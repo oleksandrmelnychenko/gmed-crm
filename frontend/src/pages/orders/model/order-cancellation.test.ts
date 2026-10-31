@@ -45,8 +45,10 @@ describe("normalizeOrderCancellationSummary", () => {
         uninvoiced_gross: "200",
         lines: [{ description: "Organisation der Behandlung", status: "delivered", gross: "200" }],
       },
+      draft_invoices: [{ id: "i1", total_gross: "178.5", currency: "EUR" }],
     });
 
+    expect(summary.draft_invoices).toEqual([{ id: "i1", total_gross: 178.5, currency: "EUR" }]);
     expect(summary.cancelled_services[0]).toEqual({
       id: "l1",
       description: "Dolmetscher",

@@ -14087,6 +14087,26 @@ async fn update_invoice_status(
     // the invoice; a released invoice is immutable, so it is never numbered
     // without it.
     if releasing {
+        if locked_invoice_type != "advance" {
+            match release::cancelled_services_on_draft(&mut transaction, invoice_id).await {
+                Ok(services) if services.is_empty() => {}
+                Ok(services) => {
+                    return coded_err(
+                        StatusCode::CONFLICT,
+                        release::BILLS_CANCELLED_SERVICE,
+                        "The draft bills cancelled services; cancel the draft and make a new invoice",
+                        json!({ "cancelled_services_label": services.join(", ") }),
+                    );
+                }
+                Err(error) => {
+                    tracing::error!(%error, %invoice_id, "check the services of a draft");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to update invoice",
+                    );
+                }
+            }
+        }
         match release::issuer_tax_registration_configured(&mut transaction).await {
             Ok(true) => {}
             Ok(false) => {

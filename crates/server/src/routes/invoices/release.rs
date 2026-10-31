@@ -8,6 +8,7 @@
 
 use chrono::{Days, NaiveDate};
 use sqlx::PgConnection;
+use uuid::Uuid;
 
 use super::gen_invoice_number;
 
@@ -17,6 +18,45 @@ pub(super) const DEFAULT_INVOICE_PAYMENT_TERM_DAYS: u64 = 14;
 /// Error code of a release refused because GMED's own tax registration is
 /// missing; the UI points to the system settings with it.
 pub(super) const ISSUER_TAX_REGISTRATION_MISSING: &str = "issuer_tax_registration_missing";
+
+/// Error code of a release refused because a service the draft bills was
+/// cancelled after the draft was made.
+pub(super) const BILLS_CANCELLED_SERVICE: &str = "invoice_bills_cancelled_service";
+
+/// The cancelled services a draft bills. A draft only reserves its services,
+/// so a contract termination can cancel one under it; the release must not
+/// bill it (QA 2026-10-31). The rows are locked to wait for a cancellation
+/// running right now.
+pub(super) async fn cancelled_services_on_draft(
+    conn: &mut PgConnection,
+    invoice_id: Uuid,
+) -> Result<Vec<String>, sqlx::Error> {
+    let services: Vec<(String, String)> = sqlx::query_as(
+        r#"SELECT service.status, service.description
+           FROM order_leistungen service
+           WHERE service.id IN (
+               SELECT allocation.order_leistung_id
+               FROM invoice_order_line_allocations allocation
+               WHERE allocation.invoice_id = $1
+           ) OR EXISTS (
+               SELECT 1 FROM invoices invoice
+               WHERE invoice.id = $1
+                 AND invoice.line_items @> jsonb_build_array(
+                     jsonb_build_object('source_order_leistung_id', service.id::text)
+                 )
+           )
+           ORDER BY service.created_at, service.id
+           FOR SHARE OF service"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(conn)
+    .await?;
+    Ok(services
+        .into_iter()
+        .filter(|(status, _)| status == "cancelled")
+        .map(|(_, description)| description)
+        .collect())
+}
 
 /// Whether GMED's Steuernummer or USt-IdNr. is set (`system_settings`
 /// `agency_tax_number` / `agency_vat_id`). An invoice must name one of them

@@ -30,6 +30,8 @@ export type OrderCancellationSummary = {
   closed_quotes: Array<{ id: string; quote_number: string; previous_status: string }>;
   rejected_amendment_ids: string[];
   settlement: OrderCancellationSettlement | null;
+  /** Draft invoices that bill planned services: they are cancelled first (preview only). */
+  draft_invoices: Array<{ id: string; total_gross: number; currency: string }>;
 };
 
 function record(value: unknown): Record<string, unknown> {
@@ -98,6 +100,14 @@ export function normalizeOrderCancellationSummary(value: unknown): OrderCancella
     }),
     rejected_amendment_ids: list(source.rejected_amendment_ids).map((id) => text(id)),
     settlement: normalizeOrderCancellationSettlement(source.settlement),
+    draft_invoices: list(source.draft_invoices).map((entry) => {
+      const invoice = record(entry);
+      return {
+        id: text(invoice.id),
+        total_gross: amount(invoice.total_gross),
+        currency: text(invoice.currency, "EUR") || "EUR",
+      };
+    }),
   };
 }
 

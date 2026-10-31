@@ -5991,6 +5991,9 @@ struct OrderCancellation {
     settlement: Option<serde_json::Value>,
     /// Open checklist items resolved as "not required" (`order_cancelled`).
     checklist_changes: Vec<crate::routes::workflow_checklists::ChecklistItemSync>,
+    /// Draft invoices that bill planned services of the order: the
+    /// cancellation waits for them ([`cancel_order`]), the preview names them.
+    draft_invoices: Vec<serde_json::Value>,
 }
 
 impl OrderCancellation {
@@ -6015,6 +6018,7 @@ impl OrderCancellation {
             // refund: delivered/approved/invoiced services and third-party
             // costs (accrued), released invoices and received cash.
             "settlement": self.settlement,
+            "draft_invoices": self.draft_invoices,
         })
     }
 }
@@ -6035,6 +6039,56 @@ fn normalize_order_cancellation_reason(
         ));
     }
     Ok(reason.to_string())
+}
+
+/// Draft invoices that bill planned services of the order. A draft only
+/// reserves its lines and they cannot be edited, so it is cancelled first, as
+/// for a single service (`service_reversal`, QA 2026-10-31). Read under the
+/// locks of the cancellation: no new draft comes from the order's quotes.
+async fn draft_invoices_of_planned_services(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    order_id: Uuid,
+) -> Result<Vec<serde_json::Value>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT invoice.id, invoice.total_gross, UPPER(invoice.currency) AS currency
+           FROM invoices invoice
+           WHERE invoice.status = 'draft'
+             AND invoice.invoice_type <> 'advance'
+             AND EXISTS (
+                 SELECT 1
+                 FROM order_leistungen service
+                 WHERE service.order_id = $1
+                   AND service.status = 'planned'
+                   AND (
+                       EXISTS (
+                           SELECT 1
+                           FROM invoice_order_line_allocations allocation
+                           WHERE allocation.invoice_id = invoice.id
+                             AND allocation.order_leistung_id = service.id
+                       )
+                       OR invoice.line_items @> jsonb_build_array(
+                           jsonb_build_object('source_order_leistung_id', service.id::text)
+                       )
+                   )
+             )
+           ORDER BY invoice.created_at, invoice.id"#,
+    )
+    .bind(order_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(|row| {
+            serde_json::json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "total_gross": row
+                    .try_get::<rust_decimal::Decimal, _>("total_gross")
+                    .map(money::money_string)
+                    .unwrap_or_default(),
+                "currency": row.try_get::<String, _>("currency").unwrap_or_default(),
+            })
+        })
+        .collect())
 }
 
 /// Cancels an order inside `tx`. Planned services are cancelled (they keep
@@ -6074,6 +6128,9 @@ async fn cancel_order_in_tx(
 
     // Quotes before services: the lock order of an invoice from a quote.
     crate::routes::contracts::lock_open_order_quotes_tx(tx, order_id)
+        .await
+        .map_err(failed)?;
+    let draft_invoices = draft_invoices_of_planned_services(tx, order_id)
         .await
         .map_err(failed)?;
 
@@ -6194,6 +6251,7 @@ async fn cancel_order_in_tx(
         rejected_amendment_ids,
         settlement,
         checklist_changes,
+        draft_invoices,
     })
 }
 
@@ -6217,6 +6275,18 @@ async fn cancel_order(
         Ok(value) => value,
         Err(resp) => return resp,
     };
+    // Dropping the transaction rolls the cancellation back.
+    if !cancellation.draft_invoices.is_empty() {
+        return (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({
+                "error": "order_services_on_draft_invoice",
+                "message": "Planned services of the order are on a draft invoice; cancel the draft invoice first, then the order",
+                "draft_invoices": cancellation.draft_invoices,
+            })),
+        )
+            .into_response();
+    }
     // The order, its closed quotes, cancelled services and rejected amount
     // changes are audited in the cancellation transaction.
     let mut audit_events = vec![audit::domain_event(

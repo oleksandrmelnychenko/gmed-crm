@@ -511,6 +511,95 @@ async fn invoiced_lines_are_cancelled_with_a_credit_note_by_finance_roles() {
     assert_eq!(body["code"], "credit_note_of_cancelled_order_service");
 }
 
+/// QA 2026-10-31: a draft only reserves its services. The order cancellation
+/// waits for the draft as a single service does, and a draft that bills a
+/// service cancelled under it (a contract termination) is not released.
+#[tokio::test]
+async fn an_order_on_a_draft_invoice_is_not_cancelled_and_the_draft_bills_no_cancelled_service() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let case = case(&ctx.pool, ctx.admin_id, &tag).await;
+    let pm = auth_header_for(case.pm_id, "patient_manager");
+    let billing = auth_header_for(case.billing_id, "billing");
+    let planned = seed_line(&ctx.pool, &case, "Drafted transfer", "planned", None).await;
+    let draft_id = seed_invoice(&ctx.pool, ctx.admin_id, &case, planned, "draft", None).await;
+
+    let (status, preview) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/orders/{}/cancellation-preview", case.order_id),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["draft_invoices"][0]["id"], json!(draft_id));
+    assert_eq!(preview["draft_invoices"][0]["total_gross"], "178.5");
+
+    let status_path = format!("/api/v1/orders/{}/status", case.order_id);
+    let cancel_order = json!({ "status": "cancelled", "reason": "Patient withdrew" });
+    let (status, body) = json_request(
+        &ctx.app,
+        "POST",
+        &status_path,
+        &pm,
+        Some(cancel_order.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "order_services_on_draft_invoice");
+    assert_eq!(body["draft_invoices"][0]["id"], json!(draft_id));
+    assert_eq!(line_status(&ctx.pool, planned).await.0, "planned");
+    let order_status: String = sqlx::query_scalar("SELECT status FROM orders WHERE id = $1")
+        .bind(case.order_id)
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
+    assert_eq!(order_status, "active");
+
+    // A contract termination cancels planned lines without looking at drafts.
+    sqlx::query("UPDATE order_leistungen SET status = 'cancelled' WHERE id = $1")
+        .bind(planned)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let release_path = format!("/api/v1/invoices/{draft_id}/status");
+    let (status, body) = json_request(
+        &ctx.app,
+        "POST",
+        &release_path,
+        &billing,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "invoice_bills_cancelled_service");
+    assert_eq!(body["cancelled_services_label"], "Drafted transfer");
+    let (invoice_status, number): (String, Option<String>) =
+        sqlx::query_as("SELECT status, invoice_number FROM invoices WHERE id = $1")
+            .bind(draft_id)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+    assert_eq!((invoice_status.as_str(), number), ("draft", None));
+
+    // Without the draft the order goes.
+    let (status, body) = json_request(
+        &ctx.app,
+        "POST",
+        &release_path,
+        &billing,
+        Some(json!({ "status": "cancelled" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) =
+        json_request(&ctx.app, "POST", &status_path, &pm, Some(cancel_order)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
 async fn seed_visit_with_report(
     pool: &PgPool,
     admin_id: Uuid,

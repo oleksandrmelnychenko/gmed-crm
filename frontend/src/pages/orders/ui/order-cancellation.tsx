@@ -183,9 +183,10 @@ export function OrderCancellationDialog({
   }, [open, orderId, lang]);
 
   const reasonValid = isValidOrderCancelReason(reason);
+  const draftInvoices = preview?.draft_invoices ?? [];
 
   async function submit() {
-    if (!orderId || busy) return;
+    if (!orderId || busy || draftInvoices.length > 0) return;
     if (!reasonValid) {
       setError(
         tx(
@@ -292,6 +293,19 @@ export function OrderCancellationDialog({
                 ) : null}
               </div>
             )}
+            {draftInvoices.length > 0 ? (
+              <Banner tone="warning" withIcon>
+                <span data-testid="order-cancellation-draft-invoices">
+                  {tx(
+                    "Запланированные услуги есть в черновиках счетов. Сначала отмените черновики, затем заказ:",
+                    "Geplante Leistungen stehen in Rechnungsentwürfen. Bitte zuerst die Entwürfe stornieren, dann den Auftrag:",
+                  )}{" "}
+                  {draftInvoices
+                    .map((invoice) => formatMoneyAmount(invoice.total_gross, invoice.currency))
+                    .join(", ")}
+                </span>
+              </Banner>
+            ) : null}
             <Field label={tx("Причина отмены", "Stornogrund")} htmlFor={reasonId} required>
               <textarea
                 id={reasonId}
@@ -318,7 +332,7 @@ export function OrderCancellationDialog({
               <Button
                 type="submit"
                 variant="destructive"
-                disabled={busy || !reasonValid || Boolean(previewError)}
+                disabled={busy || !reasonValid || Boolean(previewError) || draftInvoices.length > 0}
               >
                 {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
                 {tx("Отменить заказ", "Auftrag stornieren")}

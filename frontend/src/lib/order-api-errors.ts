@@ -12,6 +12,8 @@ export const ORDER_API_ERROR_KEYS: Record<string, string> = {
   prepayment_exceeds_order_total: "api_orders_prepayment_exceeds_order_total",
   order_period_invalid: "api_orders_period_invalid",
   order_closed_for_new_services: "api_orders_closed_for_new_services",
+  // A draft invoice reserves planned services: it is cancelled before the order.
+  order_services_on_draft_invoice: "api_orders_services_on_draft_invoice",
   agency_service_currency_mismatch: "api_orders_agency_service_currency_mismatch",
   agency_service_price_version_mismatch: "api_orders_agency_service_price_version_mismatch",
   agency_service_no_active_price: "api_orders_agency_service_no_active_price",
