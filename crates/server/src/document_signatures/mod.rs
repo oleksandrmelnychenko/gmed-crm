@@ -225,8 +225,6 @@ enum SignerPolicy {
     BothParties,
     /// Kostenübernahmeerklärung: the payer (Kostenübernehmer) and GMED.
     PayerAndAgency,
-    /// A package with a contract or consent and a cost coverage declaration.
-    ClientPayerAndAgency,
     /// The payer's own documents (phase 3b, D4): the payer's self-disclosure,
     /// the patient's statement about the payer and the payer's copy of the
     /// cost estimate. The payer and GMED sign; the patient side never does —
@@ -243,7 +241,6 @@ impl SignerPolicy {
             Self::AgencyOnly => "agency_only",
             Self::BothParties => "both_parties",
             Self::PayerAndAgency => "payer_and_agency",
-            Self::ClientPayerAndAgency => "client_payer_and_agency",
             Self::PayerPackage => "payer_package",
         }
     }
@@ -267,6 +264,10 @@ impl SignerPolicy {
         }
         match self {
             Self::PayerPackage => Err("payer_package_signers_required"),
+            // Everything else stays with the patient side and GMED: an order
+            // estimate would bring the payer the client's lines and the
+            // medical cost calculation (owner rule 2026-10-06, QA 2026-10-31).
+            Self::Flexible | Self::BothParties if has_payer => Err("signature_policy_conflict"),
             Self::Flexible => Ok(()),
             Self::ClientOnly
                 if has_client
@@ -281,17 +282,18 @@ impl SignerPolicy {
             Self::AgencyOnly => Err("agency_signature_only"),
             Self::BothParties if has_client && has_agency => Ok(()),
             Self::BothParties => Err("both_contract_parties_required"),
-            Self::PayerAndAgency if has_payer && has_agency => Ok(()),
+            Self::PayerAndAgency if has_payer && has_agency && !has_client => Ok(()),
             Self::PayerAndAgency => Err("payer_and_agency_required"),
-            Self::ClientPayerAndAgency if has_client && has_payer && has_agency => Ok(()),
-            Self::ClientPayerAndAgency => Err("client_payer_and_agency_required"),
         }
     }
 
     /// One merged PDF has one set of signers, so a package needs what its
     /// strictest member needs. An internal agency-only document is never sent
-    /// together with documents for the patient side, and the payer's own
-    /// documents never together with a document the patient side signs.
+    /// together with documents for the patient side. Everybody invited reads
+    /// the whole PDF: the payer's documents (the cost coverage declaration
+    /// among them) therefore go out only with each other, never with a
+    /// document of the patient side or any other document (owner rule
+    /// 2026-10-06, QA 2026-10-31).
     fn combine(policies: impl IntoIterator<Item = Self>) -> Result<Self, &'static str> {
         let policies: Vec<Self> = policies.into_iter().collect();
         if policies.contains(&Self::AgencyOnly) {
@@ -301,33 +303,23 @@ impl SignerPolicy {
                 Err("signature_policy_conflict")
             };
         }
-        if policies.contains(&Self::PayerPackage) {
-            return if policies.iter().all(|policy| {
-                matches!(
-                    policy,
-                    Self::PayerPackage | Self::PayerAndAgency | Self::Flexible
-                )
-            }) {
+        let of_the_payer =
+            |policy: &Self| matches!(policy, Self::PayerPackage | Self::PayerAndAgency);
+        if policies.iter().any(of_the_payer) {
+            return if !policies.iter().all(of_the_payer) {
+                Err("signature_policy_conflict")
+            } else if policies.contains(&Self::PayerPackage) {
                 Ok(Self::PayerPackage)
             } else {
-                Err("signature_policy_conflict")
+                Ok(Self::PayerAndAgency)
             };
         }
-        let needs_payer = policies
-            .iter()
-            .any(|policy| matches!(policy, Self::PayerAndAgency | Self::ClientPayerAndAgency));
-        let needs_client = policies.iter().any(|policy| {
-            matches!(
-                policy,
-                Self::ClientOnly | Self::BothParties | Self::ClientPayerAndAgency
-            )
-        });
-        Ok(match (needs_payer, needs_client) {
-            (true, true) => Self::ClientPayerAndAgency,
-            (true, false) => Self::PayerAndAgency,
-            _ if policies.contains(&Self::BothParties) => Self::BothParties,
-            _ if policies.contains(&Self::ClientOnly) => Self::ClientOnly,
-            _ => Self::Flexible,
+        Ok(if policies.contains(&Self::BothParties) {
+            Self::BothParties
+        } else if policies.contains(&Self::ClientOnly) {
+            Self::ClientOnly
+        } else {
+            Self::Flexible
         })
     }
 }

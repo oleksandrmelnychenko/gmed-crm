@@ -13,9 +13,8 @@ export function rolesForPolicy(policy: SignerPolicy = "flexible"): SignerRole[] 
   if (policy === "agency_only") return ["agency"];
   if (policy === "client_only") return ["client", "minor"];
   if (policy === "both_parties") return ["client", "minor", "agency"];
-  if (policy === "payer_and_agency") return ["payer", "agency"];
-  if (policy === "client_payer_and_agency") return ["client", "minor", "payer", "agency"];
-  return ["client", "minor", "payer", "agency", "other"];
+  if (policy === "payer_and_agency" || policy === "payer_package") return ["payer", "agency"];
+  return ["client", "minor", "agency", "other"];
 }
 
 export function SignatureSignerFields({ signer, index, disabled, agencyOnly, embedded, policy, onChange, onRemove }: {

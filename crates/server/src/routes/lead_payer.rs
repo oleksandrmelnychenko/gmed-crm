@@ -2091,9 +2091,9 @@ pub(crate) struct SigningDocument {
 
 /// Gate for an electronic signature request in which GMED signs a lead's
 /// framework contract or order. The client signs first in the same request
-/// (provider sequence), so only the declaration is checked; a cost assumption
-/// declaration in the same package with a payer signer counts as signed, as
-/// the payer also signs before GMED.
+/// (provider sequence), so only the declaration is checked. The payer's cost
+/// assumption declaration never travels in one package with these documents
+/// (`SignerPolicy::combine`, QA 2026-10-31): it is signed before.
 pub(crate) async fn check_signature_request(
     db: &gmed_db::DbPool,
     documents: &[SigningDocument],
@@ -2131,21 +2131,11 @@ pub(crate) async fn check_signature_request(
     .fetch_all(&mut *conn)
     .await
     .map_err(|error| database_error(error, "load signature leads"))?;
-    let payer_signs_cost_assumption = signer_roles.contains(&"payer")
-        && documents
-            .iter()
-            .any(|document| document.template.as_deref() == Some(COST_ASSUMPTION_TEMPLATE));
     for lead_id in leads {
         let state = load_payer_state(&mut conn, lead_id)
             .await
             .map_err(|error| database_error(error, "load signature payer state"))?;
-        let reasons: Vec<PayerReason> = state
-            .agency_gate(true)
-            .into_iter()
-            .filter(|reason| {
-                !(payer_signs_cost_assumption && *reason == PayerReason::CostAssumptionUnsigned)
-            })
-            .collect();
+        let reasons = state.agency_gate(true);
         if !reasons.is_empty() {
             return Err(gate_response(&reasons));
         }

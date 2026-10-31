@@ -46,7 +46,7 @@ function warningText(warning: PackageWarning, tx: (ru: string, de: string) => st
     case "electronic_form_excluded": return tx("Электронная форма исключена законом — только бумажная подпись.", "Elektronische Form gesetzlich ausgeschlossen – nur Papierunterschrift.");
     case "too_large": return tx("Пакет больше 18 МБ — уберите документы или отправьте их отдельно.", "Das Paket ist größer als 18 MB – entfernen Sie Dokumente oder versenden Sie sie einzeln.");
     case "too_many": return tx("Не больше 10 документов в одном пакете.", "Höchstens 10 Dokumente pro Paket.");
-    case "policy_conflict": return tx("Внутренний документ GMED нельзя объединять с документами для пациента.", "Ein internes GMED-Dokument kann nicht mit Dokumenten für die Patientenseite kombiniert werden.");
+    case "policy_conflict": return tx("Документы плательщика и внутренние документы GMED нельзя объединять с другими документами.", "Unterlagen des Zahlers und interne GMED-Dokumente lassen sich nicht mit anderen Dokumenten kombinieren.");
   }
 }
 

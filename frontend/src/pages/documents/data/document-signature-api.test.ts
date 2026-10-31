@@ -37,8 +37,8 @@ describe("document signing", () => {
   });
   it("keeps the payer's package away from the patient side (mirrors the server)", () => {
     expect(combinedSignerPolicy(["payer_package"])).toBe("payer_package");
-    expect(combinedSignerPolicy(["payer_package", "payer_and_agency", "flexible"])).toBe("payer_package");
-    for (const other of ["client_only", "both_parties", "client_payer_and_agency", "agency_only"] as const) {
+    expect(combinedSignerPolicy(["payer_package", "payer_and_agency"])).toBe("payer_package");
+    for (const other of ["client_only", "both_parties", "flexible", "agency_only"] as const) {
       expect(combinedSignerPolicy(["payer_package", other])).toBe("conflict");
     }
     const payer: Signer = { first_name: "Viktor", last_name: "Zahler", email: "viktor.zahler@example.com", role: "payer" };

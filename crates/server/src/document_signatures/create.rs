@@ -1000,13 +1000,7 @@ pub(super) async fn candidates(
     let suggested_signers = if package_rows.is_empty() {
         Vec::new()
     } else {
-        defaults::suggested_for_package(
-            &state,
-            &auth,
-            &package_rows,
-            SignerPolicy::ClientPayerAndAgency,
-        )
-        .await?
+        defaults::suggested_for_package(&state, &auth, &package_rows).await?
     };
     Ok(Json(json!({
         "scope": {"patient_id": patient_id, "lead_id": lead_id},

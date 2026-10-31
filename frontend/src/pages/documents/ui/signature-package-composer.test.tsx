@@ -88,17 +88,22 @@ describe("signature package composer rules", () => {
 
   it("has the Kostenübernehmer sign the cost coverage declaration in its own role", () => {
     const payer: Signer = { first_name: "Paul", last_name: "Zahler", email: "payer@example.org", role: "payer" };
-    expect(combinedSignerPolicy(["payer_and_agency", "flexible"])).toBe("payer_and_agency");
-    expect(combinedSignerPolicy(["payer_and_agency", "both_parties"])).toBe("client_payer_and_agency");
-    expect(combinedSignerPolicy(["payer_and_agency", "client_only"])).toBe("client_payer_and_agency");
+    // Everybody invited reads the whole PDF: nothing else goes with the payer's documents (QA 2026-10-31).
+    for (const other of ["flexible", "both_parties", "client_only"] as const) {
+      expect(combinedSignerPolicy(["payer_and_agency", other])).toBe("conflict");
+    }
+    expect(combinedSignerPolicy(["payer_and_agency"])).toBe("payer_and_agency");
     expect(signerPolicyError("payer_and_agency", [payer, agency])).toBeNull();
     expect(signerPolicyError("payer_and_agency", [client, agency])).toBe("payer_and_agency_required");
-    expect(signerPolicyError("client_payer_and_agency", [client, payer, agency])).toBeNull();
+    expect(signerPolicyError("payer_and_agency", [client, payer, agency])).toBe("payer_and_agency_required");
     expect(signerPolicyError("client_only", [client, payer])).toBe("patient_signature_only");
+    expect(signerPolicyError("both_parties", [client, payer, agency])).toBe("signature_policy_conflict");
+    expect(signerPolicyError("flexible", [payer, agency])).toBe("signature_policy_conflict");
     expect(signersForPolicy([client, payer, agency], "payer_and_agency").map(signer => signer.role)).toEqual(["payer", "agency"]);
-    expect(signersForPolicy([client, agency], "client_payer_and_agency").map(signer => signer.role)).toEqual(["client", "payer", "agency"]);
+    expect(signersForPolicy([client, payer, agency], "payer_package").map(signer => signer.role)).toEqual(["payer", "agency"]);
     expect(signersForPolicy([client, payer, agency], "both_parties").map(signer => signer.role)).toEqual(["client", "agency"]);
     expect(rolesForPolicy("payer_and_agency")).toEqual(["payer", "agency"]);
+    expect(rolesForPolicy("flexible")).not.toContain("payer");
     expect(validSigners([payer, agency])).toBe(true);
     const tx = (_ru: string, de: string) => de;
     expect(signatureErrorText("payer_and_agency_required", tx)).toContain("Kostenübernehmer");

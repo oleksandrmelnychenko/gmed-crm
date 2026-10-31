@@ -290,7 +290,8 @@ node node_modules/@playwright/test/cli.js test tests/e2e/document-signatures.spe
   підписаний і не в іншому активному запиті (`signature_already_pending` з
   `document_ids`); спільний пацієнт/лід; найсуворіша політика підписантів
   (`SignerPolicy::combine`; внутрішній AML/PEP-документ разом із документами
-  для пацієнта — `signature_policy_conflict`); рівень; обов'язкові
+  для пацієнта і документ платника разом із будь-яким не своїм документом —
+  `signature_policy_conflict`); рівень; обов'язкові
   інформаційні додатки; PDF без цифрового підпису
   (`signature_pdf_already_signed`); об'єднаний PDF ≤ 18 МБ
   (`signature_bundle_too_large`).
@@ -668,18 +669,25 @@ Outbox зберігає явний вибір, контрольну суму т�
   показує попередження; тоді Skribble сам розміщує підпис.
 - Kostenübernahmeerklärung (`cost_coverage_declaration`) підписують платник
   (роль `payer`, власне поле підпису `payer`, підписує першим) і GMED
-  (`SignerPolicy::PayerAndAgency`, мінімум QES). У пакеті з договором чи
-  згодою потрібні клієнт, платник і GMED (`ClientPayerAndAgency`). Платника
-  пропонує замовлення (`invoice_recipient_resolve`, гілка платника); доказом
-  згоди пацієнта платник не вважається.
+  (`SignerPolicy::PayerAndAgency`, мінімум QES); сторона пацієнта її не
+  підписує. Кожен запрошений читає весь об'єднаний PDF, тому документи
+  платника їдуть лише разом між собою: договір, згода, кошторис клієнта чи
+  будь-який інший документ у пакеті з ними — 422 `signature_policy_conflict`,
+  як і роль `payer` на документі, який не є документом платника (рішення
+  власника 2026-10-06: медична калькуляція, обов'язковий додаток кошторису
+  клієнта, платникові не передається; QA 2026-10-31). Тому GMED контрпідписує
+  договір чи замовлення третьої особи-платника лише після окремо підписаної
+  Kostenübernahmeerklärung. Платника пропонує замовлення
+  (`invoice_recipient_resolve`, гілка платника); доказом згоди пацієнта
+  платник не вважається.
 - Власні документи платника (фаза 3b, 2026-10-06; шаблони
   `payer_self_disclosure`, `patient_payer_statement`, `payer_cost_estimate` —
   за шаблоном або типом): `SignerPolicy::PayerPackage` (`payer_package`):
   потрібні `payer` і `agency`, `client` і `minor` заборонені
   (422 `payer_package_signers_required`) — самооцінка містить дані документа
   особи платника й не повинна потрапити до пацієнта. `combine`: з
-  `PayerAndAgency` (Kostenübernahmeerklärung) і `Flexible` → `PayerPackage`;
-  з політикою, якій потрібен клієнт, або з `AgencyOnly` — 422
+  `PayerAndAgency` (Kostenübernahmeerklärung) → `PayerPackage`; з будь-якою
+  іншою політикою, також `Flexible` чи `AgencyOnly`, — 422
   `signature_policy_conflict`. Жоден із трьох шаблонів не в `AES_ALLOWED`
   (мінімум QES). Запрошення: «Selbstauskunft der zahlenden Person»,
   «Erklärung zur Kostenübernahme durch Dritte», «Kostenvoranschlag».

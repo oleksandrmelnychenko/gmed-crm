@@ -16,6 +16,7 @@ use uuid::Uuid;
 use super::{
     SignerPolicy, db_error, error,
     provider::{Signer, normalize_signers},
+    signer_policy,
 };
 use crate::{audit, auth::middleware::AuthUser, routes::patients, state::AppState};
 
@@ -530,10 +531,6 @@ pub(super) async fn suggested(
         SignerPolicy::PayerAndAgency | SignerPolicy::PayerPackage => {
             vec![payer.unwrap_or_else(|| empty("payer"))]
         }
-        SignerPolicy::ClientPayerAndAgency => {
-            clients.extend(payer);
-            clients
-        }
         _ => clients,
     };
     if policy == SignerPolicy::ClientOnly {
@@ -555,12 +552,13 @@ pub(super) async fn suggested(
 /// both suggests both. The parent who contracts leads the client signers, so
 /// the bundle gives the contract's `client` frame to that parent and the other
 /// parent only the `guardian_N` frames of the documents they sign
-/// (`package::visual_positions`).
+/// (`package::visual_positions`). A document of the payer suggests the payer
+/// and GMED, any other the patient side and GMED; the composer keeps what the
+/// package's policy allows.
 pub(super) async fn suggested_for_package(
     state: &AppState,
     auth: &AuthUser,
     rows: &[&PgRow],
-    policy: SignerPolicy,
 ) -> Result<Vec<Signer>, Response> {
     let mut merged: Vec<Signer> = Vec::new();
     let mut contracting: Vec<String> = Vec::new();
@@ -569,6 +567,10 @@ pub(super) async fn suggested_for_package(
             .try_get::<Option<String>, _>("generated_template_id")
             .unwrap_or_default();
         let contract = paying_parent_signs_alone(template.as_deref());
+        let policy = match signer_policy(row) {
+            policy @ (SignerPolicy::PayerAndAgency | SignerPolicy::PayerPackage) => policy,
+            _ => SignerPolicy::BothParties,
+        };
         for signer in suggested(state, auth, row, policy).await? {
             let email = normalized_email(&signer.email);
             if contract && signer.role == "client" && !email.is_empty() {

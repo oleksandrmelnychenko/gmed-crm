@@ -1374,6 +1374,21 @@ async fn package_validation_matrix_and_rbac() {
     let (status, value) = post(json!({"document_ids":[coverage],"signers":both_parties()})).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(value["error"], "payer_and_agency_required");
+    // Everybody invited reads the whole PDF: the payer signs nothing of the
+    // patient side, least of all the estimate with the medical calculation
+    // that goes with it (owner rule 2026-10-06, QA 2026-10-31).
+    let paying = json!([
+        signer("Paul", "payer@example.org", "payer"), signer("Max", "max@example.org", "agency")]);
+    let client_estimate = upload(&env, patient, Doc::new("order_cost_estimate", 1)).await;
+    for documents in [
+        json!([coverage, contract]),
+        json!([coverage, client_estimate]),
+        json!([client_estimate]),
+    ] {
+        let (status, value) = post(json!({"document_ids":documents,"signers":paying})).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{value}");
+        assert_eq!(value["error"], "signature_policy_conflict", "{value}");
+    }
     let (status, value) = post(json!({"document_ids":[coverage],"level":"AES","signers":[
         signer("Paul", "payer@example.org", "payer"), signer("Max", "max@example.org", "agency")]}))
     .await;

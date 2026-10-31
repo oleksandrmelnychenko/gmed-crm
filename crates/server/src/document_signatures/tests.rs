@@ -112,32 +112,42 @@ fn cost_coverage_is_signed_by_the_payer_and_gmed() {
         SignerPolicy::PayerAndAgency.validate(&both),
         Err("payer_and_agency_required")
     );
+    // The declaration is the payer's: the patient side does not sign it.
     assert_eq!(
-        SignerPolicy::combine([SignerPolicy::BothParties, SignerPolicy::PayerAndAgency]),
-        Ok(SignerPolicy::ClientPayerAndAgency)
+        SignerPolicy::PayerAndAgency.validate(&[client.clone(), payer.clone(), agency.clone()]),
+        Err("payer_and_agency_required")
     );
+    // Everybody invited reads the whole PDF: nothing of the patient side and
+    // no other document goes out with it (owner rule 2026-10-06, QA 2026-10-31).
+    for other in [
+        SignerPolicy::BothParties,
+        SignerPolicy::ClientOnly,
+        SignerPolicy::Flexible,
+        SignerPolicy::AgencyOnly,
+    ] {
+        assert_eq!(
+            SignerPolicy::combine([other, SignerPolicy::PayerAndAgency]),
+            Err("signature_policy_conflict"),
+            "{other:?}"
+        );
+    }
     assert_eq!(
-        SignerPolicy::combine([SignerPolicy::Flexible, SignerPolicy::PayerAndAgency]),
+        SignerPolicy::combine([SignerPolicy::PayerAndAgency]),
         Ok(SignerPolicy::PayerAndAgency)
     );
+    // A consent is never signed by the payer, nor any other document that is
+    // not the payer's.
     assert_eq!(
-        SignerPolicy::combine([SignerPolicy::ClientOnly, SignerPolicy::PayerAndAgency]),
-        Ok(SignerPolicy::ClientPayerAndAgency)
-    );
-    assert!(
-        SignerPolicy::ClientPayerAndAgency
-            .validate(&[client.clone(), payer.clone(), agency.clone()])
-            .is_ok()
-    );
-    assert_eq!(
-        SignerPolicy::ClientPayerAndAgency.validate(&both),
-        Err("client_payer_and_agency_required")
-    );
-    // A consent is never signed by the payer.
-    assert_eq!(
-        SignerPolicy::ClientOnly.validate(&[client, payer.clone()]),
+        SignerPolicy::ClientOnly.validate(&[client.clone(), payer.clone()]),
         Err("patient_signature_only")
     );
+    for policy in [SignerPolicy::Flexible, SignerPolicy::BothParties] {
+        assert_eq!(
+            policy.validate(&[client.clone(), payer.clone(), agency.clone()]),
+            Err("signature_policy_conflict"),
+            "{policy:?}"
+        );
+    }
     // The payer signs before GMED, like the client.
     let entries = provider::signature_entries(&[agency, payer]);
     assert_eq!(entries[0]["sequence"], 2);
@@ -192,21 +202,16 @@ fn the_payers_package_is_signed_by_the_payer_and_gmed_only() {
             Err("payer_package_signers_required")
         );
     }
-    // With the Kostenübernahmeerklärung (and documents anybody signs) the
-    // package stays the payer's; with a document of the patient side it
-    // cannot be one PDF.
+    // With the Kostenübernahmeerklärung the package stays the payer's; with
+    // any other document it cannot be one PDF.
     assert_eq!(
-        SignerPolicy::combine([
-            SignerPolicy::PayerPackage,
-            SignerPolicy::PayerAndAgency,
-            SignerPolicy::Flexible
-        ]),
+        SignerPolicy::combine([SignerPolicy::PayerPackage, SignerPolicy::PayerAndAgency]),
         Ok(SignerPolicy::PayerPackage)
     );
     for other in [
         SignerPolicy::ClientOnly,
         SignerPolicy::BothParties,
-        SignerPolicy::ClientPayerAndAgency,
+        SignerPolicy::Flexible,
         SignerPolicy::AgencyOnly,
     ] {
         assert_eq!(
