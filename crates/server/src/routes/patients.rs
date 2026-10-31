@@ -7906,6 +7906,19 @@ async fn activate_patient_portal_account(
         })?;
         audit::write_in_transaction(&mut tx,&audit::domain_event("reuse_guardian_for_own_patient",Some(auth.user_id),"patient",Some(patient_uuid),json!({"portal_user_id":user_id,"password_changed":false,"child_access_preserved":true}))).await.map_err(|error| { tracing::error!(%error,"audit guardian reuse"); err(StatusCode::INTERNAL_SERVER_ERROR,"Failed to activate patient account") })?;
     }
+    super::lead_portal_account::share_released_documents_in_tx(
+        &mut tx,
+        patient_uuid,
+        auth.user_id,
+    )
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, patient_id = %patient_uuid, "share released documents with the portal login");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to activate patient account",
+        )
+    })?;
     tx.commit().await.map_err(|error| {
         tracing::error!(%error, patient_id = %patient_uuid, user_id = %user_id, "commit patient portal activation");
         err(

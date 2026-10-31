@@ -998,22 +998,41 @@ async fn mark_contact_linked_in_tx(
     Ok(changed > 0)
 }
 
-/// Releases the patient's `patient_visible` documents to the patient's
-/// portal logins (QA 2026-10-25): the signed consents, the contract, the
-/// order and the estimate moved from the lead carry the visibility, but the
-/// portal (`GET /me/documents`) lists `document_shares` only, so the cabinet
-/// stayed empty after the conversion. Same recipients and share as the
-/// staff's "release to the portal" (`documents.rs`): every active patient
-/// login assigned to the patient — the lead's own login, or the parents'
-/// of a minor — on the channel `patient_portal`, without a confirmation; an
-/// archived version, a deleted file and a document already shared with the
-/// login are left out. Returns the ids of the shares made.
+/// Document types a patient login gets without an earlier release (QA
+/// 2026-10-31): what the patient contracted and was told at the conversion.
+/// `patient_visible` alone is no release: it is the default of a template,
+/// the treatment plan's and the medication summary's too.
+const SHARED_WITHOUT_RELEASE: [&str; 5] = [
+    "framework_contract",
+    "single_order",
+    "order_cost_estimate",
+    "cost_estimate",
+    "privacy_information",
+];
+
+/// Shares the patient's released documents with the patient's portal logins
+/// (QA 2026-10-25): the signed consents, the contract, the order and the
+/// estimate moved from the lead carry the visibility, but the portal
+/// (`GET /me/documents`) lists `document_shares` only, so the cabinet stayed
+/// empty after the conversion. Runs too when a login joins later (QA
+/// 2026-10-31): the own login that takes over at 18 sees what the parents
+/// saw. Same recipients and share as the staff's "release to the portal"
+/// (`documents.rs`): every active patient login assigned to the patient — the
+/// lead's own login, or the parents' of a minor — on the channel
+/// `patient_portal`, without a confirmation.
+///
+/// Released means (QA 2026-10-31): the active current version, with a file,
+/// that another login holds a share of, or a signed document or one of
+/// [`SHARED_WITHOUT_RELEASE`] that was never withdrawn. A draft is never
+/// shared here, and neither is what is only `patient_visible` by its template.
+/// A login's own share, also a withdrawn one, is not made again. Returns the
+/// ids of the shares made; they are audited in the transaction.
 pub(crate) async fn share_released_documents_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     patient_id: Uuid,
     shared_by: Uuid,
 ) -> Result<Vec<Uuid>, sqlx::Error> {
-    sqlx::query_scalar(
+    let shares: Vec<Uuid> = sqlx::query_scalar(
         r#"INSERT INTO document_shares (
                document_id, shared_with_user_id, shared_by, channel, requires_confirmation
            )
@@ -1023,21 +1042,52 @@ pub(crate) async fn share_released_documents_in_tx(
            JOIN users u ON u.id = pa.user_id AND u.role = 'patient' AND u.is_active
            WHERE d.patient_id = $1
              AND d.visibility = 'patient_visible'
-             AND d.status <> 'archived'
+             AND d.status = 'active'
              AND d.file_deleted_at IS NULL
-             -- Only the current version; a share staff withdrew stays withdrawn.
              AND NOT EXISTS (SELECT 1 FROM documents n WHERE n.replaces_document_id = d.id)
              AND NOT EXISTS (
                  SELECT 1 FROM document_shares existing
                  WHERE existing.document_id = d.id
                    AND existing.shared_with_user_id = u.id
              )
+             AND (
+                 EXISTS (
+                     SELECT 1 FROM document_shares released
+                     WHERE released.document_id = d.id
+                       AND released.channel = 'patient_portal'
+                       AND released.revoked_at IS NULL
+                 )
+                 OR (
+                     (d.signed_at IS NOT NULL
+                      OR COALESCE(NULLIF(btrim(d.generated_template_id), ''), d.art) = ANY($3))
+                     AND NOT EXISTS (
+                         SELECT 1 FROM document_shares withdrawn
+                         WHERE withdrawn.document_id = d.id
+                           AND withdrawn.channel = 'patient_portal'
+                     )
+                 )
+             )
            RETURNING id"#,
     )
     .bind(patient_id)
     .bind(shared_by)
+    .bind(&SHARED_WITHOUT_RELEASE[..])
     .fetch_all(&mut **tx)
-    .await
+    .await?;
+    if !shares.is_empty() {
+        audit::write_in_transaction(
+            tx,
+            &audit::domain_event(
+                "share_released_documents_with_portal_logins",
+                Some(shared_by),
+                "patient",
+                Some(patient_id),
+                json!({ "share_ids": shares }),
+            ),
+        )
+        .await?;
+    }
+    Ok(shares)
 }
 
 /// A parent's or representative's login carries the contact's name
@@ -1141,6 +1191,7 @@ pub(crate) async fn link_own_login_of_age_in_tx(
         ),
     )
     .await?;
+    share_released_documents_in_tx(tx, patient_id, assigned_by).await?;
     Ok(true)
 }
 

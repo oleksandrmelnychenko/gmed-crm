@@ -28,7 +28,7 @@ use crate::auth::{password, password_policy};
 use crate::mail::coded;
 use crate::routes::lead_portal_account::{
     email_owner, email_taken_response, is_unique_violation, may_issue_portal_password,
-    normalize_portal_email,
+    normalize_portal_email, share_released_documents_in_tx,
 };
 use crate::state::AppState;
 
@@ -293,6 +293,10 @@ async fn issue_patient_portal_access(
             "reuse_guardian_for_own_patient",Some(auth.user_id),"patient",Some(patient_id),
             json!({"portal_user_id":user_id,"password_changed":false,"child_access_preserved":true}),
         )).await { return internal(error,patient_id,"audit reuse"); }
+        if let Err(error) = share_released_documents_in_tx(&mut tx, patient_id, auth.user_id).await
+        {
+            return internal(error, patient_id, "share released documents");
+        }
         if let Err(error) = tx.commit().await {
             return internal(error, patient_id, "commit reuse");
         }
@@ -360,6 +364,9 @@ async fn issue_patient_portal_access(
     .await
     {
         return internal(error, patient_id, "audit");
+    }
+    if let Err(error) = share_released_documents_in_tx(&mut tx, patient_id, auth.user_id).await {
+        return internal(error, patient_id, "share released documents");
     }
     if let Err(error) = tx.commit().await {
         return internal(error, patient_id, "commit");
@@ -464,6 +471,9 @@ async fn link_converted_request_login(
     )
     .await
     .map_err(|error| internal(error, patient_id, "audit request login"))?;
+    share_released_documents_in_tx(&mut tx, patient_id, actor)
+        .await
+        .map_err(|error| internal(error, patient_id, "share released documents"))?;
     tx.commit()
         .await
         .map_err(|error| internal(error, patient_id, "commit request login"))?;

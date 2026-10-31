@@ -429,6 +429,221 @@ async fn parents_lose_access_on_the_eighteenth_birthday_and_staff_is_told_once()
     assert_eq!(body["linked_request_login"], false, "{body}");
 }
 
+/// A document row of the patient, `status` and signed as given, visible to the
+/// patient by its template; `shared_with` holds a portal share of it.
+async fn document(
+    pool: &PgPool,
+    patient: Uuid,
+    actor: Uuid,
+    template: &str,
+    status: &str,
+    signed: bool,
+    shared_with: Option<Uuid>,
+) -> Uuid {
+    let id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, patient_id, auto_name, original_filename, art, category, status, visibility,
+                is_medical, mime_type, file_size, generated_template_id, version_root_document_id,
+                version_number, uploaded_by, signed_at
+           ) VALUES (
+                $1, $2, $3, $4, $3, 'consent', $5, 'patient_visible', false, 'application/pdf', 128,
+                $3, $1, 1, $6, CASE WHEN $7 THEN now() END
+           )"#,
+    )
+    .bind(id)
+    .bind(patient)
+    .bind(template)
+    .bind(format!("{template}.pdf"))
+    .bind(status)
+    .bind(actor)
+    .bind(signed)
+    .execute(pool)
+    .await
+    .unwrap();
+    if let Some(login) = shared_with {
+        sqlx::query(
+            "INSERT INTO document_shares (document_id, shared_with_user_id, shared_by, channel)
+             VALUES ($1, $2, $3, 'patient_portal')",
+        )
+        .bind(id)
+        .bind(login)
+        .bind(actor)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    id
+}
+
+/// QA 2026-10-31: the own login that takes over at 18 sees what the parents
+/// saw, and `patient_visible` alone is no release: a template's default never
+/// opens a draft or a treatment plan nobody released.
+#[tokio::test]
+async fn the_own_login_at_18_gets_the_released_documents_only() {
+    let Some(suite) = support::suite_context(SECRET).await else {
+        return;
+    };
+    let pool = &suite.pool;
+    let today = gmed_server::app_time::today();
+    let birth = years_before(today, 18);
+    let actor = suite.admin_id;
+    let (child_login, child_email) = user(pool, "Hanna", "patient").await;
+    let (mother, _) = user(pool, "Ina", "patient").await;
+    let child = patient(pool, actor, "Hanna", birth, &child_email).await;
+    converted_request(pool, actor, child, birth, child_login, Some(mother)).await;
+    assign(pool, child, mother, actor, "lead_guardian").await;
+
+    // Released to the mother, signed, and of the contract: these three.
+    let plan_released = document(
+        pool,
+        child,
+        actor,
+        "treatment_plan",
+        "active",
+        false,
+        Some(mother),
+    )
+    .await;
+    let consent = document(pool, child, actor, "privacy_consents", "active", true, None).await;
+    let contract = document(
+        pool,
+        child,
+        actor,
+        "framework_contract",
+        "active",
+        false,
+        None,
+    )
+    .await;
+    // Never released, only `patient_visible` by the template.
+    document(pool, child, actor, "treatment_plan", "draft", false, None).await;
+    document(
+        pool,
+        child,
+        actor,
+        "medication_summary",
+        "active",
+        false,
+        None,
+    )
+    .await;
+    document(
+        pool,
+        child,
+        actor,
+        "framework_contract",
+        "draft",
+        false,
+        None,
+    )
+    .await;
+    // Withdrawn by staff while it stayed `patient_visible` (before QA 2026-10-31).
+    let withdrawn = document(
+        pool,
+        child,
+        actor,
+        "privacy_consents",
+        "active",
+        true,
+        Some(mother),
+    )
+    .await;
+    sqlx::query("UPDATE document_shares SET revoked_at = now() WHERE document_id = $1")
+        .bind(withdrawn)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    run_on(&suite.state, today).await.unwrap();
+    let (status, body) = request(
+        &suite.app,
+        "POST",
+        &format!("/api/v1/patients/{child}/portal-account"),
+        &bearer(actor, "ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["linked_request_login"], true, "{body}");
+
+    let (status, list) = request(
+        &suite.app,
+        "GET",
+        "/api/v1/me/documents",
+        &bearer(child_login, "patient"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let mut listed: Vec<String> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["id"].as_str().unwrap().to_string())
+        .collect();
+    listed.sort();
+    let mut expected = vec![
+        plan_released.to_string(),
+        consent.to_string(),
+        contract.to_string(),
+    ];
+    expected.sort();
+    assert_eq!(listed, expected, "{list}");
+    assert_eq!(
+        count(
+            pool,
+            "SELECT count(*) FROM audit_log WHERE action = 'share_released_documents_with_portal_logins' AND entity_id = $1",
+            child,
+        )
+        .await,
+        1
+    );
+}
+
+/// QA 2026-10-31: a login issued later gets what is already released.
+#[tokio::test]
+async fn a_new_patient_login_gets_the_released_documents() {
+    let Some(suite) = support::suite_context(SECRET).await else {
+        return;
+    };
+    let pool = &suite.pool;
+    let birth = years_before(gmed_server::app_time::today(), 40);
+    let email = format!("nora-{}@example.test", Uuid::new_v4().simple());
+    let adult = patient(pool, suite.admin_id, "Nora", birth, &email).await;
+    let consent = document(
+        pool,
+        adult,
+        suite.admin_id,
+        "privacy_consents",
+        "active",
+        true,
+        None,
+    )
+    .await;
+
+    let (status, body) = request(
+        &suite.app,
+        "POST",
+        &format!("/api/v1/patients/{adult}/portal-account"),
+        &bearer(suite.admin_id, "ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let login: Uuid = body["user_id"].as_str().unwrap().parse().unwrap();
+    let (status, list) = request(
+        &suite.app,
+        "GET",
+        "/api/v1/me/documents",
+        &bearer(login, "patient"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list[0]["id"], consent.to_string(), "{list}");
+}
+
 #[tokio::test]
 async fn staff_granted_access_and_minors_stay_untouched() {
     let Some(suite) = support::suite_context(SECRET).await else {
@@ -497,6 +712,16 @@ async fn a_new_password_on_the_converted_request_links_the_adults_own_login() {
     let (child_login, child_email) = user(pool, "Gina", "patient").await;
     let child = patient(pool, suite.admin_id, "Gina", birth, &child_email).await;
     let lead = converted_request(pool, suite.admin_id, child, birth, child_login, None).await;
+    let consent = document(
+        pool,
+        child,
+        suite.admin_id,
+        "privacy_consents",
+        "active",
+        true,
+        None,
+    )
+    .await;
 
     let (status, body) = request(
         &suite.app,
@@ -508,6 +733,18 @@ async fn a_new_password_on_the_converted_request_links_the_adults_own_login() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["user_id"], child_login.to_string(), "{body}");
+    // The signed consent waits in the portal (QA 2026-10-31).
+    assert_eq!(
+        count(
+            pool,
+            &format!(
+                "SELECT count(*) FROM document_shares WHERE document_id = $1 AND shared_with_user_id = '{child_login}'"
+            ),
+            consent,
+        )
+        .await,
+        1
+    );
     let active: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM patient_assignments WHERE patient_id = $1 AND user_id = $2 AND revoked_at IS NULL AND source = 'manual'",
     )
