@@ -102,8 +102,8 @@
     --sidebar-foreground: oklch(0.25 0 0);
     --sidebar-primary: var(--brand);
     --sidebar-primary-foreground: oklch(1 0 0);
-    --sidebar-accent: var(--brand-soft);
-    --sidebar-accent-foreground: var(--brand);
+    --sidebar-accent: var(--muted);
+    --sidebar-accent-foreground: var(--sidebar-foreground);
     --sidebar-border: oklch(0.92 0 0);
     --sidebar-ring: var(--brand-ring);
 }
@@ -464,7 +464,7 @@ html[data-native-platform] {
     cursor: not-allowed;
     }
   svg.lucide {
-    stroke-width: 1.5;
+    stroke-width: 1.75;
     }
 
   * {
@@ -1630,4 +1630,12 @@ html[data-native-platform] {
     transform: none !important;
     transition: none !important;
   }
+}
+
+/* Icons are plain black outlines: muted and brand tints are dropped here, outside
+   the layers, so the utility classes lose. Status colours and icons on filled
+   buttons keep their own colour. */
+svg.lucide:is(.text-primary, .text-\[var\(--brand\)\], [class^="text-muted-foreground"], [class*=" text-muted-foreground"], [class^="text-orange-"], [class*=" text-orange-"]),
+:is(.text-primary, .text-\[var\(--brand\)\], [class^="text-muted-foreground"], [class*=" text-muted-foreground"], [class^="text-orange-"], [class*=" text-orange-"]) > svg.lucide:not([class^="text-"], [class*=" text-"]) {
+  color: var(--foreground);
 }

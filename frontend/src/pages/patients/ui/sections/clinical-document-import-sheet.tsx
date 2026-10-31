@@ -2868,7 +2868,7 @@ export function ClinicalDocumentImportSheet({
               aria-live="polite"
               className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-8 text-center"
             >
-              <div className="relative flex size-16 items-center justify-center rounded-2xl bg-primary/10">
+              <div className="relative flex size-16 items-center justify-center">
                 <FileText className="size-7 text-primary" />
                 <LoaderCircle className="absolute -right-1 -bottom-1 size-6 animate-spin rounded-full bg-background text-primary" />
               </div>

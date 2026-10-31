@@ -1134,7 +1134,7 @@ export function ConciergeTaskDetailDialog({
                     {/* Generated order work (checklist, appointment concierge tasks) links back to its order. */}
                     {detail.item.order_id && canOpenOrders ? (
                       <StaffLink to={`/orders?order=${detail.item.order_id}`} data-testid="task-detail-order-link" className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/20">
-                        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-orange-50 text-orange-700"><ClipboardList className="size-4" /></span>
+                        <span className="flex shrink-0 items-center justify-center text-foreground"><ClipboardList className="size-5" /></span>
                         <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.order}</span><strong className="block truncate text-sm">{detail.item.order_number || "—"}</strong></span>
                         <ExternalLink className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-[var(--brand)]" />
                       </StaffLink>
@@ -1147,14 +1147,14 @@ export function ConciergeTaskDetailDialog({
                     ) : null}
                     {detail.item.provider_id && detail.item.provider_name ? (
                       <StaffLink to={`/providers/${detail.item.provider_id}`} className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/20">
-                        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-orange-50 text-orange-700"><Building2 className="size-4" /></span>
+                        <span className="flex shrink-0 items-center justify-center text-foreground"><Building2 className="size-5" /></span>
                         <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.provider}</span><strong className="block truncate text-sm">{detail.item.provider_name}</strong><span className="block truncate text-xs text-muted-foreground">{[detail.item.provider_phone, detail.item.provider_email].filter(Boolean).join(" · ") || "—"}</span></span>
                         <ExternalLink className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-[var(--brand)]" />
                       </StaffLink>
                     ) : null}
                     {detail.item.project_id && detail.item.project_name ? (
                       <StaffLink to={`/projects?project=${detail.item.project_id}`} className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/20">
-                        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-orange-50 text-orange-700"><FolderKanban className="size-4" /></span>
+                        <span className="flex shrink-0 items-center justify-center text-foreground"><FolderKanban className="size-5" /></span>
                         <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.project}</span><strong className="block truncate text-sm">{detail.item.project_name}</strong></span>
                         <ExternalLink className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-[var(--brand)]" />
                       </StaffLink>

@@ -2910,8 +2910,8 @@ function useStaffInvoicesPageContent() {
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
-                        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                          <FileText aria-hidden="true" className="size-4" />
+                        <div className="flex shrink-0 items-center justify-center text-foreground">
+                          <FileText aria-hidden="true" className="size-5" />
                         </div>
                         <div className="min-w-[12rem] flex-1">
                           <p className="truncate text-sm font-medium text-foreground">

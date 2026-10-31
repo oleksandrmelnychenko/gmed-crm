@@ -460,7 +460,7 @@ function ProfileActionCard({
       <p className="col-start-1 row-start-2 min-w-0 text-xs leading-5 text-muted-foreground">
         {description}
       </p>
-      <span className="col-start-2 row-span-2 row-start-1 flex size-7 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground transition-colors group-hover:border-primary group-hover:bg-primary group-hover:text-primary-foreground">
+      <span className="col-start-2 row-span-2 row-start-1 flex size-7 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground transition-colors group-hover:border-foreground/30">
         {busy ? (
           <LoaderCircle className="size-4 animate-spin" />
         ) : (

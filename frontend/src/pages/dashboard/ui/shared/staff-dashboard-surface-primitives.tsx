@@ -62,8 +62,8 @@ export function QuickLink({
       onClick={onClick}
       className="flex items-center gap-3 rounded-lg border border-border/70 bg-card px-4 py-3 text-left transition-colors hover:border-foreground/30"
     >
-      <div className="flex size-9 items-center justify-center rounded-lg bg-[var(--brand-soft)] text-[var(--brand)]">
-        <Icon className="size-4" />
+      <div className="flex shrink-0 items-center justify-center text-foreground">
+        <Icon className="size-5" />
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-medium text-foreground">{label}</div>

@@ -563,8 +563,8 @@ export function StaffAccessSheet({
                 <tr className="bg-primary/[0.035]">
                   <td className="px-3 py-3 align-middle">
                     <div className="flex min-w-0 items-start gap-2">
-                      <span className="mt-0.5 rounded-md bg-primary/10 p-1.5 text-primary">
-                        <Icon className="size-3.5" />
+                      <span className="mt-0.5 text-foreground">
+                        <Icon className="size-4" />
                       </span>
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-foreground">{copy.all}</p>

@@ -392,7 +392,7 @@ export function ConciergeProviderBookingDialog<TService extends BookableConcierg
       <DialogContent className={conciergeDialogContentClassName}>
         <ConciergeDialogHeader
           icon={CalendarCheck2}
-          tone="orange"
+          tone="plain"
           title={labels.title}
           description={serviceTitle ? `${serviceTitle} · ${labels.description}` : labels.description}
         />

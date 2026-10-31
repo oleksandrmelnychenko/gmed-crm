@@ -226,14 +226,14 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
               {canMarkInvoicePaidByPatient(paymentChoice) ? <button type="button" disabled={paymentBusy || paymentChoice.status === "received" || paymentChoice.paid_by === "agency"}
                 className="group flex min-h-32 flex-col rounded-lg border border-border/70 bg-card p-3.5 text-left shadow-sm transition-colors hover:border-sky-300 hover:bg-sky-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 dark:hover:border-sky-800 dark:hover:bg-sky-950/20"
                 onClick={() => void updatePatientPayment(paymentChoice, paymentChoice.paid_by !== "patient")}>
-                <span className="mb-3 flex size-9 items-center justify-center rounded-md border border-sky-100 bg-sky-50 text-sky-700 dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-300"><UserRound className="size-4.5" /></span>
+                <span className="mb-3 flex items-center text-foreground"><UserRound className="size-5" /></span>
                 <span className="block text-sm font-semibold text-foreground">{paymentChoice.paid_by === "patient" ? tx("Снова не оплачен", "Wieder unbezahlt") : tx("Пациент оплатил сам", "Patient hat selbst bezahlt")}</span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">{tx("Движение денег GMed не создаётся.", "Es wird keine GMed-Geldbewegung erstellt.")}</span>
               </button> : null}
               <button type="button" disabled={paymentBusy || paymentChoice.paid_by === "patient" || ["received", "expected"].includes(paymentChoice.status)}
                 className="group flex min-h-32 flex-col rounded-lg border border-border/70 bg-card p-3.5 text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => { setPaymentError(null); setPendingSettlement(paymentChoice); setPaymentChoice(null); }}>
-                <span className="mb-3 flex size-9 items-center justify-center rounded-md border border-orange-100 bg-orange-50 text-orange-700 dark:border-orange-900 dark:bg-orange-950/50 dark:text-orange-300"><Building2 className="size-4.5" /></span>
+                <span className="mb-3 flex items-center text-foreground"><Building2 className="size-5" /></span>
                 <span className="block text-sm font-semibold text-foreground">{Number(paymentChoice.company_paid_gross) > 0 ? tx("История оплат GMed", "GMed-Zahlungsverlauf") : tx("Оплатила GMed", "Von GMed bezahlt")}</span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">{tx("Оплата проводится через счёт компании.", "Die Zahlung wird über ein Unternehmenskonto gebucht.")}</span>
               </button>

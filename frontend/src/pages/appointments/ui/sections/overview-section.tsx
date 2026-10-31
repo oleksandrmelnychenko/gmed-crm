@@ -267,7 +267,7 @@ function RecurringSeriesDetails({
         <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-orange-50 text-orange-700 ring-1 ring-orange-200 transition-colors">
+              <span className="inline-flex size-6 shrink-0 items-center justify-center text-foreground">
                 <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
               </span>
               <p className="min-w-0 max-w-full break-words text-[13px] font-semibold tracking-tight text-foreground">

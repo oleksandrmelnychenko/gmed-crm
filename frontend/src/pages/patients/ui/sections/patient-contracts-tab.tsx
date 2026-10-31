@@ -272,8 +272,8 @@ export function PatientContractsTab({
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <div className="flex min-w-0 items-start gap-3">
-              <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <FileSignature aria-hidden="true" className="size-4" />
+              <span className="mt-0.5 flex shrink-0 items-center justify-center text-foreground">
+                <FileSignature aria-hidden="true" className="size-5" />
               </span>
               <div className="min-w-0">
                 <DialogTitle className="break-words font-mono text-base tracking-[0.08em]">
