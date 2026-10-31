@@ -199,6 +199,20 @@ async fn load_inner(
         .await?
         .unwrap_or_default();
     let canonical = crate::services::lead_guardian_identity::load(conn, lead_id).await?;
+    // The parent who pays answers PEP and sanctions in the payer questionnaire:
+    // once sent, those answers are that parent's, like block R (one level for
+    // the lead, parents count; QA 2026-10-30).
+    let paying_parent = if flag("statement_draft") {
+        None
+    } else {
+        let declaration = crate::routes::lead_payer::load_declaration(conn, lead_id).await?;
+        crate::routes::lead_representatives::payer_same_person(
+            &active.representation,
+            declaration
+                .as_ref()
+                .filter(|payer| payer.is_representative()),
+        )
+    };
     let representatives = active.representation.representatives.iter()
         .filter(|person| person.slot.is_some())
         .map(|person| {
@@ -211,9 +225,21 @@ async fn load_inner(
                 .unwrap_or(fallback);
             let material = identity.map(|identity| risk_identity_material(&identity.contact))
                 .unwrap_or_else(|| serde_json::json!({"id":person.id,"name":person.name()}));
+            let mut fields = crate::routes::lead_representatives::representative_question_fields(&person.extras);
+            if paying_parent == Some(person.id) {
+                for (column, key) in [
+                    ("statement_pep_self", "pep_self"),
+                    ("statement_pep_related", "pep_related"),
+                    ("statement_sanctions_links", "sanctions_links"),
+                ] {
+                    if flag(column) {
+                        fields[key] = serde_json::Value::Bool(true);
+                    }
+                }
+            }
             super::RepresentativeInputs {
                 id: person.id, name: person.name(), citizenships, residences,
-                fields: crate::routes::lead_representatives::representative_question_fields(&person.extras),
+                fields,
                 identity_fingerprint: hex::encode(Sha256::digest(material.to_string().as_bytes())),
                 legacy_identity_fingerprint: hex::encode(Sha256::digest(legacy.to_string().as_bytes())),
             }

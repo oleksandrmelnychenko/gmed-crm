@@ -5110,6 +5110,34 @@ async fn retention_sweep_counts_from_the_last_status_change() {
     .await
     .unwrap();
 
+    // The first sweep only warns: no lead goes without a warning.
+    gmed_server::routes::leads::auto_purge_stale_archived(&app.suite.state)
+        .await
+        .unwrap();
+    let warned: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM lead_archived_retention_warnings WHERE lead_id = $1",
+    )
+    .bind(stale)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(warned, 1);
+    let (still, _): (String, String) =
+        sqlx::query_as("SELECT qualification_status, first_name FROM leads WHERE id = $1")
+            .bind(stale)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(still, "archived");
+    // The warning's lead time has passed.
+    sqlx::query(
+        "UPDATE lead_archived_retention_warnings SET warned_at = now() - interval '4 days'
+         WHERE lead_id = $1",
+    )
+    .bind(stale)
+    .execute(pool)
+    .await
+    .unwrap();
     gmed_server::routes::leads::auto_purge_stale_archived(&app.suite.state)
         .await
         .unwrap();

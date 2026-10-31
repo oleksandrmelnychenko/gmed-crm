@@ -3485,13 +3485,15 @@ async fn load_lead_conversion_readiness(
                   ) AS framework_document_generated,
                   EXISTS (
                       SELECT 1 FROM orders o
-                      WHERE o.source_lead_id = leads.id
+                      WHERE o.source_lead_id = leads.id AND o.status <> 'cancelled'
                   ) AS order_exists,
                   EXISTS (
                       SELECT 1
                       FROM orders o
                       JOIN order_leistungen ol ON ol.order_id = o.id
                       WHERE o.source_lead_id = leads.id
+                        AND o.status <> 'cancelled'
+                        AND ol.status <> 'cancelled'
                         AND length(trim(ol.description)) > 0
                         AND ol.quantity > 0
                         AND ol.unit_price_snapshot >= 0
@@ -10895,6 +10897,38 @@ fn string_array(v: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// A short field of the public form: one line, of a size a person's name or
+/// contact has (the bundle as a whole may hold 512 KB).
+fn public_line(value: String) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(200)
+        .collect()
+}
+
+/// Tells staff that a website lead uses an e-mail or phone GMED knows: the same
+/// person coming back, a parent, or a typing error. They check before replying.
+async fn notify_lead_contact_known(state: &AppState, lead_id: Uuid) -> Result<(), sqlx::Error> {
+    let mut tx = state.db.begin().await?;
+    let recipients = unqualified_lead_recipients(&mut tx, None).await?;
+    // The frontend shows these facts in RU/DE (topbar-data.ts).
+    let stored = store_lead_retention_notices(
+        &mut tx,
+        &recipients,
+        "lead_contact_known",
+        "Website lead with a known e-mail or phone",
+        "The e-mail or phone belongs to an existing lead or patient: check the person.",
+        lead_id,
+    )
+    .await?;
+    tx.commit().await?;
+    publish_lead_retention_notices(state, lead_id, &stored).await;
+    Ok(())
+}
+
 fn first_phone(phones: &Value) -> (Option<String>, Option<String>) {
     let Some(arr) = phones.as_array() else {
         return (None, None);
@@ -11039,8 +11073,8 @@ async fn ingest_lead_intake(
     }
 
     let payload = &parsed.bundle["payload"];
-    let first_name = str_opt(&payload["firstName"]).unwrap_or_default();
-    let last_name = str_opt(&payload["lastName"]).unwrap_or_default();
+    let first_name = public_line(str_opt(&payload["firstName"]).unwrap_or_default());
+    let last_name = public_line(str_opt(&payload["lastName"]).unwrap_or_default());
 
     if first_name.is_empty() || last_name.is_empty() {
         return err(
@@ -11050,10 +11084,19 @@ async fn ingest_lead_intake(
     }
 
     let (primary_phone, primary_phone_type) = first_phone(&payload["phones"]);
-    let email = str_opt(&payload["email"]);
+    // An address the form let through but no mail can reach stays in
+    // `raw_payload`; the request itself is never lost over it.
+    let email = str_opt(&payload["email"])
+        .map(public_line)
+        .filter(|email| crate::email_address::has_valid_format(email));
+    let primary_phone = primary_phone.map(public_line);
     let date_of_birth = date_opt(&payload["dateOfBirth"]);
+    // A known e-mail or phone keeps the request: a returning patient or a
+    // parent asking for a second child must not lose it, and the answer must
+    // not tell a visitor that the address is known. Staff get a notice to
+    // check the person (QA 2026-10-30).
     let no_guardians = json!([]);
-    if let Err(response) = validate_lead_contact_identity(
+    let known_contact = validate_lead_contact_identity(
         &state,
         &LeadContactIdentity {
             lead_id: None,
@@ -11067,9 +11110,7 @@ async fn ingest_lead_intake(
         },
     )
     .await
-    {
-        return response;
-    }
+    .is_err();
     let services = string_array(&payload["services"]);
     let phones_json = if payload["phones"].is_array() {
         payload["phones"].clone()
@@ -11109,6 +11150,56 @@ async fn ingest_lead_intake(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
         }
     };
+
+    // A double submit of the form (the website sends no key of its own):
+    // serialised per person, the second one answers like the first.
+    let submission = [
+        first_name.to_lowercase(),
+        last_name.to_lowercase(),
+        email.as_deref().unwrap_or_default().to_lowercase(),
+        primary_phone.clone().unwrap_or_default(),
+    ]
+    .join("|");
+    let repeated = async {
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(&submission)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query_scalar::<_, Uuid>(
+            r#"SELECT id FROM leads
+               WHERE lower(first_name) = $1 AND lower(last_name) = $2
+                 AND lower(COALESCE(email, '')) = $3 AND COALESCE(phone, '') = $4
+                 AND intake_source = $5
+                 AND created_at > now() - interval '10 minutes'
+               ORDER BY created_at DESC
+               LIMIT 1"#,
+        )
+        .bind(first_name.to_lowercase())
+        .bind(last_name.to_lowercase())
+        .bind(email.as_deref().unwrap_or_default().to_lowercase())
+        .bind(primary_phone.as_deref().unwrap_or_default())
+        .bind(intake_source)
+        .fetch_optional(&mut *tx)
+        .await
+    }
+    .await;
+    match repeated {
+        Ok(Some(lead_id)) => {
+            return (
+                StatusCode::CREATED,
+                Json(json!({
+                    "lead_id": lead_id,
+                    "attachment_count": parsed.files.len(),
+                })),
+            )
+                .into_response();
+        }
+        Ok(None) => {}
+        Err(e) => {
+            tracing::error!(error = %e, "lead intake: repeated submission");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    }
 
     let insert = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO leads (
@@ -11246,6 +11337,9 @@ async fn ingest_lead_intake(
         attachments = parsed.files.len(),
         "lead intake stored from visitor facade"
     );
+    if known_contact && let Err(error) = notify_lead_contact_known(&state, lead_id).await {
+        tracing::warn!(%lead_id, %error, "notify known contact of a website lead");
+    }
 
     if let Err(resp) = crate::routes::workflow_lifecycle::record_event(
         &state,
@@ -12028,6 +12122,19 @@ async fn purge_lead_side_records_in_tx(
     .bind(lead_id)
     .execute(&mut **tx)
     .await?;
+    // Staff's words on the risk decisions: the decision itself stays in the
+    // append-only history, its free text does not (A3-02, QA 2026-10-30).
+    sqlx::query("SELECT set_config('gmed.dsgvo_erasure', 'on', true)")
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query("UPDATE lead_risk_decisions SET reason = $2 WHERE lead_id = $1 AND reason <> $2")
+        .bind(lead_id)
+        .bind("Aus Datenschutzgründen entfernt.")
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query("SELECT set_config('gmed.dsgvo_erasure', 'off', true)")
+        .execute(&mut **tx)
+        .await?;
     // The payer's data copied onto the lead's orders (`set_order_payer`); an
     // order with an invoice keeps its recipient for accounting (QA 2026-10-30).
     sqlx::query(
@@ -12181,32 +12288,132 @@ pub(crate) fn should_purge_prospect(lifecycle_status: &str, lead_converted: bool
     lifecycle_status == "prospective" && !lead_converted
 }
 
-/// Run one purge sweep: find every lead that has been sitting in an
-/// archived/failed state past the retention window, anonymise it, delete
-/// its attachments, and emit an `auto_purge_lead` audit event for each
-/// anonymised row.
+/// From when the archived-lead sweep counts (alias `l`): the latest of the
+/// failed-lead resolution and the last status change.
+const ARCHIVED_LEAD_AGE_SQL: &str =
+    "GREATEST(COALESCE(l.failed_processed_at, l.updated_at), l.status_changed_at)";
+
+/// A lead (alias `l`) the archived-lead sweep covers: `$1` days window, `$2`
+/// the anonymised first name.
+const ARCHIVED_LEAD_SUBJECT_SQL: &str = r#"l.qualification_status IN ('archived', 'not_qualified')
+    AND COALESCE(l.failed_outcome_status, 'none') != 'delete_anonymized'
+    AND l.first_name != $2"#;
+
+/// Warns staff about the archived leads the sweep deletes within the warning
+/// lead time: never a silent deletion (owner 2026-10-24). A lead that was
+/// touched since its warning counts anew. One lead's failure stops no other.
+async fn warn_about_stale_archived_leads(
+    state: &crate::state::AppState,
+    retention_days: i64,
+) -> Result<(), sqlx::Error> {
+    let due: Vec<(Uuid, Option<Uuid>, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(&format!(
+        r#"SELECT l.id, l.created_by,
+                      GREATEST({ARCHIVED_LEAD_AGE_SQL} + make_interval(days => $1::int),
+                               now() + make_interval(days => $3::int))
+               FROM leads l
+               WHERE {ARCHIVED_LEAD_SUBJECT_SQL}
+                 AND {ARCHIVED_LEAD_AGE_SQL}
+                     < now() - make_interval(days => $1::int - $3::int)
+                 AND NOT {UNQUALIFIED_LEAD_INVOICED_SQL}
+                 AND NOT EXISTS (
+                     SELECT 1 FROM lead_archived_retention_warnings w
+                     WHERE w.lead_id = l.id AND w.warned_at >= {ARCHIVED_LEAD_AGE_SQL}
+                 )
+               ORDER BY l.id"#
+    ))
+    .bind(retention_days as i32)
+    .bind(ANONYMIZED_FIRST_NAME)
+    .bind(UNQUALIFIED_LEAD_WARNING_DAYS as i32)
+    .fetch_all(&state.db)
+    .await?;
+    for (lead_id, created_by, delete_at) in due {
+        let warned = async {
+            let mut tx = state.db.begin().await?;
+            sqlx::query(
+                r#"INSERT INTO lead_archived_retention_warnings (lead_id, warned_at)
+                   VALUES ($1, now())
+                   ON CONFLICT (lead_id) DO UPDATE SET warned_at = EXCLUDED.warned_at"#,
+            )
+            .bind(lead_id)
+            .execute(&mut *tx)
+            .await?;
+            let recipients = unqualified_lead_recipients(&mut tx, created_by).await?;
+            // The frontend shows these facts in RU/DE (topbar-data.ts).
+            let stored = store_lead_retention_notices(
+                &mut tx,
+                &recipients,
+                "lead_retention_archived_warning",
+                "Archived lead will be deleted automatically",
+                &format!(
+                    "Kept past the retention period; deletion on {}.",
+                    crate::app_time::date_of(delete_at).format("%Y-%m-%d")
+                ),
+                lead_id,
+            )
+            .await?;
+            tx.commit().await?;
+            Ok::<_, sqlx::Error>(stored)
+        }
+        .await;
+        match warned {
+            Ok(stored) => publish_lead_retention_notices(state, lead_id, &stored).await,
+            Err(error) => {
+                tracing::error!(lead_id = %lead_id, %error, "Archived lead warning failed");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Run one purge sweep: warn about the archived leads that come due, find
+/// every lead that has been sitting in an archived/failed state past the
+/// retention window with its warning given, anonymise it, delete its
+/// attachments, and emit an `auto_purge_lead` audit event for each anonymised
+/// row. A lead with an invoice waits for staff's decision.
 pub async fn auto_purge_stale_archived(
     state: &crate::state::AppState,
 ) -> Result<LeadPurgeReport, sqlx::Error> {
     let retention_days = load_archived_lead_retention_days(&state.db).await;
+    if let Err(error) = warn_about_stale_archived_leads(state, retention_days).await {
+        tracing::error!(%error, "Archived lead warnings failed");
+    }
+    let kept: Vec<Uuid> = sqlx::query_scalar(&format!(
+        r#"SELECT l.id FROM leads l
+           WHERE {ARCHIVED_LEAD_SUBJECT_SQL}
+             AND {ARCHIVED_LEAD_AGE_SQL} < now() - make_interval(days => $1::int)
+             AND {UNQUALIFIED_LEAD_INVOICED_SQL}"#
+    ))
+    .bind(retention_days as i32)
+    .bind(ANONYMIZED_FIRST_NAME)
+    .fetch_all(&state.db)
+    .await?;
+    for lead_id in kept {
+        if let Err(error) = notify_unqualified_lead_purge_blocked(state, lead_id).await {
+            tracing::warn!(lead_id = %lead_id, error = %error, "notify blocked lead purge");
+        }
+    }
 
     // Coarse filtering happens in SQL. The WHERE clause here mirrors the
     // guards in `should_auto_purge` — if you edit one, edit both. The age
     // counts from the latest of the failed-lead resolution and the last
     // status change: a lead archived long ago, reopened and rejected again
     // today starts a new retention window instead of being erased at once.
-    let candidates: Vec<(Uuid, String)> = sqlx::query_as(
-        r#"
-        SELECT id, qualification_status FROM leads
-        WHERE qualification_status IN ('archived', 'not_qualified')
-          AND COALESCE(failed_outcome_status, 'none') != 'delete_anonymized'
-          AND first_name != $2
-          AND GREATEST(COALESCE(failed_processed_at, updated_at), status_changed_at)
-              < now() - make_interval(days => $1::int)
-        "#,
-    )
+    let candidates: Vec<(Uuid, String)> = sqlx::query_as(&format!(
+        r#"SELECT l.id, l.qualification_status FROM leads l
+           WHERE {ARCHIVED_LEAD_SUBJECT_SQL}
+             AND {ARCHIVED_LEAD_AGE_SQL} < now() - make_interval(days => $1::int)
+             AND NOT {UNQUALIFIED_LEAD_INVOICED_SQL}
+             AND NOT {LEAD_SIGNATURE_OPEN_SQL}
+             AND EXISTS (
+                 SELECT 1 FROM lead_archived_retention_warnings w
+                 WHERE w.lead_id = l.id
+                   AND w.warned_at >= {ARCHIVED_LEAD_AGE_SQL}
+                   AND w.warned_at <= now() - make_interval(days => $3::int)
+             )"#
+    ))
     .bind(retention_days as i32)
     .bind(ANONYMIZED_FIRST_NAME)
+    .bind(UNQUALIFIED_LEAD_WARNING_DAYS as i32)
     .fetch_all(&state.db)
     .await?;
 
@@ -12218,6 +12425,16 @@ pub async fn auto_purge_stale_archived(
     };
 
     for (lead_id, from_status) in candidates {
+        // Read before the purge unlinks them: open cabinets learn it live.
+        let portal_users: Vec<Uuid> = sqlx::query_scalar(
+            r#"SELECT portal_user_id FROM leads WHERE id = $1 AND portal_user_id IS NOT NULL
+               UNION
+               SELECT user_id FROM lead_portal_access WHERE lead_id = $1 AND revoked_at IS NULL"#,
+        )
+        .bind(lead_id)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
         match purge_lead_and_prospect(
             &state.db,
             LeadPurge {
@@ -12263,6 +12480,21 @@ pub async fn auto_purge_stale_archived(
                     .bind(lead_id)
                     .execute(&state.db)
                     .await;
+                crate::realtime::publish_lead_event(
+                    state,
+                    None,
+                    LEAD_PURGED_EVENT,
+                    lead_id,
+                    json!({ "reason": "archived_lead_retention" }),
+                )
+                .await;
+                crate::realtime::publish_lead_portal_access_ended(
+                    state,
+                    lead_id,
+                    portal_users,
+                    "lead_purged",
+                )
+                .await;
             }
             Ok(_) => {
                 // Row was concurrently anonymised between SELECT and
@@ -12335,7 +12567,7 @@ impl UnqualifiedLeadRetention {
             "new" | "in_progress" | "not_qualified" | "archived"
         );
         (unqualified && compliance_status != "signed")
-            .then(|| created_at.max(self.effective_at) + chrono::Duration::days(self.days))
+            .then(|| berlin_days_later(created_at.max(self.effective_at), self.days))
     }
 
     /// When the sweep really deletes the lead ([`effective_deletion_at`] of
@@ -12405,7 +12637,26 @@ const UNQUALIFIED_LEAD_INVOICED_SQL: &str = r#"(
     ) OR EXISTS (
         SELECT 1 FROM external_invoices e JOIN orders o ON o.id = e.order_id
         WHERE o.source_lead_id = l.id AND e.status <> 'cancelled'
+    ) OR EXISTS (
+        -- The prospect stays for its accounting records (`prospect_has_accounting_records`):
+        -- deleting only the lead would leave its identity and record on a
+        -- patient no sweep covers. Staff decide (QA 2026-10-30).
+        SELECT 1 FROM patients p
+        WHERE p.id = l.prospect_patient_id AND p.lifecycle_status = 'prospective'
+          AND (EXISTS (SELECT 1 FROM invoices i WHERE i.patient_id = p.id)
+               OR EXISTS (SELECT 1 FROM external_invoices e WHERE e.patient_id = p.id)
+               OR EXISTS (SELECT 1 FROM framework_contracts fc
+                          WHERE fc.patient_id = p.id AND fc.status = 'signed'))
     ))"#;
+
+/// A signature request of the lead (alias `l`) still out: the person can sign
+/// it, and the signed PDF would land on a deleted lead. The sweeps wait for
+/// its end; a signed DSGVO then takes the lead out of the 14-day rule.
+const LEAD_SIGNATURE_OPEN_SQL: &str = r#"EXISTS (
+    SELECT 1 FROM document_signature_requests r
+    JOIN documents d ON d.id = r.source_document_id
+    WHERE d.lead_id = l.id AND r.status IN ('sending', 'pending', 'needs_review')
+)"#;
 
 /// The leads among `lead_ids` the sweep never deletes although
 /// [`UnqualifiedLeadRetention::deadline`] alone gives them a date: they are
@@ -12487,8 +12738,22 @@ pub fn effective_deletion_at(
     warning_sent_at: Option<chrono::DateTime<chrono::Utc>>,
     now: chrono::DateTime<chrono::Utc>,
 ) -> chrono::DateTime<chrono::Utc> {
-    deadline
-        .max(warning_sent_at.unwrap_or(now) + chrono::Duration::days(UNQUALIFIED_LEAD_WARNING_DAYS))
+    deadline.max(berlin_days_later(
+        warning_sent_at.unwrap_or(now),
+        UNQUALIFIED_LEAD_WARNING_DAYS,
+    ))
+}
+
+/// `days` calendar days later on the German clock, as `make_interval(days => …)`
+/// counts in the database's session time zone: across a clock change a day is
+/// not 24 hours, and the date shown must be the day the sweep deletes.
+fn berlin_days_later(
+    instant: chrono::DateTime<chrono::Utc>,
+    days: i64,
+) -> chrono::DateTime<chrono::Utc> {
+    crate::app_time::from_local(
+        crate::app_time::local(instant).naive_local() + chrono::Duration::days(days),
+    )
 }
 
 /// The rule from `system_settings`, or `None` when it is switched off (window
@@ -12672,6 +12937,31 @@ pub async fn purge_unqualified_leads(
     .fetch_all(&state.db)
     .await?;
     report.scanned = candidates.len() as u64;
+    // An invoice or accounting record keeps a lead from the warning, so the
+    // scan above never finds it: past its deadline it still needs a decision
+    // (QA 2026-10-30).
+    let kept_past_deadline: Vec<Uuid> = sqlx::query_scalar(&format!(
+        r#"SELECT l.id FROM leads l
+           WHERE {UNQUALIFIED_LEAD_SUBJECT_SQL}
+             AND {UNQUALIFIED_LEAD_INVOICED_SQL}
+             AND l.retention_warning_sent_at IS NULL
+             AND {UNQUALIFIED_LEAD_DEADLINE_SQL} <= $3
+             AND ($5::uuid[] IS NULL OR l.id = ANY($5))
+           ORDER BY l.id"#
+    ))
+    .bind(policy.days as i32)
+    .bind(policy.effective_at)
+    .bind(now)
+    .bind(ANONYMIZED_FIRST_NAME)
+    .bind(only)
+    .fetch_all(&state.db)
+    .await?;
+    for lead_id in kept_past_deadline {
+        report.blocked += 1;
+        if let Err(error) = notify_unqualified_lead_purge_blocked(state, lead_id).await {
+            tracing::warn!(lead_id = %lead_id, error = %error, "notify blocked lead purge");
+        }
+    }
 
     for lead_id in candidates {
         match purge_unqualified_lead(state, policy, now, lead_id).await {
@@ -12749,13 +13039,9 @@ async fn purge_unqualified_lead(
     // A signature request still out: the person can sign it, and the signed PDF
     // would land on a deleted lead. The lead waits for the request's end; a
     // signed DSGVO then takes it out of the rule (QA 2026-10-30).
-    let signature_open: bool = sqlx::query_scalar(
-        r#"SELECT EXISTS (
-               SELECT 1 FROM document_signature_requests r
-               JOIN documents d ON d.id = r.source_document_id
-               WHERE d.lead_id = $1 AND r.status IN ('sending', 'pending', 'needs_review')
-           )"#,
-    )
+    let signature_open: bool = sqlx::query_scalar(&format!(
+        "SELECT {LEAD_SIGNATURE_OPEN_SQL} FROM leads l WHERE l.id = $1"
+    ))
     .bind(lead_id)
     .fetch_one(&mut *tx)
     .await?;

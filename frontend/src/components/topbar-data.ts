@@ -131,6 +131,30 @@ export function leadRetentionNotificationCopy(
           body: `Не квалифицирован и нет подписанного согласия${date ? `; удаление ${date}` : ""}. Все документы удаляются вместе с ним.`,
         };
   }
+  if (item.kind === "lead_contact_known") {
+    return lang === "de"
+      ? {
+          title: "Website-Lead mit bekannter E-Mail oder Telefonnummer",
+          body: "E-Mail oder Telefonnummer gehören zu einem vorhandenen Lead oder Patienten: Person prüfen.",
+        }
+      : {
+          title: "Лид с сайта с известным e-mail или телефоном",
+          body: "E-mail или телефон принадлежат существующему лиду или пациенту: проверьте человека.",
+        };
+  }
+  if (item.kind === "lead_retention_archived_warning") {
+    const isoDate = /(\d{4}-\d{2}-\d{2})/.exec(item.body ?? "")?.[1];
+    const date = isoDate ? formatAppDate(`${isoDate}T12:00:00Z`) : "";
+    return lang === "de"
+      ? {
+          title: "Archivierter Lead wird automatisch gelöscht",
+          body: `Aufbewahrungsfrist abgelaufen${date ? `; Löschung am ${date}` : ""}. Alle Dokumente werden mitgelöscht.`,
+        }
+      : {
+          title: "Архивный лид будет удалён автоматически",
+          body: `Срок хранения истёк${date ? `; удаление ${date}` : ""}. Все документы удаляются вместе с ним.`,
+        };
+  }
   // Lead portal (crates/server/src/routes/lead_portal_intake.rs, 2026-10-03).
   if (item.kind === "lead_portal_submitted") {
     const params = item.params ?? {};

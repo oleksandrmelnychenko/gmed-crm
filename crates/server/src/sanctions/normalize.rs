@@ -213,6 +213,22 @@ pub fn canonical_token(latin: &str) -> String {
     } else if let Some(stem) = value.strip_suffix("eff") {
         value = format!("{stem}ev");
     }
+    // Г in Ukrainian passports (Hryhorii, Oleh, Serhii) against the Russian
+    // form of the same name on a list (Grigori, Oleg, Sergei); the digraphs
+    // ch and sh stay.
+    let mut previous = None;
+    value = value
+        .chars()
+        .map(|ch| {
+            let folded = if ch == 'h' && !matches!(previous, Some('c' | 's')) {
+                'g'
+            } else {
+                ch
+            };
+            previous = Some(ch);
+            folded
+        })
+        .collect();
     collapse_repeats(&value)
 }
 

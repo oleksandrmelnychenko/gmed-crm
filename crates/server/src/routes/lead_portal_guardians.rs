@@ -211,6 +211,7 @@ pub(crate) async fn auto_link_parent_logins_in_tx(
         let user_id: Uuid = account.try_get("id")?;
         if Some(user_id) == lead_login
             || !compatible_person_name(&account.try_get::<String, _>("name")?, name)
+            || login_is_someone_else(tx, user_id, contact).await?
         {
             continue;
         }
@@ -424,6 +425,45 @@ pub(crate) async fn has_other_active_links(
     .await
 }
 
+/// The contact's date of birth as stored on the trusted contact.
+fn contact_birth_date(contact: &Value) -> Option<chrono::NaiveDate> {
+    contact
+        .get("birth_date")
+        .or_else(|| contact.get("date_of_birth"))
+        .and_then(Value::as_str)
+        .and_then(|day| chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").ok())
+}
+
+/// Whether the login's own record (its patient file or own lead) names another
+/// date of birth than the contact: a family e-mail and a similar name are two
+/// people then, say a mother and her adult daughter. Different people are
+/// never merged (owner 2026-10-03, QA 2026-10-30). Unknown dates do not decide.
+async fn login_is_someone_else(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+    contact: &Value,
+) -> Result<bool, sqlx::Error> {
+    let Some(birth_date) = contact_birth_date(contact) else {
+        return Ok(false);
+    };
+    let own: Option<chrono::NaiveDate> = sqlx::query_scalar(
+        r#"SELECT COALESCE(
+               (SELECT p.birth_date FROM patient_assignments pa
+                JOIN patients p ON p.id = pa.patient_id
+                WHERE pa.user_id = $1 AND pa.revoked_at IS NULL
+                  AND pa.source <> 'lead_guardian' AND p.birth_date IS NOT NULL
+                ORDER BY pa.assigned_at LIMIT 1),
+               (SELECT l.date_of_birth FROM leads l
+                WHERE l.portal_user_id = $1 AND l.date_of_birth IS NOT NULL
+                ORDER BY l.created_at LIMIT 1)
+           )"#,
+    )
+    .bind(user_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(own.is_some_and(|own| own != birth_date))
+}
+
 /// Revokes the guardian logins of a purged lead, in the purge transaction.
 /// A login without any other link is deactivated and anonymised like the
 /// lead's own login.
@@ -432,14 +472,25 @@ pub(crate) async fn revoke_for_purged_lead_in_tx(
     lead_id: Uuid,
     processed_by: Option<Uuid>,
 ) -> Result<Vec<Uuid>, sqlx::Error> {
-    let users: Vec<Uuid> = sqlx::query_scalar(
+    sqlx::query(
         r#"UPDATE lead_portal_access
            SET revoked_at = now(), revoked_by = $2, revoked_reason = 'lead_purged'
-           WHERE lead_id = $1 AND revoked_at IS NULL
-           RETURNING user_id"#,
+           WHERE lead_id = $1 AND revoked_at IS NULL"#,
     )
     .bind(lead_id)
     .bind(processed_by)
+    .execute(&mut **tx)
+    .await?;
+    // Also a login whose access ended earlier (revoked, or the child came of
+    // age): it holds the parent's name and e-mail and reaches nothing now
+    // (QA 2026-10-30). The check below keeps a login with other links.
+    let users: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT DISTINCT a.user_id FROM lead_portal_access a
+           JOIN users u ON u.id = a.user_id AND u.role = 'patient'
+           WHERE a.lead_id = $1 AND a.kind = 'guardian'
+             AND u.email NOT LIKE 'deleted-lead-%'"#,
+    )
+    .bind(lead_id)
     .fetch_all(&mut **tx)
     .await?;
     let mut disabled = Vec::new();
@@ -724,6 +775,11 @@ async fn issue_guardian_access(
                     &name,
                 )
                 && Some(user_id) != lead_login;
+            let same_patient = same_patient
+                && match login_is_someone_else(&mut tx, user_id, &contact).await {
+                    Ok(someone_else) => !someone_else,
+                    Err(error) => return internal(error, "compare birth dates"),
+                };
             if !same_patient {
                 return match email_owner(&mut *tx, &email, None).await {
                     Ok(Some(owner)) => email_taken_response(owner),

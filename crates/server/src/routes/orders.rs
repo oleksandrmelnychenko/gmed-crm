@@ -1973,7 +1973,7 @@ async fn ensure_order_planning_preparation_state(
     state: &AppState,
     order_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    sqlx::query(
+    let created = sqlx::query(
         r#"INSERT INTO order_planning_preparation (order_id)
            VALUES ($1)
            ON CONFLICT (order_id) DO NOTHING"#,
@@ -1987,7 +1987,28 @@ async fn ensure_order_planning_preparation_state(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to load order planning state",
         )
-    })?;
+    })?
+    .rows_affected()
+        == 1;
+    // The set-up after a conversion runs past its commit: when it failed, the
+    // first read creates the row and still takes the lead's interpreter and
+    // non-medical needs along (QA 2026-10-30).
+    if created {
+        let source_lead = sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT source_lead_id FROM orders WHERE id = $1",
+        )
+        .bind(order_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten()
+        .flatten();
+        if let Some(lead_id) = source_lead
+            && let Err(error) = carry_lead_needs_into_order_planning(state, order_id, lead_id).await
+        {
+            tracing::warn!(%error, %order_id, %lead_id, "carry lead needs into new planning row");
+        }
+    }
 
     Ok(())
 }

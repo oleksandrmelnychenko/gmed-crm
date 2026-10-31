@@ -85,6 +85,10 @@ pub struct Assessment {
     pub status: String,
     pub released_fingerprint: Option<String>,
     pub representative_country_ids: Vec<Uuid>,
+    /// Block F of the patient or block R of a representative is open with
+    /// answers missing: what holds a level-one lead. Another open block keeps
+    /// the status `awaiting_answers` without holding anything.
+    pub country_answers_pending: bool,
 }
 
 impl Assessment {
@@ -114,6 +118,7 @@ impl Assessment {
         self.status == STATUS_REJECTED
             || (self.level() >= 2 && self.status != STATUS_RELEASED)
             || (self.status == STATUS_AWAITING
+                && self.country_answers_pending
                 && self
                     .triggers
                     .iter()
@@ -162,6 +167,7 @@ impl Assessment {
             follow_up_answered_at: row.try_get("follow_up_answered_at").ok().flatten(),
             status: row.try_get("status").unwrap_or_default(),
             released_fingerprint: row.try_get("released_fingerprint").ok().flatten(),
+            country_answers_pending: row.try_get("country_answers_pending").unwrap_or(true),
             representative_country_ids: row
                 .try_get("representative_country_ids")
                 .unwrap_or_default(),
@@ -171,7 +177,8 @@ impl Assessment {
 
 const ASSESSMENT_COLUMNS: &str = "lead_id, started_at, config_version, patient_points, \
      payer_points, points, knockout, level, triggers, fingerprint, requested_blocks, \
-     follow_up_answered_at, status, released_fingerprint, representative_country_ids, updated_at";
+     follow_up_answered_at, status, released_fingerprint, representative_country_ids, \
+     country_answers_pending, updated_at";
 
 /// The stored assessment, if any (no lock).
 pub async fn load(
@@ -1429,6 +1436,9 @@ async fn evaluate_and_store(
     // answers, so a release stored with it stays valid and is upgraded.
     let mut print = fingerprint(&merged.triggers);
     let mut legacy_print = print.clone();
+    // The print without the K.o. answers below: a release stored before they
+    // counted stays valid and is upgraded, like `legacy_print`.
+    let mut print_before_answers = print.clone();
     for person in inputs
         .representatives
         .iter()
@@ -1437,15 +1447,29 @@ async fn evaluate_and_store(
         use sha2::{Digest, Sha256};
         let digest = hex::encode(Sha256::digest(person.identity_fingerprint.as_bytes()));
         print.push_str(&format!(",{REPRESENTATIVE_PRINT}{}:{digest}", person.id));
+        print_before_answers.push_str(&format!(",{REPRESENTATIVE_PRINT}{}:{digest}", person.id));
         let legacy = hex::encode(Sha256::digest(
             format!("{}:{}", person.legacy_identity_fingerprint, person.fields).as_bytes(),
         ));
         legacy_print.push_str(&format!(",{REPRESENTATIVE_PRINT}{}:{legacy}", person.id));
     }
+    // T14 and T15 are one trigger per key, also with two parents: the second
+    // parent's «Ja» adds no trigger, so each person's own K.o. answer counts
+    // here (a «Nein» or none adds nothing; QA 2026-10-30).
+    for person in &inputs.representatives {
+        for key in ["pep_self", "pep_related", "sanctions_links"] {
+            if person.fields[key] == true {
+                print.push_str(&format!(",{REPRESENTATIVE_PRINT}{}:{key}", person.id));
+            }
+        }
+    }
     let released_print = stored.released_fingerprint.as_deref().unwrap_or("");
+    let released_before_answers =
+        !released_print.contains(":pep_") && !released_print.contains(":sanctions_links");
     let release_upgraded = stored.status == STATUS_RELEASED
         && !within_release(&print, released_print)
-        && within_release(&legacy_print, released_print);
+        && (within_release(&legacy_print, released_print)
+            || (released_before_answers && within_release(&print_before_answers, released_print)));
     let mut answers = load_block_answers(conn, lead_id, &inputs, None).await?;
     answers.representatives = representative_questions(&inputs, &representative_country_ids);
     let states = block_states(
@@ -1455,6 +1479,11 @@ async fn evaluate_and_store(
         &config,
         &answers,
     );
+    let country_answers_pending = ["F", "R"].iter().any(|block| {
+        states
+            .get(block)
+            .is_some_and(|state| state.open && !state.missing.is_empty())
+    });
     let pending = pending_proposal_id(conn, lead_id).await?;
     let status: String = if starting {
         computed_status(score.level, &states).to_string()
@@ -1480,7 +1509,8 @@ async fn evaluate_and_store(
         || status != stored.status
         || config.version != stored.config_version
         || print != stored.fingerprint
-        || representative_country_ids != stored.representative_country_ids;
+        || representative_country_ids != stored.representative_country_ids
+        || country_answers_pending != stored.country_answers_pending;
     if !changed {
         return Ok(stored);
     }
@@ -1495,7 +1525,8 @@ async fn evaluate_and_store(
         r#"UPDATE lead_risk_assessments
            SET started_at = $2, config_version = $3, patient_points = $4, payer_points = $5,
                points = $6, knockout = $7, level = $8, triggers = $9, fingerprint = $10,
-               status = $11, released_fingerprint = $12, representative_country_ids = $13, updated_at = now()
+               status = $11, released_fingerprint = $12, representative_country_ids = $13,
+               country_answers_pending = $14, updated_at = now()
            WHERE lead_id = $1
            RETURNING {ASSESSMENT_COLUMNS}"#
     ))
@@ -1512,6 +1543,7 @@ async fn evaluate_and_store(
     .bind(&status)
     .bind(&released_fingerprint)
     .bind(&representative_country_ids)
+    .bind(country_answers_pending)
     .fetch_one(&mut *conn)
     .await?;
     let updated = Assessment::from_row(&row);
@@ -2231,6 +2263,7 @@ mod tests {
             status: STATUS_REVIEW.into(),
             released_fingerprint: None,
             representative_country_ids: Vec::new(),
+            country_answers_pending: true,
         };
         assert_eq!(assessment.level(), 3);
         assert!(assessment.holds());
@@ -2315,6 +2348,7 @@ mod tests {
             status: STATUS_CLEAR.into(),
             released_fingerprint: None,
             representative_country_ids: Vec::new(),
+            country_answers_pending: true,
         };
         assert!(!assessment.holds());
         // Staff may still ask: a requested A, K or L opens on any level.
@@ -2363,6 +2397,7 @@ mod tests {
             status: STATUS_REVIEW.into(),
             released_fingerprint: None,
             representative_country_ids: Vec::new(),
+            country_answers_pending: true,
         };
         assert!(
             !assessment.sanctions_confirmed(),
@@ -2395,6 +2430,7 @@ mod tests {
             status: STATUS_AWAITING.into(),
             released_fingerprint: None,
             representative_country_ids: Vec::new(),
+            country_answers_pending: true,
         };
         let trigger = |key: &str, subject: &str| Sticky {
             key: key.into(),
