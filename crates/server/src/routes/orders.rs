@@ -5841,13 +5841,20 @@ async fn update_status(
     if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return response;
     }
-    match can_access_order(&state, &auth, order_id, None).await {
-        Ok(true) => {}
-        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(response) => return response,
+    let requested_status = body.status.trim().to_lowercase();
+    let discards_draft = requested_status == "cancelled"
+        && match super::order_intakes::can_discard_draft(&state, &auth, order_id).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    if !discards_draft {
+        match can_access_order(&state, &auth, order_id, None).await {
+            Ok(true) => {}
+            Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+            Err(response) => return response,
+        }
     }
 
-    let requested_status = body.status.trim().to_lowercase();
     if !is_valid_order_status(&requested_status) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid order status");
     }

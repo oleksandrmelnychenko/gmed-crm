@@ -279,10 +279,11 @@ pub(crate) async fn load_open_business(
 }
 
 /// The patient's open business, read in the erasure transaction: orders not
-/// completed or cancelled; invoices not cancelled whose gross amount is not
-/// settled by credit notes, payments and applied advances (a draft too), and
-/// advance invoices whose paid amount is not yet applied to a final invoice
-/// (the patient's money the agency still holds).
+/// completed or cancelled (an unconfirmed draft is no business yet, QA
+/// 2026-10-31); invoices not cancelled whose gross amount is not settled by
+/// credit notes, payments and applied advances (a draft too), and advance
+/// invoices whose paid amount is not yet applied to a final invoice (the
+/// patient's money the agency still holds).
 pub(crate) async fn load_open_business_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     patient_id: Uuid,
@@ -291,6 +292,7 @@ pub(crate) async fn load_open_business_in_tx(
         r#"SELECT order_number
            FROM orders
            WHERE patient_id = $1 AND status IN ('active', 'paused')
+             AND intake_state IS DISTINCT FROM 'draft'
            ORDER BY created_at, order_number"#,
     )
     .bind(patient_id)

@@ -238,6 +238,29 @@ async fn order_patient(state: &AppState, auth: &AuthUser, id: Uuid) -> Result<Uu
     Ok(patient)
 }
 
+/// Whether the order is an order wizard draft the caller may discard. Every
+/// operational route refuses drafts (`can_access_order`), so «Удалить черновик»
+/// failed with 403 for everyone (QA 2026-10-31): the wizard's own rule decides.
+pub(crate) async fn can_discard_draft(
+    state: &AppState,
+    auth: &AuthUser,
+    order_id: Uuid,
+) -> Result<bool, Response> {
+    let patient = sqlx::query_scalar::<_, Uuid>(
+        "SELECT o.patient_id FROM orders o JOIN order_intakes i ON i.order_id=o.id
+        WHERE o.id=$1 AND o.intake_state='draft'",
+    )
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(db_error)?;
+    let Some(patient) = patient else {
+        return Ok(false);
+    };
+    access(state, auth, patient).await?;
+    Ok(true)
+}
+
 async fn facts(conn: &mut PgConnection, patient: Uuid) -> Result<Facts, Response> {
     let row = sqlx::query(
         "SELECT insurance_type, insurance_provider, insurance_number,
@@ -511,7 +534,7 @@ async fn save(
     )?;
     let mut tx = state.db.begin().await.map_err(db_error)?;
     let row = sqlx::query(
-        "SELECT i.*,o.intake_state FROM order_intakes i JOIN orders o ON o.id=i.order_id
+        "SELECT i.*,o.intake_state,o.status AS order_status FROM order_intakes i JOIN orders o ON o.id=i.order_id
         WHERE i.order_id=$1 FOR UPDATE OF i,o",
     )
     .bind(id)
@@ -525,6 +548,10 @@ async fn save(
             return workspace(&state, id).await;
         }
         return Err(conflict("Order preparation is already completed"));
+    }
+    // A discarded draft stays discarded.
+    if row.try_get::<String, _>("order_status").map_err(db_error)? == "cancelled" {
+        return Err(conflict("Order preparation was discarded"));
     }
     if row.try_get::<i64, _>("revision").map_err(db_error)? != body.revision {
         return Err(conflict(

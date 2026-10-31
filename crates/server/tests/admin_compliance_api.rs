@@ -2828,6 +2828,18 @@ async fn erasure_waits_for_open_orders_and_invoices() {
     .fetch_one(&pool)
     .await
     .unwrap();
+    // An unconfirmed order draft is no business yet (QA 2026-10-31): only the
+    // order above is named below.
+    sqlx::query(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, intake_state, created_by)
+           VALUES ($1, $2, 'discovery', 'active', 'draft', $3)"#,
+    )
+    .bind(format!("ORD-DRAFT-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
     let invoice_number = format!("INV-{tag}");
     for (number, status) in [(Some(invoice_number.clone()), "sent"), (None, "draft")] {
         sqlx::query(
