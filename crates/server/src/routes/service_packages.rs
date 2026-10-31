@@ -2578,6 +2578,13 @@ async fn order_subscription_payload(
     )
     .fetch_all(&state.db)
     .await?;
+    // The tariff of a closed order stays as it is.
+    let order_open = sqlx::query_scalar::<_, bool>(
+        "SELECT status NOT IN ('completed', 'cancelled') FROM orders WHERE id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&state.db)
+    .await?;
     Ok(serde_json::json!({
         "current": current.map(|row| {
             let package_key: String = row.try_get("package_key").unwrap_or_default();
@@ -2611,7 +2618,7 @@ async fn order_subscription_payload(
                 })
             })
             .collect::<Vec<_>>(),
-        "can_edit": can_edit,
+        "can_edit": can_edit && order_open,
     }))
 }
 
@@ -2627,6 +2634,11 @@ async fn get_order_subscription(
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
     if let Err(response) = auth.require_capability(Capability::OrdersView) {
+        return response;
+    }
+    // Tariffs and prices are the commercial side of the order: not part of
+    // the concierge's or the team lead's projection (QA 2026-10-31).
+    if let Err(response) = crate::routes::orders::require_full_order_read(&auth) {
         return response;
     }
     let patient_id = match order_patient(&state, order_id).await {
@@ -2713,12 +2725,17 @@ async fn set_order_subscription(
         }
     }
 
-    let result: Result<(), sqlx::Error> = async {
+    // `false`: the order is closed. Read under the row lock.
+    let result: Result<bool, sqlx::Error> = async {
         let mut tx = state.db.begin().await?;
-        sqlx::query("SELECT id FROM orders WHERE id = $1 FOR UPDATE")
-            .bind(order_id)
-            .execute(&mut *tx)
-            .await?;
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM orders WHERE id = $1 FOR UPDATE")
+                .bind(order_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        if matches!(status.as_str(), "completed" | "cancelled") {
+            return Ok(false);
+        }
         let current = sqlx::query_scalar::<_, Uuid>(
             r#"SELECT package_id FROM patient_service_packages
                WHERE order_id = $1 AND status IN ('draft', 'active', 'paused')"#,
@@ -2731,7 +2748,8 @@ async fn set_order_subscription(
             && current.len() == 1
             && current[0] == package_id
         {
-            return tx.commit().await;
+            tx.commit().await?;
+            return Ok(true);
         }
         sqlx::query(
             r#"UPDATE patient_service_packages
@@ -2776,15 +2794,20 @@ async fn set_order_subscription(
             ),
         )
         .await?;
-        tx.commit().await
+        tx.commit().await?;
+        Ok(true)
     }
     .await;
-    if let Err(error) = result {
-        tracing::error!(%error, %order_id, "set order subscription");
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to set the tariff",
-        );
+    match result {
+        Ok(true) => {}
+        Ok(false) => return crate::routes::orders::order_closed_for_new_services(),
+        Err(error) => {
+            tracing::error!(%error, %order_id, "set order subscription");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to set the tariff",
+            );
+        }
     }
     crate::realtime::publish_patient_event(
         &state,
