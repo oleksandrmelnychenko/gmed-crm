@@ -201,11 +201,14 @@ async fn record(
         original_filename: &original_filename,
         sha256: sha256(&data),
     };
-    match store_signed_version(&state, &auth, id, &scan, signed_at).await {
+    let mut committing = false;
+    match store_signed_version(&state, &auth, id, &scan, signed_at, &mut committing).await {
         Ok(value) => Ok(Json(value)),
         Err(response) => {
-            // The row was not written; do not leave the scan behind.
-            if let Err(error) = remove_document_blob_checked(&storage_key).await {
+            // A failed COMMIT can have succeeded on PostgreSQL: the row may
+            // stand and hold this scan (QA 2026-10-31, as `archive` in mod.rs).
+            // Before it the row was not written; do not leave the scan behind.
+            if !committing && let Err(error) = remove_document_blob_checked(&storage_key).await {
                 tracing::error!(%error, document_id = %id, "remove unused paper signature scan");
             }
             Err(response)
@@ -259,6 +262,7 @@ async fn store_signed_version(
     id: Uuid,
     scan: &StoredScan<'_>,
     signed_at: DateTime<Utc>,
+    committing: &mut bool,
 ) -> Result<Value, Response> {
     let mut tx = state.db.begin().await.map_err(db_error)?;
     let context = sqlx::query("SELECT * FROM documents WHERE id=$1")
@@ -480,6 +484,7 @@ async fn store_signed_version(
     )
     .await
     .map_err(db_error)?;
+    *committing = true;
     tx.commit().await.map_err(db_error)?;
     if lead_id.is_some() {
         crate::realtime::publish_lead_document_signed(state, Some(auth.user_id), signed_id).await;
