@@ -41,6 +41,27 @@ export function sameCents(left: number, right: number): boolean {
   return toCents(left) === toCents(right);
 }
 
+/**
+ * A money amount as staff type it, in the API's "1234.56" form, or null when
+ * it cannot be read safely. The comma is the decimal mark and dots group
+ * thousands: "119,50", "1.234,56", "1.500" (QA 2026-10-31: «1.500» was booked
+ * as 1,50 €), and the plain "1234.56". Money has two decimals, so anything
+ * longer ("1,500", "12.3456") is refused instead of guessed.
+ */
+export function normalizeMoneyInput(value: string): string | null {
+  const compact = value.trim().replace(/\s/gu, "");
+  if (/^-?[1-9]\d{0,2}(?:\.\d{3})+(?:,\d{1,2})?$/u.test(compact)) {
+    return compact.replace(/\./gu, "").replace(",", ".");
+  }
+  return /^-?\d+(?:[.,]\d{1,2})?$/u.test(compact) ? compact.replace(",", ".") : null;
+}
+
+/** The typed amount as a number, NaN when {@link normalizeMoneyInput} refuses it. */
+export function parseMoneyInput(value: string): number {
+  const normalized = normalizeMoneyInput(value);
+  return normalized === null ? Number.NaN : Number(normalized);
+}
+
 export type MoneyLineAmounts = { net: number; vat: number; gross: number };
 
 /**

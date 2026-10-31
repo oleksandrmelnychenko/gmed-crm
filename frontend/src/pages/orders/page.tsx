@@ -5,6 +5,7 @@ import {
   OrderWorkspaceNav,
 } from "@/components/order-workspace-nav";
 import { StaffLink } from "@/components/staff-link";
+import { parseMoneyInput } from "@/lib/money";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import {
   startTransition,
@@ -2966,7 +2967,7 @@ function useOrdersPageContent() {
     }
 
     const quantity = Number(leistungForm.quantity.replace(",", "."));
-    const unitPrice = Number(leistungForm.unitPrice.replace(",", "."));
+    const unitPrice = parseMoneyInput(leistungForm.unitPrice);
     const vatRate = Number(leistungForm.vatRate.replace(",", "."));
     const plannedCost = partnerCostAmountsForSubmit(leistungForm.plannedPartnerCost);
 
@@ -3169,11 +3170,9 @@ function useOrdersPageContent() {
       return;
     }
 
-    const amountNet = Number(externalInvoiceForm.amountNet.replace(",", "."));
-    const amountVat = Number(externalInvoiceForm.amountVat.replace(",", "."));
-    const amountGross = Number(
-      externalInvoiceForm.amountGross.replace(",", "."),
-    );
+    const amountNet = parseMoneyInput(externalInvoiceForm.amountNet);
+    const amountVat = parseMoneyInput(externalInvoiceForm.amountVat);
+    const amountGross = parseMoneyInput(externalInvoiceForm.amountGross);
 
     if (!externalInvoiceForm.amountGross.trim() || !Number.isFinite(amountGross) || amountGross < 0) {
       setExternalInvoiceError(l("orders_error_gross_amount_numeric"));

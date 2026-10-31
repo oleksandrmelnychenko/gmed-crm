@@ -19,6 +19,12 @@ function typeInto(
 }
 
 describe("planned partner cost amounts", () => {
+  it("reads a typed «1.500» as thousands (QA 2026-10-31)", () => {
+    const amounts = typeInto(blankPartnerCostAmounts(), ["net", "1.500"], ["vat", "0"]);
+    expect(amounts.gross).toBe("1500.00");
+    expect(partnerCostAmountsForSubmit(amounts)).toEqual({ net: 1500, vat: 0, gross: 1500 });
+  });
+
   it("derives gross from net and VAT", () => {
     const amounts = typeInto(blankPartnerCostAmounts(), ["net", "100"], ["vat", "19"]);
     expect(amounts.gross).toBe("119.00");
@@ -35,10 +41,13 @@ describe("planned partner cost amounts", () => {
     expect(partnerCostAmountsForSubmit(amounts)).toEqual({ net: 100, vat: 19, gross: 119 });
   });
 
-  it("rounds typed amounts to cents like the server", () => {
-    const amounts = typeInto(blankPartnerCostAmounts(), ["net", "10.005"], ["vat", "1,904"]);
+  it("adds typed cents exactly and refuses more than two decimals", () => {
+    const amounts = typeInto(blankPartnerCostAmounts(), ["net", "10.01"], ["vat", "1,90"]);
     expect(amounts.gross).toBe("11.91");
     expect(partnerCostAmountsForSubmit(amounts)).toEqual({ net: 10.01, vat: 1.9, gross: 11.91 });
+    const guess = typeInto(blankPartnerCostAmounts(), ["net", "10.01"], ["vat", "1,904"]);
+    expect(guess.gross).toBe("");
+    expect(partnerCostAmountsForSubmit(guess)).toBeNull();
   });
 
   it("accepts an empty cost and a cost without VAT", () => {

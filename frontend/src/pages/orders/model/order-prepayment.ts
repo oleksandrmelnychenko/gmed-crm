@@ -1,4 +1,4 @@
-import { roundCents, toCents } from "@/lib/money";
+import { parseMoneyInput, roundCents, toCents } from "@/lib/money";
 
 /** The prepayment terms of an order, named like the API and the order wizard draft. */
 export type OrderPrepaymentTerms = {
@@ -15,9 +15,7 @@ export function blankOrderPrepaymentTerms(): OrderPrepaymentTerms {
 }
 
 function prepaymentAmount(value: string): number | null {
-  const normalized = value.trim().replace(",", ".");
-  if (!/^\d+(?:\.\d+)?$/.test(normalized)) return null;
-  const amount = Number(normalized);
+  const amount = parseMoneyInput(value);
   return toCents(amount) > 0 ? roundCents(amount) : null;
 }
 

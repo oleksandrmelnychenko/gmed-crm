@@ -1,4 +1,4 @@
-import { roundCents, toCents } from "@/lib/money";
+import { parseMoneyInput, roundCents, toCents } from "@/lib/money";
 
 import type { InvoiceCreditableLine } from "./types";
 
@@ -121,7 +121,7 @@ export function emptyCreditNoteSelection(
 
 /** Gross amount a selected line credits: its entered amount or what is left. */
 export function selectedLineAmount(line: InvoiceCreditableLine, draft: CreditNoteLineDraft) {
-  return draft.amount.trim() === "" ? remaining(line) : amount(draft.amount);
+  return draft.amount.trim() === "" ? remaining(line) : parseMoneyInput(draft.amount);
 }
 
 function lineVatShare(line: InvoiceCreditableLine, gross: number) {
@@ -172,7 +172,7 @@ function previewSelection(
   const all = lines ?? [];
   if (draft.mode === "amount") {
     // The server keeps the invoice's own VAT split (`without_lines`).
-    const gross = amount(draft.amountGross);
+    const gross = parseMoneyInput(draft.amountGross);
     if (!Number.isFinite(gross) || toCents(gross) <= 0) {
       return { gross: 0, vat: 0, net: 0, error: "invalid_amount" };
     }
@@ -181,7 +181,7 @@ function previewSelection(
   }
   if (draft.mode === "vat_rate") {
     const rate = creditableVatRates(all).find((entry) => entry.rate === draft.vatRate);
-    const gross = amount(draft.amountGross);
+    const gross = parseMoneyInput(draft.amountGross);
     if (!rate) return { gross: 0, vat: 0, net: 0, error: "vat_rate_missing" };
     if (!Number.isFinite(gross) || toCents(gross) <= 0) {
       return { gross: 0, vat: 0, net: 0, error: "invalid_amount" };
@@ -234,12 +234,12 @@ export function creditNoteSelectionPayload(
   draft: CreditNoteSelectionDraft,
 ): Record<string, unknown> {
   if (draft.mode === "amount") {
-    return { amount_gross: roundCents(amount(draft.amountGross)).toFixed(2) };
+    return { amount_gross: roundCents(parseMoneyInput(draft.amountGross)).toFixed(2) };
   }
   if (draft.mode === "vat_rate") {
     return {
       vat_rate: draft.vatRate,
-      amount_gross: roundCents(amount(draft.amountGross)).toFixed(2),
+      amount_gross: roundCents(parseMoneyInput(draft.amountGross)).toFixed(2),
     };
   }
   return {
@@ -255,4 +255,36 @@ export function creditNoteSelectionPayload(
           : { line_index: line.line_index, amount_gross: roundCents(gross).toFixed(2) };
       }),
   };
+}
+
+/**
+ * What the selection credits on lines re-billing a supplier cost: the server
+ * unbills that cost even when the rest of the invoice still covers the amount
+ * (QA 2026-10-31). A credit within a VAT rate is spread over the rate's lines
+ * by what is left of them, as on the server.
+ */
+export function creditedSupplierCostGross(
+  lines: readonly InvoiceCreditableLine[] | undefined,
+  lineItems: readonly { source_external_invoice_id?: string | null }[] | undefined,
+  draft: CreditNoteSelectionDraft,
+) {
+  const rebills = (line: InvoiceCreditableLine) =>
+    Boolean(lineItems?.[line.line_index]?.source_external_invoice_id);
+  if (draft.mode === "amount") return 0;
+  if (draft.mode === "vat_rate") {
+    const gross = parseMoneyInput(draft.amountGross);
+    const rateLines = openCreditableLines(lines).filter(
+      (line) => normalizeVatRate(line.vat_rate) === draft.vatRate,
+    );
+    const open = rateLines.reduce((sum, line) => sum + remaining(line), 0);
+    const costs = rateLines.filter(rebills).reduce((sum, line) => sum + remaining(line), 0);
+    return Number.isFinite(gross) && open > 0 ? roundCents((gross * costs) / open) : 0;
+  }
+  return roundCents(
+    (lines ?? [])
+      .filter((line) => rebills(line) && draft.lines[line.line_index]?.selected)
+      .map((line) => selectedLineAmount(line, draft.lines[line.line_index]))
+      .filter(Number.isFinite)
+      .reduce((sum, gross) => sum + gross, 0),
+  );
 }

@@ -8,7 +8,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Banner, EmptyCell, Field, InfoRow, StatusBadge, tokens } from "@/components/ui-shell";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
-import { formatMoneyAmount } from "@/lib/money";
+import { formatMoneyAmount, normalizeMoneyInput } from "@/lib/money";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
@@ -93,14 +93,13 @@ export function ExternalInvoiceAllocationSheet({
     () => workspace?.candidate_invoices.find((candidate) => candidate.id === patientInvoiceId),
     [patientInvoiceId, workspace?.candidate_invoices],
   );
-  const normalizedAmount = amountGross.trim().replace(",", ".");
+  const normalizedAmount = normalizeMoneyInput(amountGross) ?? "";
   const numericAmount = Number(normalizedAmount);
   const allocationLimit = Math.min(
     Number(workspace?.remaining_receivable_gross ?? 0),
     Number(selectedCandidate?.allocatable_capacity ?? 0),
   );
-  const canAllocate = /^\d+(?:\.\d+)?$/.test(normalizedAmount)
-    && Number.isFinite(numericAmount) && numericAmount > 0 && numericAmount <= allocationLimit;
+  const canAllocate = Number.isFinite(numericAmount) && numericAmount > 0 && numericAmount <= allocationLimit;
 
   async function handleAllocate() {
     if (!externalInvoiceId || !patientInvoiceId || busy || loading || !canAllocate) return;

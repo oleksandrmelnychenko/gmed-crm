@@ -1,4 +1,4 @@
-import { toCents } from "@/lib/money";
+import { parseMoneyInput, toCents } from "@/lib/money";
 
 /**
  * A planned partner cost as typed: net, the partner's VAT amount and gross.
@@ -29,10 +29,10 @@ export function partnerCostAmountsFrom(
 
 /** Cents of a typed non-negative amount ("12,50" or "12.50"); blank is 0. */
 function amountCents(value: string): number | null {
-  const normalized = value.trim().replace(",", ".");
-  if (!normalized) return 0;
-  if (!/^\d+(?:\.\d+)?$/.test(normalized)) return null;
-  const cents = toCents(Number(normalized));
+  if (!value.trim()) return 0;
+  const amount = parseMoneyInput(value);
+  if (!(amount >= 0)) return null;
+  const cents = toCents(amount);
   return Number.isSafeInteger(cents) ? cents : null;
 }
 

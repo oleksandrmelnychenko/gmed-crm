@@ -5,10 +5,36 @@ import {
   formatMoneyRange,
   formatRecognizedMoney,
   moneyLineAmounts,
+  normalizeMoneyInput,
+  parseMoneyInput,
   roundCents,
   sameCents,
   toCents,
 } from "./money";
+
+describe("typed money amounts (QA 2026-10-31)", () => {
+  it("reads German amounts and the plain API form", () => {
+    expect(normalizeMoneyInput("119,5")).toBe("119.5");
+    expect(normalizeMoneyInput("1.234,56")).toBe("1234.56");
+    expect(normalizeMoneyInput(" 1 234,5 ")).toBe("1234.5");
+    expect(normalizeMoneyInput("1234.56")).toBe("1234.56");
+    expect(normalizeMoneyInput("1500")).toBe("1500");
+    expect(normalizeMoneyInput("-12,50")).toBe("-12.50");
+  });
+
+  it("reads a dot before three digits as thousands, never as 1,50", () => {
+    expect(normalizeMoneyInput("1.500")).toBe("1500");
+    expect(normalizeMoneyInput("12.345.678")).toBe("12345678");
+    expect(parseMoneyInput("1.500")).toBe(1500);
+  });
+
+  it("refuses what it would have to guess", () => {
+    for (const value of ["", "abc", "1,500", "1.2.3", "12.3456", "1.50.000", "1.234,567", "0.004"]) {
+      expect(normalizeMoneyInput(value), value).toBeNull();
+      expect(parseMoneyInput(value), value).toBeNaN();
+    }
+  });
+});
 
 describe("commercial money rounding", () => {
   it("rounds cent midpoints up for positive amounts", () => {

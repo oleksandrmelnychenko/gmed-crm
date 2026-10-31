@@ -1,4 +1,5 @@
 import { hasFormChanges } from "@/lib/form-changes";
+import { parseMoneyInput } from "@/lib/money";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
@@ -1953,7 +1954,7 @@ function useStaffInvoicesPageContent() {
   }
 
   async function handleApplyPrepayment() {
-    if (!detail || !prepaymentInvoiceId || Number(prepaymentAmount) <= 0) return;
+    if (!detail || !prepaymentInvoiceId || !(parseMoneyInput(prepaymentAmount) > 0)) return;
     const advance = detail.available_prepayments?.find(
       (item) => item.invoice_id === prepaymentInvoiceId,
     );
@@ -1967,7 +1968,7 @@ function useStaffInvoicesPageContent() {
       const updated = await applyInvoicePrepayment(detail.id, {
         request_id: prepaymentRequestId,
         advance_invoice_id: prepaymentInvoiceId,
-        amount_gross: Number(prepaymentAmount),
+        amount_gross: parseMoneyInput(prepaymentAmount),
         confirm_recipient_mismatch: otherRecipient && prepaymentConfirmMismatch,
       });
       setDetail(updated);
@@ -1996,13 +1997,13 @@ function useStaffInvoicesPageContent() {
   }
 
   async function handleRecordPayment() {
-    if (!detail || Number(paymentForm.amountGross) <= 0) return;
+    if (!detail || !(parseMoneyInput(paymentForm.amountGross) > 0)) return;
     setPaymentBusy(true);
     setPaymentError(null);
     try {
       await createInvoicePayment(detail.id, {
         request_id: paymentForm.requestId,
-        amount_gross: Number(paymentForm.amountGross),
+        amount_gross: parseMoneyInput(paymentForm.amountGross),
         payment_method: paymentForm.paymentMethod,
         payment_reference: paymentForm.paymentReference.trim() || null,
         received_on: paymentForm.receivedOn,
@@ -2117,13 +2118,13 @@ function useStaffInvoicesPageContent() {
   }
 
   async function handleRecordRefund() {
-    if (!detail || Number(refundForm.amountGross) <= 0 || !refundForm.reason.trim()) return;
+    if (!detail || !(parseMoneyInput(refundForm.amountGross) > 0) || !refundForm.reason.trim()) return;
     setRefundBusy(true);
     setRefundError(null);
     try {
       await createInvoiceRefund(detail.id, {
         request_id: refundForm.requestId,
-        amount_gross: Number(refundForm.amountGross),
+        amount_gross: parseMoneyInput(refundForm.amountGross),
         payment_method: refundForm.paymentMethod,
         payment_reference: refundForm.paymentReference.trim() || null,
         refunded_on: refundForm.refundedOn,
@@ -3256,7 +3257,7 @@ function useStaffInvoicesPageContent() {
                             type="button"
                             disabled={
                               paymentBusy ||
-                              Number(paymentForm.amountGross) <= 0 ||
+                              !(parseMoneyInput(paymentForm.amountGross) > 0) ||
                               !paymentForm.receivedOn
                             }
                             onClick={() => void handleRecordPayment()}
@@ -3690,8 +3691,8 @@ function useStaffInvoicesPageContent() {
                             type="button"
                             disabled={
                               refundBusy ||
-                              Number(refundForm.amountGross) <= 0 ||
-                              Number(refundForm.amountGross) >
+                              !(parseMoneyInput(refundForm.amountGross) > 0) ||
+                              parseMoneyInput(refundForm.amountGross) >
                                 Number(detail.refundable_cash_amount ?? 0) ||
                               !refundForm.reason.trim() ||
                               !refundForm.refundedOn
@@ -3922,7 +3923,7 @@ function useStaffInvoicesPageContent() {
                             disabled={
                               prepaymentBusy ||
                               !prepaymentInvoiceId ||
-                              Number(prepaymentAmount) <= 0 ||
+                              !(parseMoneyInput(prepaymentAmount) > 0) ||
                               (detail.available_prepayments?.find(
                                 (item) => item.invoice_id === prepaymentInvoiceId,
                               )?.same_recipient === false &&

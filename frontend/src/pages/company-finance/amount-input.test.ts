@@ -13,6 +13,16 @@ describe("company-finance amount input (QA D3-02)", () => {
     expect(normalizeAmountInput("119.00")).toBe("119.00");
   });
 
+  it("reads German thousands as thousands, not as decimals (QA 2026-10-31)", () => {
+    expect(normalizeAmountInput("1.500")).toBe("1500");
+    expect(normalizeAmountInput("12.345.678")).toBe("12345678");
+    expect(normalizeAmountInput("-1.500,50")).toBe("-1500.50");
+    // Not a German amount: left for the server to refuse.
+    expect(normalizeAmountInput("1,500")).toBe("1,500");
+    expect(amountInputValue("1.500")).toBe(1500);
+    expect(amountInputValue("1,500")).toBeNaN();
+  });
+
   it("reads the typed amount as a number", () => {
     expect(amountInputValue("119,00")).toBe(119);
     expect(amountInputValue("1.234,56")).toBe(1234.56);

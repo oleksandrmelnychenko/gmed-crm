@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Banner, StatusBadge, inputClass, selectClass, tokens } from "@/components/ui-shell";
 import { appDateKey } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
-import { formatMoneyAmount, toCents } from "@/lib/money";
+import { formatMoneyAmount, normalizeMoneyInput, toCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 import { createCreditTransfer, reverseCreditTransfer } from "../data/invoice-api";
@@ -141,7 +141,7 @@ export function CreditBalancePanel({
     await send({
       request_id: requestId,
       target_invoice_id: target.invoice_id,
-      amount_gross: amountGross,
+      amount_gross: normalizeMoneyInput(amountGross) ?? amountGross,
       transferred_on: transferredOn,
       note: note.trim() || null,
     });

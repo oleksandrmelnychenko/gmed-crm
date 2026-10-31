@@ -1,4 +1,4 @@
-import { toCents } from "@/lib/money";
+import { parseMoneyInput, toCents } from "@/lib/money";
 import type { InvoicePaymentTransaction } from "./types";
 
 /** Methods the API accepts for new receipts; `legacy_import` is import-only. */
@@ -52,7 +52,7 @@ export function canCorrectPayment(
  * = open balance plus this payment); recorded as the patient's credit.
  */
 export function paymentCorrectionOverpayment(form: PaymentCorrectionForm, maxAmount: number): number {
-  const amount = Number(form.amountGross);
+  const amount = parseMoneyInput(form.amountGross);
   if (!Number.isFinite(amount) || amount <= 0) return 0;
   const excess = toCents(amount) - toCents(Math.max(maxAmount, 0));
   return excess > 0 ? excess / 100 : 0;
@@ -66,7 +66,7 @@ export function paymentCorrectionProblem(
   > &
     Partial<Pick<InvoicePaymentTransaction, "payer_name">>,
 ): PaymentCorrectionProblem | null {
-  const amount = Number(form.amountGross);
+  const amount = parseMoneyInput(form.amountGross);
   if (!Number.isFinite(amount) || amount <= 0) return "invalid_amount";
   if (!form.receivedOn) return "missing_date";
   const unchanged =
@@ -84,7 +84,7 @@ export function paymentCorrectionProblem(
 export function buildPaymentCorrectionPayload(form: PaymentCorrectionForm, maxAmount = Infinity) {
   return {
     request_id: form.requestId,
-    amount_gross: Number(form.amountGross),
+    amount_gross: parseMoneyInput(form.amountGross),
     payment_method: form.paymentMethod,
     payment_reference: form.paymentReference.trim() || null,
     received_on: form.receivedOn,

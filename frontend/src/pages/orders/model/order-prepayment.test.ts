@@ -28,6 +28,15 @@ describe("order prepayment terms", () => {
     expect(orderPrepaymentError(required("150"), null)).toBeNull();
   });
 
+  it("reads a typed «1.500» as thousands (QA 2026-10-31)", () => {
+    expect(orderPrepaymentPayload(required("1.500"))).toEqual({
+      prepayment_required: true,
+      prepayment_amount: "1500.00",
+    });
+    expect(orderPrepaymentError(required("1.500"), 1000)).toBe("amount_exceeds_total");
+    expect(orderPrepaymentError(required("1,500"), null)).toBe("amount_required");
+  });
+
   it("refuses an amount above a known order total", () => {
     expect(orderPrepaymentError(required("119.01"), 119)).toBe("amount_exceeds_total");
     expect(orderPrepaymentError(required("119,00"), 119)).toBeNull();
@@ -36,7 +45,7 @@ describe("order prepayment terms", () => {
   });
 
   it("sends the amount in cents and the due date when set", () => {
-    expect(orderPrepaymentPayload(required("150,005", "2026-10-15T12:00:00Z"))).toEqual({
+    expect(orderPrepaymentPayload(required("150,01", "2026-10-15T12:00:00Z"))).toEqual({
       prepayment_required: true,
       prepayment_amount: "150.01",
       prepayment_due_at: "2026-10-15T12:00:00Z",

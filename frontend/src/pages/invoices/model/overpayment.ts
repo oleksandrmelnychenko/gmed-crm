@@ -1,4 +1,4 @@
-import { roundCents, toCents } from "@/lib/money";
+import { parseMoneyInput, roundCents, toCents } from "@/lib/money";
 
 /**
  * Overpayments and credit transfers. A receipt above the open balance is
@@ -107,10 +107,7 @@ export function creditTransferTargetLabel(
 export const CREDIT_TRANSFER_METHOD = "credit_transfer";
 
 function amount(value: unknown): number {
-  const text = String(value ?? "").trim();
-  if (text === "") return Number.NaN;
-  const numeric = Number(text.replace(",", "."));
-  return Number.isFinite(numeric) ? numeric : Number.NaN;
+  return parseMoneyInput(String(value ?? ""));
 }
 
 /** Part of a receipt above the open balance (0 when it fits). */

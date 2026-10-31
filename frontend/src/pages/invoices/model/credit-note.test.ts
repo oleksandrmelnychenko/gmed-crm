@@ -99,6 +99,15 @@ describe("credit-note selection", () => {
     expect(previewCreditNote(lines, lineDraft({ 0: "0" })).error).toBe("invalid_amount");
   });
 
+  it("reads a typed «1.500» as thousands, not as 1,50 (QA 2026-10-31)", () => {
+    expect(previewCreditNote(lines, lineDraft({ 0: "1.500" })).error).toBe("line_exceeded");
+    expect(previewCreditNote(lines, lineDraft({ 0: "1,500" })).error).toBe("invalid_amount");
+    const large = [{ ...lines[0], remaining_gross: "2000", remaining_vat: "0" }];
+    expect(creditNoteSelectionPayload(large, lineDraft({ 0: "1.500" }))).toEqual({
+      lines: [{ line_index: 0, amount_gross: "1500.00" }],
+    });
+  });
+
   it("credits an amount within one VAT rate", () => {
     const draft: CreditNoteSelectionDraft = {
       mode: "vat_rate",

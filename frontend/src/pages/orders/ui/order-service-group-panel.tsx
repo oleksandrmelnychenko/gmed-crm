@@ -4,7 +4,7 @@ import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { useEffect } from "react";
 
 import { formatAppDate } from "@/lib/app-time-zone";
-import { formatMoneyAmount } from "@/lib/money";
+import { formatMoneyAmount, parseMoneyInput } from "@/lib/money";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -532,6 +532,11 @@ export function OrderServiceGroupWizard({
       setLocalError(t.orders_service_group_wizard_duplicate_doctor);
       return;
     }
+    const unitPrice = form.unit_price.trim() ? parseMoneyInput(form.unit_price) : 0;
+    if (!(unitPrice >= 0)) {
+      setLocalError(lang === "de" ? "Einzelpreis muss numerisch sein." : "Цена за единицу должна быть числом.");
+      return;
+    }
 
     setLocalError("");
     try {
@@ -544,7 +549,7 @@ export function OrderServiceGroupWizard({
         description: form.description.trim() || null,
         service_date: form.service_date || null,
         quantity: numberOrNull(form.quantity) ?? 1,
-        unit_price: numberOrNull(form.unit_price) ?? 0,
+        unit_price: unitPrice,
         currency: form.currency.trim().toUpperCase() || "EUR",
         vat_rate: numberOrNull(form.vat_rate) ?? 19,
         participants,
