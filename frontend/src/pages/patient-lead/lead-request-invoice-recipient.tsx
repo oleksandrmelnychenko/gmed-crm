@@ -57,6 +57,8 @@ import {
   PayerSection,
   PaymentReasonField,
   usePayerAutosave,
+  usePayerEdits,
+  type PayerEdits,
 } from "./lead-request-payer-section";
 import {
   OTHER_PAYER_CHOICES,
@@ -82,7 +84,7 @@ import {
 import { useServerDraftSync } from "./lead-request-server-sync";
 import { payerAnsweredByPayer } from "./lead-request-summary";
 import { PERSON_CITY_MAX } from "@/lib/person-fields";
-import { asLeadCabinetLang, payerFieldLabel, recipientFieldLabel, recipientOptions, type LeadRequestText } from "./lead-request-text";
+import { actsAsVormund, asLeadCabinetLang, payerFieldLabel, recipientFieldLabel, recipientOptions, type LeadRequestText } from "./lead-request-text";
 
 type Refused = Partial<Record<keyof RecipientDraft, string>>;
 
@@ -142,11 +144,14 @@ export function InvoiceRecipientSection({
   // that parent receives the invoice, nobody is asked which parent. Staff have no own parent: they
   // name the parent who receives it, as a login that is none of the parents does.
   const ownParent = parents.find((person) => person.mine) ?? null;
-  const [draft, setDraft] = useState<RecipientDraft>(() => withOwnParent(draftFromRecipient(request.billing), ownParent?.id));
+  // As stored: the signed-in parent is named by an answer, never by opening the step (QA 2026-10-31).
+  const [draft, setDraft] = useState<RecipientDraft>(() => draftFromRecipient(request.billing));
   const invoiceParent = parents.find((person) => person.id === draft.representative_id);
   // Which parent: only for a login that is none of the parents, or a choice of the other parent made before.
+  // Also when two parents are on file and none is named any more (the parent named before was removed, QA 2026-10-31 B-7).
+  const parentNotNamed = draft.recipient === "self" && !invoiceParent && (parents.length > 1 || Boolean(draft.representative_id));
   const parentChoiceShown = guardian && flowOf(draft).recipient === "self" && parents.length > 0
-    && (!ownParent || Boolean(draft.representative_id && draft.representative_id !== ownParent.id));
+    && (!ownParent || parentNotNamed || Boolean(draft.representative_id && draft.representative_id !== ownParent.id));
   const parentChoiceNeeded = !invoiceParent && (parents.length > 1 || Boolean(draft.representative_id));
   const savedRef = useRef<RecipientDraft>(draftFromRecipient(request.billing));
   const queuedDraftRef = useRef(savedRef.current);
@@ -247,7 +252,14 @@ export function InvoiceRecipientSection({
       : "";
   const party = partyChoice ?? storedParty;
 
-  const update = (change: (current: RecipientDraft) => RecipientDraft) => setDraft(change);
+  // What the person changes here may also name the payer: the changes of the server do not.
+  const payerEditsRef = usePayerEdits();
+  // "The patient pays" is the answer of the radio alone, whatever else is edited in the step.
+  const partyEditsRef = usePayerEdits();
+  const update = (change: (current: RecipientDraft) => RecipientDraft) => {
+    payerEditsRef.current.made += 1;
+    setDraft(change);
+  };
   const set = (field: RecipientField, value: string) => update((current) => ({ ...current, [field]: value }));
   const errorFor = (field: keyof RecipientDraft) => {
     if (refused[field] === undefined || refused[field] !== recipientValue(field, draft)) return undefined;
@@ -264,7 +276,7 @@ export function InvoiceRecipientSection({
   });
   const labeled = (field: keyof RecipientDraft, required = false, className?: string) => ({
     id: `lead-request-recipient_${field}`,
-    label: recipientFieldLabel(text, field, guardian),
+    label: field === "representative_id" && vormund ? text.recipient.parentQuestionVormund : recipientFieldLabel(text, field, guardian),
     error: errorFor(field),
     required,
     className,
@@ -307,15 +319,17 @@ export function InvoiceRecipientSection({
   // "I (as a parent)" only for the parent who receives the invoice (QA 2026-10-24): the other
   // parent, or a login that is none of the parents, reads "one of the parents" with the name below.
   const otherParentReceives = guardian && parents.length > 0
-    && (!ownParent || Boolean(draft.representative_id && draft.representative_id !== ownParent.id));
-  const options = recipientOptions(text, request, otherParentReceives);
+    && (!ownParent || parentNotNamed || Boolean(draft.representative_id && draft.representative_id !== ownParent.id));
+  // A Vormund is no parent (QA 2026-10-31, B-4).
+  const vormund = actsAsVormund(request);
+  const options = vormund && otherParentReceives ? { ...recipientOptions(text, request, true), self: text.recipient.vormundSelf } : recipientOptions(text, request, otherParentReceives);
   // "I pay (as a parent)" only for a minor's parent; an adult's representative reads "the patient",
   // staff on a minor's form "one of the parents" (owner 2026-10-30).
   const payerPartyOptions = staffForChild(request) ? text.recipient.payerPartyParents
     : guardian && request.minor ? text.recipient.payerPartyGuardian : text.recipient.payerParty;
   // "I pay myself" is the signed-in recipient's; a parent named by somebody else "also pays".
   const isPayerLabel = flow.recipient === "self"
-    ? otherParentReceives ? text.recipient.isPayerOtherParent : text.recipient.isPayerSelf
+    ? otherParentReceives ? (vormund ? text.recipient.isPayerVormund : text.recipient.isPayerOtherParent) : text.recipient.isPayerSelf
     : organisation ? text.recipient.isPayerOrganisation : text.recipient.isPayerThirdParty;
   // Unanswered after "Next": said at the question too, not only in the list at the top.
   const recipientMissing = useStepMissingError("lead-request-invoice_recipient");
@@ -381,7 +395,8 @@ export function InvoiceRecipientSection({
               <NativeComboboxSelect
                 {...control("representative_id")}
                 className={selectClass}
-                value={draft.representative_id}
+                // A parent no longer on file is no answer: the question is open again (QA 2026-10-31, B-7).
+                value={invoiceParent ? draft.representative_id : ""}
                 disabled={locked}
                 onChange={(event) => update((current) => ({ ...current, representative_id: event.target.value, email: "" }))}
               >
@@ -564,7 +579,10 @@ export function InvoiceRecipientSection({
                       aria-label={payerPartyOptions[value]}
                       className={cn(checkboxClass, "mt-0.5 rounded-full")}
                       checked={checked}
-                      onChange={() => setPartyChoice(value)}
+                      onChange={() => {
+                        partyEditsRef.current.made += 1;
+                        setPartyChoice(value);
+                      }}
                     />
                     <span className="min-w-0">
                       {payerPartyOptions[value]}
@@ -621,6 +639,7 @@ export function InvoiceRecipientSection({
         <PatientSidePayer
           key="payer-patient"
           request={request}
+          editsRef={partyEditsRef}
           text={text}
           lang={lang}
           identification={identification}
@@ -636,6 +655,7 @@ export function InvoiceRecipientSection({
           text={text}
           lang={lang}
           recipient={draft}
+          editsRef={payerEditsRef}
           enqueue={enqueue}
           onChange={onChange}
           onSaveState={partState("payer")}
@@ -646,6 +666,7 @@ export function InvoiceRecipientSection({
         <PatientSidePayer
           key="payer-own"
           request={request}
+          editsRef={partyEditsRef}
           text={text}
           lang={lang}
           identification={identification}
@@ -668,6 +689,7 @@ export function InvoiceRecipientSection({
  */
 function PatientSidePayer({
   request,
+  editsRef,
   parentSelected = false,
   text,
   lang,
@@ -677,6 +699,7 @@ function PatientSidePayer({
   onSaveState,
 }: {
   request: LeadRequest;
+  editsRef: PayerEdits;
   parentSelected?: boolean;
   text: LeadRequestText;
   lang: string;
@@ -707,7 +730,7 @@ function PatientSidePayer({
       />
     );
   }
-  return <OwnPayer request={request} parentSelected={parentSelected} enqueue={enqueue} onChange={onChange} onSaveState={onSaveState} />;
+  return <OwnPayer request={request} editsRef={editsRef} parentSelected={parentSelected} enqueue={enqueue} onChange={onChange} onSaveState={onSaveState} />;
 }
 
 /**
@@ -718,12 +741,14 @@ function PatientSidePayer({
  */
 function OwnPayer({
   request,
+  editsRef,
   parentSelected = false,
   enqueue,
   onChange,
   onSaveState,
 }: {
   request: LeadRequest;
+  editsRef: PayerEdits;
   parentSelected?: boolean;
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
@@ -737,7 +762,7 @@ function OwnPayer({
     const payer = parentSelected && !sameParent ? null : request.payer;
     return withPayerChoice(draftFromPayer(payer, template), guardian && template ? "guardian" : "self", template);
   });
-  usePayerAutosave({ request, draft, enqueue, onChange, onSaveState });
+  usePayerAutosave({ request, draft, editsRef, enqueue, onChange, onSaveState });
   return null;
 }
 
@@ -763,7 +788,8 @@ function ParentPayer({
   const parents = request.representation?.representatives.filter((person) => person.slot === "rep1" || person.slot === "rep2") ?? [];
   const [draft, setDraft] = useState<PayerDraft>(() =>
     request.payer?.payer_kind === "representative" ? draftFromPayer(request.payer) : unansweredPayerDraft(request.payer));
-  usePayerAutosave({ request, draft, enqueue, onChange, onSaveState });
+  const editsRef = usePayerEdits();
+  usePayerAutosave({ request, draft, editsRef, enqueue, onChange, onSaveState });
   const chosen = draft.payer_kind === "third_party" && parents.some((person) => person.id === draft.representative_id)
     ? draft.representative_id ?? ""
     : "";
@@ -782,6 +808,7 @@ function ParentPayer({
             value={chosen}
             onChange={(event) => {
               const parent = parents.find((person) => person.id === event.target.value) ?? null;
+              editsRef.current.made += 1;
               setDraft(parent ? withPayerChoice(unansweredPayerDraft(request.payer), "other_parent", null, parent) : unansweredPayerDraft(request.payer));
             }}
           >
@@ -806,6 +833,7 @@ function RecipientPayer({
   text,
   lang,
   recipient,
+  editsRef,
   enqueue,
   onChange,
   onSaveState,
@@ -814,6 +842,8 @@ function RecipientPayer({
   text: LeadRequestText;
   lang: string;
   recipient: RecipientDraft;
+  /** The person's changes of the recipient: this payer is built from a copy that may be older. */
+  editsRef: PayerEdits;
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
@@ -861,19 +891,24 @@ function RecipientPayer({
   const replacementPending = Boolean(request.payer) && request.payer?.payer_kind !== "self" && !fits && !replacementConfirmed;
   const readyToReplace = recipientPayerReady(recipient);
   const sameIdentity = fits && payerIdentityKey(draftFromPayer(request.payer)) === payerIdentityKey(draft);
-  const { fieldError } = usePayerAutosave({ request, draft, enqueue, onChange, onSaveState, enabled: !replacementPending && (fits || readyToReplace) });
+  const { fieldError } = usePayerAutosave({ request, draft, editsRef, enqueue, onChange, onSaveState, enabled: !replacementPending && (fits || readyToReplace) });
   const organisation = recipient.type === "organisation";
   const payerType = organisation ? "organisation" : "person";
   const errorFor = (field: string) => (fieldError === field ? text.invalidField : undefined);
-  const set = <K extends keyof RecipientPayerExtras>(field: K, value: RecipientPayerExtras[K]) =>
+  const set = <K extends keyof RecipientPayerExtras>(field: K, value: RecipientPayerExtras[K]) => {
+    editsRef.current.made += 1;
     setExtras((current) => ({ ...current, [field]: value, ...(field === "date_of_birth" && value !== current.date_of_birth ? { contact_consent: false } : {}) }));
+  };
 
   return (
     <Section title={text.recipient.payerExtrasBlock}>
       <div className="space-y-3" data-testid="lead-request-recipient-payer">
         {replacementPending ? <div className="space-y-3" data-testid="lead-request-payer-replacement">
           <StatusChip tone="warning">{text.recipient.replacePayerHint}</StatusChip>
-          <Button type="button" disabled={!readyToReplace} onClick={() => setReplacementConfirmed(true)}>{text.recipient.confirmPayerChange}</Button>
+          <Button type="button" disabled={!readyToReplace} onClick={() => {
+            editsRef.current.made += 1;
+            setReplacementConfirmed(true);
+          }}>{text.recipient.confirmPayerChange}</Button>
         </div> : null}
         <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
           {organisation ? (
@@ -932,6 +967,7 @@ function RecipientPayer({
                 sameAsPhone={messengerSameAsPhone}
                 invalid={Boolean(errorFor("payer_messenger"))}
                 onSameAsPhone={(same) => {
+                  editsRef.current.made += 1;
                   setMessengerSameAsPhone(same);
                   if (!same) set("messenger", recipient.phone);
                 }}

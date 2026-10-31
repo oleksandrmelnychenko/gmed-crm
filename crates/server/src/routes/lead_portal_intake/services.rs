@@ -211,8 +211,10 @@ pub(super) async fn update(
             Err(error) => return error.into_response(),
         };
         // The wished start lies ahead (owner 2026-10-29); a stored past date
-        // stays until it is changed.
-        if next != from
+        // stays until it is changed. Staff may enter a past one, as in the
+        // wizard (owner rule, QA 2026-10-31 A S3-2).
+        if kind != AccessKind::Staff
+            && next != from
             && !next.is_empty()
             && next < crate::app_time::today().format("%Y-%m-%d").to_string()
         {

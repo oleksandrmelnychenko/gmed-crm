@@ -629,17 +629,10 @@ async fn issue_guardian_access(
     {
         return err(StatusCode::CONFLICT, "A deleted lead has no patient access");
     }
-    if lead
-        .try_get::<Option<Uuid>, _>("converted_patient_id")
-        .ok()
-        .flatten()
-        .is_some()
-    {
-        return err(
-            StatusCode::CONFLICT,
-            "The lead is converted; manage the access on the patient record",
-        );
-    }
+    // A parent left without a login at the conversion gets the access here
+    // (QA 2026-10-31, B-9: no other way existed): the request stays closed,
+    // the access leads to the child's record, as the conversion gives it.
+    let converted_patient: Option<Uuid> = lead.try_get("converted_patient_id").ok().flatten();
     if !crate::routes::leads::is_minor_on(
         lead.try_get::<Option<chrono::NaiveDate>, _>("date_of_birth")
             .ok()
@@ -852,6 +845,45 @@ async fn issue_guardian_access(
             .await
     {
         return internal(error, "revoke payer link after guardian access");
+    }
+    if let Some(patient_id) = converted_patient {
+        let linked = sqlx::query(
+            r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by, source)
+               VALUES ($1, $2, $3, 'lead_guardian')
+               ON CONFLICT (patient_id, user_id)
+               DO UPDATE SET revoked_at = NULL, source = 'lead_guardian'"#,
+        )
+        .bind(patient_id)
+        .bind(user_id)
+        .bind(auth.user_id)
+        .execute(&mut *tx)
+        .await;
+        if let Err(error) = linked {
+            return internal(error, "link guardian to patient");
+        }
+        if let Err(error) = audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                "link_lead_guardian_to_patient",
+                Some(auth.user_id),
+                "patient",
+                Some(patient_id),
+                json!({ "reason": "guardian_access_after_conversion", "lead_id": lead_id, "user_id": user_id }),
+            ),
+        )
+        .await
+        {
+            return internal(error, "audit guardian link");
+        }
+        if let Err(error) = crate::routes::lead_portal_account::share_released_documents_in_tx(
+            &mut tx,
+            patient_id,
+            auth.user_id,
+        )
+        .await
+        {
+            return internal(error, "share released documents");
+        }
     }
     let reused = !created && !reactivated;
     if let Err(error) = audit::write_in_transaction(

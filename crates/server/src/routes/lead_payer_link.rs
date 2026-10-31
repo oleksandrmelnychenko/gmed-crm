@@ -1194,8 +1194,9 @@ struct Requirements<'a> {
     privacy_acknowledged: bool,
     payer_type: &'a str,
     id_uploaded: bool,
-    /// An organisation's register extract is on file (staff, paper path):
-    /// it stands for the representative's ID (owner 2026-10-30).
+    /// An organisation's register extract is on file (filed by staff): it
+    /// stands for the representative's ID (owner 2026-10-30), on the paper
+    /// path and on the payer's link alike.
     register_extract: bool,
     /// The enhanced check is required: the payer states the source of the
     /// funds (client and owner 2026-10-19: asked only by a trigger).
@@ -2204,7 +2205,9 @@ fn questionnaire(
             privacy_acknowledged: statement.privacy_ack_at.is_some(),
             payer_type: &payer_type,
             id_uploaded: !identity_documents.is_empty() || (staff && context.identity_on_file),
-            register_extract: staff && context.register_extract_on_file,
+            // Whoever files it: the extract staff hold lifts the representative's
+            // ID on the payer's own page too (owner 2026-10-30, QA 2026-10-31 C S2).
+            register_extract: context.register_extract_on_file,
             funds_required: level == 2,
             funds_proof_required: level == 2,
             funds_proof_uploaded: !funds_proof_documents.is_empty()

@@ -617,7 +617,8 @@ export function payerDraftFromRecipient(
     payer_kind: "third_party",
     guardian_pays: false,
     representative_id: "",
-    payer_type: organisation ? (base.payer_type === "company" ? "company" : "organisation") : "person",
+    // An insurer staff named stays one: the cabinet's lists know "organisation" only (QA 2026-10-31).
+    payer_type: organisation ? organisationPayerType(base.payer_type) ?? "organisation" : "person",
     organisation_name: organisation ? recipient.organisation_name : "",
     organisation_legal_form: organisation ? recipient.legal_form : "",
     organisation_register_number: organisation ? extras.register_number : "",
@@ -824,7 +825,8 @@ export function thirdPartyPayerNamed(draft: PayerDraft, typed = true): boolean {
 
 /** The named payer identity used to bind consent and guard autosave replacements. */
 export function payerIdentityKey(draft: PayerDraft): string {
-  return JSON.stringify([draft.payer_kind, payerTypeOf(draft), oneLine(draft.organisation_name), oneLine(draft.first_name), oneLine(draft.last_name), draft.date_of_birth]);
+  // A company, an organisation or an insurer of one name is the same payer (QA 2026-10-31, as the server).
+  return JSON.stringify([draft.payer_kind, payerTypeOf(draft) === "person" ? "person" : "organisation", oneLine(draft.organisation_name), oneLine(draft.first_name), oneLine(draft.last_name), draft.date_of_birth]);
 }
 
 /** Consent belongs to the identity the patient named, not the form itself. */

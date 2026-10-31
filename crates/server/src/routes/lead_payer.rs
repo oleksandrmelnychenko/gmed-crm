@@ -2874,6 +2874,16 @@ async fn save_payer_declaration(
     {
         return database_error(error, "sync order payer");
     }
+    if let Err(error) = crate::routes::lead_invoice_recipient::follow_staff_payer(
+        &mut tx,
+        lead_id,
+        &declaration,
+        auth.user_id,
+    )
+    .await
+    {
+        return database_error(error, "follow payer with invoice recipient");
+    }
     if let Err(error) = tx.commit().await {
         return database_error(error, "commit payer declaration");
     }
@@ -3372,8 +3382,14 @@ fn changed_json_fields(before: &Value, after: &Value) -> Vec<String> {
 /// `lead_payer_links.payer_key`) keep the raw values and match through this
 /// function.
 pub(crate) fn same_payer_key(earlier: &Value, later: &Value) -> bool {
-    same_key_completed(earlier, later, PAYER_KEY_COMPLETABLE)
+    same_key_completed(earlier, later, PAYER_KEY_COMPLETABLE, PAYER_KEY_TYPE)
 }
+
+/// Where [`Declaration::payer_key`] holds the payer type.
+const PAYER_KEY_TYPE: usize = 0;
+
+/// Where [`Declaration::identity_key`] holds the payer type.
+const IDENTITY_KEY_TYPE: usize = 1;
 
 /// The parts of [`Declaration::payer_key`] a later key may fill in where the
 /// earlier one was empty: the date of birth.
@@ -3388,13 +3404,21 @@ const IDENTITY_KEY_COMPLETABLE: &[usize] = &[5, 6, 7, 8, 9];
 /// `completable` that `earlier` left empty matches whatever `later` holds:
 /// adding a value completes the same payer; only changing or removing one
 /// names another.
-fn same_key_completed(earlier: &Value, later: &Value, completable: &[usize]) -> bool {
+fn same_key_completed(
+    earlier: &Value,
+    later: &Value,
+    completable: &[usize],
+    payer_type: usize,
+) -> bool {
     match (earlier.as_array(), later.as_array()) {
         (Some(earlier), Some(later)) if earlier.len() == later.len() => earlier
             .iter()
             .zip(later)
             .enumerate()
             .all(|(index, (earlier, later))| {
+                if index == payer_type {
+                    return normalized_payer_type(earlier) == normalized_payer_type(later);
+                }
                 let earlier = normalized_key_part(earlier);
                 earlier == normalized_key_part(later)
                     || (earlier.is_null() && completable.contains(&index))
@@ -3412,6 +3436,17 @@ fn normalized_key_part(part: &Value) -> Value {
             normalized => Value::String(normalized),
         },
         other => other.clone(),
+    }
+}
+
+/// The first part of a key: which kind of organisation a payer is says nothing
+/// about who it is. "Страховая" for the organisation named before stays that
+/// payer (QA 2026-10-31, C S1-2: the change cleared the patient's consents and
+/// the payer's answers). A person stays a person; the raw value stays stored.
+fn normalized_payer_type(part: &Value) -> Value {
+    match part.as_str() {
+        Some(PAYER_TYPE_PERSON) | None => part.clone(),
+        Some(_) => json!("organisation"),
     }
 }
 
@@ -3469,6 +3504,7 @@ impl Declaration {
             &self.identity_key(),
             &other.identity_key(),
             IDENTITY_KEY_COMPLETABLE,
+            IDENTITY_KEY_TYPE,
         )
     }
 
@@ -5709,6 +5745,21 @@ mod tests {
         assert_ne!(company.identity_key(), renamed.identity_key());
         assert_ne!(company.identity_key(), insurer.identity_key());
         assert_ne!(company.identity_key(), declaration.identity_key());
+    }
+
+    /// QA 2026-10-31, C S1-2: "Страховая" for the organisation named before
+    /// is that payer, its consents and answers stay; another name is not.
+    #[test]
+    fn the_kind_of_organisation_names_no_other_payer() {
+        let company = from_input(&organisation("organisation", "Beispiel AG")).unwrap();
+        let insurer = from_input(&organisation("insurance", "Beispiel AG")).unwrap();
+        let renamed = from_input(&organisation("insurance", "Anders AG")).unwrap();
+        assert!(company.same_payer(&insurer));
+        assert!(company.same_identity(&insurer));
+        assert!(same_payer_key(&company.payer_key(), &insurer.payer_key()));
+        assert!(!company.same_payer(&renamed));
+        let person = from_input(&input("third_party")).unwrap();
+        assert!(!person.same_payer(&company));
     }
 
     /// QA 2026-10-24, C-5: staff writing "OLGA " for "Olga" correct the

@@ -2707,6 +2707,14 @@ async fn remove_person(
         .execute(&mut **tx)
         .await
         .map_err(|error| intake::internal(error, "delete representative"))?;
+    crate::routes::lead_invoice_recipient::forget_removed_parent(
+        &mut *tx,
+        lead_id,
+        representative_id,
+        actor,
+    )
+    .await
+    .map_err(|error| intake::internal(error, "clear invoice recipient"))?;
     contacts.retain(|entry| entry_id(entry) != Some(representative_id));
     audit::write_in_transaction(
         &mut *tx,
@@ -2865,6 +2873,10 @@ async fn store_answers(
     .map(|_| ())
 }
 
+/// Refusal of a custody answer that would leave the parent who gives it
+/// without a place in the form.
+const CUSTODY_ENDS_OWN_ACCESS: &str = "custody_ends_own_access";
+
 /// `POST /me/lead-requests/{lead_id}/representation`: the answers that decide
 /// who is asked for. An adult's "no" (or a taken-back answer) removes the
 /// person entered for that question; leaving joint custody removes every
@@ -2960,6 +2972,24 @@ pub(crate) async fn update_my_representation(
     if let Some(custody) = patch.custody {
         let before = representation.answers.custody().to_string();
         next.custody = custody;
+        // The second parent's own answer must not end that parent's access
+        // (QA 2026-10-31, B-1: "sole custody" locked him out and made the
+        // other parent the sole one, with no way back). Only staff, who see
+        // the proof, state that; the first parent's answer stays as before.
+        if kind == AccessKind::Guardian
+            && next.custody() != before
+            && next.custody() != CUSTODY_JOINT
+            && representation.representatives.iter().any(|person| {
+                person.slot == Some(SLOT_REP2) && person.login_user_ids.contains(&auth.user_id)
+            })
+        {
+            return intake::coded(
+                StatusCode::CONFLICT,
+                CUSTODY_ENDS_OWN_ACCESS,
+                "This answer would end your own access; GMED changes it",
+                json!({ "field": "custody" }),
+            );
+        }
         if next.custody() != before && next.custody() != CUSTODY_JOINT {
             removed.extend(
                 representation
@@ -4740,6 +4770,13 @@ pub(crate) async fn remove_lead_trusted_contact(
             .bind(representative_id)
             .execute(&mut *tx)
             .await?;
+        crate::routes::lead_invoice_recipient::forget_removed_parent(
+            &mut tx,
+            lead_id,
+            representative_id,
+            auth.user_id,
+        )
+        .await?;
         let revoked: Vec<Uuid> = sqlx::query_scalar(
             r#"UPDATE lead_portal_access
                SET revoked_at = now(), revoked_by = $3, revoked_reason = 'contact_removed'

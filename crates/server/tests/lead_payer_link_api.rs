@@ -387,7 +387,21 @@ async fn submit_request(app: &PayerApp, lead_id: Uuid) {
         .unwrap();
 }
 
+/// Names the payer from the cabinet. On a sent request that takes a request
+/// reopened for it (QA 2026-10-31: a sent form keeps the payer): the send
+/// stays recorded afterwards.
 async fn name_payer(app: &PayerApp, lead_id: Uuid, patient: &str, payer: Value) {
+    let sent: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT portal_submitted_at FROM leads WHERE id = $1")
+            .bind(lead_id)
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+    sqlx::query("UPDATE leads SET portal_submitted_at = NULL WHERE id = $1")
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
     let (status, body) = with_login(
         app,
         "POST",
@@ -396,6 +410,12 @@ async fn name_payer(app: &PayerApp, lead_id: Uuid, patient: &str, payer: Value) 
         Some(payer),
     )
     .await;
+    sqlx::query("UPDATE leads SET portal_submitted_at = $2 WHERE id = $1")
+        .bind(lead_id)
+        .bind(sent)
+        .execute(app.pool())
+        .await
+        .unwrap();
     assert_eq!(status, StatusCode::OK, "{body}");
 }
 
@@ -2608,15 +2628,7 @@ async fn a_new_address_gets_a_link_without_the_previous_answers() {
         1,
         "a draft is not archived: {after_rename}"
     );
-    let (status, body) = with_login(
-        &app,
-        "POST",
-        &format!("{request_path}/payer"),
-        &patient,
-        Some(viktor()),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
+    name_payer(&app, lead_id, &patient, viktor()).await;
 
     // The payer answers once more and sends; then staff change the surname
     // (another person): that statement is listed first, the older one after

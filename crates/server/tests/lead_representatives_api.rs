@@ -530,7 +530,8 @@ async fn an_invoice_names_the_chosen_parent_and_never_another_childs_contact() {
     let (status, after) = json_request(router, "GET", &base, &login, None).await;
     assert_eq!(status, StatusCode::OK, "{after}");
     assert!(after["billing"]["invoice_to"].is_null(), "{after}");
-    assert!(missing(&after).contains(&"recipient_representative_id".into()));
+    // The answer went with the parent: the step asks again (QA 2026-10-31, B-7).
+    assert!(missing(&after).contains(&"invoice_recipient".into()));
 }
 
 async fn audit_contexts(pool: &PgPool, action: &str, lead_id: Uuid) -> Vec<Value> {

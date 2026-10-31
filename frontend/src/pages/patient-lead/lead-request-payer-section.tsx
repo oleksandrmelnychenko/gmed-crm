@@ -82,9 +82,22 @@ import { answeredPayerRows, payerAnsweredByPayer } from "./lead-request-summary"
 import { LEAD_CABINET_LANGS, asLeadCabinetLang, leadRequestText, payerFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 /**
+ * The person's own changes of an answer about the payer. Only those are saved
+ * (QA 2026-10-31, C S1-1): a draft built from another copy (the recipient of
+ * step 3, a parent's own data) differs from the stored payer by itself, and
+ * merely opening the step once overwrote what staff had entered. Held by the
+ * form that takes the changes, so it outlives a part that is mounted anew.
+ */
+export type PayerEdits = MutableRefObject<{ made: number; handled: number }>;
+
+export function usePayerEdits(): PayerEdits {
+  return useRef({ made: 0, handled: 0 });
+}
+
+/**
  * The autosave of "who pays" (owner request 2026-10-05): the whole answer is
- * sent once the draft has rested and differs from the saved one; a refused
- * answer is not repeated until it changes. Once the payer answered on the
+ * sent once the person changed it (`edits`), the draft has rested and differs
+ * from the saved one; a refused answer is not repeated until it changes. Once the payer answered on the
  * own link, nothing is sent: the request is loaded afresh and the block turns
  * read-only. Shared by the payer form and by the invoice recipient who pays
  * (step 3, owner spec 2026-10-11), whose answer is built from the recipient.
@@ -92,6 +105,7 @@ import { LEAD_CABINET_LANGS, asLeadCabinetLang, leadRequestText, payerFieldLabel
 export function usePayerAutosave({
   request,
   draft,
+  editsRef,
   enqueue,
   onChange,
   onSaveState,
@@ -99,6 +113,7 @@ export function usePayerAutosave({
 }: {
   request: LeadRequest;
   draft: PayerDraft;
+  editsRef: PayerEdits;
   enabled?: boolean;
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
@@ -133,15 +148,18 @@ export function usePayerAutosave({
     (snapshot: PayerDraft) => {
       const withConsent = (!snapshot.guardian_pays && !parentPaying) || serverAsksConsent;
       const keyOf = (value: PayerDraft) => JSON.stringify(payerInput(value, typed, withConsent));
-      const fields = new Set(keyOf(snapshot) === keyOf(savedRef.current) && keyOf(snapshot) === keyOf(queuedDraftRef.current) ? [] : ["payer"]);
+      const edited = () => editsRef.current.made !== editsRef.current.handled;
+      const fields = new Set(!edited() || (keyOf(snapshot) === keyOf(savedRef.current) && keyOf(snapshot) === keyOf(queuedDraftRef.current)) ? [] : ["payer"]);
       queuedDraftRef.current = snapshot;
       return runDraftSave(enqueue, fields, async () => {
-        if (!enabled || answeredRef.current) return true;
+        if (!enabled || answeredRef.current || !edited()) return true;
+        const edition = editsRef.current.made;
         // Without the box the consent is left out: the server keeps what it has.
         const withConsent = (!snapshot.guardian_pays && !parentPaying) || serverAsksConsent;
         const input = payerInput(snapshot, typed, withConsent);
         const key = JSON.stringify(input);
         if (key === JSON.stringify(payerInput(savedRef.current, typed, withConsent))) {
+          editsRef.current.handled = edition;
           // Back at the saved answer: an answer the server refused in between is no error any more.
           if (rejectedRef.current !== null) {
             rejectedRef.current = null;
@@ -179,6 +197,7 @@ export function usePayerAutosave({
         try {
           const next = await saveLeadPayer(request.lead_id, input);
           savedRef.current = draftFromPayer(next.payer);
+          editsRef.current.handled = edition;
           rejectedRef.current = null;
           setFieldError(null);
           onSaveState("saved");
@@ -214,7 +233,7 @@ export function usePayerAutosave({
         }
       });
     },
-    [enabled, enqueue, onChange, onSaveState, parentPaying, request.lead_id, serverAsksConsent, typed],
+    [editsRef, enabled, enqueue, onChange, onSaveState, parentPaying, request.lead_id, serverAsksConsent, typed],
   );
 
   useAutosave(draft, save);
@@ -278,7 +297,7 @@ export function PayerSection({
   // For staff (none of the parents) the one besides the parent who receives the invoice (owner 2026-10-30).
   const otherParent = typed && choices.includes("other_parent") ? otherParentOf(request, recipient?.representative_id) : null;
   const answered = payerAnsweredByPayer(request);
-  const [draft, setDraft] = useState<PayerDraft>(() => {
+  const [draft, setDraftState] = useState<PayerDraft>(() => {
     const parentPays = payerAnswer(request.payer, template) === "guardian";
     const fits = !flow || !recipient || payerFitsFlow(flow, request.payer, recipient, parentPays, request.representation?.representatives);
     const stored = fits ? draftFromPayer(request.payer, template) : unansweredPayerDraft(request.payer);
@@ -286,7 +305,12 @@ export function PayerSection({
     const choice = payerChoiceOf(stored);
     return ownAccountOnly || !choice || choices.includes(choice) ? stored : unansweredPayerDraft(request.payer);
   });
-  const { fieldError, fieldErrorCode, savedRef, queuedDraftRef } = usePayerAutosave({ request, draft, enqueue, onChange, onSaveState });
+  const editsRef = usePayerEdits();
+  const setDraft = (change: (current: PayerDraft) => PayerDraft) => {
+    editsRef.current.made += 1;
+    setDraftState(change);
+  };
+  const { fieldError, fieldErrorCode, savedRef, queuedDraftRef } = usePayerAutosave({ request, draft, editsRef, enqueue, onChange, onSaveState });
   // The other parent saved the payer meanwhile (the request was re-read): the untouched fields
   // follow, a field being typed in keeps its value and says so. Not once the payer answered.
   useServerDraftSync({
@@ -294,7 +318,7 @@ export function PayerSection({
     draft,
     savedRef,
     queuedDraftRef,
-    setDraft,
+    setDraft: setDraftState,
     idOf: (field) => `lead-request-${payerFieldOfDraft(field)}`,
     enabled: !answered,
   });

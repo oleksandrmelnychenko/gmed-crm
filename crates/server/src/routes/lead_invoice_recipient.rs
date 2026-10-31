@@ -810,6 +810,138 @@ pub(crate) async fn audit_section_seven_change(
     Ok(changed)
 }
 
+/// The parent named as invoice recipient is removed from the lead: the answer
+/// goes and the step asks again (QA 2026-10-31, B-7: the reference stayed, the
+/// form read "value not available" and a remaining single parent would have
+/// become the recipient unasked). In the caller's transaction.
+pub(crate) async fn forget_removed_parent(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    representative_id: Uuid,
+    actor: Uuid,
+) -> Result<(), sqlx::Error> {
+    let cleared = sqlx::query(
+        "DELETE FROM lead_invoice_recipients WHERE lead_id = $1 AND representative_contact_id = $2",
+    )
+    .bind(lead_id)
+    .bind(representative_id)
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    if cleared > 0 {
+        crate::audit::write_in_transaction(
+            conn,
+            &crate::audit::domain_event(
+                "lead_invoice_recipient_cleared",
+                Some(actor),
+                "lead",
+                Some(lead_id),
+                json!({ "lead_id": lead_id, "reason": "representative_removed" }),
+            ),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// The recipient after staff changed the payer in the wizard: "the recipient
+/// is the payer" keeps saying the same person (QA 2026-10-31, C4 and C S1-1:
+/// the cabinet's copy stayed with the old e-mail, or with the third party
+/// after "the patient pays", and showed and restored that). `None`: nothing
+/// to follow.
+pub(crate) fn following_payer(
+    recipient: &Recipient,
+    declaration: &Declaration,
+    paying_parent: bool,
+) -> Option<Recipient> {
+    if recipient.is_payer != Some(true) {
+        return None;
+    }
+    let mut next = recipient.clone();
+    match (recipient.is_third_party(), declaration.is_third_party()) {
+        (true, true) => {
+            let organisation = declaration.is_organisation();
+            next.recipient_type = Some(
+                if organisation {
+                    RECIPIENT_TYPE_ORGANISATION
+                } else {
+                    RECIPIENT_TYPE_PERSON
+                }
+                .to_string(),
+            );
+            next.organisation_name = declaration
+                .organisation_name
+                .clone()
+                .filter(|_| organisation);
+            next.first_name = declaration.first_name.clone().filter(|_| !organisation);
+            next.last_name = declaration.last_name.clone().filter(|_| !organisation);
+            next.street = declaration.street.clone();
+            next.zip = declaration.zip.clone();
+            next.city = declaration.city.clone();
+            next.country = declaration.country.clone();
+            next.email = declaration.email.clone();
+            next.phone = declaration.phone.clone();
+            next.legacy_name = None;
+        }
+        // The patient or a parent pays: that side receives the invoice too.
+        (true, false) => {
+            next = Recipient {
+                recipient: Some(RECIPIENT_SELF.into()),
+                is_payer: Some(true),
+                representative_contact_id: declaration.payer_representative_id,
+                ..Recipient::default()
+            };
+        }
+        // Another party pays than the patient side that receives the invoice.
+        (false, _) if !payer_fits(recipient, Some(declaration), paying_parent) => {
+            next.is_payer = Some(false);
+        }
+        _ => return None,
+    }
+    (next != *recipient).then_some(next)
+}
+
+/// Stores [`following_payer`] in the caller's transaction, audited with the
+/// changed keys only.
+pub(crate) async fn follow_staff_payer(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    declaration: &Declaration,
+    actor: Uuid,
+) -> Result<(), sqlx::Error> {
+    let Some(stored) = load(&mut *conn, lead_id).await? else {
+        return Ok(());
+    };
+    let representation = super::lead_representatives::load(&mut *conn, lead_id)
+        .await?
+        .unwrap_or_default()
+        .representation;
+    let paying_parent =
+        super::lead_representatives::payer_same_person(&representation, Some(declaration))
+            .is_some();
+    let mut resolved = stored.clone();
+    let _ = resolve_parent(&mut resolved, &representation);
+    let Some(next) = following_payer(&resolved, declaration, paying_parent) else {
+        return Ok(());
+    };
+    store(&mut *conn, lead_id, &next, actor).await?;
+    crate::audit::write_in_transaction(
+        conn,
+        &crate::audit::domain_event(
+            "update_lead_invoice_recipient",
+            Some(actor),
+            "lead",
+            Some(lead_id),
+            json!({
+                "lead_id": lead_id,
+                "fields": changed_keys(&stored, &next),
+                "reason": "payer_changed_by_staff",
+            }),
+        ),
+    )
+    .await
+}
+
 /// Resolve a selected parent from the same canonical representation used for
 /// signatures. The browser sends only an id, never authoritative identity data.
 pub(crate) fn resolve_parent(
@@ -1245,6 +1377,51 @@ mod tests {
 
     fn body(value: Value) -> Map<String, Value> {
         value.as_object().cloned().unwrap()
+    }
+
+    /// QA 2026-10-31: staff's change of the payer reaches "the recipient is
+    /// the payer", so the cabinet's copy neither shows nor restores the old one.
+    #[test]
+    fn the_recipient_who_pays_follows_the_payer_staff_named() {
+        let recipient = Recipient {
+            recipient: Some(RECIPIENT_THIRD_PARTY.into()),
+            is_payer: Some(true),
+            recipient_type: Some(RECIPIENT_TYPE_PERSON.into()),
+            first_name: Some("Klaus".into()),
+            last_name: Some("Zimmermann".into()),
+            email: Some("old@example.com".into()),
+            ..Recipient::default()
+        };
+        let mut corrected = third_party_payer("Klaus", "Zimmermann");
+        corrected.email = Some("new@example.com".into());
+        let next = following_payer(&recipient, &corrected, false).unwrap();
+        assert_eq!(next.email.as_deref(), Some("new@example.com"));
+        assert_eq!(next.is_payer, Some(true));
+
+        // The patient pays: the patient side receives the invoice too.
+        let own = Declaration {
+            payer_kind: lead_payer::PAYER_KIND_SELF.into(),
+            ..Declaration::default()
+        };
+        let next = following_payer(&recipient, &own, false).unwrap();
+        assert_eq!(next.recipient.as_deref(), Some(RECIPIENT_SELF));
+        assert_eq!(next.first_name, None);
+
+        // A recipient who does not pay stays as answered.
+        let apart = Recipient {
+            is_payer: Some(false),
+            ..recipient
+        };
+        assert_eq!(following_payer(&apart, &own, false), None);
+
+        // The patient as recipient, a third party named: no longer the payer.
+        let patient = Recipient {
+            recipient: Some(RECIPIENT_SELF.into()),
+            is_payer: Some(true),
+            ..Recipient::default()
+        };
+        let next = following_payer(&patient, &corrected, false).unwrap();
+        assert_eq!(next.is_payer, Some(false));
     }
 
     fn third_party_payer(first: &str, last: &str) -> Declaration {

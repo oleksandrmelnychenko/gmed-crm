@@ -3893,6 +3893,16 @@ async fn update_my_payer(
         }
         Err(error) => return internal(error, "load payer"),
     }
+    // The client's side after the send: only the own economic interest of
+    // follow-up block L and a withdrawn consent to contact the payer are still
+    // open (owner 2026-10-26: every withdrawal). Everything else about the
+    // payer is GMED's by now (QA 2026-10-31, C S1-1: a stale copy of the sent
+    // form overwrote staff's payer and answered 200). Staff stay free.
+    let sent_by_client = kind != AccessKind::Staff
+        && match request_sent(&mut tx, lead_id).await {
+            Ok(sent) => sent,
+            Err(error) => return internal(error, "check the sent request"),
+        };
     let saved = match lead_payer::save_from_portal(
         &mut tx,
         lead_id,
@@ -3914,12 +3924,24 @@ async fn update_my_payer(
         }
         Err(PortalPayerError::Database(error)) => return internal(error, "save payer"),
     };
+    if sent_by_client
+        && saved.as_ref().is_some_and(|after| {
+            declared
+                .as_ref()
+                .is_none_or(|before| !payer_answer_open_after_send(before, after))
+        })
+    {
+        return request_already_sent();
+    }
     let mask_changed =
         match crate::risk::cabinet::save_organisation_mask(&mut tx, lead_id, &mask).await {
             Ok(Ok(changed)) => changed,
             Ok(Err(error)) => return error.into_response(),
             Err(error) => return internal(error, "save organisation"),
         };
+    if sent_by_client && !mask_changed.is_empty() {
+        return request_already_sent();
+    }
     if !mask_changed.is_empty()
         && let Err(error) = crate::risk::cabinet::audit_keys(
             &mut tx,
@@ -4144,6 +4166,29 @@ async fn previous_marker(
     .fetch_one(conn)
     .await
     .map(|value| value.filter(Value::is_object))
+}
+
+/// Whether the payer the cabinet saved after the send differs from the stored
+/// one at most in the own economic interest and a withdrawn consent to
+/// contact the payer.
+fn payer_answer_open_after_send(
+    before: &lead_payer::Declaration,
+    after: &lead_payer::Declaration,
+) -> bool {
+    let strip = |declaration: &lead_payer::Declaration| {
+        let mut value: Value = serde_json::from_str(&lead_payer::portal_marker_value(declaration))
+            .unwrap_or(Value::Null);
+        if let Some(object) = value.as_object_mut() {
+            object.remove("acts_on_own_account");
+            object.remove("beneficial_owner");
+            if after.contact_consent_at.is_none() {
+                object.remove("contact_consent_at");
+                object.remove("cost_estimate_consent_at");
+            }
+        }
+        value
+    };
+    strip(before) == strip(after)
 }
 
 async fn billing_marker(

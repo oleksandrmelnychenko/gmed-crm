@@ -6165,20 +6165,32 @@ async fn a_black_list_citizenship_opens_follow_up_blocks_without_telling_why() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(audit_count(pool, "lead_portal_submit", lead_id).await, 1);
 
-    // A third party pays after all: the own source goes.
+    // A third party pays after all: after the send that is GMED's to enter
+    // (QA 2026-10-31, C S1-1), also while a block is open; the own source goes.
+    let third_party = json!({
+        "payer_kind": "third_party",
+        "payer_type": "person",
+        "first_name": "Viktor",
+        "last_name": "Zahler",
+        "relationship_kind": "parent",
+        "citizenships": ["AT"]
+    });
     let (status, body) = json_request(
         router,
         "POST",
         &format!("{request}/payer"),
         &patient,
-        Some(json!({
-            "payer_kind": "third_party",
-            "payer_type": "person",
-            "first_name": "Viktor",
-            "last_name": "Zahler",
-            "relationship_kind": "parent",
-            "citizenships": ["AT"]
-        })),
+        Some(third_party.clone()),
+    )
+    .await;
+    assert_sent_lock(status, &body);
+    let pm = app.staff("patient_manager");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/payer"),
+        &pm,
+        Some(third_party),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -10573,4 +10585,190 @@ async fn one_person_is_the_father_of_one_child_and_the_guardian_of_another() {
     )
     .await;
     assert!(status.is_success(), "{saved}");
+}
+
+/// QA 2026-10-31, B-1 and B-7 and B-9: the second parent cannot end the own
+/// access by the custody answer; a removed parent is no invoice recipient any
+/// more; a parent left without a login at the conversion gets the access.
+#[tokio::test]
+async fn parents_keep_their_place_by_their_own_answers_and_get_access_after_the_conversion() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let router = &app.suite.app;
+    let pm = app.staff("patient_manager");
+    let (lead, _, _) = lead_with_login(&app, "Minor", "minor.qa1031@example.com").await;
+    let (mother, father) = (Uuid::new_v4(), Uuid::new_v4());
+    sqlx::query("UPDATE leads SET date_of_birth = '2015-01-01', trusted_contacts = $2 WHERE id = $1")
+        .bind(lead).bind(json!([
+            {"id": mother,"name":"Anna Qa","relation":"mother","email":"anna.qa1031@example.com","birth_date":"1980-01-01"},
+            {"id": father,"name":"Ben Qa","relation":"father","email":"ben.qa1031@example.com","birth_date":"1980-02-02"}
+        ])).execute(pool).await.unwrap();
+    let issue_path = format!("/api/v1/leads/{lead}/portal-guardians");
+    let mut logins = Vec::new();
+    for contact in [mother, father] {
+        let (status, issued) = json_request(
+            router,
+            "POST",
+            &issue_path,
+            &pm,
+            Some(json!({ "trusted_contact_id": contact })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{issued}");
+        let user: Uuid = issued["user_id"].as_str().unwrap().parse().unwrap();
+        logins.push(bearer(user, "patient"));
+    }
+    let path = format!("/api/v1/me/lead-requests/{lead}/representation");
+    let (status, view) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{lead}"),
+        &logins[0],
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    let first_is_rep1 = view["representation"]["representatives"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|person| person["mine"] == true && person["slot"] == "rep1");
+    let second = usize::from(first_is_rep1);
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        &path,
+        &logins[second],
+        Some(json!({ "custody": "sole_parent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "custody_ends_own_access", "{refused}");
+    let open: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM lead_portal_access WHERE lead_id = $1 AND kind = 'guardian' AND revoked_at IS NULL",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(open, 2);
+
+    // The parent named as recipient is removed: the answer goes.
+    sqlx::query(
+        "INSERT INTO lead_invoice_recipients (lead_id, recipient, recipient_is_payer, representative_contact_id, updated_by) VALUES ($1, 'self', true, $2, $3)",
+    )
+    .bind(lead)
+    .bind(father)
+    .bind(app.suite.admin_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (status, removed) = json_request(
+        router,
+        "DELETE",
+        &format!("/api/v1/leads/{lead}/trusted-contacts/{father}"),
+        &pm,
+        None,
+    )
+    .await;
+    assert!(status.is_success(), "{removed}");
+    let recipients: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM lead_invoice_recipients WHERE lead_id = $1")
+            .bind(lead)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(recipients, 0);
+    assert_eq!(
+        audit_count(pool, "lead_invoice_recipient_cleared", lead).await,
+        1
+    );
+
+    // A contact added after the conversion gets the access to the record.
+    let aunt = Uuid::new_v4();
+    let patient: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
+           VALUES ($1, 'Minor', 'Qa', DATE '2015-01-01', 'female', $2) RETURNING id"#,
+    )
+    .bind(format!("P-QA1031-{}", Uuid::new_v4().simple()))
+    .bind(app.suite.admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"UPDATE leads SET converted_patient_id = $2,
+               trusted_contacts = trusted_contacts || $3::jsonb WHERE id = $1"#,
+    )
+    .bind(lead)
+    .bind(patient)
+    .bind(json!([{"id": aunt,"name":"Vera Qa","relation":"legal_guardian","email":"vera.qa1031@example.com","birth_date":"1975-03-03"}]))
+    .execute(pool)
+    .await
+    .unwrap();
+    let (status, issued) = json_request(
+        router,
+        "POST",
+        &issue_path,
+        &pm,
+        Some(json!({ "trusted_contact_id": aunt })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{issued}");
+    let user: Uuid = issued["user_id"].as_str().unwrap().parse().unwrap();
+    let source: String = sqlx::query_scalar(
+        "SELECT source FROM patient_assignments WHERE patient_id = $1 AND user_id = $2 AND revoked_at IS NULL",
+    )
+    .bind(patient)
+    .bind(user)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(source, "lead_guardian");
+}
+
+/// QA 2026-10-31, C S1-1 and A S3-2: a sent form takes no payer from the
+/// client's side; staff may enter a past wished start, the client not.
+#[tokio::test]
+async fn a_sent_form_keeps_the_payer_and_staff_may_enter_a_past_start() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let (lead, _, login) = lead_with_login(&app, "Sent", "sent.qa1031@example.com").await;
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{lead}/services"),
+        &login,
+        Some(json!({ "program_date_from": "2020-01-01" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    let pm = app.staff("patient_manager");
+    let (status, saved) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{lead}/services"),
+        &pm,
+        Some(json!({ "program_date_from": "2020-01-01" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    fill_in_complete_request(router, lead, &login).await;
+    let (status, sent) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{lead}/submit"),
+        &login,
+        declared(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{lead}/payer"),
+        &login,
+        Some(json!({ "payer_kind": "third_party", "first_name": "Stale", "last_name": "Copy", "payer_type": "person" })),
+    )
+    .await;
+    assert_sent_lock(status, &body);
 }

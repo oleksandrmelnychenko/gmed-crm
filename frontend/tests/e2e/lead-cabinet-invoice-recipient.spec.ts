@@ -599,7 +599,7 @@ test("'Ich' of a signed-in parent is that parent: no parent question, also with 
   await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "disclosure");
 });
 
-test("a stored 'Ich' without a named parent gets the signed-in parent at once", async ({ page }) => {
+test("a stored 'Ich' without a named parent is asked again: opening the step names nobody (QA 2026-10-31)", async ({ page }) => {
   const { request, calls } = await setup(page, { minor: true, prepare: (request) => {
     request.representation = twoParents(MOTHER);
     request.billing.invoice_recipient = "self";
@@ -607,9 +607,12 @@ test("a stored 'Ich' without a named parent gets the signed-in parent at once", 
   } });
   await page.goto("/");
   await step(page, "billing");
+  const parent = page.getByRole("combobox", { name: "Welcher Elternteil erhält die Rechnung?" });
+  await expect(parent).toBeVisible();
+  await page.waitForTimeout(1_200);
+  expect(calls.billing).toEqual([]);
+  await choose(page, parent, "Maria Muster");
   await expect.poll(() => request.billing.recipient.representative_id).toBe(MOTHER);
-  expect(calls.billing.at(-1)).toEqual({ recipient_representative_id: MOTHER });
-  await expect(page.getByRole("combobox", { name: "Welcher Elternteil erhält die Rechnung?" })).toHaveCount(0);
 });
 
 test("two parents and a login that is none of them: choose the named invoice parent, preserve it on reload and switch the payer deliberately", async ({ page }) => {
@@ -1086,6 +1089,61 @@ test("an unanswered recipient says so at the question after Next (QA 2026-10-22)
   await expect(stepBox.getByTestId("lead-request-invoice-recipient").getByRole("alert")).toHaveText("Pflichtfeld");
   await checkLabelledRadio(stepBox.getByRole("radio", { name: "Ich", exact: true }));
   await expect(stepBox.getByTestId("lead-request-invoice-recipient").getByRole("alert")).toHaveCount(0);
+});
+
+/** A third-party recipient who pays, as the client entered it: staff changed the payer after that. */
+const clientCopy = (request: Request) => {
+  request.billing.invoice_recipient = "third_party";
+  request.billing.invoice_recipient_is_payer = true;
+  request.billing.recipient = { ...emptyParty(), type: "organisation", organisation_name: "Hanseatische Kranken AG", legal_form: "AG", contact_name: "Frau Rat",
+    street: "Alter Wall 1", zip: "20457", city: "Hamburg", country: "DE", email: "old@example.com" };
+};
+
+test("opening the billing step of a sent form saves nothing: staff's insurer, e-mail and answers stay (QA 2026-10-31, C S1-1)", async ({ page }) => {
+  const { request, calls } = await setup(page, { prepare: (request) => {
+    clientCopy(request);
+    request.submitted_at = "2026-10-11T10:00:00Z";
+    request.payer = { ...selfPayer(), payer_kind: "third_party", payer_type: "insurance", organisation_name: "Hanseatische Kranken AG",
+      organisation_legal_form: "AG", organisation_contact_name: "Frau Rat", street: "Alter Wall 1", zip: "20457", city: "Hamburg", country: "DE",
+      email: "corrected@example.com", contact_consent_at: "2026-10-11T09:00:00Z" };
+  } });
+  await page.goto("/");
+  await step(page, "billing");
+  await expect(page.getByTestId("lead-request-step-billing")).toBeVisible();
+  await page.waitForTimeout(1_200);
+  await step(page, "disclosure");
+  await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "disclosure");
+  await page.waitForTimeout(800);
+  expect(calls.payer).toEqual([]);
+  expect(calls.billing).toEqual([]);
+  expect(request.payer?.payer_type).toBe("insurance");
+  expect(request.payer?.email).toBe("corrected@example.com");
+});
+
+test("the cabinet's older copy of the recipient does not bring a payer back that staff replaced by the patient (QA 2026-10-31, C4)", async ({ page }) => {
+  const { request, calls } = await setup(page, { prepare: (request) => {
+    clientCopy(request);
+    request.payer = selfPayer();
+  } });
+  await page.goto("/");
+  await step(page, "billing");
+  await expect(page.getByTestId("lead-request-recipient-party")).toBeVisible();
+  await page.waitForTimeout(1_200);
+  expect(calls.payer).toEqual([]);
+  expect(request.payer?.payer_kind).toBe("self");
+});
+
+test("an own change of the recipient still reaches the payer, as an insurer it stays one", async ({ page }) => {
+  const { calls } = await setup(page, { prepare: (request) => {
+    clientCopy(request);
+    request.payer = { ...selfPayer(), payer_kind: "third_party", payer_type: "insurance", organisation_name: "Hanseatische Kranken AG",
+      organisation_legal_form: "AG", organisation_contact_name: "Frau Rat", street: "Alter Wall 1", zip: "20457", city: "Hamburg", country: "DE",
+      email: "old@example.com", contact_consent_at: "2026-10-11T09:00:00Z" };
+  } });
+  await page.goto("/");
+  await step(page, "billing");
+  await page.getByTestId("lead-request-recipient-party").getByRole("textbox", { name: "Ort" }).fill("Bremen");
+  await expect.poll(() => calls.payer.at(-1)).toMatchObject({ city: "Bremen", payer_type: "insurance", contact_consent: true });
 });
 
 test("guardian does not overwrite a stored self payer simply by opening billing", async ({ page }) => {
