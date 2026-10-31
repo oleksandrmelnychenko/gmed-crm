@@ -2666,6 +2666,13 @@ async fn mark_document_signed(
             }
         }
     }
+    // QA 2026-10-31: an ID confirmed with no data let a patient be created
+    // as identified without a passport number.
+    if let Err(response) =
+        super::lead_representatives::check_identity_confirmation(&mut tx, kind, lead_id).await
+    {
+        return response;
+    }
     // Owner decision 2026-10-11: a generated consent, confidentiality release
     // or framework contract is signed only with proof (scan or QES).
     if super::contracts::mark_signed_needs_proof(

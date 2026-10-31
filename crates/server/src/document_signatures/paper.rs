@@ -172,6 +172,16 @@ async fn record(
             "paper_signature_scan_too_large",
         ));
     }
+    // Like the one-click confirmation (QA 2026-10-31): no ID without its data.
+    if let Some(kind) = source.get::<Option<String>, _>("compliance_kind") {
+        let mut conn = state.db.acquire().await.map_err(db_error)?;
+        crate::routes::lead_representatives::check_identity_confirmation(
+            &mut conn,
+            &kind,
+            source.get("lead_id"),
+        )
+        .await?;
+    }
     let wrong_type = || {
         error(
             StatusCode::UNPROCESSABLE_ENTITY,

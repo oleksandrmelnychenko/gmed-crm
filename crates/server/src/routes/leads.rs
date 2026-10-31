@@ -7217,7 +7217,10 @@ async fn qualify_lead(
              failed_outcome_status = CASE WHEN $2 IN ('new', 'in_progress', 'qualified') THEN 'none' ELSE failed_outcome_status END,
              -- The reason of not_qualified starts the failed-lead workflow;
              -- an archived or deleted lead keeps the reason it was processed with.
+             -- Back in work it has no outcome and no reason: the history keeps
+             -- it (QA 2026-10-31: «Дубликат» stayed on the reopened lead).
              failed_reason = CASE
+                 WHEN $2 IN ('new', 'in_progress', 'qualified') THEN NULL
                  WHEN $2 = 'not_qualified' AND $4::text IS NOT NULL
                       AND failed_outcome_status = 'none' THEN $4
                  ELSE failed_reason

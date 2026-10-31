@@ -266,9 +266,12 @@ pub(crate) fn greeting_name(account_name: &str) -> String {
 /// The wording of an e-mail about the lead's own login: once the request is
 /// converted the login is the patient's portal account (appointments,
 /// documents, invoices), so it is not asked to fill in a request any more.
-fn own_login_audience(converted: bool) -> LoginAudience {
+fn own_login_audience(converted: bool, request_sent: bool) -> LoginAudience {
     if converted {
         LoginAudience::Patient
+    } else if request_sent {
+        // Nothing is left to fill in (QA 2026-10-31: staff sent the form).
+        LoginAudience::LeadSent
     } else {
         LoginAudience::Lead
     }
@@ -409,6 +412,7 @@ async fn send_login_email(
         r#"SELECT u.email, u.name, u.is_active, u.password_hash,
                   l.qualification_status, l.compliance_status, l.created_at,
                   l.converted_patient_id, l.primary_language, l.first_name, l.last_name,
+                  l.portal_submitted_at IS NOT NULL AS request_sent,
                   (l.portal_user_id IS NOT DISTINCT FROM u.id) AS own_login,
                   {} AS own_login_closed
            FROM leads l
@@ -494,6 +498,7 @@ async fn send_login_email(
                         .ok()
                         .flatten()
                         .is_some(),
+                    row.try_get::<bool, _>("request_sent").unwrap_or(false),
                 )
             } else {
                 LoginAudience::Guardian
@@ -732,7 +737,7 @@ async fn deliver(
         json!({
             "portal_user_id": body.user_id,
             "login": match target.audience {
-                LoginAudience::Lead => "lead",
+                LoginAudience::Lead | LoginAudience::LeadSent => "lead",
                 LoginAudience::Guardian => "guardian",
                 LoginAudience::Patient => "patient",
             },
@@ -809,8 +814,9 @@ mod tests {
 
     #[test]
     fn the_own_login_of_a_converted_request_gets_the_patient_wording() {
-        assert_eq!(own_login_audience(false), LoginAudience::Lead);
-        assert_eq!(own_login_audience(true), LoginAudience::Patient);
+        assert_eq!(own_login_audience(false, false), LoginAudience::Lead);
+        assert_eq!(own_login_audience(false, true), LoginAudience::LeadSent);
+        assert_eq!(own_login_audience(true, true), LoginAudience::Patient);
     }
 
     #[test]

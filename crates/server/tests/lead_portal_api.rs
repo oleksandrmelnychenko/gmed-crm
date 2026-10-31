@@ -2536,6 +2536,20 @@ async fn the_identity_document_needs_the_request_consent_and_is_not_a_medical_do
         .unwrap()
         .parse()
         .unwrap();
+    sqlx::query(
+        r#"INSERT INTO lead_gwg_declarations
+               (lead_id, id_document_type, id_document_number, id_issuing_authority,
+                id_issuing_country, id_valid_until)
+           VALUES ($1, 'passport', 'SYN12345', 'Synthetic office', 'DE', '2040-01-01')
+           ON CONFLICT (lead_id) DO UPDATE SET
+               id_document_type = 'passport', id_document_number = 'SYN12345',
+               id_issuing_authority = 'Synthetic office', id_issuing_country = 'DE',
+               id_valid_until = '2040-01-01'"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
     let (status, marked) = json_request(
         router,
         "POST",

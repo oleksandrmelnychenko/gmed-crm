@@ -1234,6 +1234,36 @@ pub(crate) async fn patient_identity_missing(
     .collect())
 }
 
+/// Confirming the patient's identity document (`compliance_kind` "identity"
+/// on a lead) needs the data read from the scan: a document staff confirmed
+/// with empty fields counted as identified. The same list as a document of
+/// the patient's own; an organisation payer's register extract and a
+/// representative's scan are other documents and never come here.
+pub(crate) async fn check_identity_confirmation(
+    conn: &mut PgConnection,
+    kind: &str,
+    lead_id: Option<Uuid>,
+) -> Result<(), axum::response::Response> {
+    let Some(lead_id) = lead_id.filter(|_| kind == "identity") else {
+        return Ok(());
+    };
+    match patient_identity_missing(conn, lead_id, crate::app_time::today()).await {
+        Ok(missing) if missing.is_empty() => Ok(()),
+        Ok(missing) => Err(signature_details_incomplete(
+            SignatureDetails::Patient,
+            &missing,
+        )),
+        Err(error) => {
+            tracing::error!(error = %error, "check identity document data");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error":"Internal Server Error","message":"Failed"})),
+            )
+                .into_response())
+        }
+    }
+}
+
 /// What one representative still lacks for a document of their own, as keys
 /// `<slot>_<field>`: the full list of their place, never the other parent's.
 /// A person on file without a place in the form (a third parent) needs none.

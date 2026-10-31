@@ -6007,6 +6007,24 @@ async fn reset_statement(
     } else {
         Vec::new()
     };
+    // The unsigned GwG sheet of that payer would stay on the list as current
+    // (QA 2026-10-31); a signed one stays as the record of what was done.
+    if matches!(reason, "payer_changed" | "email_changed") {
+        sqlx::query(&format!(
+            r#"UPDATE documents d
+               SET status = 'archived',
+                   auto_name = '{PREVIOUS_PAYER_PREFIX}' || d.auto_name,
+                   updated_at = now()
+               WHERE d.lead_id = $1
+                 AND d.status = 'active'
+                 AND d.signed_at IS NULL
+                 AND d.generated_template_id LIKE 'gwg_%'
+                 AND d.generated_bindings -> 'gwg_identification' ->> 'subject' = 'payer'"#
+        ))
+        .bind(lead_id)
+        .execute(&mut *conn)
+        .await?;
+    }
     let archived: Vec<Uuid> = archived_copies.iter().map(|(id, _)| *id).collect();
     // The previous payer's sent statement stays readable for staff, with its
     // archived identity document when there is one (else the proof of funds).

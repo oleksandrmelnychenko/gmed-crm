@@ -360,8 +360,9 @@ pub(super) fn content(sheet: &LegalEntitySheet, today: NaiveDate) -> Vec<SheetIt
                 .to_string()
         })),
     ));
+    // The extract staff filed is the proof of this sheet (QA 2026-10-31).
     items.push(Check(
-        false,
+        sheet.register_extract_on_file,
         "Die Angaben wurden anhand eines Auszugs aus dem Handels-, Genossenschafts-, Partnerschafts- oder Vereinsregister bzw. eines vergleichbaren amtlichen Registers oder Verzeichnisses überprüft; der Auszug ist beigefügt."
             .to_string(),
     ));

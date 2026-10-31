@@ -597,6 +597,37 @@ async fn the_gate_never_holds_the_consent_or_the_identity_document() {
     assert_eq!(response.0, StatusCode::CONFLICT, "{}", response.1);
     assert_eq!(response.1["error"], "signature_evidence_required");
     let identity = insert_lead_document(&app, lead_id, "passport", None).await;
+    // QA 2026-10-31: no confirmation of an ID without the data read from it.
+    let response = mark_signed(&app, identity, "identity").await;
+    assert_eq!(
+        response.0,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        response.1
+    );
+    assert_eq!(response.1["code"], "representative_details_incomplete");
+    assert!(
+        response.1["missing"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("patient_id_document_number")),
+        "{}",
+        response.1
+    );
+    sqlx::query(
+        r#"INSERT INTO lead_gwg_declarations
+               (lead_id, id_document_type, id_document_number, id_issuing_authority,
+                id_issuing_country, id_valid_until)
+           VALUES ($1, 'passport', 'SYN12345', 'Synthetic office', 'DE', '2040-01-01')
+           ON CONFLICT (lead_id) DO UPDATE SET
+               id_document_type = 'passport', id_document_number = 'SYN12345',
+               id_issuing_authority = 'Synthetic office', id_issuing_country = 'DE',
+               id_valid_until = '2040-01-01'"#,
+    )
+    .bind(lead_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
     let response = mark_signed(&app, identity, "identity").await;
     assert_eq!(response.0, StatusCode::OK, "{}", response.1);
     // The others stay held.

@@ -116,6 +116,8 @@ fn non_empty(value: Option<&str>) -> Option<&str> {
 pub enum LoginAudience {
     /// The lead fills in the request.
     Lead,
+    /// The lead's request was already sent (by the lead or by staff).
+    LeadSent,
     /// A parent fills in a minor's request.
     Guardian,
     /// A patient uses the portal (appointments, documents, invoices).
@@ -171,6 +173,7 @@ struct LoginCopy {
     intro: &'static str,
     intro_guardian: &'static str,
     intro_patient: &'static str,
+    intro_sent: &'static str,
     credentials_heading: &'static str,
     login_label: &'static str,
     password_label: &'static str,
@@ -193,6 +196,7 @@ fn login_copy(language: MailLanguage) -> LoginCopy {
             intro: "Ihr Zugang zum GMED-Patientenportal ist eingerichtet. Bitte tragen Sie dort Ihre persönlichen Daten ein und laden Sie Ihre Unterlagen hoch.",
             intro_guardian: "Ihr Zugang zum GMED-Patientenportal ist eingerichtet. Bitte tragen Sie dort die Angaben zur Anfrage für Ihr Kind ein und laden Sie die Unterlagen hoch.",
             intro_patient: "Ihr Zugang zum GMED-Patientenportal ist eingerichtet. Dort finden Sie Ihre Termine, Dokumente und Rechnungen und erreichen Ihr Betreuungsteam.",
+            intro_sent: "Ihr Zugang zum GMED-Patientenportal ist eingerichtet. Ihre Anfrage liegt uns bereits vor; dort können Sie den Stand einsehen und weitere Unterlagen nachreichen.",
             credentials_heading: "Ihre Anmeldedaten",
             login_label: "Benutzername",
             password_label: "Passwort",
@@ -212,6 +216,7 @@ fn login_copy(language: MailLanguage) -> LoginCopy {
             intro: "Your access to the GMED patient portal is ready. Please enter your personal details there and upload your documents.",
             intro_guardian: "Your access to the GMED patient portal is ready. Please enter the details of the request for your child there and upload the documents.",
             intro_patient: "Your access to the GMED patient portal is ready. There you find your appointments, documents and invoices and reach your care team.",
+            intro_sent: "Your access to the GMED patient portal is ready. We already have your request; there you can see where it stands and send further documents.",
             credentials_heading: "Your sign-in details",
             login_label: "Login",
             password_label: "Password",
@@ -231,6 +236,7 @@ fn login_copy(language: MailLanguage) -> LoginCopy {
             intro: "Ваш доступ в портал пациента GMED готов. Пожалуйста, заполните там свои данные и загрузите документы.",
             intro_guardian: "Ваш доступ в портал пациента GMED готов. Пожалуйста, заполните там данные заявки для вашего ребёнка и загрузите документы.",
             intro_patient: "Ваш доступ в портал пациента GMED готов. Там вы найдёте свои записи, документы и счета и сможете связаться со своей командой сопровождения.",
+            intro_sent: "Ваш доступ в портал пациента GMED готов. Ваша заявка у нас; там вы увидите, на каком она этапе, и сможете дослать документы.",
             credentials_heading: "Данные для входа",
             login_label: "Логин",
             password_label: "Пароль",
@@ -250,6 +256,7 @@ fn login_copy(language: MailLanguage) -> LoginCopy {
             intro: "Ваш доступ до порталу пацієнта GMED готовий. Будь ласка, заповніть там свої дані та завантажте документи.",
             intro_guardian: "Ваш доступ до порталу пацієнта GMED готовий. Будь ласка, заповніть там дані заявки для вашої дитини та завантажте документи.",
             intro_patient: "Ваш доступ до порталу пацієнта GMED готовий. Там ви знайдете свої записи, документи й рахунки та зможете зв'язатися зі своєю командою супроводу.",
+            intro_sent: "Ваш доступ до порталу пацієнта GMED готовий. Ваша заявка вже в нас; там ви побачите, на якому вона етапі, і зможете надіслати документи.",
             credentials_heading: "Дані для входу",
             login_label: "Логін",
             password_label: "Пароль",
@@ -289,6 +296,7 @@ pub fn portal_login(email: &PortalLoginEmail<'_>) -> RenderedEmail {
     };
     let intro = match email.audience {
         LoginAudience::Lead => copy.intro,
+        LoginAudience::LeadSent => copy.intro_sent,
         LoginAudience::Guardian => copy.intro_guardian,
         LoginAudience::Patient => copy.intro_patient,
     };
@@ -967,7 +975,7 @@ pub fn retention_reminder(email: &RetentionReminderEmail<'_>) -> RenderedEmail {
     };
     let intro = match email.audience {
         LoginAudience::Guardian => copy.intro_guardian,
-        LoginAudience::Lead | LoginAudience::Patient => copy.intro,
+        LoginAudience::Lead | LoginAudience::LeadSent | LoginAudience::Patient => copy.intro,
     }
     .replace("{date}", &email.delete_on.format("%d.%m.%Y").to_string());
     let footer = email.agency.lines();

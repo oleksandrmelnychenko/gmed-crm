@@ -8641,6 +8641,8 @@ async fn evaluate_patient_document_alerts(
            FROM documents d
            WHERE d.patient_id = $1
              AND d.status = 'active'
+             -- A deleted upload proves nothing (QA 2026-10-31: it stood as «Скан паспорта»).
+             AND d.file_deleted_at IS NULL
              AND NOT EXISTS (
                  SELECT 1 FROM documents newer WHERE newer.replaces_document_id = d.id
              )

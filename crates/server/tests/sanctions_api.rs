@@ -674,6 +674,20 @@ async fn assert_consent_and_identity_free(app: &TestApp, lead_id: Uuid) {
     let consent =
         insert_lead_document(app, lead_id, "privacy_consents", Some("privacy_consents")).await;
     let identity = insert_lead_document(app, lead_id, "passport", None).await;
+    sqlx::query(
+        r#"INSERT INTO lead_gwg_declarations
+               (lead_id, id_document_type, id_document_number, id_issuing_authority,
+                id_issuing_country, id_valid_until)
+           VALUES ($1, 'passport', 'SYN12345', 'Synthetic office', 'DE', '2040-01-01')
+           ON CONFLICT (lead_id) DO UPDATE SET
+               id_document_type = 'passport', id_document_number = 'SYN12345',
+               id_issuing_authority = 'Synthetic office', id_issuing_country = 'DE',
+               id_valid_until = '2040-01-01'"#,
+    )
+    .bind(lead_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
     for (document, kind) in [(consent, "dsgvo"), (identity, "identity")] {
         let (code, body) = request(
             app,
