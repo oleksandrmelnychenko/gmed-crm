@@ -567,6 +567,55 @@ async fn public_lead_intake_stores_contact_form_submissions_as_leads() {
     assert!(items.iter().any(|item| item["id"] == lead_id));
 }
 
+/// A returning patient or a parent's second child keeps the request, with the
+/// same answer as anyone else (no oracle for known addresses), and staff hear
+/// of it; a double submit answers like the first (QA 2026-10-30).
+#[tokio::test]
+async fn public_lead_intake_keeps_a_known_contact_and_answers_a_double_submit_once() {
+    let Some(app) = test_app().await else { return };
+    let token = "test-lead-intake-token";
+    unsafe {
+        std::env::set_var("LEAD_INTAKE_TOKEN", token);
+        std::env::set_var("GMED_LEAD_INTAKE_TOKEN", token);
+    }
+    let email = format!("known.{}@gmx.de", Uuid::new_v4().simple());
+    let bundle = |first_name: &str| {
+        json!({
+            "version": 1,
+            "source": "contact",
+            "flow": "contact",
+            "submittedAt": "2026-10-30T12:00:00Z",
+            "locale": "de",
+            "payload": {
+                "firstName": first_name,
+                "lastName": "Muster",
+                "email": email,
+                "phones": [],
+                "services": [],
+                "consentAutomatedContact": false,
+                "consentHealthcare": false,
+                "consentOptOut": false,
+                "consentPrivacyPractices": false
+            }
+        })
+    };
+    let path = "/api/v1/public/lead-intake";
+    let (status, first) = public_multipart_request(&app, path, token, bundle("Mira")).await;
+    assert_eq!(status, StatusCode::CREATED, "{first}");
+    let (status, again) = public_multipart_request(&app, path, token, bundle("Mira")).await;
+    assert_eq!(status, StatusCode::CREATED, "{again}");
+    assert_eq!(again["lead_id"], first["lead_id"]);
+    let (status, other) = public_multipart_request(&app, path, token, bundle("Olga")).await;
+    assert_eq!(status, StatusCode::CREATED, "{other}");
+    assert_ne!(other["lead_id"], first["lead_id"]);
+    let leads: i64 = sqlx::query_scalar("SELECT count(*) FROM leads WHERE email = $1")
+        .bind(&email)
+        .fetch_one(&app.suite.pool)
+        .await
+        .unwrap();
+    assert_eq!(leads, 2);
+}
+
 #[tokio::test]
 async fn public_lead_intake_stores_wizard_submissions_as_questionnaire_leads() {
     let Some(app) = test_app().await else { return };
