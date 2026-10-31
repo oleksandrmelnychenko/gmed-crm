@@ -21,12 +21,18 @@ import {
 } from "@/lib/billing-reversal";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { LeadConfirmDialog } from "@/pages/leads/ui/lead-confirm-dialog";
 
 import {
   cancelOrderLeistung,
   fetchLeistungCancellationPreview,
   type CancelledOrderLeistung,
 } from "../data/order-api";
+import {
+  signedTermsChangeConfirmText,
+  SignedTermsChangeCancelled,
+  withSignedTermsConfirmation,
+} from "../model/client-signature";
 import {
   LEISTUNG_CANCEL_REASON_MAX,
   isStaleLeistungCancelError,
@@ -58,7 +64,9 @@ type CancelLeistungDialogProps = {
  * or the order completion gate. The dialog first asks the server what the
  * cancellation does: a line on a released invoice is cancelled together with
  * a credit note (amount shown, CEO / billing only), a line on a draft invoice
- * waits until the draft is cancelled (decision 2026-09-29).
+ * waits until the draft is cancelled (decision 2026-09-29). On an order the
+ * client signed it then asks to confirm the reset of the signature, with the
+ * signed and the new total (QA 2026-10-31).
  */
 export function CancelLeistungDialog({
   orderId,
@@ -75,6 +83,7 @@ export function CancelLeistungDialog({
   const [error, setError] = useState("");
   const [preview, setPreview] = useState<BillingReversalPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [signedTermsAsk, setSignedTermsAsk] = useState<{ text: string; resolve: (yes: boolean) => void } | null>(null);
   const leistungId = leistung?.id ?? null;
 
   useEffect(() => {
@@ -116,16 +125,28 @@ export function CancelLeistungDialog({
     setBusy(true);
     setError("");
     try {
-      const result = await cancelOrderLeistung(
-        orderId,
-        leistung.id,
-        reason.trim(),
-        preview.requires_credit_note,
+      const result = await withSignedTermsConfirmation(
+        (confirmSignatureReset) => cancelOrderLeistung(
+          orderId,
+          leistung.id,
+          reason.trim(),
+          preview.requires_credit_note,
+          confirmSignatureReset,
+        ),
+        (refusal) => new Promise<boolean>((resolve) => setSignedTermsAsk({
+          text: signedTermsChangeConfirmText(refusal, null),
+          resolve,
+        })),
       );
       toast.success(billingReversalSuccessMessage(result.credit_notes ?? [], tx));
       onClose();
       onCancelled(result);
     } catch (cause) {
+      // Keeping the client's signature is a choice: the line stays as it was.
+      if (cause instanceof SignedTermsChangeCancelled) {
+        setError(cause.message);
+        return;
+      }
       setError(leistungCancelErrorMessage(cause, tx));
       if (isStaleLeistungCancelError(cause)) onStale();
     } finally {
@@ -209,6 +230,23 @@ export function CancelLeistungDialog({
               </Button>
             </DialogFooter>
           </form>
+          <LeadConfirmDialog
+            open={Boolean(signedTermsAsk)}
+            testId="leistung-signed-terms-change-dialog"
+            title={tx("Изменить подписанные условия заказа?", "Unterschriebene Auftragsbedingungen ändern?")}
+            description={signedTermsAsk?.text}
+            confirmLabel={tx("Изменить, подпись сбросится", "Ändern, Unterschrift entfällt")}
+            cancelLabel={tx("Отмена", "Abbrechen")}
+            destructive
+            onConfirm={() => {
+              signedTermsAsk?.resolve(true);
+              setSignedTermsAsk(null);
+            }}
+            onCancel={() => {
+              signedTermsAsk?.resolve(false);
+              setSignedTermsAsk(null);
+            }}
+          />
         </DialogContent>
       ) : null}
     </Dialog>

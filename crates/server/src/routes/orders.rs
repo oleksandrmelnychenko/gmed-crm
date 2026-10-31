@@ -369,6 +369,9 @@ struct CancelLeistungRequest {
     /// Confirms that a line on a released invoice is cancelled with a credit
     /// note (finance roles).
     issue_credit_note: Option<bool>,
+    /// See `AddLeistungRequest::confirm_signature_reset`.
+    #[serde(default)]
+    confirm_signature_reset: bool,
 }
 
 #[derive(Deserialize)]
@@ -11114,7 +11117,10 @@ async fn leistung_cancellation_preview(
 /// (finance roles, `issue_credit_note: true`); a line on a draft invoice is
 /// refused until the draft is cancelled (owner decision 2026-09-29). The line
 /// is kept with who, when and why; it no longer counts for quotes, invoices
-/// or the order completion gate.
+/// or the order completion gate. On an order the client signed the line
+/// leaves the signed terms: it needs `confirm_signature_reset`, which resets
+/// the order signatures (QA 2026-10-31, `client_terms.rs`). Cancellations that
+/// follow an appointment or a concierge service keep the signature.
 async fn cancel_leistung(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -11141,6 +11147,17 @@ async fn cancel_leistung(
         Ok(transaction) => transaction,
         Err(error) => {
             tracing::error!(error = %error, %order_id, %leistung_id, "begin cancel order service");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to cancel order service",
+            );
+        }
+    };
+    let terms_before = match client_terms::lock_before(&mut transaction, order_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(error) => {
+            tracing::error!(error = %error, %order_id, %leistung_id, "lock order terms to cancel a service");
             return err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to cancel order service",
@@ -11178,6 +11195,33 @@ async fn cancel_leistung(
         Ok(value) => value,
         Err(response) => return response,
     };
+    let terms_change = match client_terms::settle(
+        &mut transaction,
+        order_id,
+        &terms_before,
+        body.confirm_signature_reset,
+        Some(auth.user_id),
+        "order_service_cancellation",
+    )
+    .await
+    {
+        Ok(change) => change,
+        // The refused cancellation rolls back, with any credit note it issued.
+        Err(client_terms::TermsError::Refused(response)) => {
+            drop(transaction);
+            reversal.discard_documents().await;
+            return response;
+        }
+        Err(client_terms::TermsError::Database(error)) => {
+            tracing::error!(error = %error, %order_id, %leistung_id, "check signed order terms to cancel a service");
+            drop(transaction);
+            reversal.discard_documents().await;
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to cancel order service",
+            );
+        }
+    };
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, %order_id, %leistung_id, "commit cancel order service");
         reversal.discard_documents().await;
@@ -11191,6 +11235,10 @@ async fn cancel_leistung(
     let mut response = reversal.to_json();
     if let Some(map) = response.as_object_mut() {
         map.insert("cancelled_by".to_string(), serde_json::json!(auth.user_id));
+        map.insert(
+            "signature_reset".to_string(),
+            serde_json::json!(terms_change.signature_reset()),
+        );
     }
     Json(response).into_response()
 }

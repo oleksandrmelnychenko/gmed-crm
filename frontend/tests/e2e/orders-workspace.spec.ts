@@ -537,6 +537,39 @@ test("a planned service is cancelled with a required reason and shows it afterwa
   await expect(deliveredLine.getByRole("button", {name:"Отменить услугу", exact:true})).toHaveCount(1);
 });
 
+test("cancelling a service of a signed order asks before the client's signature is reset (QA 2026-10-31)", async ({page}) => {
+  const {order} = await prepare(page);
+  const line: Record<string, unknown> = {id:"service-1", description:"QA interpreter block", quantity:"4", unit_price:"80", currency:"EUR", vat_rate:"19", status:"planned", notes:null};
+  order.leistungen.push(line);
+  const cancelBodies: Array<{reason: string; confirm_signature_reset?: boolean}> = [];
+  await page.route(`**/orders/${orderId}/leistungen/service-1/cancel`, route => {
+    const body = route.request().postDataJSON() as {reason: string; confirm_signature_reset?: boolean};
+    cancelBodies.push(body);
+    if (body.confirm_signature_reset !== true) {
+      return route.fulfill({status:409, json:{error:"order_signed_terms_change", message:"The client signed this order", signed_total_label:"889,15 €", new_total_label:"508,15 €"}});
+    }
+    Object.assign(line, {status:"cancelled", cancelled_at:"2026-09-25T10:15:00Z", cancellation_reason:body.reason});
+    return route.fulfill({json:{id:"service-1", order_id:orderId, status:"cancelled", cancelled_at:"2026-09-25T10:15:00Z", cancelled_by:"order-test-user", cancellation_reason:body.reason, signature_reset:true}});
+  });
+  await page.goto(`/orders/${orderId}?section=services`);
+  await page.getByRole("button", {name:"Отменить услугу", exact:true}).click();
+  const dialog = page.getByRole("dialog", {name:"Отменить услугу", exact:true});
+  await dialog.getByLabel("Причина отмены").fill("Услуга не нужна");
+  await dialog.getByRole("button", {name:"Отменить услугу", exact:true}).click();
+  const ask = page.getByTestId("leistung-signed-terms-change-dialog");
+  await expect(ask).toContainText("889,15 €");
+  await expect(ask).toContainText("508,15 €");
+  // Keeping the signature leaves the line as it was, with the reason still typed.
+  await ask.getByRole("button", {name:"Отмена", exact:true}).click();
+  await expect(ask).toBeHidden();
+  await expect(dialog.getByRole("alert")).toContainText("подпись клиента сохранена");
+  expect(cancelBodies).toHaveLength(1);
+  await dialog.getByRole("button", {name:"Отменить услугу", exact:true}).click();
+  await ask.getByRole("button", {name:"Изменить, подпись сбросится", exact:true}).click();
+  await expect(dialog).toBeHidden();
+  expect(cancelBodies[cancelBodies.length - 1]).toEqual({reason:"Услуга не нужна", issue_credit_note:false, confirm_signature_reset:true});
+});
+
 test("a cancellation conflict shows a localized error and reloads the line", async ({page}) => {
   const {order} = await prepare(page, "de");
   const line: Record<string, unknown> = {id:"service-1", description:"QA interpreter block", quantity:"4", unit_price:"80", currency:"EUR", vat_rate:"19", status:"planned", notes:null};

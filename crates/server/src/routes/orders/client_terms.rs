@@ -6,7 +6,8 @@
 //! pass-through), the programme period and the gross total
 //! (`order_client_terms` in the database). A staff edit that changes them —
 //! a service added or changed in the lead wizard or the order workspace, a
-//! wizard line removed, the programme period moved — works like this:
+//! wizard line removed, a service cancelled in the order workspace, the
+//! programme period moved — works like this:
 //!
 //! * the order row is locked and its terms are read before the change;
 //! * after the change the terms are read again; when they differ, the order

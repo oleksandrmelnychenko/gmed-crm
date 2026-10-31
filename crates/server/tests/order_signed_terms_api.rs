@@ -372,3 +372,100 @@ async fn moving_the_period_of_a_signed_order_needs_a_confirmed_signature_reset()
     assert_eq!(moved["date_from"], "2026-10-21");
     assert_eq!(order_signatures(&pool, order_id).await, (false, false));
 }
+
+/// A service line that stays or goes next to the interpreter hours.
+async fn add_transfer(app: &axum::Router, bearer: &str, order_id: Uuid) -> Uuid {
+    let (status, line) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        bearer,
+        Some(json!({
+            "description": "Flughafentransfer",
+            "quantity": 1.0,
+            "unit_price": 100.0,
+            "vat_rate": 19.0,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{line}");
+    Uuid::parse_str(line["id"].as_str().unwrap()).unwrap()
+}
+
+/// QA 2026-10-31: `order_client_terms` drops cancelled lines, so a line
+/// cancelled in the order workspace changes what the client signed.
+#[tokio::test]
+async fn cancelling_a_service_of_a_signed_order_needs_a_confirmed_signature_reset() {
+    let Some((app, pool, admin_id, ceo)) = test_context().await else {
+        return;
+    };
+    let patient_id = seed_patient(&pool, admin_id).await;
+    let order_id = create_order_with_interpreter_hours(&app, &ceo, patient_id).await;
+    let transfer = add_transfer(&app, &ceo, order_id).await;
+    let document = seed_order_document(&pool, patient_id, order_id, admin_id).await;
+    let (status, signed) = sign_on_paper(&app, document, &ceo).await;
+    assert_eq!(status, StatusCode::OK, "{signed}");
+    assert_eq!(order_signatures(&pool, order_id).await, (true, true));
+
+    let path = format!("/api/v1/orders/{order_id}/leistungen/{transfer}/cancel");
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        &path,
+        &ceo,
+        Some(json!({ "reason": "Transfer entfällt" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "order_signed_terms_change");
+    assert_eq!(refused["signed_total_label"], "458,15 €");
+    assert_eq!(refused["new_total_label"], "339,15 €");
+    let line_status: String =
+        sqlx::query_scalar("SELECT status FROM order_leistungen WHERE id = $1")
+            .bind(transfer)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(line_status, "planned");
+    assert_eq!(order_signatures(&pool, order_id).await, (true, true));
+
+    let (status, cancelled) = json_request(
+        &app,
+        "POST",
+        &path,
+        &ceo,
+        Some(json!({ "reason": "Transfer entfällt", "confirm_signature_reset": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cancelled}");
+    assert_eq!(cancelled["status"], "cancelled");
+    assert_eq!(cancelled["signature_reset"], true);
+    assert_eq!(order_signatures(&pool, order_id).await, (false, false));
+    let resets: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action = 'reset_order_client_signature' AND entity_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(resets, 1);
+
+    // Nothing is signed any more: the next line goes without a confirmation.
+    let hours: Uuid = sqlx::query_scalar(
+        "SELECT id FROM order_leistungen WHERE order_id = $1 AND client_reference = 'terms-test:interpreter'",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, next) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen/{hours}/cancel"),
+        &ceo,
+        Some(json!({ "reason": "Termin entfällt" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{next}");
+    assert_eq!(next["signature_reset"], false);
+}

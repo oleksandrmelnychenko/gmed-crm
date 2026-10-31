@@ -406,22 +406,30 @@ export type CancelledOrderLeistung = {
   cancellation_reason: string;
   /** Credit notes issued for a line on a released invoice. */
   credit_notes?: IssuedCreditNote[];
+  /** The cancellation changed the signed terms and reset the order signatures. */
+  signature_reset?: boolean;
 };
 
 /**
  * Cancels a service line; the server keeps who, when and why. A line on a
  * released invoice needs `issueCreditNote` (CEO / billing): a credit note is
- * issued in the same transaction.
+ * issued in the same transaction. On an order the client signed the server
+ * refuses until `confirmSignatureReset` (`withSignedTermsConfirmation`).
  */
 export function cancelOrderLeistung(
   orderId: string,
   leistungId: string,
   reason: string,
   issueCreditNote = false,
+  confirmSignatureReset = false,
 ) {
   return postJson<CancelledOrderLeistung>(
     `/orders/${orderId}/leistungen/${leistungId}/cancel`,
-    { reason, issue_credit_note: issueCreditNote },
+    {
+      reason,
+      issue_credit_note: issueCreditNote,
+      ...(confirmSignatureReset ? { confirm_signature_reset: true } : {}),
+    },
   );
 }
 
