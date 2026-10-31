@@ -341,6 +341,11 @@ async function setup(page: Page, options: { minor?: boolean; prepare?: (request:
       calls.loads += 1;
       return route.fulfill({ json: { requests: [answer()] } });
     }
+    // A conflict re-reads this one request (staff get the same route, the list is the patient's).
+    if (path === base && method === "GET") {
+      calls.loads += 1;
+      return route.fulfill({ json: answer() });
+    }
 
     if (path === `${base}/billing` && method === "POST") {
       const patch = req.postDataJSON() as Record<string, unknown>;
