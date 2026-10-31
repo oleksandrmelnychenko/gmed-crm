@@ -3777,6 +3777,7 @@ async fn get_order(
                   o.signed_agency, o.client_signed_terms, o.client_terms_changed_at,
                   COALESCE(order_service_total_gross(o.id), o.total_estimated) AS total_estimated,
                   o.total_actual, UPPER(o.currency) AS currency,
+                  o.prepayment_required, o.prepayment_amount, o.prepayment_due_at,
                   o.created_at, o.updated_at, o.cancellation_reason, o.cancelled_at,
                   o.cancelled_by, cancelled_user.name AS cancelled_by_name,
                   settlement.id AS termination_settlement_id,
@@ -4400,6 +4401,9 @@ async fn get_order(
         "client_signature": client_signature,
         "total_estimated": total_estimated, "total_actual": total_actual,
         "currency": order_currency,
+        "prepayment_required": order.try_get::<bool, _>("prepayment_required").unwrap_or(false),
+        "prepayment_amount": order.try_get::<Option<rust_decimal::Decimal>, _>("prepayment_amount").unwrap_or_default().map(money::money_string),
+        "prepayment_due_at": order.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("prepayment_due_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "leistungen": leist_json,
         "external_invoices": external_invoices_json,
         "process_gates": process_gates,
@@ -5347,7 +5351,8 @@ async fn update_order_commercial_basis(
 
     let order = match sqlx::query(
         r#"SELECT patient_id, source_lead_id, date_from, date_to,
-                  total_estimated, prepayment_amount, signed_patient,
+                  total_estimated, order_service_total_gross(id) AS service_total,
+                  prepayment_amount, signed_patient,
                   intake_state = 'draft' AND EXISTS (
                       SELECT 1 FROM leads l WHERE l.id = orders.source_lead_id
                       AND l.repeat_patient_id = orders.patient_id AND l.converted_patient_id IS NULL
@@ -5381,6 +5386,9 @@ async fn update_order_commercial_basis(
         .unwrap_or_default();
     let current_total_estimated = order
         .try_get::<Option<rust_decimal::Decimal>, _>("total_estimated")
+        .unwrap_or_default();
+    let service_total = order
+        .try_get::<Option<rust_decimal::Decimal>, _>("service_total")
         .unwrap_or_default();
     let current_prepayment_amount = order
         .try_get::<Option<rust_decimal::Decimal>, _>("prepayment_amount")
@@ -5500,13 +5508,24 @@ async fn update_order_commercial_basis(
     if let Err(resp) = validate_order_date_range(effective_date_from, effective_date_to) {
         return resp;
     }
-    let effective_total_estimated = total_estimated.or(current_total_estimated);
+    // The prepayment is measured against the order total shown everywhere: the
+    // gross of the services, the stored estimate only for an order without
+    // any (QA 2026-10-31). A request that leaves both as they are is not
+    // checked: an order whose total fell below its prepayment keeps saving,
+    // and the order workspace asks to adjust the prepayment.
+    let effective_total_estimated = service_total
+        .or(total_estimated)
+        .or(current_total_estimated);
     let effective_prepayment_amount = if body.prepayment_required == Some(false) {
         None
     } else {
         prepayment_amount.or(current_prepayment_amount)
     };
-    if let (Some(amount), Some(total)) = (effective_prepayment_amount, effective_total_estimated)
+    let checks_prepayment =
+        prepayment_amount.is_some() || (service_total.is_none() && total_estimated.is_some());
+    if checks_prepayment
+        && let (Some(amount), Some(total)) =
+            (effective_prepayment_amount, effective_total_estimated)
         && amount > total
     {
         return prepayment_exceeds_total_err(Some(total));
@@ -5662,15 +5681,16 @@ async fn update_order_commercial_basis(
              updated_at = now()
          WHERE id = $1
            AND (
-               CASE
-                   WHEN $6 IS FALSE THEN NULL
-                   ELSE COALESCE($7, prepayment_amount)
-               END IS NULL
-               OR COALESCE($2, total_estimated) IS NULL
+               NOT $15
                OR CASE
                    WHEN $6 IS FALSE THEN NULL
                    ELSE COALESCE($7, prepayment_amount)
-               END <= COALESCE($2, total_estimated)
+               END IS NULL
+               OR COALESCE(order_service_total_gross(id), $2, total_estimated) IS NULL
+               OR CASE
+                   WHEN $6 IS FALSE THEN NULL
+                   ELSE COALESCE($7, prepayment_amount)
+               END <= COALESCE(order_service_total_gross(id), $2, total_estimated)
            )
          RETURNING contract_id, total_estimated, signed_patient, signed_agency,
                    signed_patient_at, signed_agency_at, prepayment_required,
@@ -5691,6 +5711,7 @@ async fn update_order_commercial_basis(
     .bind(date_to_patch.flatten())
     .bind(prepayment_due_patch.is_some())
     .bind(prepayment_due_patch.flatten())
+    .bind(checks_prepayment)
     .fetch_optional(&mut *transaction)
     .await;
     let updated = match updated {
@@ -10370,6 +10391,10 @@ async fn add_leistung(
         Ok(Some(r)) => {
             let id: Uuid = r.try_get("id").unwrap_or_default();
             let inserted: bool = r.try_get("inserted").unwrap_or(false);
+            if let Err(error) = sync_order_total_estimated(&mut transaction, order_id).await {
+                tracing::error!(%error, %order_id, "sync order total for a service");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
             let terms_change = match client_terms::settle(
                 &mut transaction,
                 order_id,
@@ -10646,6 +10671,13 @@ async fn sync_lead_wizard_leistungen(
             );
         }
     };
+    if let Err(error) = sync_order_total_estimated(&mut transaction, order_id).await {
+        tracing::error!(error = %error, order_id = %order_id, "sync order total after service sync");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to sync order services",
+        );
+    }
     let terms_change = match client_terms::settle(
         &mut transaction,
         order_id,
@@ -11265,6 +11297,15 @@ async fn cancel_leistung(
         Ok(value) => value,
         Err(response) => return response,
     };
+    if let Err(error) = sync_order_total_estimated(&mut transaction, order_id).await {
+        tracing::error!(error = %error, %order_id, %leistung_id, "sync order total after a cancelled service");
+        drop(transaction);
+        reversal.discard_documents().await;
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to cancel order service",
+        );
+    }
     let terms_change = match client_terms::settle(
         &mut transaction,
         order_id,
@@ -11859,7 +11900,7 @@ async fn load_order_total_estimated(state: &AppState, order_id: Uuid) -> Option<
 
 /// Keeps the stored order estimate equal to the gross of its services after
 /// a service line was added or cancelled outside a quote.
-async fn sync_order_total_estimated(
+pub(crate) async fn sync_order_total_estimated(
     conn: &mut sqlx::PgConnection,
     order_id: Uuid,
 ) -> Result<(), sqlx::Error> {

@@ -344,6 +344,7 @@ pub async fn generate_order_service_group_lines_checked(
         .await?;
     }
 
+    crate::routes::orders::sync_order_total_estimated(&mut tx, group.order_id).await?;
     match client_terms::settle(
         &mut tx,
         group.order_id,

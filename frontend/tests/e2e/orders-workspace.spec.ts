@@ -570,6 +570,32 @@ test("cancelling a service of a signed order asks before the client's signature 
   expect(cancelBodies[cancelBodies.length - 1]).toEqual({reason:"Услуга не нужна", issue_credit_note:false, confirm_signature_reset:true});
 });
 
+test("the order workspace shows a prepayment above the total and adjusts it (QA 2026-10-31)", async ({page}) => {
+  const {order} = await prepare(page);
+  Object.assign(order, {total_estimated:"339.15", prepayment_required:true, prepayment_amount:"458.15", prepayment_due_at:null});
+  const writes: Array<Record<string, unknown>> = [];
+  await page.route(`**/orders/${orderId}/commercial-basis`, route => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    writes.push(body);
+    Object.assign(order, {prepayment_amount:body.prepayment_amount});
+    return route.fulfill({json:{ok:true, order_id:orderId, prepayment_required:true, prepayment_amount:body.prepayment_amount, prepayment_due_at:null, signature_reset:false}});
+  });
+  await page.goto(`/orders/${orderId}`);
+  const card = page.getByTestId("order-prepayment");
+  await expect(card.getByTestId("order-prepayment-exceeds-total")).toContainText("339,15");
+  await card.getByTestId("order-prepayment-edit").click();
+  const dialog = page.getByRole("dialog", {name:"Изменить предоплату", exact:true});
+  await dialog.getByLabel("Сумма предоплаты, EUR").fill("500");
+  await dialog.getByRole("button", {name:"Сохранить", exact:true}).click();
+  await expect(dialog.getByRole("alert")).toContainText("не может превышать");
+  expect(writes).toHaveLength(0);
+  await dialog.getByLabel("Сумма предоплаты, EUR").fill("300");
+  await dialog.getByRole("button", {name:"Сохранить", exact:true}).click();
+  await expect(dialog).toBeHidden();
+  expect(writes).toEqual([{prepayment_required:true, prepayment_amount:"300.00", prepayment_due_at:""}]);
+  await expect(card.getByTestId("order-prepayment-exceeds-total")).toHaveCount(0);
+});
+
 test("a cancellation conflict shows a localized error and reloads the line", async ({page}) => {
   const {order} = await prepare(page, "de");
   const line: Record<string, unknown> = {id:"service-1", description:"QA interpreter block", quantity:"4", unit_price:"80", currency:"EUR", vat_rate:"19", status:"planned", notes:null};

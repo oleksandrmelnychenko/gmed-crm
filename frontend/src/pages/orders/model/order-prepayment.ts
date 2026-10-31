@@ -46,6 +46,30 @@ export function orderPrepaymentErrorMessage(error: OrderPrepaymentError, lang: "
     : "Укажите сумму предоплаты больше нуля.";
 }
 
+/** The stored prepayment of an order, as the form edits it. */
+export function orderPrepaymentTerms(order: {
+  prepayment_required?: boolean;
+  prepayment_amount?: unknown;
+  prepayment_due_at?: string | null;
+}): OrderPrepaymentTerms {
+  return {
+    prepayment_required: Boolean(order.prepayment_required),
+    prepayment_amount: order.prepayment_amount == null ? "" : String(order.prepayment_amount),
+    prepayment_due_at: order.prepayment_due_at ?? null,
+  };
+}
+
+/** The prepayment fields of `POST /orders/{id}/commercial-basis`: an empty date clears the due date. */
+export function orderPrepaymentUpdate(terms: OrderPrepaymentTerms) {
+  const amount = prepaymentAmount(terms.prepayment_amount);
+  if (!terms.prepayment_required || amount === null) return { prepayment_required: false };
+  return {
+    prepayment_required: true,
+    prepayment_amount: amount.toFixed(2),
+    prepayment_due_at: terms.prepayment_due_at ?? "",
+  };
+}
+
 /** The prepayment fields of `POST /orders`; nothing when no prepayment is required. */
 export function orderPrepaymentPayload(terms: OrderPrepaymentTerms) {
   const amount = prepaymentAmount(terms.prepayment_amount);

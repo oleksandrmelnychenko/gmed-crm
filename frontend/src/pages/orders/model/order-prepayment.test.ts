@@ -4,6 +4,8 @@ import {
   blankOrderPrepaymentTerms,
   orderPrepaymentError,
   orderPrepaymentPayload,
+  orderPrepaymentTerms,
+  orderPrepaymentUpdate,
 } from "./order-prepayment";
 
 const required = (amount: string, dueAt: string | null = null) => ({
@@ -13,6 +15,27 @@ const required = (amount: string, dueAt: string | null = null) => ({
 });
 
 describe("order prepayment terms", () => {
+  it("reads the stored terms and writes them back for the order workspace", () => {
+    expect(orderPrepaymentTerms({})).toEqual(blankOrderPrepaymentTerms());
+    const stored = orderPrepaymentTerms({
+      prepayment_required: true,
+      prepayment_amount: "500",
+      prepayment_due_at: "2026-11-05T12:00:00Z",
+    });
+    expect(orderPrepaymentUpdate(stored)).toEqual({
+      prepayment_required: true,
+      prepayment_amount: "500.00",
+      prepayment_due_at: "2026-11-05T12:00:00Z",
+    });
+    // An empty date clears the deadline; no prepayment clears the amount.
+    expect(orderPrepaymentUpdate({ ...stored, prepayment_due_at: null })).toMatchObject({
+      prepayment_due_at: "",
+    });
+    expect(orderPrepaymentUpdate({ ...stored, prepayment_required: false })).toEqual({
+      prepayment_required: false,
+    });
+  });
+
   it("sends nothing when no prepayment is required", () => {
     expect(orderPrepaymentError(blankOrderPrepaymentTerms(), null)).toBeNull();
     expect(orderPrepaymentPayload(blankOrderPrepaymentTerms())).toEqual({});

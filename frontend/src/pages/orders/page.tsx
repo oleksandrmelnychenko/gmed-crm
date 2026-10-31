@@ -148,6 +148,7 @@ import {
   orderPrepaymentErrorMessage,
   orderPrepaymentPayload,
 } from "./model/order-prepayment";
+import { OrderPrepaymentCard } from "./ui/order-prepayment-card";
 import { OrderPrepaymentFields } from "./ui/order-prepayment-fields";
 import {
   editPartnerCostAmounts,
@@ -4398,6 +4399,13 @@ function useOrdersPageContent() {
                     {orderDetail.patient_id ? (
                       <OrderSubscriptionCard orderId={orderDetail.id} lang={lang} />
                     ) : null}
+
+                    <OrderPrepaymentCard
+                      order={orderDetail}
+                      canEdit={permissions.canManagePhase && !orderStepsLocked}
+                      lang={lang}
+                      onSaved={triggerReload}
+                    />
 
                     <SectionCard
                       title={lang === "de" ? "Finanzen des Auftrags" : "Деньги по заказу"}

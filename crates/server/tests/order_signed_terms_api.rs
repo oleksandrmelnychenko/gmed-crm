@@ -469,3 +469,98 @@ async fn cancelling_a_service_of_a_signed_order_needs_a_confirmed_signature_rese
     assert_eq!(status, StatusCode::OK, "{next}");
     assert_eq!(next["signature_reset"], false);
 }
+
+/// QA 2026-10-31: the guard read a stored total that service lines did not
+/// update, and after a cancelled line every new quote failed with no way to
+/// change the prepayment from the order workspace.
+#[tokio::test]
+async fn the_prepayment_is_measured_against_the_services_and_can_be_adjusted() {
+    let Some((app, pool, admin_id, ceo)) = test_context().await else {
+        return;
+    };
+    let patient_id = seed_patient(&pool, admin_id).await;
+    let order_id = create_order_with_interpreter_hours(&app, &ceo, patient_id).await;
+    let transfer = add_transfer(&app, &ceo, order_id).await;
+    let stored_total = || async {
+        sqlx::query_scalar::<_, Option<rust_decimal::Decimal>>(
+            "SELECT total_estimated FROM orders WHERE id = $1",
+        )
+        .bind(order_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+    assert_eq!(stored_total().await, Some(rust_decimal::Decimal::new(45815, 2)));
+
+    let path = format!("/api/v1/orders/{order_id}/commercial-basis");
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        &path,
+        &ceo,
+        Some(json!({ "prepayment_required": true, "prepayment_amount": "458.16" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["error"], "prepayment_exceeds_order_total");
+    assert_eq!(refused["order_total_label"], "458,15 €");
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &path,
+        &ceo,
+        Some(json!({ "prepayment_required": true, "prepayment_amount": "458.15" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+
+    // The cancelled line takes the total below the prepayment.
+    let (status, cancelled) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen/{transfer}/cancel"),
+        &ceo,
+        Some(json!({ "reason": "Transfer entfällt" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cancelled}");
+    assert_eq!(stored_total().await, Some(rust_decimal::Decimal::new(33915, 2)));
+    let (status, order) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{order}");
+    assert_eq!(order["prepayment_required"], true);
+    assert_eq!(order["prepayment_amount"], "458.15");
+    assert_eq!(order["total_estimated"], "339.15");
+
+    // No new quote until the prepayment is adjusted; other saves go on.
+    let quotes = format!("/api/v1/orders/{order_id}/quotes");
+    let (status, refused) = json_request(&app, "POST", &quotes, &ceo, Some(json!({}))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["error"], "prepayment_exceeds_quote_total");
+    let (status, unrelated) = json_request(
+        &app,
+        "POST",
+        &path,
+        &ceo,
+        Some(json!({ "needs_description": "Kardiologische Kontrolle" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unrelated}");
+    let (status, adjusted) = json_request(
+        &app,
+        "POST",
+        &path,
+        &ceo,
+        Some(json!({ "prepayment_amount": "300.00" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{adjusted}");
+    let (status, quote) = json_request(&app, "POST", &quotes, &ceo, Some(json!({}))).await;
+    assert!(status.is_success(), "{quote}");
+}

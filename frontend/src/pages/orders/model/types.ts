@@ -259,6 +259,9 @@ export type OrderDetail = {
   total_estimated: unknown;
   total_actual: unknown;
   currency: string;
+  prepayment_required?: boolean;
+  prepayment_amount?: unknown;
+  prepayment_due_at?: string | null;
   leistungen: Leistung[];
   external_invoices?: ExternalInvoice[];
   process_gates?: OrderProcessGates | null;
