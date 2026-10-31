@@ -490,7 +490,10 @@ async fn the_prepayment_is_measured_against_the_services_and_can_be_adjusted() {
         .await
         .unwrap()
     };
-    assert_eq!(stored_total().await, Some(rust_decimal::Decimal::new(45815, 2)));
+    assert_eq!(
+        stored_total().await,
+        Some(rust_decimal::Decimal::new(45815, 2))
+    );
 
     let path = format!("/api/v1/orders/{order_id}/commercial-basis");
     let (status, refused) = json_request(
@@ -524,7 +527,10 @@ async fn the_prepayment_is_measured_against_the_services_and_can_be_adjusted() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{cancelled}");
-    assert_eq!(stored_total().await, Some(rust_decimal::Decimal::new(33915, 2)));
+    assert_eq!(
+        stored_total().await,
+        Some(rust_decimal::Decimal::new(33915, 2))
+    );
     let (status, order) = json_request(
         &app,
         "GET",
