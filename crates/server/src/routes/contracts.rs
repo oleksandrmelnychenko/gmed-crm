@@ -657,15 +657,35 @@ fn quote_lines_match_persisted(value: &Value, persisted: &[QuoteLineItem]) -> bo
     !stored.is_empty() && stored == normalized_quote_line_signatures(persisted)
 }
 
-fn add_remaining_quote_quantities(mut line_items: Value, allocated_quantities: &Value) -> Value {
+fn add_remaining_quote_quantities(
+    mut line_items: Value,
+    allocated_quantities: &Value,
+    service_quantities: &Value,
+) -> Value {
     let Some(items) = line_items.as_array_mut() else {
         return line_items;
     };
     for (index, item) in items.iter_mut().enumerate() {
         let quoted = quote_decimal_value(item.get("quantity"));
         let allocated = quote_decimal_value(allocated_quantities.get(index.to_string().as_str()));
-        let remaining = (quoted - allocated).max(Decimal::ZERO).round_commercial(2);
+        // What a settlement invoice bills: the delivered quantity, never more
+        // than quoted (`build_selected_invoice_snapshot`, QA 2026-10-31).
+        let actual = item
+            .get("source_order_leistung_id")
+            .and_then(Value::as_str)
+            .and_then(|service_id| service_quantities.get(service_id))
+            .map(|quantity| quote_decimal_value(Some(quantity)));
+        let billable = actual.map_or(quoted, |quantity| quantity.min(quoted));
+        let remaining = (billable - allocated)
+            .max(Decimal::ZERO)
+            .round_commercial(2);
         if let Some(map) = item.as_object_mut() {
+            if let Some(actual) = actual.filter(|quantity| *quantity != quoted) {
+                map.insert(
+                    "actual_quantity".to_string(),
+                    Value::String(decimal_to_string(actual)),
+                );
+            }
             map.insert(
                 "invoiced_quantity".to_string(),
                 Value::String(decimal_to_string(allocated)),
@@ -3748,8 +3768,15 @@ async fn load_quote_detail(
                       FROM quote_line_invoiced_quantities(q.id) allocated
                       WHERE allocated.quantity > 0
                   ), '{}'::jsonb) AS invoiced_quantities,
+                  COALESCE((
+                      SELECT jsonb_object_agg(service.id::text, service.quantity)
+                      FROM order_leistungen service
+                      WHERE service.order_id = q.order_id AND service.status <> 'cancelled'
+                  ), '{}'::jsonb) AS service_quantities,
                   ARRAY(SELECT DISTINCT invoice.invoice_type FROM invoices invoice
-                        WHERE invoice.quote_id = q.id AND invoice.status <> 'cancelled') AS active_invoice_types,
+                        WHERE invoice.quote_id = q.id AND invoice.status <> 'cancelled'
+                          AND (invoice.invoice_type <> 'final' OR invoice.total_gross <= 0
+                               OR invoice.credited_amount < invoice.total_gross)) AS active_invoice_types,
                   q.created_at, q.updated_at,
                   COALESCE((SELECT count(*)::bigint FROM quote_versions qv WHERE qv.quote_id = q.id), 0) AS version_count,
                   COALESCE((SELECT max(version_number) FROM quote_versions qv WHERE qv.quote_id = q.id), 0) AS current_version_number,
@@ -3831,6 +3858,7 @@ async fn load_quote_detail(
         "line_items": add_remaining_quote_quantities(
             row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
             &row.try_get::<Value, _>("invoiced_quantities").unwrap_or_else(|_| serde_json::json!({})),
+            &row.try_get::<Value, _>("service_quantities").unwrap_or_else(|_| serde_json::json!({})),
         ),
         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
         // Staff only: quotes are never served to the patient portal or a payer.
@@ -3872,8 +3900,15 @@ async fn list_quotes(
                       FROM quote_line_invoiced_quantities(q.id) allocated
                       WHERE allocated.quantity > 0
                   ), '{}'::jsonb) AS invoiced_quantities,
+                  COALESCE((
+                      SELECT jsonb_object_agg(service.id::text, service.quantity)
+                      FROM order_leistungen service
+                      WHERE service.order_id = q.order_id AND service.status <> 'cancelled'
+                  ), '{}'::jsonb) AS service_quantities,
                   ARRAY(SELECT DISTINCT invoice.invoice_type FROM invoices invoice
-                        WHERE invoice.quote_id = q.id AND invoice.status <> 'cancelled') AS active_invoice_types,
+                        WHERE invoice.quote_id = q.id AND invoice.status <> 'cancelled'
+                          AND (invoice.invoice_type <> 'final' OR invoice.total_gross <= 0
+                               OR invoice.credited_amount < invoice.total_gross)) AS active_invoice_types,
                   q.created_at, q.updated_at,
                   q.superseded_by_quote_id, q.superseded_at,
                   successor.quote_number AS superseded_by_quote_number,
@@ -3907,6 +3942,8 @@ async fn list_quotes(
                         WHERE final_invoice.quote_id = q.id
                           AND final_invoice.invoice_type = 'final'
                           AND final_invoice.status <> 'cancelled'
+                          AND (final_invoice.total_gross <= 0
+                               OR final_invoice.credited_amount < final_invoice.total_gross)
                     )
                 )
              )
@@ -3983,6 +4020,7 @@ async fn list_quotes(
                     "line_items": add_remaining_quote_quantities(
                         row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
                         &row.try_get::<Value, _>("invoiced_quantities").unwrap_or_else(|_| serde_json::json!({})),
+            &row.try_get::<Value, _>("service_quantities").unwrap_or_else(|_| serde_json::json!({})),
                     ),
                     "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
                     "internal_note": row.try_get::<Option<String>, _>("internal_note").unwrap_or_default(),

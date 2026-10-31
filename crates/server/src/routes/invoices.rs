@@ -564,6 +564,9 @@ struct QuoteInvoiceContext {
     /// rule does not apply and cancelled services can never be invoiced.
     order_contract_terminated: bool,
     cancelled_source_line_ids: BTreeSet<Uuid>,
+    /// Current quantity of the order's not cancelled services: an approved
+    /// report or a split planned block changes it after the quote was made.
+    service_quantities: BTreeMap<Uuid, Decimal>,
 }
 
 struct InvoiceCreationSnapshot {
@@ -3755,6 +3758,11 @@ async fn load_quote_invoice_context(
                   ARRAY(SELECT service.id FROM order_leistungen service
                         WHERE service.order_id = o.id AND service.status = 'cancelled')
                       AS cancelled_source_line_ids,
+                  COALESCE((
+                      SELECT jsonb_object_agg(service.id::text, service.quantity)
+                      FROM order_leistungen service
+                      WHERE service.order_id = o.id AND service.status <> 'cancelled'
+                  ), '{}'::jsonb) AS service_quantities,
                   p.first_name, p.last_name, p.patient_id AS patient_pid
            FROM quotes q
            JOIN orders o ON o.id = q.order_id
@@ -3812,6 +3820,19 @@ async fn load_quote_invoice_context(
             .unwrap_or_default()
             .into_iter()
             .collect(),
+        service_quantities: row
+            .try_get::<Value, _>("service_quantities")
+            .ok()
+            .and_then(|value| value.as_object().cloned())
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(id, quantity)| {
+                Some((
+                    Uuid::parse_str(&id).ok()?,
+                    Decimal::from_str(&quantity.to_string()).ok()?,
+                ))
+            })
+            .collect(),
     }))
 }
 
@@ -3822,6 +3843,10 @@ fn invoice_json_decimal(item: &Value, key: &str) -> Option<Decimal> {
         _ => None,
     }
 }
+
+/// Error code of a final invoice refused because services of the order grew
+/// beyond its quote.
+const QUOTE_BEHIND_ACTUAL_SERVICES: &str = "quote_behind_actual_services";
 
 async fn load_allocated_quote_quantities(
     state: &AppState,
@@ -3935,6 +3960,8 @@ async fn build_selected_invoice_snapshot(
     let mut consumed_requested_lines = BTreeSet::new();
     let mut skipped_cancelled_lines = false;
     let mut leaves_quantities_open = false;
+    let mut billed_below_quote = false;
+    let mut services_above_quote = Vec::new();
 
     for (line_index, source_item) in quote_items.iter().enumerate() {
         let quoted_quantity = invoice_json_decimal(source_item, "quantity")
@@ -3963,6 +3990,30 @@ async fn build_selected_invoice_snapshot(
             skipped_cancelled_lines = true;
             continue;
         }
+        // A settlement invoice bills what was actually delivered (doc 2.4):
+        // 3,5 approved hours of a line quoted with 4 are billed as 3,5. More
+        // than the quote cannot go through it: the patient accepted the quoted
+        // quantity, so a new quote covers the difference (QA 2026-10-31, R3-1).
+        let service_quantity = source_item
+            .get("source_order_leistung_id")
+            .and_then(Value::as_str)
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .and_then(|service_id| ctx.service_quantities.get(&service_id).copied())
+            .map(|quantity| quantity.round_commercial(2));
+        if invoice_type == "final"
+            && !ctx.order_contract_terminated
+            && service_quantity.is_some_and(|quantity| quantity > quoted_quantity)
+        {
+            services_above_quote.push(
+                source_item
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Invoice line")
+                    .to_string(),
+            );
+        }
+        let billable_quantity =
+            service_quantity.map_or(quoted_quantity, |quantity| quantity.min(quoted_quantity));
         let already_allocated = allocated
             .get(&line_index)
             .copied()
@@ -3971,7 +4022,8 @@ async fn build_selected_invoice_snapshot(
         let remaining = if invoice_type == "advance" {
             quoted_quantity
         } else {
-            (quoted_quantity - already_allocated).max(Decimal::ZERO)
+            billed_below_quote |= billable_quantity < quoted_quantity;
+            (billable_quantity - already_allocated).max(Decimal::ZERO)
         };
         if remaining <= Decimal::ZERO {
             continue;
@@ -4075,6 +4127,14 @@ async fn build_selected_invoice_snapshot(
         }
     }
 
+    if !services_above_quote.is_empty() {
+        return Err(coded_err(
+            StatusCode::CONFLICT,
+            QUOTE_BEHIND_ACTUAL_SERVICES,
+            "Services of the order exceed this quote; create a new quote for the actual quantities",
+            json!({ "services_label": services_above_quote.join(", ") }),
+        ));
+    }
     if !incomplete_final_lines.is_empty() {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -4104,7 +4164,11 @@ async fn build_selected_invoice_snapshot(
         // The whole quote is billed as stored, unless a cancelled service
         // was left out, or lines were picked (with their comments): then the
         // recomputed lines and totals are the base.
-        let base = if skipped_cancelled_lines || !first_settlement || !selected_all_lines {
+        let base = if skipped_cancelled_lines
+            || billed_below_quote
+            || !first_settlement
+            || !selected_all_lines
+        {
             (total_net, total_vat, total_gross, selected_items)
         } else {
             (
@@ -4297,7 +4361,7 @@ async fn build_invoice_snapshot_with_approved_package_overages(
                   spc.overage_quantity,
                   sp.name AS package_name,
                   spi.agency_service_id,
-                  COALESCE(NULLIF(spi.description, ''), c.service_name, sp.name, 'Package overage') AS item_description,
+                  COALESCE(NULLIF(spi.description, ''), c.service_name, sp.name, 'Mehrverbrauch') AS item_description,
                   COALESCE(NULLIF(spi.unit_label, ''), 'unit') AS unit_label,
                   spc.unit_price_net_snapshot AS unit_price_net,
                   spc.vat_rate_snapshot AS vat_rate,
@@ -4358,7 +4422,7 @@ async fn build_invoice_snapshot_with_approved_package_overages(
         let package_name = row.try_get::<String, _>("package_name").unwrap_or_default();
         let item_description = row
             .try_get::<String, _>("item_description")
-            .unwrap_or_else(|_| "Package overage".to_string());
+            .unwrap_or_else(|_| "Mehrverbrauch".to_string());
         let tax_profile_id = row
             .try_get::<Option<Uuid>, _>("tax_profile_id")
             .unwrap_or_default();
@@ -4385,7 +4449,8 @@ async fn build_invoice_snapshot_with_approved_package_overages(
         total_gross = (total_gross + line_gross).round_cents();
 
         line_items.push(json!({
-            "description": format!("Package overage: {package_name} - {item_description}"),
+            // Printed on the invoice: German like its other lines (R3-9).
+            "description": format!("Mehrverbrauch Paket {package_name}: {item_description}"),
             "quantity": decimal_to_string(quantity),
             "unit": row.try_get::<String, _>("unit_label").unwrap_or_else(|_| "unit".to_string()),
             "unit_price": decimal_to_string(unit_price_net),
@@ -4549,6 +4614,9 @@ async fn validate_invoice_creation_for_quote(
                 WHERE quote_id = $1
                   AND invoice_type = 'final'
                   AND status <> 'cancelled'
+                  -- A fully credited final invoice no longer bills anything
+                  -- (doc 3.3): the quote can be invoiced again (R3-7).
+                  AND (total_gross <= 0 OR credited_amount < total_gross)
             )",
         )
         .bind(ctx.quote_id)
@@ -9121,6 +9189,11 @@ async fn create_invoice_payment(
     let Some(amount_gross) = body.amount_gross.parse_decimal() else {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment amount");
     };
+    // Money moves in cents: 0,005 € is a typing slip, not a payment of 0,01 €
+    // (QA 2026-10-31, R3-15).
+    if amount_gross != amount_gross.round_cents() {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment amount");
+    }
     let amount_gross = amount_gross.round_cents();
     if amount_gross <= Decimal::ZERO {
         return err(
@@ -11123,7 +11196,21 @@ async fn reverse_invoice_credit_note(
                       SELECT 1 FROM invoice_credit_note_transactions reversal
                       WHERE reversal.reverses_transaction_id = credit.id
                         AND reversal.transaction_type = 'reversal'
-                  ) AS already_reversed
+                  ) AS already_reversed,
+                  -- Lines this credit note gave back and a later invoice billed
+                  -- again: the reversal would bill them twice (R3-7).
+                  EXISTS (
+                      SELECT 1
+                      FROM invoice_order_line_allocations own
+                      JOIN invoice_order_line_allocations again
+                        ON again.quote_id = own.quote_id
+                       AND again.quote_line_index = own.quote_line_index
+                       AND again.invoice_id <> own.invoice_id
+                      JOIN invoices rebilling ON rebilling.id = again.invoice_id
+                      WHERE own.invoice_id = invoice.id
+                        AND rebilling.status <> 'cancelled'
+                        AND rebilling.created_at > credit.created_at
+                  ) AS rebilled_since
            FROM invoice_credit_note_transactions credit
            JOIN invoices invoice ON invoice.id = credit.invoice_id
            LEFT JOIN orders ON orders.id = invoice.order_id
@@ -11145,6 +11232,14 @@ async fn reverse_invoice_credit_note(
             );
         }
     };
+    if row.try_get::<bool, _>("rebilled_since").unwrap_or(false) {
+        return coded_err(
+            StatusCode::CONFLICT,
+            "credit_note_rebilled",
+            "A later invoice bills these lines again; cancel or correct that invoice before reversing this credit note",
+            json!({}),
+        );
+    }
     if row
         .try_get::<String, _>("transaction_type")
         .unwrap_or_default()
@@ -14100,6 +14195,24 @@ async fn update_invoice_status(
                 }
                 Err(error) => {
                     tracing::error!(%error, %invoice_id, "check the services of a draft");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to update invoice",
+                    );
+                }
+            }
+            match release::services_billed_above_actuals(&mut transaction, invoice_id).await {
+                Ok(services) if services.is_empty() => {}
+                Ok(services) => {
+                    return coded_err(
+                        StatusCode::CONFLICT,
+                        release::BILLS_ABOVE_ACTUALS,
+                        "The draft bills more than was actually delivered; cancel the draft and make a new invoice",
+                        json!({ "services_label": services.join(", ") }),
+                    );
+                }
+                Err(error) => {
+                    tracing::error!(%error, %invoice_id, "check the quantities of a draft");
                     return err(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Failed to update invoice",

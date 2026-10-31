@@ -1657,6 +1657,9 @@ async fn load_patient_account_statement(
             "credit_total": decimal_to_string(settlement.credit_total),
             "calculated_balance": decimal_to_string(settlement.calculated_balance),
             "closing_balance": if settlement_complete { serde_json::json!(decimal_to_string(settlement.calculated_balance)) } else { Value::Null },
+            // Staff see the figure next to «needs reconciliation» instead of
+            // nothing: the statement itself is right (QA 2026-10-31, R4-3).
+            "provisional_balance": if reconciliation_required && !portal_scope { serde_json::json!(decimal_to_string(settlement.calculated_balance)) } else { Value::Null },
             "balance_side": balance_side,
             "unreconciled_external_debit": if reconciliation_required { serde_json::json!(decimal_to_string(settlement.external_balance)) } else { serde_json::json!("0") },
         },

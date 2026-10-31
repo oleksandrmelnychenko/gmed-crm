@@ -58,6 +58,43 @@ pub(super) async fn cancelled_services_on_draft(
         .collect())
 }
 
+/// Error code of a release refused because the draft bills more of a service
+/// than the order now holds.
+pub(super) const BILLS_ABOVE_ACTUALS: &str = "invoice_bills_above_actual_services";
+
+/// The services a draft would bill above their current quantity: an approved
+/// report replaced the planned hours, or a completed appointment took a unit
+/// of the block, after the draft was made (QA 2026-10-31, R3-1). A credited
+/// invoice no longer bills its line (doc 3.3).
+pub(super) async fn services_billed_above_actuals(
+    conn: &mut PgConnection,
+    invoice_id: Uuid,
+) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar::<_, String>(
+        r#"SELECT service.description
+           FROM order_leistungen service
+           WHERE service.status <> 'cancelled'
+             AND service.id IN (
+                 SELECT allocation.order_leistung_id
+                 FROM invoice_order_line_allocations allocation
+                 WHERE allocation.invoice_id = $1
+             )
+             AND (
+                 SELECT COALESCE(SUM(allocation.quantity), 0)
+                 FROM invoice_order_line_allocations allocation
+                 JOIN invoices invoice ON invoice.id = allocation.invoice_id
+                 WHERE allocation.order_leistung_id = service.id
+                   AND invoice.status <> 'cancelled'
+                   AND invoice.invoice_type <> 'advance'
+                   AND NOT invoice_quote_line_credited(invoice.id, allocation.quote_line_index)
+             ) > round(service.quantity, 2)
+           ORDER BY service.created_at, service.id"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(conn)
+    .await
+}
+
 /// Whether GMED's Steuernummer or USt-IdNr. is set (`system_settings`
 /// `agency_tax_number` / `agency_vat_id`). An invoice must name one of them
 /// (§ 14 Abs. 4 Nr. 2 UStG) and the e-invoice cannot be built without it, so

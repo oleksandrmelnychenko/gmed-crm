@@ -7,6 +7,64 @@ use uuid::Uuid;
 
 use crate::state::AppState;
 
+/// The patient's open invoices with what each still asks for once the money
+/// GMED holds for its debtor is counted: the rule of reminders, the statement
+/// and the portal (`invoice_amount_to_pay`). An invoice a paid advance covers
+/// is no debt; the panels showed the gross figure next to a reminder for the
+/// net one (QA 2026-10-31, R3-11).
+pub(crate) struct NetOpenInvoice {
+    pub(crate) invoice_id: Uuid,
+    pub(crate) order_id: Option<Uuid>,
+    pub(crate) overdue: bool,
+    pub(crate) to_pay: Decimal,
+}
+
+pub(crate) async fn load_net_open_invoices(
+    state: &AppState,
+    patient_id: Uuid,
+) -> Result<Vec<NetOpenInvoice>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT id, order_id, status
+           FROM invoices
+           WHERE patient_id = $1
+             AND status NOT IN ('draft', 'paid', 'cancelled')"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&state.db)
+    .await?;
+    let mut invoices = Vec::with_capacity(rows.len());
+    for row in rows {
+        let invoice_id: Uuid = row.try_get("id")?;
+        let to_pay = crate::routes::invoices::advance_application::invoice_amount_to_pay(
+            &state.db, invoice_id,
+        )
+        .await?
+        .unwrap_or(Decimal::ZERO);
+        invoices.push(NetOpenInvoice {
+            invoice_id,
+            order_id: row.try_get("order_id")?,
+            overdue: row.try_get::<String, _>("status")? == "overdue",
+            to_pay,
+        });
+    }
+    Ok(invoices)
+}
+
+/// Overdue invoices that still ask for money, and the open amount.
+pub(crate) fn net_debt_figures<'a>(
+    invoices: impl Iterator<Item = &'a NetOpenInvoice>,
+) -> (i64, Decimal) {
+    let mut overdue = 0;
+    let mut open = Decimal::ZERO;
+    for invoice in invoices {
+        if invoice.to_pay > Decimal::ZERO {
+            overdue += i64::from(invoice.overdue);
+            open += invoice.to_pay;
+        }
+    }
+    (overdue, open)
+}
+
 pub(crate) struct OrderDebtManagementState {
     pub(crate) blocking: bool,
     pub(crate) blocking_reason: Option<String>,
@@ -146,73 +204,52 @@ pub(crate) async fn load_patient_debt_management_state(
     state: &AppState,
     patient_id: Uuid,
 ) -> Result<PatientDebtManagementState, axum::response::Response> {
-    let finance = sqlx::query(
-        r#"SELECT
-                COUNT(*) FILTER (
-                    WHERE status = 'overdue'
-                      AND total_gross - COALESCE(credited_amount, 0) > COALESCE(paid_amount, 0)
-                                         + COALESCE(prepayment_applied_amount, 0)
-                ) AS overdue_invoice_count,
-                COALESCE(
-                    SUM(
-                        CASE
-                            WHEN status NOT IN ('draft', 'paid', 'cancelled')
-                            THEN GREATEST(
-                                total_gross
-                                - COALESCE(credited_amount, 0)
-                                - COALESCE(paid_amount, 0)
-                                - COALESCE(prepayment_applied_amount, 0),
-                                0
-                            )
-                            ELSE 0
-                        END
-                    ),
-                    0
-                ) + COALESCE((
-                    SELECT SUM(balance.remaining_receivable_gross)
-                    FROM external_invoices external
-                    JOIN external_invoice_receivable_balances balance
-                      ON balance.external_invoice_id = external.id
-                    WHERE external.patient_id = $1
-                ), 0) AS outstanding_balance
-           FROM invoices
-           WHERE patient_id = $1"#,
-    )
-    .bind(patient_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| {
+    let finance_failed = |e: sqlx::Error| {
         tracing::error!(error = %e, patient_id = %patient_id, "load patient debt-management finance");
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to load debt-management state",
         )
-    })?;
-
-    let overdue_invoice_count = finance
-        .try_get::<i64, _>("overdue_invoice_count")
-        .unwrap_or_default();
-    let outstanding_balance = finance
-        .try_get::<Decimal, _>("outstanding_balance")
-        .unwrap_or(Decimal::ZERO);
+    };
+    let net_invoices = load_net_open_invoices(state, patient_id)
+        .await
+        .map_err(finance_failed)?;
+    let external_receivable = sqlx::query_scalar::<_, Option<Decimal>>(
+        r#"SELECT SUM(balance.remaining_receivable_gross)
+           FROM external_invoices external
+           JOIN external_invoice_receivable_balances balance
+             ON balance.external_invoice_id = external.id
+           WHERE external.patient_id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(finance_failed)?
+    .unwrap_or(Decimal::ZERO);
+    let (overdue_invoice_count, open_invoices) = net_debt_figures(net_invoices.iter());
+    let outstanding_balance = open_invoices + external_receivable;
     // Which invoices are overdue and to whom they went (a third-party payer's
     // invoice counts too): the re-check panel names them instead of saying
     // "no overdue debt" next to a count (QA D2-08). Debt never blocks.
     let overdue_invoices = sqlx::query(
-        r#"SELECT invoice_number, due_date,
+        r#"SELECT id, invoice_number, due_date,
                   recipient_snapshot ->> 'name' AS recipient_name,
-                  COALESCE((recipient_snapshot ->> 'kind') = 'patient', true) AS billed_to_patient,
-                  GREATEST(total_gross - COALESCE(credited_amount, 0) - COALESCE(paid_amount, 0)
-                           - COALESCE(prepayment_applied_amount, 0), 0) AS balance_due
+                  COALESCE((recipient_snapshot ->> 'kind') = 'patient', true) AS billed_to_patient
            FROM invoices
            WHERE patient_id = $1
              AND status = 'overdue'
-             AND total_gross - COALESCE(credited_amount, 0) > COALESCE(paid_amount, 0)
-                                + COALESCE(prepayment_applied_amount, 0)
+             AND id = ANY($2)
            ORDER BY due_date NULLS LAST, invoice_number
            LIMIT 10"#,
     )
     .bind(patient_id)
+    .bind(
+        net_invoices
+            .iter()
+            .filter(|invoice| invoice.to_pay > Decimal::ZERO)
+            .map(|invoice| invoice.invoice_id)
+            .collect::<Vec<_>>(),
+    )
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
@@ -229,7 +266,12 @@ pub(crate) async fn load_patient_debt_management_state(
             "due_date": row.try_get::<Option<chrono::NaiveDate>, _>("due_date").unwrap_or_default().map(|value| value.to_string()),
             "recipient_name": row.try_get::<Option<String>, _>("recipient_name").unwrap_or_default(),
             "billed_to_patient": row.try_get::<bool, _>("billed_to_patient").unwrap_or(true),
-            "balance_due": decimal_to_string(row.try_get::<Decimal, _>("balance_due").unwrap_or(Decimal::ZERO)),
+            "balance_due": decimal_to_string(
+                row.try_get::<Uuid, _>("id")
+                    .ok()
+                    .and_then(|id| net_invoices.iter().find(|invoice| invoice.invoice_id == id))
+                    .map_or(Decimal::ZERO, |invoice| invoice.to_pay),
+            ),
         })
     })
     .collect::<Vec<_>>();
@@ -248,40 +290,13 @@ pub(crate) async fn load_patient_debt_management_state(
                   dm.resolved_by,
                   resolved_by_user.name AS resolved_by_name,
                   dm.updated_at,
-                  (
-                    SELECT COUNT(*)
-                    FROM invoices i
-                    WHERE i.order_id = dm.order_id
-                      AND i.status = 'overdue'
-                      AND i.total_gross - COALESCE(i.credited_amount, 0) > COALESCE(i.paid_amount, 0)
-                                            + COALESCE(i.prepayment_applied_amount, 0)
-                  ) AS order_overdue_invoice_count,
-                  (
-                    SELECT COALESCE(
-                        SUM(
-                            CASE
-                                WHEN i.status NOT IN ('draft', 'paid', 'cancelled')
-                                THEN GREATEST(
-                                    i.total_gross
-                                    - COALESCE(i.credited_amount, 0)
-                                    - COALESCE(i.paid_amount, 0)
-                                    - COALESCE(i.prepayment_applied_amount, 0),
-                                    0
-                                )
-                                ELSE 0
-                            END
-                        ),
-                        0
-                    ) + COALESCE((
+                  COALESCE((
                         SELECT SUM(balance.remaining_receivable_gross)
                         FROM external_invoices external
                         JOIN external_invoice_receivable_balances balance
                           ON balance.external_invoice_id = external.id
                         WHERE external.order_id = dm.order_id
-                    ), 0)
-                    FROM invoices i
-                    WHERE i.order_id = dm.order_id
-                  ) AS order_outstanding_balance
+                  ), 0) AS order_external_receivable
            FROM order_debt_management dm
            JOIN orders o ON o.id = dm.order_id
            LEFT JOIN users owner_user ON owner_user.id = dm.owner_user_id
@@ -316,12 +331,16 @@ pub(crate) async fn load_patient_debt_management_state(
         let status: String = row
             .try_get("status")
             .unwrap_or_else(|_| "not_required".to_string());
-        let order_overdue_invoice_count = row
-            .try_get::<i64, _>("order_overdue_invoice_count")
-            .unwrap_or_default();
-        let order_outstanding_balance = row
-            .try_get::<Decimal, _>("order_outstanding_balance")
-            .unwrap_or(Decimal::ZERO);
+        let order_id = row.try_get::<Uuid, _>("order_id").ok();
+        let (order_overdue_invoice_count, order_open_invoices) = net_debt_figures(
+            net_invoices
+                .iter()
+                .filter(|invoice| invoice.order_id == order_id),
+        );
+        let order_outstanding_balance = order_open_invoices
+            + row
+                .try_get::<Decimal, _>("order_external_receivable")
+                .unwrap_or(Decimal::ZERO);
         let effective_status = effective_status(&status, order_overdue_invoice_count);
 
         json!({
@@ -349,9 +368,12 @@ pub(crate) async fn load_patient_debt_management_state(
         let status: String = row
             .try_get("status")
             .unwrap_or_else(|_| "not_required".to_string());
-        let order_overdue_invoice_count = row
-            .try_get::<i64, _>("order_overdue_invoice_count")
-            .unwrap_or_default();
+        let order_id = row.try_get::<Uuid, _>("order_id").ok();
+        let (order_overdue_invoice_count, _) = net_debt_figures(
+            net_invoices
+                .iter()
+                .filter(|invoice| invoice.order_id == order_id),
+        );
         effective_status(&status, order_overdue_invoice_count)
     });
 

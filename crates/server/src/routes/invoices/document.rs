@@ -358,6 +358,12 @@ pub(super) async fn load_invoice_service_period(
         .filter_map(|item| item.get("source_invoice_date").and_then(Value::as_str))
         .filter_map(|raw| NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d").ok())
         .collect::<Vec<_>>();
+    // The supplier's date dates the supplier's cost only: next to an undated
+    // line it would claim a service date for that line too (QA 2026-10-31, R4-2).
+    let line_count = line_items.as_array().map_or(0, Vec::len);
+    if supplier_days.len() < line_count {
+        return Ok(None);
+    }
     Ok(supplier_days
         .iter()
         .min()

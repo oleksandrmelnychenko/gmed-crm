@@ -79,6 +79,8 @@ pub(crate) const CONTRACT_TERMINATED_REASON: &str = "contract_terminated";
 /// because no open quote line covers them.
 const TERMINATION_ORDER_SERVICE_SOURCE: &str = "termination_order_service";
 const FINAL_INVOICE_NOTE: &str = "Abrechnung der bis zur Kündigung des Rahmendienstleistungsvertrags angefallenen Leistungen und Aufwendungen (§ 6).";
+const CANCELLED_ORDER_FINAL_INVOICE_NOTE: &str =
+    "Abrechnung der bis zur Stornierung des Auftrags angefallenen Leistungen und Aufwendungen.";
 
 pub fn router() -> axum::Router<AppState> {
     Router::new()
@@ -1063,55 +1065,14 @@ pub(crate) async fn terminate_open_orders_tx(
         .execute(&mut **transaction)
         .await?;
 
-        // Nothing accrued, invoiced or paid: there is nothing for billing to
-        // settle, so the settlement is closed right away.
-        let nothing_to_settle = settlement.accrued_gross.is_zero()
-            && settlement.invoiced_gross.is_zero()
-            && settlement.draft_gross.is_zero()
-            && settlement.paid_gross.is_zero();
-        let (settlement_id, settlement_status) = match settlement.patient_id {
-            Some(patient_id) => {
-                let status = if nothing_to_settle { "settled" } else { "open" };
-                let settlement_id = sqlx::query_scalar::<_, Uuid>(
-                    r#"INSERT INTO order_termination_settlements (
-                           order_id, patient_id, contract_id, terminated_at, currency,
-                           accrued_net, accrued_gross, invoiced_gross, paid_gross,
-                           balance_gross, uninvoiced_gross, lines, status,
-                           settled_at, settled_by, settlement_note, settled_balance_gross,
-                           created_by, to_credit_gross
-                       ) VALUES (
-                           $1, $2, $3, now(), $4,
-                           $5, $6, $7, $8,
-                           $9, $10, $11, $12,
-                           CASE WHEN $12 = 'settled' THEN now() END,
-                           CASE WHEN $12 = 'settled' THEN $13::uuid END,
-                           CASE WHEN $12 = 'settled' THEN 'Nothing accrued, invoiced or paid' END,
-                           CASE WHEN $12 = 'settled' THEN 0::numeric END,
-                           $13, $14
-                       )
-                       RETURNING id"#,
-                )
-                .bind(order_id)
-                .bind(patient_id)
-                .bind(contract_id)
-                .bind(&settlement.currency)
-                .bind(settlement.accrued_net)
-                .bind(settlement.accrued_gross)
-                .bind(settlement.invoiced_gross)
-                .bind(settlement.paid_gross)
-                .bind(settlement.balance_gross())
-                .bind(settlement.uninvoiced_gross())
-                .bind(settlement.lines_json())
-                .bind(status)
-                .bind(actor_user_id)
-                .bind(settlement.to_credit_gross())
-                .fetch_one(&mut **transaction)
-                .await?;
-                (Some(settlement_id), Some(status))
-            }
-            // A lead-only order has no patient to bill; it is only stopped.
-            None => (None, None),
-        };
+        let (settlement_id, settlement_status) =
+            match insert_settlement_tx(transaction, &settlement, Some(contract_id), actor_user_id)
+                .await?
+            {
+                Some((settlement_id, status)) => (Some(settlement_id), Some(status)),
+                // A lead-only order has no patient to bill; it is only stopped.
+                None => (None, None),
+            };
 
         terminated.push(TerminatedOrder {
             order_id,
@@ -1131,6 +1092,116 @@ pub(crate) async fn terminate_open_orders_tx(
         });
     }
     Ok(terminated)
+}
+
+/// Records the settlement of a stopped order with a patient. Nothing accrued,
+/// invoiced or paid: there is nothing for billing to settle, so it is closed
+/// right away.
+async fn insert_settlement_tx(
+    transaction: &mut Transaction<'_, Postgres>,
+    settlement: &OrderSettlement,
+    contract_id: Option<Uuid>,
+    actor_user_id: Uuid,
+) -> Result<Option<(Uuid, &'static str)>, sqlx::Error> {
+    let Some(patient_id) = settlement.patient_id else {
+        return Ok(None);
+    };
+    let nothing_to_settle = settlement.accrued_gross.is_zero()
+        && settlement.invoiced_gross.is_zero()
+        && settlement.draft_gross.is_zero()
+        && settlement.paid_gross.is_zero();
+    let status = if nothing_to_settle { "settled" } else { "open" };
+    let settlement_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO order_termination_settlements (
+               order_id, patient_id, contract_id, terminated_at, currency,
+               accrued_net, accrued_gross, invoiced_gross, paid_gross,
+               balance_gross, uninvoiced_gross, lines, status,
+               settled_at, settled_by, settlement_note, settled_balance_gross,
+               created_by, to_credit_gross
+           ) VALUES (
+               $1, $2, $3, now(), $4,
+               $5, $6, $7, $8,
+               $9, $10, $11, $12,
+               CASE WHEN $12 = 'settled' THEN now() END,
+               CASE WHEN $12 = 'settled' THEN $13::uuid END,
+               CASE WHEN $12 = 'settled' THEN 'Nothing accrued, invoiced or paid' END,
+               CASE WHEN $12 = 'settled' THEN 0::numeric END,
+               $13, $14
+           )
+           RETURNING id"#,
+    )
+    .bind(settlement.order_id)
+    .bind(patient_id)
+    .bind(contract_id)
+    .bind(&settlement.currency)
+    .bind(settlement.accrued_net)
+    .bind(settlement.accrued_gross)
+    .bind(settlement.invoiced_gross)
+    .bind(settlement.paid_gross)
+    .bind(settlement.balance_gross())
+    .bind(settlement.uninvoiced_gross())
+    .bind(settlement.lines_json())
+    .bind(status)
+    .bind(actor_user_id)
+    .bind(settlement.to_credit_gross())
+    .fetch_one(&mut **transaction)
+    .await?;
+    Ok(Some((settlement_id, status)))
+}
+
+/// Opens the settlement of an order cancelled by hand: section 7 of the status
+/// doc applies the termination rule to it, so delivered work can still be
+/// billed and a paid advance has its record (QA 2026-10-31, R4-1, R3-6). Runs
+/// in the cancellation transaction, the order already cancelled. An unconfirmed
+/// intake draft is not settled, as on a termination.
+pub(crate) async fn open_cancelled_order_settlement_tx(
+    transaction: &mut Transaction<'_, Postgres>,
+    order_id: Uuid,
+    actor_user_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let Some(order) = sqlx::query("SELECT contract_id, intake_state FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_optional(&mut **transaction)
+        .await?
+    else {
+        return Ok(());
+    };
+    if order
+        .try_get::<String, _>("intake_state")
+        .unwrap_or_default()
+        == "draft"
+    {
+        return Ok(());
+    }
+    let Some(settlement) = compute_order_settlement(transaction, order_id).await? else {
+        return Ok(());
+    };
+    let contract_id = order
+        .try_get::<Option<Uuid>, _>("contract_id")
+        .unwrap_or_default();
+    let Some((settlement_id, status)) =
+        insert_settlement_tx(transaction, &settlement, contract_id, actor_user_id).await?
+    else {
+        return Ok(());
+    };
+    audit::write_in_transaction(
+        transaction,
+        &audit::domain_event(
+            "open_cancelled_order_settlement",
+            Some(actor_user_id),
+            "order",
+            Some(order_id),
+            json!({
+                "termination_settlement_id": settlement_id,
+                "status": status,
+                "accrued_gross": decimal_to_string(settlement.accrued_gross),
+                "invoiced_gross": decimal_to_string(settlement.invoiced_gross),
+                "paid_gross": decimal_to_string(settlement.paid_gross),
+                "balance_gross": decimal_to_string(settlement.balance_gross()),
+            }),
+        ),
+    )
+    .await
 }
 
 /// Realtime events for orders stopped by a committed termination (audited by
@@ -1478,8 +1549,10 @@ async fn create_termination_final_invoice(
     };
     let locked = match sqlx::query(
         r#"SELECT settlement.id, settlement.status, settlement.final_invoice_id,
-                  final_invoice.status AS final_invoice_status
+                  final_invoice.status AS final_invoice_status,
+                  settled_order.cancellation_reason
            FROM order_termination_settlements settlement
+           JOIN orders settled_order ON settled_order.id = settlement.order_id
            LEFT JOIN invoices final_invoice ON final_invoice.id = settlement.final_invoice_id
            WHERE settlement.order_id = $1
            FOR UPDATE OF settlement"#,
@@ -1750,7 +1823,18 @@ async fn create_termination_final_invoice(
     .bind(snapshot.total_vat)
     .bind(snapshot.total_gross)
     .bind(snapshot.line_items.clone())
-    .bind(FINAL_INVOICE_NOTE)
+    .bind(
+        if locked
+            .try_get::<Option<String>, _>("cancellation_reason")
+            .unwrap_or_default()
+            .as_deref()
+            == Some(CONTRACT_TERMINATED_REASON)
+        {
+            FINAL_INVOICE_NOTE
+        } else {
+            CANCELLED_ORDER_FINAL_INVOICE_NOTE
+        },
+    )
     .bind(auth.user_id)
     .fetch_one(&mut *transaction)
     .await

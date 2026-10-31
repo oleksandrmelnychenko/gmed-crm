@@ -307,6 +307,32 @@ async fn reverse_rebilling_waiver(
     {
         return response;
     }
+    // A closed settlement counted the cost as GMED's: the amount coming back
+    // would be a debt nothing settles (QA 2026-10-31, R4-4).
+    let settlement_closed = match sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (
+               SELECT 1
+               FROM external_invoices external
+               JOIN order_termination_settlements settlement
+                 ON settlement.order_id = external.order_id
+               WHERE external.id = $1 AND settlement.status = 'settled'
+           )"#,
+    )
+    .bind(external_invoice_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => return failed(error),
+    };
+    if settlement_closed {
+        return coded_err(
+            StatusCode::CONFLICT,
+            "rebilling_waiver_settlement_closed",
+            "The order's settlement is closed; the waiver stays",
+            json!({}),
+        );
+    }
     let current = match sqlx::query(
         r#"SELECT amount_gross, reversed_at
            FROM external_invoice_rebilling_waivers

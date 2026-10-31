@@ -1887,6 +1887,13 @@ async fn load_order_process_readiness(
                       ON balance.external_invoice_id = external.id
                     WHERE external.patient_id = $1
                 ), 0) AS outstanding_balance,
+                  COALESCE((
+                    SELECT SUM(balance.remaining_receivable_gross)
+                    FROM external_invoices external
+                    JOIN external_invoice_receivable_balances balance
+                      ON balance.external_invoice_id = external.id
+                    WHERE external.patient_id = $1
+                ), 0) AS external_receivable,
                   COUNT(*) FILTER (
                     WHERE order_id = $2
                       AND invoice_type = 'advance'
@@ -1932,6 +1939,9 @@ async fn load_order_process_readiness(
     let outstanding_balance: rust_decimal::Decimal = finance_row
         .try_get("outstanding_balance")
         .unwrap_or(rust_decimal::Decimal::ZERO);
+    let external_receivable: rust_decimal::Decimal = finance_row
+        .try_get("external_receivable")
+        .unwrap_or(rust_decimal::Decimal::ZERO);
     let advance_invoice_count: i64 = finance_row
         .try_get("advance_invoice_count")
         .unwrap_or_default();
@@ -1939,6 +1949,25 @@ async fn load_order_process_readiness(
         .try_get("paid_advance_invoice_count")
         .unwrap_or_default();
 
+    // Net of the money GMED holds, like reminders and the statement (R3-11).
+    let (overdue_invoice_count, outstanding_balance) = match patient_id {
+        Some(patient_id) => {
+            let net_invoices =
+                crate::routes::debt_management::load_net_open_invoices(state, patient_id)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!(error = %e, %order_id, "load net open invoices");
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to load order process gates",
+                        )
+                    })?;
+            let (overdue, open) =
+                crate::routes::debt_management::net_debt_figures(net_invoices.iter());
+            (overdue, open + external_receivable)
+        }
+        None => (overdue_invoice_count, outstanding_balance),
+    };
     let debt_management = crate::routes::debt_management::load_order_debt_management_state(
         state,
         order_id,
@@ -6342,6 +6371,20 @@ async fn cancel_order(
             })),
         )
             .into_response();
+    }
+    if let Err(error) =
+        crate::routes::invoices::termination_settlements::open_cancelled_order_settlement_tx(
+            &mut tx,
+            order_id,
+            auth.user_id,
+        )
+        .await
+    {
+        tracing::error!(error = %error, %order_id, "open cancelled order settlement");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update order status",
+        );
     }
     // The order, its closed quotes, cancelled services and rejected amount
     // changes are audited in the cancellation transaction.
@@ -11233,6 +11276,45 @@ async fn leistung_cancellation_preview(
                     "can_issue_credit_note".to_string(),
                     serde_json::json!(service_reversal::can_issue_credit_notes(&auth)),
                 );
+                // The prepayment stays when a service goes; the dialog says
+                // that it would then exceed the order total (R3-12).
+                match sqlx::query(
+                    r#"SELECT prepayment_amount,
+                              COALESCE(order_service_total_gross(id), 0) AS total
+                       FROM orders
+                       WHERE id = $1 AND prepayment_required"#,
+                )
+                .bind(order_id)
+                .fetch_optional(&mut *conn)
+                .await
+                {
+                    Ok(Some(row)) => {
+                        let prepayment = row
+                            .try_get::<Option<rust_decimal::Decimal>, _>("prepayment_amount")
+                            .unwrap_or_default();
+                        let total = row
+                            .try_get::<rust_decimal::Decimal, _>("total")
+                            .unwrap_or_default();
+                        let new_total = if preview.status == "cancelled" {
+                            total
+                        } else {
+                            total - preview.line_gross
+                        };
+                        if let Some(prepayment) = prepayment.filter(|amount| *amount > new_total) {
+                            map.insert(
+                                "prepayment_above_total".to_string(),
+                                serde_json::json!({
+                                    "prepayment": money::money_string(prepayment),
+                                    "new_total": money::money_string(new_total),
+                                }),
+                            );
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        tracing::error!(%error, %order_id, "load prepayment for cancellation preview");
+                    }
+                }
             }
             Json(body).into_response()
         }
