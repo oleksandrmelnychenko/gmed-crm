@@ -387,6 +387,9 @@ async fn store_signed_version(
         .bind(id).bind(signed_id).execute(&mut *tx).await.map_err(db_error)?;
     sqlx::query("INSERT INTO staff_access_profile_rules(profile_id,resource_type,scope_type,resource_id,capability,effect,created_by) SELECT profile_id,resource_type,scope_type,$2,capability,effect,created_by FROM staff_access_profile_rules WHERE resource_type='document' AND resource_id=$1")
         .bind(id).bind(signed_id).execute(&mut *tx).await.map_err(db_error)?;
+    documents::move_portal_release_to_version(&mut *tx, id, signed_id)
+        .await
+        .map_err(db_error)?;
 
     let template = template_of(&source);
     let art: String = source.get("art");

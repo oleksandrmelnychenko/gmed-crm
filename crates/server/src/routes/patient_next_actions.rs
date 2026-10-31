@@ -186,7 +186,7 @@ async fn load_document_actions(
     patient_id: Uuid,
     user_id: Uuid,
 ) -> Result<Vec<Value>, axum::response::Response> {
-    let rows = sqlx::query(
+    let rows = sqlx::query(&format!(
         r#"SELECT d.id, d.auto_name, d.category, d.art, ds.shared_at
            FROM documents d
            JOIN document_shares ds
@@ -195,11 +195,13 @@ async fn load_document_actions(
             AND ds.revoked_at IS NULL
            WHERE d.patient_id = $1
              AND d.visibility = 'patient_visible'
+             AND {}
              AND ds.requires_confirmation = true
              AND ds.confirmed = false
            ORDER BY ds.shared_at ASC
            LIMIT 10"#,
-    )
+        crate::routes::me::PORTAL_CURRENT_DOCUMENT_SQL
+    ))
     .bind(patient_id)
     .bind(user_id)
     .fetch_all(&state.db)
@@ -340,6 +342,9 @@ async fn load_package_actions(
                  AND (spc.package_item_id = spi.id OR (spc.package_item_id IS NULL AND spi.id IS NULL))
            WHERE psp.patient_id = $1
              AND psp.status = 'active'
+             -- A package hidden from the portal asks the patient for nothing
+             -- (QA 2026-10-31): `/me/subscriptions` does not list it either.
+             AND psp.portal_visible = true
            GROUP BY psp.id, psp.package_id, sp.name, spi.id, spi.description,
                     spi.included_quantity, spi.requires_patient_approval
            HAVING COALESCE(bool_or(spc.approval_status = 'pending'), false)

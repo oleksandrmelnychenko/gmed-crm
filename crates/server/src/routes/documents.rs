@@ -33633,6 +33633,14 @@ async fn render_document_translation_pdf(
         auth.user_id,
     )
     .await;
+    // The translation the patient asked for stays in the portal as its PDF.
+    if let Err(e) = move_portal_release_to_version(&state.db, id, document_id).await {
+        tracing::error!(error = %e, translation_id = %translation_id, "move the translation's portal release");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to link the translated document",
+        );
+    }
     if let Err(e) = sqlx::query(
         "UPDATE document_translations SET translated_document_id = $2, translated_text = $3 WHERE id = $1",
     )
@@ -34282,10 +34290,12 @@ async fn list_my_uploaded_documents(
         Err(resp) => return resp,
     };
 
+    // `notes` stays out (QA 2026-10-31): it starts as the patient's remark, but
+    // the staff's document form writes the same column.
     match sqlx::query(
         r#"SELECT d.id, d.document_number, d.patient_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
-                  d.is_medical, d.mime_type, d.file_size, d.klinik, d.ursprung, d.notes,
+                  d.is_medical, d.mime_type, d.file_size, d.klinik, d.ursprung,
                   d.created_at, d.updated_at,
                   o.order_number, a.title AS appointment_title
            FROM documents d
@@ -34322,7 +34332,6 @@ async fn list_my_uploaded_documents(
                         "file_size": row.try_get::<Option<i64>, _>("file_size").unwrap_or_default(),
                         "klinik": row.try_get::<Option<String>, _>("klinik").unwrap_or_default(),
                         "ursprung": row.try_get::<Option<String>, _>("ursprung").unwrap_or_default(),
-                        "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
                         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                         "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                     })
@@ -37124,6 +37133,22 @@ pub(crate) async fn auto_send_provider_preparation_documents_for_confirmed_appoi
     else {
         return Ok(AutoPreparationDocumentSendResult::default());
     };
+    // Art. 18 DSGVO (QA 2026-10-31): nothing new is filed for a restricted
+    // patient and nothing is released to the portal automatically; confirming
+    // the appointment itself stays possible.
+    match super::patients::ensure_patient_processing_allows(
+        state,
+        patient_id,
+        "sending preparation documents",
+    )
+    .await
+    {
+        Ok(()) => {}
+        Err(response) if response.status() == StatusCode::LOCKED => {
+            return Ok(AutoPreparationDocumentSendResult::default());
+        }
+        Err(response) => return Err(response),
+    }
     let Some(order_id) = appointment
         .try_get::<Option<Uuid>, _>("order_id")
         .unwrap_or_default()
@@ -37404,6 +37429,46 @@ async fn release_document_to_patient_portal(
     }
 }
 
+/// A new version of a released document takes its portal release over (QA
+/// 2026-10-31): the portal hands out the current version only, so the patient
+/// would lose the document the moment it is signed. Each login's share ends on
+/// `from_document` and starts on `to_document`; a confirmation is asked again,
+/// it was given for the other file. A document that is not released (any more)
+/// moves nothing. Returns the shares made.
+pub(crate) async fn move_portal_release_to_version<'e>(
+    executor: impl sqlx::PgExecutor<'e>,
+    from_document: Uuid,
+    to_document: Uuid,
+) -> Result<u64, sqlx::Error> {
+    sqlx::query(
+        r#"WITH ended AS (
+               UPDATE document_shares ds
+               SET revoked_at = now()
+               FROM documents d
+               WHERE d.id = ds.document_id
+                 AND ds.document_id = $1
+                 AND ds.channel = 'patient_portal'
+                 AND ds.revoked_at IS NULL
+                 AND d.visibility = 'patient_visible'
+               RETURNING ds.shared_with_user_id, ds.shared_by, ds.requires_confirmation
+           ), released AS (
+               UPDATE documents
+               SET visibility = 'patient_visible'
+               WHERE id = $2 AND EXISTS (SELECT 1 FROM ended)
+           )
+           INSERT INTO document_shares (
+               document_id, shared_with_user_id, shared_by, channel, requires_confirmation
+           )
+           SELECT $2, shared_with_user_id, shared_by, 'patient_portal', requires_confirmation
+           FROM ended"#,
+    )
+    .bind(from_document)
+    .bind(to_document)
+    .execute(executor)
+    .await
+    .map(|result| result.rows_affected())
+}
+
 async fn revoke_document_from_patient_portal(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -37447,36 +37512,50 @@ async fn revoke_document_from_patient_portal(
         );
     };
 
+    let revoke_failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, document_id = %id, patient_id = %patient_id, "revoke patient portal release");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to revoke patient portal release",
+        )
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => return revoke_failed(e),
+    };
+    // Every patient login's share, also of a login whose assignment ended, and
+    // the visibility: a withdrawn document does not come back when the access
+    // returns or a login is linked later (QA 2026-10-31).
     let revoked_rows = match sqlx::query(
         r#"UPDATE document_shares ds
            SET revoked_at = now()
-           FROM users u, patient_assignments pa
-           WHERE ds.shared_with_user_id = u.id
-             AND pa.user_id = u.id
-             AND ds.document_id = $1
-             AND pa.patient_id = $2
-             AND pa.revoked_at IS NULL
-             AND u.role = 'patient'
+           WHERE ds.document_id = $1
              AND ds.revoked_at IS NULL
+             AND (ds.channel = 'patient_portal'
+                  OR EXISTS (SELECT 1 FROM users u
+                             WHERE u.id = ds.shared_with_user_id AND u.role = 'patient'))
            RETURNING ds.id, ds.shared_with_user_id"#,
     )
     .bind(id)
-    .bind(patient_id)
-    .fetch_all(&state.db)
+    .fetch_all(&mut *tx)
     .await
     {
         Ok(rows) => rows,
-        Err(e) => {
-            tracing::error!(error = %e, document_id = %id, patient_id = %patient_id, "revoke patient portal release");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to revoke patient portal release",
-            );
-        }
+        Err(e) => return revoke_failed(e),
     };
 
     if revoked_rows.is_empty() {
         return err(StatusCode::NOT_FOUND, "Patient portal release not found");
+    }
+
+    if let Err(e) = sqlx::query(
+        "UPDATE documents SET visibility = 'internal' WHERE id = $1 AND visibility = 'patient_visible'",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await
+    {
+        return revoke_failed(e);
     }
 
     let revoked_share_ids: Vec<_> = revoked_rows
@@ -37484,16 +37563,27 @@ async fn revoke_document_from_patient_portal(
         .filter_map(|row| row.try_get::<Uuid, _>("id").ok())
         .collect();
 
-    state.audit_sender.try_send(audit::domain_event(
-        "revoke_document_from_patient_portal",
-        Some(auth.user_id),
-        "document",
-        Some(id),
-        json!({
-            "patient_id": patient_id,
-            "revoked_share_ids": revoked_share_ids,
-        }),
-    ));
+    if let Err(e) = audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "revoke_document_from_patient_portal",
+            Some(auth.user_id),
+            "document",
+            Some(id),
+            json!({
+                "patient_id": patient_id,
+                "revoked_share_ids": revoked_share_ids,
+                "previous_visibility": row.try_get::<String, _>("visibility").unwrap_or_default(),
+            }),
+        ),
+    )
+    .await
+    {
+        return revoke_failed(e);
+    }
+    if let Err(e) = tx.commit().await {
+        return revoke_failed(e);
+    }
 
     crate::realtime::publish_document_event(
         &state,

@@ -236,13 +236,14 @@ async fn load_visible_patient_document(
     user_id: Uuid,
     document_id: Uuid,
 ) -> Result<Option<sqlx::postgres::PgRow>, axum::response::Response> {
-    sqlx::query(
+    sqlx::query(&format!(
         r#"SELECT d.id, d.patient_id, d.auto_name, d.original_filename, d.art, d.category,
                   d.visibility, d.extracted_text
            FROM documents d
            WHERE d.id = $1
              AND d.patient_id = $2
              AND d.visibility = 'patient_visible'
+             AND {}
              AND EXISTS (
                 SELECT 1
                 FROM document_shares ds
@@ -250,7 +251,8 @@ async fn load_visible_patient_document(
                   AND ds.shared_with_user_id = $3
                   AND ds.revoked_at IS NULL
              )"#,
-    )
+        crate::routes::me::PORTAL_CURRENT_DOCUMENT_SQL
+    ))
     .bind(document_id)
     .bind(patient_id)
     .bind(user_id)

@@ -825,11 +825,6 @@ function usePatientDocumentsPageContent() {
                           {t.portal_documents_download}
                         </Button>
                       </div>
-                      {item.notes ? (
-                        <div className={cn("rounded-lg px-3 py-2 text-xs leading-5 text-foreground", tokens.surface.mutedCard)}>
-                          {item.notes}
-                        </div>
-                      ) : null}
                     </ListItem>
                   );
                 })}

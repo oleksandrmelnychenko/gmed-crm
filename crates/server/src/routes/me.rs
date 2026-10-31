@@ -22,6 +22,13 @@ use crate::routes::patients::{
 use crate::state::AppState;
 use gmed_domain::role::Role;
 
+/// The version of a document the portal hands out (`documents d`, QA
+/// 2026-10-31): never one staff archived, and only the current one, so the
+/// unsigned original is gone once the signed version is there. A draft stays:
+/// staff may release one on purpose, and only a share opens it.
+pub(crate) const PORTAL_CURRENT_DOCUMENT_SQL: &str = "d.status <> 'archived' \
+     AND NOT EXISTS (SELECT 1 FROM documents newer WHERE newer.replaces_document_id = d.id)";
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/me", get(get_me))
@@ -509,19 +516,20 @@ async fn list_my_document_alerts(
         Ok(summary) => summary,
         Err(resp) => return resp,
     };
-    let visible_document_ids = match sqlx::query_scalar::<_, Uuid>(
+    let visible_document_ids = match sqlx::query_scalar::<_, Uuid>(&format!(
         r#"SELECT d.id
            FROM documents d
            WHERE d.patient_id = $1
              AND d.visibility = 'patient_visible'
+             AND {PORTAL_CURRENT_DOCUMENT_SQL}
              AND EXISTS (
                  SELECT 1
                  FROM document_shares ds
                  WHERE ds.document_id = d.id
                    AND ds.shared_with_user_id = $2
                    AND ds.revoked_at IS NULL
-             )"#,
-    )
+             )"#
+    ))
     .bind(patient_id)
     .bind(auth.user_id)
     .fetch_all(&state.db)
@@ -558,7 +566,7 @@ async fn list_my_documents(
         Err(resp) => return resp,
     };
 
-    match sqlx::query(
+    match sqlx::query(&format!(
         r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.klinik, d.ursprung,
@@ -577,8 +585,9 @@ async fn list_my_documents(
            ) ds ON TRUE
            WHERE d.patient_id = $2
              AND d.visibility = 'patient_visible'
-           ORDER BY COALESCE(ds.shared_at, d.updated_at) DESC"#,
-    )
+             AND {PORTAL_CURRENT_DOCUMENT_SQL}
+           ORDER BY COALESCE(ds.shared_at, d.updated_at) DESC"#
+    ))
     .bind(auth.user_id)
     .bind(patient_id)
     .fetch_all(&state.db)
@@ -637,7 +646,7 @@ async fn download_my_document(
         Err(resp) => return resp,
     };
 
-    let row = match sqlx::query(
+    let row = match sqlx::query(&format!(
         r#"SELECT d.id, d.auto_name, d.original_filename, d.mime_type, d.storage_key, d.file_deleted_at
            FROM documents d
            JOIN document_shares ds
@@ -647,9 +656,10 @@ async fn download_my_document(
            WHERE d.id = $2
              AND d.patient_id = $3
              AND d.visibility = 'patient_visible'
+             AND {PORTAL_CURRENT_DOCUMENT_SQL}
            ORDER BY ds.shared_at DESC
-           LIMIT 1"#,
-    )
+           LIMIT 1"#
+    ))
     .bind(auth.user_id)
     .bind(id)
     .bind(patient_id)
@@ -735,7 +745,7 @@ async fn confirm_my_document_release(
         Err(resp) => return resp,
     };
 
-    let updated = match sqlx::query(
+    let updated = match sqlx::query(&format!(
         r#"UPDATE document_shares ds
            SET confirmed = true,
                confirmed_at = COALESCE(ds.confirmed_at, now())
@@ -746,8 +756,9 @@ async fn confirm_my_document_release(
              AND ds.revoked_at IS NULL
              AND d.patient_id = $3
              AND d.visibility = 'patient_visible'
-           RETURNING ds.id, ds.confirmed_at"#,
-    )
+             AND {PORTAL_CURRENT_DOCUMENT_SQL}
+           RETURNING ds.id, ds.confirmed_at"#
+    ))
     .bind(id)
     .bind(auth.user_id)
     .bind(patient_id)

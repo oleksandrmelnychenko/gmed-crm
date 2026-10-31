@@ -57,7 +57,6 @@ export type PortalUploadedDocumentItem = {
   file_size: number | null;
   klinik: string | null;
   ursprung: string | null;
-  notes: string | null;
   created_at: string;
   updated_at: string;
 };

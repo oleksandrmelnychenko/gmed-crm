@@ -9643,6 +9643,285 @@ async fn revoking_patient_portal_release_hides_document_from_me_workspace() {
     assert_eq!(body["message"], "Document not found");
 }
 
+/// QA 2026-10-31: a withdrawn document does not come back. Staff withdraw it
+/// while one parent's assignment has ended; that parent's share ends too, the
+/// visibility goes back, and a login linked later does not get it either.
+#[tokio::test]
+async fn a_withdrawn_portal_release_ends_for_every_login_and_stays_withdrawn() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-portal-withdrawn");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let mother = seed_user(&pool, &format!("{tag}-mother"), "patient").await;
+    let father = seed_user(&pool, &format!("{tag}-father"), "patient").await;
+    seed_patient_assignment(&pool, patient_id, mother, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, father, admin_id).await;
+    let (document_id, _) = upload_stored_pdf(
+        &app,
+        &admin_bearer,
+        patient_id,
+        "arztbrief",
+        &format!("Withdrawn {tag}"),
+        &pool,
+    )
+    .await;
+    let path = format!("/api/v1/documents/{document_id}/portal-release");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &admin_bearer,
+        Some(json!({ "requires_confirmation": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["created_share_count"], 2, "{body}");
+    sqlx::query(
+        "UPDATE patient_assignments SET revoked_at = now() WHERE patient_id = $1 AND user_id = $2",
+    )
+    .bind(patient_id)
+    .bind(father)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) =
+        json_request(&app, "POST", &format!("{path}/revoke"), &admin_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["revoked_share_count"], 2, "{body}");
+    let visibility: String = sqlx::query_scalar("SELECT visibility FROM documents WHERE id = $1")
+        .bind(document_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(visibility, "internal");
+    let audit_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action = 'revoke_document_from_patient_portal' AND entity_id = $1",
+    )
+    .bind(document_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audit_rows, 1);
+
+    // The father's access returns: nothing with it.
+    seed_patient_assignment(&pool, patient_id, father, admin_id).await;
+    let (status, list) = json_request(
+        &app,
+        "GET",
+        "/api/v1/me/documents",
+        &auth_header_for(father, "patient"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list, json!([]), "{list}");
+}
+
+/// QA 2026-10-31: the signed version replaces the source in the portal, with
+/// the source's release; an archived document is no longer handed out.
+#[tokio::test]
+async fn a_paper_signature_moves_the_portal_release_to_the_signed_version() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-portal-signed");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let login = seed_user(&pool, &tag, "patient").await;
+    seed_patient_assignment(&pool, patient_id, login, admin_id).await;
+    let bearer = auth_header_for(login, "patient");
+
+    let (status, consent) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "privacy_consents",
+            "patient_id": patient_id,
+            "language": "de",
+            "status": "active"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{consent}");
+    let source_id = consent["id"].as_str().unwrap().to_string();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{source_id}/portal-release"),
+        &admin_bearer,
+        Some(json!({ "requires_confirmation": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, confirmed) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/me/documents/{source_id}/confirm"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{confirmed}");
+
+    let (status, signed) = multipart_upload(
+        &app,
+        &format!("/api/v1/documents/{source_id}/paper-signature"),
+        &admin_bearer,
+        &[],
+        "signed-consent.pdf",
+        "application/pdf",
+        b"%PDF-1.4 signed consent scan",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{signed}");
+    let signed_id = signed["document_id"].as_str().unwrap().to_string();
+
+    let (status, list) = json_request(&app, "GET", "/api/v1/me/documents", &bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let items = list.as_array().unwrap();
+    assert_eq!(items.len(), 1, "{list}");
+    assert_eq!(items[0]["id"], signed_id, "{list}");
+    // The confirmation was for the unsigned file.
+    assert_eq!(items[0]["requires_confirmation"], true, "{list}");
+    assert_eq!(items[0]["confirmed"], false, "{list}");
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/me/documents/{source_id}/download"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/me/documents/{signed_id}/download"),
+        &bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(String::from_utf8_lossy(&bytes).contains("signed consent scan"));
+
+    // Archived in the staff's document form, it leaves the portal.
+    sqlx::query("UPDATE documents SET status = 'archived' WHERE id = $1::uuid")
+        .bind(&signed_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, list) = json_request(&app, "GET", "/api/v1/me/documents", &bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list, json!([]), "{list}");
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/me/documents/{signed_id}/download"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// QA 2026-10-31, Art. 18 DSGVO: confirming the appointment of a restricted
+/// patient stays possible, but files and releases nothing automatically.
+#[tokio::test]
+async fn a_restricted_patient_gets_no_automatic_preparation_documents() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("provider-template-restricted");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by)
+           VALUES ($1, $2, 'execution', 'active', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE appointments SET order_id = $2 WHERE id = $1")
+        .bind(appointment_id)
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{provider_id}/templates"),
+        &admin_bearer,
+        Some(json!({
+            "label": format!("Auto prep {tag}"),
+            "description": "Preparation instructions",
+            "doctor_id": doctor_id,
+            "art": "prep_instruction",
+            "category": "partner_clinic",
+            "default_auto_name": format!("Auto prep {tag}"),
+            "default_status": "active",
+            "default_visibility": "patient_visible",
+            "is_medical": true,
+            "is_active": true,
+            "auto_send_on_confirmed_appointment": true,
+            "supported_languages": ["de"],
+            "body_de": "Hallo {patient_name}, bitte erscheinen Sie zu {appointment_title}.".to_string()
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    sqlx::query(
+        r#"UPDATE patients
+           SET legal_status = COALESCE(legal_status, '{}'::jsonb)
+                              || '{"processing_restricted": true}'::jsonb
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/status"),
+        &admin_bearer,
+        Some(json!({ "status": "confirmed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["auto_preparation_documents"]["templates_matched"], 0,
+        "{body}"
+    );
+    assert_eq!(
+        body["auto_preparation_documents"]["error_count"], 0,
+        "{body}"
+    );
+    let (documents, shares): (i64, i64) = sqlx::query_as(
+        r#"SELECT count(*),
+                  (SELECT count(*) FROM document_shares ds
+                   JOIN documents d ON d.id = ds.document_id WHERE d.patient_id = $1)
+           FROM documents WHERE patient_id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!((documents, shares), (0, 0));
+}
+
 #[tokio::test]
 async fn deleting_unshared_document_file_removes_stored_file() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {

@@ -1463,6 +1463,9 @@ async fn archive_transaction(
         if publish {
             sqlx::query("INSERT INTO provider_document_links(provider_id,document_id,linked_by) SELECT provider_id,$2,linked_by FROM provider_document_links WHERE document_id=$1 ON CONFLICT DO NOTHING")
                 .bind(source_id).bind(result_id).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
+            documents::move_portal_release_to_version(&mut *tx, source_id, result_id)
+                .await
+                .map_err(|_| "signature_database_error")?;
         }
         // Preserve record-level restrictions on the newly archived version.
         sqlx::query("INSERT INTO staff_user_access_rules(user_id,granted_for_role,resource_type,scope_type,resource_id,capability,effect,reason,granted_by,valid_from,valid_until) SELECT user_id,granted_for_role,resource_type,scope_type,$2,capability,effect,reason,granted_by,valid_from,valid_until FROM staff_user_access_rules WHERE resource_type='document' AND resource_id=$1 AND revoked_at IS NULL")
@@ -1470,7 +1473,8 @@ async fn archive_transaction(
         sqlx::query("INSERT INTO staff_access_profile_rules(profile_id,resource_type,scope_type,resource_id,capability,effect,created_by) SELECT profile_id,resource_type,scope_type,$2,capability,effect,created_by FROM staff_access_profile_rules WHERE resource_type='document' AND resource_id=$1")
             .bind(source_id).bind(result_id).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
     }
-    // No external shares are created by receiving a signature. Release remains explicit.
+    // A signature gives nobody new access: release remains explicit, and only
+    // a portal release the source already had moves to the signed version.
     let status = if current { "completed" } else { "needs_review" };
     sqlx::query("UPDATE document_signature_requests SET status=$3,result_document_id=$4,report_storage_key=$5,report_sha256=$6,signed_sha256=$7,evidence=$8,last_error=$9,signed_at=$10,lease_until=NULL,lease_token=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2")
         .bind(id).bind(token).bind(status).bind(result_id).bind(report_key).bind(sha256(report)).bind(sha256(pdf)).bind(&verified.evidence)

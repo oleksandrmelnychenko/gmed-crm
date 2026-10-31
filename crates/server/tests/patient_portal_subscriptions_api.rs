@@ -200,6 +200,68 @@ fn find_subscription(items: &[Value], subscription_id: Uuid) -> &Value {
         .unwrap_or_else(|| panic!("subscription {subscription_id} missing from {items:?}"))
 }
 
+/// QA 2026-10-31: a package hidden from the portal asks the patient nothing.
+#[tokio::test]
+async fn next_actions_leave_out_a_package_hidden_from_the_portal() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("next-action-package");
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    seed_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let (package_id, package_item_id) = seed_package(&pool, admin_id, &tag).await;
+    let subscription_id = seed_subscription(
+        &pool,
+        patient_id,
+        Some(order_id),
+        package_id,
+        "active",
+        -10,
+        20,
+        true,
+        admin_id,
+    )
+    .await;
+    sqlx::query(
+        r#"INSERT INTO service_package_consumptions (
+                patient_service_package_id, package_item_id, quantity,
+                overage_quantity, requires_patient_approval, approval_status, created_by
+           ) VALUES ($1, $2, 1, 0, true, 'pending', $3)"#,
+    )
+    .bind(subscription_id)
+    .bind(package_item_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let bearer = auth_header_for(patient_user_id, "patient");
+    let package_actions = |body: &Value| {
+        body["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .filter(|item| item["kind"] == "package_approval")
+            .count()
+    };
+    let (status, body) = get_json(&app, "/api/v1/me/next-actions", &bearer).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(package_actions(&body), 1, "{body}");
+
+    // A second visible package keeps the portal open once this one is hidden.
+    support::seed_active_portal_subscription(&pool, patient_id, admin_id).await;
+    sqlx::query("UPDATE patient_service_packages SET portal_visible = false WHERE id = $1")
+        .bind(subscription_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = get_json(&app, "/api/v1/me/next-actions", &bearer).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(package_actions(&body), 0, "{body}");
+}
+
 #[tokio::test]
 async fn portal_subscriptions_are_self_scoped_visible_and_client_safe() {
     let Some((app, pool, admin_id)) = test_context().await else {
