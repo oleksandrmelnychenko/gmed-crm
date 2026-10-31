@@ -690,7 +690,11 @@ async fn list_orders(
         );
     }
 
-    match sqlx::query(
+    // The access rule is part of the query: filtering after the LIMIT lost a
+    // manager's older orders behind other people's newer ones (QA 2026-10-31).
+    // The per-row check below stays the authority. A lead's own orders are few
+    // and follow the preparation rule there.
+    match sqlx::query(&format!(
         r#"SELECT o.id, o.order_number, o.patient_id, o.source_lead_id, o.phase, o.status,
                   COALESCE(order_service_total_gross(o.id), o.total_estimated) AS total_estimated,
                   o.signed_patient, o.signed_agency, o.client_signed_terms, o.client_terms_changed_at,
@@ -775,9 +779,28 @@ async fn list_orders(
                     WHERE ol.order_id = o.id
                 )
              )
+             AND (
+                $5::uuid IS NOT NULL
+                OR (
+                    o.intake_state IS DISTINCT FROM 'draft'
+                    AND (
+                        $11::boolean
+                        OR EXISTS (
+                            SELECT 1
+                            FROM patient_assignments assignment
+                            WHERE assignment.patient_id = COALESCE(o.patient_id, l.converted_patient_id)
+                              AND assignment.user_id = $12
+                              AND assignment.revoked_at IS NULL
+                        )
+                        OR (COALESCE(o.patient_id, l.converted_patient_id) IS NULL
+                            AND o.source_lead_id IS NOT NULL)
+                        OR ($13::boolean AND {INTERPRETER_TEAM_ORDER_SQL})
+                    )
+                )
+             )
            ORDER BY o.created_at DESC, o.id DESC
            LIMIT 200"#,
-    )
+    ))
     .bind(search_pattern)
     .bind(query.phase)
     .bind(query.status)
@@ -788,6 +811,9 @@ async fn list_orders(
     .bind(query.provider_taxonomy_node_id)
     .bind(!auth.can(Capability::PatientsMedicalView))
     .bind(read_scope.is_scoped())
+    .bind(reads_every_order(auth.role))
+    .bind(auth.user_id)
+    .bind(read_scope == OrderReadScope::InterpreterTeam)
     .fetch_all(&state.db)
     .await
     {
@@ -13688,6 +13714,26 @@ pub(crate) fn require_full_order_read(auth: &AuthUser) -> Result<(), axum::respo
     }
 }
 
+/// An order over `o` that involves an interpreter: a booked appointment, an
+/// interpreter report or an interpreter-hours line.
+const INTERPRETER_TEAM_ORDER_SQL: &str = r#"(
+    EXISTS (
+        SELECT 1 FROM appointments a
+        WHERE a.order_id = o.id
+          AND (a.interpreter_id IS NOT NULL
+               OR EXISTS (SELECT 1 FROM interpreter_reports ir
+                          WHERE ir.appointment_id = a.id))
+    )
+    OR EXISTS (
+        SELECT 1 FROM order_leistungen ol
+        LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
+        WHERE ol.order_id = o.id
+          AND (ol.source_interpreter_report_id IS NOT NULL
+               OR COALESCE(ol.agency_service_key_snapshot, catalog.service_key)
+                  = 'interpreter_hours')
+    )
+)"#;
+
 /// Order visibility of the projection readers: the patient assignment (as for
 /// every assignment role) and, for the interpreter team lead, every order that
 /// involves an interpreter (booked appointment, interpreter report or
@@ -13704,30 +13750,14 @@ async fn can_access_scoped_order(
     if OrderReadScope::for_role(auth.role) != OrderReadScope::InterpreterTeam {
         return Ok(false);
     }
-    sqlx::query_scalar::<_, bool>(
+    sqlx::query_scalar::<_, bool>(&format!(
         r#"SELECT EXISTS(
                SELECT 1 FROM orders o
                WHERE o.id = $1
                  AND o.intake_state IS DISTINCT FROM 'draft'
-                 AND (
-                     EXISTS (
-                         SELECT 1 FROM appointments a
-                         WHERE a.order_id = o.id
-                           AND (a.interpreter_id IS NOT NULL
-                                OR EXISTS (SELECT 1 FROM interpreter_reports ir
-                                           WHERE ir.appointment_id = a.id))
-                     )
-                     OR EXISTS (
-                         SELECT 1 FROM order_leistungen ol
-                         LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
-                         WHERE ol.order_id = o.id
-                           AND (ol.source_interpreter_report_id IS NOT NULL
-                                OR COALESCE(ol.agency_service_key_snapshot, catalog.service_key)
-                                   = 'interpreter_hours')
-                     )
-                 )
+                 AND {INTERPRETER_TEAM_ORDER_SQL}
            )"#,
-    )
+    ))
     .bind(order_id)
     .fetch_one(&state.db)
     .await
@@ -13898,6 +13928,14 @@ pub(crate) async fn can_access_order_preparation(
     can_access_order(state, auth, order_id, patient_id).await
 }
 
+/// Roles that reach every confirmed order without a patient assignment. The
+/// CEO Assistant reads every order (owner decision 2026-10-12, QA D2-07) and
+/// writes none: every write of an order checks a role or capability the
+/// assistant does not hold before it gets here.
+fn reads_every_order(role: Role) -> bool {
+    matches!(role, Role::Ceo | Role::Billing | Role::CeoAssistant)
+}
+
 async fn can_access_order(
     state: &AppState,
     auth: &AuthUser,
@@ -13920,10 +13958,7 @@ async fn can_access_order(
     if preparing {
         return Ok(false);
     }
-    // The CEO Assistant reads every order (owner decision 2026-10-12, QA
-    // D2-07) and writes none: every write of an order checks a role or
-    // capability the assistant does not hold before it gets here.
-    if matches!(auth.role, Role::Ceo | Role::Billing | Role::CeoAssistant) {
+    if reads_every_order(auth.role) {
         return Ok(true);
     }
 
