@@ -22,6 +22,7 @@ async function setup(page: Page, options: { requests?: ReturnType<typeof request
   let failLoad = options.failLoad ?? false;
   await page.addInitScript(({ lang }) => {
     localStorage.setItem("gmed_access_token", "synthetic-disclosure-token");
+    localStorage.setItem("gmed_refresh_token", "synthetic-disclosure-refresh");
     localStorage.setItem("gmed_lang", "ru");
     localStorage.setItem("gmed_lead_cabinet_lang:synthetic-guardian", lang);
   }, { lang: options.lang ?? "en" });
@@ -38,6 +39,9 @@ async function setup(page: Page, options: { requests?: ReturnType<typeof request
       if (failLoad) { failLoad = false; return route.fulfill({ status: 503, json: { error: "unavailable" } }); }
       return route.fulfill({ json: { requests: options.closed ? [] : requests, own_access_closed: Boolean(options.closed) } });
     }
+    if (path === "/auth/refresh") return route.fulfill({ json: { access_token: "synthetic-disclosure-token", refresh_token: "synthetic-disclosure-refresh", expires_in: 900 } });
+    const one = path.match(/^\/me\/lead-requests\/([^/]+)$/);
+    if (one && route.request().method() === "GET") return route.fulfill({ json: requests.find((entry) => entry.lead_id === one[1]) ?? {} });
     const match = path.match(/^\/me\/lead-requests\/([^/]+)\/trusted-persons$/);
     if (match && route.request().method() === "POST") {
       const body = route.request().postDataJSON() as LeadDisclosureInput;
@@ -268,6 +272,37 @@ test("All information ticks every checkbox; unticking one keeps the rest", async
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "documents");
   expect(calls.at(-1)?.persons[0].scope_codes).toEqual(["organisational", "financial"]);
+});
+
+test("the other parent's newer choice stays: an idle tab saves nothing, not even on leaving the step (QA 2026-10-31, B-2)", async ({ page }) => {
+  const { calls, requests } = await setup(page);
+  await addFriend(page);
+  await expect(page.getByTestId("trusted-persons-save-state")).toHaveText("Saved");
+  expect(calls).toHaveLength(1);
+  // The other parent adds a scope from the own login: this tab reads it when it is shown again.
+  const item = requests[0];
+  item.trusted_persons = [{ ...sentFriend(), scope_codes: ["medical", "financial"] }];
+  item.disclosure = { ...receipt(), chosen_by: "synthetic-other-parent", chosen_by_name: "Other Parent", chosen_at: "2026-10-14T11:00:00Z" };
+  // The tab is shown again; two such events within a second count as one read.
+  await expect(async () => {
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect(page.getByTestId("disclosure-receipt")).toContainText("Other Parent", { timeout: 1_500 });
+  }).toPass({ timeout: 12_000 });
+  await expect(page.getByTestId("trusted-person-scope-financial")).toBeChecked();
+  await expect(page.getByTestId("disclosure-consent")).not.toBeChecked();
+  await page.waitForTimeout(1_200);
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "documents");
+  expect(calls).toHaveLength(1);
+  expect(item.disclosure?.chosen_by).toBe("synthetic-other-parent");
+});
+
+test("passing the step with the «No» shown by default records no answer", async ({ page }) => {
+  const { calls } = await setup(page);
+  await expect(page.getByTestId("disclosure-no")).toBeChecked();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "documents");
+  expect(calls).toHaveLength(0);
 });
 
 test("a free-text scope from before is shown and must be chosen again, with the phone and date of birth", async ({ page }) => {

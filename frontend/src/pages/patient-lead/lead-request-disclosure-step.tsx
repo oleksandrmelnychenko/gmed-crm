@@ -30,15 +30,21 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   const wording = disclosureWording(text, request);
   const [draft, setDraft] = useState(() => disclosureDraft(request, viewerId));
   const serverKey = JSON.stringify([request.disclosure ?? null, request.trusted_persons ?? null, request.disclosure_company_name ?? null]);
-  const [serverBase, setServerBase] = useState(() => ({ key: serverKey, draft: disclosureDraft(request, viewerId) }));
-  if (serverBase.key !== serverKey) {
-    const fresh = disclosureDraft(request, viewerId);
-    const ownEdits = JSON.stringify(draft) !== JSON.stringify(serverBase.draft);
-    setServerBase({ key: serverKey, draft: fresh });
-    if (!ownEdits) setDraft(fresh);
+  const [seenServerKey, setSeenServerKey] = useState(serverKey);
+  // Only what this person changed here is theirs to save (QA 2026-10-31, B-2: the idle tab of the
+  // other parent wrote its old copy back, with a new consent in that parent's name). Set by the
+  // person's input alone, never read off the draft: a saved draft differs from the server's in
+  // `answered` and the like, and then looked edited for good.
+  const [editedHere, setEditedHere] = useState(false);
+  const editedRef = useRef(false);
+  const markEdited = (edited: boolean) => {
+    editedRef.current = edited;
+    setEditedHere(edited);
+  };
+  if (seenServerKey !== serverKey) {
+    setSeenServerKey(serverKey);
+    if (!editedHere) setDraft(disclosureDraft(request, viewerId));
   }
-  // Only what this person changed here is theirs to save; a newer server state alone is not.
-  const editedHere = JSON.stringify(draft) !== JSON.stringify(serverBase.draft);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const saving = useRef<Promise<boolean> | null>(null);
@@ -81,14 +87,18 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
       const ok = await saving.current;
       return ok ? latest.current.save(recorded) : false;
     }
+    // Nobody saves by passing by, also not on leaving the step (QA 2026-10-31, B-2): not answered
+    // counts as «No» anyway (owner 2026-10-22), a click on the shown «No» is an answer.
+    if (!editedRef.current && !recorded) return true;
     const base = requestRef.current;
-    // The «No» shown by default and left as it is counts as the person's own
-    // answer once they leave the step (DEV 2026-10-27: a conscious «No» was
-    // saved nowhere, staff saw «not answered»). Saves run on leaving only.
-    // Staff passing by record no answer for the client.
     // Recorded by staff, the «No» shown by default is the client's answer too (DEV QA 2026-10-30).
-    const current = staffMode && !recorded ? draftRef.current : acceptedDefaultNo(draftRef.current, base);
-    if (!disclosureChanged(current, base, viewerId) || ownMinor) return true;
+    const current = recorded ? acceptedDefaultNo(draftRef.current, base) : draftRef.current;
+    if (ownMinor) return true;
+    if (!disclosureChanged(current, base, viewerId)) {
+      // Back at the saved state: nothing of this person's is pending, the server's state follows again.
+      markEdited(false);
+      return true;
+    }
     const problemNow = disclosureProblem(current);
     if (problemNow) {
       // The step stays: every missing entry is marked at its field.
@@ -114,6 +124,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
         const saved = await enqueue(() => saveLeadTrustedPersons(base.lead_id, disclosureToSend(current, asLeadCabinetLang(lang) ?? "ru"), recorded));
         // The server's state for what stayed as sent; an edit made while the save ran stays and is saved next.
         const merged = mergeDisclosureDraft(draftRef.current, current, disclosureDraft(saved, viewerId), baseline);
+        if (JSON.stringify(draftRef.current) === JSON.stringify(current)) markEdited(false);
         draftRef.current = merged;
         requestRef.current = saved;
         setDraft(merged);
@@ -173,6 +184,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     // The ref first: a save that ends in this moment merges with what is typed now.
     const next = { ...draftRef.current, ...patch };
     draftRef.current = next;
+    markEdited(true);
     setDraft(next);
     setError("");
     setServerProblem(null);

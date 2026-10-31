@@ -124,10 +124,16 @@ export function ConsentFormChoicesSection({
   const ownMinor = choiceOnlyByGuardian(request);
   const namedRecipients = savedDisclosureAllowed(request);
   const version = form?.version;
+  // Only the person's own ticks are saved (QA 2026-10-31, B-2): a newer choice of the other parent
+  // that reached this tab is never written back in this person's name.
+  const editedRef = useRef(false);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const save = useCallback(async (snapshot: ConsentFormChoices, recorded: StaffConsentRecord | null = null): Promise<boolean> => {
     if (!version || ownMinor) return true;
     return enqueue(async () => {
       // Recheck inside the shared queue: a timer and Next can flush the same choice.
+      if (!editedRef.current && !recorded) return true;
       if (!consentFormChanged(snapshot, savedRef.current?.choices)) return true;
       if (!hasCoreConsents(snapshot)) {
         onSaveState?.("idle");
@@ -144,6 +150,7 @@ export function ConsentFormChoicesSection({
         setBaseline(saved.consent_form);
         // Keep any choices made while this request was being saved.
         setDraft((current) => consentFormChanged(current, snapshot) ? current : saved.consent_form?.choices ?? snapshot);
+        if (!consentFormChanged(draftRef.current, snapshot)) editedRef.current = false;
         onChange(saved);
         onSaveState?.("saved");
         return true;
@@ -222,6 +229,7 @@ export function ConsentFormChoicesSection({
         data-consent-option={key}
         onChange={(event) => {
           const checked = event.currentTarget.checked;
+          editedRef.current = true;
           setDraft((current) => ({ ...current, [key]: checked }));
           setError("");
           onSaveState?.("idle");
