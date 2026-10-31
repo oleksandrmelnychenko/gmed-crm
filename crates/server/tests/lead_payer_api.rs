@@ -1478,7 +1478,8 @@ async fn a_staff_save_keeps_the_leads_invoice_recipient_and_payment_route() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let own = billing_keys(&body["declaration"]);
-    assert!(own["invoice_to"].is_null(), "{body}");
+    // The recipient who paid follows: the patient receives the invoice (QA 2026-10-31, C4).
+    assert_eq!(own["invoice_to"], "self", "{body}");
     assert!(own["payment_method"].is_null(), "{body}");
     // Section 7 is never written onto the declaration (its columns are
     // history since 2026-10-23).
