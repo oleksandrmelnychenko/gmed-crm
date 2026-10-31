@@ -175,6 +175,7 @@ export type InvoiceItem = {
   /** `credited` for an issued invoice fully covered by credit notes. */
   display_status?: string;
   issued_at: string;
+  released_at?: string | null;
   due_date?: string | null;
   currency?: string | null;
   /** Total as issued, before credit notes. */

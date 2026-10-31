@@ -1091,6 +1091,13 @@ fn normalize_optional(value: Option<&str>) -> Option<String> {
     }
 }
 
+/// Whether `requested` would change the stored remark of a released invoice.
+/// No remark in the request leaves the stored one as it is.
+fn changes_released_notes(requested: Option<&str>, stored: Option<&str>) -> bool {
+    normalize_optional(requested)
+        .is_some_and(|requested| Some(requested.as_str()) != stored.map(str::trim))
+}
+
 fn decimal_to_string(value: Decimal) -> String {
     money::money_string(value)
 }
@@ -13584,7 +13591,7 @@ async fn update_invoice_status(
     };
 
     let locked_invoice = match sqlx::query(
-        r#"SELECT invoice.status, invoice.invoice_type, invoice.due_date,
+        r#"SELECT invoice.status, invoice.invoice_type, invoice.due_date, invoice.notes,
                   invoice.invoice_number, invoice.released_at IS NOT NULL AS released,
                   invoice.prepayment_applied_amount, invoice.credited_amount,
                   COALESCE((
@@ -13644,6 +13651,9 @@ async fn update_invoice_status(
     let locked_released = locked_invoice
         .try_get::<bool, _>("released")
         .unwrap_or(false);
+    let locked_notes = locked_invoice
+        .try_get::<Option<String>, _>("notes")
+        .unwrap_or_default();
     if locked_status == "cancelled" && requested_status != "cancelled" {
         return err(
             StatusCode::CONFLICT,
@@ -13687,16 +13697,22 @@ async fn update_invoice_status(
             "The due date of a released invoice cannot change; a payment reminder sets a new deadline",
         );
     }
+    // The printed remark is part of the issued document (§ 14 UStG, GoBD,
+    // QA 2026-10-31); the same text, e.g. a form's prefill, is no change.
+    if locked_released && changes_released_notes(body.notes.as_deref(), locked_notes.as_deref()) {
+        return err(
+            StatusCode::CONFLICT,
+            "The remark of a released invoice cannot change; cancel the invoice and issue a new one",
+        );
+    }
     let releasing = locked_status == "draft" && requested_status == "sent";
     // An overdue invoice goes back to `sent` only under a dunning block
     // (Mahnsperre) with its reason; otherwise the hourly scheduler would mark
-    // it overdue again at once.
+    // it overdue again at once. The printed remark is no reason (QA 2026-10-31).
     let unblocking_overdue =
         locked_status == "overdue" && requested_status == "sent" && !settles_through_payment;
     let block_reason = if unblocking_overdue {
-        match dunning_blocks::normalize_block_reason(
-            body.reason.as_deref().or(body.notes.as_deref()),
-        ) {
+        match dunning_blocks::normalize_block_reason(body.reason.as_deref()) {
             Some(reason) => Some(reason),
             None => {
                 return err(
@@ -13709,11 +13725,13 @@ async fn update_invoice_status(
         None
     };
     // Cancelling a released invoice issues its cancellation document
-    // (Stornorechnung); a draft cancelled before release gets none.
+    // (Stornorechnung); a draft cancelled before release gets none. Without a
+    // reason the document names what it cancels: the invoice's own remark is
+    // no «Grund» (QA 2026-10-31).
     let cancelling_released =
         requested_status == "cancelled" && locked_status != "cancelled" && locked_released;
     let storno_reason = cancelling_released.then(|| {
-        normalize_optional(body.reason.as_deref().or(body.notes.as_deref()))
+        normalize_optional(body.reason.as_deref())
             .filter(|reason| reason.chars().count() <= 1000)
             .unwrap_or_else(|| {
                 format!(
@@ -14071,7 +14089,7 @@ async fn update_invoice_status(
     .bind(invoice_id)
     .bind(requested_status.clone())
     .bind(release_due_date.or(due_date))
-    .bind(body.notes.clone())
+    .bind(body.notes.clone().filter(|_| !locked_released))
     .bind(release_number.clone())
     .bind(release_recipient.clone())
     .execute(&mut *transaction)
@@ -14918,6 +14936,30 @@ mod tests {
             super::einvoice_prepayment_note(&[], "EUR", (dec("1"), dec("0"), dec("1"))),
             None
         );
+    }
+}
+
+#[cfg(test)]
+mod released_invoice_tests {
+    use super::changes_released_notes;
+
+    #[test]
+    fn only_another_text_changes_a_released_remark() {
+        assert!(!changes_released_notes(None, Some("Bitte zahlen")));
+        assert!(!changes_released_notes(Some("  "), Some("Bitte zahlen")));
+        assert!(!changes_released_notes(
+            Some(" Bitte zahlen "),
+            Some("Bitte zahlen")
+        ));
+        assert!(!changes_released_notes(
+            Some("Bitte zahlen"),
+            Some("Bitte zahlen\n")
+        ));
+        assert!(changes_released_notes(
+            Some("Neuer Text"),
+            Some("Bitte zahlen")
+        ));
+        assert!(changes_released_notes(Some("Neuer Text"), None));
     }
 }
 

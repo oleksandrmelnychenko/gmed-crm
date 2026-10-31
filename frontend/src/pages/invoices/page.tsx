@@ -2177,6 +2177,8 @@ function useStaffInvoicesPageContent() {
   const statusFormProblem = detail
     ? invoiceStatusFormProblem(detail, statusForm, new Date())
     : null;
+  // The printed remark is fixed with the release, like the positions.
+  const statusNotesLocked = Boolean(detail && isInvoiceReleased(detail));
   const visibilityDirty = Boolean(detail && hasFormChanges(visibilityForm, invoiceToVisibilityForm(detail)));
   const payerDirty = Boolean(detail && hasFormChanges(payerForm, invoiceToPayerForm(detail)));
   // The positions are fixed with the release; until then their remarks can be typed.
@@ -2207,7 +2209,7 @@ function useStaffInvoicesPageContent() {
       await updateInvoiceStatus(selectedInvoiceId, {
         status: statusForm.status,
         due_date: statusForm.dueDate || null,
-        notes: statusForm.notes.trim() || null,
+        ...(statusNotesLocked ? {} : { notes: statusForm.notes.trim() || null }),
         reason: statusForm.reason.trim() || null,
         ...confirmed,
       });
@@ -4922,9 +4924,11 @@ function useStaffInvoicesPageContent() {
                     onChange={(event) =>
                       setStatusForm((current) => ({ ...current, notes: event.target.value }))
                     }
-                    disabled={!access.canManage}
+                    disabled={!access.canManage || statusNotesLocked}
                   />
-                  <p className="text-xs text-muted-foreground">{t.finance_printed_notes_hint}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {statusNotesLocked ? t.revenue_invoices_notes_locked : t.finance_printed_notes_hint}
+                  </p>
                 </Field>
               </div>
               <div className="flex justify-end">

@@ -59,7 +59,11 @@ import {
   invoiceConfirmationField,
   localizeInvoiceError,
 } from "@/pages/invoices/model/invoice-errors";
-import { canPickInvoiceStatus } from "@/pages/invoices/model/invoice-model";
+import {
+  canPickInvoiceStatus,
+  isInvoiceReleased,
+  statusChangeReasonKind,
+} from "@/pages/invoices/model/invoice-model";
 
 import {
   canImportPatientClinicalDocuments,
@@ -1857,6 +1861,14 @@ function usePatientDetailPageContent() {
     setDocumentUploadOpen(true);
   }
 
+  // A released invoice keeps its printed remark: the text field then takes
+  // the reason a cancellation or a dunning block asks for, or nothing.
+  const managedInvoice = invoices.find((invoice) => invoice.id === invoiceManageId);
+  const managedInvoiceReleased = Boolean(managedInvoice && isInvoiceReleased(managedInvoice));
+  const invoiceStatusNeedsReason = Boolean(
+    managedInvoice && statusChangeReasonKind(managedInvoice, invoiceStatusForm.status),
+  );
+
   async function handleSaveInvoiceStatus(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!invoiceManageId) return;
@@ -1872,7 +1884,9 @@ function usePatientDetailPageContent() {
           await updateInvoiceStatus(invoiceManageId, {
             status: invoiceStatusForm.status,
             due_date: toOptional(invoiceStatusForm.dueDate),
-            notes: toOptional(invoiceStatusForm.notes),
+            ...(managedInvoiceReleased
+              ? { reason: toOptional(invoiceStatusForm.notes) }
+              : { notes: toOptional(invoiceStatusForm.notes) }),
             ...confirmed,
           });
           break;
@@ -2276,6 +2290,8 @@ function usePatientDetailPageContent() {
             formatMoney={fmtMoney}
             invoiceBusy={invoiceBusy}
             invoiceManageId={invoiceManageId}
+            invoiceNotesAreReason={invoiceStatusNeedsReason}
+            invoiceNotesLocked={managedInvoiceReleased && !invoiceStatusNeedsReason}
             invoiceStatusForm={invoiceStatusForm}
             invoiceStatusOptions={INVOICE_STATUS_OPTIONS.filter((status) =>
               canPickInvoiceStatus(

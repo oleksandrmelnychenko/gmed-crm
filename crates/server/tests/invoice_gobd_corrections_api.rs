@@ -567,3 +567,179 @@ async fn dunning_respects_blocks_grace_period_and_debt_states() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+const PRINTED_REMARK: &str = "Bitte überweisen Sie bis zum Fälligkeitsdatum.";
+
+/// A released invoice with a printed remark, of the order of `sibling_id`.
+async fn seed_released_invoice_with_remark(pool: &PgPool, sibling_id: Uuid, number: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status, issued_at,
+                due_date, total_net, total_vat, total_gross, paid_amount, line_items,
+                portal_visible, notes, created_by
+           )
+           SELECT order_id, patient_id, $2, 'interim', 'sent', issued_at, due_date, total_net,
+                  total_vat, total_gross, 0, line_items, true, $3, created_by
+           FROM invoices WHERE id = $1
+           RETURNING id"#,
+    )
+    .bind(sibling_id)
+    .bind(number)
+    .bind(PRINTED_REMARK)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn invoice_notes(pool: &PgPool, invoice_id: Uuid) -> Option<String> {
+    sqlx::query_scalar("SELECT notes FROM invoices WHERE id = $1")
+        .bind(invoice_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// QA 2026-10-31: the printed remark, the positions and the totals are the
+/// issued document. The status route refuses a new remark, and the database
+/// refuses all three, whatever the path.
+#[tokio::test]
+async fn a_released_invoice_keeps_its_remark_positions_and_totals() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = format!("frozen-{}", Uuid::new_v4().simple());
+    let (_, _, sibling) = seed_released_invoice(&ctx.pool, ctx.admin_id, &tag, 10).await;
+    let invoice_id =
+        seed_released_invoice_with_remark(&ctx.pool, sibling, &format!("INV-{tag}-R")).await;
+    let ceo = auth_header(ctx.admin_id, "ceo");
+    let status_path = format!("/api/v1/invoices/{invoice_id}/status");
+
+    let (status, body) = request_json(
+        &ctx.app,
+        "POST",
+        &status_path,
+        &ceo,
+        Some(json!({ "status": "sent", "notes": "Neuer Text nach der Ausstellung" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body:?}");
+    assert_eq!(
+        invoice_notes(&ctx.pool, invoice_id).await.as_deref(),
+        Some(PRINTED_REMARK)
+    );
+
+    // The form's prefill, also with stray spaces, is no change; none neither.
+    let (status, body) = request_json(
+        &ctx.app,
+        "POST",
+        &status_path,
+        &ceo,
+        Some(json!({ "status": "sent", "notes": format!("  {PRINTED_REMARK} ") })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let (status, body) = request_json(
+        &ctx.app,
+        "POST",
+        &status_path,
+        &ceo,
+        Some(json!({ "status": "sent", "notes": "" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(
+        invoice_notes(&ctx.pool, invoice_id).await.as_deref(),
+        Some(PRINTED_REMARK)
+    );
+
+    for (statement, expected) in [
+        (
+            "UPDATE invoices SET notes = 'x' WHERE id = $1",
+            "printed remark",
+        ),
+        (
+            "UPDATE invoices SET line_items = '[]'::jsonb WHERE id = $1",
+            "keeps its positions",
+        ),
+        (
+            "UPDATE invoices SET total_gross = total_gross + 1 WHERE id = $1",
+            "keeps its totals",
+        ),
+    ] {
+        let error = sqlx::query(statement)
+            .bind(invoice_id)
+            .execute(&ctx.pool)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+
+    // A draft is not issued: its remark stays editable.
+    let draft_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (order_id, patient_id, invoice_type, status, total_net, total_vat,
+                                 total_gross, line_items, created_by)
+           SELECT order_id, patient_id, 'interim', 'draft', 10, 0, 10, '[]', created_by
+           FROM invoices WHERE id = $1
+           RETURNING id"#,
+    )
+    .bind(invoice_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let (status, body) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{draft_id}/status"),
+        &ceo,
+        Some(json!({ "status": "draft", "notes": "Entwurfstext" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(
+        invoice_notes(&ctx.pool, draft_id).await.as_deref(),
+        Some("Entwurfstext")
+    );
+}
+
+/// QA 2026-10-31: the invoice's remark is no reason: it was printed as
+/// «Grund» on the cancellation document and taken as the dunning block reason.
+#[tokio::test]
+async fn the_printed_remark_is_no_storno_or_dunning_block_reason() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = format!("remark-reason-{}", Uuid::new_v4().simple());
+    let (_, _, sibling) = seed_released_invoice(&ctx.pool, ctx.admin_id, &tag, -5).await;
+    let number = format!("INV-{tag}-R");
+    let invoice_id = seed_released_invoice_with_remark(&ctx.pool, sibling, &number).await;
+    let ceo = auth_header(ctx.admin_id, "ceo");
+    let status_path = format!("/api/v1/invoices/{invoice_id}/status");
+
+    sqlx::query("UPDATE invoices SET status = 'overdue' WHERE id = $1")
+        .bind(invoice_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (status, body) = request_json(
+        &ctx.app,
+        "POST",
+        &status_path,
+        &ceo,
+        Some(json!({ "status": "sent", "notes": PRINTED_REMARK })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body:?}");
+
+    let (status, cancelled) = request_json(
+        &ctx.app,
+        "POST",
+        &status_path,
+        &ceo,
+        Some(json!({ "status": "cancelled", "notes": PRINTED_REMARK, "reason": "  " })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cancelled:?}");
+    let reason = cancelled["storno_document"]["reason"].as_str().unwrap();
+    assert!(reason.contains(&number), "{reason}");
+    assert!(!reason.contains("überweisen"), "{reason}");
+}

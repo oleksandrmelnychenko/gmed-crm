@@ -33,6 +33,10 @@ const EXACT: Record<string, Pair> = {
     "Das Fälligkeitsdatum einer ausgestellten Rechnung ist fest. Eine neue Frist setzt die Zahlungserinnerung.",
     "Срок оплаты выпущенного счёта изменить нельзя. Новый срок задаёт напоминание об оплате.",
   ],
+  "the remark of a released invoice cannot change; cancel the invoice and issue a new one": [
+    "Die Bemerkung einer ausgestellten Rechnung kann nicht geändert werden. Rechnung stornieren und neu ausstellen.",
+    "Примечание выпущенного счёта изменить нельзя. Отмените счёт и выпустите новый.",
+  ],
   "a released invoice cannot return to draft; cancel it and issue a new invoice": [
     "Eine ausgestellte Rechnung kann kein Entwurf mehr werden. Rechnung stornieren und neu ausstellen.",
     "Выпущенный счёт нельзя вернуть в черновик. Отмените его и выпустите новый.",

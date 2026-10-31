@@ -314,6 +314,7 @@ export interface RevenueTranslations {
   revenue_invoices_release_hint: string;
   revenue_invoices_due_date_before_invoice_date: string;
   revenue_invoices_due_date_locked: string;
+  revenue_invoices_notes_locked: string;
   revenue_invoices_document_draft_preview: string;
   revenue_invoices_document_archived: string;
   revenue_invoices_document_archived_on_first_download: string;
@@ -1224,6 +1225,8 @@ export const revenueRu: RevenueTranslations = {
   revenue_invoices_due_date_before_invoice_date: "Срок оплаты не может быть раньше даты счёта (сегодня).",
   revenue_invoices_due_date_locked:
     "Срок оплаты выпущенного счёта не меняется. Новый срок задаётся напоминанием об оплате.",
+  revenue_invoices_notes_locked:
+    "Примечание напечатано в выпущенном счёте и не меняется. Для исправления отмените счёт и выпустите новый.",
   revenue_invoices_document_draft_preview:
     "Предпросмотр черновика. PDF сохраняется в архив при выпуске счёта.",
   revenue_invoices_document_archived: "Архивный PDF от {date}: выдаётся без изменений.",
@@ -1641,6 +1644,8 @@ export const revenueDe: RevenueTranslations = {
   revenue_invoices_due_date_before_invoice_date: "Das Fälligkeitsdatum darf nicht vor dem Rechnungsdatum (heute) liegen.",
   revenue_invoices_due_date_locked:
     "Das Fälligkeitsdatum einer ausgestellten Rechnung bleibt unverändert. Eine neue Frist setzt die Zahlungserinnerung.",
+  revenue_invoices_notes_locked:
+    "Die Bemerkung steht auf der ausgestellten Rechnung und bleibt unverändert. Zur Korrektur die Rechnung stornieren und neu ausstellen.",
   revenue_invoices_document_draft_preview:
     "Entwurfsvorschau. Das PDF wird bei der Ausstellung archiviert.",
   revenue_invoices_document_archived: "Archiviertes PDF vom {date}: wird unverändert ausgegeben.",

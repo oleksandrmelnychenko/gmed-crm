@@ -3101,7 +3101,7 @@ async fn invoices_are_numbered_on_release_and_stay_released() {
         &app,
         &billing_bearer,
         &first_id,
-        json!({ "status": "sent", "due_date": due_on.to_string(), "notes": "unchanged due date" }),
+        json!({ "status": "sent", "due_date": due_on.to_string() }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -3600,8 +3600,7 @@ async fn paid_invoice_marks_linked_financial_supporting_documents_reimbursed() {
         &billing_bearer,
         Some(json!({
             "status": "paid",
-            "paid_amount": total_gross,
-            "notes": "Patient invoice settled"
+            "paid_amount": total_gross
         })),
     )
     .await;
@@ -3779,8 +3778,7 @@ async fn billing_can_update_invoice_payment_state_and_interpreter_cannot_access_
         &billing_bearer,
         Some(json!({
             "status": "sent",
-            "paid_amount": total_gross,
-            "notes": "Paid in full"
+            "paid_amount": total_gross
         })),
     )
     .await;
@@ -3887,8 +3885,7 @@ async fn paid_invoice_and_external_invoice_materialize_accounting_ledger_without
         &billing_bearer,
         Some(json!({
             "status": "paid",
-            "paid_amount": total_gross,
-            "notes": "Cash received"
+            "paid_amount": total_gross
         })),
     )
     .await;

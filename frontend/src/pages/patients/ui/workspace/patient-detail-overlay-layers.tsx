@@ -69,6 +69,8 @@ type PatientDetailOverlayLayersProps = {
   formatMoney: MoneyFormatter;
   invoiceBusy: boolean;
   invoiceManageId: string;
+  invoiceNotesAreReason: boolean;
+  invoiceNotesLocked: boolean;
   invoiceStatusForm: InvoiceStatusFormState;
   invoiceStatusOptions: readonly string[];
   lang: string;
@@ -127,6 +129,8 @@ export function PatientDetailOverlayLayers({
   formatMoney,
   invoiceBusy,
   invoiceManageId,
+  invoiceNotesAreReason,
+  invoiceNotesLocked,
   invoiceStatusForm,
   invoiceStatusOptions,
   lang,
@@ -238,6 +242,8 @@ export function PatientDetailOverlayLayers({
             formatMoney={formatMoney}
             invoiceBusy={invoiceBusy}
             invoiceManageId={invoiceManageId}
+            invoiceNotesAreReason={invoiceNotesAreReason}
+            invoiceNotesLocked={invoiceNotesLocked}
             invoiceStatusForm={invoiceStatusForm}
             invoiceStatusOptions={invoiceStatusOptions}
             l={l}

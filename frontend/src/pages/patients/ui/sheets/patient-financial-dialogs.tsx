@@ -72,6 +72,10 @@ type PatientFinancialDialogsProps = {
   formatMoney: MoneyFormatter;
   invoiceBusy: boolean;
   invoiceManageId: string;
+  /** The status change asks for a reason (cancellation, dunning block). */
+  invoiceNotesAreReason: boolean;
+  /** The printed remark is fixed with the release, like the positions. */
+  invoiceNotesLocked: boolean;
   invoiceStatusForm: InvoiceStatusFormState;
   invoiceStatusOptions: readonly string[];
   l: LocalizeFn;
@@ -366,6 +370,8 @@ type InvoiceManagerDialogProps = Pick<
   | "formatMoney"
   | "invoiceBusy"
   | "invoiceManageId"
+  | "invoiceNotesAreReason"
+  | "invoiceNotesLocked"
   | "invoiceStatusForm"
   | "invoiceStatusOptions"
   | "l"
@@ -392,6 +398,8 @@ function InvoiceManagerDialog({
   formatMoney,
   invoiceBusy,
   invoiceManageId,
+  invoiceNotesAreReason,
+  invoiceNotesLocked,
   invoiceStatusForm,
   invoiceStatusOptions,
   l,
@@ -408,7 +416,7 @@ function InvoiceManagerDialog({
   patientDetailStatusLabel,
   textareaClassName,
 }: InvoiceManagerDialogProps) {
-  const { lang } = useLang();
+  const { t, lang } = useLang();
   const dunningDeadline = dunningDeadlineRunning(dunningEvents, nextDunningLevel(dunningEvents));
   return (
     <PatientSheetScaffold
@@ -479,13 +487,17 @@ function InvoiceManagerDialog({
       </FormSection>
 
       <FormSection title={l("patients_additional")}>
-        <FormField label={l("appointments_notes")} htmlFor="invoice-notes-edit">
+        <FormField
+          label={invoiceNotesAreReason ? t.revenue_invoices_status_reason : l("appointments_notes")}
+          htmlFor="invoice-notes-edit"
+        >
           <textarea
             id="invoice-notes-edit"
             className={textareaClassName}
             value={invoiceStatusForm.notes}
             onChange={(event) => onInvoiceNotesChange(event.target.value)}
-            placeholder={l("patients_billing_notes_or_payment_confirmation_details")}
+            placeholder={invoiceNotesLocked ? t.revenue_invoices_notes_locked : l("patients_billing_notes_or_payment_confirmation_details")}
+            disabled={invoiceNotesLocked}
           />
         </FormField>
       </FormSection>
