@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang, useLanguageBound } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +17,7 @@ import {
   operatorTakesValue,
   type FilterOperatorLabels,
   useFilterOperatorLabels,
+  valueForOperatorChange,
 } from "./filter-operator-meta";
 import type {
   ColumnDef,
@@ -58,21 +60,24 @@ function hasEmptyEditableValue(predicate: FilterPredicate): boolean {
   return false;
 }
 
-function valueSummary(
+export function valueSummary(
   predicate: FilterPredicate,
   options: readonly FilterOption[],
   translations?: FilterBuilderTranslations,
+  fieldType?: FilterFieldType,
 ): string {
   const { operator, value } = predicate;
   if (!operatorTakesValue(operator)) return "";
+  // Dates read DD.MM.YYYY everywhere, also on the filter chip (QA 2026-10-31).
+  const shownDate = (day: string) => (fieldType === "date" ? formatAppDate(day) || day : day);
   if (operator === "between") {
     const range = (value ?? {}) as { from?: string; to?: string };
-    if (range.from && range.to) return `${range.from} → ${range.to}`;
+    if (range.from && range.to) return `${shownDate(range.from)} → ${shownDate(range.to)}`;
     if (range.from) {
-      return `${labelForOperator("after", translations?.operatorLabels)} ${range.from}`;
+      return `${labelForOperator("after", translations?.operatorLabels)} ${shownDate(range.from)}`;
     }
     if (range.to) {
-      return `${labelForOperator("before", translations?.operatorLabels)} ${range.to}`;
+      return `${labelForOperator("before", translations?.operatorLabels)} ${shownDate(range.to)}`;
     }
     return translations?.notSet ?? "";
   }
@@ -94,6 +99,7 @@ function valueSummary(
     return value ? translations?.yes ?? "" : translations?.no ?? "";
   }
   if (value == null || value === "") return translations?.notSet ?? "";
+  if (typeof value === "string" && fieldType === "date") return shownDate(value);
   const opt = options.find((o) => o.value === String(value));
   if (opt) return opt.label;
   return options.length > 0 ? translations?.unknownValue ?? "" : String(value);
@@ -387,12 +393,12 @@ function FilterChip<T>({
   const options = resolveOptions(column, rows);
   const operators = OPERATORS_BY_FIELD_TYPE[column.filterType ?? "text"];
   const opLabel = labelForOperator(predicate.operator, translations?.operatorLabels);
-  const valSummary = valueSummary(predicate, options, translations);
+  const valSummary = valueSummary(predicate, options, translations, column.filterType);
 
   const changeOperator = (next: FilterOperator) => {
     onUpdate({
       operator: next,
-      value: defaultValueForOperator(next, column.filterType ?? "text"),
+      value: valueForOperatorChange(next, predicate.value, column.filterType ?? "text"),
     });
   };
 

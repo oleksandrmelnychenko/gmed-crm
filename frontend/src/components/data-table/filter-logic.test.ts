@@ -99,6 +99,23 @@ describe("evaluatePredicate — is / is_not / equals", () => {
     expect(evaluatePredicate(rows[2], pred("active", "is", true), ctx)).toBe(false);
     expect(evaluatePredicate(rows[2], pred("active", "is", false), ctx)).toBe(true);
   });
+  it("a day filter finds the timestamps of that Berlin day (QA 2026-10-31, S2-2)", () => {
+    const at = (created: string) => ({ ...rows[0], created });
+    const day = pred("created", "is", "2026-10-30");
+    expect(evaluatePredicate(at("2026-10-30T08:00:00Z"), day, ctx)).toBe(true);
+    expect(evaluatePredicate(at("2026-10-29T23:30:00Z"), day, ctx)).toBe(true);
+    expect(evaluatePredicate(at("2026-10-31T08:00:00Z"), day, ctx)).toBe(false);
+  });
+  it("no number crashes a date comparison (QA 2026-10-31, S2-1)", () => {
+    const far = { ...rows[0], age: Number.MAX_SAFE_INTEGER };
+    expect(evaluatePredicate(far, pred("age", "before", "2026-11-08"), ctx)).toBe(false);
+    expect(evaluatePredicate(far, pred("age", "between", { from: "2026-11-08" }), ctx)).toBe(false);
+  });
+  it("before and after compare numbers as numbers", () => {
+    expect(evaluatePredicate(rows[0], pred("age", "before", "40"), ctx)).toBe(true);
+    expect(evaluatePredicate(rows[0], pred("age", "after", "40"), ctx)).toBe(false);
+    expect(evaluatePredicate(rows[0], pred("age", "between", { from: "30", to: "40" }), ctx)).toBe(true);
+  });
   it("equals on number", () => {
     expect(evaluatePredicate(rows[0], pred("age", "equals", "34"), ctx)).toBe(true);
     expect(evaluatePredicate(rows[0], pred("age", "equals", "35"), ctx)).toBe(false);

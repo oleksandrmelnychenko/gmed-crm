@@ -137,8 +137,13 @@ export function LeadPortalAccessDetail({
   const [error, setError] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [issued, setIssued] = useState<LeadPortalAccountIssued | null>(null);
+  // `busy` reaches the button a render later: a double click issued two passwords,
+  // the mail carried the first and the dialog showed the second (QA 2026-10-31).
+  const issuingRef = useRef(false);
 
   async function issue() {
+    if (issuingRef.current) return;
+    issuingRef.current = true;
     setBusy(true);
     setError("");
     try {
@@ -150,6 +155,7 @@ export function LeadPortalAccessDetail({
     } catch (nextError) {
       setError(leadErrorMessage(nextError, (ru, de) => (lang === "de" ? de : ru)));
     } finally {
+      issuingRef.current = false;
       setBusy(false);
     }
   }
@@ -243,6 +249,8 @@ export function LeadPortalAccessDetail({
    * fails, the password is already the new one — the usual window shows it.
    */
   async function issueAndEmail() {
+    if (issuingRef.current) return;
+    issuingRef.current = true;
     setBusy(true);
     setError("");
     setEmailNotice("");
@@ -282,6 +290,7 @@ export function LeadPortalAccessDetail({
         setError(reason);
       }
     } finally {
+      issuingRef.current = false;
       setBusy(false);
       if (result) onChanged?.();
     }

@@ -239,6 +239,14 @@ const LEAD_REALTIME_EVENTS = [
   LEAD_PURGED_EVENT,
 ] as const;
 
+/**
+ * A consent given in the client's form never sets the lead's own flag; the server's
+ * readiness counts both (QA 2026-10-31: «Нет» on the sheet though it was given).
+ */
+function leadConsentGiven(lead: LeadDetail, key: "healthcare_consent" | "privacy_consent") {
+  return lead.readiness.checks.some((check) => check.key === key && check.passed);
+}
+
 function shouldOpenWizardFromRow(lead: LeadListItem, canConvert: boolean) {
   return canConvert &&
     ACTIVE_WIZARD_LEAD_STATUSES.has(lead.qualification_status) &&
@@ -878,8 +886,12 @@ function useLeadsPageContent() {
       {
         id: "retention_deadline",
         label: lang === "de" ? "Automatische Löschung" : "Автоудаление",
-        accessor: (row) => daysUntilRetentionDeadline(row.retention_deadline_at) ?? Number.MAX_SAFE_INTEGER,
-        filterType: "number",
+        // Filtered by date, with the date picker of «Поступил»; a lead without a deadline
+        // has no date and still sorts last (QA 2026-10-31).
+        accessor: (row) => row.retention_deadline_at,
+        sortAccessor: (row) =>
+          daysUntilRetentionDeadline(row.retention_deadline_at) ?? Number.MAX_SAFE_INTEGER,
+        filterType: "date",
         group: "qualification",
         sortable: true,
         width: 190,
@@ -1648,6 +1660,11 @@ function useLeadsPageContent() {
   // One primary action in the header (QA 2026-10-22): the patient card of a
   // converted lead, the conversion once it is possible, otherwise the wizard.
   const detailCanOpenWizard = Boolean(detail) && permissions.canConvert && detailWizardIncomplete && !detailOutOfWork;
+  // Those who work a lead in the wizard, where the same button stands.
+  const detailCanReopen = Boolean(detail) && permissions.canEdit && permissions.canConvert
+    && !detailIsConverted
+    && detail?.failed_outcome.status !== "delete_anonymized"
+    && ["not_qualified", "archived"].includes(detail?.qualification_status ?? "");
   const detailCanConvertNow = Boolean(detail) && detailIsConsoleLead && permissions.canConvert
     && !detailIsConverted && !detailOutOfWork && Boolean(detailConversionGate?.canConvert);
   // The form «Данные для квалификации» edits an open lead only: a patient's
@@ -1670,7 +1687,8 @@ function useLeadsPageContent() {
                 {lang === "de" ? "Nur ansehen" : "Только просмотр"}
               </StatusBadge>
             ) : null}
-            {detail && detailIsConverted && detail.converted_patient_id ? (
+            {/* Sales works leads, never patient records: the button led nowhere (QA 2026-10-31). */}
+            {detail && detailIsConverted && detail.converted_patient_id && hasCapability(user, "patients.view") ? (
               <Button
                 type="button"
                 size="sm"
@@ -1691,6 +1709,20 @@ function useLeadsPageContent() {
               >
                 <ClipboardCheck className="size-3.5" />
                 {lang === "de" ? "Bearbeiten" : "Обработать"}
+              </Button>
+            ) : null}
+            {detail && detailCanReopen ? (
+              // The sheet is all an archived lead opens: without this the way back
+              // needed the wizard's address typed by hand (QA 2026-10-31, D-03).
+              <Button
+                type="button"
+                size="sm"
+                data-testid="lead-reopen"
+                disabled={Boolean(actionBusy)}
+                onClick={() => void updateStatus(detail.id, "in_progress")}
+              >
+                {actionBusy === `status:${detail.id}:in_progress` ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+                {tx("Вернуть в работу", "Zurück in Bearbeitung")}
               </Button>
             ) : null}
             {detail && permissions.canEdit && detailCanPromoteToConsole ? (
@@ -1976,9 +2008,9 @@ function useLeadsPageContent() {
                         <DetailCard label={t.lead_email_consent} value={yesNo(detail.email_consent, t)} />
                         <DetailCard label={t.lead_whatsapp_consent} value={yesNo(detail.whatsapp_consent, t)} />
                         <DetailCard label={t.lead_consent_automated_contact} value={yesNo(detail.consent_automated_contact, t)} />
-                        <DetailCard label={t.lead_consent_healthcare} value={yesNo(detail.consent_healthcare, t)} />
+                        <DetailCard label={t.lead_consent_healthcare} value={yesNo(detail.consent_healthcare || leadConsentGiven(detail, "healthcare_consent"), t)} />
                         <DetailCard label={t.lead_consent_opt_out} value={yesNo(detail.consent_opt_out, t)} />
-                        <DetailCard label={t.lead_consent_privacy_practices} value={yesNo(detail.consent_privacy_practices, t)} />
+                        <DetailCard label={t.lead_consent_privacy_practices} value={yesNo(detail.consent_privacy_practices || leadConsentGiven(detail, "privacy_consent"), t)} />
                       </div>
                     </section>
 
@@ -2382,6 +2414,9 @@ function useLeadsPageContent() {
                   </section>
                 ) : null}
 
+                {/* The patient exists: the list of what a lead still lacks read «Не хватает»
+                    next to «Пациент создан» (QA 2026-10-31). */}
+                {detailIsConverted ? null : (
                 <section className={cardClass("p-4")}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
@@ -2465,6 +2500,7 @@ function useLeadsPageContent() {
                     </div>
                   ) : null}
                 </section>
+                )}
 
                 <section className={cardClass("p-4")}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2818,11 +2854,11 @@ function useLeadsPageContent() {
                         )}
                         <DetailCard
                           label={t.lead_healthcare_consent_available}
-                          value={yesNo(gateForm.consentHealthcare, t)}
+                          value={yesNo(gateForm.consentHealthcare || leadConsentGiven(detail, "healthcare_consent"), t)}
                         />
                         <DetailCard
                           label={t.lead_privacy_practices_accepted}
-                          value={yesNo(gateForm.consentPrivacyPractices, t)}
+                          value={yesNo(gateForm.consentPrivacyPractices || leadConsentGiven(detail, "privacy_consent"), t)}
                         />
                       </div>
                     )}
@@ -3114,9 +3150,9 @@ function useLeadsPageContent() {
                     <SectionTitle>{t.lead_section_consents}</SectionTitle>
                     <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                       <DetailCard label={t.lead_consent_automated_contact} value={yesNo(detail.consent_automated_contact, t)} />
-                      <DetailCard label={t.lead_consent_healthcare} value={yesNo(detail.consent_healthcare, t)} />
+                      <DetailCard label={t.lead_consent_healthcare} value={yesNo(detail.consent_healthcare || leadConsentGiven(detail, "healthcare_consent"), t)} />
                       <DetailCard label={t.lead_consent_opt_out} value={yesNo(detail.consent_opt_out, t)} />
-                      <DetailCard label={t.lead_consent_privacy_practices} value={yesNo(detail.consent_privacy_practices, t)} />
+                      <DetailCard label={t.lead_consent_privacy_practices} value={yesNo(detail.consent_privacy_practices || leadConsentGiven(detail, "privacy_consent"), t)} />
                       <DetailCard label={t.lead_email_consent} value={yesNo(detail.email_consent, t)} />
                       <DetailCard label={t.lead_whatsapp_consent} value={yesNo(detail.whatsapp_consent, t)} />
                     </div>

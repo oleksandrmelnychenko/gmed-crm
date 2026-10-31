@@ -68,6 +68,27 @@ export function defaultValueForOperator(
   return "";
 }
 
+/**
+ * The value after the operator changed: a chosen date stays, «равно» to «до» must
+ * not make the user pick the day again (QA 2026-10-31). Other values start over.
+ */
+export function valueForOperatorChange(
+  next: FilterOperator,
+  current: FilterValue,
+  type: FilterFieldType,
+): FilterValue {
+  if (type === "date") {
+    const range =
+      current && typeof current === "object" && !Array.isArray(current) && !("days" in current)
+        ? current
+        : null;
+    const day = typeof current === "string" ? current : (range?.from ?? range?.to ?? "");
+    if (day && DATE_SINGLE_OPS.has(next)) return day;
+    if (day && DATE_RANGE_OPS.has(next)) return range ?? { from: day, to: undefined };
+  }
+  return defaultValueForOperator(next, type);
+}
+
 export type FilterOperatorLabels = Partial<Record<FilterOperator, string>>;
 
 const ALL_FILTER_OPERATORS: readonly FilterOperator[] = [

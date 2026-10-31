@@ -22,7 +22,7 @@ import { RealtimeProvider } from "@/lib/realtime";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppLayout } from "@/components/layout";
 import { LoginPage } from "@/pages/login";
-import { useLang } from "@/lib/i18n";
+import { getLang, useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { LegacyCasesRedirect } from "@/pages/cases/legacy-cases-redirect";
 import { reloadOnceForStaleChunk } from "@/lib/stale-chunk";
@@ -365,6 +365,19 @@ function NotFoundPage() {
   );
 }
 
+const ROUTE_ERROR_TEXT = {
+  de: {
+    title: "Seite konnte nicht geladen werden",
+    body: "Bitte laden Sie die Seite neu. Die eingegebenen Daten bleiben auf dem Server unverändert.",
+    reload: "Neu laden",
+  },
+  ru: {
+    title: "Не удалось загрузить страницу",
+    body: "Обновите страницу. Данные на сервере не изменились.",
+    reload: "Обновить",
+  },
+} as const;
+
 class RouteErrorBoundary extends Component<
   { children: ReactNode; resetKey: string },
   { hasError: boolean }
@@ -396,21 +409,20 @@ class RouteErrorBoundary extends Component<
       return this.props.children;
     }
 
+    // A class component cannot use the hook; this page shows after a crash, so the
+    // language is read once here. Staff work in Russian too (QA 2026-10-31).
+    const text = ROUTE_ERROR_TEXT[getLang()];
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-6">
         <div className="max-w-md rounded-xl border border-border bg-card p-6 text-center shadow-sm">
-          <h1 className="text-lg font-semibold text-foreground">
-            Seite konnte nicht geladen werden
-          </h1>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Bitte laden Sie die Seite neu. Die eingegebenen Daten bleiben auf dem Server unverändert.
-          </p>
+          <h1 className="text-lg font-semibold text-foreground">{text.title}</h1>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">{text.body}</p>
           <button
             type="button"
             className="mt-4 inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground"
             onClick={() => window.location.reload()}
           >
-            Neu laden
+            {text.reload}
           </button>
         </div>
       </div>

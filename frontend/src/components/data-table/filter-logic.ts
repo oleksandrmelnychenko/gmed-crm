@@ -32,16 +32,34 @@ function isEmpty(value: unknown): boolean {
 
 function parseDate(raw: unknown): number | null {
   if (raw == null) return null;
-  if (raw instanceof Date) return raw.getTime();
-  if (typeof raw === "number") return raw;
-  if (typeof raw === "string" && raw.trim() !== "") {
-    const ms = Date.parse(raw);
-    return Number.isFinite(ms) ? ms : null;
-  }
+  if (raw instanceof Date) return validInstant(raw.getTime());
+  if (typeof raw === "number") return validInstant(raw);
+  if (typeof raw === "string" && raw.trim() !== "") return validInstant(Date.parse(raw));
   return null;
 }
 
+/**
+ * A number outside the range of `Date` is no moment in time. Formatting one throws
+ * and took the whole page down: the leads' «Автоудаление» used MAX_SAFE_INTEGER for
+ * "no deadline" (QA 2026-10-31).
+ */
+function validInstant(ms: number): number | null {
+  return Number.isFinite(new Date(ms).getTime()) ? ms : null;
+}
+
 const DATE_OPERAND = /^\d{4}-\d{2}-\d{2}$/;
+const NUMBER_OPERAND = /^-?\d+(?:[.,]\d+)?$/;
+
+/** A number compared with a typed number; `Date.parse` would read "3" as a year. */
+function numericOperand(fieldValue: unknown, operand: unknown): number | null {
+  if (typeof fieldValue !== "number" || typeof operand !== "string") return null;
+  const trimmed = operand.trim();
+  return NUMBER_OPERAND.test(trimmed) ? Number(trimmed.replace(",", ".")) : null;
+}
+
+function isUsableOperand(fieldValue: unknown, operand: unknown): boolean {
+  return numericOperand(fieldValue, operand) != null || parseDate(operand) != null;
+}
 
 /**
  * Date filters take calendar days ("YYYY-MM-DD" from a date field). Values
@@ -59,6 +77,8 @@ function compareByDay(fieldValue: unknown, operand: string): number | null {
 }
 
 function compareDates(fieldValue: unknown, operand: string): number | null {
+  const number = numericOperand(fieldValue, operand);
+  if (number != null) return Math.sign((fieldValue as number) - number);
   if (DATE_OPERAND.test(operand)) return compareByDay(fieldValue, operand);
   const operandMs = parseDate(operand);
   const fieldMs = parseDate(fieldValue);
@@ -113,6 +133,11 @@ export function evaluatePredicate<T>(
       if (isEmpty(fieldValue)) return false;
       if (operand == null) return false;
       if (typeof operand === "boolean") return Boolean(fieldValue) === operand;
+      // A date filter names a day; a timestamp column never equals that text (QA 2026-10-31).
+      if (typeof operand === "string" && DATE_OPERAND.test(operand.trim())) {
+        const order = compareByDay(fieldValue, operand.trim());
+        if (order != null) return order === 0;
+      }
       return normalizeComparable(fieldValue) === normalizeComparable(operand);
     }
     case "is_not": {
@@ -155,19 +180,19 @@ export function evaluatePredicate<T>(
     }
 
     case "before": {
-      if (parseDate(operand as string) == null) return true;
+      if (!isUsableOperand(fieldValue, operand)) return true;
       const order = compareDates(fieldValue, operand as string);
       return order != null && order < 0;
     }
     case "after": {
-      if (parseDate(operand as string) == null) return true;
+      if (!isUsableOperand(fieldValue, operand)) return true;
       const order = compareDates(fieldValue, operand as string);
       return order != null && order > 0;
     }
     case "between": {
       const range = (operand ?? {}) as { from?: string; to?: string };
-      const from = range.from && parseDate(range.from) != null ? range.from : null;
-      const to = range.to && parseDate(range.to) != null ? range.to : null;
+      const from = range.from && isUsableOperand(fieldValue, range.from) ? range.from : null;
+      const to = range.to && isUsableOperand(fieldValue, range.to) ? range.to : null;
       if (from == null && to == null) return true;
       if (parseDate(fieldValue) == null) return false;
       if (from != null && (compareDates(fieldValue, from) ?? -1) < 0) return false;
