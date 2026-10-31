@@ -80,6 +80,7 @@ import { TerminationSettlementQueue } from "./termination-settlement/queue";
 import { PaymentEditForm } from "./ui/payment-edit-form";
 import { CreditNoteForm, CreditNoteLinesSummary } from "./ui/credit-note-form";
 import {
+  creditedSupplierCostGross,
   creditNoteLimit,
   creditNoteSelectionPayload,
   effectiveCreditNoteSelection,
@@ -3470,7 +3471,11 @@ function useStaffInvoicesPageContent() {
                       // What the credit note releases besides the invoice
                       // amount (QA D-63, D-64): shown before it is issued.
                       if (!access.canManage || creditNotePreview.error) return null;
-                      const releases = creditNoteReleases(detail, creditNotePreview.gross);
+                      const releases = creditNoteReleases(
+                        detail,
+                        creditNotePreview.gross,
+                        creditedSupplierCostGross(detail.creditable_lines, detail.line_items, creditNoteSelection),
+                      );
                       if (releases.prepayment <= 0 && releases.supplierCost <= 0) return null;
                       return (
                         <ShellBanner tone="warning">

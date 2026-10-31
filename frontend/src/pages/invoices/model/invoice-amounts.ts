@@ -96,8 +96,10 @@ export function paymentCorrectionLimit(
 /**
  * What a credit note of `creditGross` releases on the invoice: advance money
  * credited into it beyond its corrected total (it becomes the patient's
- * refundable credit on the advance) and re-billed supplier costs beyond it
- * (unbilled again). Same rule as the server (QA D-63, D-64).
+ * refundable credit on the advance) and re-billed supplier costs (unbilled
+ * again): what it credits on the lines re-billing them
+ * (`creditedSupplierCost`), and the rest beyond the corrected total. Same rule
+ * as the server (QA D-63, D-64, 2026-10-31).
  */
 export function creditNoteReleases(
   invoice: Pick<
@@ -109,6 +111,7 @@ export function creditNoteReleases(
     | "supplier_cost_allocated_gross"
   >,
   creditGross: number,
+  creditedSupplierCost = 0,
 ): { prepayment: number; supplierCost: number } {
   if (!Number.isFinite(creditGross) || creditGross <= 0) {
     return { prepayment: 0, supplierCost: 0 };
@@ -121,8 +124,9 @@ export function creditNoteReleases(
   });
   const remaining = Math.max(total - creditGross, 0);
   const supplierCost = amount(invoice.supplier_cost_allocated_gross);
+  const onLines = Math.min(creditedSupplierCost, supplierCost);
   return {
     prepayment: cents(Math.max(prepayment - remaining, 0)),
-    supplierCost: cents(Math.max(supplierCost - remaining, 0)),
+    supplierCost: cents(onLines + Math.max(supplierCost - onLines - remaining, 0)),
   };
 }

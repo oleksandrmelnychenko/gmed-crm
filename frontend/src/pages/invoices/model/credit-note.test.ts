@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  creditedSupplierCostGross,
   creditNoteLimit,
   creditNoteSelectionPayload,
   creditableVatRates,
@@ -119,6 +120,22 @@ describe("credit-note selection", () => {
     expect(creditNoteSelectionPayload(lines, draft)).toEqual({ vat_rate: "19", amount_gross: "119.00" });
     expect(previewCreditNote(lines, { ...draft, amountGross: "595.01" }).error).toBe("vat_rate_exceeded");
     expect(previewCreditNote(lines, { ...draft, vatRate: "7" }).error).toBe("vat_rate_missing");
+  });
+
+  it("names what a selection credits on lines re-billing a supplier cost (QA 2026-10-31)", () => {
+    const items = [{}, { source_external_invoice_id: "hotel" }, {}];
+    expect(creditedSupplierCostGross(lines, items, lineDraft({ 1: "" }))).toBe(481.5);
+    expect(creditedSupplierCostGross(lines, items, lineDraft({ 0: "100", 1: "50" }))).toBe(50);
+    expect(creditedSupplierCostGross(lines, items, lineDraft({ 0: "" }))).toBe(0);
+    expect(creditedSupplierCostGross(lines, undefined, lineDraft({ 1: "" }))).toBe(0);
+    const byRate: CreditNoteSelectionDraft = {
+      mode: "vat_rate",
+      lines: {},
+      vatRate: "0",
+      amountGross: "100",
+    };
+    expect(creditedSupplierCostGross(lines, items, byRate)).toBe(100);
+    expect(creditedSupplierCostGross(lines, items, { ...byRate, vatRate: "19" })).toBe(0);
   });
 
   it("never offers more than the server accepts (QA D2-01)", () => {

@@ -402,8 +402,8 @@ impl CreditRoom {
 }
 
 /// What a credit note of `credit_gross` on the invoice would release:
-/// `(prepayment, supplier cost)` gross. For the credit-note form and the
-/// service-cancellation preview.
+/// `(prepayment, supplier cost)` gross. For the service-cancellation preview:
+/// it credits service lines, so no re-billing line adds to the cap.
 pub(super) async fn credit_room_needed(
     conn: &mut PgConnection,
     context: &InvoicePaymentContext,
@@ -442,18 +442,18 @@ async fn active_supplier_cost_allocations(
 ///   release it on that invoice first);
 /// * a settlement invoice releases the advance money credited into it beyond
 ///   its corrected total (newest allocation first; a part is re-applied);
-/// * a patient invoice reverses the supplier-cost allocations beyond its
-///   corrected total (newest first; a part is re-allocated): the cost is
-///   unbilled again.
+/// * a patient invoice reverses the supplier-cost allocations of the credited
+///   lines that re-bill them, and those beyond its corrected total (newest
+///   first; a part is re-allocated): the cost is unbilled again.
 pub(super) async fn make_room_for_credit_tx(
     transaction: &mut Transaction<'_, Postgres>,
     context: &InvoicePaymentContext,
-    credit_gross: Decimal,
+    plan: &credit_notes::CreditNotePlan,
     actor_id: Uuid,
 ) -> Result<CreditRoom, axum::response::Response> {
     let invoice_id = context.invoice_id;
     let failed = |error: sqlx::Error, step: &str| failed_response(error, invoice_id, step);
-    let remaining = context.total_gross - context.credited_amount - credit_gross;
+    let remaining = context.total_gross - context.credited_amount - plan.gross;
     let mut room = CreditRoom::default();
 
     let used_from_advance = allocated_from_advance(transaction, invoice_id)
@@ -570,33 +570,45 @@ pub(super) async fn make_room_for_credit_tx(
             .map_err(|error| failed(error, "recompute after prepayment release"))?;
     }
 
-    let supplier_costs = active_supplier_cost_allocations(transaction, invoice_id)
-        .await
-        .map_err(|error| failed(error, "supplier cost allocations"))?;
-    let excess_supplier = supplier_costs - remaining.max(Decimal::ZERO);
-    if excess_supplier > Decimal::ZERO {
-        let allocations = sqlx::query(
-            r#"SELECT allocation.id, allocation.external_invoice_id, allocation.amount_gross
-               FROM external_invoice_patient_invoice_allocations allocation
-               JOIN external_invoices external ON external.id = allocation.external_invoice_id
-               WHERE allocation.patient_invoice_id = $1
-                 AND allocation.reversed_at IS NULL
-                 AND external.status <> 'cancelled'
-               ORDER BY allocation.created_at DESC, allocation.id DESC
-               FOR UPDATE OF allocation"#,
-        )
-        .bind(invoice_id)
-        .fetch_all(&mut **transaction)
-        .await
-        .map_err(|error| failed(error, "lock supplier cost allocations"))?;
+    let allocations = sqlx::query(
+        r#"SELECT allocation.id, allocation.external_invoice_id, allocation.amount_gross
+           FROM external_invoice_patient_invoice_allocations allocation
+           JOIN external_invoices external ON external.id = allocation.external_invoice_id
+           WHERE allocation.patient_invoice_id = $1
+             AND allocation.reversed_at IS NULL
+             AND external.status <> 'cancelled'
+           ORDER BY allocation.created_at DESC, allocation.id DESC
+           FOR UPDATE OF allocation"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|error| failed(error, "lock supplier cost allocations"))?;
+    let takes = supplier_cost_takes(
+        &allocations
+            .iter()
+            .map(|allocation| {
+                (
+                    allocation
+                        .try_get::<Uuid, _>("external_invoice_id")
+                        .unwrap_or_default(),
+                    allocation
+                        .try_get::<Decimal, _>("amount_gross")
+                        .unwrap_or(Decimal::ZERO),
+                )
+            })
+            .collect::<Vec<_>>(),
+        &credited_supplier_costs(&context.line_items, &plan.lines),
+        remaining,
+    );
+    if takes.iter().any(|take| *take > Decimal::ZERO) {
         let note = format!(
             "Rechnungskorrektur (Gutschrift) zu {}",
             context.invoice_number.trim()
         );
-        let mut left = excess_supplier;
-        for allocation in allocations {
-            if left <= Decimal::ZERO {
-                break;
+        for (allocation, take) in allocations.iter().zip(takes) {
+            if take <= Decimal::ZERO {
+                continue;
             }
             let allocation_id = allocation.try_get::<Uuid, _>("id").unwrap_or_default();
             let external_id = allocation
@@ -605,7 +617,6 @@ pub(super) async fn make_room_for_credit_tx(
             let amount = allocation
                 .try_get::<Decimal, _>("amount_gross")
                 .unwrap_or(Decimal::ZERO);
-            let take = amount.min(left);
             sqlx::query(
                 r#"UPDATE external_invoice_patient_invoice_allocations
                    SET reversed_at = now(), reversed_by = $2, reversal_note = $3
@@ -653,10 +664,72 @@ pub(super) async fn make_room_for_credit_tx(
             .await
             .map_err(|error| failed(error, "audit supplier cost reversal"))?;
             room.reversed_supplier_costs.push((external_id, take));
-            left -= take;
         }
     }
     Ok(room)
+}
+
+/// Gross a credit note takes from the lines that re-bill a supplier cost, per
+/// supplier invoice.
+fn credited_supplier_costs(
+    line_items: &Value,
+    credited: &[credit_notes::CreditNoteLine],
+) -> Vec<(Uuid, Decimal)> {
+    let items = line_items.as_array().map(Vec::as_slice).unwrap_or_default();
+    let mut costs = Vec::<(Uuid, Decimal)>::new();
+    for line in credited {
+        let Some(external_id) = items
+            .get(line.invoice_line_index)
+            .and_then(|item| item.get("source_external_invoice_id"))
+            .and_then(Value::as_str)
+            .and_then(|value| Uuid::parse_str(value).ok())
+        else {
+            continue;
+        };
+        match costs.iter_mut().find(|(id, _)| *id == external_id) {
+            Some((_, gross)) => *gross += line.gross,
+            None => costs.push((external_id, line.gross)),
+        }
+    }
+    costs
+}
+
+/// What a credit note takes from each active supplier-cost allocation
+/// (`(supplier invoice, amount)`, newest first): what it credits on the line
+/// re-billing that cost, even when the rest of a mixed invoice still covers
+/// the amount (QA 2026-10-31: the cost stayed "billed", so neither re-billing
+/// nor a waiver could take it), then whatever the corrected total
+/// (`remaining_total`) no longer covers.
+fn supplier_cost_takes(
+    allocations: &[(Uuid, Decimal)],
+    credited: &[(Uuid, Decimal)],
+    remaining_total: Decimal,
+) -> Vec<Decimal> {
+    let mut takes = vec![Decimal::ZERO; allocations.len()];
+    for (external_id, gross) in credited {
+        let mut left = *gross;
+        for ((allocation_external, amount), take) in allocations.iter().zip(takes.iter_mut()) {
+            if allocation_external == external_id {
+                let part = (*amount - *take).min(left);
+                *take += part;
+                left -= part;
+            }
+        }
+    }
+    let allocated = allocations
+        .iter()
+        .map(|(_, amount)| *amount)
+        .sum::<Decimal>();
+    let mut left = allocated - takes.iter().sum::<Decimal>() - remaining_total.max(Decimal::ZERO);
+    for ((_, amount), take) in allocations.iter().zip(takes.iter_mut()) {
+        if left <= Decimal::ZERO {
+            break;
+        }
+        let part = (*amount - *take).min(left);
+        *take += part;
+        left -= part;
+    }
+    takes
 }
 
 /// `POST /invoices/{id}/advance-rest`: closes the rest of an advance invoice
@@ -773,5 +846,65 @@ mod tests {
         );
         assert_eq!(advance_rest(dec(300), dec(100), dec(200)), dec(0));
         assert_eq!(advance_rest(dec(300), dec(150), dec(200)), dec(0));
+    }
+
+    #[test]
+    fn a_credited_supplier_line_unbills_its_cost_and_the_total_caps_the_rest() {
+        let dec = |value: i64| Decimal::from(value);
+        let hotel = Uuid::from_u128(1);
+        let clinic = Uuid::from_u128(2);
+        // Service 500 + hotel 100: crediting the hotel line leaves 500, which
+        // would still "cover" 100.
+        assert_eq!(
+            supplier_cost_takes(&[(hotel, dec(100))], &[(hotel, dec(100))], dec(500)),
+            vec![dec(100)]
+        );
+        // The credit stops at what is allocated; another cost stays billed.
+        assert_eq!(
+            supplier_cost_takes(
+                &[(clinic, dec(50)), (hotel, dec(80))],
+                &[(hotel, dec(100))],
+                dec(500)
+            ),
+            vec![dec(0), dec(80)]
+        );
+        // A service credit below the costs reverses the newest first (D-64).
+        assert_eq!(
+            supplier_cost_takes(&[(clinic, dec(20)), (hotel, dec(100))], &[], dec(30)),
+            vec![dec(20), dec(70)]
+        );
+        // Both: the credited line first, then the cap.
+        assert_eq!(
+            supplier_cost_takes(
+                &[(clinic, dec(50)), (hotel, dec(100))],
+                &[(hotel, dec(100))],
+                dec(20)
+            ),
+            vec![dec(30), dec(100)]
+        );
+    }
+
+    #[test]
+    fn only_lines_naming_a_supplier_invoice_count_as_credited_costs() {
+        let hotel = Uuid::from_u128(1);
+        let lines = json!([
+            { "description": "Service" },
+            { "description": "Hotel", "source_external_invoice_id": hotel.to_string() },
+        ]);
+        let credited = |index: usize, gross: i64| credit_notes::CreditNoteLine {
+            invoice_line_index: index,
+            description: String::new(),
+            quantity: None,
+            unit_price: None,
+            vat_rate: Decimal::ZERO,
+            is_cost_passthrough: false,
+            net: Decimal::from(gross),
+            vat: Decimal::ZERO,
+            gross: Decimal::from(gross),
+        };
+        assert_eq!(
+            credited_supplier_costs(&lines, &[credited(0, 500), credited(1, 40)]),
+            vec![(hotel, Decimal::from(40))]
+        );
     }
 }

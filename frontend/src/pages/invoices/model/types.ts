@@ -68,6 +68,8 @@ export type InvoiceLineItem = {
   /** Remark printed under the position on the invoice, e.g. the billed quarter. */
   comment?: string | null;
   source_order_leistung_id?: string | null;
+  /** The supplier invoice this line re-bills. */
+  source_external_invoice_id?: string | null;
   quote_line_index?: number;
   quoted_quantity?: string;
   invoiced_quantity?: string;

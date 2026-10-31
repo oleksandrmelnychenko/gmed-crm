@@ -10687,13 +10687,9 @@ async fn issue_credit_note_locked(
     issue: &CreditNoteIssue<'_>,
 ) -> Result<IssuedCreditNote, axum::response::Response> {
     let plan = plan_credit_note_tx(transaction, context, issue.selection).await?;
-    let room = advance_settlement::make_room_for_credit_tx(
-        transaction,
-        context,
-        plan.gross,
-        issue.user_id,
-    )
-    .await?;
+    let room =
+        advance_settlement::make_room_for_credit_tx(transaction, context, &plan, issue.user_id)
+            .await?;
     let mut issued =
         store_credit_note_tx(transaction, context, issue, &plan, room.audit_json()).await?;
     issued.room = room;

@@ -415,6 +415,162 @@ fn money(value: &Value) -> Decimal {
     value.as_str().unwrap().parse::<Decimal>().unwrap()
 }
 
+/// QA 2026-10-31: crediting the re-billing line of a mixed invoice unbills the
+/// cost although the service line still "covers" the amount: it was neither
+/// re-billable nor waivable, the receivable stayed at zero.
+#[tokio::test]
+async fn crediting_the_rebilling_line_of_a_mixed_invoice_unbills_the_cost() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let billing_id = seed_user(&ctx.pool, "billing", &tag).await;
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (
+               patient_id, first_name, last_name, birth_date, gender, created_by
+           ) VALUES ($1, 'Mia', 'Mixed', '1990-01-01', 'diverse', $2)
+           RETURNING id"#,
+    )
+    .bind(format!("MIX-PT-{tag}"))
+    .bind(ctx.admin_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $3)",
+    )
+    .bind(patient_id)
+    .bind(billing_id)
+    .bind(ctx.admin_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let order_id = seed_order(&ctx.pool, patient_id, ctx.admin_id, &format!("mix-{tag}")).await;
+    let external_invoice_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO external_invoices (
+               order_id, patient_id, external_invoice_number,
+               amount_net, amount_vat, amount_gross, currency,
+               status, paid_by, service_delivered, created_by
+           ) VALUES ($1, $2, $3, 100, 0, 100, 'EUR', 'paid', 'agency', true, $4)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("EXT-MIX-{tag}"))
+    .bind(ctx.admin_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let lines = json!([
+        {
+            "description": "Behandlungsorganisation", "quantity": "1", "unit_price": "500",
+            "vat_rate": "0", "line_net": "500", "line_vat": "0", "line_gross": "500",
+        },
+        {
+            "description": "Hotel", "quantity": "1", "unit_price": "100", "vat_rate": "0",
+            "line_net": "100", "line_vat": "0", "line_gross": "100",
+            "is_cost_passthrough": true, "source": "external_invoice",
+            "source_external_invoice_id": external_invoice_id,
+        },
+    ]);
+    let invoice_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+               order_id, patient_id, invoice_number, invoice_type, status,
+               total_net, total_vat, total_gross, paid_amount,
+               line_items, portal_visible, created_by
+           ) VALUES ($1, $2, $3, 'final', 'sent', 600, 0, 600, 0, $4, true, $5)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("PAT-MIX-{tag}"))
+    .bind(lines)
+    .bind(ctx.admin_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO external_invoice_patient_invoice_allocations (
+               external_invoice_id, patient_invoice_id, amount_gross, created_by
+           ) VALUES ($1, $2, 100, $3)"#,
+    )
+    .bind(external_invoice_id)
+    .bind(invoice_id)
+    .bind(ctx.admin_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+
+    let billing = auth_header_for(billing_id, "billing");
+    let today = gmed_server::app_time::today().to_string();
+    let credit_lines = |gross: &str| {
+        json!({
+            "request_id": Uuid::new_v4(),
+            "lines": [{ "line_index": 1, "amount_gross": gross }],
+            "reason": "Hotelrechnung korrigiert",
+            "issued_on": today,
+        })
+    };
+    let credit_notes = format!("/api/v1/invoices/{invoice_id}/credit-notes");
+    let receivable = |pool: sqlx::PgPool| async move {
+        sqlx::query_scalar::<_, Decimal>(
+            r#"SELECT remaining_receivable_gross FROM external_invoice_receivable_balances
+               WHERE external_invoice_id = $1"#,
+        )
+        .bind(external_invoice_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+
+    // Part of the line: that part is unbilled, the rest stays allocated.
+    let (status, credit) = request_json(
+        &ctx.app,
+        "POST",
+        &credit_notes,
+        &billing,
+        Some(credit_lines("30")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{credit}");
+    assert_eq!(credit["reversed_supplier_cost_gross"], "30");
+    assert_eq!(receivable(ctx.pool.clone()).await, Decimal::new(30, 0));
+
+    // The rest of the line.
+    let (status, credit) = request_json(
+        &ctx.app,
+        "POST",
+        &credit_notes,
+        &billing,
+        Some(credit_lines("70")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{credit}");
+    assert_eq!(credit["reversed_supplier_cost_gross"], "70");
+    assert_eq!(receivable(ctx.pool.clone()).await, Decimal::new(100, 0));
+    let active: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM external_invoice_patient_invoice_allocations
+           WHERE patient_invoice_id = $1 AND reversed_at IS NULL"#,
+    )
+    .bind(invoice_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(active, 0);
+
+    // Unbilled again: billing can drop it from re-billing.
+    let (status, waiver) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/external-invoices/{external_invoice_id}/rebilling-waivers"),
+        &billing,
+        Some(json!({ "request_id": Uuid::new_v4(), "reason": "Kulanz" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{waiver}");
+    assert_eq!(money(&waiver["amount_gross"]), Decimal::new(100, 0));
+}
+
 /// A re-billed supplier cost that is not (or no longer) on a patient invoice
 /// can be dropped from re-billing: GMED bears it, with a reason, audited and
 /// reversible; it leaves the patient's debt everywhere (owner 2026-10-12).

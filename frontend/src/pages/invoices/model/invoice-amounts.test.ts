@@ -99,4 +99,19 @@ describe("credit note releases", () => {
       ),
     ).toEqual({ prepayment: 0, supplierCost: 0 });
   });
+
+  it("names the cost of a credited re-billing line although the service still covers it (QA 2026-10-31)", () => {
+    const mixed = {
+      total_gross: "600",
+      credited_amount: "0",
+      adjusted_total_gross: "600",
+      prepayment_applied_amount: "0",
+      supplier_cost_allocated_gross: "100",
+    };
+    expect(creditNoteReleases(mixed, 100, 100)).toEqual({ prepayment: 0, supplierCost: 100 });
+    expect(creditNoteReleases(mixed, 100)).toEqual({ prepayment: 0, supplierCost: 0 });
+    // Part of the line, and more than the invoice keeps: the cap still applies.
+    expect(creditNoteReleases(mixed, 40, 40).supplierCost).toBe(40);
+    expect(creditNoteReleases(mixed, 590, 30).supplierCost).toBe(90);
+  });
 });
