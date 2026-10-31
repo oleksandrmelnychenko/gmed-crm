@@ -16,6 +16,7 @@ import { useServerDraftSync } from "./lead-request-server-sync";
 import { StepFrame, type StepProps } from "./lead-request-step-forms";
 import { servicesText } from "./lead-request-services-text";
 import { asLeadCabinetLang } from "./lead-request-text";
+import { useCabinetStaffMode } from "./lead-request-staff-mode";
 
 function draftOf(value?: LeadServicePreferences): LeadServicePreferences {
   return {
@@ -76,6 +77,7 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
   const [state, setState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
   const locked = Boolean(request.submitted_at);
+  const staffMode = useCabinetStaffMode();
 
   const save = useCallback((snapshot: LeadServicePreferences) => {
     if (locked) return true;
@@ -138,10 +140,10 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
       </div> : null}
       <CabinetSection title={wording.period} accessory={<CabinetHint className="py-1">{wording.optional}</CabinetHint>}>
         <LabeledField id="lead-request-service-program_date_from" label={wording.from} className={cn(fieldStyle, "max-w-sm")}>
-          {/* A wished start lies ahead: no date in the past (owner 2026-10-29). */}
+          {/* A wished start lies ahead: no date in the past (owner 2026-10-29); staff may enter one (QA 2026-10-31). */}
           <Input key={`program_date_from-${lang}`} id="lead-request-service-program_date_from" type="date" className="h-10 bg-background"
             pickerLang={asLeadCabinetLang(lang) ?? undefined}
-            min={appDateKey()} value={draft.program_date_from} onChange={(event) => setDraft((current) => ({ ...current, program_date_from: event.target.value }))} />
+            min={staffMode ? undefined : appDateKey()} value={draft.program_date_from} onChange={(event) => setDraft((current) => ({ ...current, program_date_from: event.target.value }))} />
         </LabeledField>
       </CabinetSection>
       <CabinetSection title={wording.services} accessory={<StatusChip tone={draft.services.length ? "info" : "neutral"}>{draft.services.length}</StatusChip>}>

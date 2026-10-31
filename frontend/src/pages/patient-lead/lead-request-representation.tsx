@@ -1,3 +1,4 @@
+import { useCabinetStaffMode } from "./lead-request-staff-mode";
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CircleAlert, LoaderCircle, Trash2, Upload } from "lucide-react";
 
@@ -113,6 +114,7 @@ import { PERSON_CITY_MAX } from "@/lib/person-fields";
 const ANSWERS = "answers";
 /** The server's refusal of a custody GMED staff stated (owner decision 2026-10-22). */
 const CUSTODY_SET_BY_STAFF = "custody_set_by_staff";
+const CUSTODY_ENDS_OWN_ACCESS = "custody_ends_own_access";
 const RELATION_GUARDIAN_NEEDS_CUSTODY = "relation_guardian_needs_custody";
 
 /**
@@ -974,11 +976,14 @@ export function RepresentationSection({
   // "in_use": the server keeps a person, so the answer went back. "failed": the answers are not saved.
   // "by_staff": GMED staff stated the custody, the cabinet may not change it (owner 2026-10-22).
   // "guardian_contact": a contact GMED marked as guardian keeps the custody "guardian".
-  const [problem, setProblem] = useState<"in_use" | "failed" | "by_staff" | "guardian_contact" | null>(null);
+  // "own_access": the answer would end this parent's own access: only GMED states that (QA 2026-10-31, B-1).
+  const [problem, setProblem] = useState<"in_use" | "failed" | "by_staff" | "guardian_contact" | "own_access" | null>(null);
   // A person removed with "remove" leaves an empty form in its place.
   const [generations, setGenerations] = useState<Partial<Record<RepresentativeSlot, number>>>({});
   const [states, setStates] = useState<Record<string, SaveState>>({});
-  const [showDocumentDetails, setShowDocumentDetails] = useState(false);
+  const staffMode = useCabinetStaffMode();
+  const [detailsAsked, setShowDocumentDetails] = useState(false);
+  const showDocumentDetails = detailsAsked || Boolean(request.submitted_at && staffMode);
   // A person's form opens once the server has the answer that asks for it (it
   // then knows whom it holds for that place), and closes with the answer.
   const stored = shownSlots(minor, draftFromRepresentation(representation), representation);
@@ -1052,10 +1057,10 @@ export function RepresentationSection({
           failedRef.current = true;
           setPartState(ANSWERS, "error");
           const code = errorBody(cause)?.code;
-          if (code === "representative_in_use" || code === RELATION_GUARDIAN_NEEDS_CUSTODY) {
+          if (code === "representative_in_use" || code === RELATION_GUARDIAN_NEEDS_CUSTODY || code === CUSTODY_ENDS_OWN_ACCESS) {
             // Nothing was saved and the person stays: the form shows the stored answers again.
             const stored = savedRef.current;
-            setProblem(code === "representative_in_use" ? "in_use" : "guardian_contact");
+            setProblem(code === "representative_in_use" ? "in_use" : code === CUSTODY_ENDS_OWN_ACCESS ? "own_access" : "guardian_contact");
             setDraft((current) => ({
               has_representative: "has_representative" in patch ? stored.has_representative : current.has_representative,
               under_guardianship: "under_guardianship" in patch ? stored.under_guardianship : current.under_guardianship,
@@ -1097,7 +1102,7 @@ export function RepresentationSection({
       ].join(", ");
       if (!window.confirm(text.representativeRemoveConfirm(who))) return;
     }
-    setProblem((current) => (current === "in_use" || current === "guardian_contact" ? null : current));
+    setProblem((current) => (current === "in_use" || current === "guardian_contact" || current === "own_access" ? null : current));
     setDraft(next);
     // An answer is a choice, not typing: it is saved at once, and the form it asks for opens with the reply.
     save(next);
@@ -1146,7 +1151,9 @@ export function RepresentationSection({
             ? text.custodySetByStaffHint
             : problem === "guardian_contact"
               ? text.custodyGuardianContact
-              : text.notSaved}
+              : problem === "own_access"
+                ? text.custodyEndsOwnAccess
+                : text.notSaved}
       </p>
     );
 
@@ -1162,7 +1169,8 @@ export function RepresentationSection({
 
   if (minor) {
     return (
-      <Section title={text.sectionLegalRepresentatives} accessory={representation.document_stage === false ? (
+      // Nothing opens in a sent, read-only form: staff see the details at once (QA 2026-10-31, B-6).
+      <Section title={text.sectionLegalRepresentatives} accessory={representation.document_stage === false && !request.submitted_at ? (
         <Button type="button" variant="outline" size="sm" className="h-auto min-h-8 max-w-full whitespace-normal" onClick={() => setShowDocumentDetails((value) => !value)} data-testid="lead-request-parent-document-details">
           {showDocumentDetails ? text.parentShortForm : text.parentDocumentDetails}
         </Button>

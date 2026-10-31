@@ -1,3 +1,4 @@
+import { authorityProofOf } from "./lead-request-representation-model";
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import { preferredLanguageOptions } from "@/pages/leads/model/lead-wizard.model";
@@ -866,12 +867,14 @@ export function OtherParentDocumentSection({
   const required = representation?.document_stage === true || request.progress.missing_for_submit.includes(`${slot}_id_upload`);
   const name = person ? [person.first_name, person.last_name].filter(Boolean).join(" ") : "";
   const byStaff = givenSlot !== undefined;
+  const vormund = byStaff && representation?.custody === "guardian";
+  const proof = vormund ? authorityProofOf(slot, "guardian") : null;
   return (
     <div className="scroll-mt-4" data-testid={byStaff ? `lead-request-parent-document-${slot}` : "lead-request-other-parent-document"}>
-      <Section compact title={byStaff ? text.parentDocumentTitle(name) : text.otherParentDocumentTitle(name)}>
+      <Section compact title={vormund ? [text.representativeGuardianOfChild, name].filter(Boolean).join(": ") : byStaff ? text.parentDocumentTitle(name) : text.otherParentDocumentTitle(name)}>
         {person ? (
           <div className="space-y-2">
-            <InfoNote>{byStaff ? text.parentDocumentHint : text.otherParentDocumentHint}</InfoNote>
+            {vormund ? null : <InfoNote>{byStaff ? text.parentDocumentHint : text.otherParentDocumentHint}</InfoNote>}
             <RepresentativeUpload
               request={request}
               slot={slot}
@@ -884,6 +887,20 @@ export function OtherParentDocumentSection({
               enqueue={enqueue}
               onChange={onChange}
             />
+            {proof ? (
+              <RepresentativeUpload
+                request={request}
+                slot={slot}
+                kind="authority"
+                label={text.representativeAuthority[proof.proof]}
+                required={proof.required && (required || request.progress.missing_for_submit.includes(`${slot}_authority_upload`))}
+                person={person}
+                documents={person.authority_documents}
+                text={text}
+                enqueue={enqueue}
+                onChange={onChange}
+              />
+            ) : null}
           </div>
         ) : (
           <div
@@ -913,7 +930,8 @@ export function OtherParentDocumentSection({
 export function parentDocumentSlots(request: Pick<LeadRequest, "representation">): ("rep1" | "rep2")[] {
   const custody = request.representation?.custody;
   if (custody === "joint") return ["rep1", "rep2"];
-  return custody === "sole_parent" ? ["rep1"] : [];
+  // A Vormund's copy and proof are asked at the release: staff enter them here too (QA 2026-10-31, B-5).
+  return custody === "sole_parent" || custody === "guardian" ? ["rep1"] : [];
 }
 
 /**

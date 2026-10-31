@@ -125,7 +125,8 @@ export function representativeInSlot(
 export function representativesOnFile(
   representation: LeadRequestRepresentation | null | undefined,
 ): LeadRequestRepresentative[] {
-  return (representation?.representatives ?? []).filter((person) => person.slot === null);
+  // Never the person who reads it: «another person with custody» would be that person (QA 2026-10-31, B-1).
+  return (representation?.representatives ?? []).filter((person) => person.slot === null && !person.mine);
 }
 
 /**

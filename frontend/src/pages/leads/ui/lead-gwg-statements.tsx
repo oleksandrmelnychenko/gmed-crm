@@ -865,7 +865,7 @@ export function PayerAnswersGroup({
             data-testid="lead-gwg-payer-badge"
             className="h-5 rounded-full border-violet-200 bg-violet-50 px-1.5 text-[10.5px] font-medium text-violet-800"
           >
-            {byStaff
+            {byStaff || questionnaire.entered_by_staff
               ? tx(
                   `внёс сотрудник с бумажной анкеты · ${formatAppDateTime(questionnaire.submitted_at)}`,
                   `von Mitarbeitenden aus dem Papierbogen erfasst am ${formatAppDateTime(questionnaire.submitted_at)}`,

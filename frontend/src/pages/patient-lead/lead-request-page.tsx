@@ -322,7 +322,8 @@ export function LeadRequestPage({
               : text.noRequest}
         </p>
         {/* The access ended: nothing to do here but to sign out (QA 2026-10-24, B-2). */}
-        {guardianAccessEnded && !ownAccessClosed ? (
+        {/* An account with a patient portal keeps working: the way there, no sign-out (QA 2026-10-31, B-8). */}
+        {guardianAccessEnded && !ownAccessClosed && leadMode ? (
           <Button type="button" variant="outline" onClick={() => void logout()} data-testid="lead-request-sign-out">
             {text.signOut}
           </Button>
@@ -330,7 +331,8 @@ export function LeadRequestPage({
         {/* The account has the patient portal (the request became a patient record): the way there. */}
         {!ownAccessClosed && !leadMode && user?.role === "patient" ? (
           <div className="space-y-3" data-testid="lead-request-patient-portal">
-            <p className="text-sm">{text.noRequestPortal}</p>
+            {/* Not "your request moved there": this access ended, nothing moved. */}
+            {guardianAccessEnded ? null : <p className="text-sm">{text.noRequestPortal}</p>}
             <Button type="button" onClick={() => window.location.assign("/")}>
               {text.openPatientPortal}
             </Button>

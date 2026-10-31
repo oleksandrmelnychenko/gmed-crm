@@ -182,6 +182,8 @@ export type StaffPayerQuestionnaire = {
   payer_type: string;
   /** `draft` or `submitted`. */
   state: string | null;
+  /** Staff entered the answers from the signed paper form (owner 2026-10-30). */
+  entered_by_staff?: boolean;
   email: string | null;
   email_confirmed_at: string | null;
   privacy: {
@@ -457,6 +459,7 @@ export function normalizeStaffPayerQuestionnaire(value: unknown): StaffPayerQues
     source: textOrNull(raw.source),
     payer_type: textOrNull(raw.payer_type) ?? "person",
     state: textOrNull(raw.state),
+    entered_by_staff: raw.entered_by_staff === true,
     email: textOrNull(raw.email),
     email_confirmed_at: textOrNull(raw.email_confirmed_at),
     privacy: {

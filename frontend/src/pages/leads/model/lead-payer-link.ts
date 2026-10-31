@@ -722,7 +722,7 @@ export function payerQuestionnaireGroups(
 }
 
 /** "Подтверждено 06.10.2026 12:10 · версия … · IP …"; "" while the payer has not acknowledged the notice. */
-export function payerPrivacyLine(questionnaire: Pick<StaffPayerQuestionnaire, "privacy">, tx: Tx): string {
+export function payerPrivacyLine(questionnaire: Pick<StaffPayerQuestionnaire, "privacy" | "entered_by_staff">, tx: Tx): string {
   const privacy = questionnaire.privacy;
   if (!privacy.acknowledged_at) return "";
   const channels = contactChannelsLabel(privacy.contact_channels, tx);
@@ -731,6 +731,7 @@ export function payerPrivacyLine(questionnaire: Pick<StaffPayerQuestionnaire, "p
     privacy.text_version ? `${tx("версия", "Version")} ${privacy.text_version}` : "",
     privacy.ip ? `IP ${privacy.ip}` : "",
     channels ? `${tx("каналы связи", "Kontaktwege")}: ${channels}` : "",
+    questionnaire.entered_by_staff ? tx("записал сотрудник", "von GMED erfasst") : "",
   ]
     .filter(Boolean)
     .join(" · ");

@@ -270,6 +270,10 @@ export type LeadRequestText = {
   recipient: {
     section: string;
     parentQuestion: string;
+    /** A minor's guardian (Vormund) is no parent (QA 2026-10-31, B-4). */
+    parentQuestionVormund: string;
+    vormundSelf: string;
+    isPayerVormund: string;
     confirmPayerChange: string;
     replacePayerHint: string;
     question: string;
@@ -438,6 +442,8 @@ export type LeadRequestText = {
   custodyQuestion: string;
   /** Under the custody GMED staff stated (read-only, owner 2026-10-22). */
   custodySetByStaffHint: string;
+  /** The second parent's answer would end that parent's own access (QA 2026-10-31, B-1). */
+  custodyEndsOwnAccess: string;
   /** One line above the legal representatives for every greyed-out field (labels audit 2026-10-26, B6). */
   representativeLockedByGmed: string;
   /** A contact GMED marked as guardian (Vormund) keeps the custody "guardian" (owner 2026-10-22). */
@@ -1279,6 +1285,9 @@ const de: LeadRequestText = {
     replacePayerHint: "Ihre bisherigen Angaben zum Zahler werden ersetzt.",
     question: "Wer ist Rechnungsempfänger?",
     parentQuestion: "Welcher Elternteil erhält die Rechnung?",
+    parentQuestionVormund: "Wer vom Vormund oder den Vormündern erhält die Rechnung?",
+    vormundSelf: "Vormund / Pfleger",
+    isPayerVormund: "Der Vormund / Pfleger zahlt auch",
     options: { self: "Ich", third_party: "Eine andere Person oder Organisation" },
     optionsGuardian: {
       self: "Ich (als Elternteil / gesetzliche Vertretung)",
@@ -1491,6 +1500,7 @@ const de: LeadRequestText = {
   parentShortFormIntroVormund: "Für die Anfrage genügen Name, Kontakt, Wohnsitzland und Staatsangehörigkeit; weitere Angaben brauchen wir erst vor dem Vertrag.",
   custodyQuestion: "Wer vertritt das Kind?",
   custodySetByStaffHint: "Von GMED angegeben; falls das nicht stimmt, schreiben Sie uns bitte.",
+  custodyEndsOwnAccess: "Diese Angabe würde Ihren eigenen Zugang beenden. Bitte wenden Sie sich an GMED, wenn sich das Sorgerecht geändert hat.",
   representativeLockedByGmed: "Grau hinterlegte Felder ändert GMED – schreiben Sie uns, falls etwas nicht stimmt.",
   custodyGuardianContact: "Bei GMED ist eine Person als Vormund eingetragen, daher bleibt die Vormundschaft angegeben. Falls das nicht stimmt, schreiben Sie uns bitte.",
   custodyOptions: {
@@ -1893,6 +1903,9 @@ const ru: LeadRequestText = {
     replacePayerHint: "Прежние данные о плательщике будут заменены.",
     question: "Кто является получателем счёта?",
     parentQuestion: "Кто из родителей получит счёт?",
+    parentQuestionVormund: "Кто из опекунов получит счёт?",
+    vormundSelf: "Опекун / попечитель",
+    isPayerVormund: "Опекун / попечитель также оплачивает",
     options: { self: "Я", third_party: "Третье лицо или организация" },
     optionsGuardian: {
       self: "Я (как родитель / законный представитель)",
@@ -2102,6 +2115,7 @@ const ru: LeadRequestText = {
   parentShortFormIntroVormund: "Для заявки достаточно имени, контактов, страны проживания и гражданства; остальное понадобится только перед договором.",
   custodyQuestion: "Кто представляет ребёнка?",
   custodySetByStaffHint: "Указано GMED; если неверно — напишите нам.",
+  custodyEndsOwnAccess: "Этот ответ закрыл бы ваш собственный доступ. Если право опеки изменилось, напишите в GMED.",
   representativeLockedByGmed: "Серые поля меняет GMED — напишите нам, если что-то неверно.",
   custodyGuardianContact: "В GMED один из контактов указан как опекун, поэтому опека остаётся. Если это неверно — напишите нам.",
   custodyOptions: {
@@ -2504,6 +2518,9 @@ const uk: LeadRequestText = {
     replacePayerHint: "Попередні дані про платника буде замінено.",
     question: "Хто є отримувачем рахунку?",
     parentQuestion: "Хто з батьків отримає рахунок?",
+    parentQuestionVormund: "Хто з опікунів отримає рахунок?",
+    vormundSelf: "Опікун / піклувальник",
+    isPayerVormund: "Опікун / піклувальник також сплачує",
     options: { self: "Я", third_party: "Третя особа або організація" },
     optionsGuardian: {
       self: "Я (як один із батьків / законний представник)",
@@ -2713,6 +2730,7 @@ const uk: LeadRequestText = {
   parentShortFormIntroVormund: "Для заявки достатньо імені, контактів, країни проживання та громадянства; решта знадобиться лише перед договором.",
   custodyQuestion: "Хто представляє дитину?",
   custodySetByStaffHint: "Вказано GMED; якщо неправильно — напишіть нам.",
+  custodyEndsOwnAccess: "Ця відповідь закрила б ваш власний доступ. Якщо право опіки змінилося, напишіть у GMED.",
   representativeLockedByGmed: "Сірі поля змінює GMED — напишіть нам, якщо щось не так.",
   custodyGuardianContact: "У GMED один із контактів указано як опікуна, тому опіка залишається. Якщо це неправильно — напишіть нам.",
   custodyOptions: {
@@ -3115,6 +3133,9 @@ const en: LeadRequestText = {
     replacePayerHint: "Your previous payer details will be replaced.",
     question: "Who is the invoice recipient?",
     parentQuestion: "Which parent will receive the invoice?",
+    parentQuestionVormund: "Which guardian will receive the invoice?",
+    vormundSelf: "Guardian",
+    isPayerVormund: "The guardian also pays",
     options: { self: "Me", third_party: "Another person or an organisation" },
     optionsGuardian: {
       self: "Me (as a parent / legal representative)",
@@ -3318,6 +3339,7 @@ const en: LeadRequestText = {
   parentShortFormIntroVormund: "Name, contact, country of residence and citizenship are enough for now; we need more only before the contract.",
   custodyQuestion: "Who represents the child?",
   custodySetByStaffHint: "Stated by GMED; if this is wrong, please write to us.",
+  custodyEndsOwnAccess: "This answer would end your own access. If custody has changed, please write to GMED.",
   representativeLockedByGmed: "Greyed-out fields are changed by GMED — write to us if something is wrong.",
   custodyGuardianContact: "GMED has a contact on file as the guardian, so the guardianship stays. If this is wrong, please write to us.",
   custodyOptions: {

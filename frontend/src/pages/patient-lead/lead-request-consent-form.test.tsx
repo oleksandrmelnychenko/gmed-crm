@@ -92,7 +92,7 @@ describe("consent form choices in the lead cabinet", () => {
       />,
     );
     expect(markup).toContain("данные и документы моего ребёнка");
-    expect(markup).toContain("за своего ребёнка");
+    expect(markup).toContain("соглашаетесь за ребёнка");
     expect(markup).not.toContain("мои персональные");
     for (const lang of ["de", "en", "uk", "ru"]) {
       const child = consentFormText(lang, true);

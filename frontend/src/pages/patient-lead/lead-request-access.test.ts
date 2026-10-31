@@ -76,7 +76,7 @@ describe("who acts for the child", () => {
   it("staff upload each parent's identity copy on step Document", () => {
     expect(parentDocumentSlots(request("staff", true, "joint"))).toEqual(["rep1", "rep2"]);
     expect(parentDocumentSlots(request("staff", true, "sole_parent"))).toEqual(["rep1"]);
-    expect(parentDocumentSlots(request("staff", true, "guardian"))).toEqual([]);
+    expect(parentDocumentSlots(request("staff", true, "guardian"))).toEqual(["rep1"]);
   });
 
   it("names the new choices in every language", () => {
