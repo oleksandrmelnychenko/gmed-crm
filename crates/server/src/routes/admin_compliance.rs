@@ -4486,6 +4486,14 @@ async fn anonymize_patient_record(
     if !open_business.is_empty() {
         return Err(erasure_blocked_by_open_business(&open_business));
     }
+    // The name as notifications print it, read before the record loses it.
+    let notified_name = sqlx::query_scalar::<_, String>(
+        "SELECT LOWER(BTRIM(concat_ws(' ', first_name, last_name))) FROM patients WHERE id = $1",
+    )
+    .bind(patient_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| failed(e, "load patient name"))?;
     // The free text of tasks and appointments, while the record still names
     // the patient (the words to replace come from it).
     let mut scrubbed_free_text = scrub_patient_free_text_in_tx(&mut tx, patient_id, &anon)
@@ -4706,13 +4714,31 @@ async fn anonymize_patient_record(
             .await
             .map_err(|e| failed(e, "remove medication plan imports"))?
             .rows_affected();
+    // QA 2026-10-31 (R2-B): every notification about the person goes, whatever
+    // record it hangs on (the lead's "New lead: …", a recommendation shown to
+    // the parent), and any other that prints the full name.
     let removed_notifications = sqlx::query(
         r#"DELETE FROM user_notifications
            WHERE (entity_type = 'patient' AND entity_id = $1)
-              OR (entity_type = 'document' AND entity_id = ANY($2))"#,
+              OR (entity_type = 'document' AND entity_id = ANY($2))
+              OR (entity_type = 'lead' AND entity_id = ANY($3))
+              OR (entity_type = 'recommendation' AND entity_id IN (
+                      SELECT id FROM patient_recommendations WHERE patient_id = $1))
+              OR (entity_type = 'order' AND entity_id IN (
+                      SELECT id FROM orders WHERE patient_id = $1))
+              OR (entity_type = 'case' AND entity_id IN (
+                      SELECT id FROM cases WHERE patient_id = $1))
+              OR (entity_type = 'invoice' AND entity_id IN (
+                      SELECT id FROM invoices WHERE patient_id = $1))
+              OR ($4 <> '' AND (
+                      strpos(LOWER(title), $4) > 0
+                      OR strpos(LOWER(COALESCE(body, '')), $4) > 0
+                      OR strpos(LOWER(COALESCE(params::text, '')), $4) > 0))"#,
     )
     .bind(patient_id)
     .bind(&erased_document_ids)
+    .bind(&source_lead_ids)
+    .bind(&notified_name)
     .execute(&mut *tx)
     .await
     .map_err(|e| failed(e, "remove patient notifications"))?

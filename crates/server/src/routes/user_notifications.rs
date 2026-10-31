@@ -33,9 +33,14 @@ async fn list_notifications(
         r#"SELECT id, kind, title, body, params, entity_type, entity_id, is_read, created_at
            FROM user_notifications
            WHERE user_id = $1
+             -- The portal's selected child (QA 2026-10-31, R2-C).
+             AND ($2::uuid IS NULL
+                  OR user_notification_patient(entity_type, entity_id) IS NULL
+                  OR user_notification_patient(entity_type, entity_id) = $2)
            ORDER BY created_at DESC LIMIT 50"#,
     )
     .bind(auth.user_id)
+    .bind(auth.selected_patient_id)
     .fetch_all(&state.db)
     .await
     {
@@ -75,10 +80,16 @@ async fn unread_count(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    let count = match sqlx::query_scalar!(
-        r#"SELECT count(*) AS "c!" FROM user_notifications WHERE user_id = $1 AND NOT is_read"#,
-        auth.user_id
+    let count = match sqlx::query_scalar::<_, i64>(
+        r#"SELECT count(*)
+           FROM user_notifications
+           WHERE user_id = $1 AND NOT is_read
+             AND ($2::uuid IS NULL
+                  OR user_notification_patient(entity_type, entity_id) IS NULL
+                  OR user_notification_patient(entity_type, entity_id) = $2)"#,
     )
+    .bind(auth.user_id)
+    .bind(auth.selected_patient_id)
     .fetch_one(&state.db)
     .await
     {
