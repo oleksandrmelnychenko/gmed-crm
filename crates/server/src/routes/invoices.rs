@@ -6267,8 +6267,12 @@ async fn get_my_invoice(
     Json(invoice).into_response()
 }
 
+/// The requested year, else the current year in Berlin: around New Year the
+/// UTC year would open the wrong ledger (QA 2026-10-31).
 fn accounting_ledger_year(query: &AccountingLedgerQuery) -> i32 {
-    query.year.unwrap_or_else(|| Utc::now().year())
+    query
+        .year
+        .unwrap_or_else(|| crate::app_time::today().year())
 }
 
 /// `GET /invoices/issuer-tax-registration`: whether GMED's Steuernummer or
