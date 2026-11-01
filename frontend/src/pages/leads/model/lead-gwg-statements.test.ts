@@ -826,6 +826,20 @@ describe("sections 7–8 as the group shows them", () => {
       .toBe("Elternteil / gesetzliche Vertretung (von Mitarbeitenden eingetragen)");
   });
 
+  it("names the parent who receives and reads her as the payer once she pays (QA 2026-11-01, V4)", () => {
+    const value = normalizeLeadPortalBilling({
+      invoice_recipient: "self",
+      invoice_recipient_is_payer: false,
+      recipient: { type: null, name: "Anke Quitte", representative_id: "anke" },
+    })!;
+    const row = (key: string, payerId: string | null) =>
+      billingStatements(value, ru, "ru", false, true, null, false, null, { payer_representative_id: payerId })
+        .invoice.find((item) => item.key === key)?.value;
+    expect(row("invoice_recipient", "rolf")).toBe("Родитель / законный представитель: Anke Quitte");
+    expect(row("invoice_recipient_is_payer", "rolf")).toBe("Нет");
+    expect(row("invoice_recipient_is_payer", "anke")).toBe("Да");
+  });
+
   it("keeps the legacy invoice choice when the server sends no recipient fields", () => {
     const value = normalizeLeadPortalBilling({ invoice_to: "payer", invoice_email: "legacy@example.com" })!;
     expect(portalInvoiceTo(value)).toBe("payer");

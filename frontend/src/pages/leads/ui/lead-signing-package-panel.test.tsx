@@ -61,6 +61,17 @@ describe("lead signing package source", () => {
     expect(html).toContain("Рамочный договор: подписан");
   });
 
+  it("does not call an outdated signed version signed (QA 2026-11-01, V4)", () => {
+    summary.value = { document_id: "contract-v1", status: "completed", test_mode: false } as NonNullable<typeof summary.value>;
+    const outdated = (id: string) => ({ ...document(id, true), terms_current: false });
+    const html = render(outdated("contract-v1"), outdated("order-v1"), true);
+    expect(html).toContain("Рамочный договор: устарел, нужна новая версия");
+    expect(html).toContain("Заказ: устарел, нужна новая версия");
+    expect(html).not.toContain("Рамочный договор: подписан");
+    expect(html).not.toContain("Заказ: подписан");
+    expect(html).not.toContain("data-current-package-status");
+  });
+
   it("does not bypass a new unsigned contract version after an earlier signature", () => {
     const html = render(document("contract-v3", false), document("new-order", false), true);
     expect(html).toContain('data-document-signature-id="contract-v3"');

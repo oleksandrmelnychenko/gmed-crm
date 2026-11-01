@@ -33,7 +33,11 @@ export function LeadSigningPackagePanel({
   // The entity may still say "signed" after a new, unsigned PDF version was
   // created. Choose by the current documents' proof, and keep signed documents
   // available for history once there is nothing left to sign.
-  const currentContractSigned = contractDocument ? Boolean(contractDocument.signed_at) : contractSigned;
+  // A signature on an outdated version names what no longer holds: «подписан»
+  // stood beside «Устарел» after a change of the paying parent (QA 2026-11-01, V4).
+  const contractOutdated = contractDocument?.terms_current === false;
+  const orderOutdated = orderDocument?.terms_current === false;
+  const currentContractSigned = contractDocument ? Boolean(contractDocument.signed_at) && !contractOutdated : contractSigned;
   const source = (contractDocument && !contractDocument.signed_at ? contractDocument : null)
     ?? (orderDocument && !orderDocument.signed_at ? orderDocument : null)
     ?? contractDocument
@@ -69,12 +73,16 @@ export function LeadSigningPackagePanel({
             <StatusChip tone="success">{contractDocument?.ursprung === "paper_signature" && contractDocument.signed_at
               ? tx("Рамочный договор: подписан на бумаге", "Rahmenvertrag: auf Papier unterzeichnet")
               : tx("Рамочный договор: подписан", "Rahmenvertrag: unterzeichnet")}</StatusChip>
+          ) : contractOutdated ? (
+            <StatusChip tone="warning">{tx("Рамочный договор: устарел, нужна новая версия", "Rahmenvertrag: veraltet, neue Version nötig")}</StatusChip>
           ) : contractDocument ? (
             <StatusChip tone={demoChecks.includes("contract_signed") ? "info" : "warning"}>{demoChecks.includes("contract_signed")
               ? tx("Рамочный договор: DEMO-подпись", "Rahmenvertrag: DEMO-Unterschrift")
               : tx("Рамочный договор: не подписан", "Rahmenvertrag: nicht unterzeichnet")}</StatusChip>
           ) : null}
-          {orderDocument ? (
+          {orderOutdated ? (
+            <StatusChip tone="warning">{tx("Заказ: устарел, нужна новая версия", "Auftrag: veraltet, neue Version nötig")}</StatusChip>
+          ) : orderDocument ? (
             <StatusChip tone={orderDocument.signed_at ? "success" : demoChecks.includes("order_signed_patient") ? "info" : "warning"}>{orderDocument.signed_at
               ? tx("Заказ: подписан", "Auftrag: unterzeichnet")
               : demoChecks.includes("order_signed_patient")
@@ -82,7 +90,7 @@ export function LeadSigningPackagePanel({
                 : tx("Заказ: не подписан", "Auftrag: nicht unterzeichnet")}</StatusChip>
           ) : null}
         </div>
-        {summary && summary.document_id === source?.id ? <div className="space-y-1.5" data-current-package-status>
+        {summary && summary.document_id === source?.id && source.terms_current !== false ? <div className="space-y-1.5" data-current-package-status>
           <StatusChip tone={summary.status === "completed" ? "success" : ["declined", "error", "needs_review"].includes(summary.status) ? "error" : "warning"}>
             {summary.test_mode ? "DEMO · " : ""}{summary.status === "pending"
               ? tx("Запрос принят Skribble", "Anfrage von Skribble angenommen")

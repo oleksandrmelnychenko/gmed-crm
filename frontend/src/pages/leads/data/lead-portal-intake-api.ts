@@ -215,6 +215,8 @@ export type LeadPortalRecipient = {
   relationship_kind: string | null;
   relationship: string | null;
   payment_reason: string | null;
+  /** The minor's parent who receives the invoice (`invoice_recipient` `self`). */
+  representative_id?: string | null;
 };
 
 /**
@@ -691,6 +693,9 @@ export function normalizeLeadPortalBilling(value: unknown): LeadPortalBilling | 
                 relationship_kind: textOrNull(party.relationship_kind),
                 relationship: textOrNull(party.relationship),
                 payment_reason: textOrNull(party.payment_reason),
+                ...(textOrNull(party.representative_id)
+                  ? { representative_id: textOrNull(party.representative_id) }
+                  : {}),
               }
             : null,
         };

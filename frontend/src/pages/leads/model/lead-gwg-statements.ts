@@ -359,6 +359,8 @@ export function gwgLegalAnswers(identification: GwgLegalAnswerSource, tx: Tx, la
  * the cabinet in one.
  */
 export type GwgPayerStatement = {
+  /** The parent who pays, when a representative does. */
+  payer_representative_id?: string | null;
   payer_kind?: "self" | "third_party" | "representative" | null;
   relationship_kind?: string | null;
   relationship?: string | null;
@@ -683,7 +685,11 @@ export function billingStatements(
    * The stored payer's relation: the recipient who pays is that payer, and a
    * replaced payer's relation goes with him (QA 2026-11-01). Null when unknown.
    */
-  payerRelation: { relationship_kind?: string | null; relationship?: string | null } | null = null,
+  payerRelation: {
+    relationship_kind?: string | null;
+    relationship?: string | null;
+    payer_representative_id?: string | null;
+  } | null = null,
 ): BillingStatements {
   const country = (code: string | null) => countryNameForDisplay(code, lang);
   const statement = (
@@ -709,12 +715,18 @@ export function billingStatements(
   if (billing.invoice_recipient !== undefined) {
     const third = billing.invoice_recipient === "third_party";
     const organisation = party?.type === "organisation";
+    // A parent named by name: after a change of the payer the recipient is
+    // not the parent who filled the cabinet (QA 2026-11-01, V4).
+    const parent = billing.invoice_recipient === "self" && minor ? billing.recipient ?? null : null;
+    const parentName = parent?.name?.trim();
     const who =
       billing.invoice_recipient === "self"
         ? minor
-          ? recipientByStaff
-            ? tx("Родитель / законный представитель (внёс сотрудник)", "Elternteil / gesetzliche Vertretung (von Mitarbeitenden eingetragen)")
-            : tx("Родитель / законный представитель, заполнявший кабинет", "Elternteil / gesetzliche Vertretung, die das Portal ausgefüllt hat")
+          ? parentName
+            ? `${tx("Родитель / законный представитель", "Elternteil / gesetzliche Vertretung")}: ${parentName}`
+            : recipientByStaff
+              ? tx("Родитель / законный представитель (внёс сотрудник)", "Elternteil / gesetzliche Vertretung (von Mitarbeitenden eingetragen)")
+              : tx("Родитель / законный представитель, заполнявший кабинет", "Elternteil / gesetzliche Vertretung, die das Portal ausgefüllt hat")
           : tx("Пациент (сам / законные представители)", "Patient/in (selbst / gesetzliche Vertretung)")
         : third
           ? [
@@ -733,7 +745,15 @@ export function billingStatements(
       statement(
         "invoice_recipient_is_payer",
         tx("Получатель счёта — плательщик", "Rechnungsempfänger ist Zahler"),
-        answerLabel(billing.invoice_recipient_is_payer ?? null, tx),
+        // The stored answer stays «no» when staff name the receiving parent as
+        // the payer: «Нет» beside the parent who pays and receives (V4). The
+        // answer is kept, a change back restores "this parent only receives".
+        answerLabel(
+          parent?.representative_id && parent.representative_id === payerRelation?.payer_representative_id
+            ? true
+            : billing.invoice_recipient_is_payer ?? null,
+          tx,
+        ),
       ),
     );
     if (third && party) {
