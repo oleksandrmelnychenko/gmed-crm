@@ -570,15 +570,26 @@ impl Declaration {
     /// free-text contact with the payer's e-mail, phone, relationship and
     /// address, role `cost_bearer`. `None` for a self-payer and for a third
     /// party without a name. `notes` are the record's own notes, which the
-    /// declaration never writes.
-    pub(crate) fn order_payer_record(&self, notes: Option<String>) -> Option<PayerRecord> {
+    /// declaration never writes. `legal_form` ([`payer_legal_form`]) completes
+    /// an organisation's name: the record names the invoice's recipient, and
+    /// § 14 UStG asks for the full name (QA 2026-11-01).
+    pub(crate) fn order_payer_record(
+        &self,
+        notes: Option<String>,
+        legal_form: Option<&str>,
+    ) -> Option<PayerRecord> {
         if !self.is_third_party() {
             return None;
         }
+        let name = self.payer_name()?;
         Some(PayerRecord {
             payer_patient_id: None,
             payer_patient_relation_id: None,
-            contact_name: Some(self.payer_name()?),
+            contact_name: Some(if self.is_organisation() {
+                organisation_full_name(name, legal_form)
+            } else {
+                name
+            }),
             contact_email: self.email.clone(),
             contact_phone: self.phone.clone(),
             contact_relationship: self.relationship_label(),
@@ -3108,6 +3119,42 @@ async fn save_staff_organisation_mask(
     )
 }
 
+/// The payer organisation's legal form: what the payer stated on its link,
+/// else staff's entry in the organisation mask.
+pub(crate) async fn payer_legal_form(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"SELECT COALESCE(NULLIF(btrim(s.legal_form), ''),
+                           NULLIF(btrim(d.organisation_legal_form), ''))
+           FROM lead_payer_declarations d
+           LEFT JOIN lead_payer_statements s ON s.lead_id = d.lead_id
+           WHERE d.lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(conn)
+    .await
+    .map(Option::flatten)
+}
+
+/// The organisation's name with its legal form, unless staff typed it into
+/// the name too.
+fn organisation_full_name(name: String, legal_form: Option<&str>) -> String {
+    let Some(legal_form) = legal_form.map(str::trim).filter(|form| !form.is_empty()) else {
+        return name;
+    };
+    let names_it = name
+        .to_lowercase()
+        .split_whitespace()
+        .any(|word| word == legal_form.to_lowercase());
+    if names_it || name.to_lowercase().ends_with(&legal_form.to_lowercase()) {
+        name
+    } else {
+        format!("{name} {legal_form}")
+    }
+}
+
 /// Writes the declaration of a lead. `identity_changed` dates the payer
 /// named in a cost assumption document (see `identity_changed_at`). `actor`
 /// is `None` for the payer's own link (no login).
@@ -4257,6 +4304,7 @@ async fn sync_order_payers(
     };
     let parent_pays =
         lead_representatives::payer_same_person(&representation, Some(declaration)).is_some();
+    let legal_form = payer_legal_form(&mut *tx, lead_id).await?;
     for order in orders {
         let order_id: Uuid = order.try_get("id")?;
         let previous = PayerRecord::from_row(&order, "");
@@ -4266,7 +4314,7 @@ async fn sync_order_payers(
                 None => continue,
             }
         } else if declaration.is_third_party() {
-            match declaration.order_payer_record(previous.notes.clone()) {
+            match declaration.order_payer_record(previous.notes.clone(), legal_form.as_deref()) {
                 Some(next) => next,
                 None => continue,
             }
@@ -4405,9 +4453,10 @@ pub(crate) async fn preset_order_payer_from_patient(
     let Some(declared) = patient_declaration(&mut *tx, patient_id).await? else {
         return Ok(false);
     };
+    let legal_form = payer_legal_form(&mut *tx, declared.lead_id).await?;
     let Some(next) = declared
         .declaration
-        .order_payer_record(previous.notes.clone())
+        .order_payer_record(previous.notes.clone(), legal_form.as_deref())
     else {
         return Ok(false);
     };
@@ -6209,9 +6258,26 @@ mod tests {
     fn the_order_payer_record_and_the_card_projection_name_the_third_party_only() {
         let third_party = informed(from_input(&input("third_party")).unwrap());
         let record = third_party
-            .order_payer_record(Some("Notiz".into()))
+            .order_payer_record(Some("Notiz".into()), Some("GmbH"))
             .unwrap();
+        // The legal form belongs to an organisation's name only.
         assert_eq!(record.contact_name.as_deref(), Some("Erika Muster"));
+        assert_eq!(
+            organisation_full_name("Müller und Söhne Spedition".into(), Some(" GmbH ")),
+            "Müller und Söhne Spedition GmbH"
+        );
+        assert_eq!(
+            organisation_full_name("Müller GmbH".into(), Some("gmbh")),
+            "Müller GmbH"
+        );
+        assert_eq!(
+            organisation_full_name("Müller GmbH & Co. KG".into(), Some("GmbH & Co. KG")),
+            "Müller GmbH & Co. KG"
+        );
+        assert_eq!(
+            organisation_full_name("Stadt Köln".into(), None),
+            "Stadt Köln"
+        );
         assert_eq!(record.contact_relationship.as_deref(), Some("Tochter"));
         assert_eq!(record.address_country.as_deref(), Some("DE"));
         assert_eq!(record.notes.as_deref(), Some("Notiz"));
@@ -6219,11 +6285,11 @@ mod tests {
         let mut nameless = third_party.clone();
         nameless.first_name = None;
         nameless.last_name = None;
-        assert!(nameless.order_payer_record(None).is_none());
+        assert!(nameless.order_payer_record(None, None).is_none());
         assert!(
             from_input(&input("self"))
                 .unwrap()
-                .order_payer_record(None)
+                .order_payer_record(None, None)
                 .is_none()
         );
 

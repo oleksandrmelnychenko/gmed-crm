@@ -5917,7 +5917,7 @@ mod tests {
         assert_eq!(record.contact_name.as_deref(), Some("Anna Muster"));
         assert_eq!(record.payer_role.as_deref(), Some("contracting_party"));
         assert_eq!(record.address_city.as_deref(), Some("Berlin"));
-        assert!(named.order_payer_record(None).is_none());
+        assert!(named.order_payer_record(None, None).is_none());
 
         // A minor does not pay himself; only a current representative of a
         // minor is named.

@@ -550,6 +550,10 @@ async fn inherit(
         }
         _ => None,
     };
+    let legal_form = match declared_full.as_ref() {
+        Some(declared) => lead_payer::payer_legal_form(conn, declared.lead_id).await?,
+        None => None,
+    };
     let declared = match declared_full.map(|declared| declared.declaration) {
         Some(declaration) => {
             let invoice_to = declaration.invoice_to.as_deref();
@@ -565,7 +569,10 @@ async fn inherit(
                 // the declaration; the contracting party decides.
                 (None, "payer_declaration")
             } else {
-                (declaration.order_payer_record(None), "payer_declaration")
+                (
+                    declaration.order_payer_record(None, legal_form.as_deref()),
+                    "payer_declaration",
+                )
             };
             DeclaredRecipient {
                 synced: (to_self || other).then_some(declaration),
@@ -600,11 +607,16 @@ async fn inherit(
                 }
                 // The Kostenübernehmer the declaration itself wrote on the
                 // order is not where the lead wants the invoice; a payer
-                // staff set or corrected on the order wins.
+                // staff set or corrected on the order wins. An order written
+                // before the legal form joined the name counts as written too.
                 if declared.synced.as_ref().is_some_and(|declaration| {
-                    declaration
-                        .order_payer_record(record.notes.clone())
-                        .is_some_and(|written| written.same_apart_from_organisation_box(&record))
+                    [legal_form.as_deref(), None].into_iter().any(|form| {
+                        declaration
+                            .order_payer_record(record.notes.clone(), form)
+                            .is_some_and(|written| {
+                                written.same_apart_from_organisation_box(&record)
+                            })
+                    })
                 }) {
                     continue;
                 }
