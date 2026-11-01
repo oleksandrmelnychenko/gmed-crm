@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { portalCreditSideLabel, resolvePatientBalancePresentation } from "./account-balance";
+import { portalCreditSideLabel, resolvePatientBalancePresentation, staffCreditSideLabel } from "./account-balance";
 
 describe("portalCreditSideLabel", () => {
   it("calls a paid advance a prepayment, not an overpayment", () => {
@@ -11,6 +11,18 @@ describe("portalCreditSideLabel", () => {
   it("keeps the overpayment word for a real credit", () => {
     expect(portalCreditSideLabel({ closing_balance: "-50", available_prepayment: "0" }, "ru")).toBe("переплата");
     expect(portalCreditSideLabel({ closing_balance: "-500", available_prepayment: "400" }, "de")).toBe("Guthaben");
+  });
+});
+
+describe("staffCreditSideLabel", () => {
+  it("calls a paid part of an advance a prepayment in the staff header", () => {
+    const part = { closing_balance: "-400.00", available_prepayment: "400.00" };
+    expect(staffCreditSideLabel(part, "ru")).toBe("Предоплата");
+    expect(staffCreditSideLabel(part, "de")).toBe("Vorauszahlung");
+  });
+  it("keeps the overpayment word for a real credit or no statement", () => {
+    expect(staffCreditSideLabel({ closing_balance: "-50", available_prepayment: "0" }, "ru")).toBe("Переплата");
+    expect(staffCreditSideLabel(null, "de")).toBe("Guthaben");
   });
 });
 

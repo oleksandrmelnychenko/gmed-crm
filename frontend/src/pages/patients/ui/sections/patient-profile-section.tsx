@@ -496,6 +496,8 @@ type PatientProfileTabProps = {
   profileControls: {
     canCreateTasks: boolean;
     canEditPatientProfile: boolean;
+    /** Art. 18 restriction: the profile form stays closed, the server refuses its save. */
+    profileLocked?: boolean;
     canExportPatientCompliance: boolean;
     canOpenComplianceWorkspace: boolean;
     canViewContracts: boolean;
@@ -582,6 +584,7 @@ function usePatientProfileTabContent({
   const {
     canCreateTasks,
     canEditPatientProfile,
+    profileLocked = false,
     canExportPatientCompliance,
     canOpenComplianceWorkspace,
     canViewContracts,
@@ -590,7 +593,7 @@ function usePatientProfileTabContent({
     canViewLeads = false,
     canManageDocuments = false,
   } = profileControls;
-  const editAction = canEditPatientProfile ? openProfileEditor : undefined;
+  const editAction = canEditPatientProfile && !profileLocked ? openProfileEditor : undefined;
   // DSGVO consent and the confidentiality release follow signed documents
   // only (owner decision 2026-10-12): read-only, with the paper signature or
   // the generator for staff who may edit the card and manage its documents.

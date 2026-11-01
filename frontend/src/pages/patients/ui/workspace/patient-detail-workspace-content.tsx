@@ -19,7 +19,7 @@ import { ApiRequestError, apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useFinanceAutoRefresh } from "@/pages/company-finance/use-finance-auto-refresh";
 
-import { resolvePatientBalancePresentation } from "../../model/account-balance";
+import { resolvePatientBalancePresentation, staffCreditSideLabel } from "../../model/account-balance";
 import type { PatientNavigationItem } from "../../model/patient-navigation";
 import {
   PATIENT_LABEL_FORMAT_OPTIONS,
@@ -632,7 +632,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     balance?.side === "debit"
       ? lang === "de" ? "Offener Betrag" : "Долг"
       : balance?.side === "credit"
-        ? lang === "de" ? "Guthaben" : "Переплата"
+        ? staffCreditSideLabel(accountStatement?.summary, lang)
         : "";
   const balanceValue = balance?.needsReconciliation
     ? [
@@ -798,7 +798,8 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             {l("patients_repeat_intake")}
           </Button>
         ) : null}
-        {canEditPatientProfile ? (
+        {/* The server refuses the save on a restricted card (423): no form to fill in vain (X2 C7). */}
+        {canEditPatientProfile && !processingRestricted ? (
           <Button size="sm" className="h-9 rounded-lg gap-1.5 px-3.5" onClick={onOpenProfileEditor}>
             <SquarePen className="size-3.5" />
             {l("patients_edit_profile")}
@@ -849,6 +850,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               profileControls={{
                 canCreateTasks,
                 canEditPatientProfile,
+                profileLocked: processingRestricted,
                 canExportPatientCompliance,
                 canOpenComplianceWorkspace,
                 canViewContracts,

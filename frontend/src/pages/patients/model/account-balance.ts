@@ -7,20 +7,31 @@ type PatientBalanceSummary = {
   balance_side: "debit" | "credit" | "settled" | "reconciliation_required";
 };
 
+type CreditSummary = { closing_balance: string | null; available_prepayment?: string | null };
+
 /**
- * The word beside a credit balance in the portal. A paid advance is on the
- * credit side until a final invoice bills the services: it is no overpayment
- * next to «still to pay» (QA 2026-11-01, R4-5).
+ * A paid advance is on the credit side until a final invoice bills the
+ * services: it is no overpayment next to «still to pay» (QA 2026-11-01, R4-5).
  */
-export function portalCreditSideLabel(
-  summary: { closing_balance: string | null; available_prepayment: string | null },
-  lang: string,
-) {
+function creditIsPaidAdvance(summary: CreditSummary) {
   const advance = Number(summary.available_prepayment ?? 0);
-  if (advance > 0 && advance >= Math.abs(Number(summary.closing_balance))) {
+  return advance > 0 && advance >= Math.abs(Number(summary.closing_balance));
+}
+
+/** The word beside a credit balance in the portal. */
+export function portalCreditSideLabel(summary: CreditSummary, lang: string) {
+  if (creditIsPaidAdvance(summary)) {
     return lang === "de" ? "Vorauszahlung" : "предоплата";
   }
   return lang === "de" ? "Guthaben" : "переплата";
+}
+
+/** The same word in the staff card's header (QA 2026-11-01, X2 bug 6). */
+export function staffCreditSideLabel(summary: CreditSummary | null | undefined, lang: string) {
+  if (summary && creditIsPaidAdvance(summary)) {
+    return lang === "de" ? "Vorauszahlung" : "Предоплата";
+  }
+  return lang === "de" ? "Guthaben" : "Переплата";
 }
 
 export type PatientBalancePresentation = {

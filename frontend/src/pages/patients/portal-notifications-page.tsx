@@ -55,7 +55,6 @@ const COPY = {
     new: "Neu",
     loadError: "Benachrichtigungen konnten nicht geladen werden.",
     actionError: "Die Benachrichtigung konnte nicht aktualisiert werden.",
-    unavailable: "Diese Benachrichtigung hat kein freigegebenes Portalziel.",
   },
   ru: {
     title: "Мои уведомления",
@@ -74,7 +73,6 @@ const COPY = {
     new: "Новое",
     loadError: "Не удалось загрузить уведомления.",
     actionError: "Не удалось обновить уведомление.",
-    unavailable: "У этого уведомления нет доступного раздела портала.",
   },
 } as const;
 
@@ -308,9 +306,7 @@ export function PatientNotificationsPage() {
                         <ExternalLink className="size-4" />
                         {copy.open}
                       </Button>
-                    ) : (
-                      <span className="self-center text-xs text-muted-foreground">{copy.unavailable}</span>
-                    )}
+                    ) : null}
                   </div>
                 </article>
               );

@@ -1609,6 +1609,14 @@ function useAdminCompliancePageContent() {
                     {!readOnly && reviewSheetRecord.status !== "approved" && identityMissing ? (
                       <Banner tone="warning">{uiText("privacy_approve_identity_open", lang)}</Banner>
                     ) : null}
+                    {/* Art. 18 runs without the check (it protects the person); staff still see it is open (X2 bug 9). */}
+                    {!readOnly &&
+                    reviewSheetRecord.status !== "approved" &&
+                    latestReviewRecord?.request_type === "restriction" &&
+                    latestReviewRecord.source === "patient_request" &&
+                    !latestReviewRecord.identity_verification ? (
+                      <Banner tone="warning">{uiText("privacy_approve_restriction_identity_open", lang)}</Banner>
+                    ) : null}
                     {!readOnly &&
                     reviewSheetRecord.status === "requested" &&
                     reviewSheetRecord.request_type === "erasure" &&
