@@ -608,6 +608,19 @@ export function payerRoleLabel(
   return role ? labels[role] : unset;
 }
 
+/**
+ * The name of who pays by the order when this invoice's recipient is someone
+ * else, null otherwise: a parent who only receives the invoice read
+ * «Получатель счёта — сторона договора», «— плательщик» while the other parent
+ * pays and contracts (QA 2026-11-01, V3).
+ */
+export function invoicePaidByOtherThanRecipient(payer: InvoiceItem["payer"]): string | null {
+  const paying = payer?.order_contact_name?.trim();
+  const recipient = (payer?.contact_name ?? payer?.patient_name ?? payer?.relation_patient_name)?.trim();
+  if (!paying || !recipient) return null;
+  return paying.toLocaleLowerCase() === recipient.toLocaleLowerCase() ? null : paying;
+}
+
 export function invoiceToPayerForm(invoice: InvoiceItem): PayerForm {
   const contactName = invoice.payer?.contact_name ?? "";
   return {

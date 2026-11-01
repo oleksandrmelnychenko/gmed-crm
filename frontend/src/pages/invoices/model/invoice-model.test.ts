@@ -31,6 +31,7 @@ import {
   payerRelationOptionLabel,
   payerRoleLabel,
   advancePrepaymentDueDate,
+  invoicePaidByOtherThanRecipient,
   effectiveAdvanceBasis,
   interimLimitBesideOpenAdvance,
   prepaymentExceedsUnbilledQuote,
@@ -301,6 +302,11 @@ describe("invoice payer and recipient", () => {
     );
     expect(payerRoleLabel("cost_bearer", labels, "nicht gesetzt")).toBe(labels.cost_bearer);
     expect(payerRoleLabel(null, labels, "nicht gesetzt")).toBe("nicht gesetzt");
+    // QA 2026-11-01, V3: a parent who only receives is no payer on the sheet.
+    expect(invoicePaidByOtherThanRecipient({ relation_patient_name: "Anke Muster", order_contact_name: "Rolf Muster" })).toBe("Rolf Muster");
+    expect(invoicePaidByOtherThanRecipient({ relation_patient_name: "Anke Muster", order_contact_name: " anke muster " })).toBeNull();
+    expect(invoicePaidByOtherThanRecipient({ relation_patient_name: "Anke Muster" })).toBeNull();
+    expect(invoicePaidByOtherThanRecipient({ order_contact_name: "Rolf Muster" })).toBeNull();
     // A role this client does not know reads as unset and is not sent back.
     expect(knownPayerRole("guarantor")).toBe("");
     expect(

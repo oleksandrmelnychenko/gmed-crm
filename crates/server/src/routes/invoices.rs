@@ -4826,6 +4826,7 @@ async fn load_invoice_detail(
                   NULLIF(trim(concat_ws(' ', payer_person.first_name, payer_person.last_name)), '') AS payer_patient_name,
                   payer_person.patient_id AS payer_patient_pid,
                   o.order_number, i.currency, o.contract_id, q.quote_number,
+                  o.payer_contact_name AS order_payer_contact_name,
                   p.first_name, p.last_name, p.patient_id AS patient_pid,
                   pr.relation_type AS payer_relation_type,
                   COALESCE(NULLIF(trim(concat_ws(' ', rp.first_name, rp.last_name)), ''), pr.related_name) AS payer_relation_patient_name,
@@ -5394,6 +5395,9 @@ async fn load_invoice_detail(
             "role": row.try_get::<Option<String>, _>("payer_role").unwrap_or_default(),
             "patient_relation_id": row.try_get::<Option<Uuid>, _>("payer_patient_relation_id").unwrap_or_default(),
             "contact_name": row.try_get::<Option<String>, _>("payer_contact_name").unwrap_or_default(),
+            // Who pays by the order: a parent may only receive the invoice
+            // while the other pays and contracts (QA 2026-11-01, V3).
+            "order_contact_name": row.try_get::<Option<String>, _>("order_payer_contact_name").unwrap_or_default(),
             // The box "Организация" of the payer dialog: the stored answer,
             // else how the screening takes the name (legal form).
             "contact_is_organisation": payer::contact_organisation_shown(

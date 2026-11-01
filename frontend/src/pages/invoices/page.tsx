@@ -196,6 +196,7 @@ import {
   invoiceRecipientAddressLines,
   payerFormToPayload,
   payerRoleLabel,
+  invoicePaidByOtherThanRecipient,
   payerRelationOptionLabel,
   invoicesPermissions,
   isCoveredByPrepaymentOnly,
@@ -697,6 +698,8 @@ function useStaffInvoicesPageContent() {
     payerRole: lang === "de" ? "Rechnungsempfänger" : "Получатель счёта",
     payerRoleContractingParty:
       lang === "de" ? "Rechnungsempfänger ist Vertragspartner" : "Получатель счёта — сторона договора",
+    payerRoleRecipientOnly:
+      lang === "de" ? "Nur Rechnungsempfänger, es zahlt {name}" : "Только получатель счёта, платит {name}",
     payerRoleCostBearer:
       lang === "de"
         ? "Abweichender Rechnungsempfänger (Kostenübernehmer)"
@@ -2394,6 +2397,8 @@ function useStaffInvoicesPageContent() {
       </div>
     );
   }
+
+  const paidByOther = invoicePaidByOtherThanRecipient(detail?.payer);
 
   return (
     <>
@@ -4214,7 +4219,7 @@ function useStaffInvoicesPageContent() {
                         />
                         <MiniMetric
                           label={text.payerRole}
-                          value={payerRoleLabel(
+                          value={paidByOther ? text.payerRoleRecipientOnly.replace("{name}", paidByOther) : payerRoleLabel(
                             detail.payer?.role,
                             {
                               contracting_party: text.payerRoleContractingParty,
@@ -4242,7 +4247,9 @@ function useStaffInvoicesPageContent() {
                       {detail.recipient ? (
                         <div className="mt-4 space-y-1 text-sm" data-testid="invoice-recipient">
                           <p className="text-xs text-muted-foreground">
-                            {detail.recipient.is_payer
+                            {paidByOther
+                              ? text.payerRole
+                              : detail.recipient.is_payer
                               ? t.revenue_invoices_recipient_payer
                               : t.revenue_invoices_recipient_patient}
                           </p>

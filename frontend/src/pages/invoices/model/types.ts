@@ -272,6 +272,8 @@ type InvoicePayer = {
   role?: PayerRole | null;
   patient_relation_id?: string | null;
   contact_name?: string | null;
+  /** Who pays by the order; can differ from this recipient (detail view). */
+  order_contact_name?: string | null;
   /**
    * Organisation box of the contact: the stored answer, else how the server screens the name
    * (legal form); null without a contact name.

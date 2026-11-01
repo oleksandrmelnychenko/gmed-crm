@@ -530,6 +530,7 @@ async fn minor_patient_invoices_go_to_the_parents_by_default() {
     assert_eq!(draft["payer"]["patient_relation_id"], mother.to_string());
     assert_eq!(draft["payer"]["role"], "contracting_party");
     assert_eq!(draft["recipient"]["name"], "Erika Muster");
+    assert_eq!(draft["payer"]["order_contact_name"], Value::Null, "{draft}");
     // Hidden from the child's portal by default.
     assert_eq!(draft["portal_visible"], false);
     assert_eq!(draft["pdf_visible_to_patient"], false);
