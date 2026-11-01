@@ -43,7 +43,7 @@ import {
 } from "@/components/ui-shell";
 import {
   agencyServiceNameLabel,
-  agencyServiceUnitLabel,
+  agencyServiceUnitCount,
 } from "@/lib/agency-service-labels";
 import { apiFetch, downloadApiFile } from "@/lib/api";
 import { EmailDomainWarning, knownNoMailEmailError } from "@/components/email-domain-warning";
@@ -2122,7 +2122,7 @@ function usePatientInvoicesTabContent({
         width: 110,
         render: (item) => (
           <span className="block text-right font-mono text-xs tabular-nums text-foreground">
-            {item.included_quantity} {agencyServiceUnitLabel(item.unit_label, t)}
+            {agencyServiceUnitCount(item.included_quantity, item.unit_label, t, lang)}
           </span>
         ),
       },

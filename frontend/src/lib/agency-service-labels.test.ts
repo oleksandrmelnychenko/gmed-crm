@@ -7,6 +7,7 @@ import {
   agencyServiceLineName,
   agencyServiceNameLabel,
   agencyServiceStoredName,
+  agencyServiceUnitCount,
   agencyServiceUnitLabel,
   germanDocumentUnitLabel,
 } from "./agency-service-labels";
@@ -102,5 +103,12 @@ describe("agencyServiceUnitLabel", () => {
 
   it("keeps a custom unit as typed", () => {
     expect(agencyServiceUnitLabel("Pauschale", t("de"))).toBe("Pauschale");
+  });
+
+  it("recognises units typed in the plural on package items (W1 B4)", () => {
+    expect(agencyServiceUnitCount("2", "Stunden", t("ru"), "ru")).toBe("2 часа");
+    expect(agencyServiceUnitCount("2", "Tage", t("ru"), "ru")).toBe("2 дня");
+    expect(agencyServiceUnitCount("2", "Stunden", t("de"), "de")).toBe("2 Stunden");
+    expect(agencyServiceUnitCount("1", "Tage", t("de"), "de")).toBe("1 Tag");
   });
 });

@@ -64,6 +64,7 @@ import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import {
   agencyServiceDescriptionLabel,
   agencyServiceNameLabel,
+  agencyServiceUnitCount,
   agencyServiceUnitLabel,
 } from "@/lib/agency-service-labels";
 import { useAuth } from "@/lib/auth";
@@ -1298,7 +1299,7 @@ function useFinanceCatalogPageContent() {
     description: string;
     pkg?: ServicePackage;
     priceVersion?: ServicePackagePriceVersion;
-    unitLabel?: string;
+    quantityLabel?: string;
     quantity?: string;
   };
   const [expandedPackages, setExpandedPackages] = useState<ReadonlySet<string>>(
@@ -1381,8 +1382,8 @@ function useFinanceCatalogPageContent() {
         currency: item.agency_service_currency || row.currency,
         isActive: true,
         description: item.description,
-        unitLabel: agencyServiceUnitLabel(item.unit_label, t),
         quantity: item.included_quantity,
+        quantityLabel: agencyServiceUnitCount(item.included_quantity, item.unit_label, t, lang),
       }));
       return [...priceRows, ...itemRows];
     },
@@ -1475,8 +1476,7 @@ function useFinanceCatalogPageContent() {
         render: (row) =>
           row.kind === "item" ? (
             <span className="tabular-nums text-foreground">
-              {row.quantity}
-              {row.unitLabel ? ` ${row.unitLabel}` : ""}
+              {row.quantityLabel}
             </span>
           ) : row.kind === "package" ? (
             <span className="tabular-nums text-foreground">{row.itemCount}</span>
