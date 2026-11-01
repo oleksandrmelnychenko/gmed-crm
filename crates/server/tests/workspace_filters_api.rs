@@ -3462,6 +3462,83 @@ async fn order_service_state(pool: &PgPool, leistung_id: Uuid) -> (String, Strin
     )
 }
 
+/// QA 2026-11-01 (R3 BUG-1, double billing): a free-text interpreter line on an
+/// issued invoice already billed the hours, like a catalog line: the report
+/// takes that line and adds nothing up to its quantity.
+#[tokio::test]
+async fn interpreter_report_on_an_invoiced_free_text_line_adds_no_second_line() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("interp-billing-free-text");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+    let order_id = seed_order(
+        &pool,
+        patient_id,
+        pm_id,
+        &format!("ORD-FREE-{tag}"),
+        "execution",
+        "active",
+        "Interpreter support",
+    )
+    .await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+    seed_agency_service_catalog_item(
+        &pool,
+        admin_id,
+        "interpreter_hours",
+        "Interpreter hours",
+        "2026-01-01",
+    )
+    .await;
+    let free_text = seed_planned_order_service(
+        &pool,
+        order_id,
+        patient_id,
+        None,
+        "Interpreter hours",
+        "4",
+        2,
+    )
+    .await;
+    sqlx::query(
+        "UPDATE order_leistungen SET status = 'invoiced', delivered_at = now(), approved_at = now() WHERE id = $1",
+    )
+    .bind(free_text)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let fixture = InterpreterReportFixture {
+        app: &app,
+        pool: &pool,
+        order_id,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        interpreter_id,
+    };
+    let report = fixture.approved_report("2026-04-21", 3.0).await;
+    let (status, quantity, linked) = order_service_state(&pool, free_text).await;
+    assert_eq!(status, "invoiced");
+    assert_eq!(quantity.parse::<f64>().unwrap(), 4.0);
+    assert_eq!(linked.map(|id| id.to_string()), Some(report));
+    let lines: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM order_leistungen WHERE order_id = $1")
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(lines, 1);
+}
+
 /// An approved interpreter report consumes the order's planned interpreter
 /// line instead of adding a second one: the quote and invoice show the actual
 /// hours once, and no planned remainder blocks order completion. Only when no

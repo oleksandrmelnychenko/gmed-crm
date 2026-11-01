@@ -9888,8 +9888,9 @@ async fn sync_interpreter_report_billing_candidate(
 
     // Hours already on an issued invoice are billed: the report takes that line
     // as its source, and only hours beyond it get a new line (QA 2026-10-31,
-    // R3-2). A line of an issued invoice keeps its quantity.
-    let invoiced_line = sqlx::query(
+    // R3-2). A line of an issued invoice keeps its quantity. It matches like an
+    // open line: a free-text line billed the hours too (QA 2026-11-01, R3 BUG-1).
+    let invoiced_line = sqlx::query(&format!(
         r#"SELECT ol.id, ol.quantity
            FROM order_leistungen ol
            LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
@@ -9897,13 +9898,17 @@ async fn sync_interpreter_report_billing_candidate(
              AND ol.status = 'invoiced'
              AND ol.source_interpreter_report_id IS NULL
              AND ol.source_medical_appointment_id IS NULL
-             AND COALESCE(ol.agency_service_key_snapshot, catalog.service_key) = $2
+             AND {service}
            ORDER BY ol.created_at, ol.id
            LIMIT 1
            FOR UPDATE OF ol SKIP LOCKED"#,
-    )
+        service = order_line_is_catalog_service_sql("$2", "$3", "$4", "$5"),
+    ))
     .bind(order_id)
     .bind(INTERPRETER_HOURS_SERVICE_KEY)
+    .bind(catalog_item.as_ref().map(|item| item.service_name.clone()))
+    .bind(catalog_item.as_ref().map(|item| item.unit_price))
+    .bind(catalog_item.as_ref().map(|item| item.vat_rate))
     .fetch_optional(&mut *tx)
     .await?;
     let invoiced_hours = match &invoiced_line {
