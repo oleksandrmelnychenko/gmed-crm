@@ -27,6 +27,7 @@ import { appDateKeyOf, formatAppDate } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang, useLanguageBound } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
+import { appointmentRequestStands } from "@/pages/patients/model/portal-shared";
 import {
   decidePortalRecommendation,
   fetchPortalRecommendations,
@@ -291,9 +292,9 @@ export function PatientRecommendationsPage() {
                   <div className="flex flex-wrap gap-3">
                     <ActionButton
                       busy={busyId === `${recommendationId}:schedule`}
-                      disabled={disabled || Boolean(item.appointment_request_id)}
+                      disabled={disabled || appointmentRequestStands(item)}
                       icon={<CalendarPlus className="size-4" />}
-                      label={item.appointment_request_id ? t.portal_recommendations_request_created : t.portal_recommendations_schedule}
+                      label={appointmentRequestStands(item) ? t.portal_recommendations_request_created : t.portal_recommendations_schedule}
                       onClick={() => void handleDecision(recommendationId, "schedule")}
                     />
                     <ActionButton

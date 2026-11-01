@@ -681,6 +681,16 @@ async fn patient_manager_erasure_request_can_be_reviewed_and_executed() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
+    // A stored realtime event repeats a title with the name (QA 2026-11-01, Y3 BUG-1).
+    sqlx::query(
+        r#"INSERT INTO realtime_events (event_type, entity_type, entity_id, patient_id, payload)
+           VALUES ('task.created', 'task', $1, $1, '{"title": "named"}')"#,
+    )
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
     let (status, body) = json_request(
         &app,
         "POST",
@@ -692,6 +702,16 @@ async fn patient_manager_erasure_request_can_be_reviewed_and_executed() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["request_type"], "erasure");
     assert_eq!(body["execution"]["mode"], "erasure");
+    // Events after the erasure are of the anonymised record.
+    let realtime_events: i64 =
+        sqlx::query_scalar(
+            "SELECT count(*) FROM realtime_events WHERE patient_id = $1 AND event_type = 'task.created'",
+        )
+            .bind(patient_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(realtime_events, 0);
 
     let patient_row = sqlx::query(
         r#"SELECT patient_id, first_name, last_name, email, is_active,
@@ -3053,6 +3073,80 @@ async fn clinical_history_stays_append_only_except_for_text_in_the_erasure() {
             .await
             .unwrap();
     assert_eq!(snapshot, json!({ "label": "ANON-0000", "count": 1 }));
+
+    // The medication evidence: source_identifiers is a free object, its texts
+    // may change in the erasure and nothing else (QA 2026-11-01, Y3 BUG-2).
+    let document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, patient_id, auto_name, original_filename, art, category, status,
+                visibility, is_medical, mime_type, file_size, storage_key,
+                version_root_document_id, version_number, uploaded_by
+           ) VALUES (
+                $1, $2, 'Plan', 'plan.pdf', 'other', 'other', 'active',
+                'internal', false, 'application/pdf', 10, $3, $1, 1, $4
+           )"#,
+    )
+    .bind(document_id)
+    .bind(patient_id)
+    .bind(format!("{document_id}_synthetic.pdf"))
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let import_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO clinical_document_imports (patient_id, document_id, requested_by, status)
+           VALUES ($1, $2, $3, 'applied') RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(document_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let evidence_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_medication_import_history (
+               patient_id, event_type, medication_series_id, regimen_fingerprint,
+               review_fingerprint, source_import_id, source_candidate_id,
+               source_identifiers, new_value
+           ) VALUES ($1, 'created', gen_random_uuid(), 'a', 'b', $2, 'c',
+                     '{"holder": "named", "page": 1}', '{}')
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(import_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    immutable(
+        sqlx::query(
+            r#"UPDATE patient_medication_import_history
+               SET source_identifiers = '{"holder": "ANON", "page": 1}' WHERE id = $1"#,
+        )
+        .bind(evidence_id)
+        .execute(&pool)
+        .await
+        .unwrap_err(),
+    );
+    immutable(
+        update_clinical_history_in_erasure(
+            &pool,
+            r#"UPDATE patient_medication_import_history
+               SET source_identifiers = '{"holder": "ANON", "page": 2}' WHERE id = $1"#,
+            evidence_id,
+        )
+        .await
+        .unwrap_err(),
+    );
+    let changed = update_clinical_history_in_erasure(
+        &pool,
+        r#"UPDATE patient_medication_import_history
+           SET source_identifiers = '{"holder": "ANON", "page": 1}' WHERE id = $1"#,
+        evidence_id,
+    )
+    .await
+    .unwrap();
+    assert_eq!(changed, 1);
 }
 
 #[tokio::test]

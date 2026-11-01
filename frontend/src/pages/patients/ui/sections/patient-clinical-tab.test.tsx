@@ -668,9 +668,9 @@ describe("PatientRecommendationsSection", () => {
       />,
     );
 
-    expect(html).toContain("Период: 2026-06-01 – 2026-09-01");
+    expect(html).toContain("Период: 01.06.2026 – 01.09.2026");
     expect(html).toContain("border-emerald-300 bg-emerald-50");
-    expect(html).toContain("Дата напоминания: 2026-07-01");
+    expect(html).toContain("Дата напоминания: 01.07.2026");
     expect(html).toContain("border-amber-300 bg-amber-50");
   });
 });

@@ -4002,6 +4002,9 @@ struct ScrubbedFreeText {
     /// stays as the record that a file was there).
     task_attachments_deleted: u64,
     removed_notifications: u64,
+    /// Stored realtime events (catch-up of open pages) of the patient: they
+    /// repeat titles with the name and the patient number.
+    removed_realtime_events: u64,
 }
 
 /// The words that identify the patient in free text (see
@@ -4211,6 +4214,23 @@ async fn scrub_patient_free_text_in_tx(
     scrubbed.removed_notifications = sqlx::query(
         r#"DELETE FROM user_notifications
            WHERE (entity_type = 'task' AND entity_id = ANY($1))
+              OR (entity_type IN ('appointment', 'appointment_request') AND entity_id = ANY($2))
+              OR (entity_type = 'appointment_request'
+                  AND entity_id IN (SELECT id FROM patient_appointment_requests
+                                    WHERE patient_id = $3))"#,
+    )
+    .bind(&task_ids)
+    .bind(&appointment_ids)
+    .bind(patient_id)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    // As the purge of a lead does; an anonymised patient needs none of them
+    // (QA 2026-11-01, Y3 BUG-1).
+    scrubbed.removed_realtime_events = sqlx::query(
+        r#"DELETE FROM realtime_events
+           WHERE patient_id = $3
+              OR (entity_type = 'task' AND entity_id = ANY($1))
               OR (entity_type IN ('appointment', 'appointment_request') AND entity_id = ANY($2))
               OR (entity_type = 'appointment_request'
                   AND entity_id IN (SELECT id FROM patient_appointment_requests
@@ -4681,8 +4701,9 @@ async fn scrub_patient_free_text_in_tx(
 /// record: the snapshots of `patient_clinical_versions` and `case_versions`,
 /// and the reviewed evidence of `patient_medication_import_history`. All three
 /// are append-only; a version snapshot is not the audit log. The exception is
-/// the one the task history has (migration
-/// `20261101083100_dsgvo_erasure_clinical_history_scrub.sql`,
+/// the one the task history has (migrations
+/// `20261101083100_dsgvo_erasure_clinical_history_scrub.sql` and
+/// `20261101090000_dsgvo_erasure_import_source_identifiers.sql`,
 /// docs/engineering/02_audit-migration-policy_ua.md): only while
 /// `gmed.dsgvo_erasure` is on, only an UPDATE, only the text values of the
 /// snapshots, so the medical words stay and the name goes. The setting is on
@@ -4706,7 +4727,14 @@ async fn scrub_clinical_history_in_tx(
         ),
         scrub_jsonb_statement(
             "patient_medication_import_history",
-            &["old_value", "new_value"],
+            // `source_identifiers` is a free object of the import's caller, so a
+            // name can land there (QA 2026-11-01, Y3 BUG-2).
+            &["old_value", "new_value", "source_identifiers"],
+            "patient_id = $1",
+        ),
+        scrub_jsonb_statement(
+            "patient_medications",
+            &["source_identifiers"],
             "patient_id = $1",
         ),
         scrub_statement(

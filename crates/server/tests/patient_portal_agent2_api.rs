@@ -758,6 +758,27 @@ async fn portal_recommendations_leave_out_staff_only_fields() {
     assert_eq!(done["appointment_request_status"], "cancelled");
     let (status, requested) = request_visit(portal_recommendations[1].clone()).await;
     assert_eq!(status, StatusCode::OK, "{requested}");
+    // The patient reads the reason in the portal (QA 2026-11-01, Y3 BUG-6).
+    let reason: Option<String> =
+        sqlx::query_scalar("SELECT reason FROM patient_appointment_requests WHERE id = $1::uuid")
+            .bind(requested["appointment_request_id"].as_str().unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(reason.as_deref(), Some("Empfehlung: Labor"));
+
+    // While it stands no second one; withdrawn, the visit can be asked for
+    // again (QA 2026-11-01, Y3 BUG-7).
+    let (status, refused) = request_visit(portal_recommendations[1].clone()).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    sqlx::query("UPDATE patient_appointment_requests SET status = 'cancelled' WHERE id = $1::uuid")
+        .bind(requested["appointment_request_id"].as_str().unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, again) = request_visit(portal_recommendations[1].clone()).await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(again["appointment_request_status"], "requested", "{again}");
 }
 
 #[tokio::test]

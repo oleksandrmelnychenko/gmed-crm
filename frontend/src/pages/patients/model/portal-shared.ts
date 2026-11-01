@@ -404,6 +404,11 @@ export type PortalRecommendationItem = {
   updated_at: string;
 };
 
+/** A withdrawn or refused request leaves the visit open to be asked for again (QA 2026-11-01, Y3 BUG-7). */
+export function appointmentRequestStands(item: Pick<PortalRecommendationItem, "appointment_request_id" | "appointment_request_status">) {
+  return Boolean(item.appointment_request_id) && !["cancelled", "rejected"].includes(item.appointment_request_status ?? "");
+}
+
 export type PortalNextActionItem = {
   id: string;
   kind: string;

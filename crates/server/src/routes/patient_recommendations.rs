@@ -854,10 +854,19 @@ async fn create_my_recommendation_appointment_request(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Recommendation not found"),
         Err(resp) => return resp,
     };
+    // A withdrawn or refused request is no request: the card kept «Terminanfrage
+    // erstellt» and the visit could not be asked for again (QA 2026-11-01, Y3 BUG-7).
+    let request_closed = matches!(
+        row.try_get::<Option<String>, _>("appointment_request_status")
+            .unwrap_or_default()
+            .as_deref(),
+        Some("cancelled" | "rejected")
+    );
     if row
         .try_get::<Option<Uuid>, _>("appointment_request_id")
         .unwrap_or_default()
         .is_some()
+        && !request_closed
     {
         return err(
             StatusCode::CONFLICT,
@@ -876,11 +885,12 @@ async fn create_my_recommendation_appointment_request(
         .try_get::<Option<Uuid>, _>("source_order_id")
         .unwrap_or_default();
     let note = normalize_optional_text(body.note.as_deref());
-    let request_reason = format!("Recommendation: {title}");
+    // The patient reads these in the portal (QA 2026-11-01, Y3 BUG-6).
+    let request_reason = format!("Empfehlung: {title}");
     let request_notes = note
         .as_deref()
-        .map(|value| format!("Patient note: {value}"))
-        .unwrap_or_else(|| "Created from patient portal recommendation action.".to_string());
+        .map(|value| format!("Anmerkung: {value}"))
+        .unwrap_or_else(|| "Aus einer Empfehlung im Patientenportal erstellt.".to_string());
 
     let request_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO patient_appointment_requests (

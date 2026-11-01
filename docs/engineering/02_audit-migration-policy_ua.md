@@ -165,7 +165,7 @@ state.audit_sender.try_send(audit::domain_diff_event(
 QA 2026-11-01 (X2, помилка 1): `patient_clinical_versions`, `case_versions` і `patient_medication_import_history` повторюють попередні тексти картки, тож повне ім'я лишалося в знімках після стирання. Це історія версій, а не журнал аудиту. Виняток такий самий вузький, як для історії задач (міграція `20261101083100_dsgvo_erasure_clinical_history_scrub.sql`):
 
 - лише всередині транзакції стирання (`gmed.dsgvo_erasure = on`, вмикає `scrub_clinical_history_in_tx` на час своїх `UPDATE`);
-- лише `UPDATE`, лише текстові значення `old_value` / `new_value` (і `source_raw_text` у доказах імпорту ліків); `DELETE` без змін;
+- лише `UPDATE`, лише текстові значення `old_value` / `new_value` (і `source_raw_text` та, з міграції `20261101090000_dsgvo_erasure_import_source_identifiers.sql`, `source_identifiers` у доказах імпорту ліків); `DELETE` без змін;
 - заміна та сама: слова, що називають пацієнта, → мітка `ANON-…`; медичний текст лишається;
 - факт фіксується в незмінному журналі: `dsgvo_anonymize`, лічильник `scrubbed_free_text.clinical_versions`.
 

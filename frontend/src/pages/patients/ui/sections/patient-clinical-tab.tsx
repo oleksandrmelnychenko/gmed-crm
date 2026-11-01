@@ -1387,9 +1387,9 @@ export function PatientRecommendationsSection({
   const doctorName = (rec: PatientRecommendation) => recommendationDoctorLabel(rec, doctorOptions, lang);
   const validityLabel = (rec: PatientRecommendation) =>
     [rec.valid_from, rec.valid_to].some(Boolean)
-      ? `${rec.valid_from ?? "…"} – ${rec.valid_to ?? "…"}`
+      ? `${rec.valid_from ? formatAppDate(rec.valid_from) || rec.valid_from : "…"} – ${rec.valid_to ? formatAppDate(rec.valid_to) || rec.valid_to : "…"}`
       : null;
-  const dueAtLabel = (rec: PatientRecommendation) => appDateKeyOf(rec.due_at) || null;
+  const dueAtLabel = (rec: PatientRecommendation) => (rec.due_at ? formatAppDate(appDateKeyOf(rec.due_at)) || null : null);
 
   const isValid = (draft: RecommendationDraft) => draft.title.trim() !== "" && !recommendationPeriodInverted(draft);
 
@@ -1469,7 +1469,7 @@ export function PatientRecommendationsSection({
           ) : null}
           {rec.reminder_at ? (
             <span className={reminderPillClass}>
-              {tx("Дата напоминания", "Erinnerungsdatum")}: {dateOnly(rec.reminder_at)}
+              {tx("Дата напоминания", "Erinnerungsdatum")}: {formatAppDate(rec.reminder_at) || dateOnly(rec.reminder_at)}
             </span>
           ) : null}
           {dueAtLabel(rec) ? <span className={datePillClass}>{dueAtLabel(rec)}</span> : null}
