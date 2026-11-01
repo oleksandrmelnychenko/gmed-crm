@@ -289,7 +289,7 @@ export function ConsentFormChoicesSection({
               {busy ? text.saving : changed
                 ? text.unsaved
                 : !staffMode && form.chosen_at && form.chosen_by_me === false
-                  ? text.savedByOtherAt(formatAppDateTime(form.chosen_at))
+                  ? (form.chosen_by_staff ? text.savedByStaffAt : text.savedByOtherAt)(formatAppDateTime(form.chosen_at))
                   : ""}
             </p>
           </div>

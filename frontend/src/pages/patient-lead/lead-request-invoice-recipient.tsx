@@ -322,7 +322,7 @@ export function InvoiceRecipientSection({
     && (!ownParent || parentNotNamed || Boolean(draft.representative_id && draft.representative_id !== ownParent.id));
   // A Vormund is no parent (QA 2026-10-31, B-4).
   const vormund = actsAsVormund(request);
-  const options = vormund && otherParentReceives ? { ...recipientOptions(text, request, true), self: text.recipient.vormundSelf } : recipientOptions(text, request, otherParentReceives);
+  const options = recipientOptions(text, request, otherParentReceives);
   // "I pay (as a parent)" only for a minor's parent; an adult's representative reads "the patient",
   // staff on a minor's form "one of the parents" (owner 2026-10-30).
   const payerPartyOptions = staffForChild(request) ? text.recipient.payerPartyParents

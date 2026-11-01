@@ -2257,6 +2257,14 @@ pub(crate) fn payment_route_by(
     }
 }
 
+/// The caller [`payment_route_by`] judges by. Staff filling the form are the
+/// staff view, not a stranger: they answer as the patient side while the
+/// paying parent has a login, or their view and the parent's cabinet differ
+/// and the payment route cannot be entered (QA 2026-11-01, Y1 bug 5).
+fn route_caller(kind: AccessKind, user_id: Uuid) -> Option<Uuid> {
+    (!matches!(kind, AccessKind::Staff)).then_some(user_id)
+}
+
 /// The extra step "Zusätzliche Angaben" of the cabinet (owner requests
 /// 2026-10-07) and which of its questions the login answers. The step is
 /// shown (`required`) while the enhanced check is required by its triggers
@@ -3143,7 +3151,7 @@ pub(crate) async fn request_payload(
             lead_id,
             payer.as_ref(),
             &representation.representation,
-            Some(user_id),
+            route_caller(kind, user_id),
         )
         .await?;
         let risk = (
@@ -3252,7 +3260,7 @@ pub(crate) async fn request_payload(
     let route_by = payment_route_by(
         payer.as_ref(),
         &representation.representation,
-        Some(user_id),
+        route_caller(kind, user_id),
     );
     // A minor holds no account of its own: when the parent who fills the
     // cabinet answers for a paying parent without a login, the suggestion is
@@ -4349,7 +4357,7 @@ async fn update_my_billing(
     let route_by = payment_route_by(
         payer.as_ref(),
         &representation.representation,
-        Some(auth.user_id),
+        route_caller(kind, auth.user_id),
     );
     // After the send only while GMED requests a follow-up block — or the
     // paying parent's own payment route, which is that parent's answer, not
@@ -5130,6 +5138,9 @@ fn consent_form_json(choice: Option<&consent_choices::OwnConsentChoice>, viewer:
         "max_recipients": consent_choices::MAX_RECIPIENTS,
         "chosen_at": core_choice.map(|choice| choice.chosen_at),
         "chosen_by_me": core_choice.map(|choice| choice.chosen_by == Some(viewer)),
+        // Staff's entry is no other parent's (QA 2026-11-01, Y1 bug 5).
+        "chosen_by_staff": core_choice
+            .map(|choice| choice.access_kind.as_deref() == Some(AccessKind::Staff.as_str())),
     })
 }
 
@@ -7361,7 +7372,7 @@ async fn submit_my_lead_request(
         lead_id,
         payer.as_ref(),
         &representation.representation,
-        Some(auth.user_id),
+        route_caller(kind, auth.user_id),
     )
     .await
     {
@@ -7392,7 +7403,7 @@ async fn submit_my_lead_request(
             payment_route_by(
                 payer.as_ref(),
                 &representation.representation,
-                Some(auth.user_id),
+                route_caller(kind, auth.user_id),
             ),
             extra,
             today,
@@ -8977,6 +8988,20 @@ pub(crate) async fn purge_portal_intake_in_tx(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn staff_are_judged_as_the_staff_view_of_the_payment_route() {
+        let user = uuid::Uuid::new_v4();
+        assert_eq!(super::route_caller(super::AccessKind::Staff, user), None);
+        assert_eq!(
+            super::route_caller(super::AccessKind::Own, user),
+            Some(user)
+        );
+        assert_eq!(
+            super::route_caller(super::AccessKind::Guardian, user),
+            Some(user)
+        );
+    }
+
     use super::*;
 
     /// A clock that steps back (WSL, NTP) never makes a later portal time

@@ -360,7 +360,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       [third ? text.recipient.email : text.billingFields.invoice_email, paying && third ? "" : recipient?.email],
       [text.recipient.phone, party?.phone],
       [text.recipient.paymentReason, organisation ? party?.payment_reason : ""],
-      [billing.invoice_recipient === "self" ? invoiceParent && !invoiceParent.mine ? text.recipient.isPayerOtherParent : text.recipient.isPayerSelf : third ? (organisation ? text.recipient.isPayerOrganisation : text.recipient.isPayerThirdParty) : text.recipient.isPayer, yesNo(billing.invoice_recipient_is_payer)],
+      [billing.invoice_recipient === "self" ? invoiceParent && !invoiceParent.mine ? (actsAsVormund(request) ? text.recipient.isPayerVormund : text.recipient.isPayerOtherParent) : text.recipient.isPayerSelf : third ? (organisation ? text.recipient.isPayerOrganisation : text.recipient.isPayerThirdParty) : text.recipient.isPayer, yesNo(billing.invoice_recipient_is_payer)],
     ]);
   }
 
@@ -495,7 +495,9 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
         : [[
             text.paymentMethodRow,
             // The other parent pays and answers it in the own access (owner 2026-10-23).
-            guardian && request.payer?.payer_kind === "representative" ? text.paymentRouteByOtherParentShort : text.paymentRouteByPayerShort,
+            guardian && request.payer?.payer_kind === "representative"
+              ? actsAsVormund(request) ? text.paymentRouteByVormundShort : text.paymentRouteByOtherParentShort
+              : text.paymentRouteByPayerShort,
           ] satisfies [string, string]]),
     ]);
   }
@@ -647,7 +649,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       ...(!request.disclosure && choices.named_recipients ? storedTrustedPersons(request).map((person): Entry =>
         [wording.recipientsTitle, [person.name, wording.recipientRelations[person.relation], formatBirthDate(person.birth_date), person.phone || person.contact, personScope(person, lang)].filter(Boolean).join(" · ")]) : []),
       // No save time of the own choice (labels audit 2026-10-26, A3); only the other parent's choice is named.
-      [text.saved, consent.chosen_at && consent.chosen_by_me === false ? wording.savedByOtherAt(formatAppDateTime(consent.chosen_at)) : ""],
+      [text.saved, consent.chosen_at && consent.chosen_by_me === false ? (consent.chosen_by_staff ? wording.savedByStaffAt : wording.savedByOtherAt)(formatAppDateTime(consent.chosen_at)) : ""],
     ]);
   }
 

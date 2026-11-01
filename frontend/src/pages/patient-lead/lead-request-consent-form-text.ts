@@ -25,6 +25,7 @@ export type ConsentFormText = {
   saving: string;
   /** The choice the other parent or guardian saved (QA 2026-10-12, A3-01). */
   savedByOtherAt: (date: string) => string;
+  savedByStaffAt: (date: string) => string;
   unsaved: string;
   /**
    * One line for the step-4 answer «Auskunft an Dritte» instead of repeating it (owner 2026-10-26, C3):
@@ -89,6 +90,8 @@ const de: ConsentFormText = {
   saving: "Wird gespeichert…",
   savedByOtherAt: (date) =>
     `Die Auswahl vom ${date} hat der andere Elternteil bzw. Vertreter gespeichert. Speichern Sie Ihre eigene Auswahl, gilt diese; unterschreiben muss, wer zuletzt gewählt hat.`,
+  savedByStaffAt: (date) =>
+    `Die Auswahl vom ${date} hat GMED nach Ihren Angaben erfasst. Speichern Sie Ihre eigene Auswahl, gilt diese; unterschreiben muss, wer zuletzt gewählt hat.`,
   unsaved: "Ihre Änderungen sind noch nicht gespeichert.",
   disclosureLabel: "Auskunft an Dritte",
   disclosureNo: "Nein",
@@ -155,6 +158,8 @@ const en: ConsentFormText = {
   saving: "Saving…",
   savedByOtherAt: (date) =>
     `The choice of ${date} was saved by the other parent or representative. If you save your own choice, yours counts; whoever chose last signs.`,
+  savedByStaffAt: (date) =>
+    `The choice of ${date} was recorded by GMED as you told us. If you save your own choice, yours applies; whoever chose last has to sign.`,
   unsaved: "Your changes are not saved yet.",
   disclosureLabel: "Information for third parties",
   disclosureNo: "No",
@@ -219,6 +224,8 @@ const uk: ConsentFormText = {
   saving: "Зберігаємо…",
   savedByOtherAt: (date) =>
     `Вибір від ${date} зберіг другий з батьків або представник. Якщо ви збережете власний вибір, діятиме ваш; підписує той, хто обрав останнім.`,
+  savedByStaffAt: (date) =>
+    `Вибір від ${date} записав співробітник GMED з ваших слів. Якщо ви збережете свій вибір, діятиме ваш; підписує той, хто вибрав останнім.`,
   unsaved: "Зміни ще не збережено.",
   disclosureLabel: "Довідки третім особам",
   disclosureNo: "Ні",
@@ -283,6 +290,8 @@ const ru: ConsentFormText = {
   saving: "Сохраняем…",
   savedByOtherAt: (date) =>
     `Выбор от ${date} сохранил другой родитель или представитель. Если вы сохраните свой выбор, будет действовать ваш; подписывает тот, кто выбрал последним.`,
+  savedByStaffAt: (date) =>
+    `Выбор от ${date} записал сотрудник GMED с ваших слов. Если вы сохраните свой выбор, будет действовать ваш; подписывает тот, кто выбрал последним.`,
   unsaved: "Изменения ещё не сохранены.",
   disclosureLabel: "Справки третьим лицам",
   disclosureNo: "Нет",

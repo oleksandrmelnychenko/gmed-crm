@@ -367,6 +367,8 @@ export type LeadRequestConsentForm = {
    * 2026-10-12, A3-01). `null` without a choice, absent on an older server.
    */
   chosen_by_me?: boolean | null;
+  /** GMED recorded the choice for the client. */
+  chosen_by_staff?: boolean | null;
 };
 
 export type LeadRequestDocument = {

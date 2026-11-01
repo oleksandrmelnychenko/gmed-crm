@@ -523,6 +523,16 @@ impl Declaration {
         }
     }
 
+    /// [`payer_name`](Self::payer_name) with an organisation's legal form.
+    pub(crate) fn payer_full_name(&self, legal_form: Option<&str>) -> Option<String> {
+        let name = self.payer_name()?;
+        Some(if self.is_organisation() {
+            organisation_full_name(name, legal_form)
+        } else {
+            name
+        })
+    }
+
     /// Who pays, as the order payer record (a free-text contact with the
     /// payer's address, role `cost_bearer`) and in the cost assumption
     /// declaration: the name of the organisation, or first and last name.
@@ -581,15 +591,10 @@ impl Declaration {
         if !self.is_third_party() {
             return None;
         }
-        let name = self.payer_name()?;
         Some(PayerRecord {
             payer_patient_id: None,
             payer_patient_relation_id: None,
-            contact_name: Some(if self.is_organisation() {
-                organisation_full_name(name, legal_form)
-            } else {
-                name
-            }),
+            contact_name: Some(self.payer_full_name(legal_form)?),
             contact_email: self.email.clone(),
             contact_phone: self.phone.clone(),
             contact_relationship: self.relationship_label(),
@@ -2272,8 +2277,15 @@ pub(crate) async fn cost_assumption_payer(
         )
             .into_response());
     };
+    // The payer's papers name the organisation in full, as its invoice does
+    // (QA 2026-11-01, Y1 bug 2).
+    let legal_form = payer_legal_form(&mut conn, lead_id)
+        .await
+        .map_err(|error| database_error(error, "load the payer's legal form"))?;
     Ok(Some(CostAssumptionPayer {
-        name: declaration.payer_name().unwrap_or_default(),
+        name: declaration
+            .payer_full_name(legal_form.as_deref())
+            .unwrap_or_default(),
         date_of_birth: declaration.date_of_birth,
         street: declaration.street.clone(),
         zip: declaration.zip.clone(),
@@ -3140,7 +3152,7 @@ pub(crate) async fn payer_legal_form(
 
 /// The organisation's name with its legal form, unless staff typed it into
 /// the name too.
-fn organisation_full_name(name: String, legal_form: Option<&str>) -> String {
+pub(crate) fn organisation_full_name(name: String, legal_form: Option<&str>) -> String {
     let Some(legal_form) = legal_form.map(str::trim).filter(|form| !form.is_empty()) else {
         return name;
     };

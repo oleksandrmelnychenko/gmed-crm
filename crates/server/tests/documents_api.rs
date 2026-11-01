@@ -2855,7 +2855,54 @@ async fn closed_papers_stay_closed_on_an_appointment_and_in_a_translation_reques
         .execute(&pool)
         .await
         .unwrap();
-    assert_eq!(status_of(gwg_id, interpreter_bearer).await, StatusCode::OK);
+    assert_eq!(
+        status_of(gwg_id, interpreter_bearer.clone()).await,
+        StatusCode::OK
+    );
+
+    // QA 2026-11-01, Y1 bug 4: so does a paper of another data class. An
+    // internal administrative paper and an invoice stayed closed, the request
+    // stuck in progress and the interpreter could not update it.
+    for art in ["other", "invoice"] {
+        let paper_id = seed_document(
+            &pool,
+            pm_id,
+            patient_id,
+            visit_id,
+            "internal",
+            false,
+            art,
+            &format!("{tag}-{art}"),
+        )
+        .await;
+        let closed = status_of(paper_id, interpreter_bearer.clone()).await;
+        let request_id =
+            seed_document_translation_request(&pool, paper_id, patient_id, pm_id).await;
+        sqlx::query(
+            "UPDATE document_translation_requests
+             SET assigned_to = $2, status = 'in_progress' WHERE id = $1",
+        )
+        .bind(request_id)
+        .bind(interpreter_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert_eq!(closed, StatusCode::FORBIDDEN, "{art} before the assignment");
+        assert_eq!(
+            status_of(paper_id, interpreter_bearer.clone()).await,
+            StatusCode::OK,
+            "{art} after the assignment"
+        );
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/documents/translation-requests/{request_id}/update"),
+            &interpreter_bearer,
+            Some(json!({ "status": "in_progress", "translated_text": "Text" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{art}: {body}");
+    }
 }
 
 #[tokio::test]

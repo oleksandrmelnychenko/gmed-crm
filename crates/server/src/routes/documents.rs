@@ -14997,6 +14997,21 @@ pub(crate) fn can_view_document_row(
         share_status,
     );
 
+    // An assignment by name is a decision and opens what it names, whatever
+    // the data class: GwG sheets and administrative papers stayed closed and
+    // the request stuck in progress (QA 2026-11-01, Y1 bug 4). Medical papers
+    // keep the role's own rule.
+    let assigned_by_name = row
+        .try_get::<bool, _>("translation_assigned_to_current")
+        .unwrap_or(false)
+        || is_own_translation_document(row);
+    if matches!(auth.role, Role::Interpreter | Role::TeamleadInterpreter)
+        && assigned_by_name
+        && sensitivity != DataSensitivity::Medical
+    {
+        return true;
+    }
+
     policy::check_access(&AccessContext {
         role: auth.role,
         user_id: auth.user_id,
@@ -26691,17 +26706,25 @@ async fn load_patient_payer_statement(
             .await
             .map_err(failed)?
             .flatten();
+    let legal_form = super::lead_payer::payer_legal_form(&mut conn, lead_id)
+        .await
+        .map_err(failed)?;
     drop(conn);
     let (statements, _) = super::lead_portal_intake::load_identification(&state.db, lead_id)
         .await
         .map_err(failed)?;
     let organisation = declaration.is_organisation();
-    let payer_name = declaration.payer_name();
+    // With the legal form, as on the payer's invoice (QA 2026-11-01, Y1 bug 2).
+    let payer_name = declaration.payer_full_name(legal_form.as_deref());
     let signer = subject.as_ref().and_then(|subject| {
+        let acting_for = subject
+            .acting_for
+            .clone()
+            .map(|name| super::lead_payer::organisation_full_name(name, legal_form.as_deref()));
         payer_signer_line(
             subject.signer_first_name.as_deref(),
             subject.signer_last_name.as_deref(),
-            subject.acting_for.as_deref(),
+            acting_for.as_deref(),
             subject.signer_role.as_deref(),
         )
     });

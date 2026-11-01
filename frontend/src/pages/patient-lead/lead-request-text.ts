@@ -515,6 +515,7 @@ export type LeadRequestText = {
   /** Section 8 when the other parent pays and answers it in the own access (owner 2026-10-23); it does not hold back sending. */
   paymentRouteByOtherParent: string;
   paymentRouteByOtherParentShort: string;
+  paymentRouteByVormundShort: string;
   sectionLegal: string;
   legalIntro: string;
   /** Prefix of a legal question in the list of what is still missing. */
@@ -921,7 +922,10 @@ export function recipientOptions(
 ): Record<InvoiceRecipient, string> {
   if (!actsAsGuardian(request)) return text.recipient.options;
   if (!request.minor) return text.recipient.optionsRepresentative;
-  if (otherParentReceives) return text.recipient.optionsOtherParent;
+  if (otherParentReceives) {
+    // A Vormund is no parent, also in the staff's view of the form (QA 2026-11-01, Y1 bug 3).
+    return actsAsVormund(request) ? { ...text.recipient.optionsOtherParent, self: text.recipient.vormundSelf } : text.recipient.optionsOtherParent;
+  }
   // A Vormund is no parent (QA 2026-11-01, R2-E).
   return actsAsVormund(request) ? { ...text.recipient.optionsGuardian, self: text.recipient.selfVormund } : text.recipient.optionsGuardian;
 }
@@ -1602,6 +1606,7 @@ const de: LeadRequestText = {
   paymentRouteByOtherParent:
     "Die Zahlungsart gibt der andere Elternteil, der zahlt, in seinem eigenen Zugang an. Sie können die Anfrage auch ohne diese Angabe senden.",
   paymentRouteByOtherParentShort: "gibt der andere Elternteil an",
+  paymentRouteByVormundShort: "gibt der Vormund / Pfleger an",
   sectionLegal: "Weitere Fragen",
   legalIntro: "Bitte beantworten Sie jede Frage mit Ja oder Nein.",
   // lawyer review pending (2026-10-22)
@@ -2220,6 +2225,7 @@ const ru: LeadRequestText = {
   paymentRouteByOtherParent:
     "Способ оплаты указывает второй родитель, который платит, в своём собственном доступе. Вы можете отправить заявку и без этих данных.",
   paymentRouteByOtherParentShort: "указывает второй родитель",
+  paymentRouteByVormundShort: "указывает опекун / попечитель",
   sectionLegal: "Дополнительные вопросы",
   legalIntro:
     "Пожалуйста, ответьте на каждый вопрос «да» или «нет».",
@@ -2838,6 +2844,7 @@ const uk: LeadRequestText = {
   paymentRouteByOtherParent:
     "Спосіб оплати вказує другий з батьків, який платить, у своєму власному доступі. Ви можете надіслати заявку й без цих даних.",
   paymentRouteByOtherParentShort: "вказує другий з батьків",
+  paymentRouteByVormundShort: "вказує опікун / піклувальник",
   sectionLegal: "Додаткові запитання",
   legalIntro:
     "Будь ласка, дайте на кожне запитання відповідь «так» або «ні».",
@@ -3449,6 +3456,7 @@ const en: LeadRequestText = {
   paymentRouteByOtherParent:
     "The other parent, who pays, states the payment method in their own access. You can send the request without it.",
   paymentRouteByOtherParentShort: "stated by the other parent",
+  paymentRouteByVormundShort: "stated by the guardian",
   sectionLegal: "Further questions",
   legalIntro: "Please answer each question with yes or no.",
   // lawyer review pending (2026-10-22)
