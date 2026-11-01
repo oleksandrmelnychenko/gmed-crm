@@ -133,6 +133,19 @@ describe("LeadPayerPackagePanel after the payer was replaced (W2 N2)", () => {
     expect(text).not.toContain("ответил на бумаге");
   });
 
+  it("uses the Documents step's words for papers from before the payer named now, package or not (U-2)", () => {
+    const value = state({ blocked_reason: "payer_not_submitted", can_prepare: false }, null);
+    const text = textOf(render(value, { paper: { ...paper, papers_predate_payer: true } }));
+    expect(text).toContain("Бумаги прежнего плательщика");
+    expect(text).toContain("Подпишет:");
+    expect(text).toContain("Следующий шаг: отправьте новому плательщику ссылку");
+    expect(text).not.toContain("Selbstauskunft на бумаге");
+    expect(text).not.toContain("ответил на бумаге");
+    expect(text).not.toContain("идентифицирован на бумаге");
+    // The own papers of the payer named now keep their words.
+    expect(textOf(render(value, { paper }))).toContain("идентифицирован на бумаге");
+  });
+
   it("keeps the signed package of the payer named now", () => {
     const value = state({}, { status: "signed", signed_at: "2026-11-01T09:00:00Z", documents: signed });
     expect(textOf(render(value))).not.toContain("прежнего плательщика");

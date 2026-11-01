@@ -178,7 +178,8 @@ export function LeadPayerPackagePanel({
       </div>
       {signer ? (
         <p className="flex flex-wrap items-center gap-2 text-xs leading-5 text-foreground" data-testid="lead-payer-package-signer">
-          <span className="font-mono text-muted-foreground">{tx("Подписывает:", "Unterschreibt:")}</span>
+          {/* The new payer signs next; nothing on file is his yet (QA 2026-11-01, U-2). */}
+          <span className="font-mono text-muted-foreground">{paperIdentification?.papers_predate_payer ? tx("Подпишет:", "Unterschreibt künftig:") : tx("Подписывает:", "Unterschreibt:")}</span>
           <StatusChip tone="warning"><UserRound aria-hidden="true" /><span className="min-w-0 break-words">{signer}</span></StatusChip>
         </p>
       ) : null}
@@ -225,9 +226,9 @@ export function LeadPayerPackagePanel({
                         ) : null}
                       </>
                     ) : slot === "self_disclosure" && answeredOnPaper ? (
-                      <StatusChip tone="success" data-testid="lead-payer-package-paper-self_disclosure">
-                        <Check aria-hidden="true" className="size-3.5" />
-                        {payerPaperSelfDisclosureText(tx)}
+                      <StatusChip tone={currentPaper?.papers_predate_payer ? "neutral" : "success"} data-testid="lead-payer-package-paper-self_disclosure">
+                        {currentPaper?.papers_predate_payer ? null : <Check aria-hidden="true" className="size-3.5" />}
+                        {payerPaperSelfDisclosureText(tx, currentPaper)}
                       </StatusChip>
                     ) : (
                       <StatusChip tone="warning">{tx("ещё не создан", "noch nicht erstellt")}</StatusChip>

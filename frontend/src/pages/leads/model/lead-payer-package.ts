@@ -168,9 +168,15 @@ export function payerPackagePreviousPayerLine(
   };
 }
 
-/** The Selbstauskunft row of the package when the payer answered on paper: "Selbstauskunft на бумаге — подписана". */
-export function payerPaperSelfDisclosureText(tx: Tx): string {
-  return tx("Selbstauskunft на бумаге — подписана", "Selbstauskunft auf Papier – unterschrieben");
+/**
+ * The Selbstauskunft row of the package when the payer answered on paper:
+ * "Selbstauskunft на бумаге — подписана", or, for papers from before the payer
+ * named now, the words of the Документы step (QA 2026-11-01, U-2).
+ */
+export function payerPaperSelfDisclosureText(tx: Tx, identification?: PayerIdentificationStatus | null): string {
+  return identification?.papers_predate_payer
+    ? tx("Бумаги прежнего плательщика", "Papiere des früheren Zahlers")
+    : tx("Selbstauskunft на бумаге — подписана", "Selbstauskunft auf Papier – unterschrieben");
 }
 
 /**
@@ -185,6 +191,12 @@ export function payerPackageBlockedText(
 ): string | null {
   if (!state.blocked_reason) return null;
   if (state.blocked_reason === "payer_not_submitted" && payerAnsweredOnPaper(identification)) {
+    if (identification?.papers_predate_payer) {
+      return tx(
+        "Бумаги прежнего плательщика остаются в деле. Следующий шаг: отправьте новому плательщику ссылку на анкету или примите её на бумаге",
+        "Die Papiere des früheren Zahlers bleiben in der Akte. Nächster Schritt: dem neuen Zahler den Link zum Fragebogen senden oder ihn auf Papier annehmen",
+      );
+    }
     return tx(
       "Плательщик ответил на бумаге (Selbstauskunft подписана): электронный пакет не готовится, остальные документы плательщика подпишите на бумаге",
       "Der Zahler hat auf Papier geantwortet (Selbstauskunft unterschrieben): Kein elektronisches Paket, die übrigen Unterlagen des Zahlers auf Papier unterschreiben lassen",
@@ -501,6 +513,16 @@ export function payerPackageIdentificationText(
 ): { tone: StatusTone; text: string } | null {
   if (!identification) return null;
   const prefix = tx("Идентификация плательщика (QES): ", "Identifizierung des Zahlers (QES): ");
+  if (!identification.qes_signed_at && paper?.identified && payerAnsweredOnPaper(paper) && paper.papers_predate_payer) {
+    // The gate keeps counting them (owner decision 2026-11-01); they are not the new payer's.
+    return {
+      tone: "neutral",
+      text: tx(
+        "Бумаги прежнего плательщика: проверьте их или запросите у нового плательщика его собственные",
+        "Papiere des früheren Zahlers: prüfen Sie sie oder fordern Sie vom neuen Zahler eigene an",
+      ),
+    };
+  }
   if (!identification.qes_signed_at && paper?.identified && payerAnsweredOnPaper(paper)) {
     // Identified on paper (Selbstauskunft + Ausweis): no QES is waited for (QA 2026-10-25, F-F2).
     return {
