@@ -435,8 +435,39 @@ export function effectiveAdvanceBasis(
 ): AdvanceBasis | null {
   if (form.invoiceType !== "advance") return null;
   return form.advanceBasis === "prepayment" && quoteRequiredPrepayment(quote) != null
+    && !prepaymentExceedsUnbilledQuote(quote)
     ? "prepayment"
     : "positions";
+}
+
+/**
+ * A required prepayment above what the quote has left to bill cannot succeed:
+ * the dialog starts from the open positions instead (QA 2026-11-01, Z1 N5).
+ */
+export function prepaymentExceedsUnbilledQuote(quote: QuoteOption | null | undefined) {
+  const required = quoteRequiredPrepayment(quote);
+  return required != null && prepaymentAdvanceSplit(quote?.line_items ?? [], required).exceedsQuote;
+}
+
+/**
+ * What an interim invoice may bill beside unpaid advances: they consume no
+ * quantity, so the quote has to keep what they ask for (QA 2026-11-01, Z1 N1).
+ * Null when nothing limits the selection.
+ */
+export function interimLimitBesideOpenAdvance(
+  quote: Pick<QuoteOption, "open_advance_rest"> | null | undefined,
+  lines: InvoiceLineItem[],
+  form: Pick<CreateForm, "invoiceType">,
+) {
+  const openAdvance = Number(quote?.open_advance_rest ?? 0);
+  if (form.invoiceType !== "interim" || !Number.isFinite(openAdvance) || openAdvance <= 0) return null;
+  const unbilled = roundCents(lines.reduce((sum, line) => {
+    const quoted = Number(line.quantity ?? 0);
+    const billed = Number(line.invoiced_quantity ?? 0);
+    const share = billed > 0 && quoted > 0 ? Math.max(0, quoted - billed) / quoted : 1;
+    return sum + roundCents(Number(line.line_gross ?? 0) * share);
+  }, 0));
+  return { openAdvance, maxGross: Math.max(0, roundCents(unbilled - openAdvance)) };
 }
 
 /** Net (in cents) of a single-unit line whose gross is `gross`; mirrors the server. */

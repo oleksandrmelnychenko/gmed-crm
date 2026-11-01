@@ -2618,12 +2618,15 @@ async fn update_overage_approval(
         }
     }
 
-    let result: Result<sqlx::postgres::PgQueryResult, sqlx::Error> = async {
+    let result: Result<u64, sqlx::Error> = async {
         let mut tx = state.db.begin().await?;
-        let result = sqlx::query(
+        let updated = sqlx::query(
             r#"UPDATE service_package_consumptions
            SET approval_status = $3,
-               notes = COALESCE($4, notes)
+               -- The note covers the whole row, the reason only its overage:
+               -- a withdrawal adds to it (QA 2026-11-01, Z1 N4).
+               notes = CASE WHEN $5 THEN concat_ws(E'\n', NULLIF(notes, ''), $4)
+                            ELSE COALESCE($4, notes) END
            WHERE patient_service_package_id = $1
              AND (
                     ($2::uuid IS NULL AND package_item_id IS NULL)
@@ -2638,16 +2641,36 @@ async fn update_overage_approval(
                            AND invoice_id IS NULL
                            AND overage_quantity > 0
                       ELSE approval_status = 'pending'
-                 END"#,
+                 END
+           RETURNING id, overage_quantity,
+                     ROUND(overage_quantity * COALESCE(unit_price_net_snapshot, 0), 2)
+                         AS amount_net"#,
         )
         .bind(patient_service_package_id)
         .bind(body.package_item_id)
         .bind(body.approval_status.clone())
         .bind(notes.clone())
         .bind(body.withdraw_approved)
-        .execute(&mut *tx)
+        .fetch_all(&mut *tx)
         .await?;
-        if result.rows_affected() > 0 {
+        let rows_affected = updated.len() as u64;
+        if rows_affected > 0 {
+            let consumptions: Vec<serde_json::Value> = updated
+                .iter()
+                .map(|row| {
+                    serde_json::json!({
+                        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                        "overage_quantity": row
+                            .try_get::<Decimal, _>("overage_quantity")
+                            .map(decimal_to_string)
+                            .unwrap_or_default(),
+                        "amount_net": row
+                            .try_get::<Decimal, _>("amount_net")
+                            .map(decimal_to_string)
+                            .unwrap_or_default(),
+                    })
+                })
+                .collect();
             crate::audit::write_in_transaction(
                 &mut tx,
                 &crate::audit::domain_event(
@@ -2659,21 +2682,22 @@ async fn update_overage_approval(
                         "patient_service_package_id": patient_service_package_id,
                         "package_item_id": body.package_item_id,
                         "approval_status": body.approval_status,
-                        "updated_count": result.rows_affected(),
+                        "updated_count": rows_affected,
                         "withdrawn_approved": body.withdraw_approved,
                         "reason": if body.withdraw_approved { notes.clone() } else { None },
+                        "consumptions": consumptions,
                     }),
                 ),
             )
             .await?;
         }
         tx.commit().await?;
-        Ok(result)
+        Ok(rows_affected)
     }
     .await;
     match result {
         // A 200 with nothing changed read as done (QA 2026-11-01, Y2 B5).
-        Ok(result) if result.rows_affected() == 0 => err(
+        Ok(0) => err(
             StatusCode::CONFLICT,
             if body.withdraw_approved {
                 "No approved overage of this item is left to decline"
@@ -2681,7 +2705,7 @@ async fn update_overage_approval(
                 "No overage of this item awaits a decision"
             },
         ),
-        Ok(result) => {
+        Ok(updated_count) => {
             crate::realtime::publish_patient_event(
                 &state,
                 Some(auth.user_id),
@@ -2691,7 +2715,7 @@ async fn update_overage_approval(
                     "patient_service_package_id": patient_service_package_id,
                     "package_item_id": body.package_item_id,
                     "approval_status": body.approval_status.clone(),
-                    "updated_count": result.rows_affected(),
+                    "updated_count": updated_count,
                 }),
             )
             .await;
@@ -2699,7 +2723,7 @@ async fn update_overage_approval(
                 "patient_service_package_id": patient_service_package_id,
                 "package_item_id": body.package_item_id,
                 "approval_status": body.approval_status,
-                "updated_count": result.rows_affected(),
+                "updated_count": updated_count,
             }))
             .into_response()
         }

@@ -3990,6 +3990,7 @@ async fn list_quotes(
                   -- (QA 2026-11-01, T3-7): the dialog total left it out.
                   open_overage.net AS open_package_overage_net,
                   open_overage.gross AS open_package_overage_gross,
+                  quote_open_advance_rest(q.id) AS open_advance_rest,
                   q.created_at, q.updated_at,
                   q.superseded_by_quote_id, q.superseded_at,
                   successor.quote_number AS superseded_by_quote_number,
@@ -4113,6 +4114,9 @@ async fn list_quotes(
                     "services_outside_quote": row.try_get::<Value, _>("services_outside_quote").unwrap_or_else(|_| serde_json::json!([])),
                     "open_package_overage_net": decimal_to_string(row.try_get::<Decimal, _>("open_package_overage_net").unwrap_or(Decimal::ZERO)),
                     "open_package_overage_gross": decimal_to_string(row.try_get::<Decimal, _>("open_package_overage_gross").unwrap_or(Decimal::ZERO)),
+                    // What released advances still ask for: an interim invoice
+                    // leaves this much of the quote (QA 2026-11-01, Z1 N1).
+                    "open_advance_rest": decimal_to_string(row.try_get::<Decimal, _>("open_advance_rest").unwrap_or(Decimal::ZERO)),
                     // The order's required prepayment: the default amount of
                     // an advance invoice from this quote.
                     "order_prepayment_required": row.try_get::<bool, _>("prepayment_required").unwrap_or(false),

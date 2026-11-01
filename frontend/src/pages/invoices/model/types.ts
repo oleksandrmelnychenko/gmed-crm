@@ -563,6 +563,8 @@ export type QuoteOption = {
   /** Approved package overage a settlement invoice adds to the quote lines. */
   open_package_overage_net?: string;
   open_package_overage_gross?: string;
+  /** What released advances still ask for and nobody paid. */
+  open_advance_rest?: string;
   /** The order's required prepayment: the default amount of an advance invoice. */
   order_prepayment_amount?: string | null;
   order_prepayment_required?: boolean;

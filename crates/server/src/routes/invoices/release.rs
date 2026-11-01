@@ -109,24 +109,46 @@ pub(super) async fn advance_exceeds_unbilled_quote(
     else {
         return Ok(false);
     };
-    let billed: Vec<(i32, Decimal)> = sqlx::query_as(
-        r#"SELECT quote_line_index, quantity
-           FROM quote_line_invoiced_quantities($1)
-           WHERE quantity > 0"#,
-    )
-    .bind(advance.try_get::<Uuid, _>("quote_id")?)
-    .fetch_all(&mut *conn)
-    .await?;
+    let quote_id: Uuid = advance.try_get("quote_id")?;
+    let billed = billed_quote_lines(conn, quote_id).await?;
     if billed.is_empty() {
         return Ok(false);
     }
     let lines: Value = advance.try_get("line_items")?;
-    let unbilled: Decimal = lines
+    let unbilled = unbilled_quote_gross(&lines, &billed, &[]);
+    let total: Decimal = advance.try_get("total_gross")?;
+    Ok(total.round_cents() > unbilled)
+}
+
+async fn billed_quote_lines(
+    conn: &mut PgConnection,
+    quote_id: Uuid,
+) -> Result<Vec<(i32, Decimal)>, sqlx::Error> {
+    sqlx::query_as(
+        r#"SELECT quote_line_index, quantity
+           FROM quote_line_invoiced_quantities($1)
+           WHERE quantity > 0"#,
+    )
+    .bind(quote_id)
+    .fetch_all(conn)
+    .await
+}
+
+/// The gross of the quote no invoice bills, cancelled services left out.
+fn unbilled_quote_gross(lines: &Value, billed: &[(i32, Decimal)], cancelled: &[Uuid]) -> Decimal {
+    lines
         .as_array()
         .map(|lines| {
             lines
                 .iter()
                 .enumerate()
+                .filter(|(_, line)| {
+                    !line
+                        .get("source_order_leistung_id")
+                        .and_then(Value::as_str)
+                        .and_then(|value| Uuid::parse_str(value).ok())
+                        .is_some_and(|service_id| cancelled.contains(&service_id))
+                })
                 .map(|(line_index, line)| {
                     let quantity = billed
                         .iter()
@@ -136,9 +158,51 @@ pub(super) async fn advance_exceeds_unbilled_quote(
                 })
                 .sum()
         })
-        .unwrap_or(Decimal::ZERO);
-    let total: Decimal = advance.try_get("total_gross")?;
-    Ok(total.round_cents() > unbilled)
+        .unwrap_or(Decimal::ZERO)
+}
+
+/// Error code of an interim invoice refused because it bills what an unpaid
+/// advance already asks for (QA 2026-11-01, Z1 N1).
+pub(super) const INTERIM_OVER_OPEN_ADVANCE: &str = "interim_over_open_advance";
+
+/// Whether an interim invoice, whose allocations are stored, leaves less of the
+/// quote unbilled than released advances still ask for: the reverse of
+/// [`advance_exceeds_unbilled_quote`]. Without this the patient owes both at
+/// once. A paid advance asks for nothing: its money is credited into the
+/// interim invoice by hand (doc 9.2). Overage on the invoice is outside the
+/// quote and is not counted.
+pub(super) async fn interim_exceeds_open_advance(
+    conn: &mut PgConnection,
+    invoice_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let Some(interim) = sqlx::query(
+        r#"SELECT quote.id AS quote_id, quote.order_id, quote.line_items,
+                  quote_open_advance_rest(quote.id) AS open_rest
+           FROM invoices interim
+           JOIN quotes quote ON quote.id = interim.quote_id
+           WHERE interim.id = $1
+             AND EXISTS (SELECT 1 FROM invoice_order_line_allocations allocation
+                         WHERE allocation.invoice_id = interim.id)"#,
+    )
+    .bind(invoice_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(false);
+    };
+    let open_rest: Decimal = interim.try_get("open_rest")?;
+    if open_rest <= Decimal::ZERO {
+        return Ok(false);
+    }
+    let billed = billed_quote_lines(conn, interim.try_get("quote_id")?).await?;
+    let cancelled: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM order_leistungen WHERE order_id = $1 AND status = 'cancelled'",
+    )
+    .bind(interim.try_get::<Uuid, _>("order_id")?)
+    .fetch_all(&mut *conn)
+    .await?;
+    let lines: Value = interim.try_get("line_items")?;
+    Ok(open_rest.round_cents() > unbilled_quote_gross(&lines, &billed, &cancelled))
 }
 
 /// Error code of a release refused because the draft bills more of a service

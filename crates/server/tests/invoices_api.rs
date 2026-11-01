@@ -1455,6 +1455,72 @@ async fn overage_approved_after_the_final_invoice_holds_the_close_and_goes_on_an
     );
 }
 
+/// QA 2026-11-01, Z1 N1: the reverse of Y2 B1. An unpaid advance for the whole
+/// quote and an interim invoice asked for 1.238 against a quote of 738. Paid
+/// money asks for nothing: it is credited into the interim invoice by hand.
+#[tokio::test]
+async fn interim_invoice_leaves_what_an_unpaid_advance_asks_for() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("interim-open-advance");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+    seed_agency_invoice_settings(&pool, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    seed_order_leistung(&pool, order_id, "First part", 500.0, "approved").await;
+    seed_order_leistung(&pool, order_id, "Second part", 238.0, "approved").await;
+    let quote = create_quote(&app, &billing_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+    let quote_lines: Value =
+        sqlx::query_scalar("SELECT line_items FROM quotes WHERE id = $1::uuid")
+            .bind(quote_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let first = line_index_by_description(&quote_lines, "First part");
+    let second = line_index_by_description(&quote_lines, "Second part");
+    let invoices_path = format!("/api/v1/quotes/{quote_id}/invoices");
+    let request =
+        |body: Value| json_request(&app, "POST", &invoices_path, &billing_bearer, Some(body));
+    let interim_of = |line_index: usize| {
+        json!({
+            "invoice_type": "interim",
+            "line_items": [{ "line_index": line_index, "quantity": "1" }],
+        })
+    };
+
+    // An advance for the second part, released and unpaid.
+    let (status, advance) = request(json!({
+        "invoice_type": "advance",
+        "advance_basis": "positions",
+        "line_items": [{ "line_index": second, "quantity": "1" }],
+    }))
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{advance}");
+    let advance_id = advance["id"].as_str().unwrap();
+    release_invoice(&app, &billing_bearer, advance_id).await;
+
+    // The whole quote does not fit beside it; the rest of the quote does, and
+    // nothing is left of the refused draft.
+    let (status, body) = request(json!({ "invoice_type": "interim" })).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "interim_over_open_advance", "{body}");
+    let (status, interim) = request(interim_of(first)).await;
+    assert_eq!(status, StatusCode::CREATED, "{interim}");
+    let (status, body) = request(interim_of(second)).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "interim_over_open_advance", "{body}");
+
+    // Paid, the advance no longer asks for anything: billing credits it.
+    pay_invoice_in_full(&app, &billing_bearer, advance_id, "ADVANCE").await;
+    let (status, interim) = request(interim_of(second)).await;
+    assert_eq!(status, StatusCode::CREATED, "{interim}");
+}
+
 /// QA 2026-11-01, Y2 B1: an advance for the whole quote beside an interim
 /// invoice billed 1.238 against a quote of 738.
 #[tokio::test]
@@ -1711,19 +1777,29 @@ async fn overage_without_a_price_or_a_quote_has_a_way_out() {
     };
     let (status, body) = withdraw(json!("  ")).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    sqlx::query("UPDATE service_package_consumptions SET notes = 'Termin 12.11.' WHERE id = $1")
+        .bind(consumption_id)
+        .execute(&pool)
+        .await
+        .unwrap();
     let (status, body) = withdraw(json!("Kein Preis vereinbart")).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["updated_count"], 1, "{body}");
-    let stored: String = sqlx::query_scalar(
-        "SELECT approval_status FROM service_package_consumptions WHERE id = $1",
+    let (stored, note): (String, Option<String>) = sqlx::query_as(
+        "SELECT approval_status, notes FROM service_package_consumptions WHERE id = $1",
     )
     .bind(consumption_id)
     .fetch_one(&pool)
     .await
     .unwrap();
     assert_eq!(stored, "declined");
-    let reason: Option<String> = sqlx::query_scalar(
-        r#"SELECT context ->> 'reason' FROM audit_log
+    // QA 2026-11-01, Z1 N4: the row's own note stays, the audit names the row.
+    assert_eq!(
+        note.as_deref(),
+        Some("Termin 12.11.\nKein Preis vereinbart")
+    );
+    let context: Value = sqlx::query_scalar(
+        r#"SELECT context FROM audit_log
            WHERE action = 'update_package_overage_approval' AND entity_id = $1
            ORDER BY id DESC LIMIT 1"#,
     )
@@ -1731,7 +1807,16 @@ async fn overage_without_a_price_or_a_quote_has_a_way_out() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(reason.as_deref(), Some("Kein Preis vereinbart"));
+    assert_eq!(context["reason"], "Kein Preis vereinbart");
+    assert_eq!(context["consumptions"][0]["id"], json!(consumption_id));
+    assert!(
+        context["consumptions"][0]["overage_quantity"].is_string(),
+        "{context}"
+    );
+    assert!(
+        context["consumptions"][0]["amount_net"].is_string(),
+        "{context}"
+    );
     let (status, body) = withdraw(json!("Noch einmal")).await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
 

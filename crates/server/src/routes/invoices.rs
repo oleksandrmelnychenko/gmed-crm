@@ -4655,6 +4655,38 @@ const ADVANCE_BLOCKED_BY_QUOTE_INVOICE_SQL: &str = "SELECT EXISTS(
                AND (total_gross <= 0 OR credited_amount < total_gross)))
 )";
 
+fn interim_over_open_advance() -> axum::response::Response {
+    coded_err(
+        StatusCode::CONFLICT,
+        release::INTERIM_OVER_OPEN_ADVANCE,
+        "An unpaid advance already asks for what this interim invoice bills",
+        json!({}),
+    )
+}
+
+/// Refuses an interim invoice over an unpaid advance, inside the transaction
+/// that stored its allocations; the caller's return rolls them back.
+async fn ensure_interim_leaves_open_advance(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    invoice_type: &str,
+    invoice_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    if invoice_type != "interim" {
+        return Ok(());
+    }
+    match release::interim_exceeds_open_advance(transaction, invoice_id).await {
+        Ok(false) => Ok(()),
+        Ok(true) => Err(interim_over_open_advance()),
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "check the open advance beside an interim invoice");
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create invoice",
+            ))
+        }
+    }
+}
+
 async fn validate_invoice_creation_for_quote(
     state: &AppState,
     ctx: &QuoteInvoiceContext,
@@ -7718,6 +7750,11 @@ async fn create_patient_billing_invoice(
                 );
             }
         }
+        if let Err(response) =
+            ensure_interim_leaves_open_advance(&mut transaction, &invoice_type, invoice_id).await
+        {
+            return response;
+        }
     }
     for (external_id, amount) in &external_allocations {
         if let Err(error) = sqlx::query(
@@ -8003,6 +8040,12 @@ async fn create_invoice_from_quote(
                         ),
                     };
                 }
+            }
+            if let Err(response) =
+                ensure_interim_leaves_open_advance(&mut transaction, &invoice_type, invoice_id)
+                    .await
+            {
+                return response;
             }
 
             // The draft reserves its services through the allocations; they
@@ -14394,6 +14437,20 @@ async fn update_invoice_status(
                 }
                 Err(error) => {
                     tracing::error!(%error, %invoice_id, "check the unbilled quote of an advance");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to update invoice",
+                    );
+                }
+            }
+        }
+        if locked_invoice_type == "interim" {
+            // An advance released after the draft was made asks for the same lines.
+            match release::interim_exceeds_open_advance(&mut transaction, invoice_id).await {
+                Ok(false) => {}
+                Ok(true) => return interim_over_open_advance(),
+                Err(error) => {
+                    tracing::error!(%error, %invoice_id, "check the open advance beside an interim invoice");
                     return err(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Failed to update invoice",

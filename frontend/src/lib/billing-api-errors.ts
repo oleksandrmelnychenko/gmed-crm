@@ -26,6 +26,8 @@ export const BILLING_API_ERROR_KEYS: Record<string, string> = {
   advance_beside_final_invoice: "api_billing_advance_beside_final_invoice",
   // An advance takes only what the quote has left to bill (QA 2026-11-01, Y2 B1).
   advance_over_billed_quote: "api_billing_advance_over_billed_quote",
+  // An interim invoice leaves what an unpaid advance asks for (QA 2026-11-01, Z1 N1).
+  interim_over_open_advance: "api_billing_interim_over_open_advance",
   // advance_settlement.rs
   advance_rest_already_closed: "api_billing_advance_rest_already_closed",
   advance_not_settled_by_final_invoice: "api_billing_advance_not_settled_by_final_invoice",

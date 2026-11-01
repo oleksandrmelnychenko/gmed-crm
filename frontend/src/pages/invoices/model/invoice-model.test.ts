@@ -31,6 +31,8 @@ import {
   payerRelationOptionLabel,
   payerRoleLabel,
   effectiveAdvanceBasis,
+  interimLimitBesideOpenAdvance,
+  prepaymentExceedsUnbilledQuote,
   netForGross,
   prepaymentAdvanceSplit,
   quoteRequiredPrepayment,
@@ -594,6 +596,34 @@ describe("prepayment advance invoices", () => {
     expect(prepaymentAdvanceSplit(partBilled, 238).quoteGross).toBe(238);
     expect(prepaymentAdvanceSplit(partBilled, 238).exceedsQuote).toBe(false);
     expect(prepaymentAdvanceSplit(partBilled, 239).exceedsQuote).toBe(true);
+  });
+
+  it("starts from the positions when the prepayment exceeds what the quote has left (Z1 N5)", () => {
+    const form = { ...blankCreateForm("quote"), invoiceType: "advance" as const };
+    const partBilled = {
+      ...quote("600"),
+      line_items: [
+        line({ quantity: "1", invoiced_quantity: "1", line_gross: "500", vat_rate: "0" }),
+        line({ quantity: "2", invoiced_quantity: "0", line_gross: "238", vat_rate: "19" }),
+      ],
+    } as QuoteOption;
+    expect(prepaymentExceedsUnbilledQuote(partBilled)).toBe(true);
+    expect(effectiveAdvanceBasis(form, partBilled)).toBe("positions");
+    expect(prepaymentExceedsUnbilledQuote({ ...partBilled, order_prepayment_amount: "200" })).toBe(false);
+  });
+
+  it("limits an interim invoice beside an unpaid advance (Z1 N1)", () => {
+    const lines = [
+      line({ quantity: "1", invoiced_quantity: "0", line_gross: "500", vat_rate: "0" }),
+      line({ quantity: "2", invoiced_quantity: "1", line_gross: "476", vat_rate: "19" }),
+    ];
+    const interim = { invoiceType: "interim" as const };
+    expect(interimLimitBesideOpenAdvance({ open_advance_rest: "138" }, lines, interim))
+      .toEqual({ openAdvance: 138, maxGross: 600 });
+    expect(interimLimitBesideOpenAdvance({ open_advance_rest: "900" }, lines, interim))
+      .toEqual({ openAdvance: 900, maxGross: 0 });
+    expect(interimLimitBesideOpenAdvance({ open_advance_rest: "0" }, lines, interim)).toBeNull();
+    expect(interimLimitBesideOpenAdvance({ open_advance_rest: "138" }, lines, { invoiceType: "final" })).toBeNull();
   });
 
   it("hits the agreed gross with a cent-exact net", () => {

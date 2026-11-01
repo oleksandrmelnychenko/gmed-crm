@@ -21,10 +21,12 @@ import {
   invoiceLineQuantityAvailable,
   isInvoiceSelectionValid,
   effectiveAdvanceBasis,
+  interimLimitBesideOpenAdvance,
   isOverageOnlyInvoice,
   isQuoteAvailableForInvoice,
   isQuoteClosedForInvoicing,
   prepaymentAdvanceSplit,
+  prepaymentExceedsUnbilledQuote,
   quoteRequiredPrepayment,
 } from "../model/invoice-model";
 import { roundCents } from "@/lib/money";
@@ -75,6 +77,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   const requiredPrepayment = quoteRequiredPrepayment(selectedQuote);
   const advanceBasis = effectiveAdvanceBasis(form, selectedQuote);
   const prepaymentBasis = advanceBasis === "prepayment";
+  const prepaymentBlocked = prepaymentExceedsUnbilledQuote(selectedQuote);
   const prepaymentSplit = prepaymentBasis && requiredPrepayment != null
     ? prepaymentAdvanceSplit(lines, requiredPrepayment)
     : null;
@@ -92,12 +95,16 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
       };
   const quoteAvailable = Boolean(selectedQuote && isQuoteAvailableForInvoice(selectedQuote, form.invoiceType));
   const overageOnly = isOverageOnlyInvoice(selectedQuote, form);
+  const interimLimit = overageOnly ? null : interimLimitBesideOpenAdvance(selectedQuote, lines, form);
+  const overOpenAdvance = interimLimit != null && selectionTotals.gross > interimLimit.maxGross;
   const valid = prepaymentSplit
-    ? quoteAvailable && !prepaymentSplit.exceedsQuote && prepaymentSplit.gross > 0
-    : quoteAvailable && (overageOnly || isInvoiceSelectionValid(lines, form)) && totals.gross > 0;
+    ? quoteAvailable && prepaymentSplit.gross > 0
+    : quoteAvailable && (overageOnly || isInvoiceSelectionValid(lines, form)) && totals.gross > 0 && !overOpenAdvance;
   const footerMessage = error || optionsError || (selectedQuote && !valid
-    ? prepaymentSplit?.exceedsQuote
-      ? (de ? "Die erforderliche Vorauszahlung übersteigt den noch nicht abgerechneten Betrag des Angebots. Wählen Sie Positionen." : "Требуемая предоплата больше суммы, ещё не выставленной по предложению. Выберите позиции.")
+    ? overOpenAdvance
+      ? (de
+          ? `Die offene Vorauszahlungsrechnung fordert bereits ${money(interimLimit.openAdvance)} für dieses Angebot. Diese Zwischenrechnung darf höchstens ${money(interimLimit.maxGross)} betragen.`
+          : `Неоплаченный счёт на предоплату уже требует ${money(interimLimit.openAdvance)} по этому предложению. Этот промежуточный счёт — не больше ${money(interimLimit.maxGross)}.`)
       : (de ? "Prüfen Sie die ausgewählten Positionen und Mengen." : "Проверьте выбранные позиции и количество.")
     : null);
   const footerError = Boolean(error || optionsError);
@@ -231,11 +238,18 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                       ["positions", de ? "Ausgewählte Angebotspositionen" : "Выбранные позиции предложения"],
                     ] as const).map(([basis, label]) => (
                       <label key={basis} className="flex items-center gap-2 text-sm text-foreground">
-                        <input type="radio" name="advance-basis" value={basis} checked={advanceBasis === basis} disabled={formBusy}
+                        <input type="radio" name="advance-basis" value={basis} checked={advanceBasis === basis} disabled={formBusy || (basis === "prepayment" && prepaymentBlocked)}
                           onChange={() => onFormChange((current) => ({ ...current, advanceBasis: basis }))} />
                         {label}
                       </label>
                     ))}
+                    {prepaymentBlocked ? (
+                      <p role="status" data-testid="invoice-prepayment-blocked" className="text-xs leading-5 text-muted-foreground">
+                        {de
+                          ? "Die erforderliche Vorauszahlung übersteigt den noch nicht abgerechneten Betrag des Angebots. Die offenen Positionen sind ausgewählt."
+                          : "Требуемая предоплата больше суммы, ещё не выставленной по предложению. Выбраны открытые позиции."}
+                      </p>
+                    ) : null}
                   </fieldset>
                 ) : null}
 
