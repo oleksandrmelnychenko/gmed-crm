@@ -55,12 +55,47 @@ export async function withSignedTermsConfirmation<T>(
 export function signedTermsChangeConfirmText(refusal: ApiRequestError, newTotal: number | null): string {
   const body = (refusal.body ?? {}) as Record<string, unknown>;
   const label = (value: unknown) => (typeof value === "string" && value ? value : "—");
-  return uiText("api_orders_signed_terms_change", undefined, {
-    signed_total_label: label(body.signed_total_label),
-    new_total_label: newTotal != null && Number.isFinite(newTotal)
-      ? formatMoneyLabel(newTotal, "EUR")
-      : label(body.new_total_label),
+  const signedTotal = label(body.signed_total_label);
+  const shownTotal = newTotal != null && Number.isFinite(newTotal)
+    ? formatMoneyLabel(newTotal, "EUR")
+    : label(body.new_total_label);
+  const changes = signedTermsChanges(body, label);
+  // Equal totals alone leave the reader guessing what changes (QA 2026-11-01, R3-4).
+  if (changes && signedTotal === shownTotal) {
+    return uiText("api_orders_signed_terms_change_same_total", undefined, {
+      signed_total_label: signedTotal,
+      changes,
+    });
+  }
+  const text = uiText("api_orders_signed_terms_change", undefined, {
+    signed_total_label: signedTotal,
+    new_total_label: shownTotal,
   });
+  return changes
+    ? `${uiText("orders_signed_terms_changes_line", undefined, { changes })} ${text}`
+    : text;
+}
+
+/** What differs from the signed version, in words; "" for an older refusal. */
+function signedTermsChanges(body: Record<string, unknown>, label: (value: unknown) => string): string {
+  const changed = Array.isArray(body.changed_terms) ? body.changed_terms : [];
+  return changed
+    .map((term) => {
+      switch (term) {
+        case "prepayment":
+          return uiText("orders_signed_terms_changed_prepayment", undefined, {
+            from: label(body.signed_prepayment_label),
+            to: label(body.new_prepayment_label),
+          });
+        case "services": return uiText("orders_signed_terms_changed_services");
+        case "period": return uiText("orders_signed_terms_changed_period");
+        case "purpose": return uiText("orders_signed_terms_changed_purpose");
+        case "contract": return uiText("orders_signed_terms_changed_contract");
+        default: return "";
+      }
+    })
+    .filter(Boolean)
+    .join(", ");
 }
 
 /**

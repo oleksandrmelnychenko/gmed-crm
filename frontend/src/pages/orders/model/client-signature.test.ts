@@ -90,6 +90,21 @@ describe("the client's signature covers the signed terms (QA C3-01)", () => {
     expect(signedTermsChangeConfirmText(refusal(), null)).toMatch(/1\.002,20/);
   });
 
+  it("says what changes when the totals stay equal", () => {
+    const text = signedTermsChangeConfirmText(new ApiRequestError("refused", {
+      status: 409,
+      body: {
+        signed_total_label: "889,15 €",
+        new_total_label: "889,15 €",
+        changed_terms: ["prepayment"],
+        signed_prepayment_label: "100,00 €",
+        new_prepayment_label: "800,00 €",
+      },
+    }), null);
+    expect(text).toContain("100,00 € → 800,00 €");
+    expect(text).not.toContain("{");
+  });
+
   it("counts only order documents made after the last change of the terms", () => {
     expect(documentMatchesOrderTerms("2026-10-12T09:00:00Z", null)).toBe(true);
     expect(documentMatchesOrderTerms("2026-10-12T09:00:00Z", "2026-10-12T10:00:00Z")).toBe(false);

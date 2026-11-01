@@ -91,14 +91,17 @@ pub(crate) async fn lock_before(
     }))
 }
 
-fn total_of(terms: Option<&Value>) -> Option<Decimal> {
-    let value = terms?.get("total_gross")?;
-    let total: Option<Decimal> = match value {
+fn amount_of(terms: &Value, key: &str) -> Option<Decimal> {
+    let total: Option<Decimal> = match terms.get(key)? {
         Value::Number(number) => number.to_string().parse().ok(),
         Value::String(text) => text.parse().ok(),
         _ => None,
     };
     total.map(|amount| amount.normalize())
+}
+
+fn total_of(terms: Option<&Value>) -> Option<Decimal> {
+    amount_of(terms?, "total_gross")
 }
 
 fn money_label(value: Option<Decimal>, currency: &str) -> String {
@@ -114,6 +117,7 @@ fn signed_terms_change_refusal(
     new_total: Option<Decimal>,
     currency: &str,
     signed_at: Option<&Value>,
+    difference: &TermsDifference,
 ) -> axum::response::Response {
     (
         StatusCode::CONFLICT,
@@ -125,9 +129,76 @@ fn signed_terms_change_refusal(
             "signed_total_label": money_label(signed_total, currency),
             "new_total_label": money_label(new_total, currency),
             "signed_at": signed_at.cloned().unwrap_or(Value::Null),
+            "changed_terms": difference.changed,
+            "signed_prepayment_label": money_label(difference.signed_prepayment, currency),
+            "new_prepayment_label": money_label(difference.new_prepayment, currency),
         })),
     )
         .into_response()
+}
+
+/// What differs from the signed version: the totals alone do not say it when
+/// the prepayment, the period or a neutral line swap changed (QA 2026-11-01,
+/// R3-4).
+#[derive(Default)]
+struct TermsDifference {
+    /// `services`, `period`, `prepayment`, `purpose`, `contract`.
+    changed: Vec<&'static str>,
+    signed_prepayment: Option<Decimal>,
+    new_prepayment: Option<Decimal>,
+}
+
+/// jsonb compares numbers by value, like [`matches_signed_terms`]. A key the
+/// signed version does not have (signed before the prepayment rule) is compared
+/// with the terms right before this change.
+async fn terms_difference(
+    conn: &mut PgConnection,
+    before: &TermsBefore,
+    after: &Value,
+) -> Result<TermsDifference, sqlx::Error> {
+    let base = match before.signed_terms.as_ref() {
+        Some(signed) if signed.get("lines").is_some() => {
+            let mut base = before.terms.clone();
+            if let (Some(base), Some(signed)) = (base.as_object_mut(), signed.as_object()) {
+                base.extend(signed.clone());
+            }
+            base
+        }
+        _ => before.terms.clone(),
+    };
+    let keys = sqlx::query_scalar::<_, String>(
+        r#"SELECT base.key
+           FROM jsonb_each($1::jsonb) AS base(key, value)
+           WHERE base.key IN (
+                     'date_from', 'date_to', 'lines', 'prepayment_required',
+                     'prepayment_amount', 'prepayment_due_at', 'needs_description',
+                     'contract_id'
+                 )
+             AND base.value IS DISTINCT FROM $2::jsonb -> base.key"#,
+    )
+    .bind(&base)
+    .bind(after)
+    .fetch_all(conn)
+    .await?;
+    let mut changed = Vec::new();
+    for key in &keys {
+        let category = match key.as_str() {
+            "lines" => "services",
+            "date_from" | "date_to" => "period",
+            "needs_description" => "purpose",
+            "contract_id" => "contract",
+            _ => "prepayment",
+        };
+        if !changed.contains(&category) {
+            changed.push(category);
+        }
+    }
+    let prepayment_of = |terms: &Value| amount_of(terms, "prepayment_amount");
+    Ok(TermsDifference {
+        changed,
+        signed_prepayment: prepayment_of(&base),
+        new_prepayment: prepayment_of(after),
+    })
 }
 
 /// The terms equal the signed version. Only the keys of the terms count: the
@@ -197,6 +268,9 @@ pub(crate) async fn settle(
         total_of(before.signed_terms.as_ref()).or_else(|| total_of(Some(&before.terms)));
 
     if before.signed_patient && !confirmed {
+        let difference = terms_difference(conn, before, &after)
+            .await
+            .map_err(TermsError::Database)?;
         return Err(TermsError::Refused(signed_terms_change_refusal(
             signed_total,
             new_total,
@@ -205,6 +279,7 @@ pub(crate) async fn settle(
                 .signed_terms
                 .as_ref()
                 .and_then(|terms| terms.get("signed_at")),
+            &difference,
         )));
     }
 
@@ -358,6 +433,7 @@ mod tests {
             Some(Decimal::new(100220, 2)),
             "EUR",
             None,
+            &TermsDifference::default(),
         );
         assert_eq!(response.status(), StatusCode::CONFLICT);
     }

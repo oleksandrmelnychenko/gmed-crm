@@ -6,6 +6,14 @@
 export const ordersRound3UiDe = {
   // The client's signature covers the signed terms (QA C3-01, lib/order-api-errors.ts)
   "api_orders_signed_terms_change": "Der Kunde hat den Auftrag über {signed_total_label} unterschrieben. Mit dieser Änderung beträgt der Auftrag {new_total_label}. Die Unterschrift des Kunden und die Bestätigung durch GMED werden zurückgesetzt: Der Kunde muss eine neue Fassung des Einzelauftrags unterschreiben (QES oder Scan). Änderung speichern?",
+  // Equal totals: the confirmation says what changes (QA 2026-11-01, R3-4)
+  "api_orders_signed_terms_change_same_total": "Der Kunde hat den Auftrag über {signed_total_label} unterschrieben; die Auftragssumme bleibt gleich. Geändert wird: {changes}. Die Unterschrift des Kunden und die Bestätigung durch GMED werden zurückgesetzt: Der Kunde muss eine neue Fassung des Einzelauftrags unterschreiben (QES oder Scan). Änderung speichern?",
+  "orders_signed_terms_changes_line": "Geändert wird: {changes}.",
+  "orders_signed_terms_changed_prepayment": "Vorauszahlung {from} → {to}",
+  "orders_signed_terms_changed_services": "Leistungen",
+  "orders_signed_terms_changed_period": "Programmzeitraum",
+  "orders_signed_terms_changed_purpose": "Auftragszweck",
+  "orders_signed_terms_changed_contract": "Rahmenvertrag",
   "api_orders_document_outdated": "Der Auftrag wurde nach dem Erstellen dieses Dokuments geändert: Es zeigt alte Leistungen oder einen alten Zeitraum. Erstellen Sie eine neue Fassung des Einzelauftrags und lassen Sie diese unterschreiben.",
   // The estimate PDF predates the last change of the amounts or of the prepayment terms (QA 2026-10-25)
   "api_orders_estimate_outdated": "Der Kostenvoranschlag ist veraltet: Beträge oder Vorauszahlung wurden nach dem Erstellen geändert. Erstellen Sie eine neue Fassung des Kostenvoranschlags.",
@@ -21,6 +29,13 @@ export const ordersRound3UiDe = {
 
 export const ordersRound3UiRu = {
   "api_orders_signed_terms_change": "Клиент подписал заказ на {signed_total_label}. С этим изменением сумма заказа — {new_total_label}. Подпись клиента и подтверждение GMED будут сброшены: клиенту нужно подписать новую версию документа заказа (QES или скан). Сохранить изменение?",
+  "api_orders_signed_terms_change_same_total": "Клиент подписал заказ на {signed_total_label}; сумма заказа не меняется. Изменится: {changes}. Подпись клиента и подтверждение GMED будут сброшены: клиенту нужно подписать новую версию документа заказа (QES или скан). Сохранить изменение?",
+  "orders_signed_terms_changes_line": "Изменится: {changes}.",
+  "orders_signed_terms_changed_prepayment": "предоплата {from} → {to}",
+  "orders_signed_terms_changed_services": "услуги",
+  "orders_signed_terms_changed_period": "период программы",
+  "orders_signed_terms_changed_purpose": "цель заказа",
+  "orders_signed_terms_changed_contract": "рамочный договор",
   "api_orders_document_outdated": "Заказ изменён после создания этого документа: в нём старые услуги или период. Создайте новую версию документа заказа и подпишите её.",
   "api_orders_estimate_outdated": "Смета устарела: суммы или предоплата изменились после её создания. Создайте новую версию сметы.",
   "orders_signed_terms_change_cancelled": "Изменение не сохранено: подпись клиента сохранена.",

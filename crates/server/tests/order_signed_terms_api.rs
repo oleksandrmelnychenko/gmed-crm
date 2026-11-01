@@ -650,6 +650,10 @@ async fn changing_the_prepayment_of_a_signed_order_needs_a_confirmed_signature_r
     assert_eq!(refused["error"], "order_signed_terms_change");
     assert_eq!(refused["signed_total_label"], "339,15 €");
     assert_eq!(refused["new_total_label"], "339,15 €");
+    // Equal totals: the refusal names what changed (QA 2026-11-01, R3-4).
+    assert_eq!(refused["changed_terms"], json!(["prepayment"]));
+    assert_eq!(refused["signed_prepayment_label"], "100,00 €");
+    assert_eq!(refused["new_prepayment_label"], "150,00 €");
     let amount: Option<rust_decimal::Decimal> =
         sqlx::query_scalar("SELECT prepayment_amount FROM orders WHERE id = $1")
             .bind(order_id)
