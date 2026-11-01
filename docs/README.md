@@ -44,6 +44,7 @@
 - `architecture/04_frontend-patients-workspace-refactor-plan_ua.md` - канонічний tracker наступного frontend-рефактора `record-workspace -> patients split`
 - `architecture/05_frontend-dashboard-refactor-plan_ua.md` - канонічний tracker dashboard route/staff dashboard refactor і route-level perf split
 - `architecture/06_frontend-feature-pages-refactor-plan_ua.md` - канонічний tracker наступної хвилі міграції root feature pages до патерну `appointments` / `patients`
+- `architecture/appointment-first-planning-plan_ua.md` - чернетка плану спрощення: планування замовлення від прийому (відгук клієнта), етапи й питання власнику.
 - `architecture/invoice-line-comments_ua.md` - примітка до позиції рахунку: де вводиться, де друкується, коли фіксується.
 - `architecture/aml-enhanced-due-diligence_ua.md` - формуляр § 15 GwG і докази походження коштів: де зберігаються файли, що перевіряє сервер, що друкується.
 - `architecture/gwg-identification-sheet_ua.md` - Dokumentationsbogen natürliche Personen (GwG): звідки сервер бере дані ліда й платника, де кнопки, чого ще немає.
