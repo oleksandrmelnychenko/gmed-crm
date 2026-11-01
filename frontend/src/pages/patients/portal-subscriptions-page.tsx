@@ -398,7 +398,9 @@ function ServiceUsage({ service }: { service: PortalSubscriptionService }) {
           value={`${quantity(service.remaining_quantity)} ${unit}`}
         />
       </div>
-      {Number(service.overage_quantity) > 0 || Number(service.pending_overage_quantity) > 0 ? (
+      {Number(service.overage_quantity) > 0 ||
+      Number(service.pending_overage_quantity) > 0 ||
+      Number(service.declined_overage_quantity ?? 0) > 0 ? (
         <div className="mt-3 flex flex-wrap gap-2">
           {Number(service.overage_quantity) > 0 ? (
             <StatusBadge tone="warning">
@@ -408,6 +410,11 @@ function ServiceUsage({ service }: { service: PortalSubscriptionService }) {
           {Number(service.pending_overage_quantity) > 0 ? (
             <StatusBadge tone="info">
               {t.portal_subscriptions_pending_approval}: {quantity(service.pending_overage_quantity)} {unit}
+            </StatusBadge>
+          ) : null}
+          {Number(service.declined_overage_quantity ?? 0) > 0 ? (
+            <StatusBadge tone="neutral">
+              {t.portal_subscriptions_declined}: {quantity(service.declined_overage_quantity ?? "0")} {unit}
             </StatusBadge>
           ) : null}
         </div>
@@ -439,7 +446,7 @@ function subscriptionUnitLabel(
   if (["day", "days", "tag", "tage", "день", "дни"].includes(normalized)) {
     return t.portal_subscriptions_days;
   }
-  if (["trip", "trips", "fahrt", "fahrten", "поездка", "поездки"].includes(normalized)) {
+  if (["trip", "trips", "ride", "rides", "fahrt", "fahrten", "поездка", "поездки"].includes(normalized)) {
     return t.portal_subscriptions_trips;
   }
   if (["night", "nights", "nacht", "nächte", "ночь", "ночи"].includes(normalized)) {

@@ -50,6 +50,7 @@ import { EmailDomainWarning, knownNoMailEmailError } from "@/components/email-do
 import { isValidEmailAddress } from "@/lib/contact-validation";
 import { appDateKey, appDateKeyOf } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
@@ -115,7 +116,6 @@ type AssignPackageForm = {
 type ConsumptionForm = {
   packageItemId: string;
   orderId: string;
-  orderLeistungId: string;
   quantity: string;
   notes: string;
 };
@@ -204,7 +204,6 @@ const BLANK_ASSIGN_PACKAGE_FORM: AssignPackageForm = {
 const BLANK_CONSUMPTION_FORM: ConsumptionForm = {
   packageItemId: "",
   orderId: "",
-  orderLeistungId: "",
   quantity: "1",
   notes: "",
 };
@@ -305,6 +304,40 @@ type PatientInvoicesTabProps = {
   invoiceTypeLabel: (value: string) => string;
 };
 
+/** The server's refusals of a package or consumption, in the UI language. */
+const PACKAGE_ERROR_TEXTS: Record<string, [string, string]> = {
+  "The date is outside the package period": [
+    "Сегодня вне периода этого пакета: расход не записан.",
+    "Heute liegt außerhalb des Paketzeitraums: Verbrauch nicht erfasst.",
+  ],
+  "Choose the package item that was used": [
+    "Выберите позицию пакета.",
+    "Bitte die Paketposition wählen.",
+  ],
+  "Overage needs an order to be billed on": [
+    "Превышение записывается только с заказом: иначе его нечем выставить. Выберите заказ.",
+    "Mehrverbrauch braucht einen Auftrag, sonst lässt er sich nicht berechnen. Bitte Auftrag wählen.",
+  ],
+  "Package is not active for consumption": [
+    "Пакет не активен: расход не записан.",
+    "Das Paket ist nicht aktiv: Verbrauch nicht erfasst.",
+  ],
+  "A completed or cancelled order cannot receive new services": [
+    "Заказ отменён: по его тарифу расход не записывается.",
+    "Der Auftrag ist storniert: Auf seinem Tarif wird kein Verbrauch erfasst.",
+  ],
+  "ends_on must not be before starts_on": [
+    "Дата окончания раньше даты начала.",
+    "Das Enddatum liegt vor dem Startdatum.",
+  ],
+};
+
+function packageErrorMessage(error: unknown, lang: string, fallback: string) {
+  if (!(error instanceof Error)) return fallback;
+  const text = PACKAGE_ERROR_TEXTS[error.message];
+  return text ? text[lang === "de" ? 1 : 0] : error.message;
+}
+
 function buildPackageGroups(servicePackages: PatientServicePackageItem[]) {
   const packageGroups = new Map<
     string,
@@ -351,6 +384,8 @@ function packageItemLabel(item: PatientServicePackageItem, t: ReturnType<typeof 
 type PackageActionsMenuProps = {
   item: PatientServicePackageItem;
   t: ReturnType<typeof useLang>["t"];
+  /** Approving is a finance decision (CEO, Billing), recording is not. */
+  canDecide: boolean;
   approvalBusyKey: string;
   onDecision: (approvalStatus: "approved" | "declined") => void;
   onRecordConsumption: () => void;
@@ -359,6 +394,7 @@ type PackageActionsMenuProps = {
 function PackageActionsMenu({
   item,
   t,
+  canDecide,
   approvalBusyKey,
   onDecision,
   onRecordConsumption,
@@ -381,6 +417,8 @@ function PackageActionsMenu({
     approvalBusyKey ===
     `${item.patient_service_package_id}:${item.package_item_id ?? "summary"}:${approvalStatus}`;
   const hasPendingOverage = moneyNumeric(item.pending_overage_quantity) > 0;
+  // An item asking for approval stays pending without overage too.
+  const hasPendingDecision = canDecide && (item.pending_consumption_count ?? 0) > 0;
 
   return (
     <div
@@ -401,7 +439,7 @@ function PackageActionsMenu({
       </Button>
       {open ? (
         <div className="absolute right-0 top-8 z-40 w-60 rounded-lg border border-border bg-popover p-1 shadow-xl">
-          {hasPendingOverage ? (
+          {hasPendingDecision ? (
             <>
               <Button
                 type="button"
@@ -414,7 +452,7 @@ function PackageActionsMenu({
                   onDecision("approved");
                 }}
               >
-                {t.patient_invoices_approve_overage}
+                {hasPendingOverage ? t.patient_invoices_approve_overage : t.patient_invoices_approve}
               </Button>
               <Button
                 type="button"
@@ -670,6 +708,9 @@ function usePatientInvoicesTabContent({
   // (server: activate_patient_portal_account; owner decision 2026-09-28).
   const canManagePortalAccount =
     user?.role === "ceo" || user?.role === "patient_manager";
+  // Assigning and recording need invoices.create on the server, deciding on
+  // an overage is finance: the PM saw no action at all (QA 2026-11-01, T3-10).
+  const canManagePackages = hasCapability(user, "invoices.create");
   const [movementDirectionFilter, setMovementDirectionFilter] = useState<
     "all" | PatientAccountMovement["direction"]
   >("all");
@@ -1023,7 +1064,7 @@ function usePatientInvoicesTabContent({
       setAssignOpen(false);
       await refreshPackages();
     } catch (error) {
-      setAssignError(error instanceof Error ? error.message : t.patient_invoices_error_assign_package);
+      setAssignError(packageErrorMessage(error, lang, t.patient_invoices_error_assign_package));
     } finally {
       setAssignBusy(false);
     }
@@ -1127,7 +1168,6 @@ function usePatientInvoicesTabContent({
           body: JSON.stringify({
             package_item_id: consumeForm.packageItemId || null,
             order_id: consumeForm.orderId || null,
-            order_leistung_id: consumeForm.orderLeistungId.trim() || null,
             quantity,
             notes: consumeForm.notes.trim() || null,
           }),
@@ -1137,7 +1177,7 @@ function usePatientInvoicesTabContent({
       setConsumeTargetId("");
       await refreshPackages();
     } catch (error) {
-      setConsumeError(error instanceof Error ? error.message : t.patient_invoices_error_record_consumption);
+      setConsumeError(packageErrorMessage(error, lang, t.patient_invoices_error_record_consumption));
     } finally {
       setConsumeBusy(false);
     }
@@ -2057,11 +2097,19 @@ function usePatientInvoicesTabContent({
             {moneyNumeric(item.pending_overage_quantity) > 0 ? (
               <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-medium text-orange-700">
                 {t.patient_invoices_pending}: {item.pending_overage_quantity}
+                {moneyNumeric(item.pending_overage_gross) > 0
+                  ? ` · ${formatMoney(item.pending_overage_gross, item.currency_snapshot)}`
+                  : ""}
               </span>
             ) : null}
             {moneyNumeric(item.approved_overage_quantity) > 0 ? (
               <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
                 {t.patient_invoices_approved}: {item.approved_overage_quantity}
+              </span>
+            ) : null}
+            {moneyNumeric(item.declined_overage_quantity) > 0 ? (
+              <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-700">
+                {t.patient_invoices_declined}: {item.declined_overage_quantity}
               </span>
             ) : null}
             {item.requires_patient_approval ? (
@@ -2072,13 +2120,14 @@ function usePatientInvoicesTabContent({
             {moneyValueNumber(item.overage_quantity) === 0 &&
             moneyNumeric(item.pending_overage_quantity) === 0 &&
             moneyNumeric(item.approved_overage_quantity) === 0 &&
+            moneyNumeric(item.declined_overage_quantity) === 0 &&
             !item.requires_patient_approval ? (
               <span className="text-xs text-muted-foreground">—</span>
             ) : null}
           </span>
         ),
       },
-      ...(canManageInvoices
+      ...(canManagePackages
         ? [
             {
               id: "package_actions",
@@ -2089,6 +2138,7 @@ function usePatientInvoicesTabContent({
                 <PackageActionsMenu
                   item={item}
                   t={t}
+                  canDecide={canManageInvoices}
                   approvalBusyKey={approvalBusyKey}
                   onDecision={(approvalStatus) =>
                     void handleOverageDecision(
@@ -2099,7 +2149,12 @@ function usePatientInvoicesTabContent({
                   }
                   onRecordConsumption={() => {
                     setConsumeTargetId(item.patient_service_package_id);
-                    setConsumeForm(BLANK_CONSUMPTION_FORM);
+                    // The row it was opened from, on the tariff's own order.
+                    setConsumeForm({
+                      ...BLANK_CONSUMPTION_FORM,
+                      packageItemId: item.package_item_id ?? "",
+                      orderId: item.order_id ?? "",
+                    });
                     setConsumeError("");
                   }}
                 />
@@ -2111,6 +2166,7 @@ function usePatientInvoicesTabContent({
     [
       approvalBusyKey,
       canManageInvoices,
+      canManagePackages,
       commonNotSet,
       effectiveServicePackages,
       formatDate,
@@ -3069,7 +3125,7 @@ function usePatientInvoicesTabContent({
 
 
       <PatientSheetScaffold presentation="dialog"
-        open={assignOpen && canManageInvoices}
+        open={assignOpen && canManagePackages}
         onOpenChange={(open) => setAssignOpen(open)}
         width="form-heavy"
         onSubmit={handleAssignPackage}
@@ -3240,7 +3296,7 @@ function usePatientInvoicesTabContent({
       </PatientSheetScaffold>
 
       <PatientSheetScaffold
-        open={Boolean(consumeTargetId) && canManageInvoices}
+        open={Boolean(consumeTargetId) && canManagePackages}
         onOpenChange={(open) => {
           if (!open) closeConsumeSheet();
         }}
@@ -3295,9 +3351,13 @@ function usePatientInvoicesTabContent({
                 className={selectClass}
                 disabled={consumeBusy}
               >
-                <option value="__summary__">
-                  {t.patient_invoices_package_summary}
-                </option>
+                {/* Only a package without items records on the package as a
+                    whole; with items such a record showed on no row. */}
+                {consumeTargetGroup?.items.some((item) => item.package_item_id) ? null : (
+                  <option value="__summary__">
+                    {t.patient_invoices_package_summary}
+                  </option>
+                )}
                 {consumeTargetGroup?.items.reduce<ReactNode[]>((options, item) => {
                   if (!item.package_item_id) {
                     return options;
@@ -3331,21 +3391,6 @@ function usePatientInvoicesTabContent({
                   </option>
                 ))}
               </NativeComboboxSelect>
-            </Field>
-            <Field label={t.patient_invoices_order_service_id} htmlFor="consume-order-service-id">
-              <Input
-                id="consume-order-service-id"
-                value={consumeForm.orderLeistungId}
-                onChange={(event) =>
-                  setConsumeForm((current) => ({
-                    ...current,
-                    orderLeistungId: event.target.value,
-                  }))
-                }
-                className={inputClass}
-                disabled={consumeBusy}
-                placeholder={t.patient_invoices_optional_uuid}
-              />
             </Field>
             <Field label={t.patient_invoices_quantity} htmlFor="consume-package-quantity">
               <Input
@@ -3400,7 +3445,7 @@ function usePatientInvoicesTabContent({
               <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
                 {t.patient_invoices_service_packages}
               </span>
-              {canManageInvoices ? (
+              {canManagePackages ? (
                 <Button
                   type="button"
                   size="sm"

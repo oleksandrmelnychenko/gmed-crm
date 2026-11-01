@@ -6237,3 +6237,278 @@ async fn internal_notes_stay_with_staff_and_old_catalogue_lines_print_in_german(
     assert_eq!(status, StatusCode::OK, "{cleared}");
     assert!(cleared["internal_note"].is_null(), "{cleared}");
 }
+
+/// QA 2026-11-01 (T3): a decline takes back the overage only, staff and portal
+/// counts agree, an overage without an order bills on the tariff's order and
+/// the limits of a consumption are enforced.
+#[tokio::test]
+async fn package_decline_and_order_rules_keep_the_overage_billable() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let app = context.app;
+    let pool = context.pool;
+    let admin_id = context.admin_id;
+    let tag = unique_tag("package-decline");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    seed_order_leistung(
+        &pool,
+        order_id,
+        "Package eligible service",
+        100.0,
+        "approved",
+    )
+    .await;
+    let standard_profile_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM tax_profiles WHERE profile_key = 'standard_vat'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let (status, package) = json_request(
+        &app,
+        "POST",
+        "/api/v1/service-packages",
+        &billing_bearer,
+        Some(json!({
+            "package_key": format!("pkg_{tag}"),
+            "name": "Decline test",
+            "base_price_net": 100,
+            "items": [{
+                "description": "Interpreter hour",
+                "included_quantity": 5,
+                "unit_label": "hour",
+                "overage_unit_price_net": 50,
+                "tax_profile_id": standard_profile_id
+            }, {
+                "description": "Concierge day",
+                "included_quantity": 2,
+                "unit_label": "day",
+                "overage_unit_price_net": 10,
+                "tax_profile_id": standard_profile_id,
+                "requires_patient_approval": true
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{package}");
+    let hour_item = package["items"][0]["id"].as_str().unwrap().to_string();
+    let day_item = package["items"][1]["id"].as_str().unwrap().to_string();
+    let (status, assigned) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/service-packages"),
+        &billing_bearer,
+        Some(json!({ "package_id": package["id"], "order_id": order_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{assigned}");
+    let assigned_id = assigned["id"].as_str().unwrap().to_string();
+    let consume = format!("/api/v1/patients/{patient_id}/service-packages/{assigned_id}/consume");
+    let approval =
+        format!("/api/v1/patients/{patient_id}/service-packages/{assigned_id}/overage-approval");
+    let list_path = format!("/api/v1/patients/{patient_id}/service-packages");
+
+    // A package with items takes no consumption without one.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &consume,
+        &billing_bearer,
+        Some(json!({ "quantity": 1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    for quantity in [3, 3] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &consume,
+            &billing_bearer,
+            Some(json!({ "package_item_id": hour_item, "quantity": quantity })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    let (status, body) = json_request(&app, "GET", &list_path, &billing_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let line = |rows: &serde_json::Value, item: &str| {
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["package_item_id"].as_str() == Some(item))
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(line(&body, &hour_item)["pending_overage_gross"], "59.5");
+
+    let (status, decision) = json_request(
+        &app,
+        "POST",
+        &approval,
+        &billing_bearer,
+        Some(json!({ "package_item_id": hour_item, "approval_status": "declined" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{decision}");
+    assert_eq!(decision["updated_count"], 1);
+    let (_, body) = json_request(&app, "GET", &list_path, &billing_bearer, None).await;
+    let hours = line(&body, &hour_item);
+    assert_eq!(hours["used_quantity"], "5");
+    assert_eq!(hours["remaining_quantity"], "0");
+    assert_eq!(hours["overage_quantity"], "0");
+    assert_eq!(hours["declined_overage_quantity"], "1");
+
+    // The quota stays spent; the next use is overage on the tariff's order,
+    // although none was named.
+    let (status, next) = json_request(
+        &app,
+        "POST",
+        &consume,
+        &billing_bearer,
+        Some(json!({ "package_item_id": hour_item, "quantity": 1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{next}");
+    assert_eq!(next["overage_quantity"], "1");
+    let next_id = Uuid::parse_str(next["id"].as_str().unwrap()).unwrap();
+    let stored_order: Option<Uuid> =
+        sqlx::query_scalar("SELECT order_id FROM service_package_consumptions WHERE id = $1")
+            .bind(next_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored_order, Some(order_id));
+    // An older row without an order is billed on the tariff's order too.
+    sqlx::query("UPDATE service_package_consumptions SET order_id = NULL WHERE id = $1")
+        .bind(next_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &approval,
+        &billing_bearer,
+        Some(json!({ "package_item_id": hour_item, "approval_status": "approved" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // An approval without overage has a decision too; declined, it takes nothing.
+    let (status, day) = json_request(
+        &app,
+        "POST",
+        &consume,
+        &billing_bearer,
+        Some(json!({ "package_item_id": day_item, "quantity": 1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{day}");
+    assert_eq!(day["approval_status"], "pending");
+    assert_eq!(day["overage_quantity"], "0");
+    let (status, decision) = json_request(
+        &app,
+        "POST",
+        &approval,
+        &billing_bearer,
+        Some(json!({ "package_item_id": day_item, "approval_status": "declined" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{decision}");
+    assert_eq!(decision["updated_count"], 1);
+    let (_, body) = json_request(&app, "GET", &list_path, &billing_bearer, None).await;
+    assert_eq!(line(&body, &day_item)["used_quantity"], "0");
+
+    let quote = create_quote(&app, &billing_bearer, order_id).await;
+    let invoice = create_sent_invoice(
+        &app,
+        &pool,
+        &billing_bearer,
+        quote["id"].as_str().unwrap(),
+        "final",
+        "2026-05-15",
+    )
+    .await;
+    assert_eq!(invoice["total_gross"], "178.5");
+
+    // Period and dates.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &list_path,
+        &billing_bearer,
+        Some(json!({
+            "package_id": package["id"],
+            "starts_on": "2030-02-01",
+            "ends_on": "2030-01-01",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, future) = json_request(
+        &app,
+        "POST",
+        &list_path,
+        &billing_bearer,
+        Some(json!({ "package_id": package["id"], "starts_on": "2030-01-01" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{future}");
+    let future_id = future["id"].as_str().unwrap();
+    let unbound = format!("/api/v1/patients/{patient_id}/service-packages/{future_id}/consume");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &unbound,
+        &billing_bearer,
+        Some(json!({ "package_item_id": hour_item, "quantity": 1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // No order at all: an overage could never be billed, included use can.
+    sqlx::query("UPDATE patient_service_packages SET starts_on = NULL WHERE id = $1")
+        .bind(Uuid::parse_str(future_id).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &unbound,
+        &billing_bearer,
+        Some(json!({ "package_item_id": hour_item, "quantity": 6 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &unbound,
+        &billing_bearer,
+        Some(json!({ "package_item_id": hour_item, "quantity": 1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Nothing is consumed on the tariff of a cancelled order.
+    sqlx::query("UPDATE orders SET status = 'cancelled' WHERE id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &consume,
+        &billing_bearer,
+        Some(json!({ "package_item_id": hour_item, "quantity": 1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}

@@ -312,6 +312,8 @@ export interface PatientsPortalTranslations {
   patient_invoices_overage: string;
   patient_invoices_pending: string;
   patient_invoices_approved: string;
+  patient_invoices_declined: string;
+  patient_invoices_approve: string;
   patient_invoices_patient_approval: string;
   patient_invoices_approve_overage: string;
   patient_invoices_decline: string;
@@ -967,6 +969,7 @@ export interface PatientsPortalTranslations {
   portal_subscriptions_used: string;
   portal_subscriptions_remaining: string;
   portal_subscriptions_overage: string;
+  portal_subscriptions_declined: string;
   portal_subscriptions_pending_approval: string;
   portal_subscriptions_no_services: string;
   portal_subscriptions_units: string;
@@ -1300,6 +1303,8 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   patient_invoices_overage: "Превышение",
   patient_invoices_pending: "В ожидании",
   patient_invoices_approved: "Одобрено",
+  patient_invoices_declined: "Отклонено",
+  patient_invoices_approve: "Подтвердить",
   patient_invoices_patient_approval: "Согласование пациента",
   patient_invoices_approve_overage: "Одобрить превышение",
   patient_invoices_decline: "Отклонить",
@@ -1942,6 +1947,7 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_subscriptions_used: "Использовано",
   portal_subscriptions_remaining: "Осталось",
   portal_subscriptions_overage: "Сверх лимита",
+  portal_subscriptions_declined: "Отклонено",
   portal_subscriptions_pending_approval: "Ожидает согласования",
   portal_subscriptions_no_services: "Для этого пакета ещё не опубликован перечень услуг.",
   portal_subscriptions_units: "ед.",
@@ -2275,6 +2281,8 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   patient_invoices_overage: "Mehrverbrauch",
   patient_invoices_pending: "Ausstehend",
   patient_invoices_approved: "Genehmigt",
+  patient_invoices_declined: "Abgelehnt",
+  patient_invoices_approve: "Bestätigen",
   patient_invoices_patient_approval: "Patientenfreigabe",
   patient_invoices_approve_overage: "Mehrverbrauch genehmigen",
   patient_invoices_decline: "Ablehnen",
@@ -2917,6 +2925,7 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_subscriptions_used: "Genutzt",
   portal_subscriptions_remaining: "Verfügbar",
   portal_subscriptions_overage: "Über Kontingent",
+  portal_subscriptions_declined: "Abgelehnt",
   portal_subscriptions_pending_approval: "Freigabe ausstehend",
   portal_subscriptions_no_services: "Für dieses Paket wurde noch keine Leistungsliste freigegeben.",
   portal_subscriptions_units: "Einheiten",

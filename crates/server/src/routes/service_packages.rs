@@ -39,6 +39,26 @@ pub(crate) fn subscription_kind(package_key: &str) -> &'static str {
     }
 }
 
+/// What a consumption (alias `spc`) takes of its item's quota. A decline takes
+/// back the overage only: the included part was used, so the next use stays
+/// overage; declining the whole consumption gave the quota back (QA 2026-11-01,
+/// T3-3). A consumption without overage was declined as a whole and took nothing.
+/// Staff, portal and the overage calculation all read this.
+pub(crate) const COUNTED_QUANTITY_SQL: &str = "CASE
+    WHEN spc.approval_status <> 'declined' THEN spc.quantity
+    WHEN spc.overage_quantity > 0 THEN spc.quantity - spc.overage_quantity
+    ELSE 0
+END";
+
+/// Gross of the overage of a consumption (alias `spc`), rounded like its
+/// invoice line (`money::line_amounts`).
+const OVERAGE_GROSS_SQL: &str = "ROUND(spc.overage_quantity * spc.unit_price_net_snapshot, 2)
+    + ROUND(
+        ROUND(spc.overage_quantity * spc.unit_price_net_snapshot, 2)
+            * spc.vat_rate_snapshot / 100,
+        2
+    )";
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/me/subscriptions", get(list_my_subscriptions))
@@ -1585,7 +1605,7 @@ async fn list_patient_service_packages(
         return resp;
     }
 
-    match sqlx::query(
+    match sqlx::query(&format!(
         r#"SELECT psp.id, psp.package_id, psp.order_id, sp.name AS package_name, psp.status,
                   psp.portal_visible,
                   psp.starts_on, psp.ends_on, psp.assigned_at, psp.notes,
@@ -1597,9 +1617,10 @@ async fn list_patient_service_packages(
                   spi.id AS package_item_id, COALESCE(c.service_key, spi.service_key) AS service_key,
                   c.service_name AS agency_service_name, spi.description, spi.included_quantity,
                   spi.unit_label, spi.requires_patient_approval,
-                  COALESCE(SUM(spc.quantity), 0) AS used_quantity,
-                  COALESCE(SUM(spc.overage_quantity), 0) AS overage_quantity,
+                  COALESCE(SUM({COUNTED_QUANTITY_SQL}), 0) AS used_quantity,
+                  COALESCE(SUM(spc.overage_quantity) FILTER (WHERE spc.approval_status <> 'declined'), 0) AS overage_quantity,
                   COALESCE(SUM(spc.overage_quantity) FILTER (WHERE spc.approval_status = 'pending'), 0) AS pending_overage_quantity,
+                  COALESCE(SUM({OVERAGE_GROSS_SQL}) FILTER (WHERE spc.approval_status = 'pending'), 0) AS pending_overage_gross,
                   COALESCE(SUM(spc.overage_quantity) FILTER (WHERE spc.approval_status = 'approved'), 0) AS approved_overage_quantity,
                   COALESCE(SUM(spc.overage_quantity) FILTER (WHERE spc.approval_status = 'declined'), 0) AS declined_overage_quantity,
                   COUNT(spc.id) FILTER (WHERE spc.approval_status = 'pending') AS pending_consumption_count,
@@ -1624,7 +1645,7 @@ async fn list_patient_service_packages(
                     spi.description, spi.included_quantity,
                     spi.unit_label, spi.requires_patient_approval
            ORDER BY psp.assigned_at DESC, spi.sort_order"#,
-    )
+    ))
     .bind(patient_id)
     .fetch_all(&state.db)
     .await
@@ -1670,6 +1691,7 @@ async fn list_patient_service_packages(
                         "remaining_quantity": decimal_to_string(remaining),
                         "overage_quantity": decimal_to_string(row.try_get::<Decimal, _>("overage_quantity").unwrap_or(Decimal::ZERO)),
                         "pending_overage_quantity": decimal_to_string(row.try_get::<Decimal, _>("pending_overage_quantity").unwrap_or(Decimal::ZERO)),
+                        "pending_overage_gross": decimal_to_string(row.try_get::<Decimal, _>("pending_overage_gross").unwrap_or(Decimal::ZERO)),
                         "approved_overage_quantity": decimal_to_string(row.try_get::<Decimal, _>("approved_overage_quantity").unwrap_or(Decimal::ZERO)),
                         "declined_overage_quantity": decimal_to_string(row.try_get::<Decimal, _>("declined_overage_quantity").unwrap_or(Decimal::ZERO)),
                         "pending_consumption_count": row.try_get::<i64, _>("pending_consumption_count").unwrap_or(0),
@@ -1708,7 +1730,7 @@ async fn list_my_subscriptions(
     // financial scope. If an order has multiple released subscriptions, the
     // shared balance is not repeated on every card; patients can inspect the
     // authoritative amount once in the invoices workspace.
-    let rows = match sqlx::query(
+    let rows = match sqlx::query(&format!(
         r#"SELECT psp.id, psp.package_id, psp.order_id, psp.status,
                   psp.starts_on, psp.ends_on, psp.assigned_at, psp.portal_visible,
                   sp.name AS package_name, sp.description AS package_description,
@@ -1718,15 +1740,16 @@ async fn list_my_subscriptions(
                   COALESCE(c.service_key, spi.service_key) AS service_key,
                   spi.description AS service_description,
                   spi.included_quantity, spi.unit_label, spi.requires_patient_approval,
-                  COALESCE(SUM(spc.quantity) FILTER (
-                      WHERE spc.approval_status <> 'declined'
-                  ), 0) AS used_quantity,
+                  COALESCE(SUM({COUNTED_QUANTITY_SQL}), 0) AS used_quantity,
                   COALESCE(SUM(spc.overage_quantity) FILTER (
                       WHERE spc.approval_status <> 'declined'
                   ), 0) AS overage_quantity,
                   COALESCE(SUM(spc.overage_quantity) FILTER (
                       WHERE spc.approval_status = 'pending'
                   ), 0) AS pending_overage_quantity,
+                  COALESCE(SUM(spc.overage_quantity) FILTER (
+                      WHERE spc.approval_status = 'declined'
+                  ), 0) AS declined_overage_quantity,
                   finance.visible_invoice_count,
                   finance.overdue_invoice_count,
                   finance.settled_amount,
@@ -1797,7 +1820,7 @@ async fn list_my_subscriptions(
                psp.assigned_at DESC,
                spi.sort_order,
                spi.created_at"#,
-    )
+    ))
     .bind(patient_id)
     .fetch_all(&state.db)
     .await
@@ -1931,6 +1954,7 @@ async fn list_my_subscriptions(
                 "remaining_quantity": decimal_to_string(remaining_quantity),
                 "overage_quantity": decimal_to_string(row.try_get::<Decimal, _>("overage_quantity").unwrap_or(Decimal::ZERO)),
                 "pending_overage_quantity": decimal_to_string(row.try_get::<Decimal, _>("pending_overage_quantity").unwrap_or(Decimal::ZERO)),
+                "declined_overage_quantity": decimal_to_string(row.try_get::<Decimal, _>("declined_overage_quantity").unwrap_or(Decimal::ZERO)),
                 "unit_label": row.try_get::<String, _>("unit_label").unwrap_or_else(|_| "unit".to_string()),
                 "requires_patient_approval": row.try_get::<bool, _>("requires_patient_approval").unwrap_or(false),
             }));
@@ -2014,6 +2038,15 @@ async fn assign_patient_service_package(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
+    // The order tariff refused this already, this path did not (QA 2026-11-01).
+    if let (Some(starts_on), Some(ends_on)) = (starts_on, ends_on)
+        && ends_on < starts_on
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "ends_on must not be before starts_on",
+        );
+    }
     if let Some(order_id) = body.order_id {
         let belongs = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM orders WHERE id = $1 AND patient_id = $2)",
@@ -2087,13 +2120,35 @@ async fn assign_patient_service_package(
     }
 }
 
+struct PatientPackageContext {
+    package_id: Uuid,
+    status: String,
+    order_id: Option<Uuid>,
+    starts_on: Option<NaiveDate>,
+    ends_on: Option<NaiveDate>,
+    has_items: bool,
+}
+
+/// Whether a package can be consumed on `today`: only inside its period.
+fn package_period_covers(
+    starts_on: Option<NaiveDate>,
+    ends_on: Option<NaiveDate>,
+    today: NaiveDate,
+) -> bool {
+    starts_on.is_none_or(|date| date <= today) && ends_on.is_none_or(|date| date >= today)
+}
+
 async fn load_patient_package_context(
     state: &AppState,
     patient_id: Uuid,
     patient_service_package_id: Uuid,
-) -> Result<Option<(Uuid, String)>, axum::response::Response> {
+) -> Result<Option<PatientPackageContext>, axum::response::Response> {
     sqlx::query(
-        r#"SELECT psp.package_id, psp.status
+        r#"SELECT psp.package_id, psp.status, psp.order_id, psp.starts_on, psp.ends_on,
+                  EXISTS(
+                      SELECT 1 FROM service_package_items item
+                      WHERE item.package_id = psp.package_id
+                  ) AS has_items
            FROM patient_service_packages psp
            WHERE psp.id = $1 AND psp.patient_id = $2"#,
     )
@@ -2102,11 +2157,17 @@ async fn load_patient_package_context(
     .fetch_optional(&state.db)
     .await
     .map(|row| {
-        row.map(|row| {
-            (
-                row.try_get::<Uuid, _>("package_id").unwrap_or_default(),
-                row.try_get::<String, _>("status").unwrap_or_default(),
-            )
+        row.map(|row| PatientPackageContext {
+            package_id: row.try_get::<Uuid, _>("package_id").unwrap_or_default(),
+            status: row.try_get::<String, _>("status").unwrap_or_default(),
+            order_id: row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
+            starts_on: row
+                .try_get::<Option<NaiveDate>, _>("starts_on")
+                .unwrap_or_default(),
+            ends_on: row
+                .try_get::<Option<NaiveDate>, _>("ends_on")
+                .unwrap_or_default(),
+            has_items: row.try_get::<bool, _>("has_items").unwrap_or(false),
         })
     })
     .map_err(|e| {
@@ -2137,7 +2198,7 @@ async fn create_package_consumption(
         );
     }
 
-    let Some((package_id, package_status)) =
+    let Some(package) =
         (match load_patient_package_context(&state, patient_id, patient_service_package_id).await {
             Ok(value) => value,
             Err(resp) => return resp,
@@ -2145,11 +2206,53 @@ async fn create_package_consumption(
     else {
         return err(StatusCode::NOT_FOUND, "Patient service package not found");
     };
-    if !matches!(package_status.as_str(), "active" | "draft") {
+    let package_id = package.package_id;
+    if !matches!(package.status.as_str(), "active" | "draft") {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Package is not active for consumption",
         );
+    }
+    if !package_period_covers(package.starts_on, package.ends_on, crate::app_time::today()) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The date is outside the package period",
+        );
+    }
+    // A consumption without an item matched no row of a package with items:
+    // it counted against nothing and nobody could see it (QA 2026-11-01, T3-5).
+    if package.has_items && body.package_item_id.is_none() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Choose the package item that was used",
+        );
+    }
+    // Recorded without an order, it belongs to the order of the tariff.
+    let order_id = body.order_id.or(package.order_id);
+    // Whether a cancelled order ends its tariff is the owner's decision; until
+    // then nothing can be consumed on it, the settlement is what stays of it
+    // (QA 2026-11-01, T3-6).
+    let cancelled_order = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM orders WHERE id = ANY($1) AND status = 'cancelled')",
+    )
+    .bind(
+        [order_id, package.order_id]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>(),
+    )
+    .fetch_one(&state.db)
+    .await;
+    match cancelled_order {
+        Ok(false) => {}
+        Ok(true) => return crate::routes::orders::order_closed_for_new_services(),
+        Err(e) => {
+            tracing::error!(error = %e, patient_service_package_id = %patient_service_package_id, "check package order");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load package consumption",
+            );
+        }
     }
 
     let item_context = if let Some(package_item_id) = body.package_item_id {
@@ -2264,7 +2367,7 @@ async fn create_package_consumption(
         None
     };
 
-    if let Some(order_id) = body.order_id {
+    if let Some(order_id) = order_id {
         let belongs = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM orders WHERE id = $1 AND patient_id = $2)",
         )
@@ -2293,7 +2396,7 @@ async fn create_package_consumption(
         )
         .bind(order_leistung_id)
         .bind(patient_id)
-        .bind(body.order_id)
+        .bind(order_id)
         .fetch_one(&state.db)
         .await
         .unwrap_or(false);
@@ -2314,16 +2417,15 @@ async fn create_package_consumption(
         .map(|context| context.requires_patient_approval)
         .unwrap_or(false);
     let package_item_id = item_context.as_ref().map(|context| context.id);
-    let used_quantity = match sqlx::query_scalar::<_, Decimal>(
-        r#"SELECT COALESCE(SUM(quantity), 0)
-           FROM service_package_consumptions
-           WHERE patient_service_package_id = $1
+    let used_quantity = match sqlx::query_scalar::<_, Decimal>(&format!(
+        r#"SELECT COALESCE(SUM({COUNTED_QUANTITY_SQL}), 0)
+           FROM service_package_consumptions spc
+           WHERE spc.patient_service_package_id = $1
              AND (
-                    ($2::uuid IS NULL AND package_item_id IS NULL)
-                 OR package_item_id = $2
-             )
-             AND approval_status <> 'declined'"#,
-    )
+                    ($2::uuid IS NULL AND spc.package_item_id IS NULL)
+                 OR spc.package_item_id = $2
+             )"#,
+    ))
     .bind(patient_service_package_id)
     .bind(package_item_id)
     .fetch_one(&state.db)
@@ -2340,6 +2442,13 @@ async fn create_package_consumption(
     };
     let remaining_quantity = (included_quantity - used_quantity).max(Decimal::ZERO);
     let overage_quantity = (body.quantity - remaining_quantity).max(Decimal::ZERO);
+    // Nothing could ever bill it (QA 2026-11-01, T3-4).
+    if overage_quantity > Decimal::ZERO && order_id.is_none() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Overage needs an order to be billed on",
+        );
+    }
     let requires_patient_approval = item_requires_approval || overage_quantity > Decimal::ZERO;
     let approval_status = if requires_patient_approval {
         "pending"
@@ -2362,7 +2471,7 @@ async fn create_package_consumption(
     )
     .bind(patient_service_package_id)
     .bind(package_item_id)
-    .bind(body.order_id)
+    .bind(order_id)
     .bind(body.order_leistung_id)
     .bind(body.quantity.round_commercial(2))
     .bind(overage_quantity.round_commercial(2))
@@ -2452,7 +2561,7 @@ async fn update_overage_approval(
     if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
         return resp;
     }
-    let Some((package_id, _)) =
+    let Some(PatientPackageContext { package_id, .. }) =
         (match load_patient_package_context(&state, patient_id, patient_service_package_id).await {
             Ok(value) => value,
             Err(resp) => return resp,
@@ -2483,7 +2592,8 @@ async fn update_overage_approval(
                     ($2::uuid IS NULL AND package_item_id IS NULL)
                  OR package_item_id = $2
              )
-             AND overage_quantity > 0
+             -- Also an item that asks for approval without overage: it stayed
+             -- pending for good (QA 2026-11-01, T3-5).
              AND approval_status = 'pending'"#,
     )
     .bind(patient_service_package_id)
@@ -2560,7 +2670,11 @@ async fn order_subscription_payload(
 ) -> Result<Value, sqlx::Error> {
     let current = sqlx::query(
         r#"SELECT psp.id, psp.package_id, psp.status, psp.starts_on, psp.ends_on,
-                  sp.package_key, sp.name
+                  sp.package_key, sp.name,
+                  EXISTS(
+                      SELECT 1 FROM service_package_consumptions consumption
+                      WHERE consumption.patient_service_package_id = psp.id
+                  ) AS has_consumption
            FROM patient_service_packages psp
            JOIN service_packages sp ON sp.id = psp.package_id
            WHERE psp.order_id = $1 AND psp.status IN ('draft', 'active', 'paused')
@@ -2597,6 +2711,7 @@ async fn order_subscription_payload(
                 "status": row.try_get::<String, _>("status").ok(),
                 "starts_on": row.try_get::<Option<NaiveDate>, _>("starts_on").ok().flatten(),
                 "ends_on": row.try_get::<Option<NaiveDate>, _>("ends_on").ok().flatten(),
+                "has_consumption": row.try_get::<bool, _>("has_consumption").unwrap_or(false),
             })
         }),
         "options": options
@@ -2829,6 +2944,16 @@ async fn set_order_subscription(
 #[cfg(test)]
 mod subscription_tests {
     use super::*;
+
+    #[test]
+    fn a_package_is_consumed_inside_its_period_only() {
+        let day = |value: u32| NaiveDate::from_ymd_opt(2026, 11, value);
+        let today = day(10).unwrap();
+        assert!(package_period_covers(None, None, today));
+        assert!(package_period_covers(day(10), day(10), today));
+        assert!(!package_period_covers(day(11), None, today));
+        assert!(!package_period_covers(None, day(9), today));
+    }
 
     #[test]
     fn the_three_tariffs_are_the_account_types() {

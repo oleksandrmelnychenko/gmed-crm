@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::auth::middleware::AuthUser;
 use crate::money::CommercialRounding;
 use crate::routes::me::resolve_self_patient_id;
+use crate::routes::service_packages::COUNTED_QUANTITY_SQL;
 use crate::state::AppState;
 use gmed_domain::role::Role;
 
@@ -323,7 +324,7 @@ async fn load_package_actions(
     state: &AppState,
     patient_id: Uuid,
 ) -> Result<Vec<Value>, axum::response::Response> {
-    let rows = sqlx::query(
+    let rows = sqlx::query(&format!(
         r#"SELECT psp.id AS patient_service_package_id,
                   psp.package_id,
                   sp.name AS package_name,
@@ -331,8 +332,10 @@ async fn load_package_actions(
                   spi.description,
                   spi.included_quantity,
                   COALESCE(spi.requires_patient_approval, false) AS requires_patient_approval,
-                  COALESCE(SUM(spc.quantity), 0) AS used_quantity,
-                  COALESCE(SUM(spc.overage_quantity), 0) AS overage_quantity,
+                  COALESCE(SUM({COUNTED_QUANTITY_SQL}), 0) AS used_quantity,
+                  COALESCE(SUM(spc.overage_quantity) FILTER (
+                      WHERE spc.approval_status <> 'declined'
+                  ), 0) AS overage_quantity,
                   COALESCE(bool_or(spc.approval_status = 'pending'), false) AS pending_approval
            FROM patient_service_packages psp
            JOIN service_packages sp ON sp.id = psp.package_id
@@ -350,11 +353,13 @@ async fn load_package_actions(
            HAVING COALESCE(bool_or(spc.approval_status = 'pending'), false)
               OR (
                    COALESCE(spi.requires_patient_approval, false) = true
-                   AND COALESCE(SUM(spc.overage_quantity), 0) > 0
+                   AND COALESCE(SUM(spc.overage_quantity) FILTER (
+                       WHERE spc.approval_status <> 'declined'
+                   ), 0) > 0
                  )
            ORDER BY psp.assigned_at DESC
            LIMIT 10"#,
-    )
+    ))
     .bind(patient_id)
     .fetch_all(&state.db)
     .await

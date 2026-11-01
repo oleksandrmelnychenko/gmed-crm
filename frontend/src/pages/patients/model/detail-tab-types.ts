@@ -449,6 +449,8 @@ export type PatientServicePackageItem = {
   remaining_quantity: string;
   overage_quantity: string;
   pending_overage_quantity?: string;
+  /** Gross of the pending overage: what an approval bills. */
+  pending_overage_gross?: string;
   approved_overage_quantity?: string;
   declined_overage_quantity?: string;
   pending_consumption_count?: number;

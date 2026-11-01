@@ -441,9 +441,11 @@ async fn portal_subscriptions_are_self_scoped_visible_and_client_safe() {
     assert_eq!(active["financial"]["amounts_visible"], true);
     assert_eq!(active["financial"]["balance_due"], "99");
     assert_eq!(active["services"][0]["included_quantity"], "5");
-    assert_eq!(active["services"][0]["used_quantity"], "2");
-    assert_eq!(active["services"][0]["remaining_quantity"], "3");
+    // A decline takes back the overage only: 2 + (4 - 1) of 5 were used.
+    assert_eq!(active["services"][0]["used_quantity"], "5");
+    assert_eq!(active["services"][0]["remaining_quantity"], "0");
     assert_eq!(active["services"][0]["overage_quantity"], "0");
+    assert_eq!(active["services"][0]["declined_overage_quantity"], "1");
 
     for shared_id in [shared_first_id, shared_second_id] {
         let shared = find_subscription(items, shared_id);

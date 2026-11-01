@@ -338,6 +338,7 @@ export type PortalSubscriptionService = {
   remaining_quantity: string;
   overage_quantity: string;
   pending_overage_quantity: string;
+  declined_overage_quantity?: string;
   unit_label: string;
   requires_patient_approval: boolean;
 };
