@@ -2597,7 +2597,7 @@ async fn update_overage_approval(
              -- Also an item that asks for approval without overage: it stayed
              -- pending for good (QA 2026-11-01, T3-5).
              AND approval_status = 'pending'"#,
-    )
+        )
         .bind(patient_service_package_id)
         .bind(body.package_item_id)
         .bind(body.approval_status.clone())
