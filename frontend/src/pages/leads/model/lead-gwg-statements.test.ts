@@ -767,6 +767,21 @@ describe("sections 7–8 as the group shows them", () => {
     expect(invoice.find((row) => row.key === "invoice_to")?.value).toBe("an eine andere Adresse");
   });
 
+  it("reads the stored payer's relation for a recipient who pays, as a replaced payer's goes with him", () => {
+    const value = normalizeLeadPortalBilling({
+      invoice_recipient: "third_party",
+      invoice_recipient_is_payer: true,
+      invoice_to: "self",
+      recipient: { type: "person", name: "Ruth Nussbaum", relationship_kind: "spouse" },
+    })!;
+    const relation = (payer: { relationship_kind: string | null } | null) =>
+      billingStatements(value, de, "de", false, false, null, false, null, payer).invoice
+        .find((row) => row.key === "recipient_relationship")?.value;
+    expect(relation(null)).toContain("Ehe");
+    expect(relation({ relationship_kind: "friend" })).toBe("Freund/in");
+    expect(relation({ relationship_kind: null })).toBe("");
+  });
+
   it("keeps paying organisation recipient details visible in the read-only invoice rows", () => {
     const value = normalizeLeadPortalBilling({
       invoice_recipient: "third_party",

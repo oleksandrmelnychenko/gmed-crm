@@ -604,14 +604,21 @@ export function payerChangeDropsConsents(
 }
 
 /**
- * The form without what belonged to the replaced payer: how to reach that
- * person, the address and the relation to the patient. The new payer is asked
- * for them; kept, a link could go to the old address and a spouse's relation
- * would hide T5 (QA 2026-11-01).
+ * The form without what belonged to the replaced payer: the name and date of
+ * birth, how to reach that person, the address and the relation to the patient.
+ * The new payer is asked for them; kept, a link could go to the old address, a
+ * spouse's relation would hide T5 and the new payer's link showed the old date
+ * of birth (QA 2026-11-01). With `stored`, what staff already typed for the new
+ * payer stays: only a value still equal to the stored one is the old payer's.
  */
-export function withReplacedPayer(form: PayerDeclarationForm): PayerDeclarationForm {
+export function withReplacedPayer(form: PayerDeclarationForm, stored?: PayerDeclarationForm): PayerDeclarationForm {
+  const typed = (field: "firstName" | "lastName" | "birthDate") =>
+    stored && form[field].trim() !== stored[field].trim() ? form[field] : "";
   return {
     ...form,
+    firstName: typed("firstName"),
+    lastName: typed("lastName"),
+    birthDate: typed("birthDate"),
     relationship: "",
     relationshipKind: "",
     email: "",

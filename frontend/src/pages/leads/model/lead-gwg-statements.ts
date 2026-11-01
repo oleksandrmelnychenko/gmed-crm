@@ -360,6 +360,8 @@ export function gwgLegalAnswers(identification: GwgLegalAnswerSource, tx: Tx, la
  */
 export type GwgPayerStatement = {
   payer_kind?: "self" | "third_party" | "representative" | null;
+  relationship_kind?: string | null;
+  relationship?: string | null;
   acts_on_own_account?: boolean | null;
   /**
    * False while nobody answered the question: `acts_on_own_account` is then
@@ -677,6 +679,11 @@ export function billingStatements(
    * recipient block read «—» beside GmbH (QA 2026-11-01).
    */
   payerLegalForm: string | null = null,
+  /**
+   * The stored payer's relation: the recipient who pays is that payer, and a
+   * replaced payer's relation goes with him (QA 2026-11-01). Null when unknown.
+   */
+  payerRelation: { relationship_kind?: string | null; relationship?: string | null } | null = null,
 ): BillingStatements {
   const country = (code: string | null) => countryNameForDisplay(code, lang);
   const statement = (
@@ -749,7 +756,9 @@ export function billingStatements(
           statement(
             "recipient_relationship",
             tx("Кем приходится пациенту", "Beziehung zur Patientin / zum Patienten"),
-            recipientRelationshipLabel(party.relationship_kind, party.relationship, tx),
+            payerRelation && billing.invoice_recipient_is_payer !== false
+              ? recipientRelationshipLabel(payerRelation.relationship_kind ?? null, payerRelation.relationship ?? null, tx)
+              : recipientRelationshipLabel(party.relationship_kind, party.relationship, tx),
           ),
         );
       }

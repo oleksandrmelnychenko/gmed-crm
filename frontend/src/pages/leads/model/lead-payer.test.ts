@@ -962,9 +962,19 @@ describe("a replaced payer leaves nothing behind (QA 2026-11-01)", () => {
     });
   });
 
-  it("clears them on a person's replacement, and keeps the new name", () => {
-    expect(withReplacedPayer({ ...old, lastName: "Nussbaum" })).toMatchObject({
-      firstName: "Klaus", lastName: "Nussbaum", relationshipKind: "", email: "", phone: "", city: "",
+  it("clears them on a person's replacement, and keeps only what was typed for the new payer", () => {
+    const stored = { ...old, birthDate: "1968-02-03" };
+    expect(withReplacedPayer({ ...stored, lastName: "Nussbaum" }, stored)).toMatchObject({
+      firstName: "", lastName: "Nussbaum", birthDate: "", relationshipKind: "", email: "", phone: "", city: "",
+    });
+    expect(withReplacedPayer({ ...stored, firstName: "Ruth" }, stored)).toMatchObject({
+      firstName: "Ruth", lastName: "", birthDate: "",
+    });
+  });
+
+  it("leaves no name or date of birth when the payer's type changes", () => {
+    expect(withPayerDeclarationField({ ...old, birthDate: "1968-02-03" }, "payerType", "company")).toMatchObject({
+      firstName: "", lastName: "", birthDate: "",
     });
   });
 

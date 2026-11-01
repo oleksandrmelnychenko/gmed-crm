@@ -409,6 +409,22 @@ export function LeadPayerDeclarationSection({
     // (live QA 2026-10-24); the form already asks to choose the parent.
     if (next.kind === "representative" && !next.representativeId) return;
     if (!consentLossAccepted.current && payerChangeDropsConsents(data?.declaration, next)) {
+      // A name is judged once typed, when it leaves the field: asked at the
+      // first letter, a half-typed name was saved and the consents recorded
+      // for it were wiped by the next letter (QA 2026-11-01 B4).
+      if (key !== "firstName" && key !== "lastName" && key !== "birthDate" && key !== "organisationName") {
+        setConsentLossAsked(true);
+      }
+      return;
+    }
+    queueSave(next);
+  };
+
+  const settlePayerIdentity = () => {
+    if (!unqueuedEditRef.current) return;
+    const next = formRef.current;
+    if (payerEmailInvalid(next) || (next.kind === "representative" && !next.representativeId)) return;
+    if (!consentLossAccepted.current && payerChangeDropsConsents(data?.declaration, next)) {
       setConsentLossAsked(true);
       return;
     }
@@ -544,6 +560,7 @@ export function LeadPayerDeclarationSection({
     ? billingStatements(
         recipientBilling, tx, lang, false, minor, cabinet?.identification?.payment_background ?? null, recipientByStaff,
         organisationMask?.legal_form ?? data?.declaration?.organisation_legal_form ?? null,
+        data?.declaration ?? null,
       ).invoice
     : [];
   const stepThreeAnswered = recipientRows.some((row) => row.key === "invoice_recipient");
@@ -1088,18 +1105,18 @@ export function LeadPayerDeclarationSection({
               ) : null}
               {organisation ? (
                 <PayerField label={tx("Название", "Name")} className="lg:col-span-2" required>
-                  <Input className={inputClass} value={form.organisationName} maxLength={200} disabled={readOnly} autoComplete="off" onChange={(event) => patch("organisationName", event.target.value)} />
+                  <Input className={inputClass} value={form.organisationName} maxLength={200} disabled={readOnly} autoComplete="off" onChange={(event) => patch("organisationName", event.target.value)} onBlur={settlePayerIdentity} />
                 </PayerField>
               ) : (
                 <>
                   <PayerField label={tx("Имя", "Vorname")} required>
-                    <Input className={inputClass} value={form.firstName} disabled={readOnly} autoComplete="off" onChange={(event) => patch("firstName", event.target.value)} />
+                    <Input className={inputClass} value={form.firstName} disabled={readOnly} autoComplete="off" onChange={(event) => patch("firstName", event.target.value)} onBlur={settlePayerIdentity} />
                   </PayerField>
                   <PayerField label={tx("Фамилия", "Nachname")} required>
-                    <Input className={inputClass} value={form.lastName} disabled={readOnly} autoComplete="off" onChange={(event) => patch("lastName", event.target.value)} />
+                    <Input className={inputClass} value={form.lastName} disabled={readOnly} autoComplete="off" onChange={(event) => patch("lastName", event.target.value)} onBlur={settlePayerIdentity} />
                   </PayerField>
                   <PayerField label={tx("Дата рождения", "Geburtsdatum")} required>
-                    <Input className={inputClass} type="date" max={appDateKey()} value={form.birthDate} disabled={readOnly} onChange={(event) => patch("birthDate", event.target.value)} />
+                    <Input className={inputClass} type="date" max={appDateKey()} value={form.birthDate} disabled={readOnly} onChange={(event) => patch("birthDate", event.target.value)} onBlur={settlePayerIdentity} />
                   </PayerField>
                   <PayerField label={tx("Место рождения", "Geburtsort")}>
                     <Input className={inputClass} value={form.placeOfBirth} disabled={readOnly} onChange={(event) => patch("placeOfBirth", event.target.value)} />
@@ -1316,8 +1333,8 @@ export function LeadPayerDeclarationSection({
               testId="lead-payer-consent-loss-dialog"
               title={tx("Сменить плательщика?", "Zahler ändern?")}
               description={tx(
-                "Согласия клиента на контакт с плательщиком и на передачу расчёта относятся к прежнему плательщику и будут сняты. Его контакты, адрес и связь с пациентом будут очищены: укажите данные нового плательщика. Форма уже отправлена, поэтому новые согласия запишете вы, указав, как клиент их дал.",
-                "Die Einwilligungen des Kunden zur Kontaktaufnahme und zur Weitergabe der Kostenschätzung gelten dem bisherigen Zahler und entfallen. Seine Kontaktdaten, seine Anschrift und seine Beziehung zum Patienten werden geleert: Tragen Sie die Daten des neuen Zahlers ein. Ist das Formular bereits gesendet, tragen Sie die neuen Einwilligungen selbst ein und geben an, wie der Kunde sie erteilt hat.",
+                "Согласия клиента на контакт с плательщиком и на передачу расчёта относятся к прежнему плательщику и будут сняты. Его имя и дата рождения, контакты, адрес и связь с пациентом будут очищены: укажите данные нового плательщика. Форма уже отправлена, поэтому новые согласия запишете вы, указав, как клиент их дал.",
+                "Die Einwilligungen des Kunden zur Kontaktaufnahme und zur Weitergabe der Kostenschätzung gelten dem bisherigen Zahler und entfallen. Sein Name und Geburtsdatum, seine Kontaktdaten, seine Anschrift und seine Beziehung zum Patienten werden geleert: Tragen Sie die Daten des neuen Zahlers ein. Ist das Formular bereits gesendet, tragen Sie die neuen Einwilligungen selbst ein und geben an, wie der Kunde sie erteilt hat.",
               )}
               confirmLabel={tx("Сменить", "Ändern")}
               cancelLabel={tx("Отмена", "Abbrechen")}
@@ -1325,7 +1342,7 @@ export function LeadPayerDeclarationSection({
               onConfirm={() => {
                 consentLossAccepted.current = true;
                 setConsentLossAsked(false);
-                const replaced = withReplacedPayer(formRef.current);
+                const replaced = withReplacedPayer(formRef.current, payerDeclarationToForm(data?.declaration));
                 formRef.current = replaced;
                 setForm(replaced);
                 queueSave(replaced);

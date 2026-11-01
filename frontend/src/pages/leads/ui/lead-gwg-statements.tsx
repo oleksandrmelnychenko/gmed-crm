@@ -503,11 +503,14 @@ function BillingGroup({
   card = false,
   minor = false,
   payerLegalForm = null,
+  payerRelation = null,
 }: {
   billing: LeadPortalBilling;
   updatedAt: string | null;
   /** The payer organisation's legal form: stands in when the recipient is that payer (QA 2026-11-01). */
   payerLegalForm?: string | null;
+  /** The stored payer: a recipient who pays reads the payer's relation (QA 2026-11-01). */
+  payerRelation?: GwgPayerStatement | null;
   /** A minor's request: "the patient himself" as recipient is the answering parent. */
   minor?: boolean;
   /** The payer link in short: whether and when the payer stated section 8; null on an older server. */
@@ -519,7 +522,7 @@ function BillingGroup({
   const payerAnswered = Boolean(payerLink?.submitted_at);
   // A minor's parent named by staff in the client's form is said so (owner 2026-10-30).
   const recipientByStaff = useMarkerKind("invoice_recipient") === "staff";
-  const statements = billingStatements(billing, tx, lang, payerAnswered, minor, null, recipientByStaff, payerLegalForm);
+  const statements = billingStatements(billing, tx, lang, payerAnswered, minor, null, recipientByStaff, payerLegalForm, payerRelation);
   return (
     <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && "col-span-full")} data-testid="lead-gwg-billing">
       <div className="flex flex-wrap items-center gap-2">
@@ -1028,7 +1031,7 @@ function LeadGwgStatementsBody({
     <PayerOrganisationGroup card={cards} mask={intake.payer_organisation} marker={intake.patient_payer} tx={tx} />
   ) : null;
   const billingGroup = intake.billing ? (
-    <BillingGroup card={cards} billing={intake.billing} updatedAt={intake.billing_updated_at} payerLink={intake.payer_link} minor={intake.minor === true} payerLegalForm={intake.payer_organisation?.legal_form ?? null} tx={tx} lang={lang} />
+    <BillingGroup card={cards} billing={intake.billing} updatedAt={intake.billing_updated_at} payerLink={intake.payer_link} minor={intake.minor === true} payerLegalForm={intake.payer_organisation?.legal_form ?? null} payerRelation={payer ?? null} tx={tx} lang={lang} />
   ) : null;
 
   if (!identification || !hasGwgStatements(intake)) {

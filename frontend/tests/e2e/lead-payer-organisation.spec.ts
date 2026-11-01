@@ -361,6 +361,7 @@ test("a stored company with the lead's consent, in German", async ({ page }, tes
   // and the relation go, and nothing is saved before they agree (QA 2026-11-01 B1, B2).
   const savesBeforeReplacement = saves.length;
   await section.getByLabel(/^Name/).fill("Beispiel Versicherung AG");
+  await section.getByLabel(/^Name/).blur();
   const warning = page.getByTestId("lead-payer-consent-loss-dialog");
   await expect(warning).toBeVisible();
   await expect(warning).toContainText("Zahler ändern?");
