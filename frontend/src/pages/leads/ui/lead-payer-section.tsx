@@ -1460,8 +1460,9 @@ export function LeadPayerDeclarationSection({
             </div>
             </div>
             ) : null}
-            {/* Staff enter or correct the payer's payment route (owner 2026-10-26); the payer's link answer replaces it. */}
-            {data?.declaration && !payingParent && data.declaration.payer_kind === "third_party" ? (
+            {/* Staff enter or correct the payer's payment route (owner 2026-10-26); the payer's link answer replaces it.
+                Once the client's form is sent the cabinet takes no answer, so staff enter it for any payer (Z2 BUG-2). */}
+            {data?.declaration && (portalIntake?.submitted_at || (!payingParent && data.declaration.payer_kind === "third_party")) ? (
               <LeadPayerPaymentRoute
                 leadId={leadId}
                 declaration={data.declaration}

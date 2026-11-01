@@ -411,9 +411,10 @@ pub(super) async fn apply_business_effects(
                           -- A document generated in the same instant as the
                           -- change is current (its `created_at` is clamped to
                           -- the change at generation).
-                          (o.client_terms_changed_at IS NULL
+                          (GREATEST(o.client_terms_changed_at, o.payer_terms_changed_at) IS NULL
                            OR COALESCE((SELECT generated_at FROM source), now())
-                              >= o.client_terms_changed_at) AS document_current
+                              >= GREATEST(o.client_terms_changed_at, o.payer_terms_changed_at))
+                              AS document_current
                    FROM orders o
                    WHERE o.id = $1
                )

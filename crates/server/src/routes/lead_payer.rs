@@ -2993,12 +2993,23 @@ async fn save_staff_payment_route(
         Err(error) => return database_error(error, "load staff payment route declaration"),
     };
     // Only a third party's route is staff's to enter: the patient or the
-    // paying parent answer it in the cabinet.
-    let Some(current) = current.filter(Declaration::is_third_party) else {
+    // paying parent answer it in the cabinet, until the form is sent and the
+    // cabinet takes no answer (moved to self-pay then, nobody could enter it:
+    // QA 2026-11-01, Z2 BUG-2).
+    let form_sent: bool =
+        match sqlx::query_scalar("SELECT portal_submitted_at IS NOT NULL FROM leads WHERE id = $1")
+            .bind(lead_id)
+            .fetch_one(&mut *tx)
+            .await
+        {
+            Ok(sent) => sent,
+            Err(error) => return database_error(error, "load staff payment route form"),
+        };
+    let Some(current) = current.filter(|current| form_sent || current.is_third_party()) else {
         return error(
             StatusCode::CONFLICT,
             "payer_not_third_party",
-            "Staff enter the payment route of a third-party payer only",
+            "Staff enter the payment route of a third-party payer or of a sent form only",
         );
     };
     let (next, changed) = match apply_payment_route_patch(&current, &patch) {
@@ -3205,6 +3216,15 @@ async fn store_declaration(
                relationship_kind = EXCLUDED.relationship_kind,
                contact_consent_at = EXCLUDED.contact_consent_at,
                cost_estimate_consent_at = EXCLUDED.cost_estimate_consent_at,
+               -- How a consent was given goes with the consent (QA 2026-11-01, Z2).
+               contact_consent_recorded_how = CASE WHEN EXCLUDED.contact_consent_at IS NULL
+                   THEN NULL ELSE lead_payer_declarations.contact_consent_recorded_how END,
+               contact_consent_recorded_note = CASE WHEN EXCLUDED.contact_consent_at IS NULL
+                   THEN NULL ELSE lead_payer_declarations.contact_consent_recorded_note END,
+               cost_estimate_consent_recorded_how = CASE WHEN EXCLUDED.cost_estimate_consent_at IS NULL
+                   THEN NULL ELSE lead_payer_declarations.cost_estimate_consent_recorded_how END,
+               cost_estimate_consent_recorded_note = CASE WHEN EXCLUDED.cost_estimate_consent_at IS NULL
+                   THEN NULL ELSE lead_payer_declarations.cost_estimate_consent_recorded_note END,
                acts_on_own_account = EXCLUDED.acts_on_own_account,
                own_account_answered = EXCLUDED.own_account_answered,
                beneficial_owner_name = EXCLUDED.beneficial_owner_name,
@@ -4404,12 +4424,61 @@ async fn write_order_payer(
     .execute(&mut *tx)
     .await?;
     let mut context = context;
-    context["changed_fields"] = json!(changed_json_fields(
-        &previous.to_audit_json(),
-        &next.to_audit_json()
-    ));
+    let changed_fields = changed_json_fields(&previous.to_audit_json(), &next.to_audit_json());
+    context["changed_fields"] = json!(changed_fields);
     let event = audit::domain_event("set_order_payer", actor, "order", Some(order_id), context);
-    audit::write_in_transaction(&mut *tx, &event).await
+    audit::write_in_transaction(&mut *tx, &event).await?;
+    // The signed order document names the previous payer: signed again on a
+    // new version, like a change of the terms (QA 2026-11-01, Z2 BUG-1).
+    if changed_fields
+        .iter()
+        .any(|field| field != "payer_contact_relationship")
+    {
+        reset_order_signature_for_payer(tx, order_id, actor).await?;
+    }
+    Ok(())
+}
+
+async fn reset_order_signature_for_payer(
+    tx: &mut PgConnection,
+    order_id: Uuid,
+    actor: Option<Uuid>,
+) -> Result<(), sqlx::Error> {
+    let reset: Option<(bool, bool)> = sqlx::query_as(
+        r#"WITH previous AS (
+               SELECT id, signed_patient, signed_agency FROM orders
+               WHERE id = $1 AND (signed_patient OR signed_agency)
+           )
+           UPDATE orders
+           SET signed_patient = false, signed_agency = false,
+               signed_patient_at = NULL, signed_agency_at = NULL, signed_at = NULL,
+               updated_at = now()
+           FROM previous
+           WHERE orders.id = previous.id
+           RETURNING previous.signed_patient, previous.signed_agency"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((signed_patient, signed_agency)) = reset else {
+        return Ok(());
+    };
+    audit::write_in_transaction(
+        tx,
+        &audit::domain_event(
+            "reset_order_client_signature",
+            actor,
+            "order",
+            Some(order_id),
+            json!({
+                "source": "order_payer",
+                "reason": "payer_changed",
+                "previous_signed_patient": signed_patient,
+                "previous_signed_agency": signed_agency,
+            }),
+        ),
+    )
+    .await
 }
 
 /// Sets the payer of a newly created lead order from the declaration.

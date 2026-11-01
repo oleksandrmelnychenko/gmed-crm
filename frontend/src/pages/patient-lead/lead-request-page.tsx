@@ -116,7 +116,11 @@ export function LeadRequestPage({
   const chosenLang = chosen.userId === userId ? chosen.lang : readStoredLeadCabinetLang(userId);
   const [requestLang, setRequestLang] = useState<LeadCabinetLang | null>(null);
   // A UA/EN choice saved on the account also holds on another device.
-  const lang = resolveLeadCabinetLang(chosenLang ?? asLeadCabinetLang(accountLang), requestLang, portalLang);
+  // Staff's own language stays as it is, so German or Russian chosen for the form is not the
+  // portal's: the form follows the choice itself (QA 2026-11-01, Z2 BUG-3).
+  const lang = staffMode && chosenLang
+    ? chosenLang
+    : resolveLeadCabinetLang(chosenLang ?? asLeadCabinetLang(accountLang), requestLang, portalLang);
   const text = leadRequestText(lang);
   const [requests, setRequests] = useState<LeadRequest[] | null>(null);
   // The own login of a minor whose parents have access reaches no request (QA 2026-10-12, A3-01).

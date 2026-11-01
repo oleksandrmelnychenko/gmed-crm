@@ -2633,6 +2633,12 @@ test.describe("the client's form filled in by staff", () => {
     await signInAsStaff(page);
     await page.goto("/leads/lead-1/client-form");
     await expect(page.getByTestId("lead-request-staff-mode")).toBeVisible();
+    // Each language switches the form, whatever staff's own language (Z2 BUG-3).
+    const languages = page.getByTestId("lead-cabinet-language");
+    await languages.getByRole("radio", { name: "RU" }).click();
+    await expect(page.getByTestId("lead-request-step-person").getByRole("button", { name: "Далее" })).toBeVisible();
+    await languages.getByRole("radio", { name: "DE" }).click();
+    await expect(page.getByTestId("lead-request-step-person").getByRole("button", { name: "Weiter" })).toBeVisible();
     // Staff record the client's consent with how it was given (owner 2026-10-29).
     const consent = page.getByTestId("lead-request-inquiry-consent");
     await page.route("**/api/v1/me/lead-requests/lead-1/consent", async (route) => {

@@ -324,7 +324,7 @@ async fn store_signed_version(
         && let Some(order_id) = source.get::<Option<Uuid>, _>("order_id")
     {
         let outdated: Option<bool> = sqlx::query_scalar(
-            "SELECT COALESCE(client_terms_changed_at > $2, false) FROM orders WHERE id = $1 FOR UPDATE",
+            "SELECT COALESCE(GREATEST(client_terms_changed_at, payer_terms_changed_at) > $2, false) FROM orders WHERE id = $1 FOR UPDATE",
         )
         .bind(order_id)
         .bind(source.get::<DateTime<Utc>, _>("created_at"))

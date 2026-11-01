@@ -6027,18 +6027,26 @@ async fn reset_statement(
         Vec::new()
     };
     // The unsigned GwG sheet of that payer would stay on the list as current
-    // (QA 2026-10-31); a signed one stays as the record of what was done.
+    // (QA 2026-10-31), and so would the unsigned papers that name that payer
+    // (QA 2026-11-01, Z2 BUG-1); a signed one stays as the record of what was
+    // done.
     if matches!(reason, "payer_changed" | "email_changed") {
         sqlx::query(&format!(
             r#"UPDATE documents d
                SET status = 'archived',
                    auto_name = '{PREVIOUS_PAYER_PREFIX}' || d.auto_name,
                    updated_at = now()
-               WHERE d.lead_id = $1
+               WHERE (d.lead_id = $1
+                      OR d.order_id IN (SELECT o.id FROM orders o WHERE o.source_lead_id = $1))
                  AND d.status = 'active'
                  AND d.signed_at IS NULL
-                 AND d.generated_template_id LIKE 'gwg_%'
-                 AND d.generated_bindings -> 'gwg_identification' ->> 'subject' = 'payer'"#
+                 AND NOT EXISTS (SELECT 1 FROM documents n WHERE n.replaces_document_id = d.id)
+                 AND ((d.generated_template_id LIKE 'gwg_%'
+                       AND d.generated_bindings -> 'gwg_identification' ->> 'subject' = 'payer')
+                      OR d.generated_template_id IN ('cost_coverage_declaration',
+                                                     'patient_payer_statement',
+                                                     'payer_cost_estimate',
+                                                     'payer_self_disclosure'))"#
         ))
         .bind(lead_id)
         .execute(&mut *conn)

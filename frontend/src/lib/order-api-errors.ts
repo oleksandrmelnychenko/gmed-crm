@@ -23,6 +23,8 @@ export const ORDER_API_ERROR_KEYS: Record<string, string> = {
   order_document_outdated: "api_orders_document_outdated",
   // An estimate PDF older than the last change of the amounts or the prepayment terms.
   estimate_document_outdated: "api_orders_estimate_outdated",
+  // An AML paper reaches an interpreter by a share only (documents.rs, QA 2026-11-01).
+  translation_aml_paper_not_assignable: "api_translation_aml_paper_not_assignable",
   // Framework contracts, quotes and the agency catalogue (contracts.rs)
   quote_valid_until_past: "api_quotes_valid_until_past",
   prepayment_exceeds_quote_total: "api_quotes_prepayment_exceeds_total",

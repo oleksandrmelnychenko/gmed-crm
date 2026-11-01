@@ -3521,6 +3521,9 @@ async fn load_lead_conversion_readiness(
                         AND d.generated_template_id = 'single_order'
                         AND d.status = 'active'
                         AND d.file_deleted_at IS NULL
+                        -- one made before the last change of the terms or the
+                        -- payer says what no longer holds (Z2 BUG-1)
+                        AND document_terms_current(d.id) IS NOT FALSE
                   ) AS order_document_generated,
                   EXISTS (
                       SELECT 1 FROM documents d
@@ -3897,7 +3900,7 @@ async fn apply_repeat_patient_readiness(
         contract_linked && super::order_intakes::contract_usable(&contract_status);
     input.contract_terminated = (inherited || own_contract) && contract_status == "terminated";
     let document_state: (bool, bool) = sqlx::query_as(
-        "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.order_id=o.id AND d.generated_template_id='single_order' AND d.status='active' AND d.file_deleted_at IS NULL AND d.order_intake_context=repeat_order_document_context(o.id) AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id)),
+        "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.order_id=o.id AND d.generated_template_id='single_order' AND d.status='active' AND d.file_deleted_at IS NULL AND d.order_intake_context=repeat_order_document_context(o.id) AND document_terms_current(d.id) IS NOT FALSE AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id)),
                 EXISTS(SELECT 1 FROM documents d WHERE d.order_id=o.id AND d.generated_template_id='order_cost_estimate' AND d.status='active' AND d.file_deleted_at IS NULL AND d.order_intake_context=repeat_order_document_context(o.id) AND document_terms_current(d.id) IS NOT FALSE AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id))
          FROM orders o WHERE o.source_lead_id=$1
          ORDER BY o.created_at DESC, o.id DESC LIMIT 1")
@@ -8315,7 +8318,15 @@ async fn create_prospect_patient(
     if !body.force_create.unwrap_or(false) {
         let candidates = match sqlx::query(
             r#"SELECT id, patient_id, first_name, last_name, birth_date,
-                      lifecycle_status, email, residence_country
+                      lifecycle_status, email, residence_country,
+                      lower(btrim(first_name)) = lower(btrim($1))
+                          AND lower(btrim(last_name)) = lower(btrim($2))
+                          AND birth_date IS NOT DISTINCT FROM $3 AS name_birth_date_match,
+                      COALESCE($4::text IS NOT NULL
+                          AND lower(btrim(email)) = lower(btrim($4)), false) AS email_match,
+                      COALESCE($5::text IS NOT NULL AND length($5) >= 6
+                          AND phone_digits(phone_primary) LIKE '%' || $5 || '%', false)
+                          AS phone_match
                FROM patients
                WHERE lifecycle_status IN ('active', 'inactive')
                  AND (
@@ -8365,8 +8376,20 @@ async fn create_prospect_patient(
         if !candidates.is_empty() {
             let mut payload = Vec::with_capacity(candidates.len());
             for row in candidates {
+                // Staff decide by what matched: a shared phone is no same
+                // person (QA 2026-11-01, Z2 BUG-4).
+                let matched_on: Vec<&str> = [
+                    ("name_birth_date_match", "name_birth_date"),
+                    ("email_match", "email"),
+                    ("phone_match", "phone"),
+                ]
+                .into_iter()
+                .filter(|(column, _)| row.try_get::<bool, _>(*column).unwrap_or(false))
+                .map(|(_, key)| key)
+                .collect();
                 payload.push(json!({
                     "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                    "matched_on": matched_on,
                     "patient_id": row.try_get::<String, _>("patient_id").unwrap_or_default(),
                     "first_name": row.try_get::<String, _>("first_name").unwrap_or_default(),
                     "last_name": row.try_get::<String, _>("last_name").unwrap_or_default(),

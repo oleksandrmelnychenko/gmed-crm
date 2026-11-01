@@ -3569,11 +3569,12 @@ async fn returning_patient_attach_reuses_identity_without_overwriting_master_dat
     let candidates = duplicate_response["duplicate_candidates"]
         .as_array()
         .unwrap();
-    assert!(
-        candidates
-            .iter()
-            .any(|candidate| candidate["id"] == patient_id.to_string())
-    );
+    assert!(candidates.iter().any(|candidate| {
+        candidate["id"] == patient_id.to_string()
+            && candidate["matched_on"]
+                .as_array()
+                .is_some_and(|keys| keys.contains(&json!("name_birth_date")))
+    }));
     let patient_count_before: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM patients WHERE first_name = 'Returning' AND last_name = 'Patient'",
     )
@@ -8899,6 +8900,17 @@ async fn declare_mother_as_payer_and_sign(app: &TestApp, lead_id: Uuid, order_id
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
     assert_eq!(refused["error"], "payer_is_representative", "{refused}");
+    // The fixture signed the order before she was named: as if signed after.
+    sqlx::query(
+        "UPDATE orders SET payer_terms_changed_at = NULL, signed_patient = true,
+             signed_agency = true, signed_patient_at = now(), signed_agency_at = now(),
+             signed_at = now()
+         WHERE id = $1",
+    )
+    .bind(order_id)
+    .execute(&app.suite.pool)
+    .await
+    .unwrap();
 }
 
 async fn convert_ready_lead(app: &TestApp, lead_id: Uuid) -> Uuid {

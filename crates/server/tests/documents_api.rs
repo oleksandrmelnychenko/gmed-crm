@@ -2903,6 +2903,52 @@ async fn closed_papers_stay_closed_on_an_appointment_and_in_a_translation_reques
         .await;
         assert_eq!(status, StatusCode::OK, "{art}: {body}");
     }
+
+    // QA 2026-11-01, Z2: an AML paper stays out of it. An assignment neither
+    // opens it nor can be made; the share above is the way.
+    for art in ["enhanced_due_diligence", "gwg_identification"] {
+        let paper_id = seed_document(
+            &pool,
+            pm_id,
+            patient_id,
+            visit_id,
+            "internal",
+            false,
+            art,
+            &format!("{tag}-aml-{art}"),
+        )
+        .await;
+        let request_id =
+            seed_document_translation_request(&pool, paper_id, patient_id, pm_id).await;
+        let assign = |bearer: String| {
+            let app = &app;
+            async move {
+                json_request(
+                    app,
+                    "POST",
+                    &format!("/api/v1/documents/translation-requests/{request_id}/update"),
+                    &bearer,
+                    Some(json!({ "status": "pending", "assigned_to": interpreter_id })),
+                )
+                .await
+            }
+        };
+        let (status, body) = assign(pm_bearer.clone()).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{art}: {body}");
+        assert_eq!(body["error"], "translation_aml_paper_not_assignable");
+        // One assigned before this rule stays closed.
+        sqlx::query("UPDATE document_translation_requests SET assigned_to = $2 WHERE id = $1")
+            .bind(request_id)
+            .bind(interpreter_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            status_of(paper_id, interpreter_bearer.clone()).await,
+            StatusCode::FORBIDDEN,
+            "{art}"
+        );
+    }
 }
 
 #[tokio::test]

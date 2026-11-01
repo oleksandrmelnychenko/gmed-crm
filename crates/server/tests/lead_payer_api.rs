@@ -2315,6 +2315,174 @@ async fn completing_the_payer_keeps_consents_link_and_informed_record() {
     assert_eq!(revoked.as_deref(), Some("payer_changed"));
 }
 
+/// A generated document of the lead's order.
+async fn seed_generated_document(
+    app: &TestApp,
+    lead_id: Uuid,
+    order_id: Uuid,
+    template: &str,
+) -> Uuid {
+    let id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+               id, lead_id, order_id, auto_name, original_filename, art, category, status,
+               visibility, is_medical, mime_type, file_size, version_root_document_id,
+               version_number, uploaded_by, generated_template_id
+           ) VALUES ($1, $2, $3, $4, $4, $4, 'administrative', 'active', 'internal', false,
+                     'application/pdf', 1234, $1, 1, $5, $4)"#,
+    )
+    .bind(id)
+    .bind(lead_id)
+    .bind(order_id)
+    .bind(template)
+    .bind(app.suite.admin_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    id
+}
+
+/// QA 2026-11-01, Z2 BUG-1: moved to self-pay, the Einzelauftrag still named the
+/// third party, could be signed and the lead converted; the old payer papers
+/// stayed active.
+#[tokio::test]
+async fn a_payer_change_outdates_the_order_document_and_the_payers_papers() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let lead_id = seed_lead(pool).await;
+    let (_, order_id) = seed_lead_order(&app, lead_id).await;
+    let pm = app.bearer("patient_manager");
+    let path = format!("/api/v1/leads/{lead_id}/payer-declaration");
+
+    let (status, saved) = json_request(&app, "POST", &path, &pm, Some(third_party_payer())).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let order_document = seed_generated_document(&app, lead_id, order_id, "single_order").await;
+    let unsigned_paper =
+        seed_generated_document(&app, lead_id, order_id, "cost_coverage_declaration").await;
+    let signed_paper =
+        seed_generated_document(&app, lead_id, order_id, "patient_payer_statement").await;
+    sqlx::query("UPDATE documents SET signed_at = now() WHERE id = $1")
+        .bind(signed_paper)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE orders SET signed_patient = true, signed_patient_at = now() WHERE id = $1")
+        .bind(order_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE lead_payer_declarations
+         SET contact_consent_at = now(), contact_consent_recorded_how = 'phone'
+         WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let current = |document: Uuid| async move {
+        sqlx::query_scalar::<_, Option<bool>>("SELECT document_terms_current($1)")
+            .bind(document)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    };
+    assert_eq!(current(order_document).await, Some(true));
+
+    // Saving the same payer again changes nothing.
+    let (status, saved) = json_request(&app, "POST", &path, &pm, Some(third_party_payer())).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(current(order_document).await, Some(true));
+
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &path,
+        &pm,
+        Some(json!({"payer_kind": "self", "acts_on_own_account": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+
+    assert_eq!(current(order_document).await, Some(false));
+    let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(
+        readiness_check(&lead, "order_document_generated")["passed"],
+        false,
+        "{lead}"
+    );
+    let signed_patient: bool =
+        sqlx::query_scalar("SELECT signed_patient FROM orders WHERE id = $1")
+            .bind(order_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(
+        !signed_patient,
+        "the signed version names the previous payer"
+    );
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log
+         WHERE action = 'reset_order_client_signature' AND entity_id = $1
+           AND context ->> 'reason' = 'payer_changed'",
+    )
+    .bind(order_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+    let status_of = |document: Uuid| async move {
+        sqlx::query_scalar::<_, String>("SELECT status FROM documents WHERE id = $1")
+            .bind(document)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    };
+    assert_eq!(status_of(unsigned_paper).await, "archived");
+    // How a consent was given goes with the consent (Z2).
+    let recorded_how: Option<String> = sqlx::query_scalar(
+        "SELECT contact_consent_recorded_how FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(recorded_how, None);
+
+    // Z2 BUG-2: a sent form takes no answer in the cabinet, so staff enter
+    // the route of a self-payer.
+    let route = format!("{path}/payment-route");
+    let cash = json!({ "payment_method": "cash" });
+    let (status, body) = json_request(&app, "POST", &route, &pm, Some(cash.clone())).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    sqlx::query("UPDATE leads SET portal_submitted_at = now() WHERE id = $1")
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(&app, "POST", &route, &pm, Some(cash)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["declaration"]["payment_method"], "cash", "{body}");
+    assert_eq!(
+        status_of(signed_paper).await,
+        "active",
+        "a signed paper is the record"
+    );
+
+    // A document made after the change counts again.
+    let new_version = seed_generated_document(&app, lead_id, order_id, "single_order").await;
+    sqlx::query(
+        "UPDATE documents SET created_at = (SELECT payer_terms_changed_at FROM orders WHERE id = $2)
+         WHERE id = $1",
+    )
+    .bind(new_version)
+    .bind(order_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    assert_eq!(current(new_version).await, Some(true));
+}
+
 fn readiness_check<'a>(lead: &'a Value, key: &str) -> &'a Value {
     lead["readiness"]["checks"]
         .as_array()

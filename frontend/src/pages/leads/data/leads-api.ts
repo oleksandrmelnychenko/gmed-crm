@@ -310,6 +310,8 @@ export type ProspectDuplicateCandidate = {
   lifecycle_status: string;
   email: string | null;
   residence_country: string | null;
+  /** What matched the lead: `name_birth_date`, `email`, `phone`. */
+  matched_on?: string[];
 };
 
 export type ProspectResponse = {

@@ -14998,18 +14998,23 @@ pub(crate) fn can_view_document_row(
     );
 
     // An assignment by name is a decision and opens what it names, whatever
-    // the data class: GwG sheets and administrative papers stayed closed and
-    // the request stuck in progress (QA 2026-11-01, Y1 bug 4). Medical papers
-    // keep the role's own rule.
+    // the data class: administrative papers stayed closed and the request
+    // stuck in progress (QA 2026-11-01, Y1 bug 4). Medical papers keep the
+    // role's own rule, and an AML paper needs an explicit share (Z2).
     let assigned_by_name = row
         .try_get::<bool, _>("translation_assigned_to_current")
         .unwrap_or(false)
         || is_own_translation_document(row);
-    if matches!(auth.role, Role::Interpreter | Role::TeamleadInterpreter)
-        && assigned_by_name
-        && sensitivity != DataSensitivity::Medical
-    {
-        return true;
+    if matches!(auth.role, Role::Interpreter | Role::TeamleadInterpreter) {
+        if assigned_by_name && sensitivity != DataSensitivity::Medical && !is_aml_paper(row) {
+            return true;
+        }
+        if is_aml_paper(row)
+            && !row.try_get::<bool, _>("shared_to_current").unwrap_or(false)
+            && !is_own_upload(auth.user_id, row)
+        {
+            return false;
+        }
     }
 
     policy::check_access(&AccessContext {
@@ -15083,6 +15088,72 @@ fn is_closed_to_interpreter_team(row: &sqlx::postgres::PgRow) -> bool {
         || row
             .try_get::<bool, _>("translates_closed_paper")
             .unwrap_or(true)
+}
+
+/// SQL over `d`: an AML paper (the GwG sheets and the enhanced check).
+const AML_PAPER_SQL: &str = "(COALESCE(d.category, '') = 'compliance_aml'
+    OR lower(COALESCE(d.art, '')) LIKE 'gwg\\_%'
+    OR lower(COALESCE(d.art, '')) = 'enhanced_due_diligence'
+    OR COALESCE(d.generated_template_id, '') LIKE 'gwg\\_%'
+    OR COALESCE(d.generated_template_id, '') = 'enhanced_due_diligence')";
+
+/// As [`AML_PAPER_SQL`].
+fn is_aml_paper(row: &sqlx::postgres::PgRow) -> bool {
+    let code = |column: &str| {
+        row.try_get::<Option<String>, _>(column)
+            .unwrap_or_default()
+            .map(|value| value.trim().to_lowercase())
+            .unwrap_or_default()
+    };
+    let aml = |value: String| value.starts_with("gwg_") || value == "enhanced_due_diligence";
+    code("category") == "compliance_aml" || aml(code("art")) || aml(code("generated_template_id"))
+}
+
+/// An AML paper goes to an interpreter or a team lead only by an explicit
+/// share, never with a translation request (QA 2026-11-01, Z2).
+async fn refuse_aml_paper_assignment(
+    state: &AppState,
+    document_id: Uuid,
+    assignee: Uuid,
+) -> Result<(), axum::response::Response> {
+    let refused = sqlx::query_scalar::<_, bool>(&format!(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM documents d
+               JOIN users assignee ON assignee.id = $2
+               WHERE d.id = $1
+                 AND assignee.role IN ('interpreter', 'teamlead_interpreter')
+                 AND {AML_PAPER_SQL}
+                 AND NOT EXISTS (
+                     SELECT 1 FROM document_shares share
+                     WHERE share.document_id = d.id
+                       AND share.shared_with_user_id = $2
+                       AND share.revoked_at IS NULL
+                 )
+           )"#
+    ))
+    .bind(document_id)
+    .bind(assignee)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, %document_id, "check the paper of a translation assignment");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate translation assignee",
+        )
+    })?;
+    if refused {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "translation_aml_paper_not_assignable",
+                "message": "An AML paper is not assigned to an interpreter",
+            })),
+        )
+            .into_response());
+    }
+    Ok(())
 }
 
 /// A document of the interpreters' work: an interpreter's upload, the source
@@ -15742,7 +15813,8 @@ pub(crate) async fn persist_document_file(
                 -- generation must not make the fresh document look outdated.
                 CASE WHEN $19 IS NOT NULL AND $4 IS NOT NULL
                      THEN GREATEST(now(), (SELECT GREATEST(o.client_terms_changed_at,
-                                                           o.prepayment_terms_changed_at)
+                                                           o.prepayment_terms_changed_at,
+                                                           o.payer_terms_changed_at)
                                            FROM orders o WHERE o.id = $4))
                      ELSE now() END
            )"#,
@@ -17281,6 +17353,7 @@ async fn generate_document(
                 AND status<>'archived' AND file_deleted_at IS NULL
                 AND ($5::text IS NULL OR d.generated_bindings->>'_contracting_party_fingerprint'=$5)
                 AND d.generated_bindings->>'_order_payer_fingerprint' IS NOT DISTINCT FROM $6::text
+                AND document_terms_current(d.id) IS NOT FALSE
                 AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id)
              ORDER BY created_at DESC,id DESC LIMIT 1")
             .bind(order_id).bind(context).bind(template.id).bind(language).bind(contracting_fingerprint.as_deref())
@@ -32590,6 +32663,17 @@ async fn update_document_translation_request(
         .try_get::<Option<Uuid>, _>("assigned_to")
         .unwrap_or_default();
     let assigns_translator = assigned_to.is_some() && assigned_to != current_assignee;
+    if assigns_translator
+        && let (Some(assignee), Some(document_id)) = (
+            assigned_to,
+            request_row
+                .try_get::<Option<Uuid>, _>("document_id")
+                .unwrap_or_default(),
+        )
+        && let Err(response) = refuse_aml_paper_assignment(&state, document_id, assignee).await
+    {
+        return response;
+    }
     let files_translation =
         body.create_translated_document.unwrap_or(false) && next_status == "completed";
     if (assigns_translator || files_translation)

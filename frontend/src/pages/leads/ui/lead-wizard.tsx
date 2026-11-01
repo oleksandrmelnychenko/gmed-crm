@@ -690,6 +690,16 @@ const ESTIMATED_OUTLAYS_REFERENCE_SUFFIX = ":estimated-outlays";
 // match, decided by the server) requires the enhanced check; the longer
 // high-risk list is an amber hint for staff. Both lists are the server's
 // risk configuration (`useRiskCountryLists`), never hardcoded here.
+/** What a duplicate candidate shares with the lead (QA 2026-11-01, Z2 BUG-4). */
+function prospectMatchLabel(matchedOn: string[] | undefined, tx: (ru: string, de: string) => string) {
+  const labels: Record<string, string> = {
+    name_birth_date: tx("имя и дата рождения", "Name und Geburtsdatum"),
+    email: tx("e-mail", "E-Mail"),
+    phone: tx("телефон", "Telefon"),
+  };
+  return (matchedOn ?? ["name_birth_date"]).map((key) => labels[key] ?? key).join(", ");
+}
+
 function amlRiskForCountries(
   lists: RiskCountryLists,
   ...values: Array<string | null | undefined>
@@ -3925,6 +3935,8 @@ export function LeadWizard({
   // duplicate patient wait for staff's choice and are saved after
   // «Привязать» / «Создать нового пациента» (QA 2026-10-25, F-F8).
   const prospectWaitersRef = useRef<((resolved: boolean) => void)[]>([]);
+  const resumeConversionRef = useRef(false);
+  const convertRef = useRef<() => Promise<void>>(async () => undefined);
   const settleProspectWaiters = useCallback((resolved: boolean) => {
     const waiters = prospectWaitersRef.current;
     prospectWaitersRef.current = [];
@@ -5491,6 +5503,8 @@ export function LeadWizard({
       zuweiser: medicalDraft.referrer.trim(),
     });
     if (response.duplicate_candidates?.length) {
+      // The conversion that ran into the check goes on after staff's choice.
+      resumeConversionRef.current = convertInFlightRef.current;
       setProspectCandidates(response.duplicate_candidates);
       throw new ProspectDuplicateError(tx(
         "Найден существующий пациент с теми же данными — выберите: привязать или создать нового",
@@ -7886,6 +7900,7 @@ ${serviceCommentLines.join("\n")}`
     }
   }
 
+  convertRef.current = convert;
   async function convert() {
     if (!leadId) return;
     if (!conversionConfirmed) {
@@ -11391,7 +11406,7 @@ ${serviceCommentLines.join("\n")}`
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                   onChanged={() => { void refreshDocumentsState(); }}
                 />
-                {isRepeatIntake && commercialDocuments.single_order.length > 0 && readinessChecks.get("order_document_generated") === false ? <Banner tone="warning">{tx("Заказ изменён. Создайте актуальную версию документа и подтвердите подписи заново.", "Der Auftrag wurde geändert. Erstellen Sie die aktuelle Dokumentversion und bestätigen Sie die Unterschriften erneut.")}</Banner> : null}
+                {commercialDocuments.single_order.length > 0 && readinessChecks.get("order_document_generated") === false ? <Banner tone="warning">{tx("Заказ изменён. Создайте актуальную версию документа и подтвердите подписи заново.", "Der Auftrag wurde geändert. Erstellen Sie die aktuelle Dokumentversion und bestätigen Sie die Unterschriften erneut.")}</Banner> : null}
                 {renderCommercialDocumentError("single_order")}
                 </Section>
               </div>
@@ -13526,6 +13541,7 @@ ${serviceCommentLines.join("\n")}`
         onOpenChange={(open) => {
           if (!open && !prospectResolutionBusy) {
             setProspectCandidates(null);
+            resumeConversionRef.current = false;
             settleProspectWaiters(false);
           }
         }}
@@ -13537,8 +13553,8 @@ ${serviceCommentLines.join("\n")}`
             </DialogTitle>
             <DialogDescription>
               {tx(
-                "Имя и дата рождения совпадают с существующей карточкой. Привязать обращение к ней или создать нового пациента?",
-                "Name und Geburtsdatum stimmen mit einer bestehenden Patientenakte überein. Anfrage mit ihr verknüpfen oder einen neuen Patienten anlegen?",
+                "Данные совпадают с существующей карточкой: что именно, указано у пациента. Привязать обращение к ней или создать нового пациента?",
+                "Angaben stimmen mit einer bestehenden Patientenakte überein: was genau, steht beim Patienten. Anfrage mit ihr verknüpfen oder einen neuen Patienten anlegen?",
               )}
             </DialogDescription>
           </DialogHeader>
@@ -13556,8 +13572,12 @@ ${serviceCommentLines.join("\n")}`
                     {candidate.patient_id} · {formatAppDate(candidate.birth_date) || candidate.birth_date}
                     {candidate.email ? ` · ${candidate.email}` : ""}
                   </div>
+                  <div className="text-xs text-muted-foreground" data-testid="lead-prospect-candidate-match">
+                    {tx("Совпадает", "Übereinstimmung")}: {prospectMatchLabel(candidate.matched_on, tx)}
+                  </div>
                 </div>
-                <Button
+                {/* Only the same name and birth date can be attached; the server refuses the rest. */}
+                {candidate.matched_on?.includes("name_birth_date") !== false ? <Button
                   type="button"
                   size="sm"
                   disabled={prospectResolutionBusy}
@@ -13582,6 +13602,10 @@ ${serviceCommentLines.join("\n")}`
                         // purge countdown), the step names and the repeat review follow at once,
                         // not after a reload (QA 2026-10-25, V-A1).
                         await refreshLeadState().catch(() => null);
+                        if (resumeConversionRef.current) {
+                          resumeConversionRef.current = false;
+                          void convertRef.current();
+                        }
                       } catch (nextError) {
                         showWizardError(nextError);
                       } finally {
@@ -13591,7 +13615,7 @@ ${serviceCommentLines.join("\n")}`
                   }}
                 >
                   {tx("Привязать", "Verknüpfen")}
-                </Button>
+                </Button> : null}
               </div>
             ))}
           </div>
@@ -13602,6 +13626,7 @@ ${serviceCommentLines.join("\n")}`
               disabled={prospectResolutionBusy}
               onClick={() => {
                 setProspectCandidates(null);
+                resumeConversionRef.current = false;
                 settleProspectWaiters(false);
               }}
             >
@@ -13620,6 +13645,11 @@ ${serviceCommentLines.join("\n")}`
                       await persistMedicalDraft(draft);
                       setProspectCandidates(null);
                       settleProspectWaiters(true);
+                      // «Создать пациента» went on to here: it continues (Z2 BUG-4).
+                      if (resumeConversionRef.current) {
+                        resumeConversionRef.current = false;
+                        void convertRef.current();
+                      }
                   } catch (nextError) {
                     showWizardError(nextError);
                   } finally {
