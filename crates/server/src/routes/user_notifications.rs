@@ -146,10 +146,17 @@ async fn mark_all_read(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(error) = sqlx::query!(
-        "UPDATE user_notifications SET is_read = true WHERE user_id = $1 AND NOT is_read",
-        auth.user_id
+    // Only what the portal shows for the selected child (QA 2026-11-01, like the
+    // list above): the other child's notices stay unread.
+    if let Err(error) = sqlx::query(
+        r#"UPDATE user_notifications SET is_read = true
+           WHERE user_id = $1 AND NOT is_read
+             AND ($2::uuid IS NULL
+                  OR user_notification_patient(entity_type, entity_id) IS NULL
+                  OR user_notification_patient(entity_type, entity_id) = $2)"#,
     )
+    .bind(auth.user_id)
+    .bind(auth.selected_patient_id)
     .execute(&state.db)
     .await
     {

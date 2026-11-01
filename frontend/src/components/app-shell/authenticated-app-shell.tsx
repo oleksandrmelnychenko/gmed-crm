@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 
 import { useAuth } from "@/lib/auth";
@@ -64,10 +65,11 @@ export function AuthenticatedAppShell() {
 }
 
 function AuthenticatedAppShellContent() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const { lang } = useLang();
   const location = useLocation();
   const patientId = usePortalPatientId(user?.id);
+  const [refreshingPick, setRefreshingPick] = useState(false);
   const patients = user?.role === "patient" ? user.patients ?? [] : [];
   const accountPage = ["/account", "/request", "/trusted-persons", "/legal", "/security"].some(
     (path) => location.pathname === path || location.pathname.startsWith(`${path}/`),
@@ -106,6 +108,10 @@ function AuthenticatedAppShellContent() {
               if (!user || !patients.some((patient) => patient.id === event.target.value)) return;
               clearApiCache();
               selectPortalPatient(user.id, event.target.value);
+              // The login's data may be older than the child's subscription: a hidden
+              // tab reads /me not at all, and the lock showed until a reload (QA 2026-11-01).
+              setRefreshingPick(true);
+              void refreshUser().catch(() => null).finally(() => setRefreshingPick(false));
             }}
           >
             <option value="" disabled>{lang === "de" ? "Bitte auswählen" : "Выберите пациента"}</option>
@@ -119,7 +125,7 @@ function AuthenticatedAppShellContent() {
         <p className="p-6 text-muted-foreground">
           {lang === "de" ? "Wählen Sie, für wen Sie das Portal öffnen möchten." : "Выберите, для кого открыть кабинет."}
         </p>
-      ) : subscriptionLocked ? <PortalSubscriptionLock /> : <Outlet />}
+      ) : subscriptionLocked ? (refreshingPick ? null : <PortalSubscriptionLock />) : <Outlet />}
     </AppShellFrame>
   );
 }

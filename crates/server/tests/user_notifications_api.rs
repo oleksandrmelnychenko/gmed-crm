@@ -154,6 +154,64 @@ async fn patient_notifications_are_self_scoped_and_presence_is_staff_only() {
     assert!(!online.contains(&patient_id.to_string()));
 }
 
+/// QA 2026-11-01 (R5-2): "all read" under one child leaves the other child's
+/// notices unread; a notice about no patient belongs to every selection.
+#[tokio::test]
+async fn read_all_stays_with_the_selected_child() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let parent = seed_user(&ctx.pool, "patient").await;
+    support::seed_subscribed_patient_for_user(&ctx.pool, parent, ctx.admin_id).await;
+    support::seed_subscribed_patient_for_user(&ctx.pool, parent, ctx.admin_id).await;
+    let children: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT patient_id FROM patient_assignments WHERE user_id = $1 ORDER BY assigned_at, id",
+    )
+    .bind(parent)
+    .fetch_all(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(children.len(), 2);
+    let notice = |entity_type: Option<&'static str>, entity_id: Option<Uuid>| {
+        let pool = ctx.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Uuid>(
+                r#"INSERT INTO user_notifications (user_id, kind, title, entity_type, entity_id)
+                   VALUES ($1, 'document_release', 'Synthetic', $2, $3) RETURNING id"#,
+            )
+            .bind(parent)
+            .bind(entity_type)
+            .bind(entity_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let selected = notice(Some("patient"), Some(children[0])).await;
+    let other = notice(Some("patient"), Some(children[1])).await;
+    let general = notice(None, None).await;
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v1/notifications/read-all")
+        .header("Authorization", auth_header_for(parent, "patient"))
+        .header("X-Patient-Id", children[0].to_string())
+        .body(Body::empty())
+        .unwrap();
+    let response = ctx.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    for (id, read) in [(selected, true), (general, true), (other, false)] {
+        let is_read: bool =
+            sqlx::query_scalar("SELECT is_read FROM user_notifications WHERE id = $1")
+                .bind(id)
+                .fetch_one(&ctx.pool)
+                .await
+                .unwrap();
+        assert_eq!(is_read, read);
+    }
+}
+
 /// QA 2026-10-11 (A-23/E-16/E-33): a notification carries its stable code
 /// (`kind`) and its facts (`params`), so the UI words it in the viewer's
 /// language; `title`/`body` remain the English fallback.
