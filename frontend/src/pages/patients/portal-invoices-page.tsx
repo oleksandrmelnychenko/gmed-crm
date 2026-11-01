@@ -53,6 +53,7 @@ import type {
   PortalInvoicePaymentTransaction,
   PortalInvoiceRefundTransaction,
 } from "@/pages/patients/model/portal-shared";
+import { portalCreditSideLabel } from "@/pages/patients/model/account-balance";
 import { cn } from "@/lib/utils";
 
 function invoiceAmountsVisible(invoice: PortalInvoiceItem) {
@@ -94,7 +95,7 @@ function portalAccountStateLabel(state: string, lang: string) {
   const labels: Record<string, [string, string]> = {
     paid: ["Bezahlt", "Оплачено"],
     credited: ["Storniert", "Сторнирован"],
-    partially_paid: ["Teilbezahlt – Rest offen", "Частично оплачено — требуется доплата"],
+    partially_paid: ["Teilweise bezahlt", "Частично оплачено"],
     unpaid: ["Nicht bezahlt", "Не оплачено"],
     amount_hidden: ["Betrag nicht freigegeben", "Сумма не открыта для просмотра"],
     invoice_adjustment: ["Rechnung korrigiert", "Счёт скорректирован"],
@@ -418,6 +419,8 @@ function usePatientInvoicesPageContent() {
     );
   }
 
+  const partlyHiddenLabel = lang === "de" ? "Teilweise ausgeblendet" : "Часть данных скрыта";
+
   return (
     <div className="w-full min-w-0 space-y-3">
       <PageHeader
@@ -479,11 +482,15 @@ function usePatientInvoicesPageContent() {
               label={lang === "de" ? "Kontosaldo" : "Сальдо взаиморасчётов"}
               value={
                 accountStatement.summary.closing_balance == null
-                  ? lang === "de" ? "Abstimmung erforderlich" : "Требуется сверка"
+                  // A hidden amount is no reconciliation case for the patient
+                  // (QA 2026-11-01, R2-D): the same neutral words as the rows.
+                  ? accountStatement.summary.reconciliation_required
+                    ? lang === "de" ? "Abstimmung erforderlich" : "Требуется сверка"
+                    : partlyHiddenLabel
                   : Number(accountStatement.summary.closing_balance) > 0
                     ? `${formatPortalCurrency(accountStatement.summary.closing_balance, accountStatement.currency)} ${lang === "de" ? "offener Betrag" : "долг"}`
                     : Number(accountStatement.summary.closing_balance) < 0
-                      ? `${formatPortalCurrency(Math.abs(Number(accountStatement.summary.closing_balance)), accountStatement.currency)} ${lang === "de" ? "Guthaben" : "переплата"}`
+                      ? `${formatPortalCurrency(Math.abs(Number(accountStatement.summary.closing_balance)), accountStatement.currency)} ${portalCreditSideLabel(accountStatement.summary, lang)}`
                       : formatPortalCurrency(0, accountStatement.currency)
               }
             />
@@ -498,7 +505,7 @@ function usePatientInvoicesPageContent() {
                 key={label}
                 className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
                 label={label}
-                value={value == null ? (lang === "de" ? "Teilweise ausgeblendet" : "Часть данных скрыта") : formatPortalCurrency(value, accountStatement.currency)}
+                value={value == null || accountStatement.redaction.hidden_invoice_amount_count > 0 ? partlyHiddenLabel : formatPortalCurrency(value, accountStatement.currency)}
               />
             ))}
           </div>

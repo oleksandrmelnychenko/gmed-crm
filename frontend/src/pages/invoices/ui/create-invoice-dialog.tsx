@@ -24,6 +24,7 @@ import {
   prepaymentAdvanceSplit,
   quoteRequiredPrepayment,
 } from "../model/invoice-model";
+import { partlyCreditedHint } from "../model/billing-release";
 import type { CreateForm, InvoiceType, QuoteOption } from "../model/types";
 
 type Props = {
@@ -88,6 +89,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
     : null);
   const footerError = Boolean(error || optionsError);
   const final = form.invoiceType === "final";
+  const servicesOutsideQuote = selectedQuote?.services_outside_quote ?? [];
   const typeLabels = {
     advance: t.revenue_invoice_type_advance,
     interim: t.revenue_invoice_type_interim,
@@ -155,6 +157,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                 {!optionsError && !optionsBusy && !selectableQuotes.length ? (
                   <p role="status" className="text-sm text-muted-foreground">
                     {de ? "Keine abrechenbaren Angebote für diese Auswahl. Bereits abgerechnete, abgelehnte und abgelaufene Angebote werden nicht angezeigt." : "Для текущего выбора нет доступных предложений. Уже выставленные, отклонённые и просроченные предложения скрыты."}
+                    {" "}{partlyCreditedHint(lang)}
                   </p>
                 ) : null}
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -178,6 +181,13 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                   </FormField>
                 </div>
                 <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground">{typeHints[form.invoiceType]}</p>
+                {final && servicesOutsideQuote.length ? (
+                  <p role="status" data-testid="invoice-services-outside-quote" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
+                    {de
+                      ? `Nicht in dieser Rechnung: ${servicesOutsideQuote.join(", ")}. Diese Leistungen sind erbracht, stehen aber nicht im Angebot. Der Auftrag lässt sich erst abschließen, wenn sie abgerechnet sind: Erstellen Sie ein neues Angebot.`
+                      : `Не войдёт в этот счёт: ${servicesOutsideQuote.join(", ")}. Эти услуги оказаны, но их нет в предложении. Заказ нельзя будет завершить, пока они не выставлены: создайте новое предложение.`}
+                  </p>
+                ) : null}
                 <p className="text-xs leading-5 text-muted-foreground" data-testid="invoice-draft-numbering-hint">
                   {de
                     ? "Die Rechnung wird als Entwurf ohne Nummer angelegt. Nummer und Rechnungsdatum erhält sie erst bei der Ausstellung; das Fälligkeitsdatum darf dann nicht vor dem Rechnungsdatum liegen."

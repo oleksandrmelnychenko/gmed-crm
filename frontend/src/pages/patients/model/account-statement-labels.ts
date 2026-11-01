@@ -31,7 +31,7 @@ const STATEMENT_STATE_LABELS: Record<string, Pair> = {
     "Распределено по счёту пациента",
   ],
   paid: ["Bezahlt", "Оплачено"],
-  partially_paid: ["Teilbezahlt – Rest offen", "Оплачено частично — требуется доплата"],
+  partially_paid: ["Teilweise bezahlt", "Частично оплачено"],
   unpaid: ["Nicht bezahlt", "Не оплачено"],
   not_issued: ["Noch nicht ausgestellt", "Ещё не выставлено"],
   amount_hidden: ["Betrag ausgeblendet", "Сумма скрыта"],

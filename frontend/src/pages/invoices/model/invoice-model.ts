@@ -326,7 +326,12 @@ export function isQuoteClosedForInvoicing(status: string | null | undefined) {
 // the unbilled scope and active invoice types, not the quote's payment total.
 export function isQuoteAvailableForInvoice(quote: QuoteOption, invoiceType: InvoiceType) {
   if (!quote.patient_id || isQuoteClosedForInvoicing(quote.status)) return false;
-  if (quote.active_invoice_types?.includes("final")) return false;
+  // Beside an active final invoice only an interim invoice is possible, for
+  // the quantity of a line credited in full (QA 2026-11-01, R3 BUG-2).
+  if (quote.active_invoice_types?.includes("final")) {
+    return invoiceType === "interim"
+      && quote.line_items.some((line) => Number(line.remaining_quantity ?? 0) > 0);
+  }
   if (invoiceType === "advance" && quote.active_invoice_types?.includes("advance")) return false;
   return quote.line_items.some((line) => invoiceLineQuantityAvailable(line, "final") > 0);
 }

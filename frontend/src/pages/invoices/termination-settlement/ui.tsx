@@ -415,7 +415,9 @@ export function TerminationSettlementCard({
         <div className="min-w-0">
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             <OctagonAlert className="size-4 text-rose-600" aria-hidden />
-            {tx("Расчёт при расторжении договора", "Abrechnung bei Vertragskündigung")}
+            {settlement.order_status === "cancelled" && !settlement.contract_number
+              ? tx("Расчёт по отменённому заказу", "Abrechnung des stornierten Auftrags")
+              : tx("Расчёт при расторжении договора", "Abrechnung bei Vertragskündigung")}
           </h3>
           <p className="mt-1 text-xs text-muted-foreground">
             {tx("Заказ", "Auftrag")}{" "}

@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { resolvePatientBalancePresentation } from "./account-balance";
+import { portalCreditSideLabel, resolvePatientBalancePresentation } from "./account-balance";
+
+describe("portalCreditSideLabel", () => {
+  it("calls a paid advance a prepayment, not an overpayment", () => {
+    const part = { closing_balance: "-400.00", available_prepayment: "400.00" };
+    expect(portalCreditSideLabel(part, "ru")).toBe("предоплата");
+    expect(portalCreditSideLabel(part, "de")).toBe("Vorauszahlung");
+  });
+  it("keeps the overpayment word for a real credit", () => {
+    expect(portalCreditSideLabel({ closing_balance: "-50", available_prepayment: "0" }, "ru")).toBe("переплата");
+    expect(portalCreditSideLabel({ closing_balance: "-500", available_prepayment: "400" }, "de")).toBe("Guthaben");
+  });
+});
 
 describe("resolvePatientBalancePresentation", () => {
   it("shows a positive closing balance as patient debit", () => {

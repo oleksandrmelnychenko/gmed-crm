@@ -35,6 +35,8 @@ export type CompanyPatientPosition = {
   external_receivable: string;
   manual_balance: string;
   available_prepayment: string;
+  /** Cash above what the patient's invoices ask for (overpayment). */
+  invoice_cash_credit: string;
   calculated_balance: string;
   balance_side: CompanyBalanceSide;
   reconciliation_required: boolean;

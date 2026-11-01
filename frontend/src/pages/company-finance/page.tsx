@@ -111,6 +111,7 @@ const textByLanguage = {
     externalReceivable: "Расходы GMED",
     adjustments: "Корректировки",
     advances: "Авансы",
+    overpayments: "Переплаты",
     balance: "Сальдо",
     status: "Статус",
     document: "Документ",
@@ -208,6 +209,7 @@ const textByLanguage = {
     externalReceivable: "GMED-Auslagen",
     adjustments: "Korrekturen",
     advances: "Vorauszahlungen",
+    overpayments: "Überzahlungen",
     balance: "Saldo",
     status: "Status",
     document: "Beleg",
@@ -492,6 +494,8 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
     { id: "external_receivable", label: text.externalReceivable, accessor: (row) => parseAmount(row.external_receivable), filterType: "number", sortable: true, width: 150, render: (row) => money(row.external_receivable) },
     { id: "manual_balance", label: text.adjustments, accessor: (row) => parseAmount(row.manual_balance), filterType: "number", sortable: true, width: 140, render: (row) => money(row.manual_balance) },
     { id: "prepayment", label: text.advances, accessor: (row) => parseAmount(row.available_prepayment), filterType: "number", sortable: true, width: 140, render: (row) => parseAmount(row.available_prepayment) > 0 ? <span className="text-sky-700 dark:text-sky-400">− {money(row.available_prepayment)}</span> : money("0") },
+    // A balance of overpayments only showed as zero in every column (QA 2026-11-01, R4-7).
+    { id: "overpayment", label: text.overpayments, accessor: (row) => parseAmount(row.invoice_cash_credit), filterType: "number", sortable: true, width: 140, render: (row) => parseAmount(row.invoice_cash_credit) > 0 ? <span className="text-sky-700 dark:text-sky-400">− {money(row.invoice_cash_credit)}</span> : money("0") },
     {
       id: "balance",
       label: text.balance,
@@ -939,7 +943,7 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
               defaultDensity="compact"
               rowHeightOverrides={{ comfortable: 52, compact: 44, condensed: 40 }}
               mobilePrimaryColumnId="patient"
-              mobileDetailColumnIds={["balance", "status", "invoice_due", "external_receivable", "manual_balance", "prepayment"]}
+              mobileDetailColumnIds={["balance", "status", "invoice_due", "external_receivable", "manual_balance", "prepayment", "overpayment"]}
               toolbarClassName="sm:flex-wrap"
               defaultSort={[{ field: "patient", dir: "asc" }]}
               emptyState={text.noRows}

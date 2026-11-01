@@ -15,6 +15,19 @@ const CREATE_FAILED: LocalizedText = {
   ru: "Не удалось создать счёт. Повторите попытку.",
 };
 
+/**
+ * Only a line credited in full gives its quantity back to the quote; a credit
+ * note on a part of a line only lowers the invoice (QA 2026-11-01, R3 BUG-2).
+ */
+const PARTLY_CREDITED_HINT: LocalizedText = {
+  de: "Eine Gutschrift über einen Teil einer Position gibt keine Menge an das Angebot zurück. Um die Leistung erneut abzurechnen, stornieren Sie diese Gutschrift und erstellen eine Gutschrift über die ganze Position (dann Zwischenrechnung), oder erfassen Sie die Leistung neu im Auftrag und erstellen ein neues Angebot.",
+  ru: "Кредит-нота на часть позиции не возвращает количество в предложение. Чтобы выставить услугу заново, сторнируйте эту кредит-ноту и оформите кредит-ноту на всю позицию (затем промежуточный счёт) или добавьте услугу в заказ и создайте новое предложение.",
+};
+
+export function partlyCreditedHint(lang: string) {
+  return lang === "de" ? PARTLY_CREDITED_HINT.de : PARTLY_CREDITED_HINT.ru;
+}
+
 /** Messages of POST /quotes/{id}/invoices, keyed by the server's `error` text. */
 const INVOICE_CREATION_ERRORS: Record<string, LocalizedText> = {
   "Cannot invoice a rejected or expired quote": {
@@ -30,8 +43,8 @@ const INVOICE_CREATION_ERRORS: Record<string, LocalizedText> = {
     ru: "Для этих позиций предложения уже существует действующий счёт. Проверьте список счетов.",
   },
   "This quote has no remaining quantities to invoice": {
-    de: "Dieses Angebot ist bereits vollständig abgerechnet. Aktualisieren Sie die Auswahl.",
-    ru: "По этому предложению уже выставлен весь объём. Обновите список предложений.",
+    de: `Dieses Angebot ist bereits vollständig abgerechnet. ${PARTLY_CREDITED_HINT.de}`,
+    ru: `По этому предложению уже выставлен весь объём. ${PARTLY_CREDITED_HINT.ru}`,
   },
   "Selected quantity exceeds the remaining quote line quantity": REFRESH_QUANTITIES,
   "Invoice quantity changed; reload the quote and try again": REFRESH_QUANTITIES,

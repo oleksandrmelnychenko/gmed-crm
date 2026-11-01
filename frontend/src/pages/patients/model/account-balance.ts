@@ -7,6 +7,22 @@ type PatientBalanceSummary = {
   balance_side: "debit" | "credit" | "settled" | "reconciliation_required";
 };
 
+/**
+ * The word beside a credit balance in the portal. A paid advance is on the
+ * credit side until a final invoice bills the services: it is no overpayment
+ * next to «still to pay» (QA 2026-11-01, R4-5).
+ */
+export function portalCreditSideLabel(
+  summary: { closing_balance: string | null; available_prepayment: string | null },
+  lang: string,
+) {
+  const advance = Number(summary.available_prepayment ?? 0);
+  if (advance > 0 && advance >= Math.abs(Number(summary.closing_balance))) {
+    return lang === "de" ? "Vorauszahlung" : "предоплата";
+  }
+  return lang === "de" ? "Guthaben" : "переплата";
+}
+
 export type PatientBalancePresentation = {
   amount: number | null;
   /** With the reconciliation still open: the calculated balance with its sign. */

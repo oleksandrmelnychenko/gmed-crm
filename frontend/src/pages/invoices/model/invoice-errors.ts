@@ -101,6 +101,10 @@ const EXACT: Record<string, Pair> = {
     "Dieser Statuswechsel ist für die Rechnung nicht möglich.",
     "Такой переход статуса для счёта невозможен.",
   ],
+  "the invoice is already cancelled": [
+    "Die Rechnung ist bereits storniert; das Stornodokument bleibt unverändert.",
+    "Счёт уже отменён; документ сторно не меняется.",
+  ],
   "cancelled invoices cannot be reactivated": [
     "Stornierte Rechnungen können nicht reaktiviert werden.",
     "Отменённый счёт нельзя вернуть в работу.",

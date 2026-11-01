@@ -16,6 +16,10 @@ describe("invoice dunning preflight", () => {
     expect(dunningBlockReason(sent, today)).toBeNull();
     expect(dunningBlockReason({ ...sent, status: "partially_paid" }, today)).toBeNull();
   });
+  it("says before submit that a covered invoice takes no reminder", () => {
+    expect(dunningBlockReason({ ...sent, reminder_amount: "0" }, today)).toBe("invoices_workspace_dunning_covered");
+    expect(dunningBlockReason({ ...sent, reminder_amount: "10" }, today)).toBeNull();
+  });
   it("blocks drafts even if their due date has passed", () => {
     expect(dunningBlockReason({ ...sent, status: "draft" }, today)).toBe("invoices_workspace_dunning_not_sent");
   });

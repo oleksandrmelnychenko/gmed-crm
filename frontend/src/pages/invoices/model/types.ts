@@ -409,6 +409,8 @@ export type InvoiceItem = {
   advance_credit_available?: unknown;
   /** Balance due net of `advance_credit_available`. */
   amount_to_pay?: unknown;
+  /** Net of paid advances and of credit balances on the debtor's other invoices: what a reminder may demand. */
+  reminder_amount?: unknown;
   credit_balance?: unknown;
   refundable_cash_amount?: unknown;
   credit_transfers?: InvoiceCreditTransfer[];
@@ -554,6 +556,8 @@ export type QuoteOption = {
   quote_number: string;
   status?: string;
   active_invoice_types?: string[];
+  /** Delivered services of the order no line of this quote bills. */
+  services_outside_quote?: string[];
   /** The order's required prepayment: the default amount of an advance invoice. */
   order_prepayment_amount?: string | null;
   order_prepayment_required?: boolean;

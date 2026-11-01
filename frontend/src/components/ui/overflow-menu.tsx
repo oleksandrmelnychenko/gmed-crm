@@ -14,6 +14,8 @@ export type OverflowMenuItem = {
   disabled?: boolean;
   /** Tooltip, e.g. why a disabled item is blocked. */
   title?: string;
+  /** Line under the label, e.g. why an item is blocked: a disabled item shows no tooltip on touch. */
+  note?: ReactNode;
   className?: string;
 };
 
@@ -64,7 +66,10 @@ export function OverflowMenu({
                 onClick={item.onSelect}
               >
                 {item.icon}
-                <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{item.label}</span>
+                  {item.note ? <span className="block whitespace-normal text-xs leading-4 text-muted-foreground">{item.note}</span> : null}
+                </span>
                 {item.detail !== undefined && item.detail !== null ? (
                   <span className="shrink-0 text-xs text-muted-foreground">{item.detail}</span>
                 ) : null}

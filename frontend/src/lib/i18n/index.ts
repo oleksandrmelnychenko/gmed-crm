@@ -1300,6 +1300,7 @@ export interface Translations
   invoices_workspace_dunning_unavailable: string;
   invoices_workspace_dunning_ineligible: string;
   invoices_workspace_dunning_not_sent: string;
+  invoices_workspace_dunning_covered: string;
   invoices_workspace_dunning_missing_due_date: string;
   invoices_workspace_dunning_not_overdue: string;
   invoices_workspace_dunning_changed: string;

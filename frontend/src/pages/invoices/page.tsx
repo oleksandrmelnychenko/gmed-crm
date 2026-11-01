@@ -2039,6 +2039,7 @@ function useStaffInvoicesPageContent() {
       });
       setReversingPaymentId("");
       setReversalNote("");
+      setRefundError(null);
       setReloadToken((current) => current + 1);
     } catch (error) {
       setPaymentError(localizeInvoiceError(error, lang, t.common_error));
@@ -2154,6 +2155,8 @@ function useStaffInvoicesPageContent() {
       });
       setReversingRefundId("");
       setRefundReversalReason("");
+      // The payment reversal this refund refused can go ahead (QA 2026-11-01, R4-6).
+      setPaymentError(null);
       setReloadToken((current) => current + 1);
     } catch (error) {
       setRefundError(localizeInvoiceError(error, lang, t.common_error));
@@ -4190,11 +4193,9 @@ function useStaffInvoicesPageContent() {
                         />
                         <MiniMetric
                           label={t.revenue_invoices_relationship}
-                          value={
-                            detail.payer?.contact_relationship ??
-                            detail.payer?.relation_type ??
-                            t.common_not_set
-                          }
+                          value={patientRelationTypeLabel(
+                            detail.payer?.contact_relationship ?? detail.payer?.relation_type,
+                          ) || t.common_not_set}
                         />
                         <MiniMetric
                           label={t.revenue_invoices_email}
@@ -4803,7 +4804,7 @@ function useStaffInvoicesPageContent() {
                 <div className="rounded-lg border border-border/70 bg-card px-4 py-3">
                   <div className="text-xs text-muted-foreground">{t.invoices_workspace_balance_due}</div>
                   <div className="mt-1 text-lg font-semibold leading-none text-foreground">
-                    {detail ? formatMoney(detail.balance_due, detail?.currency) : t.common_not_set}
+                    {detail ? formatMoney(detail.reminder_amount ?? detail.balance_due, detail?.currency) : t.common_not_set}
                   </div>
                 </div>
               </div>

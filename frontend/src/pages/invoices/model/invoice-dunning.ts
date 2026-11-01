@@ -81,7 +81,7 @@ export function dunningOverrideCopy(lang: string) {
 
 // Keep the preflight in sync with create_dunning_event. The server uses Berlin dates.
 export function dunningBlockReason(
-  invoice: Pick<InvoiceItem, "status" | "balance_due" | "due_date" | "dunning_block"> | null,
+  invoice: Pick<InvoiceItem, "status" | "balance_due" | "due_date" | "dunning_block" | "reminder_amount"> | null,
   today = appDateKey(),
 ): TranslationKey | null {
   if (!invoice) return "invoices_workspace_dunning_unavailable";
@@ -93,6 +93,10 @@ export function dunningBlockReason(
     return "invoices_workspace_dunning_ineligible";
   }
   if (invoice.status === "draft") return "invoices_workspace_dunning_not_sent";
+  // Money GMED already holds is not demanded: said before submit (R4-4).
+  if (invoice.reminder_amount != null && Number(invoice.reminder_amount) <= 0) {
+    return "invoices_workspace_dunning_covered";
+  }
   if (!invoice.due_date) return "invoices_workspace_dunning_missing_due_date";
   if (invoice.due_date >= today) return "invoices_workspace_dunning_not_overdue";
   return null;

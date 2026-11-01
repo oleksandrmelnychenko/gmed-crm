@@ -4106,6 +4106,12 @@ function useOrdersPageContent() {
                                     transition.reasons
                                       .map(localizedBlockingReason)
                                       .join("\n") || undefined,
+                                  // «blocked» alone says nothing (QA 2026-11-01, R3 BUG-3).
+                                  note: transition.blocked
+                                    ? transition.reasons
+                                        .map(localizedBlockingReason)
+                                        .join("; ") || undefined
+                                    : undefined,
                                   className:
                                     transition.status === "cancelled"
                                       ? "text-destructive data-highlighted:text-destructive [&_svg]:text-destructive"

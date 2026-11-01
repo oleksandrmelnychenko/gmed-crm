@@ -378,6 +378,13 @@ describe("quotes available for invoicing", () => {
     }
   });
 
+  it("offers a line credited in full on an interim invoice beside the active final invoice", () => {
+    const credited = { ...quote, active_invoice_types: ["final"], line_items: [line({ remaining_quantity: "0" }), line({ remaining_quantity: "1" })] };
+    expect(isQuoteAvailableForInvoice(credited, "interim")).toBe(true);
+    expect(isQuoteAvailableForInvoice(credited, "final")).toBe(false);
+    expect(isQuoteAvailableForInvoice(credited, "advance")).toBe(false);
+  });
+
   it("keeps a settlement after a paid advance but prevents a second advance", () => {
     const prepaid = { ...quote, active_invoice_types: ["advance"] };
     expect(isQuoteAvailableForInvoice(prepaid, "final")).toBe(true);

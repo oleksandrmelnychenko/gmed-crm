@@ -17,6 +17,7 @@ import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import {
   invoiceCreationErrorMessage,
+  partlyCreditedHint,
 } from "@/pages/invoices/model/billing-release";
 import { INVOICE_LINE_COMMENT_MAX_LENGTH, isQuoteClosedForInvoicing } from "@/pages/invoices/model/invoice-model";
 import type { InvoiceLineItem, InvoiceType, QuoteOption } from "@/pages/invoices/model/types";
@@ -63,6 +64,8 @@ type BillingExpense = {
   rebilling_waivers?: RebillingWaiver[];
   source_order_id: string | null;
   source_order_number: string | null;
+  /** The order's settlement is closed: its waivers stay. */
+  settlement_closed?: boolean;
   latest_patient_invoice_id: string | null;
   latest_patient_invoice_number: string | null;
   latest_patient_invoice_status: string | null;
@@ -249,16 +252,19 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     setSaving(true);
     setError(null);
     try {
+      // A quote without an open position bills nothing: the draft takes the
+      // ticked costs alone (QA 2026-11-01, it answered «check the positions»).
+      const billedQuote = selectedLines.length ? quote : null;
       const invoice = await apiFetch<CreatedInvoice>(`/patients/${patientId}/billing-invoices`, {
         method: "POST",
         body: JSON.stringify({
           request_id: requestId,
           order_id: order?.id ?? null,
-          quote_id: quote?.id || null,
+          quote_id: billedQuote?.id || null,
           currency: activeCurrency,
           invoice_type: invoiceType,
           due_date: dueDate || null,
-          line_items: quote ? selectedLines.map(line_index => {
+          line_items: billedQuote ? selectedLines.map(line_index => {
             const comment = (lineComments[line_index] ?? "").trim();
             return { line_index, quantity: String(availableQuantity(serviceLines[line_index])), ...(comment ? { comment } : {}) };
           }) : null,
@@ -349,7 +355,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
       return <div className="flex flex-col items-end gap-1">
         {waivers.map(waiver => <span key={waiver.id} className="flex flex-wrap items-center justify-end gap-1">
           <span title={copy.waivedBy(formatMoneyAmount(waiver.amount_gross, row.currency), waiver.reason)}><StatusBadge tone="neutral">{copy.waived} · {formatMoneyAmount(waiver.amount_gross, row.currency)}</StatusBadge></span>
-          {canWaive ? <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={saving} onClick={() => openWaiverAction({ kind: "reverse", expense: row, waiver })}><Undo2 className="size-3.5" />{copy.unwaive}</Button> : null}
+          {canWaive && !row.settlement_closed ? <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={saving} onClick={() => openWaiverAction({ kind: "reverse", expense: row, waiver })}><Undo2 className="size-3.5" />{copy.unwaive}</Button> : null}
         </span>)}
         {canWaiveRow ? <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={saving} onClick={() => openWaiverAction({ kind: "waive", expense: row, requestId: crypto.randomUUID() })}><Ban className="size-3.5" />{copy.waive}</Button> : null}
       </div>;
@@ -380,7 +386,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
 
         <section className="overflow-hidden rounded-xl border border-border/70">
           <div className="border-b border-border/60 px-4 py-3"><AdminSectionTitle>{copy.services}</AdminSectionTitle></div>
-          {!quote ? <p className="px-4 py-5 text-sm text-muted-foreground">{copy.noServices}</p> : <div className="divide-y divide-border/60">
+          {!quote || !serviceLines.some(line => availableQuantity(line) > 0) ? <p className="px-4 py-5 text-sm text-muted-foreground">{copy.noServices}{quote ? ` ${partlyCreditedHint(lang)}` : ""}</p> : <div className="divide-y divide-border/60">
             {serviceLines.map((line, index) => {
               const available = availableQuantity(line);
               if (available <= 0) return null;
