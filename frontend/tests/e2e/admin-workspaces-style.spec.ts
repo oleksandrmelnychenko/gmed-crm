@@ -86,14 +86,20 @@ async function responsiveProof(page: Page, testInfo: TestInfo, name: string) {
 async function dialogProof(page: Page, testInfo: TestInfo, name: string) {
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
-  const bounds = await dialog.boundingBox();
-  expect(bounds!.x).toBeGreaterThanOrEqual(10);
-  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(
-    page.viewportSize()!.width - 10,
+  // Measured settled: the dialog zooms in from 95 %, and 10 px held only while it
+  // was still zooming. At rest the phone gutter is the dialog's left-2 / right-2.
+  await dialog.evaluate((node) =>
+    Promise.all(node.getAnimations().map((animation) => animation.finished)),
   );
-  expect(bounds!.y).toBeGreaterThanOrEqual(10);
+  const gutter = 8;
+  const bounds = await dialog.boundingBox();
+  expect(bounds!.x).toBeGreaterThanOrEqual(gutter);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(
+    page.viewportSize()!.width - gutter,
+  );
+  expect(bounds!.y).toBeGreaterThanOrEqual(gutter);
   expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(
-    page.viewportSize()!.height - 10,
+    page.viewportSize()!.height - gutter,
   );
   const overlay = page.locator('[data-slot="dialog-overlay"]').last();
   await expect(overlay).toBeVisible();
