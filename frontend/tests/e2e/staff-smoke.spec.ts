@@ -66,9 +66,10 @@ async function confirmIntakeFromRelease(wizard: Locator) {
  * A lead whose only release blocker is the unconfirmed intake, with signed consents and a verified
  * identity document. With demoAccepted specified, consent PDFs have no legal signatures and
  * only the true case supplies server-authorized DEV credit. Confirming the intake posts /qualify, which answers
- * with `qualifyBlockers` (422). Returns the recorded /qualify payloads.
+ * with `qualifyBlockers` (422). Returns the recorded /qualify payloads. The specialty is chosen:
+ * without one «Patient anlegen» stops at the order step, before the intake (7f1c7e30).
  */
-async function mockLeadAwaitingIntakeConfirmation(page: Page, leadId: string, qualifyBlockers: string[], demoAccepted?: boolean) {
+async function mockLeadAwaitingIntakeConfirmation(page: Page, leadId: string, qualifyBlockers: string[], demoAccepted?: boolean, specialties: string[] = ["orthopedics"]) {
   const qualifyRequests: unknown[] = [];
   await page.route(`**/api/v1/leads/${leadId}/qualify`, (route) => {
     qualifyRequests.push(route.request().postDataJSON());
@@ -83,7 +84,7 @@ async function mockLeadAwaitingIntakeConfirmation(page: Page, leadId: string, qu
     phone: "+49 30 100002", country: "DE", street_address: "Hauptstr. 1", city: "Berlin", zip_code: "10115",
     qualification_status: "in_progress", compliance_status: demoAccepted === undefined ? "signed" : "documents_sent", date_of_birth: "1990-01-01",
     legal_sex: "female", primary_concern_text: "Orthopedic consultation",
-    additional_concerns: "Initial medical history", requested_specialties: [], services: [],
+    additional_concerns: "Initial medical history", requested_specialties: specialties, services: [],
     consent_healthcare: true, consent_privacy_practices: true, attachments: [],
     failed_outcome: { status: "none", reason: null, processed_at: null },
     readiness: {
@@ -2425,13 +2426,9 @@ test.describe("lead wizard UX", () => {
       await expect.poll(() => deadline).toBe(expected);
       await expect(input).toHaveValue("12.09.2026 15:30");
       await expect(wizard.getByText("Rechnung ausstehend", { exact: true })).toBeVisible();
-      // The field is named by its label alone; the hint that the amount comes from the
-      // advance invoice payments is its description.
-      const receivedPrepayment = wizard.getByRole("textbox", { name: "Erhaltene Vorauszahlung", exact: true });
-      await expect(receivedPrepayment).toHaveAttribute("readonly", "");
-      await expect(receivedPrepayment).toHaveAccessibleDescription(
-        "Der Betrag wird aus den Zahlungen der Vorauszahlungsrechnung übernommen.",
-      );
+      // Received cash is recorded on the patient's invoices: the wizard has no such field
+      // any more (6bb759e4), and the deadline write carries no amount.
+      await expect(wizard.getByRole("textbox", { name: "Erhaltene Vorauszahlung", exact: true })).toHaveCount(0);
       expect(writes.every((payload) => !("paid_amount" in payload))).toBe(true);
       await field.scrollIntoViewIfNeeded();
       await page.screenshot({ path: test.info().outputPath(`prepayment-deadline-${width}.png`) });
@@ -3858,7 +3855,7 @@ test.describe("lead onboarding wizard", () => {
   // Step tabs are free navigation since 8af89b04; the checks run when the intake is confirmed.
   test("jumping ahead with the step tabs cannot bypass document or order validation", async ({ page }) => {
     const leadId = "00000000-0000-0000-0000-000000000902";
-    const qualifyRequests = await mockLeadAwaitingIntakeConfirmation(page, leadId, []);
+    const qualifyRequests = await mockLeadAwaitingIntakeConfirmation(page, leadId, [], undefined, []);
     await page.goto(`/leads?lead=${leadId}`);
     await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
 
@@ -3881,6 +3878,17 @@ test.describe("lead onboarding wizard", () => {
     await expect(orderStep).toHaveAttribute("aria-current", "step");
     await expect(orderStep).toHaveAccessibleName(/noch offen/);
 
+    await releaseStep.click();
+    await expect(releaseStep).toHaveAttribute("aria-current", "step");
+    // The order's own issues come first, so that no lead is qualified for a
+    // conversion that then stops at them (7f1c7e30).
+    await confirmIntakeFromRelease(wizard);
+    await expect(orderStep).toHaveAttribute("aria-current", "step");
+    await expect(wizard.getByRole("alert").getByText("Mindestens eine Fachrichtung auswählen").first()).toBeVisible();
+    expect(qualifyRequests).toEqual([]);
+
+    // With the specialty chosen, the withdrawn consent stops the next try.
+    await chooseComboboxOption(page, wizard.getByRole("combobox", { name: "Fachrichtung hinzufügen" }), "Orthopädie");
     await releaseStep.click();
     await expect(releaseStep).toHaveAttribute("aria-current", "step");
     await confirmIntakeFromRelease(wizard);
