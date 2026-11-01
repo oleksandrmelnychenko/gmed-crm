@@ -744,6 +744,96 @@ async fn overdue_invoice_stays_overdue_after_a_partial_payment() {
     assert_eq!(settled["invoice"]["status"], "paid");
 }
 
+/// QA 2026-11-01 (R4-1, R4-4): an overdue invoice a credit balance covers
+/// keeps its status but asks for nothing: the overdue list drops it and the
+/// detail says what a reminder may demand.
+#[tokio::test]
+async fn an_overdue_invoice_covered_by_a_credit_leaves_the_overdue_filter() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("covered-overdue");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let overpaid = seed_invoice(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("{tag}-a"),
+        "interim",
+        100,
+        false,
+    )
+    .await;
+    let covered = seed_invoice_in_status(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("{tag}-b"),
+        "interim",
+        50,
+        false,
+        "overdue",
+    )
+    .await;
+    let open = seed_invoice_in_status(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("{tag}-c"),
+        "interim",
+        70,
+        false,
+        "overdue",
+    )
+    .await;
+    let billing = auth_header_for(billing_id, "billing");
+    // 80 beyond the 100: the older overdue invoice is covered, 40 of the next stay.
+    let (status, payment) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{overpaid}/payments"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": "180",
+            "payment_method": "bank_transfer",
+            "received_on": gmed_server::app_time::today().to_string(),
+            "accept_overpayment": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{payment:?}");
+
+    let (status, list) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices?order_id={order_id}&status=overdue"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list:?}");
+    let ids = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["id"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec![open.to_string()], "{list:?}");
+    assert_eq!(list["total"], 1);
+
+    let detail = invoice_detail(&app, &billing, covered).await;
+    assert_eq!(detail["status"], "overdue");
+    assert_eq!(detail["balance_due"], "50");
+    assert_eq!(detail["reminder_amount"], "0");
+}
+
 async fn category_totals(pool: &PgPool, invoice_id: Uuid) -> Vec<(String, Decimal)> {
     sqlx::query(
         r#"SELECT category, SUM(amount_gross) AS gross

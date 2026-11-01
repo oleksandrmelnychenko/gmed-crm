@@ -377,6 +377,188 @@ async fn a_fully_credited_final_invoice_leaves_the_quote_open_for_a_new_invoice(
     assert_eq!(refused["error"], "credit_note_rebilled");
 }
 
+/// QA 2026-11-01 (R3 BUG-2): a line credited in full gives its quantity back
+/// while the final invoice stays active, so it is billed on an interim invoice.
+#[tokio::test]
+async fn a_line_credited_in_full_is_billed_again_on_an_interim_invoice() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let (patient_id, order_id, _, _) =
+        seed_quoted_order(&ctx.app, &ctx.pool, ctx.admin_id, &ceo).await;
+    sqlx::query(
+        r#"INSERT INTO order_leistungen (
+               order_id, patient_id, description, quantity, unit_price, currency, vat_rate
+           ) VALUES ($1, $2, 'Koordination', 1, 100, 'EUR', 19)"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let (status, quote) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &ceo,
+        Some(json!({ "notes": "Angebot" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{quote:?}");
+    let quote_id = quote["id"].as_str().unwrap().to_string();
+    let selected = json!([
+        { "line_index": 0, "quantity": "4" },
+        { "line_index": 1, "quantity": "1" },
+    ]);
+    let invoices = format!("/api/v1/quotes/{quote_id}/invoices");
+    let (status, invoice) = call(
+        &ctx.app,
+        "POST",
+        &invoices,
+        &ceo,
+        Some(json!({ "invoice_type": "final", "line_items": selected })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice:?}");
+    let invoice_id = invoice["id"].as_str().unwrap().to_string();
+    let (status, released) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        &ceo,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{released:?}");
+
+    let (status, credit) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "lines": [{ "line_index": 1 }],
+            "reason": "Leistung falsch",
+            "issued_on": gmed_server::app_time::today().to_string(),
+            "portal_visible": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{credit:?}");
+
+    let (status, reopened) = call(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/quotes/{quote_id}"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reopened:?}");
+    assert_eq!(reopened["line_items"][0]["remaining_quantity"], "0");
+    assert_eq!(reopened["line_items"][1]["remaining_quantity"], "1");
+    assert_eq!(reopened["active_invoice_types"], json!(["final"]));
+
+    let (status, interim) = call(
+        &ctx.app,
+        "POST",
+        &invoices,
+        &ceo,
+        Some(json!({
+            "invoice_type": "interim",
+            "line_items": [{ "line_index": 1, "quantity": "1" }],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{interim:?}");
+    let gross: Decimal = interim["total_gross"].as_str().unwrap().parse().unwrap();
+    assert_eq!(gross, Decimal::new(119, 0));
+}
+
+/// QA 2026-11-01 (R4-2): the draft final invoice re-bills a supplier cost the
+/// statement still shows as a receivable; the balance counts it once and equals
+/// the settlement (138 against 19).
+#[tokio::test]
+async fn the_statement_counts_a_cost_on_the_settlement_draft_once() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let ceo = bearer(ctx.admin_id, "ceo");
+    let (patient_id, order_id, service_id, _) =
+        seed_quoted_order(&ctx.app, &ctx.pool, ctx.admin_id, &ceo).await;
+    set_actual_hours(&ctx.pool, service_id, Decimal::new(2, 0)).await;
+    sqlx::query(
+        r#"INSERT INTO external_invoices (
+               order_id, patient_id, external_invoice_number,
+               amount_net, amount_vat, amount_gross, currency,
+               status, paid_by, service_delivered, created_by
+           ) VALUES ($1, $2, $3, 100, 0, 100, 'EUR', 'paid', 'agency', true, $4)"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("EXT-DRAFT-{}", Uuid::new_v4().simple()))
+    .bind(ctx.admin_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let (status, cancelled) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/status"),
+        &ceo,
+        Some(json!({ "status": "cancelled", "reason": "Patient reist nicht an" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cancelled:?}");
+    let (status, invoice) = call(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/termination-settlement/final-invoice"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice:?}");
+    // 226,10 € services and the 100 € cost.
+    let gross: Decimal = invoice["total_gross"].as_str().unwrap().parse().unwrap();
+    assert_eq!(gross, Decimal::new(32610, 2));
+
+    let (status, settlement) = call(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/termination-settlement"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{settlement:?}");
+    let (status, statement) = call(
+        &ctx.app,
+        "GET",
+        &format!(
+            "/api/v1/patients/{patient_id}/account-statement?currency=EUR&order_id={order_id}"
+        ),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{statement:?}");
+    let balance: Decimal = statement["summary"]["calculated_balance"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(balance, Decimal::new(32610, 2), "{statement:?}");
+    let settled: Decimal = settlement["current"]["balance_gross"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(balance, settled);
+}
+
 #[tokio::test]
 async fn a_payment_below_a_cent_is_refused() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {

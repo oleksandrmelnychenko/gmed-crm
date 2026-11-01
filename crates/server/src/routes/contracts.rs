@@ -3777,6 +3777,27 @@ async fn load_quote_detail(
                         WHERE invoice.quote_id = q.id AND invoice.status <> 'cancelled'
                           AND (invoice.invoice_type <> 'final' OR invoice.total_gross <= 0
                                OR invoice.credited_amount < invoice.total_gross)) AS active_invoice_types,
+                  -- Delivered work no line of this quote bills: a final invoice
+                  -- leaves it out (QA 2026-11-01, R3 BUG-3).
+                  COALESCE((
+                      SELECT jsonb_agg(
+                                 COALESCE(NULLIF(BTRIM(service.agency_service_name_snapshot), ''), service.description)
+                                 ORDER BY service.created_at, service.id)
+                      FROM order_leistungen service
+                      WHERE service.order_id = q.order_id
+                        AND service.status IN ('delivered', 'approved')
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM jsonb_array_elements(
+                                CASE WHEN jsonb_typeof(q.line_items) = 'array'
+                                     THEN q.line_items ELSE '[]'::jsonb END
+                            ) AS quoted(value)
+                            WHERE quoted.value ->> 'source_order_leistung_id' = service.id::text
+                               OR (COALESCE(quoted.value ->> 'source_order_leistung_id', '') = ''
+                                   AND LOWER(BTRIM(quoted.value ->> 'description'))
+                                       = LOWER(BTRIM(service.description)))
+                        )
+                  ), '[]'::jsonb) AS services_outside_quote,
                   q.created_at, q.updated_at,
                   COALESCE((SELECT count(*)::bigint FROM quote_versions qv WHERE qv.quote_id = q.id), 0) AS version_count,
                   COALESCE((SELECT max(version_number) FROM quote_versions qv WHERE qv.quote_id = q.id), 0) AS current_version_number,
@@ -3855,6 +3876,7 @@ async fn load_quote_detail(
         "paid_amount": decimal_to_string(row.try_get::<Decimal, _>("paid_amount").unwrap_or(Decimal::ZERO)),
         "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
         "active_invoice_types": row.try_get::<Vec<String>, _>("active_invoice_types").unwrap_or_default(),
+        "services_outside_quote": row.try_get::<Value, _>("services_outside_quote").unwrap_or_else(|_| serde_json::json!([])),
         "line_items": add_remaining_quote_quantities(
             row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
             &row.try_get::<Value, _>("invoiced_quantities").unwrap_or_else(|_| serde_json::json!({})),
@@ -3909,6 +3931,27 @@ async fn list_quotes(
                         WHERE invoice.quote_id = q.id AND invoice.status <> 'cancelled'
                           AND (invoice.invoice_type <> 'final' OR invoice.total_gross <= 0
                                OR invoice.credited_amount < invoice.total_gross)) AS active_invoice_types,
+                  -- Delivered work no line of this quote bills: a final invoice
+                  -- leaves it out (QA 2026-11-01, R3 BUG-3).
+                  COALESCE((
+                      SELECT jsonb_agg(
+                                 COALESCE(NULLIF(BTRIM(service.agency_service_name_snapshot), ''), service.description)
+                                 ORDER BY service.created_at, service.id)
+                      FROM order_leistungen service
+                      WHERE service.order_id = q.order_id
+                        AND service.status IN ('delivered', 'approved')
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM jsonb_array_elements(
+                                CASE WHEN jsonb_typeof(q.line_items) = 'array'
+                                     THEN q.line_items ELSE '[]'::jsonb END
+                            ) AS quoted(value)
+                            WHERE quoted.value ->> 'source_order_leistung_id' = service.id::text
+                               OR (COALESCE(quoted.value ->> 'source_order_leistung_id', '') = ''
+                                   AND LOWER(BTRIM(quoted.value ->> 'description'))
+                                       = LOWER(BTRIM(service.description)))
+                        )
+                  ), '[]'::jsonb) AS services_outside_quote,
                   q.created_at, q.updated_at,
                   q.superseded_by_quote_id, q.superseded_at,
                   successor.quote_number AS superseded_by_quote_number,
@@ -4010,6 +4053,7 @@ async fn list_quotes(
                     "paid_amount": decimal_to_string(row.try_get::<Decimal, _>("paid_amount").unwrap_or(Decimal::ZERO)),
                     "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
                     "active_invoice_types": row.try_get::<Vec<String>, _>("active_invoice_types").unwrap_or_default(),
+                    "services_outside_quote": row.try_get::<Value, _>("services_outside_quote").unwrap_or_else(|_| serde_json::json!([])),
                     // The order's required prepayment: the default amount of
                     // an advance invoice from this quote.
                     "order_prepayment_required": row.try_get::<bool, _>("prepayment_required").unwrap_or(false),

@@ -1042,6 +1042,7 @@ fn redact_patient_invoice_payload(invoice: &mut Value) {
             "balance_due",
             "advance_credit_available",
             "amount_to_pay",
+            "reminder_amount",
             "credit_balance",
             "refundable_cash_amount",
         ] {
@@ -4606,6 +4607,12 @@ async fn validate_invoice_creation_for_quote(
                 "Failed to validate invoice duplication",
             )
         })?
+    } else if invoice_type == "interim" {
+        // Beside an active final invoice an interim invoice can only take the
+        // quantity of a line credited in full, the quantity check guards the
+        // rest; it was refused here, so that quantity had no way back onto an
+        // invoice (QA 2026-11-01, R3 BUG-2).
+        false
     } else {
         sqlx::query_scalar(
             "SELECT EXISTS(
@@ -5040,6 +5047,15 @@ async fn load_invoice_detail(
     } else {
         Decimal::ZERO
     };
+    // What a reminder may demand: also net of credit balances on the debtor's
+    // other invoices. The dialog says so before submit (QA 2026-11-01, R4-4).
+    let reminder_amount = advance_application::invoice_amount_to_pay(&state.db, invoice_id)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice amount to pay");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+        })?
+        .unwrap_or(balance_due);
     let credit_transfers_history = credit_transfers::load_invoice_credit_transfers(
         state, invoice_id,
     )
@@ -5202,6 +5218,7 @@ async fn load_invoice_detail(
         "balance_due": decimal_to_string(balance_due),
         "advance_credit_available": decimal_to_string(advance_credit_available),
         "amount_to_pay": decimal_to_string((balance_due - advance_credit_available).max(Decimal::ZERO)),
+        "reminder_amount": decimal_to_string(reminder_amount),
         "credit_balance": decimal_to_string(credit_balance),
         "refundable_cash_amount": decimal_to_string(refundable_cash_amount),
         "credit_transfers": credit_transfers_history,
@@ -6772,6 +6789,7 @@ async fn list_invoices(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    let overdue_filter = query.status.as_deref() == Some("overdue");
 
     match sqlx::query(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
@@ -6902,6 +6920,31 @@ async fn list_invoices(
                     "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                     "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                 }));
+            }
+            // An invoice a credit balance or a paid advance covers asks for
+            // nothing: the overdue list follows the statement's "to pay", as
+            // the reminder does (QA 2026-11-01, R4-1).
+            if overdue_filter {
+                let ids = items
+                    .iter()
+                    .filter_map(|item| item["id"].as_str().and_then(|id| Uuid::parse_str(id).ok()))
+                    .collect::<Vec<_>>();
+                let to_pay = match advance_application::invoice_amounts_to_pay(&state.db, &ids)
+                    .await
+                {
+                    Ok(value) => value,
+                    Err(e) => {
+                        tracing::error!(error = %e, "load overdue invoice amounts to pay");
+                        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to list invoices");
+                    }
+                };
+                items.retain(|item| {
+                    item["id"]
+                        .as_str()
+                        .and_then(|id| Uuid::parse_str(id).ok())
+                        .and_then(|id| to_pay.get(&id))
+                        .is_none_or(|amount| *amount > Decimal::ZERO)
+                });
             }
             let total = items.len();
             let total_pages = total.div_ceil(per_page).max(1);
@@ -7070,6 +7113,12 @@ async fn get_patient_billing_workspace(
                     ), '[]'::jsonb),
                     'source_order_id', external.order_id,
                     'source_order_number', source_order.order_number,
+                    -- A closed settlement keeps its waivers (rebilling_waivers).
+                    'settlement_closed', EXISTS (
+                        SELECT 1 FROM order_termination_settlements closed_settlement
+                        WHERE closed_settlement.order_id = external.order_id
+                          AND closed_settlement.status = 'settled'
+                    ),
                     'latest_patient_invoice_id', allocation_summary.latest_invoice_id,
                     'latest_patient_invoice_number', allocation_summary.latest_invoice_number,
                     'latest_patient_invoice_status', allocation_summary.latest_invoice_status,
@@ -13842,6 +13891,11 @@ async fn update_invoice_status(
             StatusCode::CONFLICT,
             "Cancelled invoices cannot be reactivated",
         );
+    }
+    // The cancellation document is final: a second request, with or without a
+    // reason, changes nothing and must not read as done (QA 2026-11-01).
+    if locked_status == "cancelled" {
+        return err(StatusCode::CONFLICT, "The invoice is already cancelled");
     }
     // A draft becomes an invoice only by being released (sent).
     if locked_status == "draft"

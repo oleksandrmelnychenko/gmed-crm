@@ -28,7 +28,8 @@
 //!   They did not accrue, so the patient gets them credited (and refunded);
 //! * `balance = invoiced - to_credit + uninvoiced - paid`.
 //!
-//! Credit notes lower `invoiced` and never reopen a service for billing.
+//! Credit notes lower `invoiced`; only a line credited in full gives its
+//! quantity back (`invoice_quote_line_credited`).
 //! Which service an invoice line bills is decided line by line, legacy quote
 //! lines without a service link included (see [`invoiced_lines`]), so "create
 //! final invoice" bills exactly the uninvoiced service amount.
@@ -174,6 +175,9 @@ pub(crate) struct OrderSettlement {
     pub paid_gross: Decimal,
     /// Non-advance draft invoices of the order: billed, not released yet.
     pub draft_gross: Decimal,
+    /// Part of `draft_gross` that re-bills third-party costs the account
+    /// statement still shows as external receivables.
+    pub draft_external_gross: Decimal,
     /// Invoice lines that bill no accrued service or third-party cost.
     pub unmatched_invoiced_gross: Decimal,
     lines: Vec<SettlementLine>,
@@ -247,9 +251,11 @@ impl OrderSettlement {
     }
 
     /// Part of `uninvoiced` the patient's account statement does not already
-    /// carry: its external receivables are the third-party costs.
+    /// carry: its external receivables are the third-party costs, also those
+    /// on a draft until it is released (QA 2026-11-01, R4-2: 138 against 19).
     pub fn statement_uninvoiced_gross(&self) -> Decimal {
-        (self.service_uninvoiced_gross() + self.draft_gross).round_cents()
+        (self.service_uninvoiced_gross() + self.draft_gross - self.draft_external_gross)
+            .round_cents()
     }
 
     fn is_balanced(&self) -> bool {
@@ -728,6 +734,24 @@ pub(crate) async fn compute_order_settlement(
     .bind(order_id)
     .fetch_one(&mut *conn)
     .await?;
+    // As the statement's ledger: its receivable stays while the allocation
+    // waits on the draft (`external-allocation-reopened`).
+    let draft_external_gross = sqlx::query_scalar::<_, Decimal>(
+        r#"SELECT COALESCE(SUM(allocation.amount_gross), 0)
+           FROM external_invoice_patient_invoice_allocations allocation
+           JOIN invoices invoice ON invoice.id = allocation.patient_invoice_id
+           JOIN external_invoice_receivable_balances receivable
+             ON receivable.external_invoice_id = allocation.external_invoice_id
+           WHERE invoice.order_id = $1
+             AND invoice.invoice_type <> 'advance'
+             AND invoice.status = 'draft'
+             AND invoice.updated_at >= allocation.created_at
+             AND allocation.reversed_at IS NULL
+             AND receivable.patient_receivable_gross + receivable.waived_receivable_gross > 0"#,
+    )
+    .bind(order_id)
+    .fetch_one(&mut *conn)
+    .await?;
     if invoiced_quantities.unmatched_gross > Decimal::ZERO {
         warnings.push("unmatched_invoice_lines");
     }
@@ -747,6 +771,7 @@ pub(crate) async fn compute_order_settlement(
         invoiced_gross: invoiced_gross.round_cents(),
         paid_gross: paid_gross.round_cents(),
         draft_gross: draft_gross.round_cents(),
+        draft_external_gross: draft_external_gross.round_cents(),
         unmatched_invoiced_gross: invoiced_quantities.unmatched_gross.round_cents(),
         lines,
         cancelled_lines,

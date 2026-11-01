@@ -203,6 +203,20 @@ async fn cancelling_a_released_invoice_issues_an_archived_cancellation_document(
     assert_eq!(source, "stored");
     assert!(bytes.starts_with(b"%PDF"));
 
+    // A second cancellation is refused: the document keeps its reason
+    // (QA 2026-11-01, it answered 200 and ignored the new reason).
+    let before = counter(&ctx.pool, "invoice_storno").await;
+    let (status, repeated) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        &ceo,
+        Some(json!({ "status": "cancelled", "reason": "Anderer Grund" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{repeated:?}");
+    assert_eq!(counter(&ctx.pool, "invoice_storno").await, before);
+
     // The next cancellation takes the next number of the range.
     let before = counter(&ctx.pool, "invoice_storno").await;
     let (status, second) = request_json(

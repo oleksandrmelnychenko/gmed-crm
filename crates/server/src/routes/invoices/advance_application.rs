@@ -486,8 +486,21 @@ pub(crate) async fn invoice_amount_to_pay(
     pool: &sqlx::PgPool,
     invoice_id: Uuid,
 ) -> Result<Option<Decimal>, sqlx::Error> {
+    Ok(invoice_amounts_to_pay(pool, &[invoice_id])
+        .await?
+        .remove(&invoice_id))
+}
+
+/// [`invoice_amount_to_pay`] of several invoices, each netted against its own
+/// patient's invoices of its currency; drafts and cancelled invoices have no
+/// entry.
+pub(crate) async fn invoice_amounts_to_pay(
+    pool: &sqlx::PgPool,
+    invoice_ids: &[Uuid],
+) -> Result<std::collections::BTreeMap<Uuid, Decimal>, sqlx::Error> {
     let rows = sqlx::query(
-        r#"SELECT invoice.id, invoice.order_id, invoice.invoice_type, invoice.issued_at,
+        r#"SELECT invoice.id, invoice.patient_id, invoice.currency, invoice.order_id,
+                  invoice.invoice_type, invoice.issued_at,
                   invoice.total_gross, invoice.credited_amount, invoice.paid_amount,
                   invoice.prepayment_applied_amount,
                   invoice_recipient_identity(invoice.recipient_snapshot) AS recipient,
@@ -496,26 +509,30 @@ pub(crate) async fn invoice_amount_to_pay(
                       FROM invoice_prepayment_allocations allocation
                       WHERE allocation.advance_invoice_id = invoice.id
                   ), 0) AS allocated_from_advance
-           FROM invoices target
-           JOIN invoices invoice
-             ON invoice.patient_id = target.patient_id
-            AND invoice.currency = target.currency
-           WHERE target.id = $1
-             AND invoice.status NOT IN ('draft', 'cancelled')"#,
+           FROM invoices invoice
+           WHERE invoice.status NOT IN ('draft', 'cancelled')
+             AND EXISTS (
+                 SELECT 1 FROM invoices target
+                 WHERE target.id = ANY($1)
+                   AND target.patient_id = invoice.patient_id
+                   AND target.currency = invoice.currency
+             )"#,
     )
-    .bind(invoice_id)
+    .bind(invoice_ids)
     .fetch_all(pool)
     .await?;
-    let open = rows
-        .iter()
-        .map(|row| {
-            let total = row.try_get::<Decimal, _>("total_gross")?
-                - row.try_get::<Decimal, _>("credited_amount")?;
-            let paid = row.try_get::<Decimal, _>("paid_amount")?;
-            let applied = row.try_get::<Decimal, _>("prepayment_applied_amount")?;
-            let allocated = row.try_get::<Decimal, _>("allocated_from_advance")?;
-            let is_advance = row.try_get::<String, _>("invoice_type")? == "advance";
-            Ok(OpenInvoice {
+    let mut debtors = std::collections::BTreeMap::<(Uuid, String), Vec<OpenInvoice>>::new();
+    for row in &rows {
+        let total = row.try_get::<Decimal, _>("total_gross")?
+            - row.try_get::<Decimal, _>("credited_amount")?;
+        let paid = row.try_get::<Decimal, _>("paid_amount")?;
+        let applied = row.try_get::<Decimal, _>("prepayment_applied_amount")?;
+        let allocated = row.try_get::<Decimal, _>("allocated_from_advance")?;
+        let is_advance = row.try_get::<String, _>("invoice_type")? == "advance";
+        debtors
+            .entry((row.try_get("patient_id")?, row.try_get("currency")?))
+            .or_default()
+            .push(OpenInvoice {
                 order_id: row.try_get("order_id")?,
                 recipient: row.try_get("recipient")?,
                 is_advance,
@@ -528,14 +545,17 @@ pub(crate) async fn invoice_amount_to_pay(
                 credit_balance: (paid + applied - total).max(Decimal::ZERO),
                 issued_at: row.try_get("issued_at")?,
                 id: row.try_get("id")?,
-            })
-        })
-        .collect::<Result<Vec<_>, sqlx::Error>>()?;
-    Ok(open
-        .iter()
-        .zip(net_open_balances(&open))
-        .find(|(invoice, _)| invoice.id == invoice_id)
-        .map(|(_, net)| net.to_pay))
+            });
+    }
+    let mut amounts = std::collections::BTreeMap::new();
+    for open in debtors.values() {
+        for (invoice, net) in open.iter().zip(net_open_balances(open)) {
+            if invoice_ids.contains(&invoice.id) {
+                amounts.insert(invoice.id, net.to_pay);
+            }
+        }
+    }
+    Ok(amounts)
 }
 
 #[cfg(test)]
