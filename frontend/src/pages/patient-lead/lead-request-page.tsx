@@ -62,6 +62,7 @@ import {
 } from "./lead-request-steps";
 import {
   LEAD_CABINET_LANGS,
+  actsAsVormund,
   asLeadCabinetLang,
   guardianCabinetTitle,
   leadRequestText,
@@ -253,7 +254,9 @@ export function LeadRequestPage({
     if (!userId || !requests) return;
     const guardianOnly =
       !ownPatient && requests.length > 0 && requests.every((request) => request.access_kind === "guardian");
-    setPortalAccountLabel(userId, guardianOnly ? text.accountLabelGuardian : null);
+    setPortalAccountLabel(userId, guardianOnly
+      ? requests.every((request) => actsAsVormund(request)) ? text.accountLabelVormund : text.accountLabelGuardian
+      : null);
   }, [ownPatient, requests, text, userId]);
   // The shell around the cabinet (side bar, top bar) speaks the cabinet language, UA and EN
   // included (QA 2026-10-24, A-7). Published once the language is final: not before the requests

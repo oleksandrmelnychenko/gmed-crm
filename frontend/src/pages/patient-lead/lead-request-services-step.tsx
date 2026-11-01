@@ -144,7 +144,10 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
   const textareaStyle = "w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default";
 
   // The browser's `min` only marks the field: the date was dropped with no word (QA 2026-10-31).
-  const pastStart = !staffMode && Boolean(draft.program_date_from) && draft.program_date_from < appDateKey();
+  // The picker does not pass a date before `min` on, so the draft alone never shows it
+  // (QA 2026-11-01): the refusal itself says so.
+  const [pickerRefused, setPickerRefused] = useState<string | null>(null);
+  const pastStart = !staffMode && (pickerRefused === "minDate" || (Boolean(draft.program_date_from) && draft.program_date_from < appDateKey()));
 
   return (
     <StepFrame testId="lead-request-services" step="services" request={request} text={text} missing={missing} nav={nav} saveState={state}>
@@ -157,7 +160,7 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
           {/* A wished start lies ahead: no date in the past (owner 2026-10-29); staff may enter one (QA 2026-10-31). */}
           <Input key={`program_date_from-${lang}`} id="lead-request-service-program_date_from" type="date" className="h-10 bg-background"
             pickerLang={asLeadCabinetLang(lang) ?? undefined}
-            min={staffMode ? undefined : appDateKey()} value={draft.program_date_from}
+            min={staffMode ? undefined : appDateKey()} value={draft.program_date_from} onPickerValidation={setPickerRefused}
             aria-invalid={pastStart || undefined} aria-describedby={pastStart ? "lead-request-service-program_date_from-error" : undefined}
             onChange={(event) => setDraft((current) => ({ ...current, program_date_from: event.target.value }))} />
           {pastStart ? <p id="lead-request-service-program_date_from-error" role="alert" className="text-xs text-destructive">{pastDateMessage(lang)}</p> : null}

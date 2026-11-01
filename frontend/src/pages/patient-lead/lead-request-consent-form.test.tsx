@@ -106,6 +106,18 @@ describe("consent form choices in the lead cabinet", () => {
     expect(consentFormText("de", true).options.data_system).toContain("meines Kindes");
   });
 
+  it("speaks of the represented child for a guardian, in every language (QA 2026-11-01, R2-E)", () => {
+    const parentWords = /meines Kindes|Ihres Kindes|Ihr Kind|Sorgeberechtigte|my child|My child|your child|parent|моего ребёнка|вашего ребёнка|родител|моєї дитини|вашої дитини|свою дитину|батьк/;
+    for (const lang of ["de", "ru", "uk", "en"]) {
+      const text = consentFormText(lang, true, true);
+      for (const value of [text.intro, ...Object.values(text.options), text.channelsTitle, text.coreHint, text.recipientsHint]) {
+        expect(value, lang).not.toMatch(parentWords);
+      }
+    }
+    expect(consentFormText("de", true, true).options.data_system).toContain("des von mir vertretenen Kindes");
+    expect(consentFormText("de", false, true).intro).toBe(consentFormText("de").intro);
+  });
+
   it("shows the saved choice without a receipt of its own (labels audit 2026-10-26, B8)", () => {
     const markup = renderToStaticMarkup(
       <ConsentFormChoicesSection

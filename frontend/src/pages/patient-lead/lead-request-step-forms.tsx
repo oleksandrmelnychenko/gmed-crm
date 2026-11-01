@@ -84,7 +84,7 @@ import { draftFromRecipient, flowOf, knowsRecipient, payerChoices, payerFitsFlow
 import { RepresentationSection, RepresentativeUpload } from "./lead-request-representation";
 import { useServerDraftSync } from "./lead-request-server-sync";
 import { inquiryConsentMissing, refusedIdentityUploadKeys, type StepId } from "./lead-request-steps";
-import { asLeadCabinetLang, childSectionTitle, hasInsuranceLabel, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
+import { actsAsVormund, asLeadCabinetLang, childSectionTitle, hasInsuranceLabel, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 // The steps of the lead cabinet that hold the base form (trigger flow
 // 2026-10-07, contract 6): short steps of the wider layout, each with what it
@@ -806,7 +806,7 @@ export function OwnRepresentativeDocumentSection({
   );
   return (
     <div id={SECTION_ANCHORS.ownDocument} className="scroll-mt-4" data-testid="lead-request-own-document">
-      <Section compact title={text.ownRepresentativeDocumentTitle}>
+      <Section compact title={actsAsVormund(request) ? text.ownRepresentativeDocumentTitleVormund : text.ownRepresentativeDocumentTitle}>
         {me && slot ? (
           <div className="space-y-2">
             <InfoNote>{text.ownRepresentativeDocumentHint}</InfoNote>

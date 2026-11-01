@@ -634,7 +634,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
   const consent = request.consent_form;
   if (consent?.choices) {
     const choices = consent.choices;
-    const wording = consentFormText(lang, guardian && request.minor);
+    const wording = consentFormText(lang, guardian && request.minor, request.representation?.custody === "guardian");
     const keys = (Object.keys(wording.options) as Array<keyof typeof choices>).filter((key) => key in choices);
     const channels = keys.filter((key) => key.startsWith("channel_"));
     group("consent_form", wording.title, [

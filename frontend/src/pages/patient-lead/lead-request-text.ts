@@ -58,6 +58,8 @@ export type LeadRequestText = {
   titleVormund: string;
   /** The account label of a parent's login in the side bar, instead of "Patient". */
   accountLabelGuardian: string;
+  /** A Vormund / Pfleger is no parent (QA 2026-11-01, R2-E). */
+  accountLabelVormund: string;
   intro: string;
   introGuardian: string;
   deadline: (date: string) => string;
@@ -280,6 +282,8 @@ export type LeadRequestText = {
     options: Record<InvoiceRecipient, string>;
     /** A parent's login of a minor: the parent is the recipient. */
     optionsGuardian: Record<InvoiceRecipient, string>;
+    /** "Me" of a minor's guardian (Vormund): no parent. */
+    selfVormund: string;
     /** The same when the other parent receives the invoice: "one of the parents", the name below (QA 2026-10-24). */
     optionsOtherParent: Record<InvoiceRecipient, string>;
     /** A representative's login of an adult patient: the patient is the recipient, through the representative (owner 2026-10-22). */
@@ -554,6 +558,7 @@ export type LeadRequestText = {
   /** Step "Document" of a parent's login for a minor: the child's copy and the parent's own (owner report 2026-10-21). */
   childDocumentTitle: string;
   ownRepresentativeDocumentTitle: string;
+  ownRepresentativeDocumentTitleVormund: string;
   ownRepresentativeDocumentHint: string;
   /** The parent is not yet a representative of the request: the own copy waits for that section. */
   ownRepresentativeDocumentNeedsPerson: (section: string) => string;
@@ -911,12 +916,14 @@ export function guardianCabinetTitle(
  */
 export function recipientOptions(
   text: LeadRequestText,
-  request: { access_kind?: string | null; minor?: boolean | null },
+  request: Parameters<typeof actsAsVormund>[0],
   otherParentReceives = false,
 ): Record<InvoiceRecipient, string> {
   if (!actsAsGuardian(request)) return text.recipient.options;
   if (!request.minor) return text.recipient.optionsRepresentative;
-  return otherParentReceives ? text.recipient.optionsOtherParent : text.recipient.optionsGuardian;
+  if (otherParentReceives) return text.recipient.optionsOtherParent;
+  // A Vormund is no parent (QA 2026-11-01, R2-E).
+  return actsAsVormund(request) ? { ...text.recipient.optionsGuardian, self: text.recipient.selfVormund } : text.recipient.optionsGuardian;
 }
 
 /** Whose profession and sector block A asks: the signed-in patient's, a minor child's, or an adult patient's (representative's login). */
@@ -1063,6 +1070,7 @@ const de: LeadRequestText = {
   titleGuardian: "Anfrage für Ihr Kind",
   titleVormund: "Anfrage für das von Ihnen vertretene Kind",
   accountLabelGuardian: "Elternteil / gesetzliche Vertretung",
+  accountLabelVormund: "Gesetzliche Vertretung",
   intro: "Bitte tragen Sie Ihre persönlichen Daten ein und laden Sie Ihre Unterlagen hoch. Alles wird automatisch gespeichert.",
   introGuardian:
     "Bitte tragen Sie die persönlichen Daten Ihres Kindes ein und laden Sie die Unterlagen hoch. Alles wird automatisch gespeichert.",
@@ -1287,6 +1295,7 @@ const de: LeadRequestText = {
     parentQuestion: "Welcher Elternteil erhält die Rechnung?",
     parentQuestionVormund: "Wer vom Vormund oder den Vormündern erhält die Rechnung?",
     vormundSelf: "Vormund / Pfleger",
+    selfVormund: "Ich (als gesetzliche Vertretung)",
     isPayerVormund: "Der Vormund / Pfleger zahlt auch",
     options: { self: "Ich", third_party: "Eine andere Person oder Organisation" },
     optionsGuardian: {
@@ -1655,6 +1664,7 @@ const de: LeadRequestText = {
   goToSection: (section) => `Zum Abschnitt „${section}“`,
   childDocumentTitle: "Ausweisdokument des Kindes",
   ownRepresentativeDocumentTitle: "Ihr Ausweisdokument (Elternteil / gesetzlicher Vertreter)",
+  ownRepresentativeDocumentTitleVormund: "Ihr Ausweisdokument (gesetzliche Vertretung)",
   ownRepresentativeDocumentHint: "Bitte laden Sie einen gut lesbaren Scan oder ein Foto Ihres eigenen Ausweisdokuments hoch.",
   ownRepresentativeDocumentNeedsPerson: (section) => `Um Ihr eigenes Ausweisdokument hochzuladen, tragen Sie bitte zuerst Ihre Angaben im Abschnitt „${section}“ ein.`,
   otherParentDocumentTitle: (name) => (name ? `Ausweisdokument des anderen Elternteils (${name})` : "Ausweisdokument des anderen Elternteils"),
@@ -1685,6 +1695,7 @@ const ru: LeadRequestText = {
   titleGuardian: "Заявка для вашего ребёнка",
   titleVormund: "Заявка для ребёнка, которого вы представляете",
   accountLabelGuardian: "Родитель / законный представитель",
+  accountLabelVormund: "Законный представитель",
   intro: "Пожалуйста, заполните свои личные данные и загрузите документы. Всё сохраняется автоматически.",
   introGuardian:
     "Пожалуйста, заполните личные данные ребёнка и загрузите документы. Всё сохраняется автоматически.",
@@ -1905,6 +1916,7 @@ const ru: LeadRequestText = {
     parentQuestion: "Кто из родителей получит счёт?",
     parentQuestionVormund: "Кто из опекунов получит счёт?",
     vormundSelf: "Опекун / попечитель",
+    selfVormund: "Я (как законный представитель)",
     isPayerVormund: "Опекун / попечитель также оплачивает",
     options: { self: "Я", third_party: "Третье лицо или организация" },
     optionsGuardian: {
@@ -2271,6 +2283,7 @@ const ru: LeadRequestText = {
   goToSection: (section) => `Перейти к разделу «${section}»`,
   childDocumentTitle: "Документ ребёнка",
   ownRepresentativeDocumentTitle: "Ваш документ (родитель / законный представитель)",
+  ownRepresentativeDocumentTitleVormund: "Ваш документ (законный представитель)",
   ownRepresentativeDocumentHint: "Загрузите читаемый скан или фото вашего собственного документа, удостоверяющего личность.",
   ownRepresentativeDocumentNeedsPerson: (section) => `Чтобы загрузить свой документ, сначала укажите свои данные в разделе «${section}».`,
   otherParentDocumentTitle: (name) => (name ? `Документ второго родителя (${name})` : "Документ второго родителя"),
@@ -2300,6 +2313,7 @@ const uk: LeadRequestText = {
   titleGuardian: "Заявка для вашої дитини",
   titleVormund: "Заявка для дитини, яку ви представляєте",
   accountLabelGuardian: "Один із батьків / законний представник",
+  accountLabelVormund: "Законний представник",
   intro: "Будь ласка, заповніть свої особисті дані та завантажте документи. Усе зберігається автоматично.",
   introGuardian:
     "Будь ласка, заповніть особисті дані дитини та завантажте документи. Усе зберігається автоматично.",
@@ -2520,6 +2534,7 @@ const uk: LeadRequestText = {
     parentQuestion: "Хто з батьків отримає рахунок?",
     parentQuestionVormund: "Хто з опікунів отримає рахунок?",
     vormundSelf: "Опікун / піклувальник",
+    selfVormund: "Я (як законний представник)",
     isPayerVormund: "Опікун / піклувальник також сплачує",
     options: { self: "Я", third_party: "Третя особа або організація" },
     optionsGuardian: {
@@ -2886,6 +2901,7 @@ const uk: LeadRequestText = {
   goToSection: (section) => `Перейти до розділу «${section}»`,
   childDocumentTitle: "Документ дитини",
   ownRepresentativeDocumentTitle: "Ваш документ (батько чи мати / законний представник)",
+  ownRepresentativeDocumentTitleVormund: "Ваш документ (законний представник)",
   ownRepresentativeDocumentHint: "Завантажте читабельний скан або фото вашого власного документа, що посвідчує особу.",
   ownRepresentativeDocumentNeedsPerson: (section) => `Щоб завантажити власний документ, спершу вкажіть свої дані в розділі «${section}».`,
   otherParentDocumentTitle: (name) => (name ? `Документ другого з батьків (${name})` : "Документ другого з батьків"),
@@ -2915,6 +2931,7 @@ const en: LeadRequestText = {
   titleGuardian: "Request for your child",
   titleVormund: "Request for the child you represent",
   accountLabelGuardian: "Parent / legal representative",
+  accountLabelVormund: "Legal representative",
   intro: "Please enter your personal details and upload your documents. Everything is saved automatically.",
   introGuardian:
     "Please enter your child's personal details and upload the documents. Everything is saved automatically.",
@@ -3135,6 +3152,7 @@ const en: LeadRequestText = {
     parentQuestion: "Which parent will receive the invoice?",
     parentQuestionVormund: "Which guardian will receive the invoice?",
     vormundSelf: "Guardian",
+    selfVormund: "Me (as the legal representative)",
     isPayerVormund: "The guardian also pays",
     options: { self: "Me", third_party: "Another person or an organisation" },
     optionsGuardian: {
@@ -3492,6 +3510,7 @@ const en: LeadRequestText = {
   goToSection: (section) => `Go to “${section}”`,
   childDocumentTitle: "Child’s identity document",
   ownRepresentativeDocumentTitle: "Your identity document (parent / legal representative)",
+  ownRepresentativeDocumentTitleVormund: "Your identity document (legal representative)",
   ownRepresentativeDocumentHint: "Upload a readable scan or photo of your own identity document.",
   ownRepresentativeDocumentNeedsPerson: (section) => `To upload your own document, first enter your details in the section “${section}”.`,
   otherParentDocumentTitle: (name) => (name ? `Other parent’s identity document (${name})` : "Other parent’s identity document"),

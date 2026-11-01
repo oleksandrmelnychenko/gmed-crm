@@ -142,6 +142,13 @@ export function countryLabel(code: string | null | undefined, lang: string): str
   if (!code) {
     return "";
   }
+  // A stored country name ("Germany" of an older lead) reads as the selects show it, never
+  // as «GERMANY» (QA 2026-11-01); a name no list knows stays as it was written.
+  if (code.trim().length > 2) {
+    const known = countryCodeFromStoredValue(code);
+    if (!COUNTRY_CODE_SET.has(known.toUpperCase())) return known;
+    code = known;
+  }
   const upper = code.toUpperCase();
   const display = cachedRegionDisplayNames(countryNameLocale(lang));
   if (!display) return upper;

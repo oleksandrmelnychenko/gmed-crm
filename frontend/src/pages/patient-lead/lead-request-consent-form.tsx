@@ -96,7 +96,9 @@ export function ConsentFormChoicesSection({
 }) {
   const form = request.consent_form;
   const forChild = choosesForChild(request);
-  const text = useMemo(() => consentFormText(lang, forChild), [lang, forChild]);
+  // A Vormund decides for the child without being its parent (QA 2026-11-01, R2-E).
+  const guardianship = request.representation?.custody === "guardian";
+  const text = useMemo(() => consentFormText(lang, forChild, guardianship), [lang, forChild, guardianship]);
   const [draft, setDraft] = useState<ConsentFormChoices>(form?.choices ?? NO_CONSENT_FORM_CHOICES);
   const recipients = storedTrustedPersons(request);
   const personsText = trustedPersonsText(lang);

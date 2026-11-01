@@ -159,6 +159,70 @@ impl ConsentPurpose {
             ConsentPurpose::InquiryProcessing => inquiry_consent_text(kind, language),
         }
     }
+
+    /// The text as this client reads it: under guardianship the parents'
+    /// wording in the words of a legal representative.
+    fn wording(self, kind: AccessKind, language: &str, guardianship: bool) -> Option<String> {
+        let text = self.text(kind, language)?;
+        Some(if guardianship && kind == AccessKind::Guardian {
+            guardianship_consent_text(text, language)
+        } else {
+            text.to_string()
+        })
+    }
+}
+
+/// A Vormund or Pfleger is no parent and the child is not theirs (QA
+/// 2026-11-01, R2-E): only the words for the person change, so the consent
+/// itself stays the parents' to the letter.
+fn guardianship_consent_text(text: &str, language: &str) -> String {
+    let words: &[(&str, &str)] = match language {
+        "de" => &[
+            (
+                "Als Elternteil oder gesetzlicher Vertreter",
+                "Als gesetzliche Vertretung",
+            ),
+            ("meines Kindes", "des von mir vertretenen Kindes"),
+        ],
+        "ru" => &[
+            (
+                "Как родитель или законный представитель",
+                "Как законный представитель",
+            ),
+            ("моего ребёнка", "ребёнка, которого я представляю"),
+        ],
+        "uk" => &[
+            (
+                "Як батько, мати або законний представник",
+                "Як законний представник",
+            ),
+            ("моєї дитини", "дитини, яку я представляю"),
+        ],
+        "en" => &[
+            ("As a parent or legal guardian", "As a legal representative"),
+            (
+                "my child's health data",
+                "the health data of the child I represent",
+            ),
+            ("my child's details", "the details of the child I represent"),
+        ],
+        _ => &[],
+    };
+    words
+        .iter()
+        .fold(text.to_string(), |text, (from, to)| text.replace(from, to))
+}
+
+/// Whether a guardian (Vormund, Pfleger) represents the minor of this lead.
+async fn under_guardianship(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    Ok(lead_representatives::load(conn, lead_id)
+        .await?
+        .is_some_and(|loaded| {
+            loaded.representation.answers.custody() == lead_representatives::CUSTODY_GUARDIAN
+        }))
 }
 
 /// Whose wording a consent has: staff record the client's consent, so they
@@ -3321,14 +3385,19 @@ pub(crate) async fn request_payload(
         Value::Null
     };
     let mut consents = Map::new();
+    let guardianship = under_guardianship(&mut *state.db.acquire().await?, lead_id).await?;
     for purpose in ConsentPurpose::ALL {
         let given = active_consent(&state.db, lead_id, user_id, purpose).await?;
         let texts: Map<String, Value> = CONSENT_LANGUAGES
             .iter()
             .filter_map(|language| {
                 purpose
-                    .text(consent_text_kind(kind, data.date_of_birth), language)
-                    .map(|text| (language.to_string(), Value::String(text.to_string())))
+                    .wording(
+                        consent_text_kind(kind, data.date_of_birth),
+                        language,
+                        guardianship,
+                    )
+                    .map(|text| (language.to_string(), Value::String(text)))
             })
             .collect();
         consents.insert(
@@ -6088,7 +6157,11 @@ async fn give_consent(
             .ok()
             .flatten(),
     );
-    let Some(text) = purpose.text(text_kind, &language) else {
+    let guardianship = match under_guardianship(&mut tx, lead_id).await {
+        Ok(value) => value,
+        Err(error) => return internal(error, "load custody"),
+    };
+    let Some(text) = purpose.wording(text_kind, &language, guardianship) else {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Unsupported language");
     };
     match active_consent(&mut *tx, lead_id, auth.user_id, purpose).await {
@@ -10023,6 +10096,38 @@ mod tests {
             }
             assert!(health_consent_text(kind, "tr").is_none());
             assert!(inquiry_consent_text(kind, "tr").is_none());
+        }
+    }
+
+    #[test]
+    fn guardianship_wording_names_no_parent_and_keeps_the_parents_text_otherwise() {
+        for language in CONSENT_LANGUAGES {
+            for purpose in ConsentPurpose::ALL {
+                let parents = purpose
+                    .wording(AccessKind::Guardian, language, false)
+                    .unwrap();
+                let guardian = purpose
+                    .wording(AccessKind::Guardian, language, true)
+                    .unwrap();
+                assert_ne!(parents, guardian, "{language}");
+                for word in [
+                    "Elternteil",
+                    "meines Kindes",
+                    "родитель",
+                    "моего ребёнка",
+                    "батько",
+                    "моєї дитини",
+                    "parent",
+                    "my child",
+                ] {
+                    assert!(!guardian.contains(word), "{language}: {guardian}");
+                }
+                // The own patient is not a guardian's case.
+                assert_eq!(
+                    purpose.wording(AccessKind::Own, language, true),
+                    purpose.text(AccessKind::Own, language).map(str::to_string)
+                );
+            }
         }
     }
 

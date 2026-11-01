@@ -24,6 +24,16 @@ describe("a child's cabinet by who signs in (QA 2026-10-24)", () => {
   const parentLogin = { access_kind: "guardian", minor: true, representation: { custody: "joint" } };
   const vormundLogin = { access_kind: "guardian", minor: true, representation: { custody: "guardian" } };
 
+  it("calls a guardian's own option a legal representation, no parent (QA 2026-11-01, R2-E)", () => {
+    expect(["de", "ru", "uk", "en"].map((lang) => recipientOptions(leadRequestText(lang), vormundLogin).self)).toEqual([
+      "Ich (als gesetzliche Vertretung)",
+      "Я (как законный представитель)",
+      "Я (як законний представник)",
+      "Me (as the legal representative)",
+    ]);
+    expect(recipientOptions(leadRequestText("de"), parentLogin).self).toBe("Ich (als Elternteil / gesetzliche Vertretung)");
+  });
+
   it("reads 'one of the parents' when the other parent receives the invoice", () => {
     expect(["de", "ru", "uk", "en"].map((lang) => recipientOptions(leadRequestText(lang), parentLogin, true).self)).toEqual([
       "Ein Elternteil",

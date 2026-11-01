@@ -322,11 +322,64 @@ const ruChild: ChildTexts = {
   recipientsHint: "Укажите, кому GMED может передавать данные вашего ребёнка (не более 5). Себя как родителя или опекуна указывать не нужно.",
 };
 
+/** The parents' child texts in the words of a guardian (Vormund): the longest phrase first. */
+const GUARDIANSHIP_WORDS: Record<"de" | "en" | "uk" | "ru", readonly (readonly [string, string])[]> = {
+  de: [
+    ["für Ihr Kind", "für das von Ihnen vertretene Kind"],
+    ["als Sorgeberechtigte/r", "als gesetzliche Vertretung"],
+    ["Sich selbst als Eltern bzw. Vormund", "Sich selbst als gesetzliche Vertretung"],
+    ["meines Kindes", "des von mir vertretenen Kindes"],
+    ["Ihres Kindes", "des von Ihnen vertretenen Kindes"],
+  ],
+  en: [
+    ["for your child", "for the child you represent"],
+    ["as the parent or guardian", "as the legal representative"],
+    ["as parent or guardian", "as legal representative"],
+    ["My child's treating doctors and medical institutions may send my child's treatment records", "The treating doctors and medical institutions of the child I represent may send the child's treatment records"],
+    ["my child's personal and medical data", "the personal and medical data of the child I represent"],
+    ["My child's data and documents", "The data and documents of the child I represent"],
+    ["My child's documents", "The documents of the child I represent"],
+    ["My child's data", "The data of the child I represent"],
+    ["your child's request", "the request of the child you represent"],
+    ["your child's data", "the data of the child you represent"],
+  ],
+  uk: [
+    ["за свою дитину", "за дитину, яку ви представляєте"],
+    ["як батько, мати чи опікун", "як законний представник"],
+    ["Себе як батька, матір чи опікуна", "Себе як законного представника"],
+    ["моєї дитини мо", "дитини, яку я представляю, мо"],
+    ["моєї дитини", "дитини, яку я представляю"],
+    ["вашої дитини", "дитини, яку ви представляєте"],
+  ],
+  ru: [
+    ["за ребёнка", "за ребёнка, которого вы представляете"],
+    ["как родитель или опекун", "как законный представитель"],
+    ["Себя как родителя или опекуна", "Себя как законного представителя"],
+    ["моего ребёнка мо", "ребёнка, которого я представляю, мо"],
+    ["моего ребёнка", "ребёнка, которого я представляю"],
+    ["вашего ребёнка", "ребёнка, которого вы представляете"],
+  ],
+};
+
+function guardianshipChildTexts(child: ChildTexts, lang: keyof typeof GUARDIANSHIP_WORDS): ChildTexts {
+  const reword = (value: string) =>
+    GUARDIANSHIP_WORDS[lang].reduce((text, [from, to]) => text.replaceAll(from, to), value);
+  return {
+    intro: reword(child.intro),
+    options: Object.fromEntries(Object.entries(child.options).map(([key, value]) => [key, reword(value)])) as ChildTexts["options"],
+    channelsTitle: reword(child.channelsTitle),
+    coreHint: reword(child.coreHint),
+    recipientsHint: reword(child.recipientsHint),
+  };
+}
+
 /**
  * The texts in the cabinet language; `forChild` when a parent or guardian chooses for a minor
- * (the child's data, the parent declares).
+ * (the child's data, the parent declares); `guardianship` when a guardian (Vormund) does: no
+ * "my child", no parent (QA 2026-11-01, R2-E).
  */
-export function consentFormText(lang: string, forChild = false): ConsentFormText {
+export function consentFormText(lang: string, forChild = false, guardianship = false): ConsentFormText {
+  const cabinetLang = asLeadCabinetLang(lang) ?? "ru";
   const [base, child] = (() => {
     switch (asLeadCabinetLang(lang)) {
       case "de":
@@ -339,5 +392,6 @@ export function consentFormText(lang: string, forChild = false): ConsentFormText
         return [ru, ruChild] as const;
     }
   })();
-  return forChild ? { ...base, ...child } : base;
+  if (!forChild) return base;
+  return { ...base, ...(guardianship ? guardianshipChildTexts(child, cabinetLang) : child) };
 }
