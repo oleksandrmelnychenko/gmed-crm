@@ -97,7 +97,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
     : quoteAvailable && (overageOnly || isInvoiceSelectionValid(lines, form)) && totals.gross > 0;
   const footerMessage = error || optionsError || (selectedQuote && !valid
     ? prepaymentSplit?.exceedsQuote
-      ? (de ? "Die erforderliche Vorauszahlung übersteigt die Angebotssumme. Wählen Sie Positionen." : "Требуемая предоплата больше суммы предложения. Выберите позиции.")
+      ? (de ? "Die erforderliche Vorauszahlung übersteigt den noch nicht abgerechneten Betrag des Angebots. Wählen Sie Positionen." : "Требуемая предоплата больше суммы, ещё не выставленной по предложению. Выберите позиции.")
       : (de ? "Prüfen Sie die ausgewählten Positionen und Mengen." : "Проверьте выбранные позиции и количество.")
     : null);
   const footerError = Boolean(error || optionsError);

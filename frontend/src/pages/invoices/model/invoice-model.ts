@@ -280,10 +280,10 @@ export function invoiceLineQuantityAvailable(
   line: InvoiceLineItem,
   invoiceType: InvoiceType,
 ) {
-  const value = invoiceType === "advance"
-    ? line.quantity
-    : (line.remaining_quantity ?? line.quantity);
-  const quantity = Number(value ?? 0);
+  // An advance takes the quoted quantity no invoice bills yet (QA 2026-11-01, Y2 B1).
+  const quantity = invoiceType === "advance"
+    ? Number(line.quantity ?? 0) - Number(line.invoiced_quantity ?? 0)
+    : Number(line.remaining_quantity ?? line.quantity ?? 0);
   return Number.isFinite(quantity) ? Math.max(0, quantity) : 0;
 }
 
@@ -462,12 +462,16 @@ export type PrepaymentAdvanceLine = {
  * The "Anzahlung" lines of a prepayment advance invoice, like the server
  * builds them: the amount is split over the quote's VAT groups in proportion
  * to their gross (the last group takes the rounding remainder), so the
- * advance is taxed like the services it pays for.
+ * advance is taxed like the services it pays for. Of a part-billed line only
+ * the gross no invoice bills yet counts.
  */
 export function prepaymentAdvanceSplit(lines: InvoiceLineItem[], amount: number) {
   const groups = new Map<string, { vatRate: number; isCostPassthrough: boolean; gross: number }>();
   for (const line of lines) {
-    const gross = roundCents(Number(line.line_gross ?? 0));
+    const quoted = Number(line.quantity ?? 0);
+    const billed = Number(line.invoiced_quantity ?? 0);
+    const share = billed > 0 && quoted > 0 ? Math.max(0, quoted - billed) / quoted : 1;
+    const gross = roundCents(Number(line.line_gross ?? 0) * share);
     if (!Number.isFinite(gross) || gross <= 0) continue;
     const isCostPassthrough = Boolean(line.is_cost_passthrough);
     const vatRate = isCostPassthrough ? 0 : roundCents(Number(line.vat_rate ?? 0));

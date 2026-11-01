@@ -174,6 +174,9 @@ struct UpdateOverageApprovalRequest {
     package_item_id: Option<Uuid>,
     approval_status: String,
     notes: Option<String>,
+    /// Takes back an approved overage no invoice bills: `declined` with a reason.
+    #[serde(default)]
+    withdraw_approved: bool,
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
@@ -1622,6 +1625,7 @@ async fn list_patient_service_packages(
                   COALESCE(SUM(spc.overage_quantity) FILTER (WHERE spc.approval_status = 'pending'), 0) AS pending_overage_quantity,
                   COALESCE(SUM({OVERAGE_GROSS_SQL}) FILTER (WHERE spc.approval_status = 'pending'), 0) AS pending_overage_gross,
                   COALESCE(SUM(spc.overage_quantity) FILTER (WHERE spc.approval_status = 'approved'), 0) AS approved_overage_quantity,
+                  COALESCE(SUM(spc.overage_quantity) FILTER (WHERE spc.approval_status = 'approved' AND spc.invoice_id IS NULL), 0) AS unbilled_approved_overage_quantity,
                   COALESCE(SUM(spc.overage_quantity) FILTER (WHERE spc.approval_status = 'declined'), 0) AS declined_overage_quantity,
                   COUNT(spc.id) FILTER (WHERE spc.approval_status = 'pending') AS pending_consumption_count,
                   MAX(spc.consumed_at) AS latest_consumed_at
@@ -1693,6 +1697,7 @@ async fn list_patient_service_packages(
                         "pending_overage_quantity": decimal_to_string(row.try_get::<Decimal, _>("pending_overage_quantity").unwrap_or(Decimal::ZERO)),
                         "pending_overage_gross": decimal_to_string(row.try_get::<Decimal, _>("pending_overage_gross").unwrap_or(Decimal::ZERO)),
                         "approved_overage_quantity": decimal_to_string(row.try_get::<Decimal, _>("approved_overage_quantity").unwrap_or(Decimal::ZERO)),
+                        "unbilled_approved_overage_quantity": decimal_to_string(row.try_get::<Decimal, _>("unbilled_approved_overage_quantity").unwrap_or(Decimal::ZERO)),
                         "declined_overage_quantity": decimal_to_string(row.try_get::<Decimal, _>("declined_overage_quantity").unwrap_or(Decimal::ZERO)),
                         "pending_consumption_count": row.try_get::<i64, _>("pending_consumption_count").unwrap_or(0),
                         "latest_consumed_at": row.try_get::<Option<chrono::DateTime<Utc>>, _>("latest_consumed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
@@ -2231,9 +2236,14 @@ async fn create_package_consumption(
     let order_id = body.order_id.or(package.order_id);
     // Whether a cancelled order ends its tariff is the owner's decision; until
     // then nothing can be consumed on it, the settlement is what stays of it
-    // (QA 2026-11-01, T3-6).
-    let cancelled_order = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM orders WHERE id = ANY($1) AND status = 'cancelled')",
+    // (QA 2026-11-01, T3-6). A completed order takes nothing either: a pending
+    // overage on it held nothing and nobody was asked (QA 2026-11-01, Y2 B4).
+    let closed_order = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1 FROM orders
+               WHERE (id = ANY($1) AND status = 'cancelled')
+                  OR (id = $2 AND status = 'completed')
+           )"#,
     )
     .bind(
         [order_id, package.order_id]
@@ -2241,9 +2251,10 @@ async fn create_package_consumption(
             .flatten()
             .collect::<Vec<_>>(),
     )
+    .bind(order_id)
     .fetch_one(&state.db)
     .await;
-    match cancelled_order {
+    match closed_order {
         Ok(false) => {}
         Ok(true) => return crate::routes::orders::order_closed_for_new_services(),
         Err(e) => {
@@ -2449,6 +2460,17 @@ async fn create_package_consumption(
             "Overage needs an order to be billed on",
         );
     }
+    // Without a price it could be approved but never billed, and held the
+    // order for good (QA 2026-11-01, Y2 B2).
+    let overage_priced = item_context
+        .as_ref()
+        .is_some_and(|context| context.unit_price_net > Decimal::ZERO);
+    if overage_quantity > Decimal::ZERO && !overage_priced {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Overage needs a price on the package item",
+        );
+    }
     let requires_patient_approval = item_requires_approval || overage_quantity > Decimal::ZERO;
     let approval_status = if requires_patient_approval {
         "pending"
@@ -2558,6 +2580,19 @@ async fn update_overage_approval(
     if !is_valid_approval_status(&body.approval_status) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid approval_status");
     }
+    let notes = normalize_optional(body.notes.as_deref());
+    if body.withdraw_approved && body.approval_status != "declined" {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Only a decline takes back an approved overage",
+        );
+    }
+    if body.withdraw_approved && notes.is_none() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Declining an approved overage needs a reason",
+        );
+    }
     if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
         return resp;
     }
@@ -2595,13 +2630,21 @@ async fn update_overage_approval(
                  OR package_item_id = $2
              )
              -- Also an item that asks for approval without overage: it stayed
-             -- pending for good (QA 2026-11-01, T3-5).
-             AND approval_status = 'pending'"#,
+             -- pending for good (QA 2026-11-01, T3-5). An approved overage that
+             -- nothing can bill is taken back with a reason, else it held the
+             -- order for good (QA 2026-11-01, Y2 B2, B3).
+             AND CASE WHEN $5
+                      THEN approval_status = 'approved'
+                           AND invoice_id IS NULL
+                           AND overage_quantity > 0
+                      ELSE approval_status = 'pending'
+                 END"#,
         )
         .bind(patient_service_package_id)
         .bind(body.package_item_id)
         .bind(body.approval_status.clone())
-        .bind(normalize_optional(body.notes.as_deref()))
+        .bind(notes.clone())
+        .bind(body.withdraw_approved)
         .execute(&mut *tx)
         .await?;
         if result.rows_affected() > 0 {
@@ -2617,6 +2660,8 @@ async fn update_overage_approval(
                         "package_item_id": body.package_item_id,
                         "approval_status": body.approval_status,
                         "updated_count": result.rows_affected(),
+                        "withdrawn_approved": body.withdraw_approved,
+                        "reason": if body.withdraw_approved { notes.clone() } else { None },
                     }),
                 ),
             )
@@ -2627,6 +2672,15 @@ async fn update_overage_approval(
     }
     .await;
     match result {
+        // A 200 with nothing changed read as done (QA 2026-11-01, Y2 B5).
+        Ok(result) if result.rows_affected() == 0 => err(
+            StatusCode::CONFLICT,
+            if body.withdraw_approved {
+                "No approved overage of this item is left to decline"
+            } else {
+                "No overage of this item awaits a decision"
+            },
+        ),
         Ok(result) => {
             crate::realtime::publish_patient_event(
                 &state,

@@ -7,10 +7,13 @@
 //! this rule keep theirs).
 
 use chrono::{Days, NaiveDate};
-use sqlx::PgConnection;
+use rust_decimal::Decimal;
+use serde_json::Value;
+use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
-use super::gen_invoice_number;
+use super::{gen_invoice_number, unbilled_line_gross};
+use crate::money::CommercialRounding;
 
 /// Payment term when neither the request nor the draft names a due date.
 pub(super) const DEFAULT_INVOICE_PAYMENT_TERM_DAYS: u64 = 14;
@@ -82,6 +85,60 @@ pub(super) async fn active_final_invoice_on_quote(
     .bind(invoice_id)
     .fetch_one(conn)
     .await
+}
+
+/// Error code of an advance refused because it bills more than the quote has
+/// left: interim invoices already bill the rest (QA 2026-11-01, Y2 B1).
+pub(super) const ADVANCE_OVER_BILLED: &str = "advance_over_billed_quote";
+
+/// Whether a draft advance exceeds what the quote has left to bill, when
+/// invoices already bill part of it.
+pub(super) async fn advance_exceeds_unbilled_quote(
+    conn: &mut PgConnection,
+    invoice_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let Some(advance) = sqlx::query(
+        r#"SELECT advance.total_gross, quote.id AS quote_id, quote.line_items
+           FROM invoices advance
+           JOIN quotes quote ON quote.id = advance.quote_id
+           WHERE advance.id = $1"#,
+    )
+    .bind(invoice_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(false);
+    };
+    let billed: Vec<(i32, Decimal)> = sqlx::query_as(
+        r#"SELECT quote_line_index, quantity
+           FROM quote_line_invoiced_quantities($1)
+           WHERE quantity > 0"#,
+    )
+    .bind(advance.try_get::<Uuid, _>("quote_id")?)
+    .fetch_all(&mut *conn)
+    .await?;
+    if billed.is_empty() {
+        return Ok(false);
+    }
+    let lines: Value = advance.try_get("line_items")?;
+    let unbilled: Decimal = lines
+        .as_array()
+        .map(|lines| {
+            lines
+                .iter()
+                .enumerate()
+                .map(|(line_index, line)| {
+                    let quantity = billed
+                        .iter()
+                        .find(|(index, _)| usize::try_from(*index).ok() == Some(line_index))
+                        .map(|(_, quantity)| *quantity);
+                    unbilled_line_gross(line, quantity)
+                })
+                .sum()
+        })
+        .unwrap_or(Decimal::ZERO);
+    let total: Decimal = advance.try_get("total_gross")?;
+    Ok(total.round_cents() > unbilled)
 }
 
 /// Error code of a release refused because the draft bills more of a service

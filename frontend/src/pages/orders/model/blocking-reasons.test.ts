@@ -179,6 +179,17 @@ describe("orderBlockingReasonSection", () => {
       key: "orders_blocking_package_overage_pending_count",
       values: { count: 2 },
     });
+    // No quote or no price: not an invoices' matter, the blocker says what to do.
+    const noQuote = "1 approved package overage(s) have no quote to bill them";
+    expect(isPatientInvoiceBlockingReason(noQuote)).toBe(false);
+    expect(resolveOrderBlockingReason(noQuote)).toEqual({
+      key: "orders_blocking_package_overage_no_quote_count",
+      values: { count: 1 },
+    });
+    expect(resolveOrderBlockingReason("3 approved package overage(s) have no price")).toEqual({
+      key: "orders_blocking_package_overage_no_price_count",
+      values: { count: 3 },
+    });
   });
 
   it("joins reasons without doubling their full stops", () => {

@@ -331,3 +331,20 @@ for (const lang of ["ru", "de"]) {
     });
   }
 }
+
+test("a double click on create leaves no dialog behind the invoice's sheet", async ({ page }) => {
+  const fixture = await prepare(page);
+  await page.route(`**/api/v1/quotes/${quoteId}/invoices`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    await route.fallback();
+  });
+  const dialog = await openCreate(page);
+  const button = dialog.getByRole("button", { name: "Создать счёт", exact: true });
+  await expect(button).toBeEnabled();
+  const box = (await button.boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.waitForTimeout(150);
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(page.getByRole("dialog", { name: "Новый счёт", exact: true })).toHaveCount(0);
+  expect(fixture.writes).toHaveLength(1);
+});

@@ -221,6 +221,20 @@ export function resolveOrderBlockingReason(
       values: { count: Number(packageOverage[1]) },
     };
   }
+  const overageNoQuote = reason.match(/^(\d+) approved package overage\(s\) have no quote to bill them$/);
+  if (overageNoQuote) {
+    return {
+      key: "orders_blocking_package_overage_no_quote_count",
+      values: { count: Number(overageNoQuote[1]) },
+    };
+  }
+  const overageNoPrice = reason.match(/^(\d+) approved package overage\(s\) have no price$/);
+  if (overageNoPrice) {
+    return {
+      key: "orders_blocking_package_overage_no_price_count",
+      values: { count: Number(overageNoPrice[1]) },
+    };
+  }
   const pendingOverage = reason.match(/^(\d+) package overage\(s\) still await a decision$/);
   if (pendingOverage) {
     return {

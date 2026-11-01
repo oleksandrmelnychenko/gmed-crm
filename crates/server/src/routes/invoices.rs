@@ -3849,6 +3849,20 @@ fn invoice_json_decimal(item: &Value, key: &str) -> Option<Decimal> {
 /// beyond its quote.
 const QUOTE_BEHIND_ACTUAL_SERVICES: &str = "quote_behind_actual_services";
 
+/// The gross of a quote line that no invoice bills yet, from the quantity
+/// invoices bill of it.
+fn unbilled_line_gross(line: &Value, billed: Option<Decimal>) -> Decimal {
+    let gross = invoice_json_decimal(line, "line_gross").unwrap_or(Decimal::ZERO);
+    let quoted = invoice_json_decimal(line, "quantity").unwrap_or(Decimal::ZERO);
+    match billed {
+        Some(billed) if billed > Decimal::ZERO && quoted > Decimal::ZERO => {
+            gross * (quoted - billed).max(Decimal::ZERO) / quoted
+        }
+        _ => gross,
+    }
+    .round_cents()
+}
+
 async fn load_allocated_quote_quantities(
     state: &AppState,
     quote_id: Uuid,
@@ -3902,11 +3916,7 @@ async fn build_selected_invoice_snapshot(
         ));
     }
 
-    let allocated = if invoice_type == "advance" {
-        BTreeMap::new()
-    } else {
-        load_allocated_quote_quantities(state, ctx.quote_id).await?
-    };
+    let allocated = load_allocated_quote_quantities(state, ctx.quote_id).await?;
     let mut requested = BTreeMap::<usize, Decimal>::new();
     let mut requested_comments = BTreeMap::<usize, String>::new();
     if let Some(items) = requested_items {
@@ -4020,8 +4030,10 @@ async fn build_selected_invoice_snapshot(
             .copied()
             .unwrap_or(Decimal::ZERO)
             .round_commercial(2);
+        // An advance consumes no quantity, yet a line an interim invoice already
+        // bills is billed twice by it (QA 2026-11-01, Y2 B1).
         let remaining = if invoice_type == "advance" {
-            quoted_quantity
+            (quoted_quantity - already_allocated).max(Decimal::ZERO)
         } else {
             billed_below_quote |= billable_quantity < quoted_quantity;
             (billable_quantity - already_allocated).max(Decimal::ZERO)
@@ -4170,7 +4182,7 @@ async fn build_selected_invoice_snapshot(
         ));
     }
 
-    let first_settlement = invoice_type != "advance" && allocated.is_empty();
+    let first_settlement = allocated.is_empty();
     let selected_all_lines = requested_items.is_none();
     // Approved package overages go on the invoice that bills the last open
     // quantities of the quote, however they were picked: both billing dialogs
@@ -4248,9 +4260,12 @@ async fn build_prepayment_advance_snapshot(
         )
     })?;
 
+    // The prepayment is measured against what no invoice bills yet: beside an
+    // interim invoice the whole quote would be billed twice (QA 2026-11-01, Y2 B1).
+    let allocated = load_allocated_quote_quantities(state, ctx.quote_id).await?;
     let quote_items = ctx.line_items.as_array().cloned().unwrap_or_default();
     let mut groups = BTreeMap::<(bool, Decimal), Decimal>::new();
-    for item in &quote_items {
+    for (line_index, item) in quote_items.iter().enumerate() {
         let source_service_cancelled = item
             .get("source_order_leistung_id")
             .and_then(Value::as_str)
@@ -4259,9 +4274,7 @@ async fn build_prepayment_advance_snapshot(
         if source_service_cancelled {
             continue;
         }
-        let gross = invoice_json_decimal(item, "line_gross")
-            .unwrap_or(Decimal::ZERO)
-            .round_cents();
+        let gross = unbilled_line_gross(item, allocated.get(&line_index).copied());
         if gross <= Decimal::ZERO {
             continue;
         }
@@ -4287,6 +4300,13 @@ async fn build_prepayment_advance_snapshot(
             .or_insert(Decimal::ZERO) += gross;
     }
     let quote_gross: Decimal = groups.values().copied().sum();
+    let part_billed = allocated.values().any(|quantity| *quantity > Decimal::ZERO);
+    if quote_gross <= Decimal::ZERO && part_billed {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "This quote has no remaining quantities to invoice",
+        ));
+    }
     if quote_gross <= Decimal::ZERO {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -4298,6 +4318,14 @@ async fn build_prepayment_advance_snapshot(
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "The required prepayment must be greater than zero",
+        ));
+    }
+    if amount > quote_gross && part_billed {
+        return Err(coded_err(
+            StatusCode::CONFLICT,
+            release::ADVANCE_OVER_BILLED,
+            "The advance exceeds what this quote has left to bill",
+            json!({}),
         ));
     }
     if amount > quote_gross {
@@ -14347,6 +14375,25 @@ async fn update_invoice_status(
                 }
                 Err(error) => {
                     tracing::error!(%error, %invoice_id, "check the final invoice beside an advance");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to update invoice",
+                    );
+                }
+            }
+            // The same for an interim invoice made after the draft.
+            match release::advance_exceeds_unbilled_quote(&mut transaction, invoice_id).await {
+                Ok(false) => {}
+                Ok(true) => {
+                    return coded_err(
+                        StatusCode::CONFLICT,
+                        release::ADVANCE_OVER_BILLED,
+                        "The advance exceeds what this quote has left to bill",
+                        json!({}),
+                    );
+                }
+                Err(error) => {
+                    tracing::error!(%error, %invoice_id, "check the unbilled quote of an advance");
                     return err(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Failed to update invoice",

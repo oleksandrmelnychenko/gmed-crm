@@ -480,11 +480,14 @@ describe("invoice creation totals", () => {
     });
   });
 
-  it("uses the full quoted scope for an advance and the remaining scope for settlements", () => {
+  it("uses the quoted scope no invoice bills for an advance and the remaining scope for settlements", () => {
     const quoteLine = line({ quantity: "3", remaining_quantity: "1" });
     expect(invoiceLineQuantityAvailable(quoteLine, "advance")).toBe(3);
     expect(invoiceLineQuantityAvailable(quoteLine, "interim")).toBe(1);
     expect(invoiceLineQuantityAvailable(quoteLine, "final")).toBe(1);
+    // A line an interim invoice bills is not offered again (QA 2026-11-01, Y2 B1).
+    expect(invoiceLineQuantityAvailable(line({ quantity: "3", invoiced_quantity: "2", remaining_quantity: "1" }), "advance")).toBe(1);
+    expect(invoiceLineQuantityAvailable(line({ quantity: "1", invoiced_quantity: "1", remaining_quantity: "0" }), "advance")).toBe(0);
   });
 });
 
@@ -583,6 +586,14 @@ describe("prepayment advance invoices", () => {
     expect(split.gross).toBe(500);
     expect(split.exceedsQuote).toBe(false);
     expect(prepaymentAdvanceSplit(quote("500").line_items, 1000).exceedsQuote).toBe(true);
+    // Of a part-billed quote only the unbilled gross counts (QA 2026-11-01, Y2 B1).
+    const partBilled = [
+      line({ quantity: "1", invoiced_quantity: "1", line_gross: "500", vat_rate: "19" }),
+      line({ quantity: "2", invoiced_quantity: "1", line_gross: "476", vat_rate: "19" }),
+    ];
+    expect(prepaymentAdvanceSplit(partBilled, 238).quoteGross).toBe(238);
+    expect(prepaymentAdvanceSplit(partBilled, 238).exceedsQuote).toBe(false);
+    expect(prepaymentAdvanceSplit(partBilled, 239).exceedsQuote).toBe(true);
   });
 
   it("hits the agreed gross with a cent-exact net", () => {

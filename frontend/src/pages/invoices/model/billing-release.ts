@@ -77,8 +77,8 @@ const INVOICE_CREATION_ERRORS: Record<string, LocalizedText> = {
     ru: "В предложении есть позиция с некорректной ценой или ставкой НДС. Исправьте предложение.",
   },
   "Approved package overage is missing a charge price": {
-    de: "Für eine genehmigte Paketüberschreitung fehlt der Abrechnungspreis. Ergänzen Sie ihn im Leistungspaket.",
-    ru: "Для утверждённого превышения пакета не указана цена. Укажите её в пакете услуг.",
+    de: "Für einen genehmigten Mehrverbrauch fehlt der Preis, er lässt sich nicht berechnen. Lehnen Sie ihn mit Begründung im Tarif des Patienten ab und erfassen Sie ihn nach der Preisangabe neu.",
+    ru: "Для подтверждённого превышения не указана цена, его нельзя выставить. Отклоните его с причиной в тарифе пациента, а после указания цены запишите заново.",
   },
   "At least one invoice line must be selected": CHECK_SELECTION,
   "Selected invoice line does not exist": CHECK_SELECTION,

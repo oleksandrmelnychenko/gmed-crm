@@ -323,8 +323,24 @@ const PACKAGE_ERROR_TEXTS: Record<string, [string, string]> = {
     "Das Paket ist nicht aktiv: Verbrauch nicht erfasst.",
   ],
   "A completed or cancelled order cannot receive new services": [
-    "Заказ отменён: по его тарифу расход не записывается.",
-    "Der Auftrag ist storniert: Auf seinem Tarif wird kein Verbrauch erfasst.",
+    "Заказ завершён или отменён: по нему расход не записывается.",
+    "Der Auftrag ist abgeschlossen oder storniert: Darauf wird kein Verbrauch erfasst.",
+  ],
+  "Overage needs a price on the package item": [
+    "У этой позиции нет цены превышения, поэтому его нельзя будет выставить. Сначала укажите цену в пакете.",
+    "Diese Position hat keinen Preis für Mehrverbrauch, er ließe sich nicht berechnen. Bitte zuerst den Preis im Paket angeben.",
+  ],
+  "Declining an approved overage needs a reason": [
+    "Укажите причину.",
+    "Bitte eine Begründung angeben.",
+  ],
+  "No approved overage of this item is left to decline": [
+    "Нет подтверждённого невыставленного превышения: оно уже в счёте или отклонено.",
+    "Kein offener genehmigter Mehrverbrauch: Er ist bereits abgerechnet oder abgelehnt.",
+  ],
+  "No overage of this item awaits a decision": [
+    "По этой позиции решение уже принято. Обновите страницу.",
+    "Über diese Position ist bereits entschieden. Bitte die Seite aktualisieren.",
   ],
   "ends_on must not be before starts_on": [
     "Дата окончания раньше даты начала.",
@@ -388,6 +404,7 @@ type PackageActionsMenuProps = {
   canDecide: boolean;
   approvalBusyKey: string;
   onDecision: (approvalStatus: "approved" | "declined") => void;
+  onWithdrawApproved: () => void;
   onRecordConsumption: () => void;
 };
 
@@ -397,6 +414,7 @@ function PackageActionsMenu({
   canDecide,
   approvalBusyKey,
   onDecision,
+  onWithdrawApproved,
   onRecordConsumption,
 }: PackageActionsMenuProps) {
   const [open, setOpen] = useState(false);
@@ -419,6 +437,7 @@ function PackageActionsMenu({
   const hasPendingOverage = moneyNumeric(item.pending_overage_quantity) > 0;
   // An item asking for approval stays pending without overage too.
   const hasPendingDecision = canDecide && (item.pending_consumption_count ?? 0) > 0;
+  const hasUnbilledApproved = canDecide && moneyNumeric(item.unbilled_approved_overage_quantity) > 0;
 
   return (
     <div
@@ -468,6 +487,21 @@ function PackageActionsMenu({
                 {t.patient_invoices_decline}
               </Button>
             </>
+          ) : null}
+          {hasUnbilledApproved ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 w-full justify-start rounded-md px-2.5 text-xs text-rose-700 hover:bg-rose-50 hover:text-rose-700"
+              data-testid="package-withdraw-approved-overage"
+              onClick={() => {
+                setOpen(false);
+                onWithdrawApproved();
+              }}
+            >
+              {t.patient_invoices_withdraw_approved_overage}
+            </Button>
           ) : null}
           <Button
             type="button"
@@ -718,6 +752,11 @@ function usePatientInvoicesTabContent({
     "all" | PatientAccountMovement["kind"]
   >("all");
   const [balanceAdjustments, setBalanceAdjustments] = useState<PatientBalanceAdjustment[]>([]);
+  const [overageDecisionError, setOverageDecisionError] = useState("");
+  const [withdrawTarget, setWithdrawTarget] = useState<PatientServicePackageItem | null>(null);
+  const [withdrawReason, setWithdrawReason] = useState("");
+  const [withdrawBusy, setWithdrawBusy] = useState(false);
+  const [withdrawError, setWithdrawError] = useState("");
   const [balanceAdjustmentOpen, setBalanceAdjustmentOpen] = useState(false);
   const [balanceAdjustmentForm, setBalanceAdjustmentForm] = useState<BalanceAdjustmentForm>(() =>
     createBlankBalanceAdjustmentForm(),
@@ -1191,6 +1230,7 @@ function usePatientInvoicesTabContent({
     if (!patientId) return;
     const busyKey = `${patientServicePackageId}:${packageItemId ?? "summary"}:${approvalStatus}`;
     setApprovalBusyKey(busyKey);
+    setOverageDecisionError("");
     try {
       await apiFetch(
         `/patients/${patientId}/service-packages/${patientServicePackageId}/overage-approval`,
@@ -1203,8 +1243,40 @@ function usePatientInvoicesTabContent({
         },
       );
       await refreshPackages();
+    } catch (error) {
+      // A decision somebody else already took is refused now, not a silent 200.
+      setOverageDecisionError(packageErrorMessage(error, lang, t.common_error));
+      await refreshPackages();
     } finally {
       setApprovalBusyKey("");
+    }
+  }
+
+  /** An approved overage nothing can bill is taken back with a reason (QA 2026-11-01, Y2 B2). */
+  async function handleWithdrawApprovedOverage() {
+    if (!patientId || !withdrawTarget) return;
+    setWithdrawBusy(true);
+    setWithdrawError("");
+    try {
+      await apiFetch(
+        `/patients/${patientId}/service-packages/${withdrawTarget.patient_service_package_id}/overage-approval`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            package_item_id: withdrawTarget.package_item_id ?? null,
+            approval_status: "declined",
+            withdraw_approved: true,
+            notes: withdrawReason.trim(),
+          }),
+        },
+      );
+      setWithdrawTarget(null);
+      setWithdrawReason("");
+      await refreshPackages();
+    } catch (error) {
+      setWithdrawError(packageErrorMessage(error, lang, t.common_error));
+    } finally {
+      setWithdrawBusy(false);
     }
   }
 
@@ -2147,6 +2219,11 @@ function usePatientInvoicesTabContent({
                       approvalStatus,
                     )
                   }
+                  onWithdrawApproved={() => {
+                    setWithdrawTarget(item);
+                    setWithdrawReason("");
+                    setWithdrawError("");
+                  }}
                   onRecordConsumption={() => {
                     setConsumeTargetId(item.patient_service_package_id);
                     // The row it was opened from, on the tariff's own order.
@@ -3295,6 +3372,59 @@ function usePatientInvoicesTabContent({
         </PatientFormSection>
       </PatientSheetScaffold>
 
+      <PatientSheetScaffold presentation="dialog"
+        open={Boolean(withdrawTarget)}
+        onOpenChange={(open) => {
+          if (!open) setWithdrawTarget(null);
+        }}
+        onSubmit={(event) => {
+          event.preventDefault();
+          void handleWithdrawApprovedOverage();
+        }}
+        title={t.patient_invoices_withdraw_approved_overage}
+        bodyClassName="space-y-4 px-5 py-4"
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={() => setWithdrawTarget(null)}
+              disabled={withdrawBusy}
+            >
+              {t.patient_invoices_cancel}
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              variant="destructive"
+              className="h-8 rounded-lg"
+              disabled={withdrawBusy || !withdrawReason.trim()}
+            >
+              {t.patient_invoices_decline}
+            </Button>
+          </>
+        }
+      >
+        {withdrawError ? (
+          <Banner tone="error" withIcon>
+            {withdrawError}
+          </Banner>
+        ) : null}
+        <p className="text-sm text-muted-foreground">{t.patient_invoices_withdraw_approved_hint}</p>
+        <Field label={t.patient_invoices_withdraw_approved_reason} htmlFor="withdraw-overage-reason">
+          <textarea
+            id="withdraw-overage-reason"
+            value={withdrawReason}
+            onChange={(event) => setWithdrawReason(event.target.value)}
+            className={textareaClass}
+            rows={3}
+            disabled={withdrawBusy}
+          />
+        </Field>
+      </PatientSheetScaffold>
+
       <PatientSheetScaffold
         open={Boolean(consumeTargetId) && canManagePackages}
         onOpenChange={(open) => {
@@ -3513,6 +3643,13 @@ function usePatientInvoicesTabContent({
           }}
         />
       )}
+      {overageDecisionError ? (
+        <div className="mt-3">
+          <Banner tone="error" withIcon>
+            {overageDecisionError}
+          </Banner>
+        </div>
+      ) : null}
 
       {tabLoading ? (
         <TabLoader />

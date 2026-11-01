@@ -1131,6 +1131,12 @@ function useStaffInvoicesPageContent() {
     }));
   }, [createOpen, createForm.invoiceType, createForm.lineQuantities, createForm.selectedLineIndexes, selectedCreateQuote]);
 
+  // The new invoice's sheet replaces the dialog: a double click left it open,
+  // empty, under the sheet (QA 2026-11-01, Y2 B7).
+  useEffect(() => {
+    if (createOpen && !createBusy && selectedInvoiceId) setCreateOpen(false);
+  }, [createOpen, createBusy, selectedInvoiceId]);
+
   useEffect(() => {
     const firstAvailable = detail?.available_prepayments?.[0];
     const prefilled: InvoicePrepaymentDraft = {

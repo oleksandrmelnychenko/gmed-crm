@@ -1648,11 +1648,21 @@ async fn load_order_billing_closure_blockers(
                    WHERE order_id = $1
                      AND status IN ('sent', 'partially_paid', 'overdue')
                ), ARRAY[]::text[]) AS unpaid_invoices,
+               EXISTS(
+                   SELECT 1 FROM quotes
+                   WHERE order_id = $1
+                     AND status NOT IN ('rejected', 'expired', 'superseded')
+               ) AS has_open_quote,
                overage.approved_unbilled,
+               overage.approved_unpriced,
                overage.pending
            FROM (
                SELECT COUNT(*) FILTER (WHERE consumption.approval_status = 'approved'
-                                         AND consumption.invoice_id IS NULL) AS approved_unbilled,
+                                         AND consumption.invoice_id IS NULL
+                                         AND consumption.unit_price_net_snapshot > 0) AS approved_unbilled,
+                      COUNT(*) FILTER (WHERE consumption.approval_status = 'approved'
+                                         AND consumption.invoice_id IS NULL
+                                         AND consumption.unit_price_net_snapshot <= 0) AS approved_unpriced,
                       COUNT(*) FILTER (WHERE consumption.approval_status = 'pending') AS pending
                FROM service_package_consumptions consumption
                JOIN patient_service_packages patient_package
@@ -1681,16 +1691,32 @@ async fn load_order_billing_closure_blockers(
     // NEW-1). A pending one could still be approved after the close.
     reasons.extend(package_overage_closure_reasons(
         row.try_get("approved_unbilled").unwrap_or(0),
+        row.try_get("approved_unpriced").unwrap_or(0),
         row.try_get("pending").unwrap_or(0),
+        row.try_get("has_open_quote").unwrap_or(false),
     ));
     Ok(reasons)
 }
 
-fn package_overage_closure_reasons(approved_unbilled: i64, pending: i64) -> Vec<String> {
+/// An interim invoice bills an overage from a quote, so without a quote or a
+/// price the blocker names what can be done instead (QA 2026-11-01, Y2 B2, B3).
+fn package_overage_closure_reasons(
+    approved_unbilled: i64,
+    approved_unpriced: i64,
+    pending: i64,
+    has_open_quote: bool,
+) -> Vec<String> {
     let mut reasons = Vec::new();
     if approved_unbilled > 0 {
+        reasons.push(if has_open_quote {
+            format!("{approved_unbilled} approved package overage(s) are not invoiced yet")
+        } else {
+            format!("{approved_unbilled} approved package overage(s) have no quote to bill them")
+        });
+    }
+    if approved_unpriced > 0 {
         reasons.push(format!(
-            "{approved_unbilled} approved package overage(s) are not invoiced yet"
+            "{approved_unpriced} approved package overage(s) have no price"
         ));
     }
     if pending > 0 {
@@ -14397,12 +14423,19 @@ mod tests {
 
     #[test]
     fn open_package_overages_hold_the_closure() {
-        assert!(package_overage_closure_reasons(0, 0).is_empty());
+        assert!(package_overage_closure_reasons(0, 0, 0, true).is_empty());
         assert_eq!(
-            package_overage_closure_reasons(1, 2),
+            package_overage_closure_reasons(1, 0, 2, true),
             vec![
                 "1 approved package overage(s) are not invoiced yet".to_string(),
                 "2 package overage(s) still await a decision".to_string(),
+            ]
+        );
+        assert_eq!(
+            package_overage_closure_reasons(1, 2, 0, false),
+            vec![
+                "1 approved package overage(s) have no quote to bill them".to_string(),
+                "2 approved package overage(s) have no price".to_string(),
             ]
         );
     }

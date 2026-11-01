@@ -316,6 +316,9 @@ export interface PatientsPortalTranslations {
   patient_invoices_approve: string;
   patient_invoices_patient_approval: string;
   patient_invoices_approve_overage: string;
+  patient_invoices_withdraw_approved_overage: string;
+  patient_invoices_withdraw_approved_hint: string;
+  patient_invoices_withdraw_approved_reason: string;
   patient_invoices_decline: string;
   patient_invoices_item: string;
   patient_invoices_no_order: string;
@@ -1307,6 +1310,9 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   patient_invoices_approve: "Подтвердить",
   patient_invoices_patient_approval: "Согласование пациента",
   patient_invoices_approve_overage: "Одобрить превышение",
+  patient_invoices_withdraw_approved_overage: "Отклонить подтверждённое превышение",
+  patient_invoices_withdraw_approved_hint: "Превышение, которое ещё не в счёте, будет снято и не будет выставлено. Причина записывается в журнал.",
+  patient_invoices_withdraw_approved_reason: "Причина",
   patient_invoices_decline: "Отклонить",
   patient_invoices_item: "Позиция",
   patient_invoices_no_order: "Без заказа",
@@ -2285,6 +2291,9 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   patient_invoices_approve: "Bestätigen",
   patient_invoices_patient_approval: "Patientenfreigabe",
   patient_invoices_approve_overage: "Mehrverbrauch genehmigen",
+  patient_invoices_withdraw_approved_overage: "Genehmigten Mehrverbrauch ablehnen",
+  patient_invoices_withdraw_approved_hint: "Der noch nicht berechnete Mehrverbrauch wird zurückgenommen und nicht berechnet. Die Begründung wird im Protokoll festgehalten.",
+  patient_invoices_withdraw_approved_reason: "Begründung",
   patient_invoices_decline: "Ablehnen",
   patient_invoices_item: "Position",
   patient_invoices_no_order: "Kein Auftrag",

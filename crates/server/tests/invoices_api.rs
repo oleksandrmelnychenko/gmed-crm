@@ -1455,6 +1455,334 @@ async fn overage_approved_after_the_final_invoice_holds_the_close_and_goes_on_an
     );
 }
 
+/// QA 2026-11-01, Y2 B1: an advance for the whole quote beside an interim
+/// invoice billed 1.238 against a quote of 738.
+#[tokio::test]
+async fn advance_invoice_takes_only_what_interim_invoices_leave_of_the_quote() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("advance-part-billed");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    seed_order_leistung(&pool, order_id, "First part", 500.0, "approved").await;
+    seed_order_leistung(&pool, order_id, "Second part", 238.0, "approved").await;
+    let quote = create_quote(&app, &billing_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+    let invoices_path = format!("/api/v1/quotes/{quote_id}/invoices");
+    let request =
+        |body: Value| json_request(&app, "POST", &invoices_path, &billing_bearer, Some(body));
+
+    // A draft advance of the whole quote, made while nothing was billed.
+    let (status, draft_advance) = request(json!({ "invoice_type": "advance" })).await;
+    assert_eq!(status, StatusCode::CREATED, "{draft_advance}");
+    let draft_advance_id = draft_advance["id"].as_str().unwrap();
+
+    let (status, interim) = request(json!({
+        "invoice_type": "interim",
+        "line_items": [{ "line_index": 0, "quantity": "1" }],
+    }))
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{interim}");
+    release_invoice(&app, &billing_bearer, interim["id"].as_str().unwrap()).await;
+
+    // The draft from before the interim invoice is not released over it.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{draft_advance_id}/status"),
+        &billing_bearer,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "advance_over_billed_quote", "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{draft_advance_id}/status"),
+        &billing_bearer,
+        Some(json!({ "status": "cancelled", "reason": "Teilrechnung erstellt" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // The billed line is not offered, in any form of the request.
+    let (status, body) = request(json!({
+        "invoice_type": "advance",
+        "advance_basis": "positions",
+        "line_items": [{ "line_index": 0, "quantity": "1" }],
+    }))
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    // A prepayment above what is left is refused with its reason.
+    sqlx::query("UPDATE orders SET prepayment_amount = 500 WHERE id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) =
+        request(json!({ "invoice_type": "advance", "advance_basis": "prepayment" })).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "advance_over_billed_quote", "{body}");
+
+    // Inside what is left it goes through.
+    sqlx::query("UPDATE orders SET prepayment_amount = 100 WHERE id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, prepayment) =
+        request(json!({ "invoice_type": "advance", "advance_basis": "prepayment" })).await;
+    assert_eq!(status, StatusCode::CREATED, "{prepayment}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/invoices/{}/status",
+            prepayment["id"].as_str().unwrap()
+        ),
+        &billing_bearer,
+        Some(json!({ "status": "cancelled", "reason": "Test" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Without a prepayment the advance takes the open line alone.
+    sqlx::query("UPDATE orders SET prepayment_amount = NULL WHERE id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, advance) = request(json!({ "invoice_type": "advance" })).await;
+    assert_eq!(status, StatusCode::CREATED, "{advance}");
+    assert_eq!(
+        advance["line_items"].as_array().unwrap().len(),
+        1,
+        "{advance}"
+    );
+    assert_eq!(
+        advance["line_items"][0]["description"], "Second part",
+        "{advance}"
+    );
+    release_invoice(&app, &billing_bearer, advance["id"].as_str().unwrap()).await;
+}
+
+/// QA 2026-11-01, Y2 B2, B3, B4, B5: an approved overage that nothing can bill
+/// held the order for good; a decline changed nothing and said 200; a closed
+/// order took new consumption.
+#[tokio::test]
+async fn overage_without_a_price_or_a_quote_has_a_way_out() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("overage-way-out");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let package_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO service_packages (package_key, name, base_price_net)
+           VALUES ($1, 'No overage price', 100)
+           RETURNING id"#,
+    )
+    .bind(format!("pkg_{tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let item_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO service_package_items (package_id, description, included_quantity)
+           VALUES ($1, 'Hours', 1)
+           RETURNING id"#,
+    )
+    .bind(package_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let assigned_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_service_packages (patient_id, package_id, order_id)
+           VALUES ($1, $2, $3)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(package_id)
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let consume_path =
+        format!("/api/v1/patients/{patient_id}/service-packages/{assigned_id}/consume");
+    let approval_path =
+        format!("/api/v1/patients/{patient_id}/service-packages/{assigned_id}/overage-approval");
+
+    // Inside the tariff no price is needed; beyond it the price is asked for up front.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &consume_path,
+        &billing_bearer,
+        Some(json!({ "package_item_id": item_id, "order_id": order_id, "quantity": 1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &consume_path,
+        &billing_bearer,
+        Some(json!({ "package_item_id": item_id, "order_id": order_id, "quantity": 1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["message"], "Overage needs a price on the package item");
+
+    // Such a row of before this rule: approved, without a price.
+    let consumption_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO service_package_consumptions (
+               patient_service_package_id, package_item_id, order_id, quantity, overage_quantity,
+               requires_patient_approval, approval_status, unit_price_net_snapshot,
+               currency_snapshot, vat_rate_snapshot
+           ) VALUES ($1, $2, $3, 1, 1, true, 'approved', 0, 'EUR', 19)
+           RETURNING id"#,
+    )
+    .bind(assigned_id)
+    .bind(item_id)
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query("UPDATE orders SET phase = 'closure' WHERE id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/phase"),
+        &pm_bearer,
+        Some(json!({ "phase": "followup" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(
+        body["blocking_reasons"]
+            .to_string()
+            .contains("1 approved package overage(s) have no price"),
+        "{body}"
+    );
+
+    // A plain decline finds nothing pending and says so.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &approval_path,
+        &billing_bearer,
+        Some(json!({ "package_item_id": item_id, "approval_status": "declined" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    // Taking an approval back needs a reason, and the reason is audited.
+    let withdraw = |notes: Value| {
+        json_request(
+            &app,
+            "POST",
+            &approval_path,
+            &billing_bearer,
+            Some(json!({
+                "package_item_id": item_id,
+                "approval_status": "declined",
+                "withdraw_approved": true,
+                "notes": notes,
+            })),
+        )
+    };
+    let (status, body) = withdraw(json!("  ")).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, body) = withdraw(json!("Kein Preis vereinbart")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["updated_count"], 1, "{body}");
+    let stored: String = sqlx::query_scalar(
+        "SELECT approval_status FROM service_package_consumptions WHERE id = $1",
+    )
+    .bind(consumption_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, "declined");
+    let reason: Option<String> = sqlx::query_scalar(
+        r#"SELECT context ->> 'reason' FROM audit_log
+           WHERE action = 'update_package_overage_approval' AND entity_id = $1
+           ORDER BY id DESC LIMIT 1"#,
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(reason.as_deref(), Some("Kein Preis vereinbart"));
+    let (status, body) = withdraw(json!("Noch einmal")).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    // A priced overage without a quote: the blocker names the real next step.
+    sqlx::query(
+        r#"INSERT INTO service_package_consumptions (
+               patient_service_package_id, package_item_id, order_id, quantity, overage_quantity,
+               requires_patient_approval, approval_status, unit_price_net_snapshot,
+               currency_snapshot, vat_rate_snapshot
+           ) VALUES ($1, $2, $3, 1, 1, true, 'approved', 95, 'EUR', 19)"#,
+    )
+    .bind(assigned_id)
+    .bind(item_id)
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/phase"),
+        &pm_bearer,
+        Some(json!({ "phase": "followup" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(
+        body["blocking_reasons"]
+            .to_string()
+            .contains("1 approved package overage(s) have no quote to bill them"),
+        "{body}"
+    );
+
+    // A completed order takes no consumption.
+    sqlx::query("UPDATE orders SET status = 'completed' WHERE id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &consume_path,
+        &billing_bearer,
+        Some(json!({ "package_item_id": item_id, "order_id": order_id, "quantity": 1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "order_closed_for_new_services", "{body}");
+}
+
 /// QA 2026-11-01, X1 N1: an advance beside a final invoice billed the quote a
 /// second time, also through a draft left over from before the final invoice.
 #[tokio::test]

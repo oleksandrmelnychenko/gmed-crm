@@ -454,6 +454,8 @@ export type PatientServicePackageItem = {
   /** Gross of the pending overage: what an approval bills. */
   pending_overage_gross?: string;
   approved_overage_quantity?: string;
+  /** Approved and on no invoice yet: can still be taken back with a reason. */
+  unbilled_approved_overage_quantity?: string;
   declined_overage_quantity?: string;
   pending_consumption_count?: number;
   latest_consumed_at?: string | null;
