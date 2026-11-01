@@ -10,6 +10,7 @@ import {
   sourcePepHintActive,
   sourcePepHintText,
   type LeadSourcePerson,
+  knownPersonContactRefusal,
 } from "../model/lead-source-person";
 import type { RelationItem } from "@/pages/patients/model/detail-tab-types";
 import { OrderPatientDocumentReview, OrderExistingContractsTable, type RequestReviewRow } from "@/pages/orders/ui/order-patient-document-review";
@@ -5954,10 +5955,12 @@ export function LeadWizard({
           }
           setExistingParentPatientId(existingParentPatientFromError(nextError)?.patientId ?? null);
           const refusedField = SERVER_MASTER_FIELDS[leadServerFieldError(nextError) ?? ""];
-          setServerMasterError(refusedField ? { field: refusedField, message: errorText(nextError, tx) } : null);
+          const refusalText = (sourcePerson ? knownPersonContactRefusal(nextError, tx) : null)
+            ?? errorText(nextError, tx);
+          setServerMasterError(refusedField ? { field: refusedField, message: refusalText } : null);
           const refusedContact = leadServerContactError(nextError);
           setServerContactError(refusedContact ? { contactId: refusedContact.contactId, message: errorText(nextError, tx) } : null);
-          setAutosaveError(errorText(nextError, tx));
+          setAutosaveError(refusalText);
           setAutosaveErrorDetail(autosaveErrorDetailText(stage, nextError));
           setAutosaveStatus("error");
         }

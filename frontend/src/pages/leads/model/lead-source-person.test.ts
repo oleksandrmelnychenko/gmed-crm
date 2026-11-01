@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   fillMissingFromSeed,
   fillMissingIdentityNames,
+  knownPersonContactRefusal,
   leadSourcePersonFromSearchParams,
   newRequestForPersonHref,
   prefilledFieldLabels,
@@ -16,6 +17,16 @@ import {
 import { sourcePepHintActive } from "./lead-source-person";
 
 const tx = (ru: string) => ru;
+
+describe("new request for a person: a refused contact", () => {
+  it("does not call the known person another one", () => {
+    expect(knownPersonContactRefusal(new Error("Email is already used by another person"), tx))
+      .toContain("этого же человека");
+    expect(knownPersonContactRefusal(new Error("Phone is already used by another person"), tx))
+      .toContain("поиск по номеру");
+    expect(knownPersonContactRefusal(new Error("Other"), tx)).toBeNull();
+  });
+});
 
 describe("new request for a person: the wizard link", () => {
   it("round-trips a patient relation and a lead contact through the query", () => {

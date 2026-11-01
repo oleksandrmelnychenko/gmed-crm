@@ -278,6 +278,27 @@ export function sourcePepHintText(tx: Tx): string {
   );
 }
 
+/**
+ * A request opened for a known person is refused when that person already has
+ * one: «used by another person» said the opposite (QA 2026-11-01, T3-12).
+ */
+export function knownPersonContactRefusal(error: unknown, tx: Tx): string | null {
+  const message = error instanceof Error ? error.message : "";
+  if (/^email is already used by another person/i.test(message)) {
+    return tx(
+      "Заявка или карточка с этим адресом уже есть, возможно, у этого же человека: откройте её через поиск по адресу.",
+      "Mit dieser Adresse gibt es bereits eine Anfrage oder Patientenakte, vielleicht derselben Person: Bitte über die Suche nach der Adresse öffnen.",
+    );
+  }
+  if (/^phone is already used by another person/i.test(message)) {
+    return tx(
+      "Заявка или карточка с этим номером уже есть, возможно, у этого же человека: откройте её через поиск по номеру.",
+      "Mit dieser Nummer gibt es bereits eine Anfrage oder Patientenakte, vielleicht derselben Person: Bitte über die Suche nach der Nummer öffnen.",
+    );
+  }
+  return null;
+}
+
 export function newRequestForPersonLabel(tx: Tx): string {
   return tx("Новая заявка для этого человека", "Neue Anfrage für diese Person");
 }
