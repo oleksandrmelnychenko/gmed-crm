@@ -4,6 +4,7 @@ import type { DocumentItem } from "@/pages/documents/model/types";
 
 import { normalizePayerDeclarationResponse, payerReadinessReasonFields, payerReasonLabel, PAYER_SECTION_ID } from "./lead-payer";
 import {
+  payerPreviousPapersLine,
   EMPTY_PAYER_IDENTITY_FIELDS,
   normalizePayerIdentification,
   PAYER_PAPER_PATH_ID,
@@ -19,6 +20,21 @@ import {
 
 const ru = (text: string) => text;
 const de = (_ru: string, text: string) => text;
+
+describe("the replaced payer's papers (W2 N2)", () => {
+  const since = "2026-11-01T12:00:00Z";
+  it("are kept apart from the new payer's", () => {
+    const old = document({ id: "old", art: "payer_identity", created_at: "2026-11-01T09:00:00Z" });
+    const oldSigned = document({ id: "old-sd", art: "payer_self_disclosure", is_latest_version: true, created_at: "2026-11-01T08:00:00Z", signed_at: "2026-11-01T09:00:00Z" });
+    const fresh = document({ id: "new", art: "payer_identity", created_at: "2026-11-01T13:00:00Z" });
+    const split = payerPaperDocuments([old, oldSigned, fresh], since);
+    expect(split.identity.map((item) => item.id)).toEqual(["new"]);
+    expect(split.selfDisclosure).toBeNull();
+    expect(split.previous.map((item) => item.id)).toEqual(["old-sd", "old"]);
+    expect(payerPaperDocuments([old, oldSigned, fresh]).previous).toEqual([]);
+    expect(payerPreviousPapersLine(ru).text).toContain("прежнему плательщику");
+  });
+});
 
 const document = (patch: Partial<DocumentItem>): DocumentItem => ({
   id: "doc",

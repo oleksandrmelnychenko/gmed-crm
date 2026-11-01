@@ -117,6 +117,28 @@ describe("LeadPayerPackagePanel paper signature (DEV QA 2026-10-30)", () => {
   });
 });
 
+describe("LeadPayerPackagePanel after the payer was replaced (W2 N2)", () => {
+  const signed = documents.map((document) => ({ ...document, signed_at: "2026-11-01T09:00:00Z" }));
+  const paper = { required: true, identified: true, statement_sent: false, self_disclosure_signed: true, identity_document: true };
+
+  it("shows the signed papers as the previous payer's, with the next step", () => {
+    const value = state(
+      { blocked_reason: "payer_not_submitted", can_prepare: false },
+      { status: "signed", signed_at: "2026-11-01T09:00:00Z", outdated_reasons: ["payer_changed"], documents: signed },
+    );
+    const text = textOf(render(value, { paper }));
+    expect(text).toContain("Документы прежнего плательщика");
+    expect(text).toContain("Подписан прежним плательщиком");
+    expect(text).toContain("Следующий шаг: отправьте новому плательщику ссылку");
+    expect(text).not.toContain("ответил на бумаге");
+  });
+
+  it("keeps the signed package of the payer named now", () => {
+    const value = state({}, { status: "signed", signed_at: "2026-11-01T09:00:00Z", documents: signed });
+    expect(textOf(render(value))).not.toContain("прежнего плательщика");
+  });
+});
+
 describe("LeadPayerPackagePanel", () => {
   it("lists the four documents before preparing and offers to prepare them", () => {
     const html = render(state());

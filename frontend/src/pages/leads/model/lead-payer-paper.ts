@@ -24,6 +24,8 @@ export type PayerIdentificationStatus = {
   identity_document: boolean;
   /** Staff entered the sent answers from the paper Selbstauskunft (owner 2026-10-30); absent on an older server. */
   statement_by_staff?: boolean;
+  /** When the payer named now was named; absent on an older server. */
+  payer_since?: string | null;
 };
 
 /** The anchor the readiness reason `payer_not_identified` focuses. */
@@ -152,20 +154,39 @@ export function paperSelfDisclosurePayload(leadId: string, replaceDocumentId?: s
 const usable = (document: DocumentItem) =>
   document.status !== "archived" && !document.file_deleted_at;
 
-/** The payer's paper documents of the lead: the current Selbstauskunft and the identity documents. */
-export function payerPaperDocuments(documents: readonly DocumentItem[]): {
+/**
+ * The payer's paper documents of the lead: the current Selbstauskunft and the
+ * identity documents, and apart from them what was filed before the payer
+ * named now (`payerSince`): the replaced payer's papers stay on file as the
+ * record, but they are not the new payer's (QA 2026-11-01, W2 N2).
+ */
+export function payerPaperDocuments(allDocuments: readonly DocumentItem[], payerSince?: string | null): {
   selfDisclosure: DocumentItem | null;
   identity: DocumentItem[];
+  previous: DocumentItem[];
 } {
+  const since = payerSince ? Date.parse(payerSince) : Number.NaN;
+  const ofPreviousPayer = (document: DocumentItem) =>
+    Date.parse(document.signed_at ?? document.created_at ?? "") < since;
   const newestFirst = (left: DocumentItem, right: DocumentItem) => (right.created_at ?? "").localeCompare(left.created_at ?? "");
-  const selfDisclosure = documents
-    .filter((document) => usable(document) && document.is_latest_version
-      && (document.generated_template_id === "payer_self_disclosure" || document.art === "payer_self_disclosure"))
-    .sort(newestFirst)[0] ?? null;
-  const identity = documents
-    .filter((document) => usable(document) && document.art === "payer_identity")
-    .sort(newestFirst);
-  return { selfDisclosure, identity };
+  const disclosures = allDocuments.filter((document) => usable(document) && document.is_latest_version
+    && (document.generated_template_id === "payer_self_disclosure" || document.art === "payer_self_disclosure"));
+  const identities = allDocuments.filter((document) => usable(document) && document.art === "payer_identity");
+  const selfDisclosure = disclosures.filter((document) => !ofPreviousPayer(document)).sort(newestFirst)[0] ?? null;
+  const identity = identities.filter((document) => !ofPreviousPayer(document)).sort(newestFirst);
+  const previous = [...disclosures, ...identities].filter(ofPreviousPayer);
+  return { selfDisclosure, identity, previous };
+}
+
+/** The status line while only the replaced payer's papers are on file: the next step for the new payer. */
+export function payerPreviousPapersLine(tx: Tx): { tone: "warning"; text: string } {
+  return {
+    tone: "warning",
+    text: tx(
+      "Бумаги ниже относятся к прежнему плательщику. Следующий шаг: отправьте новому плательщику ссылку или возьмите у него Selbstauskunft и документ",
+      "Die Papiere unten gehören zum früheren Zahler. Nächster Schritt: dem neuen Zahler den Link senden oder Selbstauskunft und Ausweis von ihm einholen",
+    ),
+  };
 }
 
 /**
@@ -209,6 +230,7 @@ export function normalizePayerIdentification(value: unknown): PayerIdentificatio
     self_disclosure_signed: record.self_disclosure_signed === true,
     identity_document: record.identity_document === true,
     statement_by_staff: record.statement_by_staff === true,
+    ...(typeof record.payer_since === "string" ? { payer_since: record.payer_since } : {}),
   };
 }
 

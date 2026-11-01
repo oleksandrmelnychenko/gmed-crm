@@ -2786,6 +2786,8 @@ async fn a_level_two_payer_is_identified_on_paper_without_a_payer_link() {
     assert_eq!(identification["self_disclosure_signed"], true);
     assert_eq!(identification["identity_document"], true);
     assert_eq!(identification["statement_sent"], false);
+    // The wizard tells a replaced payer's papers by this date.
+    assert!(identification["payer_since"].is_string(), "{declaration}");
     let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
     assert_eq!(
         readiness_check(&lead, "payer_identified")["passed"],

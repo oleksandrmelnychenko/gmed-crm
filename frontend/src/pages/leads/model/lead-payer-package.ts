@@ -139,6 +139,35 @@ export function payerAnsweredOnPaper(identification: PayerIdentificationStatus |
   return Boolean(identification && !identification.statement_sent && identification.self_disclosure_signed);
 }
 
+/**
+ * The package still holds what the replaced payer signed (QA 2026-11-01, W2
+ * N2): those papers stay on file as the record, but the new payer signed
+ * nothing yet, so the package must not read as his signed one.
+ */
+export function payerPackageOfPreviousPayer(pkg: Pick<PayerPackage, "outdated_reasons" | "documents"> | null | undefined): boolean {
+  return Boolean(pkg?.outdated_reasons.includes("payer_changed") && pkg.documents.some((document) => document.signed_at));
+}
+
+/** The status of such a package, and the next step for the new payer. */
+export function payerPackagePreviousPayerLine(
+  state: Pick<LeadPayerPackageState, "blocked_reason">,
+  tx: Tx,
+): PayerPackageStatusLine {
+  return {
+    tone: "neutral",
+    label: tx("Документы прежнего плательщика", "Unterlagen des früheren Zahlers"),
+    text: state.blocked_reason === "payer_not_submitted"
+      ? tx(
+        "Подписано прежним плательщиком, остаётся в деле. Следующий шаг: отправьте новому плательщику ссылку на анкету или примите её на бумаге, затем пересоздайте документы.",
+        "Vom früheren Zahler unterschrieben, bleibt in der Akte. Nächster Schritt: dem neuen Zahler den Link zum Fragebogen senden oder ihn auf Papier annehmen, dann die Unterlagen neu erstellen.",
+      )
+      : tx(
+        "Подписано прежним плательщиком, остаётся в деле. Следующий шаг: пересоздайте документы для нового плательщика.",
+        "Vom früheren Zahler unterschrieben, bleibt in der Akte. Nächster Schritt: die Unterlagen für den neuen Zahler neu erstellen.",
+      ),
+  };
+}
+
 /** The Selbstauskunft row of the package when the payer answered on paper: "Selbstauskunft на бумаге — подписана". */
 export function payerPaperSelfDisclosureText(tx: Tx): string {
   return tx("Selbstauskunft на бумаге — подписана", "Selbstauskunft auf Papier – unterschrieben");

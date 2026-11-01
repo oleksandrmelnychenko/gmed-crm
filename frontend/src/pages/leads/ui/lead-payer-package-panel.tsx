@@ -27,6 +27,8 @@ import {
   payerPackageSignerText,
   payerPackageSlotLabel,
   payerPackageSlotPurpose,
+  payerPackageOfPreviousPayer,
+  payerPackagePreviousPayerLine,
   payerPackageStatusLine,
   payerPackageTestModeLabel,
   payerPaperSelfDisclosureText,
@@ -96,13 +98,16 @@ export function LeadPayerPackagePanel({
   const pkg = state.package;
   const actions = payerPackageActions(state, canEdit);
   const rows = payerPackageRows(pkg, fallbackDocuments);
-  const status = pkg ? payerPackageStatusLine(pkg, tx) : null;
+  const previousPayer = payerPackageOfPreviousPayer(pkg);
+  const status = !pkg ? null : previousPayer ? payerPackagePreviousPayerLine(state, tx) : payerPackageStatusLine(pkg, tx);
   const chosenLanguage = payerPackageLanguageOf(state, language);
   const languageHint = payerPackageLanguageHint(state, chosenLanguage, tx);
   const signer = payerPackageSignerText(state.signer, tx);
-  const identification = payerPackageIdentificationText(state.payer_identification, tx, paperIdentification);
-  const answeredOnPaper = payerAnsweredOnPaper(paperIdentification);
-  const blockedText = payerPackageBlockedText(state, paperIdentification, tx);
+  // «Answered on paper» would be the replaced payer's Selbstauskunft.
+  const currentPaper = previousPayer ? null : paperIdentification;
+  const identification = payerPackageIdentificationText(state.payer_identification, tx, currentPaper);
+  const answeredOnPaper = payerAnsweredOnPaper(currentPaper);
+  const blockedText = payerPackageBlockedText(state, currentPaper, tx);
   const outdated = pkg?.outdated_reasons ?? [];
   // Why the QES button is off, said beside it (QA 2026-10-25).
   const sendDisabledHint = !state.signature_enabled
@@ -117,7 +122,7 @@ export function LeadPayerPackagePanel({
   const locked = disabled || busy !== null;
   const firstDocument = rows[0]?.document ?? null;
   // Out for the QES: the request decides; otherwise a prepared document can be signed on paper.
-  const paperSignable = canEdit && Boolean(onPaperSigned) && !(pkg && ["sending", "pending", "needs_review"].includes(pkg.status));
+  const paperSignable = canEdit && Boolean(onPaperSigned) && !previousPayer && !(pkg && ["sending", "pending", "needs_review"].includes(pkg.status));
   const message = (cause: unknown) => payerPackageErrorText(cause, tx) ?? errorText(cause);
 
   async function prepare() {
@@ -212,7 +217,9 @@ export function LeadPayerPackagePanel({
                         ) : null}
                         {document.signed_at ? (
                           <span className="inline-flex flex-wrap items-center gap-1.5" data-testid={`lead-payer-package-signed-${slot}`}>
-                            <StatusChip tone="success"><Check aria-hidden="true" />{tx("Подписан", "Unterschrieben")}</StatusChip>
+                            {previousPayer
+                              ? <StatusChip tone="neutral">{tx("Подписан прежним плательщиком", "Vom früheren Zahler unterschrieben")}</StatusChip>
+                              : <StatusChip tone="success"><Check aria-hidden="true" />{tx("Подписан", "Unterschrieben")}</StatusChip>}
                             <StatusChip tone="info"><CalendarDays aria-hidden="true" />{formatAppDate(document.signed_at)}</StatusChip>
                           </span>
                         ) : null}

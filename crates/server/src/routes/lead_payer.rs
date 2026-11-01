@@ -1928,6 +1928,9 @@ async fn identification_status(
         "self_disclosure_signed": parts.self_disclosure_signed,
         "identity_document": parts.identity_document,
         "statement_by_staff": parts.statement_by_staff,
+        // Papers older than this concern the payer named before (QA
+        // 2026-11-01, W2 N2): they stay on file, the wizard says whose they are.
+        "payer_since": state.identity_changed_at.map(|at| at.to_rfc3339()),
     }))
 }
 

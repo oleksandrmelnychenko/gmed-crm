@@ -27,6 +27,7 @@ import {
   payerIdentificationLine,
   payerIdentityAnswersPatch,
   payerPaperDocuments,
+  payerPreviousPapersLine,
   type PayerIdentificationStatus,
   type PayerIdentityFields,
 } from "../model/lead-payer-paper";
@@ -104,13 +105,17 @@ export function LeadPayerPaperPath({
     void reload();
   }, [reload]);
 
-  const { selfDisclosure, identity } = payerPaperDocuments(documents);
+  const { selfDisclosure, identity, previous } = payerPaperDocuments(documents, identification.payer_since);
   const documentCount = identity.length + (selfDisclosure ? 1 : 0);
   const countCallback = useRef(onDocumentCountChange);
   countCallback.current = onDocumentCountChange;
   useEffect(() => { countCallback.current?.(documentCount); }, [leadId, documentCount]);
-  const line = payerIdentificationLine(identification, tx);
-  const disclosureDone = identification.statement_sent || identification.self_disclosure_signed;
+  // The server's flags also count the replaced payer's papers.
+  const onlyPreviousPapers = previous.length > 0 && documentCount === 0 && !identification.statement_sent;
+  const line = onlyPreviousPapers ? payerPreviousPapersLine(tx) : payerIdentificationLine(identification, tx);
+  const disclosureDone = identification.statement_sent
+    || (identification.self_disclosure_signed && (previous.length === 0 || Boolean(selfDisclosure?.signed_at)));
+  const identityDone = identification.identity_document && (previous.length === 0 || identity.length > 0);
   const locked = disabled || busy !== null;
   const title = (document: DocumentItem) => document.auto_name || document.original_filename || tx("Документ", "Dokument");
 
@@ -180,7 +185,7 @@ export function LeadPayerPaperPath({
       tabIndex={-1}
       className="min-w-0 space-y-3 bg-card focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       data-testid="lead-payer-paper-path"
-      data-identified={identification.identified ? "true" : "false"}
+      data-identified={identification.identified && !onlyPreviousPapers ? "true" : "false"}
     >
       <AdminSectionTitle>{tx("Бумажный путь (без ссылки)", "Papierweg (ohne Link)")}</AdminSectionTitle>
       <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
@@ -202,6 +207,31 @@ export function LeadPayerPaperPath({
           {line.tone === "success" ? <Check aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" /> : line.tone === "warning" ? <CircleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" /> : null}
           <span>{line.text}</span>
         </p>
+      ) : null}
+
+      {previous.length > 0 ? (
+        <div className="min-w-0 space-y-1 rounded-lg border border-border/70 px-3 py-2" data-testid="lead-payer-paper-previous">
+          <p className="break-words text-sm font-medium text-foreground">
+            {tx("Бумаги прежнего плательщика", "Papiere des früheren Zahlers")}
+          </p>
+          <p className="break-words text-xs leading-5 text-muted-foreground">
+            {tx("Остаются в деле, для нового плательщика не засчитываются.", "Bleiben in der Akte, zählen nicht für den neuen Zahler.")}
+          </p>
+          <ul className="space-y-1">
+            {previous.map((document) => (
+              <li key={document.id}>
+                <button
+                  type="button"
+                  className="inline-flex max-w-full items-start gap-1.5 rounded-xl border border-border px-2 py-1 text-left text-xs text-muted-foreground hover:bg-muted disabled:opacity-60"
+                  disabled={disabled}
+                  onClick={() => onOpenDocument?.(document.id, title(document))}
+                >
+                  <FileText aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" /><span className="min-w-0 break-all">{title(document)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
 
       <ol className="divide-y divide-border/70 rounded-lg border border-border/70 bg-card">
@@ -301,7 +331,7 @@ export function LeadPayerPaperPath({
         ) : null}
 
         {/* (a) The payer's identity document. */}
-        <li className="min-w-0 space-y-2 px-3 py-2" data-testid="lead-payer-paper-identity" data-done={identification.identity_document ? "true" : "false"}>
+        <li className="min-w-0 space-y-2 px-3 py-2" data-testid="lead-payer-paper-identity" data-done={identityDone ? "true" : "false"}>
           <div className="flex min-w-0 flex-wrap items-start gap-2">
             <div className="min-w-0 flex-1">
               <p className="break-words text-sm font-medium text-foreground">
@@ -327,7 +357,7 @@ export function LeadPayerPaperPath({
                 </ul>
               ) : (
                 <p className="text-xs leading-5 text-muted-foreground">
-                  {identification.identity_document
+                  {identityDone
                     ? tx("документ есть в документах заявки", "Ausweis liegt in den Dokumenten der Anfrage")
                     : tx("ещё не загружен", "noch nicht hochgeladen")}
                 </p>
