@@ -655,7 +655,8 @@ async fn portal_recommendations_leave_out_staff_only_fields() {
 
     // The patient's copy lists the published recommendation, no staff field
     // (QA 2026-11-01).
-    let (status, export) = json_request(&app, "GET", "/api/v1/me/export", &patient_auth, None).await;
+    let (status, export) =
+        json_request(&app, "GET", "/api/v1/me/export", &patient_auth, None).await;
     assert_eq!(status, StatusCode::OK, "{export}");
     assert_eq!(
         export["recommendations"][0]["title"],

@@ -7313,6 +7313,25 @@ fn parse_quote_line_items(value: &Value) -> Vec<GeneratedContractLineItem> {
         .collect()
 }
 
+/// The category of an appointment on a German plan: stored as a technical
+/// key by some screens, free text by others (QA 2026-11-01).
+fn appointment_category_label(language: &str, category: &str) -> String {
+    let german = match category.trim().to_ascii_lowercase().as_str() {
+        _ if !language.starts_with("de") => None,
+        "consultation" => Some("Beratung"),
+        "examination" => Some("Untersuchung"),
+        "diagnostics" => Some("Diagnostik"),
+        "treatment" => Some("Behandlung"),
+        "surgery" => Some("Operation"),
+        "transfer" => Some("Transfer"),
+        "hotel" => Some("Hotel"),
+        "interpreter" => Some("Dolmetscher"),
+        "followup" | "follow_up" => Some("Nachsorge"),
+        _ => None,
+    };
+    german.map_or_else(|| category.to_string(), ToOwned::to_owned)
+}
+
 fn localized_weekday(language: &str, weekday: Weekday) -> &'static str {
     match (language, weekday) {
         ("uk", Weekday::Mon) => "Понеділок",
@@ -11256,6 +11275,37 @@ fn visa_invitation_patient_reference(context: &GeneratedVisaInvitationContext) -
     }
 }
 
+/// The passport a letter names: what the operator typed, else the patient's
+/// record, so a filled record leaves no blank line (QA 2026-11-01).
+async fn resolved_passport(
+    state: &AppState,
+    patient_id: Uuid,
+    bindings: &DocumentBindingOverrides,
+) -> Result<(Option<String>, Option<NaiveDate>), axum::response::Response> {
+    let stored = sqlx::query_as::<_, (Option<String>, Option<NaiveDate>)>(
+        "SELECT passport_number, passport_expiry FROM patients WHERE id = $1",
+    )
+    .bind(patient_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, %patient_id, "load patient passport");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the patient's passport",
+        )
+    })?
+    .unwrap_or_default();
+    let number = bindings
+        .passport_number
+        .clone()
+        .filter(|value| !value.trim().is_empty());
+    Ok((
+        number.or(stored.0),
+        bindings.passport_valid_until.or(stored.1),
+    ))
+}
+
 fn visa_invitation_birth_clause(context: &GeneratedVisaInvitationContext) -> String {
     context
         .birth_date
@@ -11685,15 +11735,7 @@ fn build_visa_invitation_pdf(
         3.0,
     );
 
-    layout.text_block(
-        translated_label(&context.language, "draft_badge"),
-        10.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Primary,
-        0.0,
-        4.0,
-    );
+    // A letter to an embassy: no "Arbeitsdokument" above it (QA 2026-11-01).
     layout.text_block(
         &title,
         22.0,
@@ -17671,7 +17713,8 @@ async fn generate_document(
                         .unwrap_or_default(),
                     category: row
                         .try_get::<Option<String>, _>("category")
-                        .unwrap_or_default(),
+                        .unwrap_or_default()
+                        .map(|category| appointment_category_label(language, &category)),
                     notes: row
                         .try_get::<Option<String>, _>("notes")
                         .unwrap_or_default(),
@@ -18168,6 +18211,11 @@ async fn generate_document(
                 .clone()
                 .or_else(|| Some(agency.sign_place.clone()));
 
+            let (passport_number, passport_valid_until) =
+                match resolved_passport(&state, patient_uuid, &bindings).await {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                };
             let context = GeneratedVisaInvitationContext {
                 patient_pid: patient_pid.clone(),
                 patient_name: patient_name.clone(),
@@ -18185,8 +18233,8 @@ async fn generate_document(
                 nationality: german_country_names(nationality.as_deref()),
                 residence_country: german_country_names(residence_country.as_deref())
                     .or_else(|| german_country_names(patient_party.country.as_deref())),
-                passport_number: bindings.passport_number.clone(),
-                passport_valid_until: bindings.passport_valid_until,
+                passport_number,
+                passport_valid_until,
                 recipient_block: bindings.recipient_block.clone(),
                 clinics: bindings.clinics.clone(),
                 contact_phones: bindings.contact_phones.clone(),
@@ -18876,6 +18924,11 @@ async fn generate_document(
                 Ok(value) => value,
                 Err(resp) => return resp,
             };
+            let (passport_number, passport_valid_until) =
+                match resolved_passport(&state, patient_uuid, &bindings).await {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                };
             let context = GeneratedAppointmentConfirmationContext {
                 language: language.to_string(),
                 title_override: title_override.clone(),
@@ -18887,8 +18940,8 @@ async fn generate_document(
                     .map(ToOwned::to_owned)
                     .or_else(|| Some(generated_doc_id.clone())),
                 patient: patient_party.clone(),
-                passport_number: bindings.passport_number.clone(),
-                passport_valid_until: bindings.passport_valid_until,
+                passport_number,
+                passport_valid_until,
                 recipient_block: bindings.recipient_block.clone(),
                 clinics: if bindings.clinics.is_empty() {
                     appointment_scope.clinics
@@ -21871,9 +21924,15 @@ fn build_single_order_pdf(
             scope_number += 1;
         }
     }
+    // Section II lists the services only when the client pays: a third party's
+    // order settles them in the estimate alone (QA 2026-11-01).
     admin_block(
         &mut layout,
-        "Der konkrete Leistungsumfang beschränkt sich auf die in Abschnitt II aufgeführten, vom Auftraggeber ausgewählten Leistungen und den zugehörigen Kostenvoranschlag.",
+        if context.payer.is_some() {
+            "Der konkrete Leistungsumfang beschränkt sich auf die im zugehörigen Kostenvoranschlag ausgewiesenen, vom Auftraggeber ausgewählten Leistungen."
+        } else {
+            "Der konkrete Leistungsumfang beschränkt sich auf die in Abschnitt II aufgeführten, vom Auftraggeber ausgewählten Leistungen und den zugehörigen Kostenvoranschlag."
+        },
         0.0,
         2.0,
     );
@@ -22887,9 +22946,10 @@ fn build_cost_coverage_pdf(
     let estimated_outlays = estimated_outlays_total(&context.line_items);
     let service_rows = payer_estimate_rows(&context.line_items, &context.service_catalog);
     if service_rows.is_empty() {
+        // A working note has no place in a legal document (QA 2026-11-01).
         admin_block(
             &mut layout,
-            translated_label(&context.language, "no_services"),
+            "Die Vergütung richtet sich nach dem Kostenvoranschlag zum Einzelauftrag.",
             0.0,
             1.0,
         );
@@ -25999,13 +26059,15 @@ const PAYER_COST_ESTIMATE_PRIVACY_SENTENCE: &str =
 async fn load_payer_estimate_catalog(
     state: &AppState,
 ) -> Result<Vec<(String, String)>, axum::response::Response> {
-    payer_estimate_catalog_rows(&state.db).await.map_err(|error| {
-        tracing::error!(%error, "load agency service catalogue for the payer's estimate");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to load the service catalogue",
-        )
-    })
+    payer_estimate_catalog_rows(&state.db)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, "load agency service catalogue for the payer's estimate");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load the service catalogue",
+            )
+        })
 }
 
 /// See [`load_payer_estimate_catalog`]; also read inside the release of an
@@ -26636,6 +26698,18 @@ fn payer_yes_no(answer: Option<bool>, details: Option<&str>) -> String {
     }
 }
 
+/// "vom 06.10.2026" for the stored key "payer-privacy-2026-10-06"; the key
+/// itself means nothing to the reader (QA 2026-11-01).
+fn privacy_version_label(version: &str) -> String {
+    version
+        .len()
+        .checked_sub(10)
+        .and_then(|start| version.get(start..))
+        .and_then(|day| NaiveDate::parse_from_str(day, "%Y-%m-%d").ok())
+        .map(|day| format!("vom {}", day.format("%d.%m.%Y")))
+        .unwrap_or_else(|| version.to_string())
+}
+
 fn payer_date_time(at: chrono::DateTime<chrono::Utc>) -> (String, String) {
     let local = crate::app_time::local(at);
     (
@@ -26954,15 +27028,23 @@ fn build_payer_self_disclosure_pdf(
             "Ausweisdokument"
         },
     );
+    // An organisation's register extract replaces the representative's ID
+    // (owner 2026-10-30): the section says so instead of empty lines, as the
+    // GwG sheet does (QA 2026-11-01).
+    let register_extract = organisation && data.register_extract_on_file;
     field(
         &mut layout,
         "Art",
-        data.id_document_type.as_deref().map(|kind| match kind {
-            "passport" => "Reisepass",
-            "id_card" => "Personalausweis",
-            "residence_permit" => "Aufenthaltstitel",
-            other => other,
-        }),
+        if register_extract {
+            Some("Handelsregisterauszug (statt Ausweis)")
+        } else {
+            data.id_document_type.as_deref().map(|kind| match kind {
+                "passport" => "Reisepass",
+                "id_card" => "Personalausweis",
+                "residence_permit" => "Aufenthaltstitel",
+                other => other,
+            })
+        },
     );
     field(&mut layout, "Nummer", data.id_document_number.as_deref());
     field(
@@ -26992,7 +27074,9 @@ fn build_payer_self_disclosure_pdf(
         } else {
             "Kopie übermittelt"
         },
-        Some(if paper && !data.id_copy_on_file {
+        Some(if register_extract {
+            "ja"
+        } else if paper && !data.id_copy_on_file {
             PAPER_FORM_YES_NO
         } else if data.id_copy_on_file {
             "ja"
@@ -27174,16 +27258,18 @@ fn build_payer_self_disclosure_pdf(
         format!(
             "Datenschutzhinweise zur Kenntnis genommen am {} (Fassung {})",
             payer_date_time(at).0,
-            data.privacy_text_version
-                .as_deref()
-                .unwrap_or(super::lead_payer_link::PRIVACY_TEXT_VERSION)
+            privacy_version_label(
+                data.privacy_text_version
+                    .as_deref()
+                    .unwrap_or(super::lead_payer_link::PRIVACY_TEXT_VERSION)
+            )
         )
     });
     let acknowledged = acknowledged.or_else(|| {
         paper.then(|| {
             format!(
                 "[  ] Die Datenschutzhinweise von GMED (Fassung {}) habe ich erhalten und zur Kenntnis genommen.",
-                super::lead_payer_link::PRIVACY_TEXT_VERSION
+                privacy_version_label(super::lead_payer_link::PRIVACY_TEXT_VERSION)
             )
         })
     });
@@ -28570,10 +28656,11 @@ fn build_lead_self_disclosure_pdf(
             rows.extend([
                 (
                     "Wer zahlt?",
-                    Some(format!(
-                        "Eine Organisation ({})",
-                        payer_type_label(&payer.payer_type)
-                    )),
+                    // "Eine Organisation (Organisation)" said nothing twice.
+                    Some(match payer_type_label(&payer.payer_type) {
+                        "Organisation" => "Eine Organisation".to_string(),
+                        label => format!("Eine Organisation ({label})"),
+                    }),
                 ),
                 ("Name", payer.name.clone()),
                 ("Rechtsform", payer.legal_form.clone()),
@@ -40444,7 +40531,7 @@ mod tests {
             "6. Erklärungen",
             "ja – Bruder, Bürgermeister",
             "7. Datenschutz",
-            "Datenschutzhinweise zur Kenntnis genommen am 06.10.2026 (Fassung payer-privacy-2026-10-06)",
+            "Datenschutzhinweise zur Kenntnis genommen am 06.10.2026 (Fassung vom 06.10.2026)",
             "E-Mail, Telefon",
             "8. Versicherung",
             "Ich versichere, dass die vorstehenden Angaben vollständig und richtig sind",

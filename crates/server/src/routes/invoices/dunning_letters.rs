@@ -25,8 +25,7 @@ use super::{
     InvoicePdfAgency, InvoicePdfCellAlign, InvoicePdfColor, InvoicePdfLayout, document, err,
     format_invoice_pdf_date, format_invoice_pdf_money, invoice_document_date,
     invoice_pdf_bank_cells, invoice_pdf_brand, invoice_pdf_heading_with_rows_height_mm,
-    invoice_pdf_label, invoice_pdf_line_height_mm, invoice_pdf_sender_line,
-    resolve_invoice_pdf_language,
+    invoice_pdf_label, invoice_pdf_sender_line, resolve_invoice_pdf_language,
 };
 use crate::pdf_text::{add_unicode_pdf_fonts, pdf_text_save_options};
 
@@ -328,6 +327,9 @@ pub(super) fn dunning_letter_filename(level: &str, invoice_number: &str) -> Stri
     format!("{prefix}-{}.pdf", number.trim())
 }
 
+/// Closing and signature of a letter.
+const DUNNING_CLOSING_HEIGHT_MM: f32 = 25.0;
+
 pub(super) fn build_dunning_letter_pdf(
     context: &DunningLetterContext,
 ) -> Result<Vec<u8>, &'static str> {
@@ -455,12 +457,13 @@ pub(super) fn build_dunning_letter_pdf(
 
     let bank_cells = invoice_pdf_bank_cells(language, &context.agency);
     if !bank_cells.is_empty() {
-        // The payment details (plus the reference row) stay on one page.
-        layout.ensure_space(invoice_pdf_heading_with_rows_height_mm(
-            12.0,
-            6.0,
-            bank_cells.len() + 1,
-        ));
+        // The payment details (plus the reference row) stay on one page, and
+        // with the closing: a page 2 with only the greeting looked stray
+        // (QA 2026-11-01).
+        layout.ensure_space(
+            invoice_pdf_heading_with_rows_height_mm(12.0, 6.0, bank_cells.len() + 1)
+                + DUNNING_CLOSING_HEIGHT_MM,
+        );
         layout.text_block(
             invoice_pdf_label(language, "payment_details"),
             12.0,
@@ -492,7 +495,7 @@ pub(super) fn build_dunning_letter_pdf(
 
     // Closing and signature belong together; the signature alone on a
     // second page looked like a stray page.
-    layout.ensure_space(8.0 + 1.0 + 2.0 * invoice_pdf_line_height_mm(10.5, 1.35));
+    layout.ensure_space(DUNNING_CLOSING_HEIGHT_MM);
     layout.text_block(
         dunning_letter_label(language, "closing"),
         10.5,

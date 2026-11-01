@@ -6450,6 +6450,8 @@ pub(crate) struct PayerSelfDisclosure {
     pub id_issued_on: Option<NaiveDate>,
     pub id_valid_until: Option<NaiveDate>,
     pub id_copy_on_file: bool,
+    /// Staff filed the organisation's register extract instead of an ID.
+    pub register_extract_on_file: bool,
     pub beneficial_owners: Vec<PayerOwnerLine>,
     pub beneficial_owners_none: Option<bool>,
     pub relationship_kind: Option<String>,
@@ -6558,6 +6560,7 @@ fn disclosure_of(
             .map(|source| funds_source_label(source).to_string())
             .collect(),
         id_copy_on_file: !built.identity_documents.is_empty(),
+        register_extract_on_file: context.register_extract_on_file,
         funds_proof_on_file: !built.funds_proof_documents.is_empty(),
         payment_route: built.route.clone(),
         privacy_ack_at: statement.privacy_ack_at,

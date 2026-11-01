@@ -130,8 +130,9 @@ impl InvoiceRecipient {
         if !locality.is_empty() {
             lines.push(locality);
         }
+        // As the contracts print it: "Deutschland", not the stored "DE".
         if let Some(country) = &self.country {
-            lines.push(country.clone());
+            lines.push(crate::routes::documents::german_document_country(country));
         }
         lines
     }

@@ -1021,8 +1021,8 @@ async fn the_lead_says_where_the_invoice_goes_and_the_order_keeps_its_cost_beare
             .unwrap();
     assert_eq!(snapshot["name"], "Beispiel GmbH");
     assert_eq!(snapshot["service_recipient_name"], patient_name);
-    // The quote's notes stay off what a third party reads; the advance line
-    // names only the quote (QA 2026-11-01).
+    // A third party reads the type of the service, not the line text or the
+    // quote's notes (QA 2026-11-01).
     let (status, pdf) = binary_get(
         &fx.app,
         &format!("/api/v1/invoices/{company_id}/pdf"),
@@ -1031,7 +1031,7 @@ async fn the_lead_says_where_the_invoice_goes_and_the_order_keeps_its_cost_beare
     .await;
     assert_eq!(status, StatusCode::OK);
     let text = pdf_extract::extract_text_from_mem(&pdf).unwrap();
-    assert!(text.contains("Anzahlung"), "{text}");
+    assert!(text.contains("Leistungen der Agentur"), "{text}");
     assert!(!text.contains("payer test"), "{text}");
 
     // "To me" while a third party pays: the Kostenübernehmer the declaration

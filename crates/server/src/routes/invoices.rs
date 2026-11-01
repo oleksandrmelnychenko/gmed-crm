@@ -5815,7 +5815,10 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
             service_recipient.to_string(),
         ));
     }
-    meta_cells.push((invoice_pdf_label(language, "patient_name"), patient_line));
+    // Under Leistungsempfänger the same name a second time says nothing.
+    if context.recipient.service_recipient_name.as_deref() != Some(context.patient_name.as_str()) {
+        meta_cells.push((invoice_pdf_label(language, "patient_name"), patient_line));
+    }
     meta_cells.push((
         invoice_pdf_label(language, "patient_id"),
         context.patient_pid.clone(),
