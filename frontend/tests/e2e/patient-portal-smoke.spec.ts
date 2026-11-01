@@ -502,7 +502,6 @@ async function installPatientPortalMocks(page: Page, patients?: Array<{ id: stri
 
       const autoName =
         multipartField(body, "auto_name") || `Portal upload ${nextPortalUploadIndex}`;
-      const notes = multipartField(body, "notes");
       const createdAt = `2026-04-1${nextPortalUploadIndex}T11:00:00Z`;
       const createdUpload = {
         id: `00000000-0000-0000-0000-0000000094${10 + nextPortalUploadIndex}`,
@@ -528,7 +527,6 @@ async function installPatientPortalMocks(page: Page, patients?: Array<{ id: stri
         file_size: 3072,
         klinik: null,
         ursprung: "patient_portal",
-        notes,
         created_at: createdAt,
         updated_at: createdAt,
       };
@@ -849,11 +847,17 @@ test.describe("patient portal smoke flows", () => {
     await page
       .getByLabel(/Notiz|Заметка|Note/i)
       .fill("Front and back scanned.");
+    const uploadRequest = page.waitForRequest((request) =>
+      request.method() === "POST" && new URL(request.url()).pathname.endsWith("/me/documents/upload"),
+    );
     await page
       .getByRole("button", {
         name: /Datei senden|Upload senden|Отправить загрузку|Send upload/i,
       })
       .click();
+    // The note goes to the care team; the portal list no longer carries the
+    // notes field, which staff can edit (7da67a26, QA 2026-10-31).
+    expect((await uploadRequest).postDataBuffer()?.toString("latin1")).toContain("Front and back scanned.");
 
     await expect(
       page.getByText(
@@ -868,7 +872,7 @@ test.describe("patient portal smoke flows", () => {
       .locator("article")
       .filter({ hasText: "Insurance card April" });
     await expect(uploadedCard).toBeVisible();
-    await expect(uploadedCard.getByText("Front and back scanned.")).toBeVisible();
+    await expect(uploadedCard.getByText("Front and back scanned.")).toHaveCount(0);
 
     const uploadDownloadRequest = page.waitForRequest((request) =>
       request.method() === "GET" &&

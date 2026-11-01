@@ -89,8 +89,10 @@ for (const lang of ["ru", "de"] as const) {
       await expect(dialog.getByRole("img", { name: `vertrag.pdf. ${pageLabel} 1`, exact: true })).toBeVisible();
       const attachmentPage = dialog.getByRole("img", { name: `Information PDF. ${pageLabel} 2`, exact: true });
       await expect(attachmentPage).toBeAttached();
-      await expect(dialog.getByRole("navigation", { name: lang === "ru" ? "Документы пакета" : "Dokumente des Pakets", exact: true }))
-        .toContainText(lang === "ru" ? "Information PDF · для ознакомления" : "Information PDF · zur Kenntnisnahme");
+      // The row names the file and, in its own chip since 7b4c4136, what it is for.
+      await expect(dialog.getByRole("navigation", { name: lang === "ru" ? "Документы пакета" : "Dokumente des Pakets", exact: true })
+        .getByRole("button").filter({ hasText: "Information PDF" }))
+        .toContainText(lang === "ru" ? "для ознакомления" : "zur Kenntnisnahme");
       const sendLabel = lang === "ru" ? "Отправить пакет на подпись" : "Paket zur Unterschrift senden";
       const send = dialog.getByRole("button", { name: sendLabel, exact: true });
       // Sending needs the explicit confirmation that every PDF of the package was checked.
