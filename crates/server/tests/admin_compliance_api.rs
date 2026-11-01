@@ -2330,6 +2330,87 @@ async fn erasure_removes_names_and_content_from_the_patients_documents() {
     .fetch_one(&pool)
     .await
     .unwrap();
+    // QA 2026-11-01 (X2 bug 1): the structured sections, the version history
+    // (append-only) and the feedback name him too.
+    let diagnosis: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_diagnoses (patient_id, label) VALUES ($1, $2) RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(format!("Gonarthrose rechts, {person}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let warning: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_clinical_warnings (patient_id, kind, label)
+           VALUES ($1, 'cave', $2) RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(format!("{person}: Penicillin"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let medication: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_medications (
+                patient_id, handelsname, wirkstoff, hinweis, medication_series_id
+           ) VALUES ($1, 'Ibuprofen 400', 'Ibuprofen', $2, gen_random_uuid()) RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(format!("{person} nach dem Essen"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let clinical_version: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_clinical_versions (patient_id, section, old_value, new_value)
+           VALUES ($1, 'diagnoses', NULL, $2) RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(json!({ "label": format!("Gonarthrose rechts, {person}"), "sort_order": 3 }))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let case_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO cases (case_id, patient_id, manager_id, hauptanfragegrund)
+           VALUES ($1, $2, $3, $4) RETURNING id"#,
+    )
+    .bind(format!("C-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .bind(format!("{person}: Knieschmerz"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let case_version: i64 = sqlx::query_scalar(
+        r#"INSERT INTO case_versions (case_id, changed_by, section, old_value, new_value)
+           VALUES ($1, $2, 'anamnesis', $3, NULL) RETURNING id"#,
+    )
+    .bind(case_id)
+    .bind(admin_id)
+    .bind(json!({ "text": format!("Bericht von {person}") }))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let feedback: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_feedback_forms (
+                patient_id, submitted_by, source, overall_score, nps_score, comments
+           ) VALUES ($1, $2, 'staff_capture', 5, 10, $3) RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(admin_id)
+    .bind(format!("{person} war zufrieden"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let order_note: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by, notes)
+           VALUES ($1, $2, 'closure', 'completed', $3, $4) RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}-note"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .bind(format!("Rückruf {person}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
 
     // Another patient's file names the erased person: as a spouse (nothing
     // else names that relation) and as the payer of his completed order.
@@ -2403,10 +2484,80 @@ async fn erasure_removes_names_and_content_from_the_patients_documents() {
         ("internal_notes", 1),
         ("task_attachments_deleted", 1),
         ("recommendations", 1),
-        ("clinical_notes", 1),
+        // Verlauf, diagnosis, warning, medication, the episode's reason.
+        ("clinical_notes", 5),
+        ("clinical_versions", 2),
+        ("feedback", 1),
+        ("order_notes", 1),
     ] {
         assert_eq!(scrubbed[counter], expected, "{counter}: {scrubbed}");
     }
+    let diagnosis_label: String =
+        sqlx::query_scalar("SELECT label FROM patient_diagnoses WHERE id = $1")
+            .bind(diagnosis)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(diagnosis_label, format!("Gonarthrose rechts, {anon}"));
+    let warning_label: String =
+        sqlx::query_scalar("SELECT label FROM patient_clinical_warnings WHERE id = $1")
+            .bind(warning)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(warning_label, format!("{anon}: Penicillin"));
+    let medication_note: Option<String> =
+        sqlx::query_scalar("SELECT hinweis FROM patient_medications WHERE id = $1")
+            .bind(medication)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        medication_note.as_deref(),
+        Some(format!("{anon} nach dem Essen").as_str())
+    );
+    let (version_old, version_new): (Option<Value>, Option<Value>) = sqlx::query_as(
+        "SELECT old_value, new_value FROM patient_clinical_versions WHERE id = $1",
+    )
+    .bind(clinical_version)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(version_old, None, "a NULL snapshot stays NULL");
+    assert_eq!(
+        version_new,
+        Some(json!({ "label": format!("Gonarthrose rechts, {anon}"), "sort_order": 3 })),
+        "the medical words and the numbers stay, the name goes"
+    );
+    let case_snapshot: Option<Value> =
+        sqlx::query_scalar("SELECT old_value FROM case_versions WHERE id = $1")
+            .bind(case_version)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        case_snapshot,
+        Some(json!({ "text": format!("Bericht von {anon}") }))
+    );
+    let feedback_comment: Option<String> =
+        sqlx::query_scalar("SELECT comments FROM patient_feedback_forms WHERE id = $1")
+            .bind(feedback)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        feedback_comment.as_deref(),
+        Some(format!("{anon} war zufrieden").as_str())
+    );
+    let order_notes: Option<String> = sqlx::query_scalar("SELECT notes FROM orders WHERE id = $1")
+        .bind(order_note)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        order_notes.as_deref(),
+        Some(format!("Rückruf {anon}").as_str())
+    );
     let (recommendation_title, recommendation_note): (String, Option<String>) =
         sqlx::query_as("SELECT title, note_intern FROM patient_recommendations WHERE id = $1")
             .bind(recommendation)
@@ -2815,6 +2966,94 @@ async fn update_task_history_in_erasure(
             Err(error)
         }
     }
+}
+
+/// Runs one statement on a version-history row as the erasure would.
+async fn update_clinical_history_in_erasure(
+    pool: &PgPool,
+    statement: &str,
+    version_id: Uuid,
+) -> Result<u64, sqlx::Error> {
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query("SELECT set_config('gmed.dsgvo_erasure', 'on', true)")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let rows = sqlx::query(statement)
+        .bind(version_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    tx.commit().await.unwrap();
+    Ok(rows)
+}
+
+#[tokio::test]
+async fn clinical_history_stays_append_only_except_for_text_in_the_erasure() {
+    let Some((_app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("clinical-history-append-only");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let version_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_clinical_versions (patient_id, section, old_value, new_value)
+           VALUES ($1, 'diagnoses', NULL, $2) RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(json!({ "label": format!("Text {tag}"), "count": 1 }))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let immutable = |error: sqlx::Error| {
+        assert!(error.to_string().contains("immutable"), "{error}");
+    };
+
+    // Outside the erasure nothing changes, not even a text.
+    immutable(
+        sqlx::query(
+            r#"UPDATE patient_clinical_versions
+               SET new_value = jsonb_set(new_value, '{label}', '"changed"')
+               WHERE id = $1"#,
+        )
+        .bind(version_id)
+        .execute(&pool)
+        .await
+        .unwrap_err(),
+    );
+    // In the erasure: no other column, no number, no new key, no delete, and
+    // a NULL snapshot stays NULL.
+    for statement in [
+        "UPDATE patient_clinical_versions SET section = 'other' WHERE id = $1",
+        "UPDATE patient_clinical_versions SET created_at = now() - interval '1 day' WHERE id = $1",
+        r#"UPDATE patient_clinical_versions SET new_value = jsonb_set(new_value, '{count}', '2') WHERE id = $1"#,
+        r#"UPDATE patient_clinical_versions SET new_value = new_value || '{"extra": "x"}' WHERE id = $1"#,
+        r#"UPDATE patient_clinical_versions SET old_value = '{"label": "x"}' WHERE id = $1"#,
+        "DELETE FROM patient_clinical_versions WHERE id = $1",
+    ] {
+        immutable(
+            update_clinical_history_in_erasure(&pool, statement, version_id)
+                .await
+                .unwrap_err(),
+        );
+    }
+    // Texts may change there.
+    let changed = update_clinical_history_in_erasure(
+        &pool,
+        r#"UPDATE patient_clinical_versions
+           SET new_value = jsonb_set(new_value, '{label}', '"ANON-0000"')
+           WHERE id = $1"#,
+        version_id,
+    )
+    .await
+    .unwrap();
+    assert_eq!(changed, 1);
+    let snapshot: Value =
+        sqlx::query_scalar("SELECT new_value FROM patient_clinical_versions WHERE id = $1")
+            .bind(version_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(snapshot, json!({ "label": "ANON-0000", "count": 1 }));
 }
 
 #[tokio::test]

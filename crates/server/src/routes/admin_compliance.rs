@@ -3988,8 +3988,16 @@ struct ScrubbedFreeText {
     recommendations: u64,
     /// Reminders of the patient's appointments and tasks.
     reminders: u64,
-    /// Card entries and clinical notes of the record that named the patient.
+    /// Card entries, clinical notes and sections of the record that named the
+    /// patient: diagnoses, medication, findings, warnings, the episode's rows.
     clinical_notes: u64,
+    /// Entries of the record's version history (append-only except for the
+    /// erasure) whose snapshots named the patient.
+    clinical_versions: u64,
+    /// Feedback forms: comments, improvement notes, staff notes.
+    feedback: u64,
+    /// Running notes of the patient's orders and interpreter preferences.
+    order_notes: u64,
     /// Attachments of the patient's tasks whose files were deleted (the row
     /// stays as the record that a file was there).
     task_attachments_deleted: u64,
@@ -4103,6 +4111,23 @@ fn scrub_statement(table: &str, columns: &[(&str, Option<u32>)], filter: &str) -
         .collect::<Vec<_>>()
         .join(" OR ");
     format!("UPDATE {table} SET {set} WHERE ({filter}) AND ({matches})")
+}
+
+/// The same for JSON columns: every text value of the column, at any depth;
+/// keys, numbers and flags stay. Same placeholders as [`scrub_statement`].
+fn scrub_jsonb_statement(table: &str, columns: &[&str], filter: &str) -> String {
+    let scrubbed = |column: &str| format!("gmed_scrub_jsonb_text({column}, $2, $3)");
+    let set = columns
+        .iter()
+        .map(|column| format!("{column} = {}", scrubbed(column)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let changed = columns
+        .iter()
+        .map(|column| format!("{column} IS DISTINCT FROM {}", scrubbed(column)))
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    format!("UPDATE {table} SET {set} WHERE ({filter}) AND ({changed})")
 }
 
 /// A PostgreSQL regular expression (ARE) that finds any of the terms as a
@@ -4368,12 +4393,265 @@ async fn scrub_patient_free_text_in_tx(
                 ("untersuchungsbefund", None),
                 ("beurteilung", None),
                 ("verlauf", None),
+                ("red_flags", None),
+                ("anamnese_familie", None),
             ],
             "patient_id = $1",
+        ),
+        // QA 2026-11-01 (X2 bug 1, Art. 17): the structured sections kept the
+        // name, «… Lotte Kranzböck» in a diagnosis label, in no report.
+        scrub_statement(
+            "patient_narrative_specializations",
+            &[("narrative_text", None), ("assessment_text", None)],
+            "narrative_id IN (SELECT id FROM patient_clinical_narrative WHERE patient_id = $1)",
+        ),
+        scrub_statement(
+            "patient_diagnoses",
+            &[("label", None), ("note", None), ("red_flags", None)],
+            "patient_id = $1",
+        ),
+        scrub_statement(
+            "patient_medications",
+            &[
+                ("hinweis", None),
+                ("grund", None),
+                ("sonstige_vermerke", None),
+                ("hold_note", None),
+                ("source_raw_text", None),
+            ],
+            "patient_id = $1",
+        ),
+        scrub_statement(
+            "patient_examinations",
+            &[
+                ("title", None),
+                ("result", None),
+                ("note", None),
+                ("red_flags", None),
+            ],
+            "patient_id = $1",
+        ),
+        scrub_statement(
+            "patient_procedures",
+            &[("label", None), ("note", None)],
+            "patient_id = $1",
+        ),
+        scrub_statement(
+            "patient_clinical_warnings",
+            &[("label", None), ("reaction", None), ("note", None)],
+            "patient_id = $1",
+        ),
+        scrub_statement(
+            "patient_medical_orders",
+            &[("title", None), ("instructions", None)],
+            "patient_id = $1",
+        ),
+        scrub_statement(
+            "patient_lab_results",
+            &[
+                ("result_text", None),
+                ("correction_note", Some(500)),
+                ("deletion_note", Some(500)),
+                ("interpretation_note", Some(4000)),
+            ],
+            "patient_id = $1",
+        ),
+        scrub_statement(
+            "patient_vital_measurements",
+            &[("notes", None)],
+            "patient_id = $1",
+        ),
+        scrub_statement(
+            "patient_impfstatus",
+            &[("status_text", None)],
+            "patient_id = $1",
+        ),
+        // The episode's residue, older than the patient-level record.
+        scrub_statement(
+            "cases",
+            &[
+                ("hauptanfragegrund", None),
+                ("notes", None),
+                ("closed_reason", None),
+            ],
+            "patient_id = $1",
+        ),
+        scrub_jsonb_statement("cases", &["intake_snapshot"], "patient_id = $1"),
+        scrub_statement(
+            "pain_records",
+            &[
+                ("lokalisierung", None),
+                ("ursache", None),
+                ("qualitaet", None),
+                ("entwicklung", None),
+                ("ausstrahlung", None),
+                ("auftreten", None),
+            ],
+            "patient_id = $1",
+        ),
+        scrub_statement("symptome", &[("beschreibung", None)], "patient_id = $1"),
+        scrub_statement(
+            "case_cardiology_assessments",
+            &[
+                ("known_diagnosis", None),
+                ("prior_cardiac_workup", None),
+                ("cardiovascular_risk_factors", None),
+                ("anticoagulation", None),
+                ("family_history", None),
+                ("red_flags", None),
+                ("notes", None),
+            ],
+            "patient_id = $1",
+        ),
+        scrub_statement(
+            "case_gastroenterology_assessments",
+            &[
+                ("prior_endoscopy", None),
+                ("bowel_habits", None),
+                ("liver_history", None),
+                ("food_intolerance", None),
+                ("red_flags", None),
+                ("notes", None),
+            ],
+            "patient_id = $1",
+        ),
+        scrub_statement(
+            "case_neurology_assessments",
+            &[
+                ("prior_neuro_imaging", None),
+                ("prior_neurology_workup", None),
+                ("cognitive_changes", None),
+                ("red_flags", None),
+                ("notes", None),
+            ],
+            "patient_id = $1",
+        ),
+        scrub_statement(
+            "case_orthopedics_assessments",
+            &[
+                ("prior_imaging", None),
+                ("assistive_devices", None),
+                ("physiotherapy_history", None),
+                ("pain_triggers", None),
+                ("red_flags", None),
+                ("notes", None),
+            ],
+            "patient_id = $1",
+        ),
+        scrub_statement(
+            "case_pulmonology_assessments",
+            &[
+                ("smoking_history", None),
+                ("prior_chest_imaging", None),
+                ("inhaler_therapy", None),
+                ("sleep_apnea_history", None),
+                ("red_flags", None),
+                ("notes", None),
+            ],
+            "patient_id = $1",
+        ),
+        scrub_statement(
+            "case_urology_assessments",
+            &[
+                ("prior_urology_workup", None),
+                ("catheter_history", None),
+                ("stone_history", None),
+                ("red_flags", None),
+                ("notes", None),
+            ],
+            "patient_id = $1",
+        ),
+        scrub_statement(
+            "case_clinical_reconciliation_items",
+            &[("resolution_note", None)],
+            "case_id IN (SELECT id FROM cases WHERE patient_id = $1)",
+        ),
+        scrub_jsonb_statement(
+            "case_clinical_reconciliation_items",
+            &["source_payload", "target_payload"],
+            "case_id IN (SELECT id FROM cases WHERE patient_id = $1)",
         ),
     ];
     for statement in &clinical_notes {
         scrubbed.clinical_notes += sqlx::query(statement)
+            .bind(patient_id)
+            .bind(&pattern)
+            .bind(&replacement)
+            .execute(&mut **tx)
+            .await?
+            .rows_affected();
+    }
+    scrubbed.clinical_versions =
+        scrub_clinical_history_in_tx(tx, patient_id, &pattern, &replacement).await?;
+    scrubbed.feedback = sqlx::query(&scrub_statement(
+        "patient_feedback_forms",
+        &[
+            ("comments", None),
+            ("improvement_notes", None),
+            ("internal_note", None),
+            ("review_note", None),
+        ],
+        "patient_id = $1",
+    ))
+    .bind(patient_id)
+    .bind(&pattern)
+    .bind(&replacement)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    // The running notes of the orders; amounts and statuses stay for the
+    // business records. Invoices and quotes are not touched: their texts are
+    // the issued documents (§ 147 AO, § 14b UStG).
+    let order_filter = "order_id IN (SELECT id FROM orders WHERE patient_id = $1)";
+    let order_notes = [
+        scrub_statement(
+            "orders",
+            &[
+                ("needs_description", None),
+                ("notes", None),
+                ("package_coverage_note", None),
+                ("cancellation_reason", None),
+            ],
+            "patient_id = $1",
+        ),
+        scrub_statement(
+            "order_leistungen",
+            &[("notes", None), ("cancellation_reason", None)],
+            order_filter,
+        ),
+        scrub_statement(
+            "order_planning_preparation",
+            &[("treatment_plan_note", None)],
+            order_filter,
+        ),
+        scrub_statement(
+            "order_execution_flows",
+            &[("deviation_note", None), ("execution_summary", None)],
+            order_filter,
+        ),
+        scrub_statement(
+            "order_followup_flows",
+            &[("followup_summary", None)],
+            order_filter,
+        ),
+        scrub_statement(
+            "order_debt_management",
+            &[("note", None), ("resolution_note", None)],
+            order_filter,
+        ),
+        scrub_statement(
+            "order_amendments",
+            &[("agreed_note", None), ("decision_note", None)],
+            order_filter,
+        ),
+        scrub_statement(
+            "interpreter_patient_preferences",
+            &[("note", None)],
+            "patient_id = $1",
+        ),
+    ];
+    for statement in &order_notes {
+        scrubbed.order_notes += sqlx::query(statement)
             .bind(patient_id)
             .bind(&pattern)
             .bind(&replacement)
@@ -4396,6 +4674,63 @@ async fn scrub_patient_free_text_in_tx(
         .await?
         .rows_affected();
     }
+    Ok(scrubbed)
+}
+
+/// The version history of the record repeats every earlier text of the
+/// record: the snapshots of `patient_clinical_versions` and `case_versions`,
+/// and the reviewed evidence of `patient_medication_import_history`. All three
+/// are append-only; a version snapshot is not the audit log. The exception is
+/// the one the task history has (migration
+/// `20261101083100_dsgvo_erasure_clinical_history_scrub.sql`,
+/// docs/engineering/02_audit-migration-policy_ua.md): only while
+/// `gmed.dsgvo_erasure` is on, only an UPDATE, only the text values of the
+/// snapshots, so the medical words stay and the name goes. The setting is on
+/// for these statements only; `dsgvo_anonymize` records the count.
+async fn scrub_clinical_history_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_id: Uuid,
+    pattern: &str,
+    replacement: &str,
+) -> Result<u64, sqlx::Error> {
+    let statements = [
+        scrub_jsonb_statement(
+            "patient_clinical_versions",
+            &["old_value", "new_value"],
+            "patient_id = $1",
+        ),
+        scrub_jsonb_statement(
+            "case_versions",
+            &["old_value", "new_value"],
+            "patient_id = $1 OR case_id IN (SELECT id FROM cases WHERE patient_id = $1)",
+        ),
+        scrub_jsonb_statement(
+            "patient_medication_import_history",
+            &["old_value", "new_value"],
+            "patient_id = $1",
+        ),
+        scrub_statement(
+            "patient_medication_import_history",
+            &[("source_raw_text", None)],
+            "patient_id = $1",
+        ),
+    ];
+    sqlx::query("SELECT set_config('gmed.dsgvo_erasure', 'on', true)")
+        .execute(&mut **tx)
+        .await?;
+    let mut scrubbed = 0;
+    for statement in &statements {
+        scrubbed += sqlx::query(statement)
+            .bind(patient_id)
+            .bind(pattern)
+            .bind(replacement)
+            .execute(&mut **tx)
+            .await?
+            .rows_affected();
+    }
+    sqlx::query("SELECT set_config('gmed.dsgvo_erasure', 'off', true)")
+        .execute(&mut **tx)
+        .await?;
     Ok(scrubbed)
 }
 

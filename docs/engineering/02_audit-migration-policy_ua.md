@@ -160,6 +160,17 @@ state.audit_sender.try_send(audit::domain_diff_event(
 
 `audit_log` під цей виняток не підпадає: туди персональних даних пацієнта не кладуть (див. «Випадок 3»). Тест: `task_history_stays_append_only_except_for_text_in_the_erasure` (`crates/server/tests/admin_compliance_api.rs`) — звичайне оновлення відхиляється, у стиранні — лише зміна тексту.
 
+## Історія версій медкартки і виняток для стирання (Art. 17 DSGVO)
+
+QA 2026-11-01 (X2, помилка 1): `patient_clinical_versions`, `case_versions` і `patient_medication_import_history` повторюють попередні тексти картки, тож повне ім'я лишалося в знімках після стирання. Це історія версій, а не журнал аудиту. Виняток такий самий вузький, як для історії задач (міграція `20261101083100_dsgvo_erasure_clinical_history_scrub.sql`):
+
+- лише всередині транзакції стирання (`gmed.dsgvo_erasure = on`, вмикає `scrub_clinical_history_in_tx` на час своїх `UPDATE`);
+- лише `UPDATE`, лише текстові значення `old_value` / `new_value` (і `source_raw_text` у доказах імпорту ліків); `DELETE` без змін;
+- заміна та сама: слова, що називають пацієнта, → мітка `ANON-…`; медичний текст лишається;
+- факт фіксується в незмінному журналі: `dsgvo_anonymize`, лічильник `scrubbed_free_text.clinical_versions`.
+
+`audit_log` цей виняток не розширює. Тест: `clinical_history_stays_append_only_except_for_text_in_the_erasure` (`crates/server/tests/admin_compliance_api.rs`).
+
 ## Вільний текст про лід у `audit_log` і виняток для видалення (Art. 17 DSGVO)
 
 QA 2026-10-12 (A3-02): текст, який персонал набрав у «Не подходит» → «Другое», потрапляв в аудит (`qualify_lead`, `context.reason`) і після «Удалить и анонимизировать» лишався там — із ім'ям і діагнозом. Так само вільна причина й внутрішня нотатка архівування (`resolve_failed_lead`, `reason` / `note`) і їхня копія в скасуванні замовлень ліда (`cancel_order`, `lead_reason`).
