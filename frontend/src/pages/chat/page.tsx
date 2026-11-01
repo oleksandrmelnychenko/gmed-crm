@@ -331,6 +331,9 @@ function useChatPageContent() {
 
   useEffect(() => {
     if (!messages.some((message) => message.expires_at)) return;
+    // The clock stands still without a timed message: the first one would read
+    // from a stale "now" until the first tick (QA 2026-11-01).
+    dispatchChatState({ expiryClock: Date.now() });
     const interval = window.setInterval(() => {
       dispatchChatState({ expiryClock: Date.now() });
     }, 1_000);

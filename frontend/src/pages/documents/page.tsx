@@ -6684,8 +6684,10 @@ function StaffDocumentsPage({
                           <DocumentMetaFact
                             label={metaText.sourcePerson}
                             value={
-                              detail.source_person?.trim().toLowerCase() ===
-                              "manual_intake"
+                              // Technical origin keys, no person (QA 2026-11-01).
+                              ["manual_intake", "clinical_document_import"].includes(
+                                detail.source_person?.trim().toLowerCase() ?? "",
+                              )
                                 ? t.common_not_set
                                 : detail.source_person || t.common_not_set
                             }

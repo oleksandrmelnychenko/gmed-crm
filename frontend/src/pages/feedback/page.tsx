@@ -4,6 +4,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   type Dispatch,
   type FormEvent,
   type ReactNode,
@@ -120,6 +121,8 @@ type PatientFeedbackWorkspaceState = {
   feedback: PortalFeedbackItem[];
   appointments: PortalAppointmentItem[];
   form: FeedbackFormState;
+  /** The blank form left by the last success; sent again only once touched. */
+  sentForm: FeedbackFormState | null;
   loading: boolean;
   refreshing: boolean;
   submitting: boolean;
@@ -168,6 +171,7 @@ function createPatientFeedbackWorkspaceState(): PatientFeedbackWorkspaceState {
     feedback: [],
     appointments: [],
     form: blankFeedbackForm(),
+    sentForm: null,
     loading: true,
     refreshing: false,
     submitting: false,
@@ -865,6 +869,7 @@ type PatientFeedbackContentProps = {
   notice: string;
   refreshing: boolean;
   submitting: boolean;
+  submitDisabled: boolean;
   t: ReturnType<typeof useLang>["t"];
   setActiveFeedbackId: Dispatch<SetStateAction<string>>;
   setForm: SetFeedbackForm;
@@ -884,6 +889,7 @@ function PatientFeedbackContent({
   notice,
   refreshing,
   submitting,
+  submitDisabled,
   t,
   setActiveFeedbackId,
   setForm,
@@ -954,7 +960,7 @@ function PatientFeedbackContent({
               <FeedbackFormNotes t={t} form={form} setForm={setForm} />
             </section>
 
-            <Button type="submit" className="h-9 w-full rounded-lg" disabled={submitting}>
+            <Button type="submit" className="h-9 w-full rounded-lg" disabled={submitting || submitDisabled}>
               {submitting ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
               {t.feedback_submit_button}
             </Button>
@@ -1044,6 +1050,7 @@ function PatientFeedbackWorkspace() {
     feedback,
     appointments,
     form,
+    sentForm,
     loading,
     refreshing,
     submitting,
@@ -1052,6 +1059,7 @@ function PatientFeedbackWorkspace() {
     version,
     activeFeedbackId,
   } = patientState;
+  const submitInFlight = useRef(false);
 
   const setForm = useMemo<SetFeedbackForm>(
     () => (nextValue) => {
@@ -1246,6 +1254,10 @@ function PatientFeedbackWorkspace() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // The blank form is valid: an untouched one after a success, or a second
+    // click before the next render, would send the feedback twice (QA 2026-11-01).
+    if (submitInFlight.current || form === sentForm) return;
+    submitInFlight.current = true;
     dispatchPatientState({
       submitting: true,
       error: "",
@@ -1271,8 +1283,10 @@ function PatientFeedbackWorkspace() {
         comments: form.comments.trim() || null,
         improvement_notes: form.improvementNotes.trim() || null,
       });
+      const emptyForm = blankFeedbackForm();
       dispatchPatientState((current) => ({
-        form: blankFeedbackForm(),
+        form: emptyForm,
+        sentForm: emptyForm,
         notice: t.feedback_submit_success,
         version: current.version + 1,
         submitting: false,
@@ -1285,6 +1299,8 @@ function PatientFeedbackWorkspace() {
             : t.feedback_submit_error,
         submitting: false,
       });
+    } finally {
+      submitInFlight.current = false;
     }
   }
 
@@ -1314,6 +1330,7 @@ function PatientFeedbackWorkspace() {
       setForm={setForm}
       setVersion={setVersion}
       onSubmit={handleSubmit}
+      submitDisabled={form === sentForm}
     />
   );
 }

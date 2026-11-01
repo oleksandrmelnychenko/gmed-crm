@@ -11975,7 +11975,7 @@ ${serviceCommentLines.join("\n")}`
                         disabled={isBusy || !target || target.id === step}
                         onClick={() => target && navigateToStep(target.id)}
                       >
-                        <span className="text-sm text-foreground">{readinessStepLabel(item.key, tx, isRepeatIntake)}</span>
+                        <span className="min-w-0 text-sm text-foreground [overflow-wrap:anywhere]">{readinessStepLabel(item.key, tx, isRepeatIntake)}</span>
                         <span className="inline-flex shrink-0 items-center gap-2">
                           {/* As the tab bar says it: the optional medical step left empty is no "done" (owner 2026-10-22). */}
                           {ready && ((item.key === "medical" && !medicalTabFilled) || (item.key === "service" && !serviceTabFilled))
