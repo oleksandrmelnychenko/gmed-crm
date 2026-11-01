@@ -2,11 +2,21 @@ import { describe, expect, it } from "vitest";
 
 import {
   blankOrderPrepaymentTerms,
+  orderNotYetBilledGross,
   orderPrepaymentError,
   orderPrepaymentPayload,
   orderPrepaymentTerms,
   orderPrepaymentUpdate,
 } from "./order-prepayment";
+
+describe("orderNotYetBilledGross", () => {
+  it("is what the order total holds beyond the invoices, never negative", () => {
+    expect(orderNotYetBilledGross("788", "550")).toBe(238);
+    expect(orderNotYetBilledGross(714, "827.05")).toBe(0);
+    expect(orderNotYetBilledGross("550", "550.00")).toBe(0);
+    expect(orderNotYetBilledGross(undefined, undefined)).toBe(0);
+  });
+});
 
 const required = (amount: string, dueAt: string | null = null) => ({
   prepayment_required: true,

@@ -14,7 +14,8 @@ import {
   type StatusTone,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { useLang } from "@/lib/i18n";
+import { useLang, type Lang } from "@/lib/i18n";
+import { pluralWord, type PluralWords } from "@/lib/i18n/plural";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
@@ -357,11 +358,12 @@ function SubscriptionCard({ subscription }: { subscription: PortalSubscriptionIt
 }
 
 function ServiceUsage({ service }: { service: PortalSubscriptionService }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const included = Number(service.included_quantity);
   const used = Number(service.used_quantity);
   const progress = included > 0 ? Math.min(100, Math.max(0, (used / included) * 100)) : 0;
-  const unit = subscriptionUnitLabel(service.unit_label, t);
+  const unit = (count: string | null | undefined) =>
+    subscriptionUnitLabel(service.unit_label, t, lang, Number(count));
 
   return (
     <div className="rounded-lg border border-border/70 bg-background/60 p-3">
@@ -375,7 +377,7 @@ function ServiceUsage({ service }: { service: PortalSubscriptionService }) {
           ) : null}
         </div>
         <div className="text-right font-mono text-xs tabular-nums text-muted-foreground">
-          {quantity(service.used_quantity)} / {quantity(service.included_quantity)} {unit}
+          {quantity(service.used_quantity)} / {quantity(service.included_quantity)} {unit(service.included_quantity)}
         </div>
       </div>
       <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
@@ -387,15 +389,15 @@ function ServiceUsage({ service }: { service: PortalSubscriptionService }) {
       <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
         <UsageMetric
           label={t.portal_subscriptions_included}
-          value={`${quantity(service.included_quantity)} ${unit}`}
+          value={`${quantity(service.included_quantity)} ${unit(service.included_quantity)}`}
         />
         <UsageMetric
           label={t.portal_subscriptions_used}
-          value={`${quantity(service.used_quantity)} ${unit}`}
+          value={`${quantity(service.used_quantity)} ${unit(service.used_quantity)}`}
         />
         <UsageMetric
           label={t.portal_subscriptions_remaining}
-          value={`${quantity(service.remaining_quantity)} ${unit}`}
+          value={`${quantity(service.remaining_quantity)} ${unit(service.remaining_quantity)}`}
         />
       </div>
       {Number(service.overage_quantity) > 0 ||
@@ -404,17 +406,17 @@ function ServiceUsage({ service }: { service: PortalSubscriptionService }) {
         <div className="mt-3 flex flex-wrap gap-2">
           {Number(service.overage_quantity) > 0 ? (
             <StatusBadge tone="warning">
-              {t.portal_subscriptions_overage}: {quantity(service.overage_quantity)} {unit}
+              {t.portal_subscriptions_overage}: {quantity(service.overage_quantity)} {unit(service.overage_quantity)}
             </StatusBadge>
           ) : null}
           {Number(service.pending_overage_quantity) > 0 ? (
             <StatusBadge tone="info">
-              {t.portal_subscriptions_pending_approval}: {quantity(service.pending_overage_quantity)} {unit}
+              {t.portal_subscriptions_pending_approval}: {quantity(service.pending_overage_quantity)} {unit(service.pending_overage_quantity)}
             </StatusBadge>
           ) : null}
           {Number(service.declined_overage_quantity ?? 0) > 0 ? (
             <StatusBadge tone="neutral">
-              {t.portal_subscriptions_declined}: {quantity(service.declined_overage_quantity ?? "0")} {unit}
+              {t.portal_subscriptions_declined}: {quantity(service.declined_overage_quantity ?? "0")} {unit(service.declined_overage_quantity ?? "0")}
             </StatusBadge>
           ) : null}
         </div>
@@ -432,9 +434,16 @@ function UsageMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
+// «1 поездок» (QA 2026-11-01, X3 NEW-6): the word follows the count.
+const COUNTED_TRIPS: PluralWords = { ru: ["поездка", "поездки", "поездок"], de: ["Fahrt", "Fahrten"] };
+const COUNTED_NIGHTS: PluralWords = { ru: ["ночь", "ночи", "ночей"], de: ["Nacht", "Nächte"] };
+const COUNTED_APPOINTMENTS: PluralWords = { ru: ["приём", "приёма", "приёмов"], de: ["Termin", "Termine"] };
+
 function subscriptionUnitLabel(
   rawUnit: string,
   t: ReturnType<typeof useLang>["t"],
+  lang: Lang,
+  count: number,
 ) {
   const normalized = rawUnit.trim().toLowerCase();
   if (["unit", "units", "einheit", "einheiten", "шт", "ед"].includes(normalized)) {
@@ -447,13 +456,13 @@ function subscriptionUnitLabel(
     return t.portal_subscriptions_days;
   }
   if (["trip", "trips", "ride", "rides", "fahrt", "fahrten", "поездка", "поездки"].includes(normalized)) {
-    return t.portal_subscriptions_trips;
+    return pluralWord(lang, count, COUNTED_TRIPS);
   }
   if (["night", "nights", "nacht", "nächte", "ночь", "ночи"].includes(normalized)) {
-    return t.portal_subscriptions_nights;
+    return pluralWord(lang, count, COUNTED_NIGHTS);
   }
   if (["appointment", "appointments", "termin", "termine", "приём", "прием"].includes(normalized)) {
-    return t.portal_subscriptions_appointments;
+    return pluralWord(lang, count, COUNTED_APPOINTMENTS);
   }
   return rawUnit || t.portal_subscriptions_units;
 }

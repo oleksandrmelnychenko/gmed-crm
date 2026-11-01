@@ -80,3 +80,13 @@ export function orderPrepaymentPayload(terms: OrderPrepaymentTerms) {
     ...(terms.prepayment_due_at ? { prepayment_due_at: terms.prepayment_due_at } : {}),
   };
 }
+
+/**
+ * What the order total holds beyond the patient's invoices: «осталось получить»
+ * counts issued invoices only, so 788 ordered and 550 billed read as settled
+ * (QA 2026-11-01, X3 A-0011).
+ */
+export function orderNotYetBilledGross(orderTotal: unknown, billedGross: string | undefined) {
+  const rest = Number(orderTotal ?? 0) - Number(billedGross ?? 0);
+  return Number.isFinite(rest) && rest >= 0.005 ? Math.round(rest * 100) / 100 : 0;
+}

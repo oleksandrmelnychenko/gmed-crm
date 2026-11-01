@@ -214,6 +214,20 @@ export function resolveOrderBlockingReason(
       values: { count: Number(approvedUninvoiced[1]) },
     };
   }
+  const packageOverage = reason.match(/^(\d+) approved package overage\(s\) are not invoiced yet$/);
+  if (packageOverage) {
+    return {
+      key: "orders_blocking_package_overage_uninvoiced_count",
+      values: { count: Number(packageOverage[1]) },
+    };
+  }
+  const pendingOverage = reason.match(/^(\d+) package overage\(s\) still await a decision$/);
+  if (pendingOverage) {
+    return {
+      key: "orders_blocking_package_overage_pending_count",
+      values: { count: Number(pendingOverage[1]) },
+    };
+  }
   const draftInvoices = reason.match(/^(\d+) draft patient invoice\(s\) are not issued yet$/);
   if (draftInvoices) {
     return {
@@ -324,9 +338,15 @@ export function orderBlockingReasonAnchor(reason: string): string | null {
 export function isPatientInvoiceBlockingReason(reason: string): boolean {
   return (
     /^\d+ approved service item\(s\) are not invoiced yet$/.test(reason) ||
+    /^\d+ approved package overage\(s\) are not invoiced yet$/.test(reason) ||
     /^\d+ draft patient invoice\(s\) are not issued yet$/.test(reason) ||
     /^Patient invoice .+ is not paid yet \(\w+\)$/.test(reason)
   );
+}
+
+/** Reasons in one line; each text ends with its own full stop (QA 2026-11-01: «2.; 1 …»). */
+export function joinBlockingReasons(reasons: string[]) {
+  return reasons.map((reason) => reason.trim().replace(/\.$/, "")).join("; ");
 }
 
 export function orderBlockingReasonSection(reason: string): OrderSectionKey {

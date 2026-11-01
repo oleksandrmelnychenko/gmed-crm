@@ -134,6 +134,7 @@ import {
 import {
   isOrderReadinessGateApplicable,
   isPatientInvoiceBlockingReason,
+  joinBlockingReasons,
   orderBlockingReasonAnchor,
   orderBlockingReasonSection,
   resolveOrderBlockingReason,
@@ -159,6 +160,7 @@ import {
   type PartnerCostAmounts,
 } from "./model/partner-cost-amounts";
 import { parseOrderStatusBlocker, resolveOrderNextStep } from "./model/order-next-step";
+import { orderNotYetBilledGross } from "./model/order-prepayment";
 import { orderLoadErrorKey } from "./model/order-load-error";
 import { LeadConfirmDialog } from "@/pages/leads/ui/lead-confirm-dialog";
 import {
@@ -4110,9 +4112,9 @@ function useOrdersPageContent() {
                                       .join("\n") || undefined,
                                   // «blocked» alone says nothing (QA 2026-11-01, R3 BUG-3).
                                   note: transition.blocked
-                                    ? transition.reasons
-                                        .map(localizedBlockingReason)
-                                        .join("; ") || undefined
+                                    ? joinBlockingReasons(
+                                        transition.reasons.map(localizedBlockingReason),
+                                      ) || undefined
                                     : undefined,
                                   className:
                                     transition.status === "cancelled"
@@ -4533,6 +4535,16 @@ function useOrdersPageContent() {
                               )}
                             />
                           </dl>
+                          {orderNotYetBilledGross(
+                            orderDetail.total_estimated,
+                            orderEconomics.actual.billed_to_patient_gross,
+                          ) > 0 ? (
+                            <p className="text-xs text-muted-foreground" data-testid="order-not-yet-billed">
+                              {lang === "de"
+                                ? `Noch nicht in Rechnung gestellt: ${formatMoney(orderNotYetBilledGross(orderDetail.total_estimated, orderEconomics.actual.billed_to_patient_gross), orderEconomics.currency)}. „Noch vom Patienten zu erhalten“ zählt nur ausgestellte Rechnungen.`
+                                : `Ещё не выставлено счётом: ${formatMoney(orderNotYetBilledGross(orderDetail.total_estimated, orderEconomics.actual.billed_to_patient_gross), orderEconomics.currency)}. «Осталось получить» считает только выпущенные счета.`}
+                            </p>
+                          ) : null}
                           {Number(orderEconomics.actual.advance_available_gross ?? 0) > 0 ||
                           Number(orderEconomics.actual.patient_credit_gross ?? 0) > 0 ? (
                             <p className="text-xs text-muted-foreground">

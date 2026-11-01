@@ -84,6 +84,14 @@ export function OrderCancellationBasis({
                 "Ausgeglichen: Die erbrachten Leistungen sind vollständig bezahlt.",
               )}
       </p>
+      {settlement.pending_overage_gross > 0 ? (
+        <p className="text-muted-foreground" data-testid="order-cancellation-pending-overage">
+          {tx(
+            `Превышение по тарифу ${money(settlement.pending_overage_gross)} ждёт решения и не входит в суммы выше. Если его подтвердят, оно войдёт в расчёт.`,
+            `Mehrverbrauch aus dem Tarif von ${money(settlement.pending_overage_gross)} wartet auf eine Entscheidung und ist in den Beträgen oben nicht enthalten. Wird er bestätigt, kommt er zur Abrechnung hinzu.`,
+          )}
+        </p>
+      ) : null}
       {settlement.lines.length > 0 ? (
         <ul className="grid gap-1">
           {settlement.lines.map((line, index) => (

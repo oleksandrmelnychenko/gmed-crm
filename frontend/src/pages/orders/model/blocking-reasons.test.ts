@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   isOrderReadinessGateApplicable,
   isPatientInvoiceBlockingReason,
+  joinBlockingReasons,
   orderBlockingReasonAnchor,
   orderBlockingReasonSection,
   resolveOrderBlockingReason,
@@ -165,6 +166,25 @@ describe("orderBlockingReasonSection", () => {
       key: "orders_blocking_patient_invoice_unpaid",
       values: { number: "RE-2026-0007" },
     });
+  });
+
+  it("sends an unbilled package overage to the invoices and names an undecided one", () => {
+    const unbilled = "1 approved package overage(s) are not invoiced yet";
+    expect(isPatientInvoiceBlockingReason(unbilled)).toBe(true);
+    expect(resolveOrderBlockingReason(unbilled)).toEqual({
+      key: "orders_blocking_package_overage_uninvoiced_count",
+      values: { count: 1 },
+    });
+    expect(resolveOrderBlockingReason("2 package overage(s) still await a decision")).toEqual({
+      key: "orders_blocking_package_overage_pending_count",
+      values: { count: 2 },
+    });
+  });
+
+  it("joins reasons without doubling their full stops", () => {
+    expect(joinBlockingReasons(["Открыто пунктов: 2.", "1 услуга не выставлена."])).toBe(
+      "Открыто пунктов: 2; 1 услуга не выставлена",
+    );
   });
 
   it("translates follow-up milestones that cannot count as completed yet", () => {

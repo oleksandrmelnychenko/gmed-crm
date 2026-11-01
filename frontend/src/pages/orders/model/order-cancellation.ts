@@ -22,6 +22,8 @@ export type OrderCancellationSettlement = {
   balance_gross: number;
   /** accrued − invoiced: what still needs a (final) invoice. */
   uninvoiced_gross: number;
+  /** Package overage nobody decided yet: outside the figures above. */
+  pending_overage_gross: number;
   lines: Array<{ description: string; status: string; gross: number }>;
 };
 
@@ -68,6 +70,7 @@ export function normalizeOrderCancellationSettlement(
     paid_gross: amount(source.paid_gross),
     balance_gross: amount(source.balance_gross),
     uninvoiced_gross: amount(source.uninvoiced_gross),
+    pending_overage_gross: amount(source.pending_overage_gross),
     lines: list(source.lines).map((entry) => {
       const line = record(entry);
       return {

@@ -14,6 +14,7 @@ import { toast } from "@/components/ui/toast";
 import { Field, textareaClass } from "@/components/ui-shell";
 import { formatAppDate } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
+import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import {
   fetchTerminationPreview,
@@ -239,6 +240,14 @@ export function TerminateContractDialog({
                         {tx("Паушалы к оплате полностью", "Voll fällige Pauschalen")}: {countDueInFull(order.lines)}
                       </p>
                       <CancelledAppointmentsNote appointments={order.cancelled_appointments ?? []} lang={lang} />
+                      {Number(order.pending_overage_gross ?? 0) > 0 ? (
+                        <p className="text-xs text-amber-900" data-testid="termination-pending-overage">
+                          {tx(
+                            `Превышение по тарифу ${formatMoneyAmount(order.pending_overage_gross, order.currency)} ждёт решения и не входит в суммы выше. Если его подтвердят, оно войдёт в расчёт.`,
+                            `Mehrverbrauch aus dem Tarif von ${formatMoneyAmount(order.pending_overage_gross, order.currency)} wartet auf eine Entscheidung und ist in den Beträgen oben nicht enthalten. Wird er bestätigt, kommt er zur Abrechnung hinzu.`,
+                          )}
+                        </p>
+                      ) : null}
                       {order.warnings.length > 0 ? (
                         <ul className="list-disc pl-4 text-xs text-amber-800">
                           {order.warnings.map((warning) => (
