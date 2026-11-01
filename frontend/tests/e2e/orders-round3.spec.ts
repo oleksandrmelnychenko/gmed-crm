@@ -153,6 +153,21 @@ test("the order shows which version the client signed (QA C3-01)", async ({ page
   await expect(note).toContainText("12.10.2026");
 });
 
+test("the order says when a report moved its total away from the signed one (W2)", async ({ page }) => {
+  const { order } = await prepare(page);
+  order.signed_patient = true;
+  order.total_estimated = "776.10";
+  order.client_signature = {
+    signed_total: "1002.20", signed_date_from: "2026-10-25", signed_date_to: "2026-10-30",
+    signed_at: "2026-10-12T10:00:00Z", signed_document_id: "doc-1",
+    terms_changed_at: null, changes_await_signature: false,
+  };
+  await page.goto(`/orders/${orderId}`);
+  const note = page.getByTestId("order-client-signed-version");
+  await expect(note).toContainText("1.002,20");
+  await expect(note).toContainText("776,10");
+});
+
 test("service cards name their charge source and show system notes in Russian (QA C3-10, C3-11)", async ({ page }) => {
   const { order } = await prepare(page);
   order.leistungen.push(

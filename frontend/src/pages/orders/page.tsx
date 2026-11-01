@@ -4382,7 +4382,7 @@ function useOrdersPageContent() {
                                 data-testid="order-client-signed-version"
                                 className={note.tone === "warning"
                                   ? "rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
-                                  : "px-1 text-xs leading-5 text-muted-foreground"}
+                                  : "rounded-lg border border-sky-200 bg-sky-50/70 px-3 py-2 text-xs leading-5 text-sky-900 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-200"}
                               >
                                 {note.text}
                               </p>
