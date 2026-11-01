@@ -286,6 +286,7 @@ import { OrderPipelinePanel } from "./ui/order-pipeline-panel";
 import { OrderSubscriptionCard } from "./ui/order-subscription-card";
 import { ScopedOrderDetail } from "./ui/scoped-order-detail";
 import { OrderInterpreterCallout } from "./ui/order-interpreter-callout";
+import { OrderPlannedAppointments } from "./ui/order-planned-appointments";
 import { ExternalInvoiceAllocationSheet } from "./ui/external-invoice-allocation-sheet";
 import {
   CancelLeistungDialog,
@@ -5377,6 +5378,13 @@ function useOrdersPageContent() {
                           }
                         />
                       </div>
+
+                      <OrderPlannedAppointments
+                        orderId={orderDetail.id}
+                        lang={lang}
+                        reloadNonce={reloadNonce}
+                        appointmentsHref={detailAppointmentsHref}
+                      />
 
                       <OrderInterpreterCallout
                         orderId={orderDetail.id}

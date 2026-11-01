@@ -27,6 +27,7 @@ import {
   pipelineMissingLabel,
   pipelineStageLabel,
   pipelineStageSection,
+  ORDER_APPOINTMENT_STATUS,
   pipelineStateLabel,
   type OrderPipeline,
   type OrderPipelineStage,
@@ -55,14 +56,6 @@ const STAGE_ICONS: Record<OrderPipelineStageKey, LucideIcon> = {
   appointments: CalendarClock,
   execution: ClipboardCheck,
   closure: ReceiptText,
-};
-
-const APPOINTMENT_STATUS: Record<string, { de: string; ru: string; tone: "neutral" | "info" | "warning" | "success" }> = {
-  planned: { de: "Geplant", ru: "Запланирован", tone: "warning" },
-  confirmed: { de: "Bestätigt", ru: "Подтверждён", tone: "info" },
-  in_progress: { de: "Läuft", ru: "Идёт", tone: "info" },
-  completed: { de: "Abgeschlossen", ru: "Завершён", tone: "success" },
-  cancelled: { de: "Abgesagt", ru: "Отменён", tone: "neutral" },
 };
 
 function StageBlock({
@@ -332,7 +325,7 @@ export function OrderPipelinePanel({
         ) : (
           <ul className="divide-y divide-border/60 rounded-md border border-border/60">
             {pipeline.appointments.map((appointment) => {
-              const status = APPOINTMENT_STATUS[appointment.status];
+              const status = ORDER_APPOINTMENT_STATUS[appointment.status];
               return (
                 <li key={appointment.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
                   <div className="min-w-0">

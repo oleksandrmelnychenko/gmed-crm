@@ -416,6 +416,34 @@ test("planning starts a new appointment of the order and comes back to it", asyn
   expect(href.searchParams.get("return_to")).toContain("section=planning");
 });
 
+test("planning lists the order's appointments by day and by doctor (plan stage 2)", async ({page}) => {
+  await prepare(page);
+  const item = (id: string, overrides: Record<string, unknown>) => ({
+    id, title: id, appointment_type: "medical", time_start: null, time_end: null, status: "planned", location: null,
+    provider_name: "Klinik Nord", doctor_name: "Dr. Weber", interpreter_name: null, interpreter_response: null, ...overrides,
+  });
+  await page.route(`**/api/v1/orders/${orderId}/pipeline`, route => route.fulfill({json: {
+    order_id: orderId, phase: "intake", status: "active", stages: [], medical: {visible: false, required: false}, appointments: [
+      item("MRT Abdomen", {date: "2026-11-02", time_start: "08:30:00", time_end: "09:30:00"}),
+      item("Kardiologie", {date: "2026-11-03", doctor_name: "Dr. Klein", interpreter_name: "Olga Test"}),
+      item("Nachbesprechung", {date: "2026-11-03", time_start: "13:00:00"}),
+      item("Abgesagt", {date: "2026-11-04", status: "cancelled"}),
+    ],
+  }}));
+  await page.goto(`/orders/${orderId}?section=planning`);
+  const plan = page.getByTestId("order-planned-appointments");
+  await expect(plan.getByRole("heading", {level: 3})).toHaveText(["Пн, 02.11.2026", "Вт, 03.11.2026"]);
+  await expect(plan).toContainText("08:30–09:30");
+  await expect(plan).toContainText("Переводчик: Olga Test");
+  await expect(plan).not.toContainText("Abgesagt");
+  await plan.getByRole("button", {name: "По врачам"}).click();
+  await expect(plan.getByRole("heading", {level: 3})).toHaveText([/Dr. Weber.*Klinik Nord/, /Dr. Klein.*Klinik Nord/]);
+  await expect(plan).toContainText("Вт, 03.11.2026 · 13:00");
+  const href = await plan.getByRole("link", {name: "MRT Abdomen"}).getAttribute("href");
+  expect(href).toContain("appointment=MRT%20Abdomen");
+  expect(href).toContain("return_to=");
+});
+
 test("saving a normalized note clears the dirty state", async ({page}) => {
   const {writes} = await prepare(page);
   await page.goto(`/orders/${orderId}?section=planning`);

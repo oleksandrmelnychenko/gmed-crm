@@ -67,6 +67,14 @@ export type OrderPipelineAppointment = {
   interpreter_response: string | null;
 };
 
+export const ORDER_APPOINTMENT_STATUS: Record<string, { de: string; ru: string; tone: "neutral" | "info" | "warning" | "success" }> = {
+  planned: { de: "Geplant", ru: "Запланирован", tone: "warning" },
+  confirmed: { de: "Bestätigt", ru: "Подтверждён", tone: "info" },
+  in_progress: { de: "Läuft", ru: "Идёт", tone: "info" },
+  completed: { de: "Abgeschlossen", ru: "Завершён", tone: "success" },
+  cancelled: { de: "Abgesagt", ru: "Отменён", tone: "neutral" },
+};
+
 export type OrderPipeline = {
   order_id: string;
   phase: string;
