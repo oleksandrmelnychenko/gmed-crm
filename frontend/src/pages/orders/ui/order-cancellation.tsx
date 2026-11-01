@@ -51,11 +51,14 @@ export function OrderCancellationBasis({
   const rows: Array<[string, number]> = [
     [tx("Оказано и подлежит оплате", "Erbracht und abzurechnen"), settlement.accrued_gross],
     [tx("Выставлено счетами", "In Rechnung gestellt"), settlement.invoiced_gross],
+    ...(settlement.advance_invoiced_gross > 0
+      ? ([[tx("Выставлено авансом", "Als Vorauszahlung berechnet"), settlement.advance_invoiced_gross]] as Array<[string, number]>)
+      : []),
     [tx("Получено от пациента", "Vom Patienten erhalten"), settlement.paid_gross],
   ];
   return (
     <div className="grid gap-2 text-xs">
-      <dl className="grid gap-1.5 sm:grid-cols-3">
+      <dl className={cn("grid gap-1.5", rows.length > 3 ? "sm:grid-cols-2" : "sm:grid-cols-3")}>
         {rows.map(([label, value]) => (
           <div key={label} className="rounded-lg border border-border/70 bg-card px-3 py-2">
             <dt className="text-muted-foreground">{label}</dt>

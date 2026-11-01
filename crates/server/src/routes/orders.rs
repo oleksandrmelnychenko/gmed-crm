@@ -4851,9 +4851,14 @@ async fn get_order_economics(
     let patient_credit_gross = held
         .try_get::<rust_decimal::Decimal, _>("patient_credit_gross")
         .unwrap_or(rust_decimal::Decimal::ZERO);
+    // Unpaid advances are open too, as the portal shows them (QA 2026-11-01,
+    // T3-9: an order with only an issued advance read 0,00).
     let patient_open_gross = (invoice
         .try_get::<rust_decimal::Decimal, _>("invoice_outstanding_gross")
         .unwrap_or(rust_decimal::Decimal::ZERO)
+        + advances
+            .try_get::<rust_decimal::Decimal, _>("advance_outstanding_gross")
+            .unwrap_or(rust_decimal::Decimal::ZERO)
         - advance_available_gross
         - patient_credit_gross)
         .max(rust_decimal::Decimal::ZERO);

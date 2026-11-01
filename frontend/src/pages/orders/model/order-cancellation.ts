@@ -14,6 +14,8 @@ export type OrderCancellationSettlement = {
   accrued_gross: number;
   /** Released non-advance invoices minus credit notes. */
   invoiced_gross: number;
+  /** Issued advance invoices minus credit notes: apart from `invoiced_gross`. */
+  advance_invoiced_gross: number;
   /** Cash received from the patient minus refunds. */
   paid_gross: number;
   /** accrued − paid: positive is still owed by the patient, negative is a refund. */
@@ -62,6 +64,7 @@ export function normalizeOrderCancellationSettlement(
     currency: text(source.currency, "EUR") || "EUR",
     accrued_gross: amount(source.accrued_gross),
     invoiced_gross: amount(source.invoiced_gross),
+    advance_invoiced_gross: amount(source.advance_invoiced_gross),
     paid_gross: amount(source.paid_gross),
     balance_gross: amount(source.balance_gross),
     uninvoiced_gross: amount(source.uninvoiced_gross),
