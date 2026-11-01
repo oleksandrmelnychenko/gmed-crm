@@ -1651,7 +1651,8 @@ pub(crate) async fn load_payer_state(
                               SELECT 1 FROM orders terms
                               WHERE terms.id = doc.order_id
                                 AND GREATEST(terms.client_terms_changed_at,
-                                             terms.prepayment_terms_changed_at)
+                                             terms.prepayment_terms_changed_at,
+                                             terms.contracting_party_changed_at)
                                     > COALESCE(
                                         (SELECT original.created_at FROM documents original
                                          WHERE original.id = doc.replaces_document_id
@@ -4552,6 +4553,25 @@ pub(crate) async fn outdate_framework_for_contracting_parents(
             ),
         )
         .await?;
+    }
+    // The order documents print the Auftraggeber too (QA 2026-11-01, V2),
+    // also under an inherited contract: `payer_terms_changed_at` outdates the
+    // order document, `contracting_party_changed_at` the Kostenvoranschlag and
+    // the Kostenübernahmeerklärung, and the order is signed again.
+    let orders: Vec<Uuid> = sqlx::query_scalar(
+        r#"WITH changed AS (SELECT clock_timestamp() AS at)
+           UPDATE orders
+           SET contracting_party_changed_at = changed.at,
+               payer_terms_changed_at = changed.at
+           FROM changed
+           WHERE source_lead_id = $1 AND status <> 'cancelled'
+           RETURNING id"#,
+    )
+    .bind(lead_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    for order_id in orders {
+        reset_order_signature_for_payer(tx, order_id, actor).await?;
     }
     Ok(())
 }

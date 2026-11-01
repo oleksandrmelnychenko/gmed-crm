@@ -2357,6 +2357,7 @@ async fn a_payer_change_outdates_the_order_document_and_the_payers_papers() {
     let (status, saved) = json_request(&app, "POST", &path, &pm, Some(third_party_payer())).await;
     assert_eq!(status, StatusCode::OK, "{saved}");
     let order_document = seed_generated_document(&app, lead_id, order_id, "single_order").await;
+    let estimate = seed_generated_document(&app, lead_id, order_id, "order_cost_estimate").await;
     let unsigned_paper =
         seed_generated_document(&app, lead_id, order_id, "cost_coverage_declaration").await;
     let signed_paper =
@@ -2405,6 +2406,8 @@ async fn a_payer_change_outdates_the_order_document_and_the_payers_papers() {
     assert_eq!(status, StatusCode::OK, "{saved}");
 
     assert_eq!(current(order_document).await, Some(false));
+    // The client's estimate prints the Auftraggeber, no third-party payer.
+    assert_eq!(current(estimate).await, Some(true));
     let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
     assert_eq!(
         readiness_check(&lead, "order_document_generated")["passed"],

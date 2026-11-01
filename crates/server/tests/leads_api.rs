@@ -8902,8 +8902,8 @@ async fn declare_mother_as_payer_and_sign(app: &TestApp, lead_id: Uuid, order_id
     assert_eq!(refused["error"], "payer_is_representative", "{refused}");
     // The fixture signed the order before she was named: as if signed after.
     sqlx::query(
-        "UPDATE orders SET payer_terms_changed_at = NULL, signed_patient = true,
-             signed_agency = true, signed_patient_at = now(), signed_agency_at = now(),
+        "UPDATE orders SET payer_terms_changed_at = NULL, contracting_party_changed_at = NULL,
+             signed_patient = true, signed_agency = true, signed_patient_at = now(), signed_agency_at = now(),
              signed_at = now()
          WHERE id = $1",
     )

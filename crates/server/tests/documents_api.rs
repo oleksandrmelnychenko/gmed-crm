@@ -12692,6 +12692,18 @@ async fn a_change_of_the_paying_parent_outdates_the_signed_framework_contract() 
     .await;
     assert_eq!(status, StatusCode::OK, "{generated}");
     let old_version: Uuid = generated["id"].as_str().unwrap().parse().unwrap();
+    // QA 2026-11-01, V2: the Kostenvoranschlag prints the Auftraggeber too.
+    let estimate_request = json!({"template_id":"order_cost_estimate","lead_id":lead,"order_id":order,"language":"de"});
+    let (status, generated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &bearer,
+        Some(estimate_request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let old_estimate: Uuid = generated["id"].as_str().unwrap().parse().unwrap();
     sqlx::query(
         "UPDATE framework_contracts SET status = 'signed', signed_at = now() WHERE id = $1",
     )
@@ -12699,6 +12711,11 @@ async fn a_change_of_the_paying_parent_outdates_the_signed_framework_contract() 
     .execute(&pool)
     .await
     .unwrap();
+    sqlx::query("UPDATE orders SET signed_patient = true, signed_patient_at = now() WHERE id = $1")
+        .bind(order)
+        .execute(&pool)
+        .await
+        .unwrap();
     let path = format!("/api/v1/leads/{lead}/payer-declaration");
     let current = |document: Uuid| {
         let pool = pool.clone();
@@ -12711,11 +12728,13 @@ async fn a_change_of_the_paying_parent_outdates_the_signed_framework_contract() 
         }
     };
     assert_eq!(current(old_version).await, None);
+    assert_eq!(current(old_estimate).await, Some(true));
 
     // The same parent again changes nothing.
     let same = json!({ "payer_kind": "representative", "payer_representative_id": mother, "acts_on_own_account": true });
     let (status, body) = json_request(&app, "POST", &path, &bearer, Some(same)).await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(current(old_estimate).await, Some(true));
     let unchanged: String =
         sqlx::query_scalar("SELECT status FROM framework_contracts WHERE id = $1")
             .bind(contract)
@@ -12737,6 +12756,31 @@ async fn a_change_of_the_paying_parent_outdates_the_signed_framework_contract() 
     assert_eq!(status_after, "draft");
     assert_eq!(signed_at, None);
     assert_eq!(current(old_version).await, Some(false));
+    assert_eq!(current(old_estimate).await, Some(false));
+    let signed_patient: bool =
+        sqlx::query_scalar("SELECT signed_patient FROM orders WHERE id = $1")
+            .bind(order)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!signed_patient, "the signed order names the previous parent");
+    let (_, lead_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead}"),
+        &bearer,
+        None,
+    )
+    .await;
+    let estimate_check = lead_body["readiness"]["checks"]
+        .as_array()
+        .and_then(|checks| {
+            checks
+                .iter()
+                .find(|check| check["key"] == "order_cost_estimate_document_generated")
+        })
+        .unwrap_or_else(|| panic!("no estimate check: {lead_body}"));
+    assert_eq!(estimate_check["passed"], false, "{lead_body}");
     let audited: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM audit_log
          WHERE action = 'update_framework_contract_status' AND entity_id = $1
@@ -12790,6 +12834,30 @@ async fn a_change_of_the_paying_parent_outdates_the_signed_framework_contract() 
         &app,
         "GET",
         &format!("/api/v1/documents/{new_version}/download"),
+        &bearer,
+    )
+    .await;
+    let text = extract_pdf_text(&bytes);
+    assert!(text.contains("Boris Vater"), "{text}");
+    assert!(!text.contains("Anna Mutter"), "{text}");
+
+    // So does the new estimate.
+    let (status, generated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &bearer,
+        Some(estimate_request),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let new_estimate: Uuid = generated["id"].as_str().unwrap().parse().unwrap();
+    assert_ne!(new_estimate, old_estimate);
+    assert_eq!(current(new_estimate).await, Some(true));
+    let (_, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{new_estimate}/download"),
         &bearer,
     )
     .await;
