@@ -147,7 +147,9 @@ async function mount(page: Page, lang: "ru" | "de", declaration: Declaration) {
         // Confirmations belong to the named payer; staff cannot carry a
         // patient's consent across a change to another person or organisation.
         const { payer_informed: informed, ...body } = request.postDataJSON() as Declaration;
-        const identity = (data: Declaration) => JSON.stringify([data.payer_type ?? "person", data.organisation_name ?? null, data.first_name, data.last_name, data.date_of_birth]);
+        // Which kind of organisation says nothing about who it is (server `normalized_payer_type`).
+        const organisation = (data: Declaration) => (data.payer_type ?? "person") !== "person";
+        const identity = (data: Declaration) => JSON.stringify([organisation(data), data.organisation_name ?? null, data.first_name, data.last_name, data.date_of_birth]);
         const sameIdentity = identity(state.declaration) === identity({ ...state.declaration, ...body });
         saves.push({ payer_informed: informed, ...body });
         state.declaration = {
@@ -240,14 +242,23 @@ test("staff turn a private payer into a company: name and seat instead of the pe
     await expect(section.getByLabel(label)).toHaveCount(0);
   }
   await expect(section.getByText("Гражданство")).toHaveCount(0);
+  // Another payer: nothing of the person stays, neither address nor contact
+  // nor relation (QA 2026-11-01 B1, B2).
   const seat = section.getByRole("group", { name: "Юридический адрес" });
-  await expect(seat.getByLabel(/^Улица и дом/)).toHaveValue("Musterweg 1");
-  await expect(seat.getByLabel(/^Почтовый индекс/)).toHaveValue("1010");
-  await expect(seat.getByLabel(/^Город/)).toHaveValue("Wien");
-  await expect(seat.getByRole("combobox", { name: "Страна юридического адреса плательщика" })).toContainText("Австрия");
+  await expect(seat.getByLabel(/^Улица и дом/)).toHaveValue("");
+  await expect(seat.getByLabel(/^Почтовый индекс/)).toHaveValue("");
+  await expect(seat.getByLabel(/^Город/)).toHaveValue("");
+  const seatCountry = seat.getByRole("combobox", { name: "Страна юридического адреса плательщика" });
+  await expect(seatCountry).not.toContainText("Австрия");
+  await expect(section.getByLabel(/^Электронная почта/)).toHaveValue("");
   // What is missing is worded for an organisation.
   await expect(section).toContainText("Заполните данные плательщика: название и юридический адрес");
   await section.getByLabel(/^Название/).fill("Beispiel GmbH");
+  await seat.getByLabel(/^Улица и дом/).fill("Firmenweg 2");
+  await seat.getByLabel(/^Почтовый индекс/).fill("1020");
+  await seat.getByLabel(/^Город/).fill("Wien");
+  await seatCountry.click();
+  await page.getByRole("option", { name: "Австрия", exact: true }).click();
   await expect(section).not.toContainText("Заполните данные плательщика");
 
   // A kind from the list replaces the free text.
@@ -262,7 +273,7 @@ test("staff turn a private payer into a company: name and seat instead of the pe
   await expect(relationshipText).toHaveCount(0);
   await relationship.click();
   await page.getByRole("option", { name: "Другое (уточните)", exact: true }).click();
-  await expect(relationshipText).toHaveValue("brother");
+  await expect(relationshipText).toHaveValue("");
   await relationship.click();
   await page.getByRole("option", { name: "Работодатель", exact: true }).click();
 
@@ -287,11 +298,11 @@ test("staff turn a private payer into a company: name and seat instead of the pe
     date_of_birth: null,
     place_of_birth: null,
     citizenships: [],
-    street: "Musterweg 1",
-    zip: "1010",
+    street: "Firmenweg 2",
+    zip: "1020",
     city: "Wien",
     country: "AT",
-    email: "viktor.zahler@example.com",
+    email: null,
     payer_informed: false,
   });
   // The consent is the lead's: staff never send it. This server knows no
@@ -337,11 +348,30 @@ test("a stored company with the lead's consent, in German", async ({ page }, tes
   // An insurer is an organisation as well; the consent stays out of the body.
   await section.getByRole("combobox", { name: "Art des Zahlers", exact: true }).click();
   await page.getByRole("option", { name: "Versicherung", exact: true }).click();
+  // Only the type: the same payer, so nothing is asked yet and the consent stands.
+  await expect.poll(() => saves.at(-1)).toMatchObject({
+    payer_type: "insurance",
+    organisation_name: "Beispiel GmbH",
+    relationship_kind: "employer",
+    email: "office@example.com",
+  });
+  await expect(section.getByTestId("lead-payer-contact-consent")).toContainText("05.10.2026 11:30");
+
+  // Another name is another payer: staff are warned that the consent, the contact
+  // and the relation go, and nothing is saved before they agree (QA 2026-11-01 B1, B2).
+  const savesBeforeReplacement = saves.length;
   await section.getByLabel(/^Name/).fill("Beispiel Versicherung AG");
+  const warning = page.getByTestId("lead-payer-consent-loss-dialog");
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText("Zahler ändern?");
+  expect(saves).toHaveLength(savesBeforeReplacement);
+  await warning.getByRole("button", { name: "Ändern", exact: true }).click();
   await expect.poll(() => saves.at(-1)).toMatchObject({
     payer_type: "insurance",
     organisation_name: "Beispiel Versicherung AG",
-    relationship_kind: "employer",
+    relationship_kind: null,
+    email: null,
+    street: null,
     first_name: null,
     citizenships: [],
   });
