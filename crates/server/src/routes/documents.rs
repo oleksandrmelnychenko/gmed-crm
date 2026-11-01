@@ -25999,6 +25999,20 @@ const PAYER_COST_ESTIMATE_PRIVACY_SENTENCE: &str =
 async fn load_payer_estimate_catalog(
     state: &AppState,
 ) -> Result<Vec<(String, String)>, axum::response::Response> {
+    payer_estimate_catalog_rows(&state.db).await.map_err(|error| {
+        tracing::error!(%error, "load agency service catalogue for the payer's estimate");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the service catalogue",
+        )
+    })
+}
+
+/// See [`load_payer_estimate_catalog`]; also read inside the release of an
+/// invoice.
+pub(crate) async fn payer_estimate_catalog_rows<'e>(
+    executor: impl sqlx::PgExecutor<'e>,
+) -> Result<Vec<(String, String)>, sqlx::Error> {
     // Order lines created before the catalogue got German names (migration
     // 20261011213000) still carry the English demo names.
     sqlx::query_as::<_, (String, String)>(
@@ -26011,15 +26025,40 @@ async fn load_payer_estimate_catalog(
              ('companion support', 'concierge_companion')
          ) AS legacy(name, service_key)",
     )
-    .fetch_all(&state.db)
+    .fetch_all(executor)
     .await
-    .map_err(|error| {
-        tracing::error!(%error, "load agency service catalogue for the payer's estimate");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to load the service catalogue",
-        )
-    })
+}
+
+/// "Art der Leistung" of an invoice or credit-note line addressed to a third
+/// party who pays (QA 2026-11-01, owner rule 2026-10-06: types and amounts,
+/// no medical detail): the type of the catalogue service the line is, as on
+/// the payer's estimate. A free-text line says nothing about itself, so a
+/// tax-free one is care (its exemption is printed anyway) and any other one
+/// the agency's service. An advance line names only the quote and stays.
+pub(crate) fn payer_invoice_line_label(
+    description: &str,
+    is_cost_passthrough: bool,
+    vat_rate: Decimal,
+    catalog: &[(String, String)],
+) -> String {
+    let description = description.trim();
+    if description.starts_with("Anzahlung gemäß Angebot") {
+        return description.to_string();
+    }
+    if is_cost_passthrough {
+        return "Auslagen".to_string();
+    }
+    let lower = description.to_lowercase();
+    catalog
+        .iter()
+        .find(|(name, _)| !name.is_empty() && *name == lower)
+        .map(|(_, key)| payer_estimate_catalog_label(key))
+        .unwrap_or(if vat_rate.is_zero() {
+            "Medizinische Leistungen"
+        } else {
+            "Leistungen der Agentur"
+        })
+        .to_string()
 }
 
 /// The German service type of a catalogue service, from its key. The texts of
@@ -44372,6 +44411,39 @@ mod tests {
                 "Dolmetscher- und Übersetzungsleistungen",
                 rust_decimal::Decimal::new(380, 0)
             )]
+        );
+    }
+
+    #[test]
+    fn a_payers_invoice_line_names_the_type_of_service_only() {
+        let catalog = vec![(
+            "dolmetscherbetreuung".to_string(),
+            "interpreter_hours".to_string(),
+        )];
+        let label = |description, passthrough, rate: i64| {
+            super::payer_invoice_line_label(
+                description,
+                passthrough,
+                rust_decimal::Decimal::new(rate, 0),
+                &catalog,
+            )
+        };
+        assert_eq!(
+            label(" Dolmetscherbetreuung ", false, 19),
+            "Dolmetscher- und Übersetzungsleistungen"
+        );
+        assert_eq!(
+            label("MRT Kniegelenk, Tumorverdacht", false, 0),
+            "Medizinische Leistungen"
+        );
+        assert_eq!(
+            label("MRT Kniegelenk, Tumorverdacht", false, 19),
+            "Leistungen der Agentur"
+        );
+        assert_eq!(label("Klinik Nordstern Onkologie", true, 0), "Auslagen");
+        assert_eq!(
+            label("Anzahlung gemäß Angebot KV-1 – Anteil 19 % USt.", false, 19),
+            "Anzahlung gemäß Angebot KV-1 – Anteil 19 % USt."
         );
     }
 

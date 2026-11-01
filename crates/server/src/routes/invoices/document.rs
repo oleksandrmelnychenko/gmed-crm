@@ -136,6 +136,14 @@ impl InvoiceRecipient {
         lines
     }
 
+    /// Addressed to someone other than the contracting party: the document
+    /// names the type of each service, never its medical text, its remark or
+    /// the invoice notes (owner rule 2026-10-06, QA 2026-11-01). A minor's
+    /// contracting parent and the party at another address are no such payer.
+    pub fn is_third_party_payer(&self) -> bool {
+        self.is_payer && self.service_recipient_name.is_some()
+    }
+
     /// Street plus postcode or city: enough to deliver the invoice.
     pub fn has_postal_address(&self) -> bool {
         self.street.is_some() && (self.zip.is_some() || self.city.is_some())

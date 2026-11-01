@@ -5375,6 +5375,20 @@ async fn load_invoice_pdf_context_on(
             .unwrap_or_default()
             .filter(|value| !value.trim().is_empty())
     };
+    let third_party_payer = recipient.is_third_party_payer();
+    let mut pdf_lines = parse_invoice_pdf_line_items(&line_items);
+    if third_party_payer {
+        let catalog = crate::routes::documents::payer_estimate_catalog_rows(&mut *conn).await?;
+        for line in &mut pdf_lines {
+            line.description = crate::routes::documents::payer_invoice_line_label(
+                &line.description,
+                line.is_cost_passthrough,
+                line.vat_rate_value,
+                &catalog,
+            );
+            line.comment = None;
+        }
+    }
 
     Ok(Some(InvoicePdfContext {
         currency: row
@@ -5422,7 +5436,7 @@ async fn load_invoice_pdf_context_on(
             .try_get::<Option<String>, _>("notes")
             .unwrap_or_default()
             .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty()),
+            .filter(|value| !value.is_empty() && !third_party_payer),
         patient_pid: row.try_get::<String, _>("patient_pid").unwrap_or_default(),
         patient_name: format!(
             "{} {}",
@@ -5447,7 +5461,7 @@ async fn load_invoice_pdf_context_on(
             .try_get::<Option<String>, _>("quote_number")
             .unwrap_or_default(),
         language: resolve_invoice_pdf_language(&languages),
-        line_items: parse_invoice_pdf_line_items(&line_items),
+        line_items: pdf_lines,
         agency: InvoicePdfAgency {
             name: setting("agency_name")
                 .unwrap_or_else(|| "GMED - Agentur für Patientenbetreuung".to_string()),
@@ -12538,6 +12552,14 @@ async fn load_einvoice(
 
     let (seller_street, seller_postcode, seller_city) =
         zugferd::split_german_address(&setting("agency_address").unwrap_or_default());
+    // The XML says what the printed invoice says: a third party who pays
+    // reads the type of each service only.
+    let third_party_payer = recipient.is_third_party_payer();
+    let payer_catalog = if third_party_payer {
+        crate::routes::documents::payer_estimate_catalog_rows(&mut *conn).await?
+    } else {
+        Vec::new()
+    };
     let lines = line_items
         .as_array()
         .map(Vec::as_slice)
@@ -12546,21 +12568,32 @@ async fn load_einvoice(
         .map(|line| {
             let quantity = decimal(line.get("quantity")).unwrap_or(Decimal::ONE);
             let unit_net = decimal(line.get("unit_price")).unwrap_or(Decimal::ZERO);
+            let vat_rate = decimal(line.get("vat_rate")).unwrap_or(Decimal::ZERO);
+            let is_cost_passthrough = line
+                .get("is_cost_passthrough")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let description = line
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             zugferd::EInvoiceLine {
-                name: line
-                    .get("description")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
-                note: line_comments::line_comment(line),
+                name: if third_party_payer {
+                    crate::routes::documents::payer_invoice_line_label(
+                        description,
+                        is_cost_passthrough,
+                        vat_rate,
+                        &payer_catalog,
+                    )
+                } else {
+                    description.to_string()
+                },
+                note: line_comments::line_comment(line).filter(|_| !third_party_payer),
                 quantity,
                 unit_net,
                 line_net: decimal(line.get("line_net")).unwrap_or(quantity * unit_net),
-                vat_rate: decimal(line.get("vat_rate")).unwrap_or(Decimal::ZERO),
-                is_cost_passthrough: line
-                    .get("is_cost_passthrough")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
+                vat_rate,
+                is_cost_passthrough,
             }
         })
         .collect();
@@ -12578,7 +12611,7 @@ async fn load_einvoice(
         service_period,
         currency,
         order_number: optional("order_number"),
-        note: optional("notes"),
+        note: optional("notes").filter(|_| !third_party_payer),
         seller: zugferd::EInvoiceParty {
             name: setting("agency_name").unwrap_or_default(),
             address_line: seller_street,

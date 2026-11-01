@@ -169,6 +169,12 @@ pub(crate) async fn load_credit_note_pdf_context(
         .try_get::<DateTime<Utc>, _>("issued_at")
         .unwrap_or_else(|_| Utc::now());
     let recipient = super::document::load_invoice_recipient(conn, invoice_id).await?;
+    let lines = lines_for_recipient(
+        conn,
+        parse_credit_note_lines(row.try_get::<Option<Value>, _>("line_items")?.as_ref()),
+        recipient.as_ref(),
+    )
+    .await?;
     Ok(Some(CreditNotePdfContext {
         recipient,
         credit_note_id,
@@ -184,7 +190,7 @@ pub(crate) async fn load_credit_note_pdf_context(
         amount_net: row.try_get("amount_net")?,
         amount_vat: row.try_get("amount_vat")?,
         amount_gross: row.try_get("amount_gross")?,
-        lines: parse_credit_note_lines(row.try_get::<Option<Value>, _>("line_items")?.as_ref()),
+        lines,
         credit_portal_visible: row.try_get("credit_portal_visible")?,
         invoice_number: row.try_get("invoice_number")?,
         invoice_date: issued_at
@@ -212,6 +218,33 @@ pub(crate) async fn load_credit_note_pdf_context(
         },
         vat_id: setting(&row, "agency_vat_id"),
         tax_number: setting(&row, "agency_tax_number"),
+    }))
+}
+
+/// A correction goes to whoever the invoice went to: a third party who pays
+/// reads the type of each service, like on the invoice (QA 2026-11-01).
+async fn lines_for_recipient(
+    conn: &mut PgConnection,
+    lines: Option<Vec<CreditNoteLine>>,
+    recipient: Option<&super::document::InvoiceRecipient>,
+) -> Result<Option<Vec<CreditNoteLine>>, sqlx::Error> {
+    if !recipient.is_some_and(|recipient| recipient.is_third_party_payer()) {
+        return Ok(lines);
+    }
+    let catalog = crate::routes::documents::payer_estimate_catalog_rows(&mut *conn).await?;
+    Ok(lines.map(|lines| {
+        lines
+            .into_iter()
+            .map(|line| CreditNoteLine {
+                description: crate::routes::documents::payer_invoice_line_label(
+                    &line.description,
+                    line.is_cost_passthrough,
+                    line.vat_rate,
+                    &catalog,
+                ),
+                ..line
+            })
+            .collect()
     }))
 }
 
@@ -282,6 +315,7 @@ pub(crate) async fn load_storno_pdf_context(
                 .collect::<Vec<_>>()
         })
         .filter(|lines| !lines.is_empty());
+    let lines = lines_for_recipient(conn, lines, recipient.as_ref()).await?;
     Ok(Some(CreditNotePdfContext {
         recipient,
         credit_note_id: row.try_get("id")?,
@@ -965,12 +999,19 @@ pub(crate) fn build_credit_note_pdf(
     }
     layout.meta(&cells);
     layout.space(2.0);
-    layout.paragraph(
-        &format!("{}: {}", label(language, "reason"), context.reason.trim()),
-        10.0,
-        false,
-        Tone::Body,
-    );
+    // Staff write the reason in their own words, it may name the treatment.
+    if !context
+        .recipient
+        .as_ref()
+        .is_some_and(|recipient| recipient.is_third_party_payer())
+    {
+        layout.paragraph(
+            &format!("{}: {}", label(language, "reason"), context.reason.trim()),
+            10.0,
+            false,
+            Tone::Body,
+        );
+    }
     layout.space(4.0);
 
     layout.paragraph(
@@ -1611,6 +1652,17 @@ mod tests {
         assert!(text.contains("Ivan Zahler"), "{text}");
         assert!(text.contains("Hauptstraße 1"), "{text}");
         assert!(text.contains("10115 Berlin"), "{text}");
+    }
+
+    #[test]
+    fn a_third_party_payer_reads_no_reason() {
+        let mut note = context(None, "credit_note");
+        let text = |note: &CreditNotePdfContext| {
+            pdf_extract::extract_text_from_mem(&build_credit_note_pdf(note).unwrap()).unwrap()
+        };
+        assert!(text(&note).contains("Hotel nicht in Anspruch"));
+        note.recipient.as_mut().unwrap().service_recipient_name = Some("Anna Patientin".into());
+        assert!(!text(&note).contains("Hotel nicht in Anspruch"));
     }
 
     #[test]
