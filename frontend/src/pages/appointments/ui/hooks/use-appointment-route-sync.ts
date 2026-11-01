@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   type Dispatch,
   type SetStateAction,
 } from "react";
@@ -132,6 +133,10 @@ export function useAppointmentRouteHydration({
   openDetailWorkspace,
   onOpenCreateFromRoute,
 }: UseAppointmentRouteHydrationOptions) {
+  // The URL drops `create` a render later, and every render passes a new
+  // callback: without this the effect would reopen the sheet in a loop.
+  const createHandledRef = useRef(false);
+
   useEffect(() => {
     const patientParam = searchParams.get("patient") ?? "";
     const orderParam = searchParams.get("order") ?? "";
@@ -164,7 +169,10 @@ export function useAppointmentRouteHydration({
       closeDetailWorkspace(false);
     }
 
-    if (createParam && canCreate) {
+    if (!createParam) {
+      createHandledRef.current = false;
+    } else if (canCreate && !createHandledRef.current) {
+      createHandledRef.current = true;
       onOpenCreateFromRoute({ patientId: patientParam, orderId: orderParam });
       const params = new URLSearchParams(searchParams);
       params.delete("create");

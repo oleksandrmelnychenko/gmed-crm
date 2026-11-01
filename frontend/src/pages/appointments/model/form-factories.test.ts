@@ -6,12 +6,66 @@ import {
   blankAppointmentForm,
   buildEditAppointmentForm,
   blankAppointmentFormForCurrentUser,
+  appointmentReturnPath,
   defaultAppointmentOwnerUserId,
+  nextAppointmentForm,
   restoreEditAppointmentRecurrenceFields,
 } from "./form-factories";
 import type { AppointmentDetail } from "./types";
 
 describe("appointment form factories", () => {
+  it("keeps the doctor, place and day for the next appointment of an order", () => {
+    const next = nextAppointmentForm({
+      ...blankAppointmentForm(),
+      patientId: "patient-1",
+      orderId: "order-1",
+      providerId: "provider-1",
+      doctorId: "doctor-1",
+      ownerUserId: "user-1",
+      interpreterId: "interpreter-1",
+      location: "Klinik",
+      date: "2026-11-20",
+      title: "MRT",
+      timeStart: "10:00",
+      timeEnd: "11:00",
+      category: "Radiologie",
+      notes: "nüchtern",
+      repeatEnabled: true,
+      repeatCount: "8",
+    });
+
+    expect(next).toMatchObject({
+      patientId: "patient-1",
+      orderId: "order-1",
+      providerId: "provider-1",
+      doctorId: "doctor-1",
+      ownerUserId: "user-1",
+      location: "Klinik",
+      date: "2026-11-20",
+      interpreterId: "",
+      title: "",
+      timeStart: "",
+      timeEnd: "",
+      category: "",
+      notes: "",
+      repeatEnabled: false,
+      repeatCount: "4",
+    });
+  });
+
+  it("returns only to a path inside the console", () => {
+    const returnPath = (value: string) =>
+      appointmentReturnPath(new URLSearchParams({ return_to: value }));
+
+    expect(returnPath("/orders/order-1?section=planning")).toBe(
+      "/orders/order-1?section=planning",
+    );
+    expect(returnPath("//evil.example")).toBe("");
+    expect(returnPath("/\\evil.example")).toBe("");
+    expect(returnPath("https://evil.example")).toBe("");
+    expect(appointmentReturnPath(new URLSearchParams())).toBe("");
+  });
+
   it("defaults the owner to the current non-interpreter user", () => {
     expect(defaultAppointmentOwnerUserId("user-1", "patient_manager")).toBe(
       "user-1",

@@ -11,6 +11,7 @@ import {
 import { Plus, LoaderCircle } from "lucide-react";
 
 import { apiFetch } from "@/lib/api";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -68,7 +69,10 @@ import type {
 import { assignableInterpreterOptions } from "@/pages/appointments/model/types";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
-import { hasAppointmentFormChanges } from "@/pages/appointments/model/form-factories";
+import {
+  hasAppointmentFormChanges,
+  nextAppointmentForm,
+} from "@/pages/appointments/model/form-factories";
 import {
   buildCreateAppointmentPayload,
   validateCreateAppointmentForm,
@@ -107,6 +111,8 @@ export type CreateAppointmentSheetProps = {
   onDraftChange?: (draft: AppointmentFormState) => void;
   onDraftDiscard?: () => void;
   onCreated: (result: { id: string; notice: string }) => void;
+  /** Saved with "save and plan the next one": the sheet stays open. */
+  onPlannedNext?: () => void;
 };
 
 type CreateAppointmentSheetState = {
@@ -116,6 +122,9 @@ type CreateAppointmentSheetState = {
   conflicts: ConflictSummary | null;
   error: string;
   busy: boolean;
+  savedCount: number;
+  savedSummary: string;
+  savedNotice: string;
 };
 
 function isConfirmedDismiss(
@@ -166,6 +175,7 @@ function useCreateAppointmentSheetContent({
   onDraftChange,
   onDraftDiscard,
   onCreated,
+  onPlannedNext,
 }: CreateAppointmentSheetProps) {
   const {
     appointmentText,
@@ -193,9 +203,23 @@ function useCreateAppointmentSheetContent({
       conflicts: null,
       error: "",
       busy: false,
+      savedCount: 0,
+      savedSummary: "",
+      savedNotice: "",
     }),
   );
-  const { form, baseline, doctors, conflicts, error, busy } = sheetState;
+  const {
+    form,
+    baseline,
+    doctors,
+    conflicts,
+    error,
+    busy,
+    savedCount,
+    savedSummary,
+    savedNotice,
+  } = sheetState;
+  const savedBannerRef = useRef<HTMLDivElement | null>(null);
   const latestDraftRef = useRef<AppointmentFormState | null>(draft ?? null);
   const wasOpenRef = useRef(false);
   const setForm = (nextValue: SetStateAction<AppointmentFormState>) => {
@@ -243,7 +267,10 @@ function useCreateAppointmentSheetContent({
     nextOpen: boolean,
     eventDetails?: AppointmentEditorSheetOpenChangeDetails,
   ) {
-    if (!nextOpen && isConfirmedDismiss(eventDetails)) {
+    if (
+      !nextOpen &&
+      (isConfirmedDismiss(eventDetails) || (savedCount > 0 && !isDirty))
+    ) {
       onDraftDiscard?.();
     }
 
@@ -260,10 +287,20 @@ function useCreateAppointmentSheetContent({
         conflicts: null,
         error: "",
         busy: false,
+        savedCount: 0,
+        savedSummary: "",
+        savedNotice: "",
       });
     }
     wasOpenRef.current = open;
   }, [open, seed]);
+
+  // The save button sits below the fields: bring the result into view.
+  useEffect(() => {
+    if (savedCount > 0) {
+      savedBannerRef.current?.scrollIntoView({ block: "nearest" });
+    }
+  }, [savedCount]);
 
   const scheduleWarningLabels = useMemo(
     () => ({
@@ -426,6 +463,8 @@ function useCreateAppointmentSheetContent({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    const planNext = submitter?.dataset.planNext === "true";
     dispatchSheetState({
       busy: true,
       error: "",
@@ -460,8 +499,28 @@ function useCreateAppointmentSheetContent({
         ),
       });
       const notice = buildScheduleNotice(result.conflicts, localWarnings);
-      onOpenChange(false);
+      if (planNext) {
+        dispatchSheetState((current) => {
+          const next = nextAppointmentForm(current.form);
+          return {
+            form: next,
+            baseline: next,
+            conflicts: null,
+            error: "",
+            busy: false,
+            savedCount: current.savedCount + 1,
+            savedSummary: t.appointments_planned_saved
+              .replace("{count}", String(current.savedCount + 1))
+              .replace("{title}", form.title.trim())
+              .replace("{date}", formatAppDate(form.date)),
+            savedNotice: notice,
+          };
+        });
+        onPlannedNext?.();
+        return;
+      }
       onCreated({ id: result.id, notice });
+      onOpenChange(false);
     } catch (submitError) {
       dispatchSheetState({
         error: formatScheduleConflictError(
@@ -472,6 +531,8 @@ function useCreateAppointmentSheetContent({
       });
     }
   }
+
+  const canPlanNext = Boolean(form.orderId);
 
   function sectionTitle(label: string) {
     return (
@@ -500,25 +561,65 @@ function useCreateAppointmentSheetContent({
             className="h-8 rounded-lg"
             onClick={requestClose}
           >
-            {tr.common_cancel}
+            {savedCount > 0 ? t.users_done : tr.common_cancel}
           </Button>
-          <Button
-            type="submit"
-            size="sm"
-            className="h-8 rounded-lg gap-1.5 px-3.5"
-            disabled={busy}
-          >
-            {busy ? (
-              <LoaderCircle className="size-3.5 animate-spin" />
-            ) : (
-              <Plus className="size-3.5" />
-            )}
-            {busy ? t.patients_creating : t.appointments_new}
-          </Button>
+          {canPlanNext ? (
+            <>
+              {/* First in the form, so Enter never keeps the sheet open by surprise. */}
+              <Button
+                type="submit"
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-lg px-3.5"
+                disabled={busy}
+              >
+                {t.common_save}
+              </Button>
+              <Button
+                type="submit"
+                data-plan-next="true"
+                size="sm"
+                className="h-8 rounded-lg gap-1.5 px-3.5"
+                disabled={busy}
+              >
+                {busy ? (
+                  <LoaderCircle className="size-3.5 animate-spin" />
+                ) : (
+                  <Plus className="size-3.5" />
+                )}
+                {busy ? t.patients_creating : t.appointments_save_and_plan_next}
+              </Button>
+            </>
+          ) : (
+            <Button
+              type="submit"
+              size="sm"
+              className="h-8 rounded-lg gap-1.5 px-3.5"
+              disabled={busy}
+            >
+              {busy ? (
+                <LoaderCircle className="size-3.5 animate-spin" />
+              ) : (
+                <Plus className="size-3.5" />
+              )}
+              {busy ? t.patients_creating : t.appointments_new}
+            </Button>
+          )}
         </>
       }
     >
       <div className="space-y-4">
+        {savedCount > 0 ? (
+          <div ref={savedBannerRef} className="space-y-2" data-testid="appointment-planned-saved">
+            <div
+              role="status"
+              className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
+            >
+              {savedSummary}
+            </div>
+            {savedNotice ? <Banner tone="warning">{savedNotice}</Banner> : null}
+          </div>
+        ) : null}
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
                 {sectionTitle(appointmentText("appointments_appointment_and_timing"))}
                 <div className="grid gap-4 md:grid-cols-3">
@@ -1076,5 +1177,6 @@ export const MemoizedCreateAppointmentSheet = memo(
     prev.onDraftDiscard === next.onDraftDiscard &&
     prev.title === next.title &&
     prev.onOpenChange === next.onOpenChange &&
-    prev.onCreated === next.onCreated,
+    prev.onCreated === next.onCreated &&
+    prev.onPlannedNext === next.onPlannedNext,
 );

@@ -362,7 +362,7 @@ export function SheetActionsFooter({
     <div className="shrink-0 bg-popover">
       <SheetFooterError error={error} />
       {error ? null : <SheetFooterHint hint={hint ?? noChangesText} />}
-      <div className="flex justify-end gap-2 px-4 py-3">{children}</div>
+      <div className="flex flex-wrap justify-end gap-2 px-4 py-3">{children}</div>
     </div>
   );
 }

@@ -9,6 +9,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { StaffLink } from "@/components/staff-link";
 import { Button } from "@/components/ui/button";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { toast } from "@/components/ui/toast";
@@ -106,7 +107,14 @@ function AppointmentOverviewSection({
           {/* The order number instead of the appointment's technical id. */}
           {detail.order_number && canSeeOrder ? (
             <p className="text-[11px] text-muted-foreground/80">
-              {appointmentText("appointments_order")} {detail.order_number}
+              {appointmentText("appointments_order")}{" "}
+              {detail.order_id ? (
+                <StaffLink to={`/orders/${detail.order_id}`} className="hover:underline">
+                  {detail.order_number}
+                </StaffLink>
+              ) : (
+                detail.order_number
+              )}
             </p>
           ) : null}
         </div>

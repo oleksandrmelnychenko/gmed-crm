@@ -52,6 +52,7 @@ import {
 const ACTIVE_APPOINTMENT_STATUSES = new Set(["planned", "confirmed", "in_progress"]);
 import {
   appointmentCreateContextFromSearch,
+  appointmentReturnPath,
   applyAppointmentCreateContext,
   blankAppointmentForm,
   blankAppointmentFormForCurrentUser,
@@ -307,6 +308,10 @@ function useStaffAppointmentsPageContent() {
     patientId: createContextPatientId,
     orderId: createContextOrderId,
   } = appointmentCreateContextFromSearch(searchParams);
+  const returnToOrder = appointmentReturnPath(searchParams);
+  // Set while closing the create sheet should lead back to the order: it was
+  // opened from the order, or appointments were planned in a row.
+  const leaveCreateSheetToOrderRef = useRef(false);
   const permissions = appointmentPermissions(user);
   const patientSheetPermissions = linkedPatientPermissions(user);
   const canReviewAppointmentRequests = permissions.canManageStatus;
@@ -1210,6 +1215,17 @@ function useStaffAppointmentsPageContent() {
     window.localStorage.setItem(CALENDAR_STORAGE_DATE_KEY, calendarDate);
   }, [calendarDate, calendarView]);
 
+  const handleCreateSheetOpenChange = useCallback(
+    (open: boolean) => {
+      handleCreateOpenChange(open);
+      if (!open && leaveCreateSheetToOrderRef.current) {
+        leaveCreateSheetToOrderRef.current = false;
+        staffGo(returnToOrder);
+      }
+    },
+    [handleCreateOpenChange, returnToOrder, staffGo],
+  );
+
   useAppointmentRouteHydration({
     searchParams,
     setSearchParams,
@@ -1220,6 +1236,7 @@ function useStaffAppointmentsPageContent() {
     setFilters,
     openDetailWorkspace: openDetailWorkspaceFromRoute,
     onOpenCreateFromRoute: (context) => {
+      leaveCreateSheetToOrderRef.current = Boolean(returnToOrder);
       openCreateSeedSheet(
         applyAppointmentCreateContext(
           blankAppointmentFormForCurrentUser(user?.id, user?.role),
@@ -1719,6 +1736,8 @@ function useStaffAppointmentsPageContent() {
           createLabel={t.appointments_new}
           refreshTitle={appointmentText("appointments_refresh")}
           canCreate={permissions.canCreate}
+          backTo={returnToOrder}
+          backLabel={t.appointments_back_to_order}
           onCreate={() => openCreateSheetFromDate()}
           onRefresh={refreshAppointments}
           appointmentsError={appointmentsError}
@@ -1907,16 +1926,26 @@ function useStaffAppointmentsPageContent() {
         staff={staff}
         userId={user?.id}
         userRole={user?.role}
-        onOpenChange={handleCreateOpenChange}
+        onOpenChange={handleCreateSheetOpenChange}
         onDraftChange={handleCreateDraftChange}
         onDraftDiscard={clearCreateDraft}
         onCreated={({ id, notice }) => {
           clearCreateDraft();
           reportAppointmentsNotice(notice);
           refreshAppointments();
+          leaveCreateSheetToOrderRef.current = false;
+          // Started from an order: back there, unless a warning needs reading.
+          if (returnToOrder && !notice) {
+            staffGo(returnToOrder);
+            return;
+          }
           if (id) {
             openDetailSheet(id);
           }
+        }}
+        onPlannedNext={() => {
+          refreshAppointments();
+          leaveCreateSheetToOrderRef.current = Boolean(returnToOrder);
         }}
       />
 

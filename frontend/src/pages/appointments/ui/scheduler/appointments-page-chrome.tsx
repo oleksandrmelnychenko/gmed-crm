@@ -1,6 +1,7 @@
-import { Plus, RefreshCw } from "lucide-react";
+import { ArrowLeft, Plus, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { StaffLink } from "@/components/staff-link";
 import { Banner, PageHeader } from "@/components/ui-shell";
 
 type AppointmentsPageChromeProps = {
@@ -8,6 +9,9 @@ type AppointmentsPageChromeProps = {
   createLabel: string;
   refreshTitle: string;
   canCreate: boolean;
+  /** The order the calendar was opened from. */
+  backTo?: string;
+  backLabel?: string;
   onCreate: () => void;
   onRefresh: () => void;
   appointmentsError?: string | null;
@@ -21,6 +25,8 @@ export function AppointmentsPageChrome({
   createLabel,
   refreshTitle,
   canCreate,
+  backTo,
+  backLabel,
   onCreate,
   onRefresh,
   appointmentsError,
@@ -30,6 +36,15 @@ export function AppointmentsPageChrome({
 }: AppointmentsPageChromeProps) {
   return (
     <div className="space-y-4">
+      {backTo ? (
+        <StaffLink
+          to={backTo}
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ArrowLeft className="size-3.5" />
+          {backLabel}
+        </StaffLink>
+      ) : null}
       <PageHeader
         title={title}
         actions={

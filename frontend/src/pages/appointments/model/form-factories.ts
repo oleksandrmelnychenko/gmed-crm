@@ -95,6 +95,42 @@ export function appointmentCreateContextFromSearch(
 }
 
 /**
+ * The order workspace a calendar opened from an order returns to
+ * (`?return_to=`). Only a path inside the console counts.
+ */
+export function appointmentReturnPath(searchParams: URLSearchParams): string {
+  const path = searchParams.get("return_to")?.trim() ?? "";
+  return path.startsWith("/") && !/^\/[/\\]/.test(path) ? path : "";
+}
+
+/**
+ * The form for the next appointment of an order after one was saved: the
+ * doctor, place and day stay, what belongs to the saved visit is cleared. The
+ * interpreter is cleared too: booking one notifies them, and interpreters are
+ * sorted onto the plan once it is agreed.
+ */
+export function nextAppointmentForm(
+  form: AppointmentFormState,
+): AppointmentFormState {
+  const blank = blankAppointmentForm();
+  return {
+    ...form,
+    interpreterId: blank.interpreterId,
+    title: blank.title,
+    timeStart: blank.timeStart,
+    timeEnd: blank.timeEnd,
+    category: blank.category,
+    notes: blank.notes,
+    repeatEnabled: blank.repeatEnabled,
+    repeatFrequency: blank.repeatFrequency,
+    repeatInterval: blank.repeatInterval,
+    repeatEndMode: blank.repeatEndMode,
+    repeatCount: blank.repeatCount,
+    repeatUntil: blank.repeatUntil,
+  };
+}
+
+/**
  * Preselects the patient and order of the calling context. An order is only
  * taken over together with its patient: the order select lists the orders of
  * the chosen patient, and an appointment always belongs to a patient.

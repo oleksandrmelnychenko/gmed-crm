@@ -403,6 +403,19 @@ test("a failed background refresh leaves the form editable and its error visible
   await expect(note).toBeEditable();
 });
 
+test("planning starts a new appointment of the order and comes back to it", async ({page}) => {
+  await prepare(page);
+  await page.goto(`/orders/${orderId}?section=planning`);
+  const link = page.getByRole("link", {name:"Новый приём"});
+  await expect(link).toBeVisible();
+  const href = new URL((await link.getAttribute("href")) ?? "", "http://gmed.test");
+  expect(href.pathname).toBe("/appointments");
+  expect(href.searchParams.get("order")).toBe(orderId);
+  expect(href.searchParams.get("create")).toBe("1");
+  expect(href.searchParams.get("return_to")).toContain(`/orders/${orderId}`);
+  expect(href.searchParams.get("return_to")).toContain("section=planning");
+});
+
 test("saving a normalized note clears the dirty state", async ({page}) => {
   const {writes} = await prepare(page);
   await page.goto(`/orders/${orderId}?section=planning`);

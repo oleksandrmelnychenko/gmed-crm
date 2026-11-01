@@ -39,6 +39,8 @@ type OrderPipelinePanelProps = {
   lang: string;
   reloadNonce: number;
   appointmentsHref: string;
+  /** Opens the new-appointment form for this order; empty without the right to plan. */
+  newAppointmentHref?: string;
   providersHref: string;
   /** Patient invoices of this order; closure is settled there, not in the supplier invoices. */
   invoicesHref: string;
@@ -134,6 +136,7 @@ export function OrderPipelinePanel({
   lang,
   reloadNonce,
   appointmentsHref,
+  newAppointmentHref,
   providersHref,
   invoicesHref,
   onOpenSection,
@@ -314,7 +317,12 @@ export function OrderPipelinePanel({
         lang={lang}
         current={current === "appointments"}
         action={
-          <StaffLink to={appointmentsHref} className={linkButtonClass}>{tx("Календарь приёмов", "Terminkalender")}</StaffLink>
+          <div className="flex flex-wrap items-center gap-2">
+            <StaffLink to={appointmentsHref} className={linkButtonClass}>{tx("Календарь приёмов", "Terminkalender")}</StaffLink>
+            {newAppointmentHref ? (
+              <StaffLink to={newAppointmentHref} className={linkButtonClass}>{tx("Новый приём", "Neuer Termin")}</StaffLink>
+            ) : null}
+          </div>
         }
       >
         {pipeline.appointments.length === 0 ? (

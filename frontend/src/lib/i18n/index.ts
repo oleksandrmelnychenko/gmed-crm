@@ -500,6 +500,9 @@ export interface Translations
   appointments_provider_category: string;
   appointments_location: string;
   appointments_new: string;
+  appointments_save_and_plan_next: string;
+  appointments_planned_saved: string;
+  appointments_back_to_order: string;
   appointments_recurring_series: string;
   appointments_occurrence: string;
   appointments_until: string;

@@ -3441,8 +3441,15 @@ function useOrdersPageContent() {
     ? `order=${encodeURIComponent(orderDetail.id)}`
     : "";
   const detailAppointmentsHref = orderDetail
-    ? `/appointments?${detailOrderHref}${detailPatientQuery}`
+    ? `/appointments?${detailOrderHref}${detailPatientQuery}&return_to=${encodeURIComponent(
+        buildOrderWorkspaceHref(orderDetail.id, activeOrderSection, patientContextId),
+      )}`
     : "";
+  // A new appointment belongs to a patient, so a lead's order plans none yet.
+  const detailNewAppointmentHref =
+    orderDetail && detailPatientId && !orderStepsLocked && hasCapability(user, "appointments.edit")
+      ? `${detailAppointmentsHref}&create=1`
+      : "";
   const detailDocumentsHref = orderDetail
     ? `/documents?${detailOrderHref}${detailPatientQuery}`
     : "";
@@ -4826,6 +4833,7 @@ function useOrdersPageContent() {
                       lang={lang}
                       reloadNonce={reloadNonce}
                       appointmentsHref={detailAppointmentsHref}
+                      newAppointmentHref={detailNewAppointmentHref}
                       providersHref={detailProvidersHref}
                       invoicesHref={detailInvoicesHref}
                       onOpenSection={(section) =>
@@ -5252,6 +5260,14 @@ function useOrdersPageContent() {
                           )}
                         </h2>
                       </div>
+                      {detailNewAppointmentHref ? (
+                        <StaffLink
+                          to={detailNewAppointmentHref}
+                          className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 rounded-lg bg-field text-xs")}
+                        >
+                          {t.appointments_new}
+                        </StaffLink>
+                      ) : null}
                     </div>
                     <div className="mt-5 space-y-4">
                       <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
