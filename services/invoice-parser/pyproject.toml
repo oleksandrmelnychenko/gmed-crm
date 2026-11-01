@@ -9,7 +9,7 @@ dependencies = [
   "uvicorn>=0.54,<1",
   "pydantic>=2.14,<3",
   "psutil>=7.2,<8",
-  "pypdf==6.21.2",
+  "pypdf==6.21.4",
   "pypdfium2>=5.14,<6",
   "pytesseract>=0.3.13,<1",
   "Pillow>=13,<14",
