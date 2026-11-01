@@ -558,6 +558,9 @@ export type QuoteOption = {
   active_invoice_types?: string[];
   /** Delivered services of the order no line of this quote bills. */
   services_outside_quote?: string[];
+  /** Approved package overage a settlement invoice adds to the quote lines. */
+  open_package_overage_net?: string;
+  open_package_overage_gross?: string;
   /** The order's required prepayment: the default amount of an advance invoice. */
   order_prepayment_amount?: string | null;
   order_prepayment_required?: boolean;

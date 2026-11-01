@@ -298,6 +298,28 @@ export function createInvoiceLineSelection(lines: InvoiceLineItem[], invoiceType
   };
 }
 
+/**
+ * Approved package overage the invoice adds on top of the selected lines: the
+ * server puts it on the invoice that bills the quote's last open quantities
+ * (QA 2026-11-01, T3-7: the dialog showed 571,20 for a draft of 684,25).
+ */
+export function invoiceSelectionPackageOverage(
+  quote: Pick<QuoteOption, "open_package_overage_net" | "open_package_overage_gross"> | null,
+  lines: InvoiceLineItem[],
+  form: Pick<CreateForm, "invoiceType" | "selectedLineIndexes" | "lineQuantities">,
+) {
+  const gross = Number(quote?.open_package_overage_gross ?? 0);
+  const net = Number(quote?.open_package_overage_net ?? 0);
+  const none = { net: 0, vat: 0, gross: 0 };
+  if (form.invoiceType === "advance" || !Number.isFinite(gross) || gross <= 0) return none;
+  const billsTheRest = lines.every((line, index) => {
+    const available = invoiceLineQuantityAvailable(line, form.invoiceType);
+    return available === 0 || (form.selectedLineIndexes.includes(index)
+      && Number(form.lineQuantities[String(index)]) === available);
+  });
+  return billsTheRest ? { net, vat: roundCents(gross - net), gross } : none;
+}
+
 export function isInvoiceSelectionValid(lines: InvoiceLineItem[], form: CreateForm) {
   const selected = new Set(form.selectedLineIndexes);
   if (!selected.size || selected.size !== form.selectedLineIndexes.length) return false;

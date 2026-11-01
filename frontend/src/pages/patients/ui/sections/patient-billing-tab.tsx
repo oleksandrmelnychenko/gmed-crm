@@ -236,7 +236,11 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
   }, 0);
   const expenseTotal = readyExpenses.filter(expense => selectedExpenses.includes(expense.id))
     .reduce((sum, expense) => sum + Number(expense.remaining_receivable_gross || 0), 0);
-  const total = serviceTotal + expenseTotal;
+  // The approved overage the server adds to the invoice of the last open lines.
+  const billsAllOpenLines = selectedLines.length > 0
+    && serviceLines.every((line, index) => availableQuantity(line) <= 0 || selectedLines.includes(index));
+  const overageTotal = billsAllOpenLines ? Number(quote?.open_package_overage_gross ?? 0) : 0;
+  const total = serviceTotal + expenseTotal + overageTotal;
 
   function selectQuote(nextId: string) {
     const next = orderQuotes.find(item => item.id === nextId) ?? null;

@@ -3798,6 +3798,10 @@ async fn load_quote_detail(
                                        = LOWER(BTRIM(service.description)))
                         )
                   ), '[]'::jsonb) AS services_outside_quote,
+                  -- What a settlement invoice adds on top of the quote lines
+                  -- (QA 2026-11-01, T3-7): the dialog total left it out.
+                  open_overage.net AS open_package_overage_net,
+                  open_overage.gross AS open_package_overage_gross,
                   q.created_at, q.updated_at,
                   COALESCE((SELECT count(*)::bigint FROM quote_versions qv WHERE qv.quote_id = q.id), 0) AS version_count,
                   COALESCE((SELECT max(version_number) FROM quote_versions qv WHERE qv.quote_id = q.id), 0) AS current_version_number,
@@ -3818,6 +3822,21 @@ async fn load_quote_detail(
            FROM quotes q
            JOIN orders o ON o.id = q.order_id
            LEFT JOIN quotes successor ON successor.id = q.superseded_by_quote_id
+           CROSS JOIN LATERAL (
+               SELECT COALESCE(SUM(line.net), 0) AS net,
+                      COALESCE(SUM(line.net + ROUND(line.net * line.vat_rate / 100, 2)), 0) AS gross
+               FROM (
+                   SELECT ROUND(consumption.overage_quantity * consumption.unit_price_net_snapshot, 2) AS net,
+                          consumption.vat_rate_snapshot AS vat_rate
+                   FROM service_package_consumptions consumption
+                   JOIN patient_service_packages patient_package
+                     ON patient_package.id = consumption.patient_service_package_id
+                   WHERE COALESCE(consumption.order_id, patient_package.order_id) = q.order_id
+                     AND consumption.invoice_id IS NULL
+                     AND consumption.overage_quantity > 0
+                     AND consumption.approval_status = 'approved'
+               ) line
+           ) open_overage
            LEFT JOIN patients p ON p.id = o.patient_id
            LEFT JOIN leads l ON l.id = o.source_lead_id
            WHERE q.id = $1"#,
@@ -3877,6 +3896,8 @@ async fn load_quote_detail(
         "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
         "active_invoice_types": row.try_get::<Vec<String>, _>("active_invoice_types").unwrap_or_default(),
         "services_outside_quote": row.try_get::<Value, _>("services_outside_quote").unwrap_or_else(|_| serde_json::json!([])),
+        "open_package_overage_net": decimal_to_string(row.try_get::<Decimal, _>("open_package_overage_net").unwrap_or(Decimal::ZERO)),
+        "open_package_overage_gross": decimal_to_string(row.try_get::<Decimal, _>("open_package_overage_gross").unwrap_or(Decimal::ZERO)),
         "line_items": add_remaining_quote_quantities(
             row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
             &row.try_get::<Value, _>("invoiced_quantities").unwrap_or_else(|_| serde_json::json!({})),
@@ -3952,6 +3973,10 @@ async fn list_quotes(
                                        = LOWER(BTRIM(service.description)))
                         )
                   ), '[]'::jsonb) AS services_outside_quote,
+                  -- What a settlement invoice adds on top of the quote lines
+                  -- (QA 2026-11-01, T3-7): the dialog total left it out.
+                  open_overage.net AS open_package_overage_net,
+                  open_overage.gross AS open_package_overage_gross,
                   q.created_at, q.updated_at,
                   q.superseded_by_quote_id, q.superseded_at,
                   successor.quote_number AS superseded_by_quote_number,
@@ -3963,6 +3988,21 @@ async fn list_quotes(
            FROM quotes q
            JOIN orders o ON o.id = q.order_id
            LEFT JOIN quotes successor ON successor.id = q.superseded_by_quote_id
+           CROSS JOIN LATERAL (
+               SELECT COALESCE(SUM(line.net), 0) AS net,
+                      COALESCE(SUM(line.net + ROUND(line.net * line.vat_rate / 100, 2)), 0) AS gross
+               FROM (
+                   SELECT ROUND(consumption.overage_quantity * consumption.unit_price_net_snapshot, 2) AS net,
+                          consumption.vat_rate_snapshot AS vat_rate
+                   FROM service_package_consumptions consumption
+                   JOIN patient_service_packages patient_package
+                     ON patient_package.id = consumption.patient_service_package_id
+                   WHERE COALESCE(consumption.order_id, patient_package.order_id) = q.order_id
+                     AND consumption.invoice_id IS NULL
+                     AND consumption.overage_quantity > 0
+                     AND consumption.approval_status = 'approved'
+               ) line
+           ) open_overage
            LEFT JOIN patients p ON p.id = o.patient_id
            LEFT JOIN leads l ON l.id = o.source_lead_id
            WHERE ($1::text = '%%'
@@ -4054,6 +4094,8 @@ async fn list_quotes(
                     "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
                     "active_invoice_types": row.try_get::<Vec<String>, _>("active_invoice_types").unwrap_or_default(),
                     "services_outside_quote": row.try_get::<Value, _>("services_outside_quote").unwrap_or_else(|_| serde_json::json!([])),
+                    "open_package_overage_net": decimal_to_string(row.try_get::<Decimal, _>("open_package_overage_net").unwrap_or(Decimal::ZERO)),
+                    "open_package_overage_gross": decimal_to_string(row.try_get::<Decimal, _>("open_package_overage_gross").unwrap_or(Decimal::ZERO)),
                     // The order's required prepayment: the default amount of
                     // an advance invoice from this quote.
                     "order_prepayment_required": row.try_get::<bool, _>("prepayment_required").unwrap_or(false),

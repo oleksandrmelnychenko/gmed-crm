@@ -15,6 +15,7 @@ import {
   INVOICE_LINE_COMMENT_MAX_LENGTH,
   INVOICE_TYPES,
   calculateInvoiceSelectionTotals,
+  invoiceSelectionPackageOverage,
   createInvoiceLineSelection,
   formatCurrency,
   invoiceLineQuantityAvailable,
@@ -24,6 +25,7 @@ import {
   prepaymentAdvanceSplit,
   quoteRequiredPrepayment,
 } from "../model/invoice-model";
+import { roundCents } from "@/lib/money";
 import { partlyCreditedHint } from "../model/billing-release";
 import type { CreateForm, InvoiceType, QuoteOption } from "../model/types";
 
@@ -75,9 +77,17 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
     ? prepaymentAdvanceSplit(lines, requiredPrepayment)
     : null;
   const selectionTotals = calculateInvoiceSelectionTotals(lines, form.selectedLineIndexes, form.lineQuantities);
+  const packageOverage = prepaymentSplit
+    ? { net: 0, vat: 0, gross: 0 }
+    : invoiceSelectionPackageOverage(selectedQuote, lines, form);
   const totals = prepaymentSplit
     ? { ...selectionTotals, net: prepaymentSplit.net, vat: prepaymentSplit.vat, gross: prepaymentSplit.gross }
-    : selectionTotals;
+    : {
+        ...selectionTotals,
+        net: roundCents(selectionTotals.net + packageOverage.net),
+        vat: roundCents(selectionTotals.vat + packageOverage.vat),
+        gross: roundCents(selectionTotals.gross + packageOverage.gross),
+      };
   const quoteAvailable = Boolean(selectedQuote && isQuoteAvailableForInvoice(selectedQuote, form.invoiceType));
   const valid = prepaymentSplit
     ? quoteAvailable && !prepaymentSplit.exceedsQuote && prepaymentSplit.gross > 0
@@ -353,6 +363,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     </dl>
                   ) : <p className="text-xs leading-5 text-muted-foreground">{de ? "Patient und Auftrag erscheinen nach der Angebotsauswahl." : "Пациент и заказ появятся после выбора предложения."}</p>}
                   <dl className="space-y-3 border-t border-border pt-4 text-sm tabular-nums [&_dd]:whitespace-nowrap [&_dd]:font-mono">
+                    {packageOverage.gross > 0 ? <div className="flex justify-between gap-3" data-testid="invoice-package-overage"><dt className="text-muted-foreground">{de ? "Darin Mehrverbrauch aus dem Tarif" : "В том числе превышение по тарифу"}</dt><dd>{money(packageOverage.gross)}</dd></div> : null}
                     <div className="flex justify-between gap-3"><dt className="text-muted-foreground">{de ? "Netto" : "Без НДС"}</dt><dd>{money(totals.net)}</dd></div>
                     <div className="flex justify-between gap-3"><dt className="text-muted-foreground">{t.invoices_vat}</dt><dd>{money(totals.vat)}</dd></div>
                     <div className="flex justify-between gap-3 border-t border-border pt-3 font-semibold"><dt>{t.invoices_total}</dt><dd className="text-lg">{money(totals.gross)}</dd></div>

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   calculateInvoiceSelectionTotals,
+  invoiceSelectionPackageOverage,
   blankCreateForm,
   createInvoiceLineSelection,
   invoiceLineQuantityAvailable,
@@ -417,6 +418,26 @@ describe("quotes available for invoicing", () => {
 });
 
 describe("invoice creation totals", () => {
+  it("adds the approved package overage only to the invoice of the last open quantities", () => {
+    const quote = { open_package_overage_net: "95", open_package_overage_gross: "113.05" };
+    const lines = [line(), line({ unit_price: "50" })];
+    const all = createInvoiceLineSelection(lines, "final");
+    expect(invoiceSelectionPackageOverage(quote, lines, { invoiceType: "final", ...all })).toEqual({
+      net: 95,
+      vat: 18.05,
+      gross: 113.05,
+    });
+    expect(
+      invoiceSelectionPackageOverage(quote, lines, {
+        invoiceType: "interim",
+        selectedLineIndexes: [0],
+        lineQuantities: all.lineQuantities,
+      }).gross,
+    ).toBe(0);
+    expect(invoiceSelectionPackageOverage(quote, lines, { invoiceType: "advance", ...all }).gross).toBe(0);
+    expect(invoiceSelectionPackageOverage(null, lines, { invoiceType: "final", ...all }).gross).toBe(0);
+  });
+
   it("shows net, VAT and gross for the actually selected quantities", () => {
     expect(
       calculateInvoiceSelectionTotals(
