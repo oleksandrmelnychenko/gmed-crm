@@ -2631,7 +2631,8 @@ function useOrdersPageContent() {
   }, [permissions.readsOnlyOrderPart, reloadNonce, selectedOrderId]);
 
   useEffect(() => {
-    if (!selectedOrderId) {
+    // Service groups are outside the concierge's and team lead's order part.
+    if (!selectedOrderId || permissions.readsOnlyOrderPart) {
       resetOrderServiceGroupsData();
       return;
     }
@@ -2700,6 +2701,7 @@ function useOrdersPageContent() {
     resetOrderServiceGroupsData,
     selectedOrderId,
     startOrderServiceGroupsLoad,
+    permissions.readsOnlyOrderPart,
   ]);
 
   async function handleCreateOrder(event: FormEvent<HTMLFormElement>) {

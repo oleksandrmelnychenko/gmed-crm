@@ -479,7 +479,9 @@ async fn list_order_workflow_checklist(
     Extension(auth): Extension<AuthUser>,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(resp) = require_workflow_view_role(&auth) {
+    // The CEO assistant reads the order pipeline too (RBAC, QA 2026-11-01
+    // T2-14); every write keeps `require_workflow_view_role`.
+    if let Err(resp) = require_workflow_read_role(&auth) {
         return resp;
     }
     if let Err(resp) = require_order_workflow_access(&auth) {

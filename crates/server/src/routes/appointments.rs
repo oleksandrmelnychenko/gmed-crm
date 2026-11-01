@@ -4890,8 +4890,12 @@ async fn get_appointment(
     Extension(auth): Extension<AuthUser>,
     Path(apt_id): Path<Uuid>,
 ) -> axum::response::Response {
+    // The CEO assistant reads what the appointment list shows him (RBAC
+    // "reads everything, changes nothing", QA 2026-11-01 E7); his `can_edit`
+    // stays false without `appointments.edit`.
     if let Err(e) = auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Interpreter,
@@ -7943,6 +7947,7 @@ async fn list_reminders(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Interpreter,
@@ -8224,6 +8229,7 @@ async fn list_communications(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Interpreter,
@@ -10372,6 +10378,7 @@ async fn get_report(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Interpreter,
