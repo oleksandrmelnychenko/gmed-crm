@@ -377,10 +377,10 @@ pub(super) async fn create_request(
             .await
             .map_err(db_error)?;
             if current == Some(false) {
-                let reason = if template.as_deref() == Some("order_cost_estimate") {
-                    "estimate_document_outdated"
-                } else {
-                    "order_document_outdated"
+                let reason = match template.as_deref() {
+                    Some("order_cost_estimate") => "estimate_document_outdated",
+                    Some("framework_contract") => "framework_document_outdated",
+                    _ => "order_document_outdated",
                 };
                 return Err(document_error(StatusCode::CONFLICT, reason, id));
             }

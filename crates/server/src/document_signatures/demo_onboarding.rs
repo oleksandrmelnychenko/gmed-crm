@@ -30,6 +30,12 @@ pub(crate) async fn current_documents(
                             ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1)
                         OR d.created_at < GREATEST(o.client_terms_changed_at, o.payer_terms_changed_at))
              )
+             AND NOT EXISTS (
+                 SELECT 1 FROM documents d
+                 WHERE d.id = r.source_document_id
+                   AND d.generated_template_id = 'framework_contract'
+                   AND document_terms_current(d.id) IS FALSE
+             )
            ORDER BY r.created_at DESC, r.id DESC"#,
     )
     .bind(lead_id)

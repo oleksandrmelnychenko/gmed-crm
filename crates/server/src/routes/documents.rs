@@ -2734,6 +2734,28 @@ async fn mark_document_signed(
     {
         return response;
     }
+    // One that names a parent who no longer contracts is not confirmed either
+    // (QA 2026-11-01, W2 N1).
+    if kind == "framework_contract" {
+        match sqlx::query_scalar::<_, Option<bool>>("SELECT document_terms_current($1)")
+            .bind(document_id)
+            .fetch_one(&mut *tx)
+            .await
+        {
+            Ok(Some(false)) => {
+                return super::contracts::coded_err(
+                    StatusCode::CONFLICT,
+                    "framework_document_outdated",
+                    "The contracting parent changed after this document was generated",
+                );
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::error!(%error, %document_id, "check framework document for mark-signed");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    }
 
     let compliance_updated = match record_document_signature_tx(
         &mut tx,
@@ -21656,6 +21678,35 @@ pub(crate) async fn paying_parent_contact(
         );
     }
     Ok(parent)
+}
+
+/// The contact ids of the parents who contract in their own name on a minor's
+/// open lead, as the contract documents print them ([`only_paying_parent`]),
+/// in a stable order. Empty for an adult and for a Vormund, who acts in the
+/// child's name whoever pays.
+pub(crate) async fn contracting_parents_of_lead(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    let Some(loaded) = super::lead_representatives::load(conn, lead_id).await? else {
+        return Ok(Vec::new());
+    };
+    let representation = &loaded.representation;
+    if !representation.minor
+        || representation.answers.custody() == super::lead_representatives::CUSTODY_GUARDIAN
+    {
+        return Ok(Vec::new());
+    }
+    let parents = representation
+        .representatives
+        .iter()
+        .filter(|person| person.slot.is_some())
+        .map(|person| person.id)
+        .collect::<Vec<_>>();
+    let paying_parent = paying_parent_contact(conn, lead_id).await?;
+    let mut parents = only_paying_parent(parents, paying_parent, |id| Some(*id));
+    parents.sort();
+    Ok(parents)
 }
 
 /// The parent the payer declaration names as payer

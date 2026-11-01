@@ -12655,6 +12655,147 @@ async fn minor_lead_contract_names_only_the_parent_who_receives_and_pays_the_inv
     assert_eq!(roles, vec!["guardian_1", "agency", "guardian_2"]);
 }
 
+/// QA 2026-11-01, W2 N1: the paying parent changed after signature. The order
+/// named the new parent, the signed Rahmenvertrag the old one, nothing blocked,
+/// and the invoice went to the old parent.
+#[tokio::test]
+async fn a_change_of_the_paying_parent_outdates_the_signed_framework_contract() {
+    let Some((app, pool, admin, bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("paying-parent-change");
+    let parents = joint_custody_parents(&tag);
+    let lead = seed_joint_custody_lead(&pool, admin, &tag, &parents, None).await;
+    let mother: Uuid = parents[0]["id"].as_str().unwrap().parse().unwrap();
+    let father: Uuid = parents[1]["id"].as_str().unwrap().parse().unwrap();
+    sqlx::query(
+        "INSERT INTO lead_payer_declarations(lead_id,payer_kind,payer_representative_id,source_of_funds,acts_on_own_account,own_account_answered) VALUES($1,'representative',$2,'employment',true,true)",
+    )
+    .bind(lead)
+    .bind(mother)
+    .execute(&pool)
+    .await
+    .unwrap();
+    set_parent_invoice_recipient(&pool, lead, &parents[0], true).await;
+    let contract: Uuid = sqlx::query_scalar("INSERT INTO framework_contracts(lead_id,contract_number,status,created_by) VALUES($1,$2,'draft',$3) RETURNING id")
+        .bind(lead).bind(format!("FC-{tag}")).bind(admin).fetch_one(&pool).await.unwrap();
+    let order: Uuid = sqlx::query_scalar("INSERT INTO orders(source_lead_id,contract_id,order_number,created_by) VALUES($1,$2,$3,$4) RETURNING id")
+        .bind(lead).bind(contract).bind(format!("AUF-{tag}")).bind(admin).fetch_one(&pool).await.unwrap();
+    seed_quote_for_order(&pool, order, admin, &tag).await;
+    let (status, generated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &bearer,
+        Some(json!({"template_id":"framework_contract","lead_id":lead,"order_id":order,"language":"de"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let old_version: Uuid = generated["id"].as_str().unwrap().parse().unwrap();
+    sqlx::query("UPDATE framework_contracts SET status = 'signed', signed_at = now() WHERE id = $1")
+        .bind(contract)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let path = format!("/api/v1/leads/{lead}/payer-declaration");
+    let current = |document: Uuid| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Option<bool>>("SELECT document_terms_current($1)")
+                .bind(document)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(current(old_version).await, None);
+
+    // The same parent again changes nothing.
+    let same = json!({ "payer_kind": "representative", "payer_representative_id": mother, "acts_on_own_account": true });
+    let (status, body) = json_request(&app, "POST", &path, &bearer, Some(same)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let unchanged: String =
+        sqlx::query_scalar("SELECT status FROM framework_contracts WHERE id = $1")
+            .bind(contract)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(unchanged, "signed");
+
+    let other = json!({ "payer_kind": "representative", "payer_representative_id": father, "acts_on_own_account": true });
+    let (status, body) = json_request(&app, "POST", &path, &bearer, Some(other)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status_after, signed_at): (String, Option<chrono::DateTime<chrono::Utc>>) =
+        sqlx::query_as("SELECT status, signed_at FROM framework_contracts WHERE id = $1")
+            .bind(contract)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status_after, "draft");
+    assert_eq!(signed_at, None);
+    assert_eq!(current(old_version).await, Some(false));
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log
+         WHERE action = 'update_framework_contract_status' AND entity_id = $1
+           AND context ->> 'reason' = 'contracting_parent_changed'",
+    )
+    .bind(contract)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+    // The invoice follows: "the recipient is the payer" names the father now.
+    let (recipient, pays): (Option<Uuid>, Option<bool>) = sqlx::query_as(
+        "SELECT representative_contact_id, recipient_is_payer FROM lead_invoice_recipients WHERE lead_id = $1",
+    )
+    .bind(lead)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!((recipient, pays), (Some(father), Some(true)));
+
+    // The signed old version proves nothing for a manual "signed".
+    sqlx::query("UPDATE documents SET signed_at = now() WHERE id = $1")
+        .bind(old_version)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{contract}/status"),
+        &bearer,
+        Some(json!({ "status": "signed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+
+    // The new version names the father alone and is current.
+    let (status, generated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &bearer,
+        Some(json!({"template_id":"framework_contract","lead_id":lead,"order_id":order,"language":"de"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let new_version: Uuid = generated["id"].as_str().unwrap().parse().unwrap();
+    assert_ne!(new_version, old_version);
+    assert_eq!(current(new_version).await, Some(true));
+    let (_, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{new_version}/download"),
+        &bearer,
+    )
+    .await;
+    let text = extract_pdf_text(&bytes);
+    assert!(text.contains("Boris Vater"), "{text}");
+    assert!(!text.contains("Anna Mutter"), "{text}");
+}
+
 /// The same rule for the documents of a converted patient: the answer of the
 /// lead that became the patient applies, the parent matched to the patient
 /// relation its entry made (`source_contact_id`).

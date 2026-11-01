@@ -3491,6 +3491,8 @@ async fn load_lead_conversion_readiness(
                         AND d.generated_template_id = 'framework_contract'
                         AND d.status = 'active'
                         AND d.file_deleted_at IS NULL
+                        -- one naming a parent who no longer contracts (W2 N1)
+                        AND document_terms_current(d.id) IS NOT FALSE
                     )
                     OR EXISTS (
                       SELECT 1 FROM framework_contracts fc

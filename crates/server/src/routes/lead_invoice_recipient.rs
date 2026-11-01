@@ -852,12 +852,29 @@ pub(crate) async fn forget_removed_parent(
 pub(crate) fn following_payer(
     recipient: &Recipient,
     declaration: &Declaration,
-    paying_parent: bool,
+    paying_parent: Option<Uuid>,
 ) -> Option<Recipient> {
     if recipient.is_payer != Some(true) {
         return None;
     }
     let mut next = recipient.clone();
+    // The other parent pays now: "the recipient is the payer" names that
+    // parent, the invoice follows (QA 2026-11-01, W2 N1). A parent who was
+    // answered to receive the invoice without paying is not this case.
+    if let (Some(parent), false, Some(current)) = (
+        paying_parent,
+        recipient.is_third_party(),
+        recipient.representative_contact_id,
+    ) && parent != current
+    {
+        return Some(Recipient {
+            recipient: Some(RECIPIENT_SELF.into()),
+            is_payer: Some(true),
+            representative_contact_id: Some(parent),
+            ..Recipient::default()
+        });
+    }
+    let paying_parent = paying_parent.is_some();
     match (recipient.is_third_party(), declaration.is_third_party()) {
         (true, true) => {
             let organisation = declaration.is_organisation();
@@ -917,13 +934,13 @@ pub(crate) async fn follow_staff_payer(
         .unwrap_or_default()
         .representation;
     let paying_parent =
-        super::lead_representatives::payer_same_person(&representation, Some(declaration))
-            .is_some();
+        super::lead_representatives::payer_same_person(&representation, Some(declaration));
     let mut resolved = stored.clone();
     let _ = resolve_parent(&mut resolved, &representation);
-    let Some(next) = following_payer(&resolved, declaration, paying_parent) else {
+    let Some(mut next) = following_payer(&resolved, declaration, paying_parent) else {
         return Ok(());
     };
+    let _ = resolve_parent(&mut next, &representation);
     store(&mut *conn, lead_id, &next, actor).await?;
     crate::audit::write_in_transaction(
         conn,
@@ -1394,7 +1411,7 @@ mod tests {
         };
         let mut corrected = third_party_payer("Klaus", "Zimmermann");
         corrected.email = Some("new@example.com".into());
-        let next = following_payer(&recipient, &corrected, false).unwrap();
+        let next = following_payer(&recipient, &corrected, None).unwrap();
         assert_eq!(next.email.as_deref(), Some("new@example.com"));
         assert_eq!(next.is_payer, Some(true));
 
@@ -1403,7 +1420,7 @@ mod tests {
             payer_kind: lead_payer::PAYER_KIND_SELF.into(),
             ..Declaration::default()
         };
-        let next = following_payer(&recipient, &own, false).unwrap();
+        let next = following_payer(&recipient, &own, None).unwrap();
         assert_eq!(next.recipient.as_deref(), Some(RECIPIENT_SELF));
         assert_eq!(next.first_name, None);
 
@@ -1412,7 +1429,7 @@ mod tests {
             is_payer: Some(false),
             ..recipient
         };
-        assert_eq!(following_payer(&apart, &own, false), None);
+        assert_eq!(following_payer(&apart, &own, None), None);
 
         // The patient as recipient, a third party named: no longer the payer.
         let patient = Recipient {
@@ -1420,8 +1437,39 @@ mod tests {
             is_payer: Some(true),
             ..Recipient::default()
         };
-        let next = following_payer(&patient, &corrected, false).unwrap();
+        let next = following_payer(&patient, &corrected, None).unwrap();
         assert_eq!(next.is_payer, Some(false));
+    }
+
+    /// QA 2026-11-01, W2 N1: the parent who received and paid stayed the
+    /// recipient, "not the payer", after staff named the other parent.
+    #[test]
+    fn the_parent_recipient_who_pays_follows_the_other_parent() {
+        let (mother, father) = (Uuid::from_u128(1), Uuid::from_u128(2));
+        let recipient = Recipient {
+            recipient: Some(RECIPIENT_SELF.into()),
+            is_payer: Some(true),
+            representative_contact_id: Some(mother),
+            first_name: Some("Ilse".into()),
+            ..Recipient::default()
+        };
+        let declaration = Declaration {
+            payer_kind: lead_payer::PAYER_KIND_REPRESENTATIVE.into(),
+            payer_representative_id: Some(father),
+            ..Declaration::default()
+        };
+        let next = following_payer(&recipient, &declaration, Some(father)).unwrap();
+        assert_eq!(next.representative_contact_id, Some(father));
+        assert_eq!(next.is_payer, Some(true));
+        assert_eq!(next.first_name, None);
+
+        // The same parent, and one who only receives the invoice: as answered.
+        assert_eq!(following_payer(&recipient, &declaration, Some(mother)), None);
+        let apart = Recipient {
+            is_payer: Some(false),
+            ..recipient
+        };
+        assert_eq!(following_payer(&apart, &declaration, Some(father)), None);
     }
 
     fn third_party_payer(first: &str, last: &str) -> Declaration {

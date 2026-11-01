@@ -2804,6 +2804,11 @@ async fn save_payer_declaration(
     let identity_changed = previous
         .as_ref()
         .is_none_or(|previous| !previous.same_identity(&declaration));
+    let contracting_before =
+        match super::documents::contracting_parents_of_lead(&mut tx, lead_id).await {
+            Ok(parents) => parents,
+            Err(error) => return database_error(error, "load contracting parents"),
+        };
     if previous.as_ref() == Some(&declaration) {
         // Only the organisation's legal form or register number may have
         // changed: they live beside the declaration.
@@ -2917,6 +2922,16 @@ async fn save_payer_declaration(
     .await
     {
         return database_error(error, "follow payer with invoice recipient");
+    }
+    if let Err(error) = outdate_framework_for_contracting_parents(
+        &mut tx,
+        lead_id,
+        &contracting_before,
+        Some(auth.user_id),
+    )
+    .await
+    {
+        return database_error(error, "outdate framework contract");
     }
     if let Err(error) = tx.commit().await {
         return database_error(error, "commit payer declaration");
@@ -4479,6 +4494,63 @@ async fn reset_order_signature_for_payer(
         ),
     )
     .await
+}
+
+/// The parents who contract changed (`before`, from
+/// [`super::documents::contracting_parents_of_lead`]) while the lead is open:
+/// its Rahmenvertrag names others than the order now does, so it is signed
+/// again on a new version, like an order document after a change of the payer
+/// (QA 2026-11-01, W2 N1). The earlier versions stay as the record. A contract
+/// the lead inherited from the patient has no `lead_id` of this lead and other
+/// orders may run under it: it stays as it is.
+pub(crate) async fn outdate_framework_for_contracting_parents(
+    tx: &mut PgConnection,
+    lead_id: Uuid,
+    before: &[Uuid],
+    actor: Option<Uuid>,
+) -> Result<(), sqlx::Error> {
+    let now = super::documents::contracting_parents_of_lead(&mut *tx, lead_id).await?;
+    if before == now.as_slice() {
+        return Ok(());
+    }
+    let contracts: Vec<(Uuid, String)> = sqlx::query_as(
+        r#"WITH previous AS (
+               SELECT id, status FROM framework_contracts
+               WHERE lead_id = $1 AND status <> 'terminated'
+               FOR UPDATE
+           )
+           UPDATE framework_contracts contract
+           SET party_changed_at = clock_timestamp(),
+               status = CASE WHEN previous.status IN ('signed', 'sent')
+                             THEN 'draft' ELSE previous.status END,
+               signed_at = NULL
+           FROM previous
+           WHERE contract.id = previous.id
+           RETURNING contract.id, previous.status"#,
+    )
+    .bind(lead_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    for (contract_id, previous_status) in contracts {
+        audit::write_in_transaction(
+            &mut *tx,
+            &audit::domain_event(
+                "update_framework_contract_status",
+                actor,
+                "framework_contract",
+                Some(contract_id),
+                json!({
+                    "status": "draft",
+                    "previous_status": previous_status,
+                    "source": "lead_payer_declaration",
+                    "reason": "contracting_parent_changed",
+                    "lead_id": lead_id,
+                }),
+            ),
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// Sets the payer of a newly created lead order from the declaration.

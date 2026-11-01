@@ -352,6 +352,18 @@ async fn store_signed_version(
             return Err(error(StatusCode::CONFLICT, "estimate_document_outdated"));
         }
     }
+    // QA 2026-11-01, W2 N1: a Rahmenvertrag naming a parent who no longer
+    // contracts; the contract is signed on a new version.
+    if template_of(&source).as_deref() == Some("framework_contract") {
+        let current: Option<bool> = sqlx::query_scalar("SELECT document_terms_current($1)")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_error)?;
+        if current == Some(false) {
+            return Err(error(StatusCode::CONFLICT, "framework_document_outdated"));
+        }
+    }
 
     let signed_id = Uuid::new_v4();
     // The signed scan is the same document: it keeps the document's unified

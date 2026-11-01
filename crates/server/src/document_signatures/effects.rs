@@ -351,7 +351,16 @@ pub(super) async fn apply_business_effects(
         .fetch_one(&mut **tx)
         .await
         .map_err(database)?;
-        if let Some(contract_id) = contract_id {
+        // A signature finished on a version made before the contracting
+        // parent changed signs what no longer holds (QA 2026-11-01, W2 N1).
+        let current: Option<bool> = sqlx::query_scalar("SELECT document_terms_current($1)")
+            .bind(document_id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(database)?;
+        if current == Some(false) {
+            effects["framework_document_outdated"] = json!(true);
+        } else if let Some(contract_id) = contract_id {
             let updated = sqlx::query(
                 r#"UPDATE framework_contracts
                    SET status = 'signed', signed_at = COALESCE(signed_at, $2)

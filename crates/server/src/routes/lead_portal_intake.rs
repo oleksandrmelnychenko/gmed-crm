@@ -3980,6 +3980,11 @@ async fn update_my_payer(
             Ok(sent) => sent,
             Err(error) => return internal(error, "check the sent request"),
         };
+    let contracting_before =
+        match super::documents::contracting_parents_of_lead(&mut tx, lead_id).await {
+            Ok(parents) => parents,
+            Err(error) => return internal(error, "load contracting parents"),
+        };
     let saved = match lead_payer::save_from_portal(
         &mut tx,
         lead_id,
@@ -4001,6 +4006,16 @@ async fn update_my_payer(
         }
         Err(PortalPayerError::Database(error)) => return internal(error, "save payer"),
     };
+    if let Err(error) = lead_payer::outdate_framework_for_contracting_parents(
+        &mut tx,
+        lead_id,
+        &contracting_before,
+        Some(auth.user_id),
+    )
+    .await
+    {
+        return internal(error, "outdate framework contract");
+    }
     if sent_by_client
         && saved.as_ref().is_some_and(|after| {
             declared
@@ -4354,6 +4369,11 @@ async fn update_my_billing(
         Ok(representation) => representation.unwrap_or_default(),
         Err(error) => return internal(error, "load representation"),
     };
+    let contracting_before =
+        match super::documents::contracting_parents_of_lead(&mut tx, lead_id).await {
+            Ok(parents) => parents,
+            Err(error) => return internal(error, "load contracting parents"),
+        };
     let route_by = payment_route_by(
         payer.as_ref(),
         &representation.representation,
@@ -4518,6 +4538,16 @@ async fn update_my_billing(
         Ok(synced) => synced,
         Err(error) => return internal(error, "derive invoice recipient"),
     };
+    if let Err(error) = lead_payer::outdate_framework_for_contracting_parents(
+        &mut tx,
+        lead_id,
+        &contracting_before,
+        Some(auth.user_id),
+    )
+    .await
+    {
+        return internal(error, "outdate framework contract");
+    }
     if saved.is_none()
         && block_c_changed.is_empty()
         && recipient_marker.is_none()

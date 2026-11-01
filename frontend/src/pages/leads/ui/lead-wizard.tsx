@@ -2588,6 +2588,12 @@ function outdatedDocumentSignErrorText(error: unknown, tx: Tx): string | null {
       "Der Kostenvoranschlag ist veraltet: Der Auftrag wurde nach seiner Erstellung geändert. Berechnen Sie ihn neu, erstellen Sie eine neue Version und lassen Sie diese unterschreiben.",
     );
   }
+  if (code === "framework_document_outdated") {
+    return tx(
+      "Рамочный договор устарел: платящий родитель изменился после его создания. Создайте новую версию договора и подпишите её.",
+      "Der Rahmenvertrag ist veraltet: Der zahlende Elternteil wurde nach seiner Erstellung geändert. Erstellen Sie eine neue Version und lassen Sie diese unterschreiben.",
+    );
+  }
   return null;
 }
 
@@ -3390,7 +3396,9 @@ function WizardDocumentRows({
               <Badge
                 variant="outline"
                 className="border-amber-300 bg-amber-50 text-[11px] font-semibold text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
-                title={tx("Заказ изменился после создания документа — создайте новую версию", "Der Auftrag wurde nach der Erstellung geändert – neue Version erstellen")}
+                title={document.generated_template_id === "framework_contract"
+                  ? tx("Платящий родитель изменился после создания договора — создайте новую версию", "Der zahlende Elternteil wurde nach der Erstellung geändert – neue Version erstellen")
+                  : tx("Заказ изменился после создания документа — создайте новую версию", "Der Auftrag wurde nach der Erstellung geändert – neue Version erstellen")}
                 data-testid={`lead-document-outdated-${document.id}`}
               >
                 {document.generated_template_id === "order_cost_estimate" ? tx("Устарела", "Veraltet") : tx("Устарел", "Veraltet")}
@@ -8560,6 +8568,9 @@ ${serviceCommentLines.join("\n")}`
     }
     if (template === "order_cost_estimate" && failing("estimate_document_outdated")) {
       return tx("Документ сметы создан до последнего изменения сумм или предоплаты — создайте новую версию", "Kostenvoranschlag vor der letzten Änderung von Beträgen oder Vorauszahlung erstellt – neue Version erstellen");
+    }
+    if (template === "framework_contract" && document.terms_current === false) {
+      return tx("Договор называет другого заказчика — создайте новую версию и подпишите её", "Der Vertrag nennt einen anderen Auftraggeber – neue Version erstellen und unterschreiben lassen");
     }
     return null;
   };

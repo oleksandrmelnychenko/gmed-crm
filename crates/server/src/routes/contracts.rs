@@ -1232,6 +1232,8 @@ async fn framework_contract_has_signed_document(
                  AND d.status <> 'archived'
                  AND d.file_deleted_at IS NULL
                  AND d.created_at >= fc.created_at
+                 -- one naming a parent who no longer contracts proves nothing
+                 AND document_terms_current(d.id) IS NOT FALSE
                  AND (d.generated_template_id = 'framework_contract'
                       OR d.art = 'framework_contract'
                       OR d.compliance_kind = 'framework_contract')
