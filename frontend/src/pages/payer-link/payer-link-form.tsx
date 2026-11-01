@@ -84,7 +84,7 @@ function useAnswersForm({
   onQuestionnaire: (questionnaire: PayerQuestionnaire) => void;
   onSaveState: (state: SaveState) => void;
   onFailure: (error: PayerLinkError | null) => void;
-}): AnswersForm & { flush: () => Promise<boolean> } {
+}): AnswersForm & { flush: () => Promise<boolean>; hasUnsaved: () => boolean } {
   const [draft, setDraft] = useState<PayerDraft>(() => draftFromQuestionnaire(questionnaire));
   const draftRef = useRef(draft);
   draftRef.current = draft;
@@ -190,6 +190,7 @@ function useAnswersForm({
       return (code ? text.idDocumentRules[code] : undefined) ?? text.invalidField;
     },
     flush: () => save(draftRef.current),
+    hasUnsaved: () => Object.keys(answersPatch(savedRef.current, draftRef.current, contextRef.current)).length > 0,
   };
 }
 
@@ -551,8 +552,9 @@ function DraftForm({
     advancingRef.current = true;
     try {
       // The list counts what is saved: the answer typed just before the press is
-      // saved first, or that press only saved it (QA 2026-11-01).
-      if (consented) await form.flush();
+      // saved first, or that press only saved it (QA 2026-11-01). Without one there is
+      // nothing to wait for: uploads share the queue, and a batch must not freeze the button.
+      if (consented && form.hasUnsaved()) await form.flush();
       const open = missingByStep(questionnaireRef.current.missing_for_submit ?? [], payerType, steps).some(
         (group) => group.step === step && group.keys.length > 0,
       );

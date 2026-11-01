@@ -844,12 +844,15 @@ test("payer recheck: a refused send keeps the answer saved just before it", asyn
   const occupation = page.getByTestId("payer-link-step-funds").getByRole("textbox", { name: /Beruf/ });
   await occupation.fill("Neue Tätigkeit");
   await expect.poll(() => calls.patches.some((patch) => patch.occupation === "Neue Tätigkeit")).toBe(true);
+  // "Next" waits for the save it counts on (QA 2026-11-01 B7): the step stays until the answer is in.
   await next(page);
+  await expect(page.getByTestId("payer-link-form")).toHaveAttribute("data-step", "funds");
+  releaseWrite();
+  await expect(page.getByTestId("payer-link-form")).not.toHaveAttribute("data-step", "funds");
   await next(page);
   await next(page);
   await page.getByTestId("payer-link-confirm").check();
   await page.getByTestId("payer-link-submit").click();
-  releaseWrite();
   await expect(page.getByTestId("payer-link-step-summary").getByRole("alert")).toBeVisible();
   expect(q.answers.occupation).toBe("Neue Tätigkeit");
   // The page shows what is stored, not the answers from before the save.
