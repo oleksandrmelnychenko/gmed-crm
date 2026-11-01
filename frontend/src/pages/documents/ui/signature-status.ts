@@ -1,3 +1,4 @@
+import { createContext } from "react";
 import { CircleAlert, Clock3, FileCheck2, FileSignature } from "lucide-react";
 import { isSignaturePending } from "../data/document-signature-api";
 import type { SignatureSummary } from "../data/use-signature-summary";
@@ -16,6 +17,13 @@ const SIGNATURE_STATUS_TEXT: Record<string, [string, string]> = {
   expired: ["Срок запроса истёк", "Anfrage abgelaufen"],
   error: ["Ошибка подписания", "Signatur fehlgeschlagen"],
 };
+
+/**
+ * Documents whose terms no longer hold (`terms_current: false`): their signature
+ * proves nothing now, so the signature dialog must not read as «подписан»
+ * (QA 2026-11-01, U-3). The server's manifest does not tell; the screen does.
+ */
+export const OutdatedSignatureDocuments = createContext<readonly string[]>([]);
 
 const INFORMATIONAL_TEMPLATES = ["privacy_information", "cost_estimate"];
 
@@ -62,8 +70,9 @@ export function signatureStatusText(status: string, lang: string) {
   return lang === "de" ? de : ru;
 }
 
-export function signaturePresentation(summary: SignatureSummary | undefined, lang: string, documentSigned = false) {
+export function signaturePresentation(summary: SignatureSummary | undefined, lang: string, documentSigned = false, outdated = false) {
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
+  if (outdated) return { Icon: CircleAlert, label: tx("Устарел, нужна новая версия", "Veraltet, neue Version nötig"), className: "text-amber-700 dark:text-amber-400" };
   if (documentSigned) return { Icon: FileCheck2, label: signatureStatusText("completed", lang), className: "text-emerald-700 dark:text-emerald-400" };
   if (!summary) return { Icon: FileSignature, label: tx("Электронная подпись", "Elektronische Unterschrift"), className: "" };
   const prefix = summary.test_mode ? "TEST · " : "";

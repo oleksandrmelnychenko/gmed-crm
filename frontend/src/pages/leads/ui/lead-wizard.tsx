@@ -201,7 +201,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { paymentStatusLabel } from "@/lib/payment-status";
-import { formatMoneyLabel, formatMoneyRange, moneyLineAmounts, roundCents, sameCents, toCents } from "@/lib/money";
+import { formatMoneyLabel, formatMoneyRange, moneyInputText, moneyLineAmounts, roundCents, sameCents, toCents } from "@/lib/money";
 import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
 import { appDateKey, appDateKeyOf, formatAppDate, isoToBerlinLocalInput, parseBerlinLocalInput, parseDateKey } from "@/lib/app-time-zone";
 import { isValidEmailAddress } from "@/lib/contact-validation";
@@ -2682,6 +2682,10 @@ function minorIdentityReasonLabel(tx: Tx) {
   );
 }
 
+function estimateDocumentOutdatedText(tx: Tx) {
+  return tx("Смета к заказу устарела — создайте новую версию", "Kostenvoranschlag zum Auftrag veraltet – neue Version erstellen");
+}
+
 function readinessReasonLabel(reason: string, tx: Tx, minor = false) {
   // A minor is identified through the parents or the guardian, never the child.
   if (minor && reason === "Identity document is not verified") return minorIdentityReasonLabel(tx);
@@ -2740,7 +2744,10 @@ function contractDetailsMissingOf(readiness: unknown): string[] {
  * contract data also who lacks what and where staff enter it (the person's
  * card under the identity document, or the contact's card in «Данные клиента»).
  */
-function readinessReasonText(reason: string, tx: Tx, minor: boolean, readiness: unknown): string {
+function readinessReasonText(reason: string, tx: Tx, minor: boolean, readiness: unknown, estimateDocumentExists = false): string {
+  // The server says «missing» for an outdated KV too (`order_cost_estimate_document_generated`):
+  // «Создайте смету» stood beside the KV and its «Новая версия» (QA 2026-11-01, U-5).
+  if (reason === "Order cost estimate document is missing" && estimateDocumentExists) return estimateDocumentOutdatedText(tx);
   const label = readinessReasonLabel(reason, tx, minor);
   if (reason !== CONTRACT_DETAILS_MISSING_REASON) return label;
   const missing = contractDetailsMissingOf(readiness);
@@ -4487,9 +4494,9 @@ export function LeadWizard({
         ? Boolean(nextOrder.prepayment_required)
         : storedCommercialDraft?.prepayment ?? false;
       const nextPrepaymentAmount = nextOrder?.prepayment_amount != null
-        ? String(nextOrder.prepayment_amount)
+        ? moneyInputText(nextOrder.prepayment_amount)
         : storedCommercialDraft?.prepaymentAmount
-          || (nextPrepayment && paymentQuote ? String(paymentQuote.total_gross) : "");
+          || (nextPrepayment && paymentQuote ? moneyInputText(paymentQuote.total_gross) : "");
       const nextPaidAmount = paymentQuote
         ? String(paymentQuote.paid_amount ?? "")
         : "";
@@ -4794,7 +4801,7 @@ export function LeadWizard({
     }
     if (nextOrder) {
       if (signatureVersions.prepayment_required === commercialFlagRequestVersionRef.current.prepayment_required) setPrepayment(Boolean(nextOrder.prepayment_required));
-      if (signatureVersions.prepayment_amount === commercialFlagRequestVersionRef.current.prepayment_amount) setPrepaymentAmount(String(nextOrder.prepayment_amount ?? ""));
+      if (signatureVersions.prepayment_amount === commercialFlagRequestVersionRef.current.prepayment_amount) setPrepaymentAmount(moneyInputText(nextOrder.prepayment_amount));
       if (signatureVersions.prepayment_due_at === commercialFlagRequestVersionRef.current.prepayment_due_at) setPrepaymentDeadline(localDeadline(nextOrder.prepayment_due_at));
     }
     const nextQuote = nextQuotes.find((item) => !nextOrderId || item.order_id === nextOrderId);
@@ -5348,6 +5355,8 @@ export function LeadWizard({
     ? tx("Смета ещё не рассчитана", "Kostenvoranschlag noch nicht berechnet")
     : !quoteIsCurrent
       ? tx("Услуги изменены — пересчитайте смету", "Leistungen geändert — Kostenvoranschlag neu berechnen")
+      : estimateDocumentOutdated
+        ? estimateDocumentOutdatedText(tx)
       : quote.status !== "accepted"
         ? tx("Смета ожидает подтверждения", "Kostenvoranschlag wartet auf Annahme")
         : serverQuoteAccepted === false
@@ -5479,7 +5488,7 @@ export function LeadWizard({
     return validationContext.reasons.map((reason) => ({
       key: reason,
       step: readinessReasonStep(reason),
-      message: readinessReasonText(reason, tx, Boolean(draft && isMinor(draft.birthDate, new Date())), lead?.readiness),
+      message: readinessReasonText(reason, tx, Boolean(draft && isMinor(draft.birthDate, new Date())), lead?.readiness, commercialDocuments.order_cost_estimate.length > 0),
       fieldId: readinessReasonFieldId(reason, draft),
     }));
   }, [draft, masterErrors, orderIssues, tx, validationContext, wizardDocuments, isRepeatIntake, readinessChecks, amlRequired, lead?.readiness, cabinetConsents]);
@@ -8257,7 +8266,7 @@ ${serviceCommentLines.join("\n")}`
     openValidationIssue({
       key: reason,
       step: readinessReasonStep(reason),
-      message: readinessReasonText(reason, tx, draftIsMinor, lead?.readiness),
+      message: readinessReasonText(reason, tx, draftIsMinor, lead?.readiness, commercialDocuments.order_cost_estimate.length > 0),
       fieldId: readinessReasonFieldId(reason, draft),
     });
   }
@@ -8356,7 +8365,7 @@ ${serviceCommentLines.join("\n")}`
         key: `request:${reason}`,
         label: tx("В этом обращении", "In dieser Anfrage"),
         ready: false,
-        status: readinessReasonText(reason, tx, draftIsMinor, lead.readiness),
+        status: readinessReasonText(reason, tx, draftIsMinor, lead.readiness, commercialDocuments.order_cost_estimate.length > 0),
         detail: "—",
         action: { label: tx("Исправить", "Beheben"), onClick: () => openReadinessReason(reason) },
       })),
@@ -11107,6 +11116,7 @@ ${serviceCommentLines.join("\n")}`
                   orderDocument={sortWizardDocumentsNewestFirst(commercialDocuments.single_order)[0] ?? null}
                   contractSigned={contract?.status === "signed"}
                   inheritedContract={inheritedContract}
+                  outdatedDocumentIds={documents.filter((item) => item.terms_current === false).map((item) => item.id)}
                   onDone={() => { void refreshDocumentsState(); }}
                 />
               ) : null}
@@ -11733,7 +11743,7 @@ ${serviceCommentLines.join("\n")}`
                       onChange={(checked) => {
                         setPrepayment(checked);
                         const nextAmount = checked
-                          ? prepaymentAmount || (quote ? quoteTotal.toFixed(2) : "")
+                          ? prepaymentAmount || (quote ? moneyInputText(quoteTotal) : "")
                           : prepaymentAmount;
                         if (checked && nextAmount !== prepaymentAmount) {
                           setPrepaymentAmount(nextAmount);
@@ -11784,7 +11794,7 @@ ${serviceCommentLines.join("\n")}`
                             }
                           }}
                           disabled={isBusy}
-                          placeholder="0.00"
+                          placeholder="0,00"
                         />
                       </Field>
                     ) : null}
@@ -11849,8 +11859,8 @@ ${serviceCommentLines.join("\n")}`
                       {paymentStatusLabel(order.payment_tracking.status, lang)}
                     </StatusChip>
                   ) : null}
-                  <StatusChip tone={quoteAndPrepaymentReady ? "success" : "warning"}>
-                    {quoteAndPrepaymentReady ? <Check aria-hidden="true" /> : <Info aria-hidden="true" />}
+                  <StatusChip tone={quoteAndPrepaymentReady && !estimateDocumentOutdated ? "success" : "warning"}>
+                    {quoteAndPrepaymentReady && !estimateDocumentOutdated ? <Check aria-hidden="true" /> : <Info aria-hidden="true" />}
                     {quoteStateLabel}
                   </StatusChip>
                   </div>
@@ -12060,7 +12070,7 @@ ${serviceCommentLines.join("\n")}`
                                   disabled={isBusy}
                                   onClick={() => openReadinessReason(reason)}
                                 >
-                                  {readinessReasonText(reason, tx, draftIsMinor, lead.readiness)}
+                                  {readinessReasonText(reason, tx, draftIsMinor, lead.readiness, commercialDocuments.order_cost_estimate.length > 0)}
                                 </button>
                               </li>
                             ))}

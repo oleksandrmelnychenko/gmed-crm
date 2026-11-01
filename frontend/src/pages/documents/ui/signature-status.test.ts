@@ -2,6 +2,15 @@ import { describe, expect, it } from "vitest";
 import type { SignatureSummary } from "../data/use-signature-summary";
 import { isClientSignableDocument, isInformationalDocument, signaturePresentation, signatureStatusText } from "./signature-status";
 
+describe("signaturePresentation of an outdated document", () => {
+  it("does not read as signed (QA 2026-11-01, U-3)", () => {
+    const completed = { status: "completed", test_mode: false } as SignatureSummary;
+    expect(signaturePresentation(completed, "ru", true, true).label).toBe("Устарел, нужна новая версия");
+    expect(signaturePresentation(completed, "de", true, true).label).toBe("Veraltet, neue Version nötig");
+    expect(signaturePresentation(completed, "ru", true).label).toBe("Подписано");
+  });
+});
+
 describe("isInformationalDocument", () => {
   it("recognises the attachments that are never signed themselves", () => {
     expect(isInformationalDocument({ generated_template_id: "privacy_information" })).toBe(true);

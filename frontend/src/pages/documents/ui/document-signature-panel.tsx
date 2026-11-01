@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Download, Eye, FileSignature, LoaderCircle, Info, Mail, Pencil, Plus, Send, ShieldCheck, Trash2 } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, StatusBadge } from "@/components/ui-shell";
@@ -16,6 +16,7 @@ import { SignatureSignerFields } from "./signature-signer-fields";
 import { SignatureSigners } from "./signature-signers";
 import { SignatureProgressChips } from "./signature-progress-chips";
 import { OnboardingSignatureManifest } from "./onboarding-signature-manifest";
+import { OutdatedSignatureDocuments } from "./signature-status";
 import { signatureSignerProgress } from "./signature-signer-status";
 import { SignaturePackageComposer, emptyPackageSelection, expiryInstant, resolvePackage, type PackageSelection } from "./signature-package-composer";
 import {
@@ -230,6 +231,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
 
   const pending = state?.requests.some(r => isSignaturePending(r.status));
   const completed = state?.requests.some(r => r.status === "completed");
+  const outdatedSource = useContext(OutdatedSignatureDocuments).includes(documentId);
   const paperSourceConfirmed = Boolean(state?.paper_resign_available && selection.paperSignedDocumentIds?.includes(documentId));
   const composing = Boolean(state?.enabled && state.can_send && !pending && (!state.ineligible_reason || paperSourceConfirmed) && (!completed || composeNew));
   const resolved = resolvePackage(candidates, selection);
@@ -495,11 +497,12 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
           </section>;
           })}
 
-          {state.can_send && !pending && state.ineligible_reason && !state.requests.some(r => r.result_document_id) ? <div className={CONSENT_CHOICE_REASONS.has(state.ineligible_reason) ? "flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200" : "flex items-start gap-2 rounded-xl border border-border/70 bg-card px-4 py-3 text-sm text-foreground"}><Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" /><span>{tx(...(ineligibleMessages[state.ineligible_reason] ?? ["Документ сейчас недоступен для подписания.", "Das Dokument kann derzeit nicht unterzeichnet werden."]))}{state.electronic_form_excluded ? ` (${state.electronic_form_excluded})` : ""}</span></div> : null}
+          {outdatedSource ? <Banner tone="warning" data-testid="signature-document-outdated">{tx("Эта версия устарела: данные изменились после её создания. Создайте новую версию документа и подпишите её.", "Diese Fassung ist veraltet: Die Angaben haben sich nach ihrer Erstellung geändert. Erstellen Sie eine neue Fassung und lassen Sie sie unterschreiben.")}</Banner> : null}
+          {!outdatedSource && state.can_send && !pending && state.ineligible_reason && !state.requests.some(r => r.result_document_id) ? <div className={CONSENT_CHOICE_REASONS.has(state.ineligible_reason) ? "flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200" : "flex items-start gap-2 rounded-xl border border-border/70 bg-card px-4 py-3 text-sm text-foreground"}><Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" /><span>{tx(...(ineligibleMessages[state.ineligible_reason] ?? ["Документ сейчас недоступен для подписания.", "Das Dokument kann derzeit nicht unterzeichnet werden."]))}{state.electronic_form_excluded ? ` (${state.electronic_form_excluded})` : ""}</span></div> : null}
 
-          {state.enabled && state.can_send && !pending && !state.ineligible_reason && completed && !composeNew ? <Button type="button" variant="outline" disabled={mutationDisabled} onClick={() => { setComposeNew(true); onComposeNew?.(); }}><Plus className="size-4" />{tx("Новый запрос подписи", "Neue Signaturanfrage")}</Button> : null}
+          {!outdatedSource && state.enabled && state.can_send && !pending && !state.ineligible_reason && completed && !composeNew ? <Button type="button" variant="outline" disabled={mutationDisabled} onClick={() => { setComposeNew(true); onComposeNew?.(); }}><Plus className="size-4" />{tx("Новый запрос подписи", "Neue Signaturanfrage")}</Button> : null}
           {!composing && state.onboarding_manifest ? <OnboardingSignatureManifest manifest={state.onboarding_manifest} /> : null}
-          {state.enabled && state.can_send && !pending && state.paper_resign_available && !composing ? <Button type="button" variant="outline" disabled={mutationDisabled} onClick={() => {
+          {!outdatedSource && state.enabled && state.can_send && !pending && state.paper_resign_available && !composing ? <Button type="button" variant="outline" disabled={mutationDisabled} onClick={() => {
             setSelection(current => ({ ...current, paperSignedDocumentIds: [...new Set([...(current.paperSignedDocumentIds ?? []), documentId])] }));
             setComposeNew(true); setConfirmed(false); onComposeNew?.();
           }}>{tx("Электронно подписать бумажную копию", "Papierkopie zusätzlich elektronisch unterschreiben")}</Button> : null}

@@ -13,7 +13,7 @@ import { DocumentSignaturePanel, type PackagePreviewSelection } from "./document
 import { SignatureDocumentPreview, type SignaturePreviewSource } from "./signature-document-preview";
 import { refreshSignatureSummaries, useSignatureSummary } from "../data/use-signature-summary";
 import type { SignatureRequest, SignatureState } from "../data/document-signature-api";
-import { isClientSignableDocument, signaturePresentation } from "./signature-status";
+import { isClientSignableDocument, OutdatedSignatureDocuments, signaturePresentation } from "./signature-status";
 
 type DocumentScope = { patientId?: string | null; orderId?: string | null; leadId?: string | null };
 
@@ -41,7 +41,8 @@ export function DocumentSignatureAction({ documentId, scope, title, iconOnly, di
   const [dirty, setDirty] = useState(false);
   const changed = useRef(false);
   const summary = useSignatureSummary(user && SIGNING_ROLES.includes(user.role) ? user.id : undefined, documentId);
-  const presentation = signaturePresentation(summary, lang, signed);
+  const outdated = useContext(OutdatedSignatureDocuments).includes(documentId ?? "");
+  const presentation = signaturePresentation(summary, lang, signed, outdated);
   if (!user || !SIGNING_ROLES.includes(user.role)) return null;
   if (!documentId && !scope?.patientId && !scope?.orderId && !scope?.leadId) return null;
   const label = lang === "de" ? "Elektronische Unterschrift" : "Электронная подпись";
@@ -51,7 +52,7 @@ export function DocumentSignatureAction({ documentId, scope, title, iconOnly, di
       type="button" variant={iconOnly ? "ghost" : "default"} size={iconOnly ? "icon-sm" : "sm"}
       title={presentation.label} aria-label={`${label}: ${title}`} disabled={disabled}
       aria-description={summary ? presentation.label : undefined}
-      className={iconOnly ? presentation.className : undefined} data-signature-status={signed ? "document-signed" : summary?.status ?? "none"}
+      className={iconOnly ? presentation.className : undefined} data-signature-status={outdated ? "document-outdated" : signed ? "document-signed" : summary?.status ?? "none"}
       data-document-signature-id={documentId}
       onClick={event => { event.stopPropagation(); setOpen(true); }}
       onKeyDown={event => event.stopPropagation()}

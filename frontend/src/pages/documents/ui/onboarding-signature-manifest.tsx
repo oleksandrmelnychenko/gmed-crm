@@ -1,9 +1,11 @@
+import { useContext } from "react";
 import { Info } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { useLang } from "@/lib/i18n";
 import { CONSENT_CHOICE_REASONS, signatureErrorText, type OnboardingManifest } from "../data/document-signature-api";
+import { OutdatedSignatureDocuments } from "./signature-status";
 
 const names: Record<string, [string, string]> = {
   framework_contract: ["Рамочный договор", "Rahmenvertrag"],
@@ -24,10 +26,12 @@ export function OnboardingSignatureManifest({ manifest, documentId, selectedIds 
 }) {
   const { lang } = useLang();
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
-  const incomplete = manifest.items.some(item => item.state !== "signed" &&
-    (item.state !== "ready" || item.pending_elsewhere || !item.document_id || !selectedIds.includes(item.document_id)));
+  const outdatedIds = useContext(OutdatedSignatureDocuments);
+  const isOutdated = (item: OnboardingManifest["items"][number]) => Boolean(item.document_id && outdatedIds.includes(item.document_id));
+  const incomplete = manifest.items.some(item => isOutdated(item) || (item.state !== "signed" &&
+    (item.state !== "ready" || item.pending_elsewhere || !item.document_id || !selectedIds.includes(item.document_id))));
   const selectable = manifest.items.filter(item => item.document_id && availableIds.includes(item.document_id)
-    && !item.pending_elsewhere && (item.state === "ready" || (item.state === "signed" && item.paper_signed)));
+    && !isOutdated(item) && !item.pending_elsewhere && (item.state === "ready" || (item.state === "signed" && item.paper_signed)));
   return <section data-onboarding-manifest className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-3">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <AdminSectionTitle>{tx("Полный комплект первичного оформления", "Vollständige Erstaufnahme")}</AdminSectionTitle>
@@ -56,8 +60,8 @@ export function OnboardingSignatureManifest({ manifest, documentId, selectedIds 
               onSelect?.(ids, paper);
             }} /> : null}
             <p className="min-w-0 flex-1 break-words text-sm font-semibold">{tx(...(names[item.template] ?? [item.template, item.template]))}</p>
-          <StatusBadge tone={item.pending_elsewhere ? "warning" : item.state === "signed" ? "success" : item.state === "ready" ? "neutral" : "warning"}>
-            {item.pending_elsewhere ? tx("На подписи", "In Unterzeichnung") : item.state === "signed" ? item.paper_signed ? tx("Подписан на бумаге", "Auf Papier unterschrieben") : tx("Подписан", "Unterschrieben") : item.state === "missing" ? tx("Не создан", "Fehlt") : item.state === "blocked" ? tx("Нужна проверка", "Prüfung nötig") : checked ? tx("В пакете", "Im Paket") : tx("Не выбран", "Nicht ausgewählt")}
+          <StatusBadge tone={item.pending_elsewhere || isOutdated(item) ? "warning" : item.state === "signed" ? "success" : item.state === "ready" ? "neutral" : "warning"}>
+            {isOutdated(item) ? tx("Устарел, нужна новая версия", "Veraltet, neue Version nötig") : item.pending_elsewhere ? tx("На подписи", "In Unterzeichnung") : item.state === "signed" ? item.paper_signed ? tx("Подписан на бумаге", "Auf Papier unterschrieben") : tx("Подписан", "Unterschrieben") : item.state === "missing" ? tx("Не создан", "Fehlt") : item.state === "blocked" ? tx("Нужна проверка", "Prüfung nötig") : checked ? tx("В пакете", "Im Paket") : tx("Не выбран", "Nicht ausgewählt")}
           </StatusBadge>
           </div>
           <div className="min-w-0 space-y-1.5">

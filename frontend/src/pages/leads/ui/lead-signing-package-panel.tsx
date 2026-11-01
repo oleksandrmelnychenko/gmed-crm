@@ -4,7 +4,7 @@ import { useLang } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useSignatureSummary } from "@/pages/documents/data/use-signature-summary";
 import { SignatureProgressChips } from "@/pages/documents/ui/signature-progress-chips";
-import { signatureStatusText } from "@/pages/documents/ui/signature-status";
+import { OutdatedSignatureDocuments, signatureStatusText } from "@/pages/documents/ui/signature-status";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 
@@ -19,6 +19,7 @@ export function LeadSigningPackagePanel({
   inheritedContract,
   onDone,
   demoChecks = [],
+  outdatedDocumentIds = [],
 }: {
   leadId: string;
   contractDocument: DocumentItem | null;
@@ -27,6 +28,8 @@ export function LeadSigningPackagePanel({
   inheritedContract: boolean;
   onDone: () => void;
   demoChecks?: readonly string[];
+  /** Every document of the lead with `terms_current: false`, for the dialog's list. */
+  outdatedDocumentIds?: readonly string[];
 }) {
   const { lang } = useLang();
   const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
@@ -102,16 +105,18 @@ export function LeadSigningPackagePanel({
         {description ? <p className="text-xs leading-5 text-muted-foreground">{description}</p> : null}
       </div>
       <div className="shrink-0">
-        {source ? (
-          <DocumentSignatureAction
-            documentId={source.id}
-            title={title}
-            signed={Boolean(source.signed_at)}
-            onDone={onDone}
-          />
-        ) : (
-          <DocumentSignatureAction scope={{ leadId }} title={title} onDone={onDone} />
-        )}
+        <OutdatedSignatureDocuments.Provider value={outdatedDocumentIds}>
+          {source ? (
+            <DocumentSignatureAction
+              documentId={source.id}
+              title={title}
+              signed={Boolean(source.signed_at)}
+              onDone={onDone}
+            />
+          ) : (
+            <DocumentSignatureAction scope={{ leadId }} title={title} onDone={onDone} />
+          )}
+        </OutdatedSignatureDocuments.Provider>
       </div>
     </section>
   );
