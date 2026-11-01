@@ -109,6 +109,11 @@ function newLead(item: NotificationFacts, lang: Lang): NotificationCopy {
 }
 
 const FIXED_COPY: Record<string, { title: Texts; body: Texts | null }> = {
+  // The requester of an erasure whose login stays for another child (QA 2026-11-01).
+  privacy_erasure_completed: {
+    title: { ru: "Запрос на удаление выполнен", de: "Löschantrag ausgeführt" },
+    body: { ru: "Данные удалены, насколько закон не требует их хранить.", de: "Die Daten wurden gelöscht, soweit keine gesetzliche Aufbewahrungspflicht besteht." },
+  },
   // Risk review (reviewers only; never a reason or a trigger).
   risk_review_required: {
     title: { ru: "Требуется проверка риска", de: "Risikoprüfung erforderlich" },

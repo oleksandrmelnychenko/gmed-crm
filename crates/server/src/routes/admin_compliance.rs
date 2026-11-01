@@ -3579,6 +3579,26 @@ async fn complete_privacy_request_execution(
         ));
     }
 
+    // A parent's login that stays (another child) lost the request with the
+    // erased record: nothing in the portal said it was done (QA 2026-11-01,
+    // R5-3). The notice names nobody; a disabled login gets none.
+    if request_type == "erasure"
+        && let Err(e) = sqlx::query(
+            r#"INSERT INTO user_notifications (user_id, kind, title, body, params)
+               SELECT u.id, 'privacy_erasure_completed', 'Erasure completed',
+                      'The deletion you requested has been carried out.', '{}'::jsonb
+               FROM patient_privacy_requests pr
+               JOIN users u ON u.id = pr.requested_by
+               WHERE pr.id = $1 AND u.role = 'patient' AND u.is_active"#,
+        )
+        .bind(request_id)
+        .execute(&state.db)
+        .await
+    {
+        // The erasure itself is done; the audit below records it.
+        tracing::error!(error = %e, request_id = %request_id, "notify erasure requester");
+    }
+
     state.audit_sender.try_send(audit::domain_event(
         "privacy_request_executed",
         Some(actor_id),
@@ -3871,6 +3891,12 @@ struct ScrubbedFreeText {
     /// Shared internal notes that named the patient (they link to no patient,
     /// so only the strong identifiers are looked for).
     internal_notes: u64,
+    /// Recommendations and the decisions on them (QA 2026-11-01): title, notes.
+    recommendations: u64,
+    /// Reminders of the patient's appointments and tasks.
+    reminders: u64,
+    /// Card entries and clinical notes of the record that named the patient.
+    clinical_notes: u64,
     /// Attachments of the patient's tasks whose files were deleted (the row
     /// stays as the record that a file was there).
     task_attachments_deleted: u64,
@@ -4185,6 +4211,83 @@ async fn scrub_patient_free_text_in_tx(
     .execute(&mut **tx)
     .await?
     .rows_affected();
+    // QA 2026-11-01 (R5-1, Art. 17): the recommendations kept "Paul Empfehlung"
+    // and the staff note after the erasure, in no report.
+    scrubbed.recommendations = sqlx::query(&scrub_statement(
+        "patient_recommendations",
+        &[
+            ("title", None),
+            ("description", None),
+            ("decision_note", None),
+            ("outcome_note", None),
+            ("note_intern", None),
+        ],
+        "patient_id = $1",
+    ))
+    .bind(patient_id)
+    .bind(&pattern)
+    .bind(&replacement)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    scrubbed.recommendations += sqlx::query(&scrub_statement(
+        "patient_recommendation_decisions",
+        &[("note", None)],
+        "recommendation_id IN (SELECT id FROM patient_recommendations WHERE patient_id = $1)",
+    ))
+    .bind(patient_id)
+    .bind(&pattern)
+    .bind(&replacement)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    scrubbed.reminders = sqlx::query(&scrub_statement(
+        "reminders",
+        &[("title", None), ("description", None)],
+        "appointment_id = ANY($1)",
+    ))
+    .bind(&appointment_ids)
+    .bind(&pattern)
+    .bind(&replacement)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    // The same for the record's own notes: the medical text stays, the words
+    // that name the patient go.
+    let clinical_notes = [
+        scrub_statement(
+            "patient_card_entries",
+            &[("content", None)],
+            "patient_id = $1",
+        ),
+        scrub_statement(
+            "patient_clinical_verlauf",
+            &[("note", None)],
+            "patient_id = $1",
+        ),
+        scrub_statement(
+            "patient_clinical_narrative",
+            &[
+                ("anamnese_aktuelle", None),
+                ("anamnese_vorgeschichte", None),
+                ("anamnese_vegetative", None),
+                ("anamnese_sozial", None),
+                ("untersuchungsbefund", None),
+                ("beurteilung", None),
+                ("verlauf", None),
+            ],
+            "patient_id = $1",
+        ),
+    ];
+    for statement in &clinical_notes {
+        scrubbed.clinical_notes += sqlx::query(statement)
+            .bind(patient_id)
+            .bind(&pattern)
+            .bind(&replacement)
+            .execute(&mut **tx)
+            .await?
+            .rows_affected();
+    }
     // The shared internal notes link to no patient: every note (archived
     // ones too) is searched, for the strong identifiers only. `$1` is unused.
     if let Some(strong_pattern) = identity_terms_pattern(&terms.strong) {

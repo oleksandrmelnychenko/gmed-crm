@@ -892,6 +892,62 @@ async fn erasing_a_patient_keeps_the_chat_of_a_guardian_with_another_child() {
     assert!(guardian_active);
 }
 
+/// QA 2026-11-01 (R5-3): the parent's history of the erased child is gone with
+/// the record, so a login that stays is told it was done, naming nobody. A
+/// login that went with the patient gets nothing.
+#[tokio::test]
+async fn erasure_tells_a_requester_whose_login_stays() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("erasure-notice");
+    let erased = seed_patient(&pool, admin_id, &format!("{tag}-erased")).await;
+    let sibling = seed_patient(&pool, admin_id, &format!("{tag}-sibling")).await;
+    let alone = seed_patient(&pool, admin_id, &format!("{tag}-alone")).await;
+    let guardian = seed_user(&pool, &format!("{tag}-guardian"), "patient").await;
+    let own_login = seed_user(&pool, &format!("{tag}-own"), "patient").await;
+    seed_patient_assignment(&pool, erased, guardian, admin_id).await;
+    seed_patient_assignment(&pool, sibling, guardian, admin_id).await;
+    seed_patient_assignment(&pool, alone, own_login, admin_id).await;
+    for (patient, requester) in [(erased, guardian), (alone, own_login)] {
+        let request: Uuid = sqlx::query_scalar(
+            r#"INSERT INTO patient_privacy_requests
+                   (patient_id, requested_by, request_type, status, source, due_at)
+               VALUES ($1, $2, 'erasure', 'approved', 'admin_intake', now() + interval '30 days')
+               RETURNING id"#,
+        )
+        .bind(patient)
+        .bind(requester)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/admin/compliance/privacy-requests/{request}/execute"),
+            &auth_header_for(admin_id, "ceo"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    let notices = |user: Uuid| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, String>(
+                "SELECT title FROM user_notifications
+                 WHERE user_id = $1 AND kind = 'privacy_erasure_completed'",
+            )
+            .bind(user)
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    assert_eq!(notices(guardian).await, ["Erasure completed"]);
+    assert!(notices(own_login).await.is_empty());
+}
+
 #[tokio::test]
 async fn restriction_request_updates_legal_status_and_queue_is_assignment_scoped() {
     let Some((app, pool, admin_id)) = test_context().await else {
@@ -2223,6 +2279,25 @@ async fn erasure_removes_names_and_content_from_the_patients_documents() {
     .fetch_one(&pool)
     .await
     .unwrap();
+    // QA 2026-11-01 (R5-1): the recommendation and the record's notes name him too.
+    let recommendation: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_recommendations (patient_id, title, note_intern)
+           VALUES ($1, $2, $3) RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(format!("{person} Empfehlung"))
+    .bind(format!("Notiz zu {person}: Kardiologie"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let verlauf: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_clinical_verlauf (patient_id, note) VALUES ($1, $2) RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(format!("Gespräch mit {person}: Befund stabil"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
 
     // Another patient's file names the erased person: as a spouse (nothing
     // else names that relation) and as the payer of his completed order.
@@ -2295,9 +2370,30 @@ async fn erasure_removes_names_and_content_from_the_patients_documents() {
         ("appointment_requests", 1),
         ("internal_notes", 1),
         ("task_attachments_deleted", 1),
+        ("recommendations", 1),
+        ("clinical_notes", 1),
     ] {
         assert_eq!(scrubbed[counter], expected, "{counter}: {scrubbed}");
     }
+    let (recommendation_title, recommendation_note): (String, Option<String>) =
+        sqlx::query_as("SELECT title, note_intern FROM patient_recommendations WHERE id = $1")
+            .bind(recommendation)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(recommendation_title, format!("{anon} Empfehlung"));
+    assert_eq!(
+        recommendation_note.as_deref(),
+        Some(format!("Notiz zu {anon}: Kardiologie").as_str()),
+        "the medical word stays, the name goes"
+    );
+    let verlauf_note: String =
+        sqlx::query_scalar("SELECT note FROM patient_clinical_verlauf WHERE id = $1")
+            .bind(verlauf)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(verlauf_note, format!("Gespräch mit {anon}: Befund stabil"));
     let label: String = sqlx::query_scalar(
         "SELECT label FROM concierge_operational_task_checklist_items WHERE task_id = $1",
     )

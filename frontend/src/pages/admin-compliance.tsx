@@ -1605,6 +1605,17 @@ function useAdminCompliancePageContent() {
                       </div>
                     ) : null}
 
+                    {/* Approving stays possible; what it will not yet allow is said before it (QA 2026-11-01). */}
+                    {!readOnly && reviewSheetRecord.status !== "approved" && identityMissing ? (
+                      <Banner tone="warning">{uiText("privacy_approve_identity_open", lang)}</Banner>
+                    ) : null}
+                    {!readOnly &&
+                    reviewSheetRecord.status === "requested" &&
+                    reviewSheetRecord.request_type === "erasure" &&
+                    latestReviewRecord?.patient_open_business ? (
+                      <Banner tone="warning">{uiText("privacy_approve_business_open", lang)}</Banner>
+                    ) : null}
+
                     {!readOnly &&
                     (reviewSheetRecord.status === "requested" ||
                       reviewSheetRecord.status === "retention_hold") ? (

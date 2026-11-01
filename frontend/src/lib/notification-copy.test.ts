@@ -189,6 +189,12 @@ describe("notifications in the viewer's language (QA A-23, E-16, E-33)", () => {
     }
   });
 
+  it("tells the requester that an erasure was carried out, naming nobody", () => {
+    const item = notice("privacy_erasure_completed", "Erasure completed", "The deletion you requested has been carried out.", {});
+    expect(notificationCopyFromFacts(item, "de")?.title).toBe("Löschantrag ausgeführt");
+    expect(notificationCopyFromFacts(item, "ru")?.title).toBe("Запрос на удаление выполнен");
+  });
+
   it("uses Russian plural forms for the retention notice", () => {
     const sweep = (count: number) =>
       notificationCopyFromFacts(
