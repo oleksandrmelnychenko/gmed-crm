@@ -362,7 +362,8 @@ const DECLARATION_COLUMNS: &str = "payer_kind, payer_representative_id, acts_on_
      payer_informed_by, contact_consent_at, invoice_vat_id, \
      invoice_tax_number, payment_method, payment_method_details, account_country, \
      account_holder, bank_name, via_third_party, via_third_party_details, identity_adopted_at, \
-     identity_adopted_key, identity_changed_at, cost_estimate_consent_at, self_funds_source, \
+     identity_adopted_key, identity_changed_at, payer_person_changed_at, \
+     cost_estimate_consent_at, self_funds_source, \
      self_funds_description, self_funds_entered_by, payer_funds_source_stated, \
      payer_funds_description_stated, patient_id, created_at, updated_at";
 
@@ -1362,6 +1363,9 @@ pub(crate) struct CostAssumptionDocument {
 pub(crate) struct PayerState {
     pub declaration: Option<Declaration>,
     pub identity_changed_at: Option<DateTime<Utc>>,
+    /// Last time another person was named; `identity_changed_at` also moves
+    /// with an address.
+    pub person_changed_at: Option<DateTime<Utc>>,
     pub patient_id: Option<Uuid>,
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
@@ -1691,6 +1695,7 @@ pub(crate) async fn load_payer_state(
     {
         state.declaration = Some(Declaration::from_row(&row));
         state.identity_changed_at = row.try_get("identity_changed_at").ok().flatten();
+        state.person_changed_at = row.try_get("payer_person_changed_at").ok().flatten();
         state.patient_id = row.try_get("patient_id").unwrap_or_default();
         state.created_at = row.try_get("created_at").ok().flatten();
         state.updated_at = row.try_get("updated_at").ok().flatten();
@@ -1922,6 +1927,10 @@ async fn identification_status(
     }
     let required = payer_identification_required(conn, lead_id).await?;
     let parts = load_payer_identification(conn, lead_id).await?;
+    let papers_predate_payer = match state.person_changed_at {
+        Some(changed_at) => payer_papers_predate(conn, lead_id, changed_at).await?,
+        None => false,
+    };
     Ok(json!({
         "required": required,
         "identified": parts.identified(),
@@ -1930,9 +1939,65 @@ async fn identification_status(
         "identity_document": parts.identity_document,
         "statement_by_staff": parts.statement_by_staff,
         // Papers older than this concern the payer named before (QA
-        // 2026-11-01, W2 N2): they stay on file, the wizard says whose they are.
-        "payer_since": state.identity_changed_at.map(|at| at.to_rfc3339()),
+        // 2026-11-01, W2 N2): they stay on file, the wizard says whose they
+        // are. The same person at a new address keeps her papers.
+        "payer_since": state.person_changed_at.or(state.created_at).map(|at| at.to_rfc3339()),
+        "papers_predate_payer": papers_predate_payer,
     }))
+}
+
+/// Whether a paper [`load_payer_identification`] counts has no version from
+/// after `changed_at`, the last change of the person who pays: the gate keeps
+/// counting it, staff are told to check it or to ask the new payer for their
+/// own (owner decision 2026-11-01).
+async fn payer_papers_predate(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    changed_at: DateTime<Utc>,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"SELECT COALESCE(bool_or(newest < $2), false)
+           FROM (
+               SELECT d.art = 'payer_identity' AS identity,
+                      max(COALESCE(d.signed_at, d.created_at)) AS newest
+               FROM documents d
+               WHERE d.status <> 'archived'
+                 AND d.file_deleted_at IS NULL
+                 AND ((d.art = 'payer_identity' AND d.lead_id = $1)
+                      OR ((d.art = 'payer_self_disclosure'
+                           OR d.generated_template_id = 'payer_self_disclosure')
+                          AND d.signed_at IS NOT NULL
+                          AND (d.lead_id = $1
+                               OR d.order_id IN (SELECT o.id FROM orders o
+                                                 WHERE o.source_lead_id = $1))))
+               GROUP BY 1
+           ) papers"#,
+    )
+    .bind(lead_id)
+    .bind(changed_at)
+    .fetch_one(conn)
+    .await
+}
+
+/// Dates the change when `next` names another person than `previous`
+/// ([`Declaration::same_payer`]: a new address is the same person).
+async fn record_payer_person_change(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    previous: Option<&Declaration>,
+    next: &Declaration,
+) -> Result<(), sqlx::Error> {
+    if previous.is_none_or(|previous| previous.same_payer(next)) {
+        return Ok(());
+    }
+    sqlx::query(
+        "UPDATE lead_payer_declarations SET payer_person_changed_at = clock_timestamp()
+         WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .execute(conn)
+    .await?;
+    Ok(())
 }
 
 /// [`PayerReason::PayerNotIdentified`]: a third party who is not the minor's
@@ -2864,6 +2929,11 @@ async fn save_payer_declaration(
     .await
     {
         return database_error(error, "save payer declaration");
+    }
+    if let Err(error) =
+        record_payer_person_change(&mut tx, lead_id, previous.as_ref(), &declaration).await
+    {
+        return database_error(error, "record payer person change");
     }
     // Another payer or another e-mail address: the payer's link stops
     // working, and another payer's answers go — with a link payer's
@@ -4103,6 +4173,7 @@ pub(crate) async fn save_from_portal(
         .as_ref()
         .is_none_or(|previous| !previous.same_identity(&declaration));
     store_declaration(conn, lead_id, &declaration, Some(actor), identity_changed).await?;
+    record_payer_person_change(&mut *conn, lead_id, previous.as_ref(), &declaration).await?;
     if consent_changed {
         let (how, note) = consent_recorded.unzip();
         sqlx::query(
@@ -4191,6 +4262,7 @@ pub(crate) async fn adopt_payer_identity(
         .as_ref()
         .is_none_or(|previous| !previous.same_identity(declaration));
     store_declaration(conn, lead_id, declaration, actor, identity_changed).await?;
+    record_payer_person_change(&mut *conn, lead_id, previous.as_ref(), declaration).await?;
     let changed_fields = changed_json_fields(
         &previous
             .as_ref()

@@ -26,6 +26,8 @@ export type PayerIdentificationStatus = {
   statement_by_staff?: boolean;
   /** When the payer named now was named; absent on an older server. */
   payer_since?: string | null;
+  /** A counted Selbstauskunft or Ausweis dates from before the person named now (owner 2026-11-01). */
+  papers_predate_payer?: boolean;
 };
 
 /** The anchor the readiness reason `payer_not_identified` focuses. */
@@ -178,6 +180,14 @@ export function payerPaperDocuments(allDocuments: readonly DocumentItem[], payer
   return { selfDisclosure, identity, previous };
 }
 
+/** The papers count for the gate as they are; staff decide (owner decision 2026-11-01). */
+export function payerPapersPredateText(tx: Tx): string {
+  return tx(
+    "Эти бумаги оформлены до смены плательщика. Проверьте их или запросите у нового плательщика его собственные",
+    "Diese Unterlagen stammen aus der Zeit vor dem Zahlerwechsel. Prüfen Sie sie oder fordern Sie vom neuen Zahler eigene an",
+  );
+}
+
 /** The status line while only the replaced payer's papers are on file: the next step for the new payer. */
 export function payerPreviousPapersLine(tx: Tx): { tone: "warning"; text: string } {
   return {
@@ -231,6 +241,7 @@ export function normalizePayerIdentification(value: unknown): PayerIdentificatio
     identity_document: record.identity_document === true,
     statement_by_staff: record.statement_by_staff === true,
     ...(typeof record.payer_since === "string" ? { payer_since: record.payer_since } : {}),
+    ...(record.papers_predate_payer === true ? { papers_predate_payer: true } : {}),
   };
 }
 

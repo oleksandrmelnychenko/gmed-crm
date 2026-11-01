@@ -7,6 +7,7 @@ import {
   payerPreviousPapersLine,
   EMPTY_PAYER_IDENTITY_FIELDS,
   normalizePayerIdentification,
+  payerPapersPredateText,
   PAYER_PAPER_PATH_ID,
   paperSelfDisclosurePayload,
   payerIdentificationLine,
@@ -127,6 +128,11 @@ describe("payer paper path (re-check V-A7)", () => {
     });
     expect(normalizePayerIdentification({ statement_sent: true, statement_by_staff: true })?.statement_by_staff).toBe(true);
     expect(normalizePayerIdentification(null)).toBeNull();
+    // Owner decision 2026-11-01: a hint beside the gate, absent on an older server.
+    expect(normalizePayerIdentification({ papers_predate_payer: true })?.papers_predate_payer).toBe(true);
+    expect(normalizePayerIdentification({})).not.toHaveProperty("papers_predate_payer");
+    expect(payerPapersPredateText(ru)).toContain("до смены плательщика");
+    expect(payerPapersPredateText(de)).toContain("Zahlerwechsel");
     const response = normalizePayerDeclarationResponse({
       declaration: null,
       status: { complete: false, missing: [], cost_assumption: {}, identification: { required: true, identified: true } },

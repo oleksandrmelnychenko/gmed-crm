@@ -439,6 +439,7 @@ import {
   relaxMasterErrors,
   withPatientDataPending,
 } from "../model/lead-portal-intake";
+import { LeadPayerPapersHint } from "./lead-payer-papers-hint";
 import { LeadSigningPackagePanel } from "./lead-signing-package-panel";
 import { narrativeForIntakeSave } from "./lead-wizard.clinical-state";
 import {
@@ -10131,6 +10132,7 @@ ${serviceCommentLines.join("\n")}`
 
           {draft && step === "documents" ? (
             <section className="space-y-5">
+              {leadId ? <LeadPayerPapersHint leadId={leadId} tx={tx} /> : null}
               <LeadAttachmentImportNotice
                 refused={refusedAttachments}
                 tx={tx}
@@ -11993,6 +11995,7 @@ ${serviceCommentLines.join("\n")}`
 
           {lead && step === "release" ? (
             <section className="space-y-5">
+              {leadId ? <LeadPayerPapersHint leadId={leadId} tx={tx} /> : null}
               {patientDocumentReview}
               {patientContractReview}
               <Section title={isRepeatIntake ? tx("Завершение обращения", "Anfrage abschließen") : tx("Создание пациента", "Patient anlegen")}>

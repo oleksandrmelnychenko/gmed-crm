@@ -2486,6 +2486,65 @@ async fn a_payer_change_outdates_the_order_document_and_the_payers_papers() {
     assert_eq!(current(new_version).await, Some(true));
 }
 
+/// Owner decision 2026-11-01: a counted paper from before the person named now
+/// stays counted and raises a hint; the same person at a new address does not.
+#[tokio::test]
+async fn papers_from_before_another_payer_raise_a_hint_not_a_block() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let lead_id = seed_lead(pool).await;
+    let (_, order_id) = seed_lead_order(&app, lead_id).await;
+    let pm = app.bearer("patient_manager");
+    let path = format!("/api/v1/leads/{lead_id}/payer-declaration");
+    let (status, saved) = json_request(&app, "POST", &path, &pm, Some(third_party_payer())).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let disclosure =
+        seed_generated_document(&app, lead_id, order_id, "payer_self_disclosure").await;
+    sqlx::query("UPDATE documents SET signed_at = now() WHERE id = $1")
+        .bind(disclosure)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (_, before) = json_request(&app, "GET", &path, &pm, None).await;
+    assert_eq!(
+        before["status"]["identification"]["papers_predate_payer"], false,
+        "{before}"
+    );
+    let payer_since = before["status"]["identification"]["payer_since"].clone();
+    assert!(payer_since.is_string(), "{before}");
+
+    let mut moved = third_party_payer();
+    moved["street"] = json!("Neue Gasse 1");
+    let (status, saved) = json_request(&app, "POST", &path, &pm, Some(moved)).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let identification = &saved["status"]["identification"];
+    assert_eq!(identification["papers_predate_payer"], false, "{saved}");
+    assert_eq!(identification["payer_since"], payer_since, "{saved}");
+
+    let mut other = third_party_payer();
+    other["first_name"] = json!("Olga");
+    let (status, saved) = json_request(&app, "POST", &path, &pm, Some(other)).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let identification = &saved["status"]["identification"];
+    assert_eq!(identification["papers_predate_payer"], true, "{saved}");
+    // The gate counts it as before.
+    assert_eq!(identification["self_disclosure_signed"], true, "{saved}");
+    assert_ne!(identification["payer_since"], payer_since, "{saved}");
+
+    // A paper of the new payer ends the hint.
+    let own = seed_generated_document(&app, lead_id, order_id, "payer_self_disclosure").await;
+    sqlx::query("UPDATE documents SET signed_at = clock_timestamp() WHERE id = $1")
+        .bind(own)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (_, after) = json_request(&app, "GET", &path, &pm, None).await;
+    assert_eq!(
+        after["status"]["identification"]["papers_predate_payer"], false,
+        "{after}"
+    );
+}
+
 fn readiness_check<'a>(lead: &'a Value, key: &str) -> &'a Value {
     lead["readiness"]["checks"]
         .as_array()

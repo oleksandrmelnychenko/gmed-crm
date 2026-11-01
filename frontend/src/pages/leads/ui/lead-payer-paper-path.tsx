@@ -27,6 +27,7 @@ import {
   payerIdentificationLine,
   payerIdentityAnswersPatch,
   payerPaperDocuments,
+  payerPapersPredateText,
   payerPreviousPapersLine,
   type PayerIdentificationStatus,
   type PayerIdentityFields,
@@ -209,13 +210,17 @@ export function LeadPayerPaperPath({
         </p>
       ) : null}
 
+      {identification.papers_predate_payer ? (
+        <Banner tone="warning" withIcon data-testid="lead-payer-papers-predate">{payerPapersPredateText(tx)}</Banner>
+      ) : null}
+
       {previous.length > 0 ? (
         <div className="min-w-0 space-y-1 rounded-lg border border-border/70 px-3 py-2" data-testid="lead-payer-paper-previous">
           <p className="break-words text-sm font-medium text-foreground">
             {tx("Бумаги прежнего плательщика", "Papiere des früheren Zahlers")}
           </p>
           <p className="break-words text-xs leading-5 text-muted-foreground">
-            {tx("Остаются в деле, для нового плательщика не засчитываются.", "Bleiben in der Akte, zählen nicht für den neuen Zahler.")}
+            {tx("Остаются в деле.", "Bleiben in der Akte.")}
           </p>
           <ul className="space-y-1">
             {previous.map((document) => (
