@@ -8911,6 +8911,15 @@ async fn declare_mother_as_payer_and_sign(app: &TestApp, lead_id: Uuid, order_id
     .execute(&app.suite.pool)
     .await
     .unwrap();
+    sqlx::query(
+        "UPDATE framework_contracts SET party_changed_at = NULL, status = 'signed',
+             signed_at = now()
+         WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .execute(&app.suite.pool)
+    .await
+    .unwrap();
 }
 
 async fn convert_ready_lead(app: &TestApp, lead_id: Uuid) -> Uuid {

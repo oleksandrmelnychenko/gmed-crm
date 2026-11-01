@@ -12692,11 +12692,13 @@ async fn a_change_of_the_paying_parent_outdates_the_signed_framework_contract() 
     .await;
     assert_eq!(status, StatusCode::OK, "{generated}");
     let old_version: Uuid = generated["id"].as_str().unwrap().parse().unwrap();
-    sqlx::query("UPDATE framework_contracts SET status = 'signed', signed_at = now() WHERE id = $1")
-        .bind(contract)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE framework_contracts SET status = 'signed', signed_at = now() WHERE id = $1",
+    )
+    .bind(contract)
+    .execute(&pool)
+    .await
+    .unwrap();
     let path = format!("/api/v1/leads/{lead}/payer-declaration");
     let current = |document: Uuid| {
         let pool = pool.clone();

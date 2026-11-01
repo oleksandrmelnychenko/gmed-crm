@@ -1464,7 +1464,11 @@ mod tests {
         assert_eq!(next.first_name, None);
 
         // The same parent, and one who only receives the invoice: as answered.
-        assert_eq!(following_payer(&recipient, &declaration, Some(mother)), None);
+        let same = Declaration {
+            payer_representative_id: Some(mother),
+            ..declaration.clone()
+        };
+        assert_eq!(following_payer(&recipient, &same, Some(mother)), None);
         let apart = Recipient {
             is_payer: Some(false),
             ..recipient
