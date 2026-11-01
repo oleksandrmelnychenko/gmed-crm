@@ -459,6 +459,8 @@ import {
   prepaymentDueAtPatch,
   repeatIntakePatientId,
   repeatIntakePatientNumber,
+  validMoneyInput,
+  wizardMoneyForApi,
   type LeadWizardEntryPoint,
 } from "../model/lead-wizard.model";
 
@@ -2389,12 +2391,6 @@ export function mergeCommercialQuoteReadiness(
   // Payment readiness is informative and never gates commercial progress.
   void _serverPrepaymentReady;
   return clientReady && serverQuoteAccepted !== false;
-}
-
-/** Euros with at most two decimals and no thousands separator: «1.500» would read as 1,50. */
-function validMoneyInput(value: string) {
-  const trimmed = value.trim();
-  return !trimmed || /^\d+(?:[.,]\d{1,2})?$/u.test(trimmed);
 }
 
 /** The refusal of an amount with a thousands separator, the same for every amount field. */
@@ -7352,6 +7348,7 @@ ${serviceCommentLines.join("\n")}`
     const requestedPrepaymentAmount = flags.prepayment_amount
       ?? (prepayment ? prepaymentAmount : undefined);
     const normalizedPrepaymentAmount = requestedPrepaymentAmount?.trim();
+    const prepaymentAmountForApi = wizardMoneyForApi(normalizedPrepaymentAmount ?? "");
     // The typed deadline travels with every commercial save, like the typed
     // amount: its field commits only on blur, and an action started without
     // that blur would otherwise reload the order's empty deadline over it.
@@ -7370,10 +7367,8 @@ ${serviceCommentLines.join("\n")}`
         contract_id: contractId,
         prepayment_required: flags.prepayment_required ?? prepayment,
         ...(prepaymentDueAt !== undefined ? { prepayment_due_at: prepaymentDueAt } : {}),
-        ...(!syncOrderServiceLines
-          && normalizedPrepaymentAmount
-          && validMoneyInput(normalizedPrepaymentAmount)
-          ? { prepayment_amount: normalizedPrepaymentAmount }
+        ...(!syncOrderServiceLines && prepaymentAmountForApi
+          ? { prepayment_amount: prepaymentAmountForApi }
           : {}),
         // Existing repeat signatures are changed only by the explicit signature action.
         // Sending cached checkboxes here would restore signatures invalidated by a service edit.
@@ -7450,9 +7445,7 @@ ${serviceCommentLines.join("\n")}`
           // The prepayment is part of the signed terms (QA 2026-10-31).
           ...(confirmSignatureReset ? { confirm_signature_reset: true } : {}),
           total_estimated: persistedEstimate.gross.toFixed(2),
-          ...(normalizedPrepaymentAmount && validMoneyInput(normalizedPrepaymentAmount)
-            ? { prepayment_amount: normalizedPrepaymentAmount }
-            : {}),
+          ...(prepaymentAmountForApi ? { prepayment_amount: prepaymentAmountForApi } : {}),
         });
         setLines(persistedServiceLines);
       }
@@ -11743,10 +11736,11 @@ ${serviceCommentLines.join("\n")}`
                         if (checked && nextAmount !== prepaymentAmount) {
                           setPrepaymentAmount(nextAmount);
                         }
+                        const nextAmountForApi = wizardMoneyForApi(nextAmount);
                         void saveFlags(
                           {
                             prepayment_required: checked,
-                            ...(checked && nextAmount ? { prepayment_amount: nextAmount } : {}),
+                            ...(checked && nextAmountForApi ? { prepayment_amount: nextAmountForApi } : {}),
                           },
                           {
                             prepayment_required: prepayment,
@@ -11778,8 +11772,8 @@ ${serviceCommentLines.join("\n")}`
                           value={prepaymentAmount}
                           onChange={(event) => setPrepaymentAmount(event.target.value)}
                           onBlur={() => {
-                            const normalizedAmount = prepaymentAmount.trim();
-                            if (order?.id && normalizedAmount && validMoneyInput(normalizedAmount)) {
+                            const normalizedAmount = wizardMoneyForApi(prepaymentAmount);
+                            if (order?.id && normalizedAmount) {
                               void saveFlags(
                                 { prepayment_amount: normalizedAmount },
                                 { prepayment_amount: String(order.prepayment_amount ?? "") },

@@ -44,6 +44,7 @@ import {
   patientInsuranceCoversGermany,
   resumeStep,
   stepIsComplete,
+  wizardMoneyForApi,
   wizardUpdatePayload,
   type GuardianDraft,
   type WizardDraft,
@@ -137,6 +138,21 @@ describe("discovery source", () => {
 
   it("does not require the recommending customer on a repeat intake", () => {
     expect(discoveryReferrerMissing(referral, true)).toBe(false);
+  });
+});
+
+describe("wizardMoneyForApi", () => {
+  it("sends a typed German amount in the API's form", () => {
+    expect(wizardMoneyForApi("87,40")).toBe("87.40");
+    expect(wizardMoneyForApi(" 87.40 ")).toBe("87.40");
+    expect(wizardMoneyForApi("300")).toBe("300");
+  });
+
+  it("sends nothing it would have to guess", () => {
+    expect(wizardMoneyForApi("")).toBeNull();
+    expect(wizardMoneyForApi("1.500")).toBeNull();
+    expect(wizardMoneyForApi("1.234,56")).toBeNull();
+    expect(wizardMoneyForApi("abc")).toBeNull();
   });
 });
 

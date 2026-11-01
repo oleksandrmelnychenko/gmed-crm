@@ -4,7 +4,7 @@ import {
   isoToBerlinLocalInput,
   parseBerlinLocalInput,
 } from "@/lib/app-time-zone";
-import { moneyLineAmounts, roundCents } from "@/lib/money";
+import { moneyLineAmounts, normalizeMoneyInput, roundCents } from "@/lib/money";
 import type {
   ClinicalMedication,
   ClinicalNarrative,
@@ -17,6 +17,21 @@ import type {
  * Phase B (clinical / order / contracts / compliance) runs against the patient
  * after {@link canConvert} is satisfied and the lead is wizard-converted.
  */
+
+/** Euros with at most two decimals and no thousands separator: «1.500» would read as 1,50. */
+export function validMoneyInput(value: string) {
+  const trimmed = value.trim();
+  return !trimmed || /^\d+(?:[.,]\d{1,2})?$/u.test(trimmed);
+}
+
+/**
+ * A typed amount in the API's "87.40" form, null when empty or refused by
+ * {@link validMoneyInput}: «87,40» was sent as typed and came back 422 while
+ * the summary beside it showed 87,40 € (QA 2026-11-01, V1).
+ */
+export function wizardMoneyForApi(value: string) {
+  return value.trim() && validMoneyInput(value) ? normalizeMoneyInput(value) : null;
+}
 
 export type WizardStepId = "identity" | "eligibility" | "specialties";
 
