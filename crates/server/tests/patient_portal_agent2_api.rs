@@ -684,6 +684,7 @@ async fn portal_recommendations_leave_out_staff_only_fields() {
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"], "recommendation_period_inverted", "{body}");
 
     // Declining takes the open visit request along (QA 2026-11-01).
     let (status, requested) = json_request(
@@ -706,6 +707,57 @@ async fn portal_recommendations_leave_out_staff_only_fields() {
     .await;
     assert_eq!(status, StatusCode::OK, "{declined}");
     assert_eq!(declined["appointment_request_status"], "cancelled");
+
+    // «Schon erledigt» does the same, so the leftover blocks no visit on
+    // another recommendation (QA 2026-11-01, X2 bugs 2, 3).
+    let mut portal_recommendations = Vec::new();
+    for title in ["Sonografie", "Labor"] {
+        let (status, created) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/patients/{patient_id}/recommendations"),
+            &pm_auth,
+            Some(json!({ "title": title, "portal_visible": true })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{created}");
+        portal_recommendations.push(created["id"].as_str().unwrap().to_string());
+    }
+    let request_visit = |recommendation: String| {
+        let app = app.clone();
+        let patient_auth = patient_auth.clone();
+        async move {
+            json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/me/recommendations/{recommendation}/appointment-request"),
+                &patient_auth,
+                Some(json!({})),
+            )
+            .await
+        }
+    };
+    let (status, requested) = request_visit(portal_recommendations[0].clone()).await;
+    assert_eq!(status, StatusCode::OK, "{requested}");
+    // While it is open the refusal carries the code of the portal's own text.
+    let (status, refused) = request_visit(portal_recommendations[1].clone()).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "appointment_request_open_exists");
+    let (status, done) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/me/recommendations/{}/decision",
+            portal_recommendations[0]
+        ),
+        &patient_auth,
+        Some(json!({ "decision": "already_done" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{done}");
+    assert_eq!(done["appointment_request_status"], "cancelled");
+    let (status, requested) = request_visit(portal_recommendations[1].clone()).await;
+    assert_eq!(status, StatusCode::OK, "{requested}");
 }
 
 #[tokio::test]

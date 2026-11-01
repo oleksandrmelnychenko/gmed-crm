@@ -768,9 +768,11 @@ async fn create_my_recommendation_decision(
     }
 
     // A declined recommendation takes its visit request along: staff keep no
-    // open request the patient no longer wants (QA 2026-11-01). The request
-    // may be converted already or another login's: it stays then.
-    if decision == "declined"
+    // open request the patient no longer wants (QA 2026-11-01). The same for
+    // «Schon erledigt»: the leftover blocked visits on other recommendations
+    // (X2 bug 2). The request may be converted already or another login's: it
+    // stays then.
+    if matches!(decision, "declined" | "already_done")
         && let Some(request_id) = row
             .try_get::<Option<Uuid>, _>("appointment_request_id")
             .unwrap_or_default()
@@ -785,7 +787,7 @@ async fn create_my_recommendation_decision(
         )
         .await;
         if response.status().is_server_error() {
-            tracing::error!(%recommendation_id, %request_id, "withdraw the request of a declined recommendation");
+            tracing::error!(%recommendation_id, %request_id, "withdraw the request of a closed recommendation");
         }
     }
 
@@ -904,8 +906,10 @@ async fn create_my_recommendation_appointment_request(
         Ok(id) => id,
         // At most one open request per patient, requester, type and care path.
         Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23505") => {
-            return err(
+            // The code carries the portal's own text (X2 bug 3).
+            return super::appointments::coded_err(
                 StatusCode::CONFLICT,
+                "appointment_request_open_exists",
                 "An open appointment request of this kind already exists",
             );
         }
@@ -1330,8 +1334,9 @@ fn validate_period(
     valid_to: Option<&str>,
 ) -> Result<(), axum::response::Response> {
     match (valid_from, valid_to) {
-        (Some(from), Some(to)) if to < from => Err(err(
+        (Some(from), Some(to)) if to < from => Err(super::appointments::coded_err(
             StatusCode::UNPROCESSABLE_ENTITY,
+            "recommendation_period_inverted",
             "The end of the validity period lies before its start",
         )),
         _ => Ok(()),

@@ -12831,7 +12831,7 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 }
 
 /// A refusal with a stable code the UI shows translated (no raw English text).
-fn coded_err(status: StatusCode, code: &str, message: &str) -> axum::response::Response {
+pub(super) fn coded_err(status: StatusCode, code: &str, message: &str) -> axum::response::Response {
     (
         status,
         Json(serde_json::json!({ "error": code, "message": message })),

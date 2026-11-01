@@ -1275,6 +1275,11 @@ const LIFECYCLE_OPTIONS: { value: RecommendationLifecycleStatus; ru: string; de:
 ];
 
 /** Draft used by the create/edit form; `id` absent means "create". */
+/** ISO dates compare as text; the server refuses the same (QA 2026-11-01, X2 bug 5). */
+export function recommendationPeriodInverted(draft: { valid_from: string | null; valid_to: string | null }) {
+  return Boolean(draft.valid_from && draft.valid_to && draft.valid_to < draft.valid_from);
+}
+
 type RecommendationDraft = {
   id?: string;
   title: string;
@@ -1386,7 +1391,7 @@ export function PatientRecommendationsSection({
       : null;
   const dueAtLabel = (rec: PatientRecommendation) => appDateKeyOf(rec.due_at) || null;
 
-  const isValid = (draft: RecommendationDraft) => draft.title.trim() !== "";
+  const isValid = (draft: RecommendationDraft) => draft.title.trim() !== "" && !recommendationPeriodInverted(draft);
 
   async function submitDraft() {
     if (!editing || !isValid(editing)) return;
@@ -1678,8 +1683,15 @@ export function PatientRecommendationsSection({
                     type="date"
                     value={editing.valid_to ?? ""}
                     onChange={(e) => set({ valid_to: blankToNull(e.target.value) })}
-                    className={inputClass}
+                    className={cn(inputClass, recommendationPeriodInverted(editing) && "border-destructive")}
+                    aria-invalid={recommendationPeriodInverted(editing) || undefined}
+                    aria-describedby={recommendationPeriodInverted(editing) ? "recommendation-period-error" : undefined}
                   />
+                  {recommendationPeriodInverted(editing) ? (
+                    <p id="recommendation-period-error" role="alert" className="mt-1 text-xs text-destructive">
+                      {tx("Окончание срока действия раньше его начала.", "Das Ende der Gültigkeit liegt vor ihrem Beginn.")}
+                    </p>
+                  ) : null}
                 </Field>
               </div>
               <div className="grid gap-2 md:grid-cols-2">

@@ -7,6 +7,7 @@ export const careUiDe = {
   // Server refusals (lib/care-api-errors.ts)
   "api_appointment_request_open_exists": "Es gibt bereits eine offene Terminanfrage dieser Art. Warten Sie auf die Antwort des Teams oder ziehen Sie die offene Anfrage zurück.",
   "api_appointment_request_date_or_reason_required": "Bitte geben Sie ein Wunschdatum oder einen Grund für den Termin an.",
+  "api_recommendation_period_inverted": "Das Ende der Gültigkeit liegt vor ihrem Beginn.",
   "api_reminder_target_inactive": "Eine Erinnerung kann nur an aktive Mitarbeitende gehen.",
   "api_reminder_role_not_involved": "Diese Rolle wirkt an der Vorbereitung des Termins nicht mit (die CEO-Assistenz liest nur); sie kann keine Erinnerung erhalten.",
   "api_reminder_interpreter_not_booked": "Dolmetscher können nur an Termine erinnert werden, für die sie gebucht sind.",
@@ -43,6 +44,7 @@ export const careUiDe = {
 export const careUiRu = {
   "api_appointment_request_open_exists": "Запрос на запись этого типа уже открыт. Дождитесь ответа команды или отзовите открытый запрос.",
   "api_appointment_request_date_or_reason_required": "Укажите желаемую дату или причину визита.",
+  "api_recommendation_period_inverted": "Окончание срока действия раньше его начала.",
   "api_reminder_target_inactive": "Напоминание можно назначить только активному сотруднику.",
   "api_reminder_role_not_involved": "Эта роль не участвует в подготовке приёма (ассистент CEO только читает), поэтому напоминание ей назначить нельзя.",
   "api_reminder_interpreter_not_booked": "Переводчику можно напомнить только о приёме, на который он назначен.",

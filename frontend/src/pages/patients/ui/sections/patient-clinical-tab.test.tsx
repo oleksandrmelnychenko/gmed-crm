@@ -30,6 +30,7 @@ import {
   patientLabLatestDate,
   filterPatientLabResultsByPeriod,
   groupPatientLabResults,
+  recommendationPeriodInverted,
 } from "./patient-clinical-tab";
 import {
   PatientRecommendationOverviewItem,
@@ -601,6 +602,13 @@ describe("DiagnosisTreeSection", () => {
 });
 
 describe("PatientRecommendationsSection", () => {
+  it("marks a recommendation period that ends before it starts", () => {
+    expect(recommendationPeriodInverted({ valid_from: "2026-12-01", valid_to: "2026-01-01" })).toBe(true);
+    expect(recommendationPeriodInverted({ valid_from: "2026-12-01", valid_to: "2026-12-01" })).toBe(false);
+    expect(recommendationPeriodInverted({ valid_from: "2026-12-01", valid_to: null })).toBe(false);
+    expect(recommendationPeriodInverted({ valid_from: null, valid_to: "2026-01-01" })).toBe(false);
+  });
+
   it("uses the Russian label for the add recommendation button", () => {
     const html = renderToStaticMarkup(
       <PatientRecommendationsSection
