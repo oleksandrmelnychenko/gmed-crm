@@ -263,6 +263,18 @@ async fn patient_sees_only_portal_visible_recommendations_and_can_decide() {
     .await;
     assert_eq!(status, StatusCode::OK, "{decision}");
     assert_eq!(decision["patient_decision"], "already_done");
+    // A decided recommendation is no next action (QA 2026-11-01, Z2).
+    let (status, actions) =
+        json_request(&app, "GET", "/api/v1/me/next-actions", &patient_auth, None).await;
+    assert_eq!(status, StatusCode::OK, "{actions}");
+    assert!(
+        !actions["items"]
+            .as_array()
+            .expect("next action items")
+            .iter()
+            .any(|item| item["title"] == "Book cardiology follow-up"),
+        "{actions}"
+    );
     assert_eq!(decision["status"], "completed");
 
     let decision_count: i64 = sqlx::query_scalar(

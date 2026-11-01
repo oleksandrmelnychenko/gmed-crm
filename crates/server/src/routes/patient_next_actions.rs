@@ -75,6 +75,8 @@ async fn load_recommendation_actions(
            WHERE patient_id = $1
              AND portal_visible = true
              AND status = 'active'
+             -- A decided one is not a next action (QA 2026-11-01, Z2).
+             AND patient_decision IS NULL
            ORDER BY due_at NULLS LAST, created_at DESC
            LIMIT 10"#,
     )

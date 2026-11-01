@@ -562,7 +562,7 @@ function usePatientDashboardPageContent() {
                   {(item.due_at || item.amount) ? (
                     <div className="grid gap-3 sm:grid-cols-2">
                       {item.due_at ? (
-                        <InfoRow label={t.portal_dashboard_due} value={<PortalDateChip>{formatPortalDateTime(item.due_at)}</PortalDateChip>} />
+                        <InfoRow label={t.portal_dashboard_due} value={<PortalDateChip>{item.kind === "recommendation" ? formatPortalDate(item.due_at) : formatPortalDateTime(item.due_at)}</PortalDateChip>} />
                       ) : null}
                       {item.amount ? (
                         <InfoRow label={t.portal_dashboard_amount} value={formatPortalCurrency(item.amount)} />
@@ -610,7 +610,7 @@ function usePatientDashboardPageContent() {
                   </div>
                   <p className={cn("mt-3", tokens.text.muted)}>
                     {item.due_at
-                      ? `${t.portal_dashboard_due} ${formatPortalDateTime(item.due_at)}`
+                      ? `${t.portal_dashboard_due} ${formatPortalDate(item.due_at)}`
                       : t.portal_dashboard_no_due_date}
                   </p>
                 </ListItem>

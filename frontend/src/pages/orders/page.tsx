@@ -133,7 +133,9 @@ import {
 } from "./sections";
 import {
   isOrderReadinessGateApplicable,
+  isOverageDeclineBlockingReason,
   isPatientInvoiceBlockingReason,
+  prepaymentGateAmount,
   joinBlockingReasons,
   orderBlockingReasonAnchor,
   orderBlockingReasonSection,
@@ -4924,6 +4926,12 @@ function useOrdersPageContent() {
                                       staffGo(detailInvoicesHref);
                                       return;
                                     }
+                                    // An overage without a price is declined on
+                                    // the patient's invoices tab.
+                                    if (isOverageDeclineBlockingReason(reason) && detailPatientId) {
+                                      staffGo(`/patients/${detailPatientId}?tab=invoices`);
+                                      return;
+                                    }
                                     // A blocker with its own control (the
                                     // follow-up milestone planner) scrolls to that
                                     // control once the section has rendered it;
@@ -5023,7 +5031,7 @@ function useOrdersPageContent() {
                           <OrderSummaryLine
                             label={lang === "de" ? "Vorauszahlung" : "Предоплата"}
                             className="md:col-span-2"
-                            value={`${paymentStatusLabel(orderDetail.process_gates.payment_tracking.status, lang)} · ${formatMoney(orderDetail.process_gates.payment_tracking.remaining_amount, orderDetail.process_gates.payment_tracking.currency)}${orderDetail.process_gates.payment_tracking.due_at ? ` · ${formatDateTimeLabel(orderDetail.process_gates.payment_tracking.due_at)}` : ""}`}
+                            value={`${paymentStatusLabel(orderDetail.process_gates.payment_tracking.status, lang)} · ${formatMoney(prepaymentGateAmount(orderDetail.process_gates.payment_tracking), orderDetail.process_gates.payment_tracking.currency)}${orderDetail.process_gates.payment_tracking.due_at ? ` · ${formatDateTimeLabel(orderDetail.process_gates.payment_tracking.due_at)}` : ""}`}
                           />
                         ) : null}
                         <OrderSummaryLine
@@ -5037,7 +5045,7 @@ function useOrdersPageContent() {
                                       .attention_reason,
                                 )
                               : orderDetail.process_gates.overdue_invoice_count > 0
-                                ? `${orderDetail.process_gates.overdue_invoice_count} ${l("orders_uberfallige_rechnung_en")}`
+                                ? `${l("orders_uberfallige_rechnung_en")}: ${orderDetail.process_gates.overdue_invoice_count}`
                                 : l("orders_keine_uberfalligen_forderungen")
                           }
                         />
@@ -6463,7 +6471,7 @@ function useOrdersPageContent() {
                             variant="outline"
                             className="rounded-full border-border bg-slate-50 text-muted-foreground"
                           >
-                            {workflowMetrics.total} {l("orders_punkte")}
+                            {l("orders_punkte")}: {workflowMetrics.total}
                           </Badge>
                         ) : null}
                         {permissions.canManagePhase && !workflowPatientRequired ? (

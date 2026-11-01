@@ -2,12 +2,27 @@ import { describe, expect, it } from "vitest";
 
 import {
   isOrderReadinessGateApplicable,
+  isOverageDeclineBlockingReason,
   isPatientInvoiceBlockingReason,
   joinBlockingReasons,
   orderBlockingReasonAnchor,
   orderBlockingReasonSection,
+  prepaymentGateAmount,
   resolveOrderBlockingReason,
 } from "./blocking-reasons";
+
+describe("overage blockers (QA 2026-11-01, Z1 N2)", () => {
+  it("opens where the blocker is resolved", () => {
+    expect(orderBlockingReasonSection("1 approved package overage(s) have no quote to bill them")).toBe("services");
+    expect(isOverageDeclineBlockingReason("1 approved package overage(s) have no price")).toBe(true);
+    expect(isOverageDeclineBlockingReason("1 approved package overage(s) have no quote to bill them")).toBe(false);
+  });
+  it("shows the paid amount, not the rest of 0 (Z1 N7)", () => {
+    const tracking = { required_amount: "119", remaining_amount: "0" };
+    expect(prepaymentGateAmount({ ...tracking, status: "paid" })).toBe("119");
+    expect(prepaymentGateAmount({ ...tracking, status: "awaiting_payment", remaining_amount: "119" })).toBe("119");
+  });
+});
 
 describe("isOrderReadinessGateApplicable", () => {
   it("only exposes blockers while their transition is actionable", () => {

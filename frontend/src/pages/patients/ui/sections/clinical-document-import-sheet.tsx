@@ -2534,8 +2534,8 @@ export function ClinicalDocumentImportSheet({
               <CheckCircle2 className="size-4 shrink-0" />
               <span className="truncate font-medium">
                 {tx(
-                  `${appliedObjectCount(documentImport)} объект(ов) добавлено в карту`,
-                  `${appliedObjectCount(documentImport)} Objekt(e) in die Akte übernommen`,
+                  `Добавлено в карту объектов: ${appliedObjectCount(documentImport)}`,
+                  `In die Akte übernommene Objekte: ${appliedObjectCount(documentImport)}`,
                 )}
               </span>
             </div>

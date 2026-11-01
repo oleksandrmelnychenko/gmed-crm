@@ -358,6 +358,19 @@ export function isPatientInvoiceBlockingReason(reason: string): boolean {
   );
 }
 
+/**
+ * An approved overage without a price can only be declined, on the patient's
+ * invoices tab (QA 2026-11-01, Z1 N2).
+ */
+export function isOverageDeclineBlockingReason(reason: string): boolean {
+  return /^\d+ approved package overage\(s\) have no price$/.test(reason);
+}
+
+/** What the order gate shows beside the prepayment status: a paid one its amount, not the rest of 0. */
+export function prepaymentGateAmount(tracking: { status: string; required_amount: string; remaining_amount: string }) {
+  return tracking.status === "paid" ? tracking.required_amount : tracking.remaining_amount;
+}
+
 /** Reasons in one line; each text ends with its own full stop (QA 2026-11-01: «2.; 1 …»). */
 export function joinBlockingReasons(reasons: string[]) {
   return reasons.map((reason) => reason.trim().replace(/\.$/, "")).join("; ");
@@ -380,6 +393,10 @@ export function orderBlockingReasonSection(reason: string): OrderSectionKey {
   // Services still planned or delivered are approved, invoiced or cancelled
   // in the service list.
   if (/^\d+ service item\(s\) are not approved or invoiced$/.test(reason)) {
+    return "services";
+  }
+  // Without a quote the service goes on the order first (QA 2026-11-01, Z1 N2).
+  if (/^\d+ approved package overage\(s\) have no quote to bill them$/.test(reason)) {
     return "services";
   }
   // Open billing is closed on the invoices section of the order.

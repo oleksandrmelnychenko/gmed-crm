@@ -88,7 +88,7 @@ function patientRecommendationsReducer(
 
 export function PatientRecommendationsPage() {
   const {
-    formatPortalDateTime,
+    formatPortalDate,
     portalStatusLabel,
     recommendationDecisionLabel,
     recommendationTypeLabel,
@@ -271,7 +271,7 @@ export function PatientRecommendationsPage() {
                     </p>
                   </div>
                   {item.due_at ? (
-                    <PortalDateChip>{t.portal_recommendations_due} {formatPortalDateTime(item.due_at)}</PortalDateChip>
+                    <PortalDateChip>{t.portal_recommendations_due} {formatPortalDate(item.due_at)}</PortalDateChip>
                   ) : null}
                 </div>
 
@@ -485,7 +485,7 @@ function resolveStaffRecommendationsStateAction<T>(action: SetStateAction<T>, cu
 
 function useStaffRecommendationsWorkspaceContent() {
   const {
-    formatPortalDateTime,
+    formatPortalDate,
     portalOrderPhaseLabel,
     portalStatusLabel,
     recommendationDecisionLabel,
@@ -1028,7 +1028,7 @@ function useStaffRecommendationsWorkspaceContent() {
                       ) : null}
                       {item.due_at ? (
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {t.patient_recommendations_staff_due} {formatPortalDateTime(item.due_at)}
+                          {t.patient_recommendations_staff_due} {formatPortalDate(item.due_at)}
                         </p>
                       ) : null}
                     </div>
