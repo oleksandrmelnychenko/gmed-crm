@@ -4424,7 +4424,7 @@ function useOrdersPageContent() {
                     </SectionCard>
 
                     {orderDetail.patient_id ? (
-                      <OrderSubscriptionCard orderId={orderDetail.id} lang={lang} />
+                      <OrderSubscriptionCard orderId={orderDetail.id} orderStatus={orderDetail.status} lang={lang} />
                     ) : null}
 
                     <OrderPrepaymentCard
@@ -4605,8 +4605,8 @@ function useOrdersPageContent() {
                                                       ? "Ein Teil der vom Patienten zu erstattenden Partnerkosten ist noch keiner Patientenrechnung zugeordnet."
                                                       : "Часть затрат, подлежащих возмещению пациентом, ещё не связана со счётом пациента."
                                                     : lang === "de"
-                                                      ? "Ein Teil des abgerechneten Erlöses ist keiner Auftragsleistung zugeordnet."
-                                                      : "Часть выставленного дохода не связана с услугой заказа."}
+                                                      ? "Ein Teil des abgerechneten Erlöses ist keiner Auftragsleistung zugeordnet, zum Beispiel Mehrverbrauch aus dem Tarif: Er steht als eigene Rechnungszeile, nicht in der Auftragssumme."
+                                                      : "Часть выставленного дохода не связана с услугой заказа: например, превышение по тарифу идёт отдельной строкой счёта и не входит в сумму заказа."}
                                       </div>
                                     ))}
                                   </div>

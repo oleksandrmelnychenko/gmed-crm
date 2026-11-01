@@ -19,7 +19,15 @@ import {
  * treatment (owner decision 2026-10-05). The chosen tariff becomes the
  * patient's subscription and shows as the account type in the patients table.
  */
-export function OrderSubscriptionCard({ orderId, lang }: { orderId: string; lang: string }) {
+export function OrderSubscriptionCard({
+  orderId,
+  orderStatus,
+  lang,
+}: {
+  orderId: string;
+  orderStatus?: string;
+  lang: string;
+}) {
   const de = lang === "de";
   const [data, setData] = useState<OrderSubscription | null>(null);
   const [unavailable, setUnavailable] = useState(false);
@@ -43,12 +51,15 @@ export function OrderSubscriptionCard({ orderId, lang }: { orderId: string; lang
     return () => {
       cancelled = true;
     };
-  }, [orderId]);
+    // The status reloads it: a card opened before the cancellation kept its
+    // Save, which then failed with 409 (QA 2026-11-01, T3-6).
+  }, [orderId, orderStatus]);
 
   if (unavailable || !data) return null;
 
   const current = data.current;
   const dirty = choice !== (current?.package_id ?? "");
+  const resetsConsumption = dirty && Boolean(current?.has_consumption);
 
   async function save() {
     setBusy(true);
@@ -134,6 +145,13 @@ export function OrderSubscriptionCard({ orderId, lang }: { orderId: string; lang
               {de ? "Tarif speichern" : "Сохранить тариф"}
             </Button>
           </div>
+        ) : null}
+        {data.can_edit && resetsConsumption ? (
+          <StatusChip tone="warning" role="status" data-testid="order-subscription-reset-warning">
+            {de
+              ? "Der bisherige Verbrauch bleibt beim alten Tarif: Der neue Tarif zählt von null."
+              : "Записанный расход останется на старом тарифе: новый тариф считается с нуля."}
+          </StatusChip>
         ) : null}
         {notice ? (
           <StatusChip tone="success" role="status">{notice}</StatusChip>

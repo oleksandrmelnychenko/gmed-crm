@@ -19,6 +19,8 @@ export type OrderTariff = {
   status: string | null;
   starts_on: string | null;
   ends_on: string | null;
+  /** Consumption is recorded on it: another tariff starts counting at zero. */
+  has_consumption?: boolean;
 };
 
 /** The order's tariff (the patient's account type) and the tariffs on offer. */
