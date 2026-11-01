@@ -12846,21 +12846,11 @@ async fn minor_lead_contract_documents_use_the_current_legal_representatives() {
                             assert!(roles.contains(&"payer"), "{detail}");
                             assert!(!roles.contains(&"client"), "{detail}");
                             assert!(text.contains(&format!("Mia Kind-{scenario}")), "{text}");
+                            // The patient's name only for the payer (QA 2026-11-01).
+                            assert!(!text.contains("Geburtsdatum des"), "{text}");
                             if child_party {
                                 assert!(text.contains("gesetzlich vertreten durch"), "{text}");
-                                assert!(
-                                    text.contains("Geburtsdatum des Auftraggebers: 07.06.2015"),
-                                    "{text}"
-                                );
                             } else {
-                                assert!(
-                                    text.contains("Geburtsdatum des Patienten: 07.06.2015"),
-                                    "{text}"
-                                );
-                                assert!(
-                                    !text.contains("Geburtsdatum des Auftraggebers: 07.06.2015"),
-                                    "{text}"
-                                );
                                 if let Some(preview) = body["preview_html"].as_str() {
                                     for (first, last, _) in &people {
                                         assert!(

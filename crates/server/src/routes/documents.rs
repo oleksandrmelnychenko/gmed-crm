@@ -414,6 +414,8 @@ struct GeneratedContractLineItem {
     description: String,
     quantity: String,
     unit_price: String,
+    /// The line's amount before VAT, whatever the name says: the "Summe"
+    /// column of the contract documents sums to their "Nettowert".
     line_gross: String,
     vat_rate: Option<String>,
     /// Pass-through cost (durchlaufender Posten). Sources that do not carry
@@ -7285,8 +7287,12 @@ fn parse_quote_line_items(value: &Value) -> Vec<GeneratedContractLineItem> {
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_string(),
+                // Every document prints net line amounts with the VAT below
+                // them, as manual service lines do: a stored quote keeps both,
+                // so its gross never stands under "zzgl. MwSt." (QA 2026-11-01).
                 line_gross: object
-                    .get("line_gross")
+                    .get("line_net")
+                    .or_else(|| object.get("line_gross"))
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_string(),
@@ -22714,7 +22720,7 @@ fn mixed_contract_vat_note(items: &[&GeneratedContractLineItem]) -> Option<Strin
 /// The VAT sentence of the payer's documents when the listed services do not
 /// all carry one rate: the service names and the reason of a 0 % line
 /// ("Steuerfreie Heilbehandlung") stay out of what the payer reads.
-const PAYER_MIXED_VAT_SENTENCE: &str = "Die Umsatzsteuer richtet sich nach dem für die jeweilige Leistungsart geltenden Steuersatz; durchlaufende Posten sind nicht umsatzsteuerbar.";
+const PAYER_MIXED_VAT_SENTENCE: &str = "Alle angegebenen Beträge verstehen sich netto; die Umsatzsteuer richtet sich nach dem für die jeweilige Leistungsart geltenden Steuersatz, durchlaufende Posten sind nicht umsatzsteuerbar.";
 
 /// [`contract_vat_note`] for a document the payer reads.
 fn payer_vat_note(items: &[&GeneratedContractLineItem]) -> String {
@@ -23007,8 +23013,11 @@ fn build_cost_coverage_pdf(
         format!(
             "Anlage 1: Kostenvoranschlag zum {ordinal}. Einzelauftrag Nr. {quote_label} (Ausfertigung für die zahlende Person, nach Leistungsarten zusammengefasst);"
         ),
+        // The Einzelauftrag is what the declaration refers to, not an annex:
+        // it stays between the client and GMED with its services and notes
+        // and is no slot of the payer's package (QA 2026-11-01).
         format!(
-            "Anlage 2: {ordinal}. Einzelauftrag vom {} zum Rahmendienstleistungsvertrag vom {} - Auftraggeber: {}.",
+            "Bezugnahme: {ordinal}. Einzelauftrag vom {} zum Rahmendienstleistungsvertrag vom {} - Auftraggeber: {}; er ist nicht Anlage dieser Erklärung und wird dem Kostenübernehmer nicht ausgehändigt.",
             fmt_de_date(context.order_date),
             fmt_de_date(context.contract_date),
             context.contracting.debtor_name(&context.patient)
@@ -23062,22 +23071,8 @@ fn build_cost_coverage_pdf(
             0.5,
         );
     }
-    if let Some(birth) = context.patient.birth_date {
-        admin_block(
-            &mut layout,
-            &format!(
-                "{}: {}",
-                if context.contracting.parents_contract() {
-                    "Geburtsdatum des Patienten"
-                } else {
-                    "Geburtsdatum des Auftraggebers"
-                },
-                birth.format("%d.%m.%Y")
-            ),
-            0.0,
-            0.5,
-        );
-    }
+    // The patient's name only: no date of birth for the payer, as in the
+    // payer's copy of the estimate (QA 2026-11-01).
     admin_block(
         &mut layout,
         &format!(
@@ -44354,6 +44349,30 @@ mod tests {
             "Alle angegebenen Preise zzgl. MwSt. nach dem für die jeweilige Leistung geltenden Steuersatz: 19 % – Airport transfer; 7 % – Fachliteratur."
         );
         assert_eq!(super::contract_vat_total_label(&two_rates), "MWSt.");
+    }
+
+    /// QA 2026-11-01: a stored quote keeps net and gross per line; 452,20 stood
+    /// under "zzgl. MwSt." on the estimate and the Kostenübernahmeerklärung.
+    #[test]
+    fn quote_lines_print_their_net_amount_like_manual_lines() {
+        let quote = super::parse_quote_line_items(&json!([
+            {"description": "Interpreter", "quantity": "4", "unit_price": "95",
+             "vat_rate": "19", "line_net": "380", "line_vat": "72.2", "line_gross": "452.2"},
+            {"description": "Alter Stand", "quantity": "1", "unit_price": "100",
+             "vat_rate": "0", "line_gross": "100.00"}
+        ]));
+        assert_eq!(quote[0].line_gross, "380");
+        // A line stored before the amounts were split keeps what it has.
+        assert_eq!(quote[1].line_gross, "100.00");
+        let catalog = vec![("interpreter".to_string(), "interpreter_hours".to_string())];
+        let rows = super::payer_estimate_rows(&quote[..1], &catalog);
+        assert_eq!(
+            rows,
+            vec![(
+                "Dolmetscher- und Übersetzungsleistungen",
+                rust_decimal::Decimal::new(380, 0)
+            )]
+        );
     }
 
     #[test]
