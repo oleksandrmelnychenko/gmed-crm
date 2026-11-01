@@ -136,6 +136,27 @@ test("a prepayment route opens an advance invoice with the selected quote", asyn
   await expect(dialog.getByRole("button", { name: "Создать счёт", exact: true })).toBeEnabled();
 });
 
+test("an advance for the required prepayment takes the order's deadline as its due date", async ({ page }) => {
+  const fixture = await prepare(page);
+  Object.assign(fixture.quote, { order_prepayment_amount: "500", order_prepayment_required: true });
+  Object.assign(fixture.order, { prepayment_due_at: "2099-11-20T11:00:00Z" });
+  await page.goto(`/invoices?patient=${patientId}&order=${orderId}&quote=${quoteId}&invoice_type=advance&create=1`);
+  const dialog = page.getByRole("dialog", { name: "Новый счёт", exact: true });
+  await expect(dialog.getByRole("radio", { name: /Требуемая предоплата/ })).toBeChecked();
+  await dialog.getByRole("radio", { name: "Выбранные позиции предложения", exact: true }).check();
+  await dialog.getByRole("radio", { name: /Требуемая предоплата/ }).check();
+  await dialog.getByRole("button", { name: "Создать счёт", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(fixture.writes).toEqual([{ invoice_type: "advance", advance_basis: "prepayment", due_date: "2099-11-20", notes: null, internal_note: null }]);
+
+  await page.goto(`/invoices?patient=${patientId}&order=${orderId}&quote=${quoteId}&invoice_type=advance&create=1`);
+  const positions = page.getByRole("dialog", { name: "Новый счёт", exact: true });
+  await positions.getByRole("radio", { name: "Выбранные позиции предложения", exact: true }).check();
+  await positions.getByRole("button", { name: "Создать счёт", exact: true }).click();
+  await expect(positions).toHaveCount(0);
+  expect(fixture.writes[1]).toMatchObject({ advance_basis: "positions", due_date: null });
+});
+
 test("an advance invoice bills the order's required prepayment unless positions are picked", async ({ page }) => {
   const fixture = await prepare(page);
   Object.assign(fixture.quote, { order_prepayment_amount: "500", order_prepayment_required: true });

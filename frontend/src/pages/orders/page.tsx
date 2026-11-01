@@ -984,7 +984,7 @@ function useOrdersPageContent() {
     );
     if (unsettledServices) {
       return lang === "de"
-        ? `${unsettledServices[1]} Leistung(en) sind noch nicht freigegeben oder abgerechnet.`
+        ? `Noch nicht freigegebene oder abgerechnete Leistungen: ${unsettledServices[1]}.`
         : `Не согласовано или не выставлено в счёт услуг: ${unsettledServices[1]}.`;
     }
     const blockingStatus = parseOrderStatusBlocker(reason);
@@ -5031,7 +5031,7 @@ function useOrdersPageContent() {
                           <OrderSummaryLine
                             label={lang === "de" ? "Vorauszahlung" : "Предоплата"}
                             className="md:col-span-2"
-                            value={`${paymentStatusLabel(orderDetail.process_gates.payment_tracking.status, lang)} · ${formatMoney(prepaymentGateAmount(orderDetail.process_gates.payment_tracking), orderDetail.process_gates.payment_tracking.currency)}${orderDetail.process_gates.payment_tracking.due_at ? ` · ${formatDateTimeLabel(orderDetail.process_gates.payment_tracking.due_at)}` : ""}`}
+                            value={`${paymentStatusLabel(orderDetail.process_gates.payment_tracking.status, lang)} · ${formatMoney(prepaymentGateAmount(orderDetail.process_gates.payment_tracking), orderDetail.process_gates.payment_tracking.currency)}${orderDetail.process_gates.payment_tracking.due_at ? ` · ${lang === "de" ? "zahlbar bis" : "срок оплаты"} ${formatDateTimeLabel(orderDetail.process_gates.payment_tracking.due_at)}` : ""}`}
                           />
                         ) : null}
                         <OrderSummaryLine

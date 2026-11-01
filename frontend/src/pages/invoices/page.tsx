@@ -175,6 +175,7 @@ import {
   buildInvoicesPath,
   buildSearchParams,
   createInvoiceLineSelection,
+  advancePrepaymentDueDate,
   effectiveAdvanceBasis,
   invoiceLineSelectionPayload,
   isOverageOnlyInvoice,
@@ -1111,6 +1112,12 @@ function useStaffInvoicesPageContent() {
     });
   }, [filters.orderId, filters.patientId, quotes]);
   const selectedCreateQuote = useMemo(() => quotes.find((quote) => quote.id === createForm.quoteId) ?? null, [quotes, createForm.quoteId]);
+  const createDefaultDueDate = advancePrepaymentDueDate(
+    createForm,
+    selectedCreateQuote,
+    orders.find((order) => order.id === selectedCreateQuote?.order_id)?.prepayment_due_at,
+    appDateKey(),
+  );
   const anyQuickFilterActive =
     filters.search.trim() !== "" ||
     filters.patientId !== "" ||
@@ -1130,6 +1137,23 @@ function useStaffInvoicesPageContent() {
       ...selection,
     }));
   }, [createOpen, createForm.invoiceType, createForm.lineQuantities, createForm.selectedLineIndexes, selectedCreateQuote]);
+
+  // The default follows the quote and basis; a date staff typed or cleared stays.
+  const appliedDueDateRef = useRef("");
+  useEffect(() => {
+    if (!createOpen) {
+      appliedDueDateRef.current = "";
+      return;
+    }
+    const applied = appliedDueDateRef.current;
+    if (createDefaultDueDate === applied) return;
+    appliedDueDateRef.current = createDefaultDueDate;
+    setCreateForm((current) =>
+      !current.dueDate || current.dueDate === applied
+        ? { ...current, dueDate: createDefaultDueDate }
+        : current,
+    );
+  }, [createOpen, createDefaultDueDate]);
 
   // The new invoice's sheet replaces the dialog: a double click left it open,
   // empty, under the sheet (QA 2026-11-01, Y2 B7).
@@ -2845,6 +2869,7 @@ function useStaffInvoicesPageContent() {
         dirty={hasFormChanges(createForm, {
           ...blankCreateForm(filters.quoteId),
           invoiceType: createForm.invoiceType,
+          dueDate: createDefaultDueDate,
           ...createInvoiceLineSelection(quotes.find((quote) => quote.id === filters.quoteId)?.line_items ?? [], createForm.invoiceType),
         })}
         optionsBusy={optionsBusy}

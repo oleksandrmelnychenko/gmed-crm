@@ -1,6 +1,7 @@
 import {
   addDaysToDateKey,
   appDateKey,
+  appDateKeyOf,
   formatAppDate,
   formatAppDateTime,
 } from "@/lib/app-time-zone";
@@ -438,6 +439,23 @@ export function effectiveAdvanceBasis(
     && !prepaymentExceedsUnbilledQuote(quote)
     ? "prepayment"
     : "positions";
+}
+
+/**
+ * The due date an advance for the required prepayment starts from: the
+ * deadline the order already names, so one payment does not carry two dates
+ * (QA 2026-11-01, W1 B2: due 15.11. beside a deadline of 20.11.). A deadline
+ * that has passed cannot be released, the billing term applies then.
+ */
+export function advancePrepaymentDueDate(
+  form: Pick<CreateForm, "invoiceType" | "advanceBasis">,
+  quote: QuoteOption | null | undefined,
+  prepaymentDueAt: string | null | undefined,
+  today: string,
+) {
+  if (effectiveAdvanceBasis(form, quote) !== "prepayment") return "";
+  const due = appDateKeyOf(prepaymentDueAt);
+  return due && due >= today ? due : "";
 }
 
 /**

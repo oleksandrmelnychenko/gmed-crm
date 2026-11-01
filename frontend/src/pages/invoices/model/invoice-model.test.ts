@@ -30,6 +30,7 @@ import {
   payerFormToPayload,
   payerRelationOptionLabel,
   payerRoleLabel,
+  advancePrepaymentDueDate,
   effectiveAdvanceBasis,
   interimLimitBesideOpenAdvance,
   prepaymentExceedsUnbilledQuote,
@@ -577,6 +578,17 @@ describe("prepayment advance invoices", () => {
     expect(effectiveAdvanceBasis({ ...form, advanceBasis: "positions" }, quote("500"))).toBe("positions");
     expect(effectiveAdvanceBasis(form, quote(null))).toBe("positions");
     expect(effectiveAdvanceBasis({ ...form, invoiceType: "final" }, quote("500"))).toBeNull();
+  });
+
+  it("starts the advance from the order's prepayment deadline (W1 B2)", () => {
+    const form = { ...blankCreateForm("quote"), invoiceType: "advance" as const };
+    const due = "2026-11-20T11:00:00Z";
+    expect(advancePrepaymentDueDate(form, quote("300"), due, "2026-11-01")).toBe("2026-11-20");
+    expect(advancePrepaymentDueDate(form, quote("300"), due, "2026-11-20")).toBe("2026-11-20");
+    expect(advancePrepaymentDueDate(form, quote("300"), due, "2026-11-21")).toBe("");
+    expect(advancePrepaymentDueDate(form, quote("300"), null, "2026-11-01")).toBe("");
+    expect(advancePrepaymentDueDate({ ...form, advanceBasis: "positions" }, quote("300"), due, "2026-11-01")).toBe("");
+    expect(advancePrepaymentDueDate({ ...form, invoiceType: "final" }, quote("300"), due, "2026-11-01")).toBe("");
   });
 
   it("splits the prepayment over the quote's VAT groups like the server", () => {

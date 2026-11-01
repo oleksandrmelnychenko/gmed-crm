@@ -543,6 +543,8 @@ export type OrderOption = {
   patient_id: string;
   patient_name: string;
   patient_pid: string;
+  /** The deadline of the required prepayment, set in the wizard. */
+  prepayment_due_at?: string | null;
 };
 
 export type QuoteOption = {
