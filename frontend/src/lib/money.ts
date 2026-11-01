@@ -56,6 +56,16 @@ export function normalizeMoneyInput(value: string): string | null {
   return /^-?\d+(?:[.,]\d{1,2})?$/u.test(compact) ? compact.replace(",", ".") : null;
 }
 
+/**
+ * A stored amount ("87.40") as staff type it ("87,40"): the field showed the
+ * API's dot after saving a comma (QA 2026-11-01, U-6). "" for nothing stored.
+ */
+export function moneyInputText(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "";
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount.toFixed(2).replace(".", ",") : String(value);
+}
+
 /** The typed amount as a number, NaN when {@link normalizeMoneyInput} refuses it. */
 export function parseMoneyInput(value: string): number {
   const normalized = normalizeMoneyInput(value);

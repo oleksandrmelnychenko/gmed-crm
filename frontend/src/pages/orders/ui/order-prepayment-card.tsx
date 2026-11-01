@@ -15,6 +15,7 @@ import {
 import { formatAppDate } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
+import { paymentStatusLabel } from "@/lib/payment-status";
 import { LeadConfirmDialog } from "@/pages/leads/ui/lead-confirm-dialog";
 
 import { updateOrderCommercialBasis } from "../data/order-api";
@@ -51,6 +52,7 @@ export function OrderPrepaymentCard({
     prepayment_required?: boolean;
     prepayment_amount?: unknown;
     prepayment_due_at?: string | null;
+    process_gates?: { payment_tracking?: { status: string } | null } | null;
   };
   /** The order owner, on an order that is still open. */
   canEdit: boolean;
@@ -61,6 +63,7 @@ export function OrderPrepaymentCard({
   const formLang = lang === "de" ? "de" : "ru";
   const currency = order.currency || "EUR";
   const stored = orderPrepaymentTerms(order);
+  const paymentStatus = order.process_gates?.payment_tracking?.status;
   const total = order.total_estimated == null ? null : Number(order.total_estimated);
   const orderTotal = total !== null && Number.isFinite(total) ? total : null;
   const exceedsTotal = orderPrepaymentError(stored, orderTotal) === "amount_exceeds_total";
@@ -112,6 +115,13 @@ export function OrderPrepaymentCard({
               <span className="font-medium text-foreground">
                 {formatMoneyAmount(stored.prepayment_amount, currency)}
               </span>
+              {/* After payment the line read as still owed (QA 2026-11-01, U-7). */}
+              {paymentStatus === "paid" || paymentStatus === "partially_paid" ? (
+                <span className="font-medium text-emerald-700 dark:text-emerald-400" data-testid="order-prepayment-paid">
+                  {" · "}
+                  {paymentStatusLabel(paymentStatus, formLang)}
+                </span>
+              ) : null}
               {stored.prepayment_due_at ? (
                 <span className="text-muted-foreground">
                   {" · "}

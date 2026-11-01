@@ -4,6 +4,7 @@ import {
   formatMoneyLabel,
   formatMoneyRange,
   formatRecognizedMoney,
+  moneyInputText,
   moneyLineAmounts,
   normalizeMoneyInput,
   parseMoneyInput,
@@ -102,5 +103,16 @@ describe("money labels", () => {
     expect(formatRecognizedMoney("1190", "USD")).toBe("1.190,00\u00a0USD");
     expect(formatRecognizedMoney("n/a", "EUR")).toBe("n/a EUR");
     expect(formatRecognizedMoney(null, "EUR")).toBe("");
+  });
+});
+
+describe("moneyInputText", () => {
+  it("shows a stored amount as staff type it (QA 2026-11-01, U-6)", () => {
+    expect(moneyInputText("87.40")).toBe("87,40");
+    expect(moneyInputText("87.4000")).toBe("87,40");
+    expect(moneyInputText(1234.5)).toBe("1234,50");
+    expect(normalizeMoneyInput(moneyInputText("1234.50"))).toBe("1234.50");
+    expect(moneyInputText(null)).toBe("");
+    expect(moneyInputText("")).toBe("");
   });
 });
