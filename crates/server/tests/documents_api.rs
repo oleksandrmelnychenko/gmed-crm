@@ -12763,15 +12763,12 @@ async fn a_change_of_the_paying_parent_outdates_the_signed_framework_contract() 
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert!(!signed_patient, "the signed order names the previous parent");
-    let (_, lead_body) = json_request(
-        &app,
-        "GET",
-        &format!("/api/v1/leads/{lead}"),
-        &bearer,
-        None,
-    )
-    .await;
+    assert!(
+        !signed_patient,
+        "the signed order names the previous parent"
+    );
+    let (_, lead_body) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead}"), &bearer, None).await;
     let estimate_check = lead_body["readiness"]["checks"]
         .as_array()
         .and_then(|checks| {
