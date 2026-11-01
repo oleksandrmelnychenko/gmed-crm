@@ -598,6 +598,28 @@ describe("prepayment advance invoices", () => {
     expect(prepaymentAdvanceSplit(partBilled, 239).exceedsQuote).toBe(true);
   });
 
+  it("bills exactly the required prepayment at every amount and mix of rates (W1 B1)", () => {
+    const single = [line({ quantity: "1", line_gross: "1190", vat_rate: "19" })];
+    expect(prepaymentAdvanceSplit(single, 87.4).lines).toEqual([
+      { vatRate: 19, isCostPassthrough: false, net: 73.45, vat: 13.95, gross: 87.4 },
+    ]);
+    const mixed = [
+      line({ quantity: "1", line_gross: "550", vat_rate: "0" }),
+      line({ quantity: "1", line_gross: "226.10", vat_rate: "19" }),
+      line({ quantity: "1", line_gross: "107", vat_rate: "7" }),
+      line({ quantity: "1", line_gross: "40", vat_rate: "0", is_cost_passthrough: true }),
+    ];
+    for (let cents = 1; cents <= 92310; cents += 7) {
+      const amount = cents / 100;
+      for (const lines of [single, mixed]) {
+        const split = prepaymentAdvanceSplit(lines, amount);
+        if (split.exceedsQuote) continue;
+        expect(split.gross).toBe(amount);
+        expect(Math.round((split.net + split.vat) * 100)).toBe(cents);
+      }
+    }
+  });
+
   it("starts from the positions when the prepayment exceeds what the quote has left (Z1 N5)", () => {
     const form = { ...blankCreateForm("quote"), invoiceType: "advance" as const };
     const partBilled = {

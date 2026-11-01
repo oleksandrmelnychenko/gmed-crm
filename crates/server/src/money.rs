@@ -83,6 +83,21 @@ pub fn net_for_gross(gross: Decimal, vat_rate: Decimal) -> Decimal {
         .unwrap_or(estimate)
 }
 
+/// Net, VAT and gross of a single-unit line whose gross is exactly `gross`, an
+/// amount agreed gross such as a required prepayment. Where no cent net reaches
+/// that gross (see [`net_for_gross`]) the VAT is the rest of the gross, the VAT
+/// contained in it: 87.40 at 19 % is 73.45 + 13.95, not 73.45 + 13.96 = 87.41
+/// (QA 2026-11-01, W1 B1).
+pub fn line_amounts_for_gross(gross: Decimal, vat_rate: Decimal) -> LineAmounts {
+    let gross = round_cents(gross);
+    let net = net_for_gross(gross, vat_rate);
+    LineAmounts {
+        net,
+        vat: gross - net,
+        gross,
+    }
+}
+
 /// Canonical API string of a money amount: rounded to cents, trailing zeros
 /// trimmed (`"282.63"`, `"95"`).
 pub fn money_string(value: Decimal) -> String {
@@ -216,6 +231,30 @@ mod tests {
         }
         assert_eq!(net_for_gross(dec("150"), dec("19")), dec("126.05"));
         assert_eq!(net_for_gross(dec("550"), dec("0")), dec("550"));
+    }
+
+    #[test]
+    fn a_line_agreed_gross_keeps_that_gross_at_every_amount_and_rate() {
+        for rate in ["0", "7", "19", "5.5", "10.7"] {
+            let rate = dec(rate);
+            for cents in 1..=100_000 {
+                let gross = Decimal::new(cents, 2);
+                let line = line_amounts_for_gross(gross, rate);
+                assert_eq!(line.gross, gross, "{gross} at {rate}%");
+                assert_eq!(line.net + line.vat, gross, "{gross} at {rate}%");
+                assert!(line.vat >= Decimal::ZERO, "{gross} at {rate}%");
+                // Only a cent from the VAT of the net, where a cent is off at all.
+                let exact = line_amounts(Decimal::ONE, line.net, rate);
+                assert!(
+                    (exact.vat - line.vat).abs() <= Decimal::new(1, 2),
+                    "{gross} at {rate}%"
+                );
+            }
+        }
+        let gap = line_amounts_for_gross(dec("87.40"), dec("19"));
+        assert_eq!((gap.net, gap.vat), (dec("73.45"), dec("13.95")));
+        let exact = line_amounts_for_gross(dec("150"), dec("19"));
+        assert_eq!((exact.net, exact.vat), (dec("126.05"), dec("23.95")));
     }
 
     #[test]

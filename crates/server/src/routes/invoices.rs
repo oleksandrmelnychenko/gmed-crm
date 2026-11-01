@@ -4354,9 +4354,15 @@ async fn build_prepayment_advance_snapshot(
         if share <= Decimal::ZERO {
             continue;
         }
-        let unit_price = money::net_for_gross(share, vat_rate);
-        let (line_net, line_vat, line_gross) =
-            compute_invoice_line_parts(Decimal::ONE, unit_price, vat_rate);
+        // The share is the amount asked for: the net is worked back from it
+        // and never rebuilds it a cent off, or the client pays what was
+        // required and the advance stays part paid (QA 2026-11-01, W1 B1).
+        let money::LineAmounts {
+            net: line_net,
+            vat: line_vat,
+            gross: line_gross,
+        } = money::line_amounts_for_gross(share, vat_rate);
+        let unit_price = line_net;
         let description = if group_count == 1 {
             format!("Anzahlung gemäß Angebot {}", ctx.quote_number)
         } else if is_cost_passthrough {

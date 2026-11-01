@@ -528,9 +528,16 @@ export function prepaymentAdvanceSplit(lines: InvoiceLineItem[], amount: number)
       : roundCents((target * group.gross) / quoteGross);
     remaining = roundCents(remaining - share);
     if (share <= 0) return;
+    // As the server's `line_amounts_for_gross`: the share is the amount asked
+    // for, the VAT the rest of it (QA 2026-11-01, W1 B1).
     const net = netForGross(share, group.vatRate);
-    const amounts = moneyLineAmounts(1, net, group.vatRate);
-    result.push({ vatRate: group.vatRate, isCostPassthrough: group.isCostPassthrough, ...amounts });
+    result.push({
+      vatRate: group.vatRate,
+      isCostPassthrough: group.isCostPassthrough,
+      net,
+      vat: roundCents(share - net),
+      gross: share,
+    });
   });
   return {
     lines: result,
