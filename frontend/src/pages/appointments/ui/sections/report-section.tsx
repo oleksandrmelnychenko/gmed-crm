@@ -590,12 +590,12 @@ function useAppointmentReportSectionContent({
 
             {canSubmitInterpreterReport ? (
               <div className="grid gap-4 md:grid-cols-[180px_minmax(0,1fr)]">
-                <Field label={t.appointments_time}>
+                <Field label={appointmentText("appointments_report_hours")}>
+                  {/* No native limits: the browser refused 120 without a word
+                      (QA 2026-11-01, W2 N4); the submit handler says why. */}
                   <Input
                     type="number"
-                    min="0.25"
-                    max="24"
-                    step="0.25"
+                    step="any"
                     value={form.hours}
                     onChange={(event) =>
                       dispatchReportState((current) => ({
@@ -607,7 +607,6 @@ function useAppointmentReportSectionContent({
                       }))
                     }
                     className={appointmentFilterControlClassName}
-                    required
                   />
                 </Field>
                 <Field label={tr.patients_notes}>

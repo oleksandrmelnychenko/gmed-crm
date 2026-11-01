@@ -174,6 +174,12 @@ describe("AppointmentReportSection review decision", () => {
     expect(html).toContain("Accompanied the consultation.");
   });
 
+  it("leaves the limits to the form's own message: no native refusal without a word (W2 N4)", () => {
+    const html = renderReadOnly(null, { ...noActions, canSubmitInterpreterReport: true });
+    expect(hoursInput(html)).not.toMatch(/\b(max|min|required)=/);
+    expect(hoursInput(html)).toContain('step="any"');
+  });
+
   it("labels the hours in both catalogs", () => {
     expect(uiText("appointments_report_hours", "ru")).toBe("Часы");
     expect(uiText("appointments_report_hours", "de")).toBe("Stunden");

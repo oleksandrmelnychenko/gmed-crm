@@ -700,6 +700,22 @@ function prospectMatchLabel(matchedOn: string[] | undefined, tx: (ru: string, de
   return (matchedOn ?? ["name_birth_date"]).map((key) => labels[key] ?? key).join(", ");
 }
 
+/** The question of the duplicate dialog: only the same name and birth date can be attached (QA 2026-11-01, W2 N7). */
+function prospectDuplicateQuestion(
+  candidates: { matched_on?: string[] }[] | null,
+  tx: (ru: string, de: string) => string,
+) {
+  return (candidates ?? []).some((candidate) => candidate.matched_on?.includes("name_birth_date") !== false)
+    ? tx(
+      "Данные совпадают с существующей карточкой: что именно, указано у пациента. Привязать обращение к ней или создать нового пациента?",
+      "Angaben stimmen mit einer bestehenden Patientenakte überein: was genau, steht beim Patienten. Anfrage mit ihr verknüpfen oder einen neuen Patienten anlegen?",
+    )
+    : tx(
+      "Совпадают только контактные данные: что именно, указано у пациента. Привязать можно лишь при том же имени и дате рождения. Создать нового пациента?",
+      "Nur Kontaktdaten stimmen überein: was genau, steht beim Patienten. Verknüpfen geht nur bei gleichem Namen und Geburtsdatum. Neuen Patienten anlegen?",
+    );
+}
+
 function amlRiskForCountries(
   lists: RiskCountryLists,
   ...values: Array<string | null | undefined>
@@ -13563,10 +13579,7 @@ ${serviceCommentLines.join("\n")}`
               {tx("Найден существующий пациент", "Vorhandener Patient gefunden")}
             </DialogTitle>
             <DialogDescription>
-              {tx(
-                "Данные совпадают с существующей карточкой: что именно, указано у пациента. Привязать обращение к ней или создать нового пациента?",
-                "Angaben stimmen mit einer bestehenden Patientenakte überein: was genau, steht beim Patienten. Anfrage mit ihr verknüpfen oder einen neuen Patienten anlegen?",
-              )}
+              {prospectDuplicateQuestion(prospectCandidates, tx)}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
