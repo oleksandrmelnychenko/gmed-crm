@@ -2516,13 +2516,12 @@ async fn erasure_removes_names_and_content_from_the_patients_documents() {
         medication_note.as_deref(),
         Some(format!("{anon} nach dem Essen").as_str())
     );
-    let (version_old, version_new): (Option<Value>, Option<Value>) = sqlx::query_as(
-        "SELECT old_value, new_value FROM patient_clinical_versions WHERE id = $1",
-    )
-    .bind(clinical_version)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let (version_old, version_new): (Option<Value>, Option<Value>) =
+        sqlx::query_as("SELECT old_value, new_value FROM patient_clinical_versions WHERE id = $1")
+            .bind(clinical_version)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(version_old, None, "a NULL snapshot stays NULL");
     assert_eq!(
         version_new,

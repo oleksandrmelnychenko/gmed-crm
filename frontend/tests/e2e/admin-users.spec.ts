@@ -179,7 +179,7 @@ test("IT admin creates a user with a one-time password that is shown once", asyn
   await sheet.getByPlaceholder("max@gmed.de").fill("neue.person@example.com");
   await sheet.getByRole("button", { name: "Создать пользователя", exact: true }).click();
 
-  expect(state.createBodies).toEqual([
+  await expect.poll(() => state.createBodies).toEqual([
     { email: "neue.person@example.com", name: "Neue Person", role: "billing" },
   ]);
   const panel = sheet.getByTestId("one-time-password-panel");
