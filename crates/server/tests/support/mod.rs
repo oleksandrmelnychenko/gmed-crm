@@ -187,12 +187,14 @@ pub async fn seed_signed_framework_contract_document(
                id, patient_id, lead_id, auto_name, original_filename, art, category,
                status, visibility, is_medical, mime_type, generated_template_id, ursprung,
                version_root_document_id, version_number, uploaded_by,
-               signed_at, signed_by, compliance_kind
+               signed_at, signed_by, compliance_kind, created_at
            ) VALUES (
                $1, $2, $3, 'Rahmenvertrag (unterschrieben)', 'rahmenvertrag-scan.pdf',
                'framework_contract', 'administrative', 'active', 'internal', false,
                'application/pdf', 'framework_contract', 'paper_signature',
-               $1, 1, $4, now(), $4, 'framework_contract'
+               $1, 1, $4, now(), $4, 'framework_contract',
+               -- After the contract even when the WSL clock steps back.
+               clock_timestamp() + interval '5 seconds'
            )"#,
     )
     .bind(document_id)
