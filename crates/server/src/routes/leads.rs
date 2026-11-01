@@ -6198,7 +6198,7 @@ async fn update_lead(
         r#"SELECT first_name, last_name, middle_name, city, date_of_birth, email, phone,
                   trusted_contacts, repeat_patient_id, prospect_patient_id,
                   converted_patient_id, qualification_status, compliance_status,
-                  portal_user_id
+                  portal_user_id, consent_healthcare
              FROM leads WHERE id = $1"#,
     )
     .bind(lead_id)
@@ -6234,6 +6234,21 @@ async fn update_lead(
         .flatten()
     {
         return lead_converted_response(patient_id);
+    }
+    // The Art. 9 consent is medical state: a role without medical access may
+    // resend it unchanged (its forms always carry it) but not change it (QA
+    // 2026-11-01 E6).
+    let current_consent_healthcare = current_identity
+        .try_get::<bool, _>("consent_healthcare")
+        .unwrap_or(false);
+    let consent_healthcare_changed = body
+        .consent_healthcare
+        .is_some_and(|value| value != current_consent_healthcare);
+    if consent_healthcare_changed && !lead_medical_visible(&auth) {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Medical lead fields require medical access",
+        );
     }
     let current_compliance_status = current_identity
         .try_get::<String, _>("compliance_status")
@@ -6808,6 +6823,27 @@ async fn update_lead(
     .await
     {
         tracing::error!(error = %e, lead_id = %lead_id, "audit lead update");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    // A consent change is a row of its own, not a flag in the edit above.
+    if consent_healthcare_changed
+        && let Err(e) = audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                if body.consent_healthcare == Some(true) {
+                    "lead_healthcare_consent_granted"
+                } else {
+                    "lead_healthcare_consent_revoked"
+                },
+                Some(auth.user_id),
+                "lead",
+                Some(lead_id),
+                json!({ "lead_id": lead_id, "consent_healthcare": body.consent_healthcare }),
+            ),
+        )
+        .await
+    {
+        tracing::error!(error = %e, lead_id = %lead_id, "audit lead consent change");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     if let Some(previous) = previous_pep_status_checked {

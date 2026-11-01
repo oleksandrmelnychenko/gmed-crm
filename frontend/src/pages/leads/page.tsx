@@ -2784,6 +2784,8 @@ function useLeadsPageContent() {
                             type="checkbox"
                             className={checkboxClass}
                             checked={gateForm.consentHealthcare}
+                            // Sales cannot change the Art. 9 consent (server 403).
+                            disabled={detailMedicalHidden}
                             onChange={(event) =>
                               setGateForm((current) =>
                                 current

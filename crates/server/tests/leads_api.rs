@@ -183,6 +183,17 @@ async fn record_dsgvo_signature(pool: &PgPool, lead_id: &str) {
 
 async fn make_lead_ready_for_qualification(app: &TestApp, bearer: &str, lead_id: &str) -> Value {
     record_dsgvo_signature(&app.suite.pool, lead_id).await;
+    // The consent is already on the lead: Sales may resend it but not change
+    // it (QA 2026-11-01 E6).
+    let (status, _) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &app.auth_header("ceo"),
+        Some(json!({ "consent_healthcare": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
     let (status, body) = json_request(
         app,
         "POST",
