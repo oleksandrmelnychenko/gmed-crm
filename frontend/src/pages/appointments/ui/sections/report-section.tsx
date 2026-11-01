@@ -543,15 +543,13 @@ function useAppointmentReportSectionContent({
                   </Button>
                 ) : null}
                 {canSubmitInterpreterReport ? (
+                  // Invalid hours keep the button live: the submit handler says
+                  // why, a disabled button said nothing (QA 2026-11-01, U-1).
                   <Button
                     type="submit"
                     size="sm"
                     className="h-8 gap-1.5 rounded-lg"
-                    disabled={
-                      busyAction === "report-submit" ||
-                      reportTooEarly ||
-                      parseValidInterpreterReportHours(form.hours) === null
-                    }
+                    disabled={busyAction === "report-submit" || reportTooEarly}
                     title={reportTooEarly ? reportTooEarlyHint : undefined}
                   >
                     {busyAction === "report-submit" ? (

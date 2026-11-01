@@ -178,6 +178,8 @@ describe("AppointmentReportSection review decision", () => {
     const html = renderReadOnly(null, { ...noActions, canSubmitInterpreterReport: true });
     expect(hoursInput(html)).not.toMatch(/\b(max|min|required)=/);
     expect(hoursInput(html)).toContain('step="any"');
+    // An empty field keeps the button live, so the submit handler can say why (U-1).
+    expect(tagDisabled(submitButton(html))).toBe(false);
   });
 
   it("labels the hours in both catalogs", () => {

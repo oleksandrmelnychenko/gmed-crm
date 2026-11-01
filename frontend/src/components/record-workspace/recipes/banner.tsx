@@ -8,10 +8,12 @@ export function Banner({
   tone,
   children,
   withIcon = false,
+  "data-testid": testId,
 }: {
   tone: "error" | "warning";
   children: ReactNode;
   withIcon?: boolean;
+  "data-testid"?: string;
 }) {
   const classes =
     tone === "error"
@@ -22,6 +24,7 @@ export function Banner({
   return (
     <div
       role={tone === "error" ? "alert" : "status"}
+      data-testid={testId}
       className={cn(
         tone === "warning"
           ? "flex w-fit max-w-full items-start gap-2 rounded-2xl border px-3 py-2 text-xs font-medium leading-5"
