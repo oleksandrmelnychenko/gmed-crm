@@ -618,7 +618,7 @@ async fn the_declared_third_party_pays_the_invoice_after_the_default_payer_and_b
     seed_converted_declaration(&fx.pool, patient, "third_party").await;
     let order = seed_order(&fx.pool, patient, fx.admin_id, &fx.tag).await;
     let quote = create_quote(&fx.app, &fx.manager, order).await;
-    let draft = create_draft(&fx.app, &fx.billing, &quote, "final").await;
+    let draft = create_draft(&fx.app, &fx.billing, &quote, "advance").await;
     let invoice_id = draft["id"].as_str().unwrap().to_string();
     assert_eq!(draft["payer"]["contact_name"], "Viktor Zahler", "{draft}");
     assert_eq!(draft["payer"]["role"], "cost_bearer");
@@ -641,8 +641,9 @@ async fn the_declared_third_party_pays_the_invoice_after_the_default_payer_and_b
     assert_eq!(cleared["recipient"]["kind"], "patient");
 
     // A second draft starts with the declared payer again and releases to
-    // him: the frozen recipient names the declared third party.
-    let second = create_draft(&fx.app, &fx.billing, &quote, "advance").await;
+    // him: the frozen recipient names the declared third party. The final
+    // comes second, no advance goes beside a final (QA 2026-11-01, X1 N1).
+    let second = create_draft(&fx.app, &fx.billing, &quote, "final").await;
     let second_id = second["id"].as_str().unwrap().to_string();
     assert_eq!(second["payer"]["contact_name"], "Viktor Zahler", "{second}");
     let (status, released) = release(&fx.app, &fx.billing, &second_id, json!({})).await;
@@ -999,7 +1000,10 @@ async fn the_lead_says_where_the_invoice_goes_and_the_order_keeps_its_cost_beare
 
     // Another name at the other address: still no confirmation (the lead
     // chose it), but the invoice names the Leistungsempfänger (§ 14 Abs. 4
-    // Nr. 1 UStG).
+    // Nr. 1 UStG). An order of its own: no advance goes beside a final (QA
+    // 2026-11-01, X1 N1).
+    let order = seed_order(&fx.pool, patient, fx.admin_id, &format!("{}-a", fx.tag)).await;
+    let quote = create_quote(&fx.app, &fx.manager, order).await;
     set_invoice_to(&fx.pool, lead, Some("other"), Some("Beispiel GmbH")).await;
     let company = create_draft(&fx.app, &fx.billing, &quote, "advance").await;
     let company_id = company["id"].as_str().unwrap().to_string();
@@ -1052,7 +1056,7 @@ async fn the_lead_says_where_the_invoice_goes_and_the_order_keeps_its_cost_beare
     .unwrap();
     assert_eq!(inherited.source, "none", "{:?}", inherited.record);
     assert!(!inherited.record.is_set());
-    let mine = create_draft(&fx.app, &fx.billing, &quote, "final").await;
+    let mine = create_draft(&fx.app, &fx.billing, &quote, "advance").await;
     assert_eq!(mine["recipient"]["kind"], "patient", "{mine}");
     assert_eq!(mine["recipient"]["name"], patient_name, "{mine}");
     sqlx::query("UPDATE orders SET payer_notes = 'Zahlt per Überweisung' WHERE id = $1")
@@ -1130,7 +1134,7 @@ async fn the_lead_says_where_the_invoice_goes_and_the_order_keeps_its_cost_beare
     assert_eq!(inherited.source, "none");
 
     // Billing may set the role on a draft and on an order.
-    let fresh = create_draft(&fx.app, &fx.billing, &quote, "advance").await;
+    let fresh = create_draft(&fx.app, &fx.billing, &quote, "final").await;
     let fresh_id = fresh["id"].as_str().unwrap().to_string();
     let (status, body) = set_invoice_payer(
         &fx.app,
