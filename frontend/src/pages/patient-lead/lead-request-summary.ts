@@ -39,6 +39,7 @@ import {
   type RepresentativeField,
 } from "./lead-request-representation-model";
 import {
+  actsAsVormund,
   identificationFieldLabel,
   childSectionTitle,
   extraFieldLabel,
@@ -178,8 +179,9 @@ function representativePayerLabel(
   const name = [payer.first_name, payer.last_name].map((part) => part?.trim()).filter(Boolean).join(" ")
     || [person?.first_name, person?.last_name].map((part) => part?.trim()).filter(Boolean).join(" ");
   const mine = person ? person.mine : payerAnswer(payer, request.payer_self_template ?? null) === "guardian";
+  // A Vormund is no parent (QA 2026-11-01).
   const label = mine
-    ? text.recipient.payerOptions.guardian
+    ? actsAsVormund(request) ? text.recipient.selfVormund : text.recipient.payerOptions.guardian
     : person?.slot
       ? representativeHeading(text, person.slot, false, custody)
       : text.payerRelationshipOptions.parent;
@@ -346,7 +348,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
         billing.invoice_recipient ? recipientOptions(text, request, Boolean(invoiceParent && !invoiceParent.mine))[billing.invoice_recipient] : "",
       ],
       [text.recipient.typeQuestion, third && recipient?.type ? text.recipient.typeOptions[recipient.type] : ""],
-      [text.recipient.parentQuestion, invoiceParent ? [invoiceParent.first_name, invoiceParent.last_name].filter(Boolean).join(" ") : ""],
+      [actsAsVormund(request) ? text.recipient.parentQuestionVormund : text.recipient.parentQuestion, invoiceParent ? [invoiceParent.first_name, invoiceParent.last_name].filter(Boolean).join(" ") : ""],
       [organisation ? text.recipient.organisationName : text.recipient.missingPrefix, name],
       [text.recipient.legalForm, organisation ? party?.legal_form : ""],
       [text.recipient.contactName, organisation ? party?.contact_name : ""],

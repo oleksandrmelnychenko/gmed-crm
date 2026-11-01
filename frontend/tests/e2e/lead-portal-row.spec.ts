@@ -205,7 +205,7 @@ test("the expanded lead row shows the patient portal at a glance", async ({ page
   // Filled in and sent.
   const sent = rows.filter({ hasText: "sofia.beispiel@example.com" }).first();
   await expect(sent).toContainText("Входил");
-  await expect(sent.getByTestId("lead-portal-progress")).toContainText("12 из 12 полей");
+  await expect(sent.getByTestId("lead-portal-progress")).toContainText("отправлена");
   await expect(sent).toContainText("05.10.2026 14:30");
 
   // Keyboard activation toggles only the details, without opening the lead wizard.
@@ -242,7 +242,7 @@ test("the patient portal row reads in German too", async ({ page }) => {
   const row = page.getByTestId("lead-portal-access").first();
   await expect(row).toContainText("Patientenportal");
   await expect(row).toContainText("Letzte Anmeldung");
-  await expect(row.getByTestId("lead-portal-progress")).toContainText("12 von 12 Feldern");
+  await expect(row.getByTestId("lead-portal-progress")).toContainText("gesendet");
   await expect(row).toContainText("Gesendet");
   await expect(row.getByRole("button", { name: "Neues Passwort" })).toBeVisible();
 });

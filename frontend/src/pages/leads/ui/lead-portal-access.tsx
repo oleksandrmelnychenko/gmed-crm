@@ -390,13 +390,17 @@ export function LeadPortalAccessDetail({
           {intake ? (
             <>
               <PortalFact label={de ? "Fragebogen" : "Анкета"} testId="lead-portal-progress">
-                {de ? `${intake.filled} von ${intake.total} Feldern` : `${intake.filled} из ${intake.total} полей`}
-                <span aria-hidden="true" className="mt-1 block h-0.5 w-24 max-w-full overflow-hidden rounded-full bg-muted">
-                  <span
-                    className="block h-full rounded-full bg-[var(--brand)]"
-                    style={{ width: `${intake.total > 0 ? Math.round((intake.filled / intake.total) * 100) : 0}%` }}
-                  />
-                </span>
+                {intake.submitted_at ? (de ? "gesendet" : "отправлена") : (
+                  <>
+                    {de ? `${intake.filled} von ${intake.total} Feldern` : `${intake.filled} из ${intake.total} полей`}
+                    <span aria-hidden="true" className="mt-1 block h-0.5 w-24 max-w-full overflow-hidden rounded-full bg-muted">
+                      <span
+                        className="block h-full rounded-full bg-[var(--brand)]"
+                        style={{ width: `${intake.total > 0 ? Math.round((intake.filled / intake.total) * 100) : 0}%` }}
+                      />
+                    </span>
+                  </>
+                )}
               </PortalFact>
               {/* Medical files only, as the wizard banner counts them (QA 2026-10-11, A-11). */}
               <PortalFact

@@ -89,6 +89,12 @@ it("names the parent who pays as the representative, never as a private person",
   expect(rows(requestSummary(paying("p-2", "Ivan"), de, "de"), "payer")).toEqual({
     "Wer ist der Zahler?": "Anderer Elternteil – Ivan Testov",
   });
+  // A Vormund is no parent (QA 2026-11-01).
+  const vormund = paying("p-1", "Anna");
+  vormund.representation = { ...representation, custody: "guardian" as const };
+  expect(rows(requestSummary(vormund, de, "de"), "payer")).toEqual({
+    "Wer ist der Zahler?": "Ich (als gesetzliche Vertretung) – Anna Testov",
+  });
 });
 
 function upload(id: string, fileName: string): LeadRequestDocument {

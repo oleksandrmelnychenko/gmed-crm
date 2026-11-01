@@ -72,14 +72,17 @@ describe("taking the patient's changes into an open wizard", () => {
 });
 
 describe("portal state labels", () => {
-  it("names the progress and the time of sending", () => {
+  it("names the progress of an open form and only the time of sending of a sent one", () => {
+    expect(
+      portalProgressText({ filled: 9, total: 11, documents: 2, submitted_at: null }, tx, () => ""),
+    ).toEqual(["заполнено 9 из 11 полей", "2 медицинских документа"]);
     expect(
       portalProgressText(
         { filled: 9, total: 11, documents: 2, submitted_at: "2026-10-03T09:30:00Z" },
         tx,
         () => "03.10.2026 11:30",
       ),
-    ).toEqual(["заполнено 9 из 11 полей", "2 медицинских документа", "данные отправлены 03.10.2026 11:30"]);
+    ).toEqual(["2 медицинских документа", "данные отправлены 03.10.2026 11:30"]);
   });
 
   it("counts medical documents with the right plural form (QA 2026-10-11, A-11)", () => {

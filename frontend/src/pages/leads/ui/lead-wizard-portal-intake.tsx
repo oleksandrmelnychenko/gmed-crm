@@ -238,10 +238,12 @@ export function Step1PortalSummary({ intake, mode, tx }: { intake: LeadPortalInt
       {intake.submitted_at ? <CheckCheck aria-hidden="true" className="size-3.5 text-emerald-600" /> : <Clock3 aria-hidden="true" className="size-3.5" />}
       <span className="mr-0.5">{tx("Портал пациента:", "Patientenportal:")}</span>
       {parts.map((part, index) => {
-        // portalProgressText returns fields, medical documents, then submission.
-        const tone = index === 0
+        // portalProgressText returns fields, medical documents, then submission;
+        // a sent form has no field count.
+        const position = intake.progress.submitted_at ? index + 1 : index;
+        const tone = position === 0
           ? allFieldsFilled ? "success" : "warning"
-          : index === 1 ? intake.progress.documents > 0 ? "success" : "info" : "success";
+          : position === 1 ? intake.progress.documents > 0 ? "success" : "info" : "success";
         return <StatusChip key={part} tone={tone}>{part}</StatusChip>;
       })}
     </div>

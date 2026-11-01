@@ -175,8 +175,12 @@ export function portalProgressText(
   tx: Tx,
   formatDateTime: (value: string) => string,
 ): string[] {
+  // A sent form is finished: «заполнено 11 из 12» beside it read as still
+  // open, though a field the request does not need counts too (QA 2026-11-01).
   const parts = [
-    tx(`заполнено ${progress.filled} из ${progress.total} полей`, `${progress.filled} von ${progress.total} Feldern ausgefüllt`),
+    ...(progress.submitted_at
+      ? []
+      : [tx(`заполнено ${progress.filled} из ${progress.total} полей`, `${progress.filled} von ${progress.total} Feldern ausgefüllt`)]),
     medicalDocumentsText(progress.documents, tx),
   ];
   if (progress.submitted_at) {
