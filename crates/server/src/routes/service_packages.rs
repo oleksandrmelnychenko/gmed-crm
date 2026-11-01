@@ -2583,8 +2583,10 @@ async fn update_overage_approval(
         }
     }
 
-    match sqlx::query(
-        r#"UPDATE service_package_consumptions
+    let result: Result<sqlx::postgres::PgQueryResult, sqlx::Error> = async {
+        let mut tx = state.db.begin().await?;
+        let result = sqlx::query(
+            r#"UPDATE service_package_consumptions
            SET approval_status = $3,
                notes = COALESCE($4, notes)
            WHERE patient_service_package_id = $1
@@ -2596,13 +2598,35 @@ async fn update_overage_approval(
              -- pending for good (QA 2026-11-01, T3-5).
              AND approval_status = 'pending'"#,
     )
-    .bind(patient_service_package_id)
-    .bind(body.package_item_id)
-    .bind(body.approval_status.clone())
-    .bind(normalize_optional(body.notes.as_deref()))
-    .execute(&state.db)
-    .await
-    {
+        .bind(patient_service_package_id)
+        .bind(body.package_item_id)
+        .bind(body.approval_status.clone())
+        .bind(normalize_optional(body.notes.as_deref()))
+        .execute(&mut *tx)
+        .await?;
+        if result.rows_affected() > 0 {
+            crate::audit::write_in_transaction(
+                &mut tx,
+                &crate::audit::domain_event(
+                    "update_package_overage_approval",
+                    Some(auth.user_id),
+                    "patient",
+                    Some(patient_id),
+                    serde_json::json!({
+                        "patient_service_package_id": patient_service_package_id,
+                        "package_item_id": body.package_item_id,
+                        "approval_status": body.approval_status,
+                        "updated_count": result.rows_affected(),
+                    }),
+                ),
+            )
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(result)
+    }
+    .await;
+    match result {
         Ok(result) => {
             crate::realtime::publish_patient_event(
                 &state,

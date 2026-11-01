@@ -6356,6 +6356,16 @@ async fn package_decline_and_order_rules_keep_the_overage_billable() {
     .await;
     assert_eq!(status, StatusCode::OK, "{decision}");
     assert_eq!(decision["updated_count"], 1);
+    let audited: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM audit_log
+           WHERE action = 'update_package_overage_approval' AND entity_id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .expect("audit rows");
+    assert_eq!(audited, 1);
+
     let (_, body) = json_request(&app, "GET", &list_path, &billing_bearer, None).await;
     let hours = line(&body, &hour_item);
     assert_eq!(hours["used_quantity"], "5");
