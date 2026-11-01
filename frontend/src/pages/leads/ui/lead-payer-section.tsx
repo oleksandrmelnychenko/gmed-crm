@@ -469,6 +469,16 @@ export function LeadPayerDeclarationSection({
   const representatives = data?.status.representatives ?? [];
   const chosenRepresentative = chosenPayerRepresentative(form, data?.status);
   const chooseKind = (kind: PayerDeclarationForm["kind"]) => {
+    // Back from «a parent pays» with no parent chosen, which nothing saved: the
+    // stored payer stands, not a blanked form (QA 2026-11-01, Y1 bug 1).
+    if (data?.declaration?.payer_kind === kind && formRef.current.kind === "representative" && !formRef.current.representativeId) {
+      const stored = payerDeclarationToForm(data.declaration);
+      formRef.current = stored;
+      unqueuedEditRef.current = false;
+      setForm(stored);
+      setDirty(false);
+      return;
+    }
     patch("kind", kind);
     // One parent on file: that one; otherwise staff choose.
     if (kind === "representative" && !formRef.current.representativeId && representatives.length === 1) {
@@ -1077,6 +1087,41 @@ export function LeadPayerDeclarationSection({
 
         {/* Own interest and source of funds: shown in the wizard's enhanced AML block (owner 2026-10-19), one form and one autosave. */}
         {amlPart}
+        {/* Outside the third party's block: «Пациент платит сам» takes that block
+            away with the click, and the question with it (QA 2026-11-01, Y1 bug 1). */}
+        <LeadConfirmDialog
+          open={consentLossAsked}
+          testId="lead-payer-consent-loss-dialog"
+          title={tx("Сменить плательщика?", "Zahler ändern?")}
+          description={form.kind === "third_party"
+            ? tx(
+              "Согласия клиента на контакт с плательщиком и на передачу расчёта относятся к прежнему плательщику и будут сняты. Его имя и дата рождения, контакты, адрес и связь с пациентом будут очищены: укажите данные нового плательщика. Форма уже отправлена, поэтому новые согласия запишете вы, указав, как клиент их дал.",
+              "Die Einwilligungen des Kunden zur Kontaktaufnahme und zur Weitergabe der Kostenschätzung gelten dem bisherigen Zahler und entfallen. Sein Name und Geburtsdatum, seine Kontaktdaten, seine Anschrift und seine Beziehung zum Patienten werden geleert: Tragen Sie die Daten des neuen Zahlers ein. Ist das Formular bereits gesendet, tragen Sie die neuen Einwilligungen selbst ein und geben an, wie der Kunde sie erteilt hat.",
+            )
+            : tx(
+              "Третье лицо больше не платит. Согласия клиента на контакт с ним и на передачу расчёта будут сняты, его имя и дата рождения, контакты, адрес и связь с пациентом будут очищены.",
+              "Der Dritte zahlt nicht mehr. Die Einwilligungen des Kunden zur Kontaktaufnahme und zur Weitergabe der Kostenschätzung entfallen; sein Name und Geburtsdatum, seine Kontaktdaten, seine Anschrift und seine Beziehung zum Patienten werden geleert.",
+            )}
+          confirmLabel={tx("Сменить", "Ändern")}
+          cancelLabel={tx("Отмена", "Abbrechen")}
+          destructive
+          onConfirm={() => {
+            consentLossAccepted.current = true;
+            setConsentLossAsked(false);
+            const replaced = withReplacedPayer(formRef.current, payerDeclarationToForm(data?.declaration));
+            formRef.current = replaced;
+            setForm(replaced);
+            queueSave(replaced);
+          }}
+          onCancel={() => {
+            const stored = payerDeclarationToForm(data?.declaration);
+            formRef.current = stored;
+            unqueuedEditRef.current = false;
+            setForm(stored);
+            setDirty(false);
+            setConsentLossAsked(false);
+          }}
+        />
         {thirdParty ? (
           <div className="space-y-3 border-t border-border/60 pt-3">
             <AdminSectionTitle>
@@ -1328,34 +1373,6 @@ export function LeadPayerDeclarationSection({
                   onRecord={(recorded) => void recordConsents(recorded)}
                 />
               ) : null}
-            <LeadConfirmDialog
-              open={consentLossAsked}
-              testId="lead-payer-consent-loss-dialog"
-              title={tx("Сменить плательщика?", "Zahler ändern?")}
-              description={tx(
-                "Согласия клиента на контакт с плательщиком и на передачу расчёта относятся к прежнему плательщику и будут сняты. Его имя и дата рождения, контакты, адрес и связь с пациентом будут очищены: укажите данные нового плательщика. Форма уже отправлена, поэтому новые согласия запишете вы, указав, как клиент их дал.",
-                "Die Einwilligungen des Kunden zur Kontaktaufnahme und zur Weitergabe der Kostenschätzung gelten dem bisherigen Zahler und entfallen. Sein Name und Geburtsdatum, seine Kontaktdaten, seine Anschrift und seine Beziehung zum Patienten werden geleert: Tragen Sie die Daten des neuen Zahlers ein. Ist das Formular bereits gesendet, tragen Sie die neuen Einwilligungen selbst ein und geben an, wie der Kunde sie erteilt hat.",
-              )}
-              confirmLabel={tx("Сменить", "Ändern")}
-              cancelLabel={tx("Отмена", "Abbrechen")}
-              destructive
-              onConfirm={() => {
-                consentLossAccepted.current = true;
-                setConsentLossAsked(false);
-                const replaced = withReplacedPayer(formRef.current, payerDeclarationToForm(data?.declaration));
-                formRef.current = replaced;
-                setForm(replaced);
-                queueSave(replaced);
-              }}
-              onCancel={() => {
-                const stored = payerDeclarationToForm(data?.declaration);
-                formRef.current = stored;
-                unqueuedEditRef.current = false;
-                setForm(stored);
-                setDirty(false);
-                setConsentLossAsked(false);
-              }}
-            />
             {typed && costEstimateConsent && !payingParent ? (
               <p
                 className="flex flex-wrap items-center gap-2 text-xs leading-5 text-foreground"

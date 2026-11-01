@@ -382,6 +382,36 @@ test("a stored company with the lead's consent, in German", async ({ page }, tes
   await expect(section.getByTestId("lead-payer-contact-consent")).not.toContainText("05.10.2026 11:30");
 });
 
+test("a payer with recorded consents moves to self-pay after the warning, or stays on cancel", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const { section, saves } = await mount(page, "ru", { ...person, contact_consent_at: "2026-10-05T09:30:00Z" });
+  await expect(section.getByLabel(/^Имя/)).toHaveValue("Viktor");
+  const self = section.getByRole("radio", { name: "Пациент платит сам", exact: true });
+  const thirdParty = section.getByRole("radio", { name: "Платит третье лицо", exact: true });
+  const savesBefore = saves.length;
+
+  // The dialog stays although the click takes the third party's block away (QA 2026-11-01, Y1 bug 1).
+  await self.check({ force: true });
+  const warning = page.getByTestId("lead-payer-consent-loss-dialog");
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText("Третье лицо больше не платит");
+  expect(saves).toHaveLength(savesBefore);
+
+  // Cancel: the stored payer again, not a blank form.
+  await warning.getByRole("button", { name: "Отмена", exact: true }).click();
+  await expect(warning).toHaveCount(0);
+  await expect(thirdParty).toBeChecked();
+  await expect(section.getByLabel(/^Имя/)).toHaveValue("Viktor");
+  expect(saves).toHaveLength(savesBefore);
+
+  await self.check({ force: true });
+  await expect(warning).toBeVisible();
+  await warning.getByRole("button", { name: "Сменить", exact: true }).click();
+  await expect.poll(() => saves.at(-1)).toMatchObject({ payer_kind: "self", first_name: null, last_name: null, email: null, street: null });
+  await expect(warning).toHaveCount(0);
+  await expect(self).toBeChecked();
+});
+
 test("staff add USt-IdNr. and Steuernummer of the invoice recipient; where the invoice goes stays the lead's choice", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
   const { section, saves } = await mount(page, "ru", billedCompany);
