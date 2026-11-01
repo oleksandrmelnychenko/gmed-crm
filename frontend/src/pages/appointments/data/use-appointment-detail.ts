@@ -7,7 +7,7 @@ import {
   type SetStateAction,
 } from "react";
 
-import { apiFetch } from "@/lib/api";
+import { ApiRequestError, apiFetch } from "@/lib/api";
 import { localizeBlockedAppointmentTitle } from "@/lib/blocked-appointment";
 import {
   fetchAppointmentDetailResourceGroup,
@@ -433,10 +433,14 @@ export function useAppointmentDetail({
             assignments = await apiFetch<PatientAssignment[]>(
               `/patients/${appointmentDetail.patient_id}/assignments`,
             );
-          } catch {
-            assignmentsError = appointmentText(
-              "appointments_failed_to_load_extended_appointment_data",
-            );
+          } catch (assignmentsFailure) {
+            // A team lead opens the appointments of his team without being
+            // assigned to the patient: no curators to show, not a failure.
+            if (!(assignmentsFailure instanceof ApiRequestError && assignmentsFailure.status === 403)) {
+              assignmentsError = appointmentText(
+                "appointments_failed_to_load_extended_appointment_data",
+              );
+            }
           }
         }
 

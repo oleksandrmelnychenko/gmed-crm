@@ -45,7 +45,9 @@ import {
 } from "@/components/ui-shell";
 import { ApiRequestError, apiFetch, downloadApiFile } from "@/lib/api";
 import { isValidEmailAddress } from "@/lib/contact-validation";
+import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { hasCapability } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import { useAppointmentLabels } from "@/pages/appointments/model/labels";
 import {
@@ -910,6 +912,8 @@ export function InterpretersPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [contractFilter, setContractFilter] = useState("");
   const [createAccountOpen, setCreateAccountOpen] = useState(false);
+  const { user } = useAuth();
+  const canCreateAccounts = hasCapability(user, "users.manage");
   const [createAccountSaving, setCreateAccountSaving] = useState(false);
   const [createAccountError, setCreateAccountError] = useState("");
   const [createAccountForm, setCreateAccountForm] =
@@ -1374,14 +1378,18 @@ export function InterpretersPage() {
           description={copy.subtitle}
           actions={
             <>
-              <Button
-                type="button"
-                className="h-9 rounded-lg gap-1.5 px-3.5"
-                onClick={() => setCreateAccountOpen(true)}
-              >
-                <Plus className="size-4" />
-                {copy.newInternalEmployee}
-              </Button>
+              {/* A new account goes through `POST /users`: the page itself is
+                  also open to roles that manage interpreters, not accounts. */}
+              {canCreateAccounts ? (
+                <Button
+                  type="button"
+                  className="h-9 rounded-lg gap-1.5 px-3.5"
+                  onClick={() => setCreateAccountOpen(true)}
+                >
+                  <Plus className="size-4" />
+                  {copy.newInternalEmployee}
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant="outline"

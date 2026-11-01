@@ -1664,6 +1664,7 @@ export const de = {
   documents_unclassified: "Nicht klassifiziert",
   documents_upload_interpreter_hint:
     "Dolmetscher-Dateien werden als interne Entwurfsdokumente gespeichert und an die Teamlead-Prüfung weitergeleitet.",
+  documents_upload_internal_hint: "Dieser Upload wird als internes Dokument gespeichert.",
   documents_upload_teamlead_hint:
     "Diese Datei wird als internes Dokument gespeichert. Teamlead-Dateien zeigen hier keine vollständigen Dokumentverwaltungs-Steuerungen.",
   documents_auto_classification_optional:

@@ -30,6 +30,7 @@ const ROLES_CHAT = [
   "concierge",
   "billing",
   "it_admin",
+  "sales",
 ] as const satisfies readonly StaffRole[];
 
 const ROLES_NOTES = ALL_STAFF_ROLES;

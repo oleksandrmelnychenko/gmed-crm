@@ -1,6 +1,7 @@
 import { startTransition, useEffect, useReducer } from "react";
 
-import { apiFetch } from "@/lib/api";
+import { ApiRequestError, apiFetch } from "@/lib/api";
+import { sectionLoadErrorText } from "@/lib/section-load-error";
 
 import type {
   PatientAssignment,
@@ -156,7 +157,14 @@ export function usePatientDetailCoreData({
             type: "error",
             requestKey,
             patientId: id,
-            message: error instanceof Error ? error.message : String(error),
+            // A refused card reads in the user's language, not the server's
+            // "Insufficient permissions" (QA 2026-11-01 T2-10).
+            message:
+              error instanceof ApiRequestError && error.status === 403
+                ? sectionLoadErrorText(error)
+                : error instanceof Error
+                  ? error.message
+                  : String(error),
           });
         });
       });

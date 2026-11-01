@@ -1526,6 +1526,7 @@ export interface Translations
   documents_confidence_high: string;
   documents_unclassified: string;
   documents_upload_interpreter_hint: string;
+  documents_upload_internal_hint: string;
   documents_upload_teamlead_hint: string;
   documents_auto_classification_optional: string;
   documents_popup_blocked: string;

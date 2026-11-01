@@ -23,7 +23,9 @@ export function greetingFor(name: string, tr: Record<string, string>) {
       : hour < 18
         ? tr.dash_greeting_afternoon ?? tr.dash_greeting ?? tr.common_unknown
         : tr.dash_greeting_evening ?? tr.dash_greeting ?? tr.common_unknown;
-  return name ? `${prefix}, ${name.split(/\s+/)[0]}` : prefix;
+  // The whole name: its first word alone greets «CEO» for the CEO assistant
+  // or «Patient» for a patient manager when the account has a role name.
+  return name.trim() ? `${prefix}, ${name.trim()}` : prefix;
 }
 
 export function dashboardProviderHref(providerId: string) {

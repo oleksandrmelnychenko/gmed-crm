@@ -106,6 +106,8 @@ export function canAccessChat(role?: string) {
     role === "patient" ||
     role === "ceo" ||
     role === "ceo_assistant" ||
+    // The server and the menu have opened the chat to Sales all along.
+    role === "sales" ||
     role === "patient_manager" ||
     role === "teamlead_interpreter" ||
     role === "interpreter" ||

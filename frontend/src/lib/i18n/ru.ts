@@ -1659,6 +1659,7 @@ export const ru = {
   documents_unclassified: "Без классификации",
   documents_upload_interpreter_hint:
     "Загрузки переводчика сохраняются как внутренние черновики документов и отправляются на проверку тимлиду.",
+  documents_upload_internal_hint: "Эта загрузка сохраняется как внутренний документ.",
   documents_upload_teamlead_hint:
     "Эта загрузка сохраняется как внутренний документ. Здесь для загрузок тимлида недоступны полные инструменты управления документом.",
   documents_auto_classification_optional:

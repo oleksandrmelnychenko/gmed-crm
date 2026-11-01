@@ -101,6 +101,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { ApiRequestError, clearApiCache } from "@/lib/api";
+import { sectionLoadErrorText } from "@/lib/section-load-error";
 import { appDateKey, dateKeyToDate, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
@@ -1829,9 +1830,11 @@ function StaffDocumentsPage({
         setEditForm(null);
         setShares([]);
         setDetailError(
-          nextError instanceof Error
-            ? nextError.message
-            : documentsFailedLoadDocumentText,
+          nextError instanceof ApiRequestError && nextError.status === 403
+            ? sectionLoadErrorText(nextError)
+            : nextError instanceof Error
+              ? nextError.message
+              : documentsFailedLoadDocumentText,
         );
       } finally {
         if (active) setDetailBusy(false);
@@ -4841,7 +4844,9 @@ function StaffDocumentsPage({
                   <Banner tone="warning">
                     {user?.role === "interpreter"
                       ? t.documents_upload_interpreter_hint
-                      : t.documents_upload_teamlead_hint}
+                      : user?.role === "teamlead_interpreter"
+                        ? t.documents_upload_teamlead_hint
+                        : t.documents_upload_internal_hint}
                   </Banner>
                 ) : null}
 
