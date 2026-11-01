@@ -652,6 +652,59 @@ async fn portal_recommendations_leave_out_staff_only_fields() {
         .expect("staff sees the recommendation");
     assert_eq!(staff_row["note_intern"], "Intern: Patient erinnern");
     assert_eq!(staff_row["outcome_note"], "Intern: Ergebnis offen");
+
+    // The patient's copy lists the published recommendation, no staff field
+    // (QA 2026-11-01).
+    let (status, export) = json_request(&app, "GET", "/api/v1/me/export", &patient_auth, None).await;
+    assert_eq!(status, StatusCode::OK, "{export}");
+    assert_eq!(
+        export["recommendations"][0]["title"],
+        "Kardiologische Kontrolle"
+    );
+    assert!(!export.to_string().contains("Intern:"), "{export}");
+
+    // A period that ends before it starts is refused, also against a stored
+    // end (QA 2026-11-01).
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/recommendations/{recommendation_id}/update"),
+        &pm_auth,
+        Some(json!({ "valid_to": "2026-01-01" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/recommendations/{recommendation_id}/update"),
+        &pm_auth,
+        Some(json!({ "valid_from": "2026-12-01" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // Declining takes the open visit request along (QA 2026-11-01).
+    let (status, requested) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/me/recommendations/{recommendation_id}/appointment-request"),
+        &patient_auth,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{requested}");
+    assert_eq!(requested["appointment_request_status"], "requested");
+    let (status, declined) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/me/recommendations/{recommendation_id}/decision"),
+        &patient_auth,
+        Some(json!({ "decision": "declined" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{declined}");
+    assert_eq!(declined["appointment_request_status"], "cancelled");
 }
 
 #[tokio::test]

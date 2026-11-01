@@ -14757,6 +14757,41 @@ fn version_log_case_id(used: &std::collections::HashSet<Uuid>) -> Option<Uuid> {
     used.iter().next().copied()
 }
 
+/// The clinical record for the staff handler of an Art. 15 request
+/// (QA 2026-11-01): every section as the version trail stores it, and the
+/// vital signs.
+pub(crate) async fn load_patient_clinical_record_export(
+    state: &AppState,
+    patient_uuid: Uuid,
+) -> Result<serde_json::Value, sqlx::Error> {
+    let mut record = serde_json::Map::new();
+    for section in [
+        PatientClinicalSection::Diagnoses,
+        PatientClinicalSection::Medications,
+        PatientClinicalSection::Examinations,
+        PatientClinicalSection::Narrative,
+        PatientClinicalSection::Verlauf,
+        PatientClinicalSection::Procedures,
+        PatientClinicalSection::ClinicalWarnings,
+        PatientClinicalSection::Impfstatus,
+    ] {
+        let value = sqlx::query_scalar::<_, serde_json::Value>(section.snapshot_sql())
+            .bind(patient_uuid)
+            .fetch_one(&state.db)
+            .await?;
+        record.insert(section.key().to_string(), value);
+    }
+    let vitals = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT COALESCE(jsonb_agg((to_jsonb(t) - 'patient_id') ORDER BY t.measured_at DESC), '[]'::jsonb)
+           FROM patient_vital_measurements t WHERE t.patient_id = $1"#,
+    )
+    .bind(patient_uuid)
+    .fetch_one(&state.db)
+    .await?;
+    record.insert("vitals".to_string(), vitals);
+    Ok(serde_json::Value::Object(record))
+}
+
 async fn load_patient_section_snapshot(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     patient_uuid: Uuid,

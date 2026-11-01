@@ -301,6 +301,20 @@ async fn patient_manager_can_manage_patient_consents_and_export_contains_history
     assert!(history.iter().any(|item| item["granted"] == true));
     assert!(history.iter().any(|item| item["granted"] == false));
 
+    // The copy holds the clinical record too (QA 2026-11-01).
+    sqlx::query(
+        "INSERT INTO patient_clinical_warnings (patient_id, kind, label) VALUES ($1, 'allergie', 'Penicillin')",
+    )
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .expect("seed allergy");
+    sqlx::query("INSERT INTO patient_diagnoses (patient_id, label) VALUES ($1, 'Gastritis')")
+        .bind(patient_id)
+        .execute(&pool)
+        .await
+        .expect("seed diagnosis");
+
     let (status, body) = json_request(
         &app,
         "GET",
@@ -310,6 +324,14 @@ async fn patient_manager_can_manage_patient_consents_and_export_contains_history
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["clinical_record"]["clinical_warnings"][0]["label"],
+        "Penicillin"
+    );
+    assert_eq!(
+        body["clinical_record"]["diagnoses"][0]["label"],
+        "Gastritis"
+    );
     let exported_consents = body["consents"].as_array().expect("exported consents");
     assert_eq!(exported_consents.len(), 2);
     assert!(
@@ -1044,6 +1066,16 @@ async fn restriction_request_updates_legal_status_and_queue_is_assignment_scoped
     )
     .await;
     assert_eq!(status, StatusCode::LOCKED);
+    // … recommendations too, they are clinical data (QA 2026-11-01) …
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_a}/recommendations"),
+        &auth_header_for(pm_a, "patient_manager"),
+        Some(json!({ "title": "Kontrolle" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::LOCKED, "{body}");
 
     // … the patient's documents are kept unchanged (no edit, no file deletion) …
     let document_id = seed_document(&pool, patient_a, pm_a, &tag, "internal").await;

@@ -157,6 +157,16 @@ async fn create_patient_recommendation(
     if let Err(resp) = ensure_patient_exists(&state, patient_id).await {
         return resp;
     }
+    // Art. 18 DSGVO: a recommendation is clinical data (QA 2026-11-01).
+    if let Err(resp) = super::patients::ensure_patient_processing_allows(
+        &state,
+        patient_id,
+        "creating a recommendation",
+    )
+    .await
+    {
+        return resp;
+    }
 
     let title = match normalize_required_text(&body.title, "Recommendation title is required") {
         Ok(value) => value,
@@ -199,6 +209,9 @@ async fn create_patient_recommendation(
         Ok(value) => value,
         Err(resp) => return resp,
     };
+    if let Err(resp) = validate_period(valid_from.as_deref(), valid_to.as_deref()) {
+        return resp;
+    }
     let reminder_at = match validate_optional_date(body.reminder_at.as_deref()) {
         Ok(value) => value,
         Err(resp) => return resp,
@@ -339,6 +352,17 @@ async fn update_patient_recommendation(
         return resp;
     }
 
+    // Art. 18 DSGVO: a recommendation is clinical data (QA 2026-11-01).
+    if let Err(resp) = super::patients::ensure_patient_processing_allows(
+        &state,
+        patient_id,
+        "changing a recommendation",
+    )
+    .await
+    {
+        return resp;
+    }
+
     let current = match load_recommendation_row(&state, recommendation_id).await {
         Ok(Some(row)) => row,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Recommendation not found"),
@@ -423,6 +447,24 @@ async fn update_patient_recommendation(
         Ok(value) => value,
         Err(resp) => return resp,
     };
+    // Either end may stay as stored: the period is checked as it will read.
+    let stored_date = |column: &str| {
+        current
+            .try_get::<Option<String>, _>(column)
+            .unwrap_or_default()
+    };
+    if let Err(resp) = validate_period(
+        valid_from
+            .clone()
+            .or_else(|| stored_date("valid_from"))
+            .as_deref(),
+        valid_to
+            .clone()
+            .or_else(|| stored_date("valid_to"))
+            .as_deref(),
+    ) {
+        return resp;
+    }
     let reminder_at = match validate_optional_date(body.reminder_at.as_deref()) {
         Ok(value) => value,
         Err(resp) => return resp,
@@ -548,6 +590,16 @@ async fn delete_patient_recommendation(
         return resp;
     }
     if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+    // Art. 18 DSGVO: a recommendation is clinical data (QA 2026-11-01).
+    if let Err(resp) = super::patients::ensure_patient_processing_allows(
+        &state,
+        patient_id,
+        "deleting a recommendation",
+    )
+    .await
+    {
         return resp;
     }
 
@@ -713,6 +765,28 @@ async fn create_my_recommendation_decision(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to update recommendation decision",
         );
+    }
+
+    // A declined recommendation takes its visit request along: staff keep no
+    // open request the patient no longer wants (QA 2026-11-01). The request
+    // may be converted already or another login's: it stays then.
+    if decision == "declined"
+        && let Some(request_id) = row
+            .try_get::<Option<Uuid>, _>("appointment_request_id")
+            .unwrap_or_default()
+    {
+        let response = super::appointments::cancel_open_appointment_request(
+            &state,
+            &auth,
+            request_id,
+            Some(patient_id),
+            None,
+            true,
+        )
+        .await;
+        if response.status().is_server_error() {
+            tracing::error!(%recommendation_id, %request_id, "withdraw the request of a declined recommendation");
+        }
     }
 
     state.audit_sender.try_send(audit::domain_event(
@@ -1250,6 +1324,20 @@ fn validate_optional_date(value: Option<&str>) -> Result<Option<String>, axum::r
 }
 
 /// Reminder lead time in days must be a sane non-negative span.
+/// Dates are validated ISO strings, so they compare as text (QA 2026-11-01).
+fn validate_period(
+    valid_from: Option<&str>,
+    valid_to: Option<&str>,
+) -> Result<(), axum::response::Response> {
+    match (valid_from, valid_to) {
+        (Some(from), Some(to)) if to < from => Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The end of the validity period lies before its start",
+        )),
+        _ => Ok(()),
+    }
+}
+
 fn validate_lead_days(value: Option<i32>) -> Result<Option<i32>, axum::response::Response> {
     match value {
         Some(v) if !(0..=365).contains(&v) => Err(err(

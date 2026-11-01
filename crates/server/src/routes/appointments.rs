@@ -1296,7 +1296,7 @@ async fn cancel_appointment_request(
     cancel_open_appointment_request(&state, &auth, id, None, reason, false).await
 }
 
-async fn cancel_open_appointment_request(
+pub(super) async fn cancel_open_appointment_request(
     state: &AppState,
     auth: &AuthUser,
     id: Uuid,

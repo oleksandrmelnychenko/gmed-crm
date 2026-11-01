@@ -557,8 +557,10 @@ fn portal_export_documents_sql() -> String {
 /// handler until somebody decides the patient gets it. Staff notes, the
 /// consents' context (it holds the staff note), the working tasks and
 /// reminders, the AI analyses and the labels hidden from the patient
-/// (`access_policies`) are not listed.
-const PORTAL_EXPORT_FIELDS: [(&str, &[&str]); 11] = [
+/// (`access_policies`) are not listed; nor is the clinical record, which the
+/// portal does not show at all: it goes out through the staff handler
+/// (QA 2026-11-01).
+const PORTAL_EXPORT_FIELDS: [(&str, &[&str]); 13] = [
     (
         "patient",
         &[
@@ -709,6 +711,54 @@ const PORTAL_EXPORT_FIELDS: [(&str, &[&str]); 11] = [
             "attachment_size",
             "redacted_at",
             "redaction_reason",
+        ],
+    ),
+    // As `/me/recommendations` shows them, without the staff's outcome
+    // tracking and notes.
+    (
+        "recommendations",
+        &[
+            "id",
+            "title",
+            "description",
+            "recommendation_type",
+            "due_at",
+            "priority",
+            "status",
+            "recommended_on",
+            "valid_from",
+            "valid_to",
+            "patient_decision",
+            "decision_note",
+            "decided_at",
+            "created_at",
+        ],
+    ),
+    // As `/me/feedback` shows it, without the staff's notes on it.
+    (
+        "feedback",
+        &[
+            "id",
+            "appointment_id",
+            "source",
+            "status",
+            "overall_score",
+            "patient_manager_score",
+            "interpreter_score",
+            "concierge_score",
+            "treatment_score",
+            "doctor_score",
+            "organization_score",
+            "service_score",
+            "infrastructure_score",
+            "price_value_score",
+            "treatment_success",
+            "complication_reported",
+            "nps_score",
+            "comments",
+            "improvement_notes",
+            "submitted_at",
+            "reviewed_at",
         ],
     ),
 ];
@@ -1051,6 +1101,46 @@ pub(crate) async fn build_patient_export_payload(
             "messages",
         )?
     };
+
+    // The clinical record, the recommendations and the feedback belong to the
+    // copy too (QA 2026-11-01). The patient's download keeps what the portal
+    // shows: published recommendations and the listed fields.
+    let clinical_record = if portal {
+        Value::Null
+    } else {
+        require_patient_export_section(
+            super::patients::load_patient_clinical_record_export(state, patient_id).await,
+            "clinical_record",
+        )?
+    };
+
+    let recommendations = require_patient_export_section(
+        sqlx::query_scalar::<_, Value>(
+            r#"SELECT to_jsonb(r) - 'patient_id'
+           FROM patient_recommendations r
+           WHERE r.patient_id = $1
+             AND ($2::boolean = false OR r.portal_visible = true)
+           ORDER BY r.created_at DESC"#,
+        )
+        .bind(patient_id)
+        .bind(portal)
+        .fetch_all(&state.db)
+        .await,
+        "recommendations",
+    )?;
+
+    let feedback = require_patient_export_section(
+        sqlx::query_scalar::<_, Value>(
+            r#"SELECT to_jsonb(f) - 'patient_id'
+           FROM patient_feedback_forms f
+           WHERE f.patient_id = $1
+           ORDER BY f.submitted_at DESC, f.created_at DESC"#,
+        )
+        .bind(patient_id)
+        .fetch_all(&state.db)
+        .await,
+        "feedback",
+    )?;
 
     let medication_evidence_reviews = require_patient_export_section(
         sqlx::query(
@@ -1398,6 +1488,9 @@ pub(crate) async fn build_patient_export_payload(
             })
         }).collect::<Vec<_>>(),
         "messages_manual_review": messages_manual_review,
+        "clinical_record": clinical_record,
+        "recommendations": recommendations,
+        "feedback": feedback,
         "medication_evidence_reviews": medication_evidence_reviews,
         "medication_ai_analyses": medication_ai_analyses,
         "medication_ai_analysis_events": medication_ai_analysis_events,
@@ -5570,6 +5663,12 @@ mod tests {
             "invoices": [{"invoice_number": "R-1", "internal_note": "staff"}],
             "tasks": [{"title": "staff"}],
             "reminders": [{"title": "staff"}],
+            "clinical_record": {"diagnoses": [{"title": "staff"}]},
+            "recommendations": [{
+                "title": "Kontrolle", "note_intern": "staff", "outcome_note": "staff",
+                "lifecycle_status": "staff", "created_by": "staff",
+            }],
+            "feedback": [{"comments": "Gut", "internal_note": "staff", "review_note": "staff"}],
             "messages_manual_review": [{"user_name": "staff"}],
             "medication_evidence_reviews": [{"status": "staff"}],
             "medication_ai_analyses": [{"status": "staff"}],
@@ -5580,7 +5679,14 @@ mod tests {
         assert_eq!(narrowed["orders"], json!([{"order_number": "O-1"}]));
         assert_eq!(narrowed["invoices"], json!([{"invoice_number": "R-1"}]));
         assert!(!narrowed.to_string().contains("staff"), "{narrowed}");
-        for section in ["tasks", "reminders", "a_section_added_later"] {
+        assert_eq!(narrowed["recommendations"], json!([{"title": "Kontrolle"}]));
+        assert_eq!(narrowed["feedback"], json!([{"comments": "Gut"}]));
+        for section in [
+            "tasks",
+            "reminders",
+            "clinical_record",
+            "a_section_added_later",
+        ] {
             assert!(narrowed.get(section).is_none(), "{section}");
         }
     }
