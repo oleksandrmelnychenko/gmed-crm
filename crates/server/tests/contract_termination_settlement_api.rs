@@ -1739,3 +1739,174 @@ async fn termination_credits_services_invoiced_in_advance_but_not_delivered() {
         cents(-48150)
     );
 }
+
+/// Approved package overage is part of what a stopped order owes: it was lost
+/// on termination and cancellation (QA 2026-11-01, T3-1, T3-2).
+#[tokio::test]
+async fn termination_settles_and_bills_approved_package_overage() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let app = context.app;
+    let pool = context.pool;
+    let admin_id = context.admin_id;
+    let tag = Uuid::new_v4().simple().to_string();
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by,
+                               address_street, address_zip, address_city, address_country)
+           VALUES ($1, 'Overage', 'Settlement', '1985-05-05', 'diverse', $2, 'Teststraße 1', '10115', 'Berlin', 'Deutschland')
+           RETURNING id"#,
+    )
+    .bind(format!("PT-{tag}"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    for user_id in [manager_id, billing_id] {
+        seed_assignment(&pool, patient_id, user_id, admin_id).await;
+    }
+    let manager = auth_header(manager_id, "patient_manager");
+    let billing = auth_header(billing_id, "billing");
+    let (status, contract) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &manager,
+        Some(json!({
+            "patient_id": patient_id,
+            "status": "sent",
+            "valid_from": gmed_server::app_time::today().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "contract: {contract:?}");
+    let contract_id = contract["id"].as_str().unwrap().to_string();
+    sign_framework_contract(&app, &pool, &manager, &contract_id, patient_id).await;
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, contract_id, status, currency, created_by)
+           VALUES ($1, $2, $3::uuid, 'active', 'EUR', $4)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(&contract_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let standard_profile_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM tax_profiles WHERE profile_key = 'standard_vat'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let (status, package) = json_request(
+        &app,
+        "POST",
+        "/api/v1/service-packages",
+        &billing,
+        Some(json!({
+            "package_key": format!("pkg_{tag}"),
+            "name": "Reserve",
+            "base_price_net": 0,
+            "items": [{
+                "description": "Interpreter hour",
+                "included_quantity": 1,
+                "unit_label": "hour",
+                "overage_unit_price_net": "33.33",
+                "tax_profile_id": standard_profile_id
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{package}");
+    let item_id = package["items"][0]["id"].as_str().unwrap().to_string();
+    let (status, assigned) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/service-packages"),
+        &billing,
+        Some(json!({ "package_id": package["id"], "order_id": order_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{assigned}");
+    let assigned_id = assigned["id"].as_str().unwrap().to_string();
+    let (status, consumption) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/service-packages/{assigned_id}/consume"),
+        &billing,
+        Some(json!({ "package_item_id": item_id, "quantity": 2 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{consumption}");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/service-packages/{assigned_id}/overage-approval"),
+        &billing,
+        Some(json!({ "package_item_id": item_id, "approval_status": "approved" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, terminated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{contract_id}/terminate"),
+        &manager,
+        Some(json!({ "reason": "Patient moved abroad" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "terminate: {terminated:?}");
+    assert_eq!(terminated["settlements"][0]["settlement_status"], "open");
+
+    let settlement_path = format!("/api/v1/orders/{order_id}/termination-settlement");
+    let (status, settlement) = json_request(&app, "GET", &settlement_path, &billing, None).await;
+    assert_eq!(status, StatusCode::OK, "{settlement}");
+    assert_eq!(
+        money(&settlement["current"]["uninvoiced_gross"]),
+        cents(3966)
+    );
+    assert_eq!(money(&settlement["current"]["billable_gross"]), cents(3966));
+
+    let (status, invoice) = json_request(
+        &app,
+        "POST",
+        &format!("{settlement_path}/final-invoice"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice}");
+    assert_eq!(money(&invoice["total_gross"]), cents(3966));
+    assert_eq!(
+        invoice["line_items"][0]["source"],
+        "service_package_overage"
+    );
+    let linked: Option<Uuid> =
+        sqlx::query_scalar("SELECT invoice_id FROM service_package_consumptions WHERE id = $1")
+            .bind(Uuid::parse_str(consumption["id"].as_str().unwrap()).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        linked.map(|id| id.to_string()).as_deref(),
+        invoice["id"].as_str()
+    );
+
+    // The draft now carries it: counted once, and nothing is billable twice.
+    let (status, settlement) = json_request(&app, "GET", &settlement_path, &billing, None).await;
+    assert_eq!(status, StatusCode::OK, "{settlement}");
+    assert_eq!(
+        money(&settlement["current"]["uninvoiced_gross"]),
+        cents(3966)
+    );
+    assert_eq!(money(&settlement["current"]["billable_gross"]), cents(0));
+    assert_eq!(
+        money(&settlement["current"]["unmatched_invoiced_gross"]),
+        cents(0)
+    );
+}

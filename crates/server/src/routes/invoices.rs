@@ -4179,8 +4179,13 @@ async fn build_selected_invoice_snapshot(
                 ctx.line_items.as_array().cloned().unwrap_or_default(),
             )
         };
-        let mut snapshot =
-            build_invoice_snapshot_with_approved_package_overages(state, ctx, base).await?;
+        let mut snapshot = build_invoice_snapshot_with_approved_package_overages(
+            state,
+            ctx.patient_id,
+            ctx.order_id,
+            base,
+        )
+        .await?;
         snapshot.allocations = allocations;
         return Ok(snapshot);
     }
@@ -4343,9 +4348,19 @@ async fn build_prepayment_advance_snapshot(
     })
 }
 
+/// The printed line of an approved package overage: German like the invoice's
+/// other lines (R3-9).
+fn package_overage_description(package_name: &str, item_description: &str) -> String {
+    format!("Mehrverbrauch Paket {package_name}: {item_description}")
+}
+
+/// An overage recorded without an order belongs to the order of its tariff
+/// (`COALESCE(spc.order_id, psp.order_id)`): it was approved and then billed by
+/// nothing (QA 2026-11-01, T3-4).
 async fn build_invoice_snapshot_with_approved_package_overages(
     state: &AppState,
-    ctx: &QuoteInvoiceContext,
+    patient_id: Uuid,
+    order_id: Uuid,
     (mut total_net, mut total_vat, mut total_gross, mut line_items): (
         Decimal,
         Decimal,
@@ -4357,7 +4372,7 @@ async fn build_invoice_snapshot_with_approved_package_overages(
         r#"SELECT spc.id AS consumption_id,
                   spc.patient_service_package_id,
                   spc.package_item_id,
-                  spc.order_id,
+                  COALESCE(spc.order_id, psp.order_id) AS order_id,
                   spc.order_leistung_id,
                   spc.overage_quantity,
                   sp.name AS package_name,
@@ -4376,18 +4391,18 @@ async fn build_invoice_snapshot_with_approved_package_overages(
            LEFT JOIN agency_service_catalog c ON c.id = spi.agency_service_id
            LEFT JOIN tax_profiles snapshot_tp ON snapshot_tp.id = spc.tax_profile_id_snapshot
            WHERE psp.patient_id = $1
-             AND spc.order_id = $2
+             AND COALESCE(spc.order_id, psp.order_id) = $2
              AND spc.invoice_id IS NULL
              AND spc.overage_quantity > 0
              AND spc.approval_status = 'approved'
            ORDER BY spc.created_at, spc.id"#,
     )
-    .bind(ctx.patient_id)
-    .bind(ctx.order_id)
+    .bind(patient_id)
+    .bind(order_id)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
-        tracing::error!(error = %e, order_id = %ctx.order_id, "load approved package overages for invoice");
+        tracing::error!(error = %e, %order_id, "load approved package overages for invoice");
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to load approved package overages",
@@ -4450,8 +4465,7 @@ async fn build_invoice_snapshot_with_approved_package_overages(
         total_gross = (total_gross + line_gross).round_cents();
 
         line_items.push(json!({
-            // Printed on the invoice: German like its other lines (R3-9).
-            "description": format!("Mehrverbrauch Paket {package_name}: {item_description}"),
+            "description": package_overage_description(&package_name, &item_description),
             "quantity": decimal_to_string(quantity),
             "unit": row.try_get::<String, _>("unit_label").unwrap_or_else(|_| "unit".to_string()),
             "unit_price": decimal_to_string(unit_price_net),
@@ -4646,6 +4660,32 @@ async fn validate_invoice_creation_for_quote(
     }
 
     Ok(())
+}
+
+/// Links the order's unbilled package consumptions to the invoice that bills
+/// their overage; cancelling the invoice clears the link again.
+async fn link_package_consumptions_tx(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    invoice_id: Uuid,
+    patient_id: Uuid,
+    order_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"UPDATE service_package_consumptions consumption
+           SET invoice_id = $1
+           FROM patient_service_packages patient_package
+           WHERE consumption.patient_service_package_id = patient_package.id
+             AND patient_package.patient_id = $2
+             AND COALESCE(consumption.order_id, patient_package.order_id) = $3
+             AND consumption.invoice_id IS NULL
+             AND consumption.approval_status IN ('not_required', 'approved')"#,
+    )
+    .bind(invoice_id)
+    .bind(patient_id)
+    .bind(order_id)
+    .execute(&mut **transaction)
+    .await
+    .map(|_| ())
 }
 
 fn invoice_snapshot_has_package_overage(snapshot: &InvoiceCreationSnapshot) -> bool {
@@ -7636,21 +7676,8 @@ async fn create_patient_billing_invoice(
     // `invoiced` when the invoice is released.
     if invoice_snapshot_has_package_overage(&snapshot)
         && let Some(order_id) = body.order_id
-        && let Err(error) = sqlx::query(
-            r#"UPDATE service_package_consumptions consumption
-               SET invoice_id = $1
-               FROM patient_service_packages patient_package
-               WHERE consumption.patient_service_package_id = patient_package.id
-                 AND patient_package.patient_id = $2
-                 AND consumption.order_id = $3
-                 AND consumption.invoice_id IS NULL
-                 AND consumption.approval_status IN ('not_required', 'approved')"#,
-        )
-        .bind(invoice_id)
-        .bind(patient_id)
-        .bind(order_id)
-        .execute(&mut *transaction)
-        .await
+        && let Err(error) =
+            link_package_consumptions_tx(&mut transaction, invoice_id, patient_id, order_id).await
     {
         tracing::error!(%error, %invoice_id, "link patient billing package consumption");
         return err(
@@ -7912,20 +7939,12 @@ async fn create_invoice_from_quote(
             // The draft reserves its services through the allocations; they
             // become `invoiced` when the invoice is released.
             if invoice_snapshot_has_package_overage(&invoice_snapshot)
-                && let Err(e) = sqlx::query(
-                    r#"UPDATE service_package_consumptions consumption
-                       SET invoice_id = $1
-                       FROM patient_service_packages patient_package
-                       WHERE consumption.patient_service_package_id = patient_package.id
-                         AND patient_package.patient_id = $2
-                         AND consumption.order_id = $3
-                         AND consumption.invoice_id IS NULL
-                         AND consumption.approval_status IN ('not_required', 'approved')"#,
+                && let Err(e) = link_package_consumptions_tx(
+                    &mut transaction,
+                    invoice_id,
+                    ctx.patient_id,
+                    ctx.order_id,
                 )
-                .bind(invoice_id)
-                .bind(ctx.patient_id)
-                .bind(ctx.order_id)
-                .execute(&mut *transaction)
                 .await
             {
                 tracing::error!(error = %e, invoice_id = %invoice_id, order_id = %ctx.order_id, "link package consumption to invoice");

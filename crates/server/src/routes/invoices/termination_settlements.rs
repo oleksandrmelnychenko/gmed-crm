@@ -13,7 +13,10 @@
 //! * third-party costs (external/provider invoices of the order that are a
 //!   patient receivable) unless they are attributed to an order service this
 //!   settlement bills, regular or pass-through: then they are GMED's cost of
-//!   that service and the service line is the patient's claim.
+//!   that service and the service line is the patient's claim;
+//! * approved package overages of the order, at their consumption snapshot
+//!   (QA 2026-11-01, T3-1): the regular final invoice bills them, and a stopped
+//!   order has no other way onto an invoice.
 //!
 //! One basis, the same as the patient's account statement:
 //!
@@ -59,10 +62,12 @@ use uuid::Uuid;
 
 use super::{
     CreateInvoiceLineSelection, InvoiceCreationSnapshot, MoneyInput,
-    build_selected_invoice_snapshot, can_access_patient, can_create_invoices,
-    can_manage_invoice_finance, can_read_invoices, compute_invoice_line_parts, decimal_to_string,
-    ensure_patient_access, err, invoice_json_decimal, load_allocated_quote_quantities,
-    load_invoice_detail, load_quote_invoice_context, payer, write_invoice_audit_tx,
+    build_invoice_snapshot_with_approved_package_overages, build_selected_invoice_snapshot,
+    can_access_patient, can_create_invoices, can_manage_invoice_finance, can_read_invoices,
+    compute_invoice_line_parts, decimal_to_string, ensure_patient_access, err,
+    invoice_json_decimal, invoice_snapshot_has_package_overage, link_package_consumptions_tx,
+    load_allocated_quote_quantities, load_invoice_detail, load_quote_invoice_context,
+    package_overage_description, payer, write_invoice_audit_tx,
 };
 use crate::audit;
 use crate::auth::middleware::AuthUser;
@@ -132,7 +137,7 @@ pub(crate) struct SettlementLine {
     status: String,
     due_in_full: bool,
     is_cost_passthrough: bool,
-    /// Service quantity not yet covered by an active invoice.
+    /// Service or overage quantity not yet covered by an active invoice.
     uninvoiced_quantity: Decimal,
     /// Third-party cost still to be re-invoiced to the patient.
     remaining_receivable_gross: Decimal,
@@ -172,6 +177,11 @@ pub(crate) struct OrderSettlement {
     pub accrued_net: Decimal,
     pub accrued_gross: Decimal,
     pub invoiced_gross: Decimal,
+    /// Issued advance invoices minus credit notes: outside `invoiced_gross`
+    /// (they pay for the invoices, they bill nothing of their own), shown
+    /// beside it so an issued advance does not read as "nothing invoiced"
+    /// (QA 2026-11-01, T3-9).
+    pub advance_invoiced_gross: Decimal,
     pub paid_gross: Decimal,
     /// Non-advance draft invoices of the order: billed, not released yet.
     pub draft_gross: Decimal,
@@ -204,13 +214,14 @@ impl OrderSettlement {
             .round_cents()
     }
 
-    /// Service amounts no invoice line bills yet: what "create final invoice"
-    /// puts on the invoice.
+    /// Service and package overage amounts no invoice line bills yet: what
+    /// "create final invoice" puts on the invoice.
     pub fn service_uninvoiced_gross(&self) -> Decimal {
         self.lines
             .iter()
             .filter(|line| {
-                line.source == "order_service" && line.uninvoiced_quantity > Decimal::ZERO
+                matches!(line.source, "order_service" | "package_overage")
+                    && line.uninvoiced_quantity > Decimal::ZERO
             })
             .map(|line| {
                 compute_invoice_line_parts(line.uninvoiced_quantity, line.unit_price, line.vat_rate)
@@ -292,6 +303,7 @@ impl OrderSettlement {
             "accrued_net": decimal_to_string(self.accrued_net),
             "accrued_gross": decimal_to_string(self.accrued_gross),
             "invoiced_gross": decimal_to_string(self.invoiced_gross),
+            "advance_invoiced_gross": decimal_to_string(self.advance_invoiced_gross),
             "paid_gross": decimal_to_string(self.paid_gross),
             "balance_gross": decimal_to_string(self.balance_gross()),
             "uninvoiced_gross": decimal_to_string(self.uninvoiced_gross()),
@@ -678,6 +690,81 @@ pub(crate) async fn compute_order_settlement(
         });
     }
 
+    // Approved overage accrued; the draft or released invoice that bills it
+    // counts on its own side of the balance.
+    let overage_rows = sqlx::query(
+        r#"SELECT consumption.overage_quantity,
+                  consumption.unit_price_net_snapshot AS unit_price,
+                  consumption.vat_rate_snapshot AS vat_rate,
+                  consumption.invoice_id IS NULL AS unbilled,
+                  package.name AS package_name,
+                  COALESCE(NULLIF(item.description, ''), catalog.service_name, package.name,
+                           'Mehrverbrauch') AS item_description,
+                  COALESCE(NULLIF(item.unit_label, ''), 'unit') AS unit_label
+           FROM service_package_consumptions consumption
+           JOIN patient_service_packages patient_package
+             ON patient_package.id = consumption.patient_service_package_id
+           JOIN service_packages package ON package.id = patient_package.package_id
+           LEFT JOIN service_package_items item ON item.id = consumption.package_item_id
+           LEFT JOIN agency_service_catalog catalog ON catalog.id = item.agency_service_id
+           WHERE COALESCE(consumption.order_id, patient_package.order_id) = $1
+             AND consumption.overage_quantity > 0
+             AND consumption.approval_status = 'approved'
+             AND consumption.unit_price_net_snapshot > 0
+           ORDER BY consumption.created_at, consumption.id"#,
+    )
+    .bind(order_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    for row in overage_rows {
+        let quantity = row
+            .try_get::<Decimal, _>("overage_quantity")
+            .unwrap_or(Decimal::ZERO)
+            .round_commercial(2);
+        let unit_price = row
+            .try_get::<Decimal, _>("unit_price")
+            .unwrap_or(Decimal::ZERO)
+            .round_cents();
+        let vat_rate = row
+            .try_get::<Decimal, _>("vat_rate")
+            .unwrap_or(Decimal::ZERO)
+            .round_commercial(2);
+        let (net, vat, gross) = compute_invoice_line_parts(quantity, unit_price, vat_rate);
+        accrued_net += net;
+        accrued_gross += gross;
+        lines.push(SettlementLine {
+            source: "package_overage",
+            order_leistung_id: None,
+            external_invoice_id: None,
+            description: package_overage_description(
+                &row.try_get::<String, _>("package_name").unwrap_or_default(),
+                &row.try_get::<String, _>("item_description")
+                    .unwrap_or_default(),
+            ),
+            unit_label: row
+                .try_get::<Option<String>, _>("unit_label")
+                .unwrap_or_default(),
+            quantity,
+            unit_price,
+            vat_rate,
+            net,
+            vat,
+            gross,
+            status: "approved".to_string(),
+            due_in_full: false,
+            is_cost_passthrough: false,
+            uninvoiced_quantity: if row.try_get::<bool, _>("unbilled").unwrap_or(false) {
+                quantity
+            } else {
+                Decimal::ZERO
+            },
+            remaining_receivable_gross: Decimal::ZERO,
+            billable_now: false,
+            source_document_id: None,
+            source_invoice_date: None,
+        });
+    }
+
     let invoiced_gross = sqlx::query_scalar::<_, Decimal>(
         r#"WITH credits AS (
                SELECT transaction.invoice_id,
@@ -695,6 +782,17 @@ pub(crate) async fn compute_order_settlement(
            WHERE invoice.order_id = $1
              AND invoice.invoice_type <> 'advance'
              AND invoice.status IN ('sent', 'partially_paid', 'paid', 'overdue')"#,
+    )
+    .bind(order_id)
+    .fetch_one(&mut *conn)
+    .await?;
+
+    let advance_invoiced_gross = sqlx::query_scalar::<_, Decimal>(
+        r#"SELECT COALESCE(SUM(GREATEST(total_gross - credited_amount, 0)), 0)
+           FROM invoices
+           WHERE order_id = $1
+             AND invoice_type = 'advance'
+             AND status IN ('sent', 'partially_paid', 'paid', 'overdue')"#,
     )
     .bind(order_id)
     .fetch_one(&mut *conn)
@@ -769,6 +867,7 @@ pub(crate) async fn compute_order_settlement(
         accrued_net: accrued_net.round_cents(),
         accrued_gross: accrued_gross.round_cents(),
         invoiced_gross: invoiced_gross.round_cents(),
+        advance_invoiced_gross: advance_invoiced_gross.round_cents(),
         paid_gross: paid_gross.round_cents(),
         draft_gross: draft_gross.round_cents(),
         draft_external_gross: draft_external_gross.round_cents(),
@@ -1811,16 +1910,40 @@ async fn create_termination_final_invoice(
                 _ => {}
             }
         }
-        if line_items.is_empty() {
-            return (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Json(json!({
-                    "error": "nothing_to_invoice",
-                    "message": "Everything that accrued is already invoiced or not yet billable",
-                })),
-            )
-                .into_response();
-        }
+    }
+    // A cancelled order's quote already brought them along.
+    if !invoice_snapshot_has_package_overage(&snapshot) {
+        let line_items = snapshot.line_items.as_array().cloned().unwrap_or_default();
+        let with_overages = match build_invoice_snapshot_with_approved_package_overages(
+            &state,
+            patient_id,
+            order_id,
+            (
+                snapshot.total_net,
+                snapshot.total_vat,
+                snapshot.total_gross,
+                line_items,
+            ),
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+        snapshot = InvoiceCreationSnapshot {
+            allocations: snapshot.allocations,
+            ..with_overages
+        };
+    }
+    if snapshot.line_items.as_array().is_none_or(Vec::is_empty) {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "nothing_to_invoice",
+                "message": "Everything that accrued is already invoiced or not yet billable",
+            })),
+        )
+            .into_response();
     }
     invoiced_service_ids.sort();
     invoiced_service_ids.dedup();
@@ -1935,6 +2058,12 @@ async fn create_termination_final_invoice(
                 "A third-party invoice was billed by another draft; reload and try again",
             );
         }
+    }
+    if invoice_snapshot_has_package_overage(&snapshot)
+        && let Err(error) =
+            link_package_consumptions_tx(&mut transaction, invoice_id, patient_id, order_id).await
+    {
+        return failed(error);
     }
     // The draft reserves its services (its lines and allocations count as
     // billed); they become `invoiced` when the final invoice is released.

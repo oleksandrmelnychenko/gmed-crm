@@ -4,7 +4,7 @@ import { apiFetch } from "@/lib/api";
 export type DecimalString = string;
 
 export type TerminationSettlementLine = {
-  source: "order_service" | "third_party_cost";
+  source: "order_service" | "third_party_cost" | "package_overage";
   order_leistung_id: string | null;
   external_invoice_id: string | null;
   description: string;

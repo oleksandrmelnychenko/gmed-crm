@@ -31,7 +31,9 @@ pub(crate) struct ServiceKey {
 #[derive(Debug, Clone)]
 pub(crate) struct InvoicedLine {
     pub source_service_id: Option<Uuid>,
-    /// Third-party cost lines are matched through their receivable allocation.
+    /// Third-party cost lines are matched through their receivable allocation,
+    /// package overage lines through their consumption: neither bills a
+    /// service of the order.
     pub third_party: bool,
     pub description: String,
     pub quantity: Decimal,
@@ -69,6 +71,7 @@ impl InvoicedLine {
                 .and_then(Value::as_str)
                 .and_then(|value| Uuid::parse_str(value).ok()),
             third_party: source == "external_invoice"
+                || source == "service_package_overage"
                 || item
                     .get("source_external_invoice_id")
                     .is_some_and(|value| !value.is_null()),
