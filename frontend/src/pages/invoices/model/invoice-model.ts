@@ -7,6 +7,7 @@ import {
 } from "@/lib/app-time-zone";
 import { formatMoneyAmount, moneyLineAmounts, roundCents, toCents } from "@/lib/money";
 import { hasCapability, type Actor } from "@/lib/permissions";
+import { payerRelationshipKindLabel, type PayerRelationshipKind } from "@/pages/leads/model/lead-payer";
 
 import type {
   AccountingLedgerPayload,
@@ -619,6 +620,40 @@ export function invoicePaidByOtherThanRecipient(payer: InvoiceItem["payer"]): st
   const recipient = (payer?.contact_name ?? payer?.patient_name ?? payer?.relation_patient_name)?.trim();
   if (!paying || !recipient) return null;
   return paying.toLocaleLowerCase() === recipient.toLocaleLowerCase() ? null : paying;
+}
+
+/** The German labels the lead's payer stores as the relationship (`relationship_label`, lead_payer.rs). */
+const STORED_PAYER_RELATIONSHIPS: Readonly<Record<string, PayerRelationshipKind>> = {
+  "Ehepartner/in": "spouse",
+  Elternteil: "parent",
+  Kind: "child",
+  "Bruder/Schwester": "sibling",
+  "Großmutter/Großvater": "grandparent",
+  "Verwandte/r": "relative",
+  Arbeitgeber: "employer",
+  "Freund/in": "friend",
+  "Geschäftspartner/in": "business_partner",
+};
+
+/** Relation types a contact relationship may also hold ("father"), labelled like the relation editor. */
+const STORED_RELATION_TYPES: ReadonlySet<string> = new Set(["parent", "mother", "father", "relative", "sibling", "spouse"]);
+
+/**
+ * `contact_relationship` is free text: a German label of the lead's payer, a
+ * relation type or what staff typed. Everything went through the enum label,
+ * which read «Неизвестное значение» for "Ehepartner/in" (QA 2026-11-01, U-4).
+ */
+export function invoicePayerRelationshipLabel(
+  contactRelationship: string | null | undefined,
+  relationType: string | null | undefined,
+  relationTypeLabel: (value?: string | null) => string,
+  lang: "de" | "ru",
+): string {
+  const stored = contactRelationship?.trim();
+  if (!stored) return relationType ? relationTypeLabel(relationType) : "";
+  const kind = STORED_PAYER_RELATIONSHIPS[stored];
+  if (kind) return payerRelationshipKindLabel(kind, (ru, de) => (lang === "de" ? de : ru));
+  return STORED_RELATION_TYPES.has(stored) ? relationTypeLabel(stored) : stored;
 }
 
 export function invoiceToPayerForm(invoice: InvoiceItem): PayerForm {

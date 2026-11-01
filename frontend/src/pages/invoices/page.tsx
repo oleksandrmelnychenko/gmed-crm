@@ -197,6 +197,7 @@ import {
   payerFormToPayload,
   payerRoleLabel,
   invoicePaidByOtherThanRecipient,
+  invoicePayerRelationshipLabel,
   payerRelationOptionLabel,
   invoicesPermissions,
   isCoveredByPrepaymentOnly,
@@ -4188,7 +4189,7 @@ function useStaffInvoicesPageContent() {
 
                     <section className="relative rounded-lg border border-border/70 bg-card p-6">
                       <h2 className={tokens.text.sectionTitle}>
-                        {titleWithDot(t.revenue_invoices_current_payer)}
+                        {titleWithDot(paidByOther ? text.payerRole : t.revenue_invoices_current_payer)}
                       </h2>
                       <Button
                         type="button"
@@ -4231,8 +4232,11 @@ function useStaffInvoicesPageContent() {
                         />
                         <MiniMetric
                           label={t.revenue_invoices_relationship}
-                          value={patientRelationTypeLabel(
-                            detail.payer?.contact_relationship ?? detail.payer?.relation_type,
+                          value={invoicePayerRelationshipLabel(
+                            detail.payer?.contact_relationship,
+                            detail.payer?.relation_type,
+                            patientRelationTypeLabel,
+                            lang === "de" ? "de" : "ru",
                           ) || t.common_not_set}
                         />
                         <MiniMetric
@@ -5138,7 +5142,7 @@ function useStaffInvoicesPageContent() {
         <DialogContent className="sm:max-w-2xl">
           <div className="space-y-5">
             <DialogHeader>
-              <DialogTitle>{t.revenue_invoices_current_payer}</DialogTitle>
+              <DialogTitle>{paidByOther ? text.payerRole : t.revenue_invoices_current_payer}</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 rounded-xl p-4">
               {payerError ? <ShellBanner tone="error">{payerError}</ShellBanner> : null}

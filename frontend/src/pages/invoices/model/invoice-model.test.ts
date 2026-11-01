@@ -32,6 +32,7 @@ import {
   payerRoleLabel,
   advancePrepaymentDueDate,
   invoicePaidByOtherThanRecipient,
+  invoicePayerRelationshipLabel,
   effectiveAdvanceBasis,
   interimLimitBesideOpenAdvance,
   prepaymentExceedsUnbilledQuote,
@@ -307,6 +308,14 @@ describe("invoice payer and recipient", () => {
     expect(invoicePaidByOtherThanRecipient({ relation_patient_name: "Anke Muster", order_contact_name: " anke muster " })).toBeNull();
     expect(invoicePaidByOtherThanRecipient({ relation_patient_name: "Anke Muster" })).toBeNull();
     expect(invoicePaidByOtherThanRecipient({ order_contact_name: "Rolf Muster" })).toBeNull();
+    // QA 2026-11-01, U-4: the stored label of the lead's payer, a relation type, free text.
+    const relationLabel = (value?: string | null) => `type:${value}`;
+    expect(invoicePayerRelationshipLabel("Ehepartner/in", null, relationLabel, "ru")).toBe("Супруг / супруга");
+    expect(invoicePayerRelationshipLabel("Ehepartner/in", null, relationLabel, "de")).toBe("Ehepartner/in");
+    expect(invoicePayerRelationshipLabel("father", null, relationLabel, "ru")).toBe("type:father");
+    expect(invoicePayerRelationshipLabel("Patenonkel", "parent", relationLabel, "ru")).toBe("Patenonkel");
+    expect(invoicePayerRelationshipLabel(" ", "parent", relationLabel, "ru")).toBe("type:parent");
+    expect(invoicePayerRelationshipLabel(null, null, relationLabel, "ru")).toBe("");
     // A role this client does not know reads as unset and is not sent back.
     expect(knownPayerRole("guarantor")).toBe("");
     expect(
