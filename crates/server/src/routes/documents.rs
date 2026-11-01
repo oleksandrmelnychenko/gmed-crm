@@ -13998,6 +13998,11 @@ async fn fetch_document_row(
                       AND own_request.assigned_to = $2
                       AND own_request.status IN ('pending', 'in_progress', 'completed')
                   ) AS own_translation_document,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests team_request
+                    WHERE team_request.document_id = d.id
+                       OR team_request.translated_document_id = d.id
+                  ) AS translation_request_document,
                   (d.patient_id IS NULL AND d.lead_id IS NULL AND d.order_id IS NULL
                    AND d.appointment_id IS NULL AND NOT d.is_medical AND d.art = 'provider_document'
                    AND EXISTS (SELECT 1 FROM provider_document_links link WHERE link.document_id = d.id))
@@ -14774,13 +14779,31 @@ pub(crate) fn is_consent_document_row(row: &sqlx::postgres::PgRow) -> bool {
             .unwrap_or(false)
 }
 
+/// The GwG sheet and the statements of the lead and the payer. Concierge and
+/// Billing have the payer declaration closed (RBAC matrix), and these papers
+/// must stay closed once released too (QA 2026-11-01 E4).
+fn is_gwg_statement_row(row: &sqlx::postgres::PgRow) -> bool {
+    const GWG_STATEMENTS: [&str; 4] = [
+        "gwg_identification",
+        "lead_self_disclosure",
+        "payer_self_disclosure",
+        "patient_payer_statement",
+    ];
+    ["art", "generated_template_id"].iter().any(|column| {
+        row.try_get::<Option<String>, _>(*column)
+            .unwrap_or_default()
+            .is_some_and(|value| GWG_STATEMENTS.contains(&value.trim()))
+    })
+}
+
 /// Owner decision 2026-10-11: Concierge and Billing never list, open or
 /// download a patient's or lead's consent documents — no share or record rule
 /// opens them, and the lead routes (`leads.rs`) follow the same rule. CEO,
 /// Patient Manager and CEO Assistant keep their access; Billing keeps the
 /// identity document scans (owner decision 2026-10-06).
 pub(crate) fn consent_document_closed_to_role(role: Role, row: &sqlx::postgres::PgRow) -> bool {
-    (matches!(role, Role::Concierge | Role::Billing) && is_consent_document_row(row))
+    (matches!(role, Role::Concierge | Role::Billing)
+        && (is_consent_document_row(row) || is_gwg_statement_row(row)))
         || gwg_identity_copy_closed_to_role(
             role,
             row.try_get::<Option<String>, _>("art")
@@ -14904,6 +14927,18 @@ pub(crate) fn can_view_document_row(
     {
         return false;
     }
+    // The team lead's documents are the translators' ones (RBAC matrix:
+    // «Перекладацькі документи», QA 2026-11-01 E1). The patient assignment
+    // does not open identity scans, GwG sheets, consents or the payer's
+    // papers: what is not shared to him, uploaded by him or part of the
+    // translators' work stays closed.
+    if auth.role == Role::TeamleadInterpreter
+        && !explicit_share
+        && !is_own_upload(auth.user_id, row)
+        && !is_interpreter_team_document(row)
+    {
+        return false;
+    }
     // Match the provider-document view contract for general commercial files.
     // There is no patient to assign, and Billing must be able to read contracts
     // stored as internal documents. Explicit document ACLs are checked by callers.
@@ -14999,6 +15034,27 @@ fn is_own_upload(user_id: Uuid, row: &sqlx::postgres::PgRow) -> bool {
 fn is_own_translation_document(row: &sqlx::postgres::PgRow) -> bool {
     row.try_get::<bool, _>("own_translation_document")
         .unwrap_or(false)
+}
+
+/// A document of the interpreters' work: an interpreter's upload, the source
+/// or result of a translation request, or a file on an appointment with an
+/// interpreter. A consent stays out even when filed on such an appointment.
+fn is_interpreter_team_document(row: &sqlx::postgres::PgRow) -> bool {
+    let interpreter_upload = row
+        .try_get::<Option<String>, _>("ursprung")
+        .unwrap_or_default()
+        .as_deref()
+        == Some("interpreter_upload");
+    let translation_document = row
+        .try_get::<bool, _>("translation_request_document")
+        .unwrap_or(false);
+    let interpreter_appointment = row
+        .try_get::<Option<Uuid>, _>("appointment_interpreter_id")
+        .unwrap_or_default()
+        .is_some();
+    interpreter_upload
+        || translation_document
+        || (interpreter_appointment && !is_consent_document_row(row))
 }
 
 /// An interpreter works only on the translation requests assigned to him: he
@@ -31113,6 +31169,11 @@ async fn list_documents(
                       AND own_request.status IN ('pending', 'in_progress', 'completed')
                   ) AS own_translation_document,
                   EXISTS(
+                    SELECT 1 FROM document_translation_requests team_request
+                    WHERE team_request.document_id = d.id
+                       OR team_request.translated_document_id = d.id
+                  ) AS translation_request_document,
+                  EXISTS(
                     SELECT 1
                     FROM patient_assignments pa
                     JOIN users portal_user ON portal_user.id = pa.user_id
@@ -31352,6 +31413,11 @@ async fn list_document_intake_queue(
                       AND own_request.assigned_to = $1
                       AND own_request.status IN ('pending', 'in_progress', 'completed')
                   ) AS own_translation_document,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests team_request
+                    WHERE team_request.document_id = d.id
+                       OR team_request.translated_document_id = d.id
+                  ) AS translation_request_document,
                   EXISTS(
                     SELECT 1
                     FROM patient_assignments pa
@@ -31739,6 +31805,11 @@ async fn list_document_versions(
                       AND own_request.status IN ('pending', 'in_progress', 'completed')
                   ) AS own_translation_document,
                   EXISTS(
+                    SELECT 1 FROM document_translation_requests team_request
+                    WHERE team_request.document_id = d.id
+                       OR team_request.translated_document_id = d.id
+                  ) AS translation_request_document,
+                  EXISTS(
                     SELECT 1
                     FROM patient_assignments pa
                     JOIN users portal_user ON portal_user.id = pa.user_id
@@ -31897,6 +31968,11 @@ async fn list_document_translation_request_queue(
                       AND own_request.assigned_to = $4
                       AND own_request.status IN ('pending', 'in_progress', 'completed')
                   ) AS own_translation_document,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests team_request
+                    WHERE team_request.document_id = d.id
+                       OR team_request.translated_document_id = d.id
+                  ) AS translation_request_document,
                   p.patient_id AS patient_pid,
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name
            FROM document_translation_requests dtr

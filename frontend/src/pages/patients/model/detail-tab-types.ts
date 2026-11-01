@@ -16,6 +16,8 @@ export type OrderItem = {
   repeat_lead_id?: string | null;
   phase: string;
   status: string;
+  /** Set for the team lead's projection: no needs, amounts or signatures. */
+  read_scope?: string | null;
   needs_description?: string | null;
   created_at: string;
   total_estimated?: string | number | null;

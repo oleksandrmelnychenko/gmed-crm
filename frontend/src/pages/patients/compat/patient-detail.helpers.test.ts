@@ -400,7 +400,7 @@ describe("patient surface access helpers", () => {
 
   it("keeps the clinical record and the medical PDFs from the interpreter, whatever its assignment", () => {
     expect(canViewPatientClinicalProfile("interpreter")).toBe(false);
-    expect(canViewPatientClinicalProfile("teamlead_interpreter")).toBe(true);
+    expect(canViewPatientClinicalProfile("teamlead_interpreter")).toBe(false);
     expect(canViewPatientClinicalProfile("patient_manager")).toBe(true);
     expect(
       normalizePatientDetailTab("clinical", {

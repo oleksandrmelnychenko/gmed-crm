@@ -153,7 +153,7 @@ describe("patient detail model", () => {
       // The interpreter's `patients.medical.view` covers its appointment
       // briefing, not the clinical record (owner decision 2026-09-28).
       expect(canViewPatientClinicalProfile(actor)).toBe(
-        has("patients.medical.view") && role !== "interpreter",
+        has("patients.medical.view") && role !== "interpreter" && role !== "teamlead_interpreter",
       );
       expect(canEditPatientClinicalProfile(actor)).toBe(has("patients.medical.edit"));
       expect(canManagePatientProfile(actor)).toBe(has("patients.edit"));

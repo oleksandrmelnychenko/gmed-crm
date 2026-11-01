@@ -87,7 +87,7 @@ export function PatientOrdersTab({
       setDeleteBusy(false);
     }
   }
-  const columns = useMemo<ColumnDef<OrderItem>[]>(
+  const allColumns = useMemo<ColumnDef<OrderItem>[]>(
     () => [
       {
         id: "order_number",
@@ -232,6 +232,15 @@ export function PatientOrdersTab({
     ],
     [dict, formatDate, labelLang, orderNumberLabel, orderPhaseLabel, statusColors, statusLabel],
   );
+  // The team lead's projection carries no needs or amounts (QA 2026-11-01 E3).
+  const readsOrderPart = orders.some((item) => Boolean(item.read_scope));
+  const visibleColumns = useMemo(
+    () =>
+      readsOrderPart
+        ? allColumns.filter((column) => column.id !== "needs" && column.id !== "amount")
+        : allColumns,
+    [allColumns, readsOrderPart],
+  );
 
   return (
     <>
@@ -244,7 +253,7 @@ export function PatientOrdersTab({
           <DataTableSurface
             rows={orders}
             pagination={{pageSize: 50, resetKey: orders.map((item) => item.id).join(":")}}
-            columns={columns}
+            columns={visibleColumns}
             rowId={(item) => item.id}
             dictionary={dict as unknown as Record<string, string>}
             emptyState={<EmptyCell>{emptyLabel}</EmptyCell>}

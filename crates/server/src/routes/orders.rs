@@ -13775,7 +13775,7 @@ impl OrderReadScope {
         }
     }
 
-    fn is_scoped(self) -> bool {
+    pub(crate) fn is_scoped(self) -> bool {
         self != Self::Full
     }
 }

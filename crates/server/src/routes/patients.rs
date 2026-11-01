@@ -8114,6 +8114,9 @@ async fn list_patient_orders(
         Role::TeamleadInterpreter,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
+    // The team lead reads an order as `/orders/{id}` answers it: no needs
+    // description, amounts or signature state (QA 2026-11-01 E3).
+    let scoped = crate::routes::orders::OrderReadScope::for_role(auth.role).is_scoped();
 
     let rows = sqlx::query(
         r#"SELECT id, order_number, phase, status, intake_state,
@@ -8140,7 +8143,7 @@ async fn list_patient_orders(
     let items = rows
         .into_iter()
         .map(|row| {
-            serde_json::json!({
+            let mut item = serde_json::json!({
                 "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
                 "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
                 "repeat_lead_id": row.try_get::<Option<Uuid>,_>("repeat_lead_id").unwrap_or_default(),
@@ -8157,7 +8160,22 @@ async fn list_patient_orders(
                 "signed_patient": row.try_get::<bool, _>("signed_patient").unwrap_or(false),
                 "signed_agency": row.try_get::<bool, _>("signed_agency").unwrap_or(false),
                 "signed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
-            })
+            });
+            if scoped {
+                item["read_scope"] = json!("interpreter_team");
+                for field in [
+                    "repeat_lead_id",
+                    "needs_description",
+                    "total_estimated",
+                    "total_actual",
+                    "signed_at",
+                ] {
+                    item[field] = Value::Null;
+                }
+                item["signed_patient"] = json!(false);
+                item["signed_agency"] = json!(false);
+            }
+            item
         })
         .collect::<Vec<_>>();
 
@@ -8345,6 +8363,11 @@ async fn list_patient_documents(
                       AND own_request.assigned_to = $3
                       AND own_request.status IN ('pending', 'in_progress', 'completed')
                   ) AS own_translation_document,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests team_request
+                    WHERE team_request.document_id = d.id
+                       OR team_request.translated_document_id = d.id
+                  ) AS translation_request_document,
                   EXISTS(
                     SELECT 1
                     FROM document_signature_members consent_member
@@ -8846,6 +8869,7 @@ async fn load_staff_visible_patient_document_ids(
     state: &AppState,
     auth: &AuthUser,
     patient_uuid: Uuid,
+    include_closed: bool,
 ) -> Result<HashSet<Uuid>, axum::response::Response> {
     let document_view_acl =
         load_document_acl_candidates(state, auth, AccessCapability::View).await?;
@@ -8888,13 +8912,19 @@ async fn load_staff_visible_patient_document_ids(
                            OR own_request.translated_document_id = d.id)
                       AND own_request.assigned_to = $2
                       AND own_request.status IN ('pending', 'in_progress', 'completed')
-                  ) AS own_translation_document
+                  ) AS own_translation_document,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests team_request
+                    WHERE team_request.document_id = d.id
+                       OR team_request.translated_document_id = d.id
+                  ) AS translation_request_document
            FROM documents d
            WHERE d.patient_id = $1
-             AND d.status IN ('draft', 'active')"#,
+             AND ($3::boolean OR d.status IN ('draft', 'active'))"#,
     )
     .bind(patient_uuid)
     .bind(auth.user_id)
+    .bind(include_closed)
     .fetch_all(&state.db)
     .await
     .map_err(|error| {
@@ -9437,7 +9467,7 @@ async fn get_patient_document_alerts(
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
     let visible_document_ids =
-        load_staff_visible_patient_document_ids(&state, &auth, patient_uuid).await?;
+        load_staff_visible_patient_document_ids(&state, &auth, patient_uuid, false).await?;
     // An interpreter sees only the documents opened to him, so his alerts are
     // counted from those documents: the fulfilled rules and missing counts
     // must not reveal that the patient has documents closed to him.
@@ -10617,12 +10647,35 @@ async fn get_patient_timeline(
     // The events a role may not open are left out of the event set itself, so
     // the items, totals, facets, filters and search never reveal them.
     // Without `appointments.view` no appointment (nor its communication or
-    // reminder) is listed; without `patients.medical.view` a medical
-    // appointment is a blocked slot (as for the concierge in `/appointments`),
-    // and cases (anamnesis), medical documents, recommendations and the
-    // clinical records are left out.
+    // reminder) is listed; without the clinical record a medical appointment
+    // is a blocked slot (as for the concierge in `/appointments`), and cases
+    // (anamnesis), medical documents, recommendations and the clinical records
+    // are left out.
     let can_view_appointments = auth.can(Capability::AppointmentsView);
-    let can_view_medical = auth.can(Capability::PatientsMedicalView);
+    let can_view_medical = can_read_clinical_record(&auth);
+    // One projection for every role that reaches this route (QA 2026-11-01
+    // E4, E5): a role with closed documents gets exactly the documents it may
+    // open, by the rule of the document list, so consent and GwG papers do
+    // not appear by name. Consent and compliance events follow them.
+    let reads_every_patient_document = matches!(
+        auth.role,
+        Role::Ceo | Role::CeoAssistant | Role::PatientManager
+    );
+    let can_view_compliance = reads_every_patient_document;
+    let visible_document_ids: Option<Vec<Uuid>> = if reads_every_patient_document {
+        None
+    } else {
+        Some(
+            load_staff_visible_patient_document_ids(&state, &auth, patient_uuid, true)
+                .await?
+                .into_iter()
+                .collect(),
+        )
+    };
+    // The team lead reads the interpreters' part of the patient, as in
+    // `/orders/{id}`: no tasks, relations or service groups, the orders by
+    // number and of the services only the interpreter hours.
+    let interpreter_team_scope = auth.role == Role::TeamleadInterpreter;
 
     let limit = query.limit.unwrap_or(50).clamp(1, 200);
     let offset = query.offset.unwrap_or(0).max(0);
@@ -10726,6 +10779,7 @@ async fn get_patient_timeline(
                       task_lead.converted_patient_id,
                       task_appointment.patient_id
                   ) = $1
+              AND NOT $12::boolean
               AND NOT EXISTS (
                   SELECT 1
                   FROM workflow_checklist_items checklist
@@ -10750,6 +10804,7 @@ async fn get_patient_timeline(
             FROM workflow_checklist_items checklist
             LEFT JOIN users owner ON owner.id = checklist.owner_user_id
             WHERE checklist.patient_id = $1
+              AND NOT $12::boolean
 
             UNION ALL
 
@@ -10819,6 +10874,7 @@ async fn get_patient_timeline(
             FROM patient_relations relation
             LEFT JOIN patients related_patient ON related_patient.id = relation.related_patient_id
             WHERE relation.patient_id = $1
+              AND NOT $12::boolean
 
             UNION ALL
 
@@ -10828,7 +10884,10 @@ async fn get_patient_timeline(
                    o.phase AS category,
                    o.status AS status,
                    o.created_at AS happened_at,
-                   COALESCE(o.needs_description, o.order_number) AS source_label
+                   CASE
+                       WHEN $12::boolean THEN o.order_number
+                       ELSE COALESCE(o.needs_description, o.order_number)
+                   END AS source_label
             FROM orders o
             LEFT JOIN leads source_lead ON source_lead.id = o.source_lead_id
             WHERE COALESCE(o.patient_id, source_lead.converted_patient_id) = $1
@@ -10841,13 +10900,23 @@ async fn get_patient_timeline(
                    'leistung'::text AS category,
                    ol.status AS status,
                    COALESCE(ol.delivered_at, ol.approved_at, ol.created_at) AS happened_at,
-                   concat_ws(' · ', o.order_number, p.name, d.name) AS source_label
+                   CASE
+                       WHEN $12::boolean THEN o.order_number
+                       ELSE concat_ws(' · ', o.order_number, p.name, d.name)
+                   END AS source_label
             FROM order_leistungen ol
             JOIN orders o ON o.id = ol.order_id
             LEFT JOIN leads source_lead ON source_lead.id = o.source_lead_id
             LEFT JOIN providers p ON p.id = ol.provider_id
             LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
+            LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
             WHERE COALESCE(o.patient_id, source_lead.converted_patient_id) = $1
+              AND (
+                    NOT $12::boolean
+                    OR ol.source_interpreter_report_id IS NOT NULL
+                    OR COALESCE(ol.agency_service_key_snapshot, catalog.service_key)
+                       = 'interpreter_hours'
+              )
 
             UNION ALL
 
@@ -10861,6 +10930,7 @@ async fn get_patient_timeline(
             FROM documents d
             LEFT JOIN leads source_lead ON source_lead.id = d.lead_id
             WHERE COALESCE(d.patient_id, source_lead.converted_patient_id) = $1
+              AND ($14::uuid[] IS NULL OR d.id = ANY($14))
               AND (
                     $11::boolean
                     OR NOT (
@@ -10980,6 +11050,7 @@ async fn get_patient_timeline(
             LEFT JOIN documents d ON d.id = dtr.document_id
             LEFT JOIN users u ON u.id = dtr.requested_by
             WHERE dtr.patient_id = $1
+              AND ($14::uuid[] IS NULL OR d.id = ANY($14))
               AND (
                     $11::boolean
                     OR NOT (
@@ -11069,6 +11140,7 @@ async fn get_patient_timeline(
             JOIN orders o ON o.id = osg.order_id
             LEFT JOIN leads source_lead ON source_lead.id = o.source_lead_id
             WHERE COALESCE(o.patient_id, source_lead.converted_patient_id) = $1
+              AND NOT $12::boolean
 
             UNION ALL
 
@@ -11213,6 +11285,7 @@ async fn get_patient_timeline(
             FROM consent_records consent
             LEFT JOIN users consent_user ON consent_user.id = consent.user_id
             WHERE consent.patient_id = $1
+              AND $13::boolean
 
             UNION ALL
 
@@ -11309,6 +11382,7 @@ async fn get_patient_timeline(
             ) legacy_update
             WHERE al.entity_type = 'patient'
               AND al.entity_id = $1
+              AND $13::boolean
               AND (
                     al.action IN (
                         'dsgvo_data_export',
@@ -11757,6 +11831,9 @@ async fn get_patient_timeline(
         .bind(offset)
         .bind(can_view_appointments)
         .bind(can_view_medical)
+        .bind(interpreter_team_scope)
+        .bind(can_view_compliance)
+        .bind(visible_document_ids.as_deref())
         .fetch_one(&state.db)
         .await
         .map_err(|e| {
@@ -12032,9 +12109,12 @@ async fn ensure_related_patient_usable(
 /// never reads it, whatever its patient assignment (manual or from a
 /// booking): its medical scope is the briefing of its own appointment and the
 /// documents released to it (owner decision 2026-09-28,
-/// docs/backlog/02_rbac-matrix_ua.md).
+/// docs/backlog/02_rbac-matrix_ua.md). The team lead's medical fields are
+/// system-locked the same way (QA E-42): the capability serves his team's
+/// appointments, not the clinical record (QA 2026-11-01 E2).
 fn can_read_clinical_record(auth: &AuthUser) -> bool {
-    auth.can(Capability::PatientsMedicalView) && auth.role != Role::Interpreter
+    auth.can(Capability::PatientsMedicalView)
+        && !matches!(auth.role, Role::Interpreter | Role::TeamleadInterpreter)
 }
 
 /// Who reads the clinical card sections (card entries, medical orders, risk

@@ -354,10 +354,15 @@ export function canViewPatientContractsSurface(actor?: Actor) {
  * medical PDFs. The interpreter holds `patients.medical.view` for the
  * briefing of its own appointments, but never opens the clinical record,
  * whatever its patient assignment (owner decision 2026-09-28): the server
- * answers it 403.
+ * answers it 403. The same for the team lead (QA 2026-11-01 E2).
  */
 export function canViewPatientClinicalProfile(actor?: Actor) {
-  return hasCapability(actor, "patients.medical.view") && actorRole(actor) !== "interpreter";
+  const role = actorRole(actor);
+  return (
+    hasCapability(actor, "patients.medical.view") &&
+    role !== "interpreter" &&
+    role !== "teamlead_interpreter"
+  );
 }
 
 export function canEditPatientClinicalProfile(actor?: Actor) {
@@ -450,7 +455,9 @@ export function isPatientDetailTabReadOnly(actor: Actor, tab: string | null | un
 
 export function normalizePatientDetailTab(tab: string | null | undefined, access: PatientTabAccess) {
   const requestedTab = (tab ?? "profile").trim() || "profile";
-  if (requestedTab === "cases") {
+  // `medical` is a tab no card has: an unknown name must not leave an empty
+  // card body (QA 2026-11-01 T2-15).
+  if (requestedTab === "cases" || requestedTab === "medical") {
     return access.canViewClinical ? "clinical" : "profile";
   }
   if (

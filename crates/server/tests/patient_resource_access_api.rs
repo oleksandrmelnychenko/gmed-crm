@@ -1653,3 +1653,424 @@ async fn ceo_assistant_reads_every_patient_tab_read_only() {
         assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {response}");
     }
 }
+
+async fn seed_typed_document(
+    pool: &PgPool,
+    patient_id: Uuid,
+    uploaded_by: Uuid,
+    tag: &str,
+    art: &str,
+    category: &str,
+    ursprung: Option<&str>,
+) -> Uuid {
+    let document_id = seed_document(pool, patient_id, uploaded_by, tag, false).await;
+    sqlx::query("UPDATE documents SET art = $2, category = $3, ursprung = $4 WHERE id = $1")
+        .bind(document_id)
+        .bind(art)
+        .bind(category)
+        .bind(ursprung)
+        .execute(pool)
+        .await
+        .unwrap();
+    document_id
+}
+
+async fn timeline_text(app: &axum::Router, patient_id: Uuid, bearer: &str) -> String {
+    let (status, body) = json_request(
+        app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/timeline?limit=200"),
+        bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body.to_string()
+}
+
+/// QA 2026-11-01 E1, E2, E3, E5: an assigned team lead gets the translators'
+/// documents, no clinical record, the order projection and a timeline without
+/// medical, consent or GwG names.
+#[tokio::test]
+async fn assigned_team_lead_reads_only_the_interpreter_part_of_a_patient() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("round6-teamlead");
+    let teamlead_id = seed_staff_user(&pool, &format!("{tag}-t"), "teamlead_interpreter").await;
+    let interpreter_id = seed_staff_user(&pool, &format!("{tag}-i"), "interpreter").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    seed_patient_assignment(&pool, patient_id, teamlead_id, admin_id).await;
+    let bearer = auth_header_for(teamlead_id, "teamlead_interpreter");
+
+    let payer_scan = seed_typed_document(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("{tag}-payer-scan"),
+        "payer_identity",
+        "identity",
+        None,
+    )
+    .await;
+    let gwg_sheet = seed_typed_document(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("{tag}-gwg-sheet"),
+        "gwg_identification",
+        "administrative",
+        None,
+    )
+    .await;
+    let consent = seed_typed_document(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("{tag}-consent"),
+        "confidentiality_release",
+        "consent",
+        None,
+    )
+    .await;
+    let interpreter_upload = seed_typed_document(
+        &pool,
+        patient_id,
+        interpreter_id,
+        &format!("{tag}-upload"),
+        "other",
+        "general",
+        Some("interpreter_upload"),
+    )
+    .await;
+    let translation_source = seed_document(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("{tag}-translation-source"),
+        false,
+    )
+    .await;
+    sqlx::query(
+        r#"INSERT INTO document_translation_requests (
+               document_id, patient_id, requested_language, requested_by
+           ) VALUES ($1, $2, 'de', $3)"#,
+    )
+    .bind(translation_source)
+    .bind(patient_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, list) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/documents"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let listed: Vec<String> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["id"].as_str().unwrap().to_string())
+        .collect();
+    assert!(listed.contains(&interpreter_upload.to_string()), "{list}");
+    assert!(listed.contains(&translation_source.to_string()), "{list}");
+    for closed in [payer_scan, gwg_sheet, consent] {
+        assert!(!listed.contains(&closed.to_string()), "{list}");
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{closed}"),
+            &bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    }
+
+    for path in [
+        "clinical",
+        "vitals",
+        "lab-results",
+        "impfstatus",
+        "clinical.pdf",
+    ] {
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/patients/{patient_id}/{path}"),
+            &bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
+    }
+
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (
+               order_number, patient_id, phase, status, needs_description,
+               total_estimated, created_by
+           ) VALUES ($1, $2, 'execution', 'active', 'Tumorverdacht', 900, $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO order_leistungen (order_id, description, quantity, unit_price)
+           VALUES ($1, 'MRT onkologische Abklaerung', 1, 900)"#,
+    )
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, orders) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/orders"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{orders}");
+    assert_eq!(orders[0]["id"], order_id.to_string());
+    assert_eq!(orders[0]["needs_description"], Value::Null);
+    assert_eq!(orders[0]["total_estimated"], Value::Null);
+    assert_eq!(orders[0]["total_actual"], Value::Null);
+
+    sqlx::query(
+        r#"INSERT INTO cases (case_id, patient_id, hauptanfragegrund, manager_id)
+           VALUES ($1, $2, 'Anamnese Tumorverdacht', $3)"#,
+    )
+    .bind(format!("CASE-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let timeline = timeline_text(&app, patient_id, &bearer).await;
+    for hidden in [
+        "Tumorverdacht",
+        "MRT onkologische",
+        "payer-scan",
+        "gwg-sheet",
+        &format!("Document {tag}-consent"),
+    ] {
+        assert!(!timeline.contains(hidden), "{hidden} in {timeline}");
+    }
+    assert!(timeline.contains(&format!("ORD-{tag}")), "{timeline}");
+    assert!(timeline.contains(&format!("{tag}-upload")), "{timeline}");
+
+    // The patient manager keeps the whole picture.
+    let manager_id = seed_staff_user(&pool, &format!("{tag}-m"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, manager_id, admin_id).await;
+    let manager = timeline_text(
+        &app,
+        patient_id,
+        &auth_header_for(manager_id, "patient_manager"),
+    )
+    .await;
+    assert!(manager.contains("Tumorverdacht"), "{manager}");
+    assert!(manager.contains(&format!("{tag}-consent")), "{manager}");
+}
+
+/// QA 2026-11-01 E4: consent and GwG papers and events do not reach the
+/// billing timeline; the identity scan Billing may open stays listed.
+#[tokio::test]
+async fn billing_timeline_names_no_consent_or_gwg_document() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("round6-billing");
+    let billing_id = seed_staff_user(&pool, &format!("{tag}-b"), "billing").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    seed_typed_document(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("{tag}-consent"),
+        "confidentiality_release",
+        "consent",
+        None,
+    )
+    .await;
+    seed_typed_document(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("{tag}-gwg-sheet"),
+        "gwg_identification",
+        "administrative",
+        None,
+    )
+    .await;
+    seed_typed_document(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("{tag}-passport"),
+        "passport",
+        "identity",
+        None,
+    )
+    .await;
+    sqlx::query(
+        r#"INSERT INTO consent_records (patient_id, consent_type, granted, granted_at, user_id)
+           VALUES ($1, 'data_processing', true, now(), $2)"#,
+    )
+    .bind(patient_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let timeline = timeline_text(&app, patient_id, &auth_header_for(billing_id, "billing")).await;
+    assert!(!timeline.contains(&format!("{tag}-consent")), "{timeline}");
+    assert!(
+        !timeline.contains(&format!("{tag}-gwg-sheet")),
+        "{timeline}"
+    );
+    assert!(!timeline.contains("Consent:"), "{timeline}");
+    assert!(timeline.contains(&format!("{tag}-passport")), "{timeline}");
+}
+
+/// QA 2026-11-01 E6: Sales resends the Art. 9 consent unchanged with its form
+/// but cannot change it; a change by a medical role is audited as a consent
+/// change of its own.
+#[tokio::test]
+async fn sales_cannot_change_the_lead_healthcare_consent() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("round6-consent");
+    let sales_id = seed_staff_user(&pool, &format!("{tag}-s"), "sales").await;
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, consent_healthcare, created_by)
+           VALUES ('Ready', 'Lead', $1, true, $2)
+           RETURNING id"#,
+    )
+    .bind(format!("{tag}@example.com"))
+    .bind(sales_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let sales = auth_header_for(sales_id, "sales");
+    let path = format!("/api/v1/leads/{lead_id}/update");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &sales,
+        Some(json!({ "consent_healthcare": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let stored: bool = sqlx::query_scalar("SELECT consent_healthcare FROM leads WHERE id = $1")
+        .bind(lead_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(stored);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &sales,
+        Some(json!({ "consent_healthcare": true, "phone": "+49 30 1234567" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &auth_header_for(admin_id, "ceo"),
+        Some(json!({ "consent_healthcare": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let audited: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM audit_log
+           WHERE entity_type = 'lead' AND entity_id = $1
+             AND action = 'lead_healthcare_consent_revoked'"#,
+    )
+    .bind(lead_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+}
+
+/// QA 2026-11-01 E7, T2-14: the CEO assistant opens what his lists show, the
+/// appointment and the order pipeline, and changes neither.
+#[tokio::test]
+async fn ceo_assistant_opens_appointment_detail_and_order_pipeline() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("round6-assistant");
+    let assistant_id = seed_staff_user(&pool, &format!("{tag}-a"), "ceo_assistant").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        admin_id,
+        "medical",
+        "Follow-up",
+        "2026-11-02",
+    )
+    .await;
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by)
+           VALUES ($1, $2, 'execution', 'active', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let bearer = auth_header_for(assistant_id, "ceo_assistant");
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{appointment_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["can_edit"], json!(false));
+    for path in [
+        format!("/api/v1/appointments/{appointment_id}/reminders"),
+        format!("/api/v1/appointments/{appointment_id}/communications"),
+        format!("/api/v1/orders/{order_id}/workflow-checklist"),
+    ] {
+        let (status, body) = json_request(&app, "GET", &path, &bearer, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
+    }
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/workflow-checklist"),
+        &bearer,
+        Some(json!({ "item_text": "Refused", "checklist_key": "general" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+}
