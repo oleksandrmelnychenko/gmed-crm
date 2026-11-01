@@ -649,6 +649,7 @@ impl Facts {
                     reason,
                     PayerReason::CostAssumptionMissing
                         | PayerReason::CostAssumptionOutdated
+                        | PayerReason::CostAssumptionTermsOutdated
                         | PayerReason::CostAssumptionUnsigned
                 )
             })

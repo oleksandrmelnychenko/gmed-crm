@@ -883,6 +883,7 @@ const LEAD_READINESS_REASON_LABEL_KEYS: Partial<Record<string, TranslationKey>> 
   "Third-party payer is not identified": "lead_readiness_reason_payer_not_identified",
   "Cost assumption declaration is missing": "lead_readiness_reason_cost_assumption_missing",
   "Cost assumption declaration names another payer": "lead_readiness_reason_cost_assumption_outdated",
+  "Cost assumption declaration is out of date": "lead_readiness_reason_cost_assumption_terms_outdated",
   "Cost assumption declaration is not signed": "lead_readiness_reason_cost_assumption_unsigned",
 };
 

@@ -444,6 +444,7 @@ export interface OperationsTranslations {
   lead_readiness_reason_payer_not_informed: string;
   lead_readiness_reason_cost_assumption_missing: string;
   lead_readiness_reason_cost_assumption_outdated: string;
+  lead_readiness_reason_cost_assumption_terms_outdated: string;
   lead_readiness_reason_cost_assumption_unsigned: string;
   lead_section_lifecycle: string;
   lead_lifecycle_description: string;
@@ -1091,6 +1092,7 @@ export const operationsRu: OperationsTranslations = {
   lead_readiness_reason_payer_not_informed: "Плательщик не проинформирован об обработке его данных",
   lead_readiness_reason_cost_assumption_missing: "Нет заявления о принятии расходов",
   lead_readiness_reason_cost_assumption_outdated: "Заявление о принятии расходов на другого плательщика",
+  lead_readiness_reason_cost_assumption_terms_outdated: "Заявление о принятии расходов устарело: заказ или его условия изменились",
   lead_readiness_reason_cost_assumption_unsigned: "Заявление о принятии расходов не подписано",
   lead_section_lifecycle: "Жизненный цикл лида",
   lead_lifecycle_description:
@@ -1759,6 +1761,7 @@ export const operationsDe: OperationsTranslations = {
   lead_readiness_reason_payer_not_informed: "Zahler nicht über die Datenverarbeitung informiert",
   lead_readiness_reason_cost_assumption_missing: "Kostenübernahmeerklärung fehlt",
   lead_readiness_reason_cost_assumption_outdated: "Kostenübernahmeerklärung nennt einen anderen Zahler",
+  lead_readiness_reason_cost_assumption_terms_outdated: "Kostenübernahmeerklärung veraltet: Auftrag oder Konditionen haben sich geändert",
   lead_readiness_reason_cost_assumption_unsigned: "Kostenübernahmeerklärung nicht unterschrieben",
   lead_section_lifecycle: "Lead-Lebenszyklus",
   lead_lifecycle_description:

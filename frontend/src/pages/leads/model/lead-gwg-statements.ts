@@ -671,6 +671,12 @@ export function billingStatements(
    * filling in the cabinet (owner 2026-10-30).
    */
   recipientByStaff = false,
+  /**
+   * The payer's legal form (the payer's own link stores it on the payer): the
+   * organisation that receives the invoice and pays has one legal form, the
+   * recipient block read «—» beside GmbH (QA 2026-11-01).
+   */
+  payerLegalForm: string | null = null,
 ): BillingStatements {
   const country = (code: string | null) => countryNameForDisplay(code, lang);
   const statement = (
@@ -726,7 +732,11 @@ export function billingStatements(
     if (third && party) {
       if (organisation) {
         invoice.push(
-          statement("recipient_legal_form", tx("Правовая форма", "Rechtsform"), party.legal_form),
+          statement(
+            "recipient_legal_form",
+            tx("Правовая форма", "Rechtsform"),
+            party.legal_form || (billing.invoice_recipient_is_payer !== false ? payerLegalForm : null),
+          ),
           statement("recipient_contact_name", tx("Контактное лицо", "Ansprechperson"), party.contact_name),
           statement(
             "recipient_reason",

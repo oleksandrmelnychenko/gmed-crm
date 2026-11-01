@@ -1279,6 +1279,8 @@ pub(crate) enum PayerReason {
     PayerNotInformed,
     CostAssumptionMissing,
     CostAssumptionOutdated,
+    /// The right payer, but the order or its terms moved since (QA 2026-11-01).
+    CostAssumptionTermsOutdated,
     CostAssumptionUnsigned,
     ClientOrderSignatureMissing,
     /// A third-party payer at risk level 2 or with a trigger of the payer's
@@ -1300,6 +1302,7 @@ impl PayerReason {
             Self::PayerNotInformed => "payer_not_informed",
             Self::CostAssumptionMissing => "cost_assumption_missing",
             Self::CostAssumptionOutdated => "cost_assumption_outdated",
+            Self::CostAssumptionTermsOutdated => "cost_assumption_terms_outdated",
             Self::CostAssumptionUnsigned => "cost_assumption_unsigned",
             Self::ClientOrderSignatureMissing => "client_order_signature_missing",
             Self::PayerNotIdentified => "payer_not_identified",
@@ -1319,6 +1322,7 @@ impl PayerReason {
             Self::PayerNotInformed => "Payer is not informed about the processing of their data",
             Self::CostAssumptionMissing => "Cost assumption declaration is missing",
             Self::CostAssumptionOutdated => "Cost assumption declaration names another payer",
+            Self::CostAssumptionTermsOutdated => "Cost assumption declaration is out of date",
             Self::CostAssumptionUnsigned => "Cost assumption declaration is not signed",
             Self::ClientOrderSignatureMissing => "Customer order signature is missing",
             Self::PayerNotIdentified => "Third-party payer is not identified",
@@ -1331,8 +1335,10 @@ impl PayerReason {
 pub(crate) struct CostAssumptionDocument {
     pub document_id: Option<Uuid>,
     pub signed_at: Option<DateTime<Utc>>,
-    /// Names the payer of the current declaration.
+    /// Names the payer of the current declaration, for the current order terms.
     pub current: bool,
+    /// Not current only because the terms moved: the payer is still the one named.
+    pub terms_only: bool,
 }
 
 /// Everything the readiness, the gate and the wizard need about who pays.
@@ -1429,6 +1435,7 @@ impl PayerReadiness {
                 reason,
                 PayerReason::CostAssumptionMissing
                     | PayerReason::CostAssumptionOutdated
+                    | PayerReason::CostAssumptionTermsOutdated
                     | PayerReason::CostAssumptionUnsigned
             )),
             "blocking_for": "conversion",
@@ -1490,6 +1497,9 @@ impl PayerState {
                 self.cost_assumption.signed_at,
             ) {
                 (None, _, _) => reasons.push(PayerReason::CostAssumptionMissing),
+                (Some(_), false, _) if self.cost_assumption.terms_only => {
+                    reasons.push(PayerReason::CostAssumptionTermsOutdated);
+                }
                 (Some(_), false, _) => reasons.push(PayerReason::CostAssumptionOutdated),
                 (Some(_), true, None) => reasons.push(PayerReason::CostAssumptionUnsigned),
                 (Some(_), true, Some(_)) => {}
@@ -1737,12 +1747,13 @@ pub(crate) async fn load_payer_state(
             .ok()
             .flatten()
             .unwrap_or(true);
+        let names_payer =
+            names.is_some() && names == state.identity_changed_at.map(identity_version);
         state.cost_assumption = CostAssumptionDocument {
             document_id: Some(document_id),
             signed_at: row.try_get("cost_signed_at").unwrap_or_default(),
-            current: names.is_some()
-                && names == state.identity_changed_at.map(identity_version)
-                && terms_current,
+            current: names_payer && terms_current,
+            terms_only: names_payer && !terms_current,
         };
     }
     Ok(state)
@@ -5617,15 +5628,28 @@ mod tests {
             document_id: Some(Uuid::nil()),
             signed_at: Some(Utc::now()),
             current: false,
+            terms_only: false,
         });
         assert_eq!(
             outdated.agency_gate(true),
             [PayerReason::CostAssumptionOutdated]
         );
+        // The payer is the same, only the order moved: no word of another payer (QA 2026-11-01).
+        let stale_terms = third_party_state(CostAssumptionDocument {
+            document_id: Some(Uuid::nil()),
+            signed_at: None,
+            current: false,
+            terms_only: true,
+        });
+        assert_eq!(
+            stale_terms.agency_gate(true),
+            [PayerReason::CostAssumptionTermsOutdated]
+        );
         let unsigned = third_party_state(CostAssumptionDocument {
             document_id: Some(Uuid::nil()),
             signed_at: None,
             current: true,
+            terms_only: false,
         });
         assert_eq!(
             unsigned.agency_gate(true),
@@ -5635,6 +5659,7 @@ mod tests {
             document_id: Some(Uuid::nil()),
             signed_at: Some(Utc::now()),
             current: true,
+            terms_only: false,
         });
         assert!(signed.agency_gate(true).is_empty());
         let readiness = signed.readiness();

@@ -5,6 +5,8 @@ import { ApiRequestError } from "@/lib/api";
 import {
   EMPTY_PAYER_DECLARATION_FORM,
   payerChangeDropsConsents,
+  payerReadyForConsents,
+  withReplacedPayer,
   PAYER_RELATIONSHIP_KINDS,
   PAYER_TYPES,
   costEstimateConsentLine,
@@ -933,7 +935,52 @@ describe("payer relationship of an organisation (live QA 2026-10-24)", () => {
     expect(spouse.relationshipKind).toBe("spouse");
     expect(withPayerDeclarationField(spouse, "payerType", "company").relationshipKind).toBe("");
     const employer = withPayerDeclarationField(person, "relationshipKind", "employer");
-    expect(withPayerDeclarationField(employer, "payerType", "company").relationshipKind).toBe("employer");
+    expect(withPayerDeclarationField(employer, "payerType", "company").relationshipKind).toBe("");
+  });
+
+  it("keeps a relationship between two organisation types: the same payer", () => {
+    const company = { ...person, payerType: "company" as const, relationshipKind: "employer" as const, email: "a@example.com" };
+    const insurer = withPayerDeclarationField(company, "payerType", "insurance");
+    expect(insurer.relationshipKind).toBe("employer");
+    expect(insurer.email).toBe("a@example.com");
+  });
+});
+
+describe("a replaced payer leaves nothing behind (QA 2026-11-01)", () => {
+  const old = {
+    ...EMPTY_PAYER_DECLARATION_FORM, kind: "third_party" as const, payerType: "person" as const,
+    firstName: "Klaus", lastName: "Zahlmann", relationshipKind: "spouse" as const, relationship: "Ehemann",
+    email: "klaus@example.com", phone: "+49 170 1234567", street: "Weg 1", zip: "10115", city: "Berlin", country: "DE",
+    citizenships: ["DE"], placeOfBirth: "Köln",
+  };
+
+  it("clears contact, address and relation when a person becomes an organisation", () => {
+    const company = withPayerDeclarationField(old, "payerType", "company");
+    expect(company).toMatchObject({
+      relationshipKind: "", relationship: "", email: "", phone: "", street: "", zip: "", city: "", country: "",
+      citizenships: [], placeOfBirth: "",
+    });
+  });
+
+  it("clears them on a person's replacement, and keeps the new name", () => {
+    expect(withReplacedPayer({ ...old, lastName: "Nussbaum" })).toMatchObject({
+      firstName: "Klaus", lastName: "Nussbaum", relationshipKind: "", email: "", phone: "", city: "",
+    });
+  });
+
+  it("does not touch them for an address correction of the same payer", () => {
+    expect(withPayerDeclarationField(old, "city", "Hamburg").email).toBe("klaus@example.com");
+  });
+
+  it("asks for the consents only once the payer is named and reachable", () => {
+    const stored = { payer_kind: "third_party", payer_type: "company", organisation_name: null, email: null, phone: null } as unknown as PayerDeclaration;
+    expect(payerReadyForConsents(stored)).toBe(false);
+    expect(payerReadyForConsents({ ...stored, organisation_name: "Müller GmbH" })).toBe(false);
+    expect(payerReadyForConsents({ ...stored, organisation_name: "Müller GmbH", email: "m@example.com" })).toBe(true);
+    const person = { payer_kind: "third_party", payer_type: "person", first_name: "", last_name: "Neu", email: "n@example.com" } as unknown as PayerDeclaration;
+    expect(payerReadyForConsents(person)).toBe(false);
+    expect(payerReadyForConsents({ ...person, first_name: "Ruth" })).toBe(true);
+    expect(payerReadyForConsents(null)).toBe(false);
   });
 });
 

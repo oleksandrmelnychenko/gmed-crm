@@ -603,6 +603,45 @@ export function payerChangeDropsConsents(
   return fields.some((field) => form[field].trim() !== stored[field].trim());
 }
 
+/**
+ * The form without what belonged to the replaced payer: how to reach that
+ * person, the address and the relation to the patient. The new payer is asked
+ * for them; kept, a link could go to the old address and a spouse's relation
+ * would hide T5 (QA 2026-11-01).
+ */
+export function withReplacedPayer(form: PayerDeclarationForm): PayerDeclarationForm {
+  return {
+    ...form,
+    relationship: "",
+    relationshipKind: "",
+    email: "",
+    phone: "",
+    messenger: "",
+    street: "",
+    zip: "",
+    city: "",
+    country: "",
+    placeOfBirth: "",
+    citizenships: [],
+    organisationLegalForm: "",
+    organisationRegisterNumber: "",
+  };
+}
+
+/**
+ * Whether the stored payer is named and reachable, so that the client's consents can
+ * be recorded for it. Earlier the next name or e-mail typed would drop them again
+ * (server `same_payer`) and staff recorded them twice (QA 2026-11-01).
+ */
+export function payerReadyForConsents(declaration: PayerDeclaration | null | undefined): boolean {
+  if (!declaration) return false;
+  const stored = payerDeclarationToForm(declaration);
+  const named = isOrganisationPayerForm(stored)
+    ? stored.organisationName.trim() !== ""
+    : stored.firstName.trim() !== "" && stored.lastName.trim() !== "";
+  return named && (stored.email.trim() !== "" || stored.phone.trim() !== "");
+}
+
 export function payerDeclarationToForm(
   declaration: PayerDeclaration | null | undefined,
 ): PayerDeclarationForm {
@@ -898,6 +937,12 @@ export function withPayerDeclarationField<K extends keyof PayerDeclarationForm>(
   if (!payerRelationshipKindsFor(next).includes(next.relationshipKind as PayerRelationshipKind)) {
     next.relationshipKind = "";
   }
+  // A person became an organisation or the reverse, or the third party went:
+  // another payer, whose contact data these are not (QA 2026-11-01).
+  const replaced = field === "payerType"
+    ? isOrganisationPayerForm(next) !== isOrganisationPayerForm(form)
+    : field === "kind" && form.kind === "third_party" && value !== form.kind;
+  if (replaced) next = withReplacedPayer(next);
   // Another kind of payer: the funds entered for the person before belong
   // to that person (one source per person, 2026-10-23), never to the next.
   if (field === "kind" && value !== form.kind) {
@@ -1119,6 +1164,7 @@ export function payerReasonLabel(code: string, tx: Tx, payerType?: PayerType | n
     payer_not_identified: payerNotIdentifiedText(tx),
     cost_assumption_missing: tx("Создайте заявление о принятии расходов (Kostenübernahmeerklärung)", "Kostenübernahmeerklärung erstellen"),
     cost_assumption_outdated: tx("Плательщик изменён — создайте новое заявление о принятии расходов", "Kostenübernehmer geändert – neue Kostenübernahmeerklärung erstellen"),
+    cost_assumption_terms_outdated: tx("Заказ или его условия изменились — создайте заявление о принятии расходов заново", "Auftrag oder Konditionen geändert – Kostenübernahmeerklärung neu erstellen"),
     cost_assumption_unsigned: tx("Получите подпись плательщика на заявлении о принятии расходов", "Unterschrift des Kostenübernehmers einholen"),
     client_order_signature_missing: tx("Сначала клиент подписывает заказ", "Zuerst unterschreibt der Kunde den Auftrag"),
   };
@@ -1198,6 +1244,7 @@ export const PAYER_READINESS_REASON_CODES: Record<string, string> = {
   "Third-party payer is not identified": "payer_not_identified",
   "Cost assumption declaration is missing": "cost_assumption_missing",
   "Cost assumption declaration names another payer": "cost_assumption_outdated",
+  "Cost assumption declaration is out of date": "cost_assumption_terms_outdated",
   "Cost assumption declaration is not signed": "cost_assumption_unsigned",
 };
 

@@ -787,6 +787,20 @@ describe("sections 7–8 as the group shows them", () => {
     expect(invoice.find((row) => row.key === "recipient_phone")?.value).toBe("+49 30 5550100");
   });
 
+  it("takes the payer's legal form for a recipient that is the payer and has none (QA 2026-11-01)", () => {
+    const billing = (isPayer: boolean, legalForm: string | null) => normalizeLeadPortalBilling({
+      invoice_recipient: "third_party",
+      invoice_recipient_is_payer: isPayer,
+      invoice_to: "self",
+      recipient: { type: "organisation", name: "Müller GmbH", legal_form: legalForm },
+    })!;
+    const legalForm = (value: ReturnType<typeof billing>) =>
+      billingStatements(value, de, "de", false, false, null, false, "GmbH").invoice.find((row) => row.key === "recipient_legal_form")?.value;
+    expect(legalForm(billing(true, null))).toBe("GmbH");
+    expect(legalForm(billing(true, "AG"))).toBe("AG");
+    expect(legalForm(billing(false, null))).toBe("");
+  });
+
   it("says a minor's parent was named by staff when staff filled in the client's form (owner 2026-10-30)", () => {
     const value = normalizeLeadPortalBilling({ invoice_recipient: "self", invoice_recipient_is_payer: true })!;
     const who = (byStaff: boolean) =>
