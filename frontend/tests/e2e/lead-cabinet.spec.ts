@@ -2403,8 +2403,13 @@ test.describe("lead cabinet", () => {
     expect(page.isClosed()).toBe(false);
 
     // Saved: the tab closes without a question.
+    // The mock counts the save before it answers: close only after the answer,
+    // the entry counts as saved from there on.
+    const saved = page.waitForResponse((response) => response.url().endsWith("/personal-data"));
     await page.clock.runFor(1000);
+    await saved;
     await expect.poll(() => calls.personalData).toEqual([{ middle_name: "Maria" }, { middle_name: "Marianne" }]);
+    await page.evaluate(() => undefined);
     await page.close({ runBeforeUnload: true });
     await expect.poll(() => page.isClosed()).toBe(true);
     expect(dialogs).toEqual(["beforeunload"]);
