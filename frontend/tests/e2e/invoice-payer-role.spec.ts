@@ -9,7 +9,7 @@ const invoiceId = "00000000-0000-0000-0000-000000000611";
 
 type Payload = Record<string, unknown>;
 
-async function prepare(page: Page, role: string | null) {
+async function prepare(page: Page, role: string | null, payerPatch: Payload = {}) {
   const payer = {
     role,
     contact_name: "Beispiel GmbH",
@@ -18,6 +18,7 @@ async function prepare(page: Page, role: string | null) {
     address_zip: "50667",
     address_city: "Köln",
     address_country: "DE",
+    ...payerPatch,
   };
   const invoice = {
     id: invoiceId, invoice_number: null, patient_name: "Anna Muster",
@@ -109,6 +110,22 @@ test("a stored invoice address is shown, kept on save, with the recipient's tax 
     payer_contact_email: "buchhaltung@example.com",
   });
   expect(state.errors).toEqual([]);
+});
+
+// QA 2026-11-01, U-4 and U-8: the recipient-only parent is no «current payer»,
+// and the German relationship of the lead's payer has a label.
+test("a recipient paid for by someone else is headed as the recipient, with her relationship", async ({ page }) => {
+  await prepare(page, "cost_bearer", {
+    contact_name: "Greta Sandbeck",
+    order_contact_name: "Wilhelm Sandbeck",
+    contact_relationship: "Ehepartner/in",
+  });
+  await page.goto(`/invoices?invoice=${invoiceId}`);
+  const section = page.locator("section").filter({ has: page.getByRole("heading", { name: /^Rechnungsempfänger/ }) });
+  await expect(section).toContainText("Greta Sandbeck");
+  await expect(section).toContainText("Ehepartner/in");
+  await expect(section).not.toContainText("Unbekannter Wert");
+  await expect(page.getByRole("heading", { name: /Aktueller Zahler/ })).toHaveCount(0);
 });
 
 test("the invoice address is offered as a third role choice", async ({ page }) => {

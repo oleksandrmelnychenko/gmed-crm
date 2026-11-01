@@ -51,7 +51,7 @@ const pendingReport = {
 async function openMockedAppointment(
   page: Page,
   date: string,
-  options: { report?: typeof pendingReport; detailTab?: string } = {},
+  options: { report?: typeof pendingReport; detailTab?: string; asInterpreter?: boolean } = {},
 ) {
   const statusPosts: unknown[] = [];
   const reportPosts: string[] = [];
@@ -77,8 +77,8 @@ async function openMockedAppointment(
     owner_user_id: ownerId,
     owner_name: "Sarah Kovacs",
     owner_role: "patient_manager",
-    interpreter_id: options.report ? interpreterId : null,
-    interpreter_name: options.report ? "Marina Sokolova" : null,
+    interpreter_id: options.report || options.asInterpreter ? interpreterId : null,
+    interpreter_name: options.report || options.asInterpreter ? "Marina Sokolova" : null,
     recurrence_series_id: null,
     recurrence_frequency: null,
     recurrence_interval: null,
@@ -121,10 +121,10 @@ async function openMockedAppointment(
     if (path === "/auth/logout") return json(route, { ok: true });
     if (path === "/me") {
       return json(route, {
-        id: ownerId,
+        id: options.asInterpreter ? interpreterId : ownerId,
         email: "admin@gmed.de",
         name: "Admin GMED",
-        role: "ceo",
+        role: options.asInterpreter ? "interpreter" : "ceo",
         created_at: "2026-01-01T00:00:00Z",
       });
     }
@@ -298,6 +298,20 @@ test.describe("appointment completion date rule", () => {
 
     await sheet.getByRole("button", { name: /Zur Überarbeitung zurückgeben/ }).click();
     await expect.poll(() => reportPosts).toEqual(["reject"]);
+  });
+
+  // QA 2026-11-01, U-1: the disabled button kept the message from ever running.
+  test("invalid report hours say why on save", async ({ page }) => {
+    await openMockedAppointment(page, berlinDate(0), { asInterpreter: true, detailTab: "clinical" });
+    await page.getByRole("button", { name: /Bericht öffnen/ }).click();
+    const sheet = page.getByRole("dialog").last();
+    const message = sheet.getByText("Die Stunden müssen zwischen 0,25 und 24 liegen");
+    for (const hours of ["", "0", "120", "24.25"]) {
+      await sheet.getByRole("spinbutton").fill(hours);
+      await expect(message).toHaveCount(0);
+      await sheet.locator('button[type="submit"]').click();
+      await expect(message).toBeVisible();
+    }
   });
 
   test("a pending report of today's appointment can be approved", async ({ page }) => {
