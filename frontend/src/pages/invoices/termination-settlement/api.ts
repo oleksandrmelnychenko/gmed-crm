@@ -49,6 +49,8 @@ export type TerminationPreviewOrder = TerminationFigures & {
   cancelled_lines: TerminationSettlementLine[];
   /** Upcoming appointments the termination cancels with the order (date YYYY-MM-DD, time HH:MM). */
   cancelled_appointments?: { id: string; date: string; time_start: string | null }[];
+  /** Package overage nobody decided yet: outside the figures, it joins them when approved. */
+  pending_overage_gross?: DecimalString;
   warnings: string[];
 };
 

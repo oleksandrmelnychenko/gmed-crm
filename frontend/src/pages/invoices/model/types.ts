@@ -556,6 +556,8 @@ export type QuoteOption = {
   quote_number: string;
   status?: string;
   active_invoice_types?: string[];
+  /** An active final invoice of the quote carries a credit note. */
+  final_invoice_credited?: boolean;
   /** Delivered services of the order no line of this quote bills. */
   services_outside_quote?: string[];
   /** Approved package overage a settlement invoice adds to the quote lines. */

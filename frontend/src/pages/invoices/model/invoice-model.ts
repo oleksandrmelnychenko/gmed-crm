@@ -320,6 +320,19 @@ export function invoiceSelectionPackageOverage(
   return billsTheRest ? { net, vat: roundCents(gross - net), gross } : none;
 }
 
+/**
+ * Overage approved after every quote line was billed: an interim invoice
+ * without lines bills it alone (QA 2026-11-01, X3 NEW-1).
+ */
+export function isOverageOnlyInvoice(
+  quote: QuoteOption | null | undefined,
+  form: Pick<CreateForm, "invoiceType">,
+) {
+  return form.invoiceType === "interim"
+    && Number(quote?.open_package_overage_gross ?? 0) > 0
+    && Boolean(quote?.line_items.every((line) => invoiceLineQuantityAvailable(line, "final") === 0));
+}
+
 export function isInvoiceSelectionValid(lines: InvoiceLineItem[], form: CreateForm) {
   const selected = new Set(form.selectedLineIndexes);
   if (!selected.size || selected.size !== form.selectedLineIndexes.length) return false;
@@ -348,6 +361,7 @@ export function isQuoteClosedForInvoicing(status: string | null | undefined) {
 // the unbilled scope and active invoice types, not the quote's payment total.
 export function isQuoteAvailableForInvoice(quote: QuoteOption, invoiceType: InvoiceType) {
   if (!quote.patient_id || isQuoteClosedForInvoicing(quote.status)) return false;
+  if (isOverageOnlyInvoice(quote, { invoiceType })) return true;
   // Beside an active final invoice only an interim invoice is possible, for
   // the quantity of a line credited in full (QA 2026-11-01, R3 BUG-2).
   if (quote.active_invoice_types?.includes("final")) {

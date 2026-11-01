@@ -19,7 +19,7 @@ import {
   invoiceCreationErrorMessage,
   partlyCreditedHint,
 } from "@/pages/invoices/model/billing-release";
-import { INVOICE_LINE_COMMENT_MAX_LENGTH, isQuoteClosedForInvoicing } from "@/pages/invoices/model/invoice-model";
+import { INVOICE_LINE_COMMENT_MAX_LENGTH, isOverageOnlyInvoice, isQuoteClosedForInvoicing } from "@/pages/invoices/model/invoice-model";
 import type { InvoiceLineItem, InvoiceType, QuoteOption } from "@/pages/invoices/model/types";
 import { PatientTerminationSettlements } from "@/pages/invoices/termination-settlement/ui";
 
@@ -148,6 +148,8 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     total: "Summe des Entwurfs", choose: "Mindestens eine Leistung oder einen Kostenbeleg auswählen.", patientPaid: "Patient selbst", gmedPaid: "GMed", unpaid: "Unbezahlt",
     ready: "Nicht berechnet", reserved: "Im Entwurf / berechnet", afterPayment: "Nach Zahlung", notRequired: "Nicht erforderlich",
     orderService: "Über die Auftragsleistung",
+    overageOnly: (amount: string) => `Alle Positionen sind abgerechnet. Der Entwurf wird eine Zwischenrechnung über den Mehrverbrauch aus dem Tarif: ${amount}.`,
+    orderStatus: { active: "aktiv", paused: "pausiert", completed: "abgeschlossen", cancelled: "storniert" } as Record<string, string>,
     comment: "Anmerkung auf der Rechnung", commentHint: "z. B. 2. und 3. Quartal 2026",
     actions: "Aktion", waived: "Trägt GMED", waive: "Nicht weiterberechnen", unwaive: "Wieder weiterberechnen",
     waiveTitle: "Kosten trägt GMED",
@@ -169,6 +171,8 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     total: "Сумма черновика", choose: "Выберите хотя бы одну услугу или расход.", patientPaid: "Сам пациент", gmedPaid: "GMed", unpaid: "Не оплачен",
     ready: "Не выставлено", reserved: "В черновике / выставлено", afterPayment: "После оплаты", notRequired: "Не требуется",
     orderService: "Через услугу заказа",
+    overageOnly: (amount: string) => `Все позиции выставлены. Черновик станет промежуточным счётом на превышение по тарифу: ${amount}.`,
+    orderStatus: { active: "активен", paused: "на паузе", completed: "завершён", cancelled: "отменён" } as Record<string, string>,
     comment: "Примечание в счёте", commentHint: "например: за 2 и 3 квартал 2026",
     actions: "Действие", waived: "За счёт GMED", waive: "Не перевыставлять", unwaive: "Вернуть в перевыставление",
     waiveTitle: "Расход за счёт GMED",
@@ -239,7 +243,9 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
   // The approved overage the server adds to the invoice of the last open lines.
   const billsAllOpenLines = selectedLines.length > 0
     && serviceLines.every((line, index) => availableQuantity(line) <= 0 || selectedLines.includes(index));
-  const overageTotal = billsAllOpenLines ? Number(quote?.open_package_overage_gross ?? 0) : 0;
+  // Every line is billed: an interim invoice bills the overage alone (QA 2026-11-01, X3 NEW-1).
+  const overageOnly = isOverageOnlyInvoice(quote, { invoiceType: "interim" });
+  const overageTotal = billsAllOpenLines || overageOnly ? Number(quote?.open_package_overage_gross ?? 0) : 0;
   const total = serviceTotal + expenseTotal + overageTotal;
 
   function selectQuote(nextId: string) {
@@ -258,7 +264,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     try {
       // A quote without an open position bills nothing: the draft takes the
       // ticked costs alone (QA 2026-11-01, it answered «check the positions»).
-      const billedQuote = selectedLines.length ? quote : null;
+      const billedQuote = selectedLines.length || overageOnly ? quote : null;
       const invoice = await apiFetch<CreatedInvoice>(`/patients/${patientId}/billing-invoices`, {
         method: "POST",
         body: JSON.stringify({
@@ -266,9 +272,9 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
           order_id: order?.id ?? null,
           quote_id: billedQuote?.id || null,
           currency: activeCurrency,
-          invoice_type: invoiceType,
+          invoice_type: overageOnly ? "interim" : invoiceType,
           due_date: dueDate || null,
-          line_items: billedQuote ? selectedLines.map(line_index => {
+          line_items: billedQuote && !overageOnly ? selectedLines.map(line_index => {
             const comment = (lineComments[line_index] ?? "").trim();
             return { line_index, quantity: String(availableQuantity(serviceLines[line_index])), ...(comment ? { comment } : {}) };
           }) : null,
@@ -371,7 +377,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
   const waiverReasonValid = waiverReason.trim().length >= 3 && waiverReason.trim().length <= 1000;
 
   return <div className="mt-4 min-w-0 space-y-4" data-testid="patient-billing">
-    <PatientTerminationSettlements patientId={patientId} lang={lang} />
+    <PatientTerminationSettlements patientId={patientId} lang={lang} onChanged={() => setRevision(value => value + 1)} />
     <section className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 px-4 py-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold"><span className="size-2 rounded-full bg-[var(--brand)]" />{copy.title}</h2>
@@ -379,7 +385,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
       </div>
       <form className="space-y-4 p-4" onSubmit={submit}>
         <div className="grid gap-3 lg:grid-cols-5">
-          <Field label={copy.order}><NativeComboboxSelect value={orderId || "__none__"} disabled={busy || saving} onChange={event => { const nextOrderId = event.target.value === "__none__" ? "" : event.target.value; const nextOrder = workspace?.orders.find(item => item.id === nextOrderId); setOrderId(nextOrderId); if (nextOrder) setBillingCurrency(nextOrder.currency); setQuoteId(""); setSelectedLines([]); setLineComments({}); setSelectedExpenses([]); setCreated(null); }}><option value="__none__">{copy.noOrder}</option>{workspace?.orders.map(item => <option key={item.id} value={item.id}>{item.order_number} · {item.cancellation_reason === "contract_terminated" ? (de ? "gekündigt" : "расторгнут") : item.status} · {item.currency}</option>)}</NativeComboboxSelect></Field>
+          <Field label={copy.order}><NativeComboboxSelect value={orderId || "__none__"} disabled={busy || saving} onChange={event => { const nextOrderId = event.target.value === "__none__" ? "" : event.target.value; const nextOrder = workspace?.orders.find(item => item.id === nextOrderId); setOrderId(nextOrderId); if (nextOrder) setBillingCurrency(nextOrder.currency); setQuoteId(""); setSelectedLines([]); setLineComments({}); setSelectedExpenses([]); setCreated(null); }}><option value="__none__">{copy.noOrder}</option>{workspace?.orders.map(item => <option key={item.id} value={item.id}>{item.order_number} · {item.cancellation_reason === "contract_terminated" ? (de ? "gekündigt" : "расторгнут") : copy.orderStatus[item.status] ?? item.status} · {item.currency}</option>)}</NativeComboboxSelect></Field>
           <Field label={copy.currency}><NativeComboboxSelect value={activeCurrency} disabled={Boolean(order) || busy || saving} onChange={event => { setBillingCurrency(event.target.value); setSelectedExpenses([]); setCreated(null); }}>{currencyOptions.map(currency => <option key={currency} value={currency}>{currency}</option>)}</NativeComboboxSelect></Field>
           <Field label={copy.quote}><NativeComboboxSelect value={quoteId || "__empty__"} disabled={!order || busy || saving} onChange={event => selectQuote(event.target.value === "__empty__" ? "" : event.target.value)}><option value="__empty__">{copy.noQuote}</option>{orderQuotes.map(item => <option key={item.id} value={item.id}>{item.quote_number}</option>)}</NativeComboboxSelect></Field>
           <Field label={copy.type}><NativeComboboxSelect value={invoiceType} disabled={saving} onChange={event => { const value = event.target.value as InvoiceType; setInvoiceType(value); if (value === "final") setSelectedLines(serviceLines.map((line, index) => availableQuantity(line) > 0 ? index : -1).filter(index => index >= 0)); }}><option value="interim">{copy.interim}</option><option value="final">{copy.final}</option></NativeComboboxSelect></Field>
@@ -390,7 +396,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
 
         <section className="overflow-hidden rounded-xl border border-border/70">
           <div className="border-b border-border/60 px-4 py-3"><AdminSectionTitle>{copy.services}</AdminSectionTitle></div>
-          {!quote || !serviceLines.some(line => availableQuantity(line) > 0) ? <p className="px-4 py-5 text-sm text-muted-foreground">{copy.noServices}{quote ? ` ${partlyCreditedHint(lang)}` : ""}</p> : <div className="divide-y divide-border/60">
+          {!quote || !serviceLines.some(line => availableQuantity(line) > 0) ? <p className="px-4 py-5 text-sm text-muted-foreground">{overageOnly ? copy.overageOnly(formatMoneyAmount(String(overageTotal), activeCurrency)) : <>{copy.noServices}{quote ? ` ${partlyCreditedHint(lang)}` : ""}</>}</p> : <div className="divide-y divide-border/60">
             {serviceLines.map((line, index) => {
               const available = availableQuantity(line);
               if (available <= 0) return null;

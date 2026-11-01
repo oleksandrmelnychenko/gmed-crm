@@ -22,6 +22,8 @@ export const BILLING_API_ERROR_KEYS: Record<string, string> = {
   // An invoice bills the actual quantities (doc 2.4, QA 2026-10-31).
   invoice_bills_above_actual_services: "api_billing_invoice_bills_above_actual_services",
   quote_behind_actual_services: "api_billing_quote_behind_actual_services",
+  // A draft advance is not released beside a final invoice (QA 2026-11-01).
+  advance_beside_final_invoice: "api_billing_advance_beside_final_invoice",
   // advance_settlement.rs
   advance_rest_already_closed: "api_billing_advance_rest_already_closed",
   advance_not_settled_by_final_invoice: "api_billing_advance_not_settled_by_final_invoice",

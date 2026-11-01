@@ -475,12 +475,24 @@ export function TerminationSettlementCard({
 }
 
 /** Patient billing area: every termination settlement of the patient (hidden when none). */
-export function PatientTerminationSettlements({ patientId, lang }: { patientId: string; lang: Lang }) {
+export function PatientTerminationSettlements({
+  patientId,
+  lang,
+  onChanged,
+}: {
+  patientId: string;
+  lang: Lang;
+  /** A closed settlement also changes the page around it, e.g. its waiver buttons (QA 2026-11-01, X3 NEW-5). */
+  onChanged?: () => void;
+}) {
   const canView = useCan("invoices.view");
   const [settlements, setSettlements] = useState<TerminationSettlement[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
-  const reload = useCallback(() => setRevision((value) => value + 1), []);
+  const reload = useCallback(() => {
+    setRevision((value) => value + 1);
+    onChanged?.();
+  }, [onChanged]);
 
   useEffect(() => {
     if (!canView) return;

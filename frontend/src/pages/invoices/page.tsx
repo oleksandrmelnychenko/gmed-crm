@@ -177,6 +177,7 @@ import {
   createInvoiceLineSelection,
   effectiveAdvanceBasis,
   invoiceLineSelectionPayload,
+  isOverageOnlyInvoice,
   isInvoiceSelectionValid,
   formatCurrency,
   formatDate,
@@ -1916,7 +1917,8 @@ function useStaffInvoicesPageContent() {
     // switched to picking positions (or the order has no prepayment).
     const prepaymentAdvance =
       effectiveAdvanceBasis(createForm, selectedCreateQuote) === "prepayment";
-    if (!prepaymentAdvance && !isInvoiceSelectionValid(selectedCreateQuote.line_items, createForm)) {
+    const overageOnly = isOverageOnlyInvoice(selectedCreateQuote, createForm);
+    if (!prepaymentAdvance && !overageOnly && !isInvoiceSelectionValid(selectedCreateQuote.line_items, createForm)) {
       setCreateError(lang === "de" ? "Prüfen Sie die ausgewählten Positionen und Mengen." : "Проверьте выбранные позиции и количество.");
       return;
     }
@@ -1938,7 +1940,7 @@ function useStaffInvoicesPageContent() {
             due_date: createForm.dueDate || null,
             notes: createForm.notes.trim() || null,
             internal_note: createForm.internalNote.trim() || null,
-            line_items: selectedLines,
+            ...(overageOnly ? {} : { line_items: selectedLines }),
           });
       clearApiCache();
       setCreateOpen(false);

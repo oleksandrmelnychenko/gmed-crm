@@ -21,7 +21,9 @@ import {
   invoiceLineQuantityAvailable,
   isInvoiceSelectionValid,
   effectiveAdvanceBasis,
+  isOverageOnlyInvoice,
   isQuoteAvailableForInvoice,
+  isQuoteClosedForInvoicing,
   prepaymentAdvanceSplit,
   quoteRequiredPrepayment,
 } from "../model/invoice-model";
@@ -89,9 +91,10 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
         gross: roundCents(selectionTotals.gross + packageOverage.gross),
       };
   const quoteAvailable = Boolean(selectedQuote && isQuoteAvailableForInvoice(selectedQuote, form.invoiceType));
+  const overageOnly = isOverageOnlyInvoice(selectedQuote, form);
   const valid = prepaymentSplit
     ? quoteAvailable && !prepaymentSplit.exceedsQuote && prepaymentSplit.gross > 0
-    : quoteAvailable && isInvoiceSelectionValid(lines, form) && totals.gross > 0;
+    : quoteAvailable && (overageOnly || isInvoiceSelectionValid(lines, form)) && totals.gross > 0;
   const footerMessage = error || optionsError || (selectedQuote && !valid
     ? prepaymentSplit?.exceedsQuote
       ? (de ? "Die erforderliche Vorauszahlung übersteigt die Angebotssumme. Wählen Sie Positionen." : "Требуемая предоплата больше суммы предложения. Выберите позиции.")
@@ -123,6 +126,11 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   const commentPlaceholder = de ? "z. B. 2. und 3. Quartal 2026" : "например: за 2 и 3 квартал 2026";
   const availableCount = lines.filter((line) => invoiceLineQuantityAvailable(line, form.invoiceType) > 0).length;
   const selectableQuotes = quotes.filter((quote) => isQuoteAvailableForInvoice(quote, form.invoiceType));
+  // Quotes this type hides, with why: staff looked for them under the default
+  // type without a word (QA 2026-11-01, X3 NEW-3).
+  const hiddenQuotes = quotes.filter((quote) => !selectableQuotes.includes(quote) && !isQuoteClosedForInvoicing(quote.status));
+  const interimOnlyQuotes = form.invoiceType === "interim" ? [] : hiddenQuotes.filter((quote) => isQuoteAvailableForInvoice(quote, "interim"));
+  const partlyCreditedQuotes = hiddenQuotes.filter((quote) => quote.final_invoice_credited && !interimOnlyQuotes.includes(quote));
 
   return (
     <Dialog dirty={dirty} open={open} onOpenChange={(nextOpen) => { if (!formBusy) onOpenChange(nextOpen); }}>
@@ -168,6 +176,16 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                   <p role="status" className="text-sm text-muted-foreground">
                     {de ? "Keine abrechenbaren Angebote für diese Auswahl. Bereits abgerechnete, abgelehnte und abgelaufene Angebote werden nicht angezeigt." : "Для текущего выбора нет доступных предложений. Уже выставленные, отклонённые и просроченные предложения скрыты."}
                     {" "}{partlyCreditedHint(lang)}
+                  </p>
+                ) : null}
+                {interimOnlyQuotes.length ? (
+                  <p role="status" data-testid="invoice-interim-only-quotes" className="text-xs leading-5 text-muted-foreground">
+                    {de ? "Nur als Zwischenrechnung verfügbar" : "Доступны только промежуточным счётом"}: {interimOnlyQuotes.map((quote) => quote.quote_number).join(", ")}.
+                  </p>
+                ) : null}
+                {partlyCreditedQuotes.length ? (
+                  <p role="status" data-testid="invoice-partly-credited-quotes" className="text-xs leading-5 text-muted-foreground">
+                    {partlyCreditedQuotes.map((quote) => quote.quote_number).join(", ")}: {partlyCreditedHint(lang)}
                   </p>
                 ) : null}
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -260,6 +278,13 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                       </Button>
                     ) : null}
                   </div>
+                  {overageOnly ? (
+                    <p role="status" data-testid="invoice-overage-only" className="border-b border-border px-3 py-2.5 text-xs leading-5 text-muted-foreground">
+                      {de
+                        ? `Alle Positionen sind abgerechnet. Diese Zwischenrechnung berechnet nur den Mehrverbrauch aus dem Tarif: ${money(packageOverage.gross)}.`
+                        : `Все позиции выставлены. Этот промежуточный счёт выставит только превышение по тарифу: ${money(packageOverage.gross)}.`}
+                    </p>
+                  ) : null}
                   {!selectedQuote ? (
                     <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border px-5 py-8 text-center text-muted-foreground">
                       <FileText className="size-6" />

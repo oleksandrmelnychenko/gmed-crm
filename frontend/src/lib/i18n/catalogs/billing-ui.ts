@@ -22,6 +22,8 @@ export const billingUiDe = {
     "Der Entwurf enthält stornierte Leistungen ({cancelled_services_label}). Bitte den Entwurf stornieren und eine neue Rechnung erstellen.",
   "api_billing_invoice_bills_above_actual_services":
     "Der Entwurf berechnet mehr, als tatsächlich erbracht wurde ({services_label}). Bitte den Entwurf stornieren und eine neue Rechnung erstellen.",
+  "api_billing_advance_beside_final_invoice":
+    "Dieses Angebot ist bereits mit einer Schlussrechnung abgerechnet. Bitte diesen Entwurf der Vorauszahlungsrechnung stornieren.",
   "api_billing_quote_behind_actual_services":
     "Die erbrachten Leistungen übersteigen dieses Angebot ({services_label}). Bitte ein neues Angebot mit den tatsächlichen Mengen erstellen.",
   "api_billing_advance_rest_already_closed": "Die Anzahlungsrechnung hat keinen offenen Rest mehr.",
@@ -47,6 +49,8 @@ export const billingUiRu = {
     "В черновике есть отменённые услуги ({cancelled_services_label}). Отмените черновик и создайте новый счёт.",
   "api_billing_invoice_bills_above_actual_services":
     "Черновик выставляет больше, чем фактически оказано ({services_label}). Отмените черновик и создайте новый счёт.",
+  "api_billing_advance_beside_final_invoice":
+    "По этому предложению уже есть финальный счёт. Отмените этот черновик счёта на предоплату.",
   "api_billing_quote_behind_actual_services":
     "Оказанные услуги превышают это предложение ({services_label}). Создайте новое предложение с фактическими количествами.",
   "api_billing_advance_rest_already_closed": "У авансового счёта больше нет открытого остатка.",

@@ -8,6 +8,7 @@ import {
   invoiceLineQuantityAvailable,
   invoiceLineSelectionPayload,
   isInvoiceSelectionValid,
+  isOverageOnlyInvoice,
   isQuoteAvailableForInvoice,
   isQuoteClosedForInvoicing,
   isCoveredByPrepaymentOnly,
@@ -384,6 +385,17 @@ describe("quotes available for invoicing", () => {
     expect(isQuoteAvailableForInvoice(credited, "interim")).toBe(true);
     expect(isQuoteAvailableForInvoice(credited, "final")).toBe(false);
     expect(isQuoteAvailableForInvoice(credited, "advance")).toBe(false);
+  });
+
+  it("offers overage approved after the final invoice as an interim invoice without lines", () => {
+    const billed = { ...quote, active_invoice_types: ["final"], open_package_overage_gross: "113.05", line_items: [line({ remaining_quantity: "0" })] };
+    expect(isQuoteAvailableForInvoice(billed, "interim")).toBe(true);
+    expect(isQuoteAvailableForInvoice(billed, "final")).toBe(false);
+    expect(isQuoteAvailableForInvoice(billed, "advance")).toBe(false);
+    expect(isOverageOnlyInvoice(billed, { invoiceType: "interim" })).toBe(true);
+    expect(isOverageOnlyInvoice(billed, { invoiceType: "final" })).toBe(false);
+    // Open lines take the overage with them.
+    expect(isOverageOnlyInvoice({ ...billed, line_items: [line({ remaining_quantity: "1" })] }, { invoiceType: "interim" })).toBe(false);
   });
 
   it("keeps a settlement after a paid advance but prevents a second advance", () => {
