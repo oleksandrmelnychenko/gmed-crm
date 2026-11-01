@@ -1288,6 +1288,317 @@ async fn partial_invoice_leaves_the_approved_overage_for_the_closing_one() {
     );
 }
 
+/// QA 2026-11-01, X3 NEW-1: overage approved after the quote was billed in full
+/// was on no invoice and the order closed over it.
+#[tokio::test]
+async fn overage_approved_after_the_final_invoice_holds_the_close_and_goes_on_an_interim_invoice() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("package-overage-late");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    seed_order_leistung(&pool, order_id, "Only service", 100.0, "approved").await;
+    let quote = create_quote(&app, &billing_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+    let (status, final_invoice) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "final" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{final_invoice}");
+    release_invoice(&app, &billing_bearer, final_invoice["id"].as_str().unwrap()).await;
+
+    // Nothing open yet: the interim route stays refused.
+    let invoices_path = format!("/api/v1/quotes/{quote_id}/invoices");
+    let interim_request = || {
+        json_request(
+            &app,
+            "POST",
+            &invoices_path,
+            &billing_bearer,
+            Some(json!({ "invoice_type": "interim" })),
+        )
+    };
+    let (status, body) = interim_request().await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    let package_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO service_packages (package_key, name, base_price_net)
+           VALUES ($1, 'Late overage', 100)
+           RETURNING id"#,
+    )
+    .bind(format!("pkg_{tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let assigned_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_service_packages (patient_id, package_id, order_id)
+           VALUES ($1, $2, $3)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(package_id)
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let consumption_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO service_package_consumptions (
+               patient_service_package_id, order_id, quantity, overage_quantity,
+               requires_patient_approval, approval_status, unit_price_net_snapshot,
+               currency_snapshot, vat_rate_snapshot
+           ) VALUES ($1, $2, 1, 1, true, 'pending', 95, 'EUR', 19)
+           RETURNING id"#,
+    )
+    .bind(assigned_id)
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query("UPDATE orders SET phase = 'closure' WHERE id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let closure_reasons = || async {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/orders/{order_id}/phase"),
+            &pm_bearer,
+            Some(json!({ "phase": "followup" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        body["blocking_reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|reason| reason.as_str().unwrap_or_default().to_string())
+            .collect::<Vec<_>>()
+    };
+    let reasons = closure_reasons().await;
+    assert!(
+        reasons.contains(&"1 package overage(s) still await a decision".to_string()),
+        "{reasons:?}"
+    );
+
+    sqlx::query(
+        "UPDATE service_package_consumptions SET approval_status = 'approved' WHERE id = $1",
+    )
+    .bind(consumption_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let reasons = closure_reasons().await;
+    assert!(
+        reasons.contains(&"1 approved package overage(s) are not invoiced yet".to_string()),
+        "{reasons:?}"
+    );
+
+    // The quote stays open for this one bill; a final invoice beside the
+    // active one does not.
+    let (status, listed) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes?invoiceable=true&order_id={order_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    let listed = &listed.as_array().unwrap()[0];
+    assert_eq!(listed["open_package_overage_gross"], "113.05", "{listed}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "final" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    let (status, interim) = interim_request().await;
+    assert_eq!(status, StatusCode::CREATED, "{interim}");
+    let lines = interim["line_items"].as_array().unwrap();
+    assert_eq!(lines.len(), 1, "{interim}");
+    assert_eq!(lines[0]["source"], "service_package_overage", "{interim}");
+    assert_eq!(interim["total_gross"], "113.05", "{interim}");
+    let linked: Option<Uuid> =
+        sqlx::query_scalar("SELECT invoice_id FROM service_package_consumptions WHERE id = $1")
+            .bind(consumption_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        linked.map(|id| id.to_string()).as_deref(),
+        interim["id"].as_str()
+    );
+    release_invoice(&app, &billing_bearer, interim["id"].as_str().unwrap()).await;
+    let reasons = closure_reasons().await;
+    assert!(
+        !reasons.iter().any(|reason| reason.contains("overage")),
+        "{reasons:?}"
+    );
+}
+
+/// QA 2026-11-01, X1 N1: an advance beside a final invoice billed the quote a
+/// second time, also through a draft left over from before the final invoice.
+#[tokio::test]
+async fn advance_invoice_is_refused_beside_a_final_invoice() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("advance-beside-final");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    seed_order_leistung(&pool, order_id, "Billed once", 200.0, "approved").await;
+    let quote = create_quote(&app, &billing_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+    let invoices_path = format!("/api/v1/quotes/{quote_id}/invoices");
+
+    let (status, draft_advance) = json_request(
+        &app,
+        "POST",
+        &invoices_path,
+        &billing_bearer,
+        Some(json!({ "invoice_type": "advance" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{draft_advance}");
+    let draft_advance_id = draft_advance["id"].as_str().unwrap();
+    let (status, final_invoice) = json_request(
+        &app,
+        "POST",
+        &invoices_path,
+        &billing_bearer,
+        Some(json!({ "invoice_type": "final" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{final_invoice}");
+    let final_id = final_invoice["id"].as_str().unwrap();
+    release_invoice(&app, &billing_bearer, final_id).await;
+
+    // The final invoice is the bill: the old draft is not released beside it.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{draft_advance_id}/status"),
+        &billing_bearer,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "advance_beside_final_invoice", "{body}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{draft_advance_id}/status"),
+        &billing_bearer,
+        Some(json!({ "status": "cancelled", "reason": "Schlussrechnung erstellt" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    for basis in ["positions", "prepayment"] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &invoices_path,
+            &billing_bearer,
+            Some(json!({ "invoice_type": "advance", "advance_basis": basis })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    }
+}
+
+/// QA 2026-11-01, X3 NEW-4: a final invoice without a line selection kept the
+/// stored quote lines with no quote index, so a credit note on a whole line
+/// gave nothing back to the quote.
+#[tokio::test]
+async fn final_invoice_without_a_selection_gives_a_fully_credited_line_back() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("final-no-selection-credit");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    seed_order_leistung(&pool, order_id, "Stays billed", 100.0, "approved").await;
+    seed_order_leistung(&pool, order_id, "Credited line", 40.0, "approved").await;
+    let quote = create_quote(&app, &billing_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+    let (status, final_invoice) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "final" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{final_invoice}");
+    let final_id = final_invoice["id"].as_str().unwrap();
+    release_invoice(&app, &billing_bearer, final_id).await;
+
+    let lines = final_invoice["line_items"].as_array().unwrap();
+    let credited_index = lines
+        .iter()
+        .position(|line| line["description"] == "Credited line")
+        .unwrap();
+    assert_eq!(lines[credited_index]["quote_line_index"], credited_index);
+    let (status, credit) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{final_id}/credit-notes"),
+        &billing_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "lines": [{
+                "line_index": credited_index,
+                "amount_gross": lines[credited_index]["line_gross"],
+            }],
+            "reason": "Leistung entfällt",
+            "issued_on": gmed_server::app_time::today().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{credit}");
+
+    let (status, again) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "interim" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{again}");
+    let lines = again["line_items"].as_array().unwrap();
+    assert_eq!(lines.len(), 1, "{again}");
+    assert_eq!(lines[0]["description"], "Credited line", "{again}");
+}
+
 #[tokio::test]
 async fn service_package_update_preserves_consumed_item_references() {
     let Some((app, pool, admin_id)) = test_context().await else {

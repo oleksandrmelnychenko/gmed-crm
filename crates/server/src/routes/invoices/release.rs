@@ -58,6 +58,32 @@ pub(super) async fn cancelled_services_on_draft(
         .collect())
 }
 
+/// Error code of an advance draft refused because a final invoice bills its quote.
+pub(super) const ADVANCE_BESIDE_FINAL: &str = "advance_beside_final_invoice";
+
+/// Whether the quote of an advance draft has an active final invoice; one
+/// credited in full no longer bills anything (doc 3.3).
+pub(super) async fn active_final_invoice_on_quote(
+    conn: &mut PgConnection,
+    invoice_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (
+               SELECT 1
+               FROM invoices advance
+               JOIN invoices final_invoice ON final_invoice.quote_id = advance.quote_id
+               WHERE advance.id = $1
+                 AND final_invoice.invoice_type = 'final'
+                 AND final_invoice.status <> 'cancelled'
+                 AND (final_invoice.total_gross <= 0
+                      OR final_invoice.credited_amount < final_invoice.total_gross)
+           )"#,
+    )
+    .bind(invoice_id)
+    .fetch_one(conn)
+    .await
+}
+
 /// Error code of a release refused because the draft bills more of a service
 /// than the order now holds.
 pub(super) const BILLS_ABOVE_ACTUALS: &str = "invoice_bills_above_actual_services";

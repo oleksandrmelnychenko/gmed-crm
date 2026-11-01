@@ -569,6 +569,85 @@ async fn overdue_debt_remains_visible_without_blocking_execution() {
     assert_eq!(detail["process_gates"]["overdue_invoice_count"], 1);
 }
 
+/// QA 2026-11-01, X3 NEW-2: the queue took the gross of an overdue invoice a
+/// paid advance covers, beside reminders that ask for nothing.
+#[tokio::test]
+async fn debt_management_queue_leaves_out_an_invoice_the_held_money_covers() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("debt-net");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let patient_id = create_patient(&app, &pm_bearer, &tag).await;
+    let order_id = create_order(&app, &pm_bearer, patient_id).await;
+
+    sqlx::query(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status, due_date,
+                total_net, total_vat, total_gross, paid_amount, created_by
+           )
+           VALUES ($1, $2, $3, 'final', 'overdue', $4, 100, 0, 100, 0, $5)"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INV-NET-{}", Uuid::new_v4().simple()))
+    .bind((Utc::now() - Duration::days(12)).date_naive())
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let queue_item = || async {
+        let (status, queue) = json_request(
+            &app,
+            "GET",
+            "/api/v1/orders/debt-management",
+            &billing_bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{queue}");
+        queue
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["order_id"] == order_id.to_string())
+            .cloned()
+    };
+    let item = queue_item().await.expect("overdue order in the queue");
+    assert_eq!(item["overdue_invoice_count"], 1, "{item}");
+    assert_eq!(item["overdue_balance"], "100", "{item}");
+    assert_eq!(item["outstanding_balance"], "100", "{item}");
+
+    // A paid advance not credited yet holds 60: the rest is the debt.
+    let insert_paid_advance = |amount: i32| {
+        sqlx::query(
+            r#"INSERT INTO invoices (
+                    order_id, patient_id, invoice_number, invoice_type, status, issued_at,
+                    total_net, total_vat, total_gross, paid_amount, created_by
+               )
+               VALUES ($1, $2, $3, 'advance', 'paid', now(), $4, 0, $4, $4, $5)"#,
+        )
+        .bind(order_id)
+        .bind(patient_id)
+        .bind(format!("INV-ADV-{}", Uuid::new_v4().simple()))
+        .bind(rust_decimal::Decimal::from(amount))
+        .bind(admin_id)
+        .execute(&pool)
+    };
+    insert_paid_advance(60).await.unwrap();
+    let item = queue_item().await.expect("part of the debt is left");
+    assert_eq!(item["overdue_balance"], "40", "{item}");
+    assert_eq!(item["outstanding_balance"], "40", "{item}");
+
+    // Covered in full: no debt, no row.
+    insert_paid_advance(40).await.unwrap();
+    assert!(queue_item().await.is_none());
+}
+
 #[tokio::test]
 async fn debt_management_queue_and_order_detail_reflect_workflow_updates() {
     let Some((app, pool, admin_id)) = test_context().await else {
@@ -3331,6 +3410,7 @@ async fn cancelling_an_order_requires_a_reason_and_winds_down_open_work() {
         json!(quote_id.to_string())
     );
     assert_eq!(preview["settlement"]["accrued_gross"], "200");
+    assert_eq!(preview["settlement"]["pending_overage_gross"], "0");
     let still_planned: String =
         sqlx::query_scalar("SELECT status FROM order_leistungen WHERE id = $1")
             .bind(planned_line)

@@ -3777,6 +3777,12 @@ async fn load_quote_detail(
                         WHERE invoice.quote_id = q.id AND invoice.status <> 'cancelled'
                           AND (invoice.invoice_type <> 'final' OR invoice.total_gross <= 0
                                OR invoice.credited_amount < invoice.total_gross)) AS active_invoice_types,
+                  -- An active final invoice with a credit note: why the quote
+                  -- is gone from the /invoices dialog (QA 2026-11-01, X3 NEW-3).
+                  EXISTS(SELECT 1 FROM invoices invoice
+                         WHERE invoice.quote_id = q.id AND invoice.status <> 'cancelled'
+                           AND invoice.invoice_type = 'final' AND invoice.credited_amount > 0
+                           AND invoice.credited_amount < invoice.total_gross) AS final_invoice_credited,
                   -- Delivered work no line of this quote bills: a final invoice
                   -- leaves it out (QA 2026-11-01, R3 BUG-3).
                   COALESCE((
@@ -3895,6 +3901,7 @@ async fn load_quote_detail(
         "paid_amount": decimal_to_string(row.try_get::<Decimal, _>("paid_amount").unwrap_or(Decimal::ZERO)),
         "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
         "active_invoice_types": row.try_get::<Vec<String>, _>("active_invoice_types").unwrap_or_default(),
+        "final_invoice_credited": row.try_get::<bool, _>("final_invoice_credited").unwrap_or(false),
         "services_outside_quote": row.try_get::<Value, _>("services_outside_quote").unwrap_or_else(|_| serde_json::json!([])),
         "open_package_overage_net": decimal_to_string(row.try_get::<Decimal, _>("open_package_overage_net").unwrap_or(Decimal::ZERO)),
         "open_package_overage_gross": decimal_to_string(row.try_get::<Decimal, _>("open_package_overage_gross").unwrap_or(Decimal::ZERO)),
@@ -3952,6 +3959,12 @@ async fn list_quotes(
                         WHERE invoice.quote_id = q.id AND invoice.status <> 'cancelled'
                           AND (invoice.invoice_type <> 'final' OR invoice.total_gross <= 0
                                OR invoice.credited_amount < invoice.total_gross)) AS active_invoice_types,
+                  -- An active final invoice with a credit note: why the quote
+                  -- is gone from the /invoices dialog (QA 2026-11-01, X3 NEW-3).
+                  EXISTS(SELECT 1 FROM invoices invoice
+                         WHERE invoice.quote_id = q.id AND invoice.status <> 'cancelled'
+                           AND invoice.invoice_type = 'final' AND invoice.credited_amount > 0
+                           AND invoice.credited_amount < invoice.total_gross) AS final_invoice_credited,
                   -- Delivered work no line of this quote bills: a final invoice
                   -- leaves it out (QA 2026-11-01, R3 BUG-3).
                   COALESCE((
@@ -4027,6 +4040,9 @@ async fn list_quotes(
                           AND final_invoice.status <> 'cancelled'
                           AND (final_invoice.total_gross <= 0
                                OR final_invoice.credited_amount < final_invoice.total_gross)
+                          -- Overage approved after the final invoice still
+                          -- goes on an interim invoice of this quote.
+                          AND open_overage.gross <= 0
                     )
                 )
              )
@@ -4093,6 +4109,7 @@ async fn list_quotes(
                     "paid_amount": decimal_to_string(row.try_get::<Decimal, _>("paid_amount").unwrap_or(Decimal::ZERO)),
                     "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
                     "active_invoice_types": row.try_get::<Vec<String>, _>("active_invoice_types").unwrap_or_default(),
+                    "final_invoice_credited": row.try_get::<bool, _>("final_invoice_credited").unwrap_or(false),
                     "services_outside_quote": row.try_get::<Value, _>("services_outside_quote").unwrap_or_else(|_| serde_json::json!([])),
                     "open_package_overage_net": decimal_to_string(row.try_get::<Decimal, _>("open_package_overage_net").unwrap_or(Decimal::ZERO)),
                     "open_package_overage_gross": decimal_to_string(row.try_get::<Decimal, _>("open_package_overage_gross").unwrap_or(Decimal::ZERO)),

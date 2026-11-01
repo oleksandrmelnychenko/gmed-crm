@@ -970,42 +970,12 @@ async fn list_debt_management_queue(
                                             + COALESCE(i.prepayment_applied_amount, 0)
                   ), 0) AS overdue_invoice_count,
                   COALESCE((
-                    SELECT SUM(GREATEST(
-                        i.total_gross
-                        - COALESCE(i.credited_amount, 0)
-                        - COALESCE(i.paid_amount, 0)
-                        - COALESCE(i.prepayment_applied_amount, 0),
-                        0
-                    ))
-                    FROM invoices i
-                    WHERE i.order_id = o.id
-                      AND i.status = 'overdue'
-                      AND i.total_gross - COALESCE(i.credited_amount, 0) > COALESCE(i.paid_amount, 0)
-                                            + COALESCE(i.prepayment_applied_amount, 0)
-                  ), 0) AS overdue_balance,
-                  COALESCE((
-                    SELECT SUM(
-                        CASE
-                            WHEN i.status NOT IN ('draft', 'paid', 'cancelled')
-                            THEN GREATEST(
-                                i.total_gross
-                                - COALESCE(i.credited_amount, 0)
-                                - COALESCE(i.paid_amount, 0)
-                                - COALESCE(i.prepayment_applied_amount, 0),
-                                0
-                            )
-                            ELSE 0
-                        END
-                    )
-                    FROM invoices i
-                    WHERE i.order_id = o.id
-                  ), 0) + COALESCE((
                     SELECT SUM(balance.remaining_receivable_gross)
                     FROM external_invoices external
                     JOIN external_invoice_receivable_balances balance
                       ON balance.external_invoice_id = external.id
                     WHERE external.order_id = o.id
-                  ), 0) AS outstanding_balance
+                  ), 0) AS external_receivable
            FROM orders o
            JOIN patients p ON p.id = o.patient_id
            JOIN order_debt_management dm ON dm.order_id = o.id
@@ -1072,20 +1042,54 @@ async fn list_debt_management_queue(
     .await
     {
         Ok(rows) => {
+            // Net of the money GMED holds, like reminders, the statement and
+            // the order card: an invoice a paid advance or a credit balance
+            // covers is no debt (QA 2026-11-01, X3 NEW-2). The query above
+            // only narrows the list down by gross.
+            let order_ids = rows
+                .iter()
+                .filter_map(|row| row.try_get::<Uuid, _>("order_id").ok())
+                .collect::<Vec<_>>();
+            let net_invoices = match crate::routes::debt_management::load_net_open_order_invoices(
+                &state, &order_ids,
+            )
+            .await
+            {
+                Ok(invoices) => invoices,
+                Err(e) => {
+                    tracing::error!(error = %e, "load net open invoices of the debt queue");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to load debt-management queue",
+                    );
+                }
+            };
             let mut items = Vec::with_capacity(rows.len());
             for row in rows {
-                let overdue_invoice_count = row
-                    .try_get::<i64, _>("overdue_invoice_count")
-                    .unwrap_or_default();
-                let outstanding_balance = row
-                    .try_get::<rust_decimal::Decimal, _>("outstanding_balance")
-                    .unwrap_or(rust_decimal::Decimal::ZERO);
-                let overdue_balance = row
-                    .try_get::<rust_decimal::Decimal, _>("overdue_balance")
-                    .unwrap_or(rust_decimal::Decimal::ZERO);
+                let order_id = row.try_get::<Uuid, _>("order_id").unwrap_or_default();
+                let order_invoices = || {
+                    net_invoices
+                        .iter()
+                        .filter(|invoice| invoice.order_id == Some(order_id))
+                };
+                let (overdue_invoice_count, open_invoices) =
+                    crate::routes::debt_management::net_debt_figures(order_invoices());
+                let (_, overdue_balance) = crate::routes::debt_management::net_debt_figures(
+                    order_invoices().filter(|invoice| invoice.overdue),
+                );
+                let outstanding_balance = open_invoices
+                    + row
+                        .try_get::<rust_decimal::Decimal, _>("external_receivable")
+                        .unwrap_or(rust_decimal::Decimal::ZERO);
                 let status: String = row
                     .try_get("status")
                     .unwrap_or_else(|_| "not_required".to_string());
+                if open_only
+                    && overdue_invoice_count == 0
+                    && !crate::routes::debt_management::debt_status_is_open(&status)
+                {
+                    continue;
+                }
                 let effective_status =
                     crate::routes::debt_management::effective_status(&status, overdue_invoice_count);
                 let next_review_at: Option<chrono::DateTime<chrono::Utc>> =
@@ -1124,6 +1128,9 @@ async fn list_debt_management_queue(
                     "outstanding_balance": outstanding_balance.round_cents().normalize().to_string(),
                 }));
             }
+            items.sort_by_key(|item| {
+                std::cmp::Reverse(item["overdue_invoice_count"].as_i64().unwrap_or_default())
+            });
 
             Json(items).into_response()
         }
@@ -1640,7 +1647,19 @@ async fn load_order_billing_closure_blockers(
                    FROM invoices
                    WHERE order_id = $1
                      AND status IN ('sent', 'partially_paid', 'overdue')
-               ), ARRAY[]::text[]) AS unpaid_invoices"#,
+               ), ARRAY[]::text[]) AS unpaid_invoices,
+               overage.approved_unbilled,
+               overage.pending
+           FROM (
+               SELECT COUNT(*) FILTER (WHERE consumption.approval_status = 'approved'
+                                         AND consumption.invoice_id IS NULL) AS approved_unbilled,
+                      COUNT(*) FILTER (WHERE consumption.approval_status = 'pending') AS pending
+               FROM service_package_consumptions consumption
+               JOIN patient_service_packages patient_package
+                 ON patient_package.id = consumption.patient_service_package_id
+               WHERE COALESCE(consumption.order_id, patient_package.order_id) = $1
+                 AND consumption.overage_quantity > 0
+           ) overage"#,
     )
     .bind(order_id)
     .fetch_one(&state.db)
@@ -1655,11 +1674,31 @@ async fn load_order_billing_closure_blockers(
     let approved_uninvoiced: i64 = row.try_get("approved_uninvoiced").unwrap_or(0);
     let draft_invoices: i64 = row.try_get("draft_invoices").unwrap_or(0);
     let unpaid_invoices: Vec<String> = row.try_get("unpaid_invoices").unwrap_or_default();
-    Ok(order_billing_closure_reasons(
-        approved_uninvoiced,
-        draft_invoices,
-        &unpaid_invoices,
-    ))
+    let mut reasons =
+        order_billing_closure_reasons(approved_uninvoiced, draft_invoices, &unpaid_invoices);
+    // A package overage is money of the order too: it stayed unbilled once the
+    // quote was invoiced and the order closed over it (QA 2026-11-01, X3
+    // NEW-1). A pending one could still be approved after the close.
+    reasons.extend(package_overage_closure_reasons(
+        row.try_get("approved_unbilled").unwrap_or(0),
+        row.try_get("pending").unwrap_or(0),
+    ));
+    Ok(reasons)
+}
+
+fn package_overage_closure_reasons(approved_unbilled: i64, pending: i64) -> Vec<String> {
+    let mut reasons = Vec::new();
+    if approved_unbilled > 0 {
+        reasons.push(format!(
+            "{approved_unbilled} approved package overage(s) are not invoiced yet"
+        ));
+    }
+    if pending > 0 {
+        reasons.push(format!(
+            "{pending} package overage(s) still await a decision"
+        ));
+    }
+    reasons
 }
 
 /// `unpaid_invoices` holds `number|status` of issued invoices still open.
@@ -14352,6 +14391,18 @@ mod tests {
                 "1 draft patient invoice(s) are not issued yet".to_string(),
                 "Patient invoice RE-2026-0007 is not paid yet (sent)".to_string(),
                 "Patient invoice RE-2026-0009 is not paid yet (overdue)".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn open_package_overages_hold_the_closure() {
+        assert!(package_overage_closure_reasons(0, 0).is_empty());
+        assert_eq!(
+            package_overage_closure_reasons(1, 2),
+            vec![
+                "1 approved package overage(s) are not invoiced yet".to_string(),
+                "2 package overage(s) still await a decision".to_string(),
             ]
         );
     }

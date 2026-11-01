@@ -50,6 +50,42 @@ pub(crate) async fn load_net_open_invoices(
     Ok(invoices)
 }
 
+/// [`load_net_open_invoices`] for the invoices of several orders.
+pub(crate) async fn load_net_open_order_invoices(
+    state: &AppState,
+    order_ids: &[Uuid],
+) -> Result<Vec<NetOpenInvoice>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT id, order_id, status
+           FROM invoices
+           WHERE order_id = ANY($1)
+             AND status NOT IN ('draft', 'paid', 'cancelled')"#,
+    )
+    .bind(order_ids)
+    .fetch_all(&state.db)
+    .await?;
+    let invoice_ids = rows
+        .iter()
+        .map(|row| row.try_get::<Uuid, _>("id"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let to_pay = crate::routes::invoices::advance_application::invoice_amounts_to_pay(
+        &state.db,
+        &invoice_ids,
+    )
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            let invoice_id: Uuid = row.try_get("id")?;
+            Ok(NetOpenInvoice {
+                invoice_id,
+                order_id: row.try_get("order_id")?,
+                overdue: row.try_get::<String, _>("status")? == "overdue",
+                to_pay: to_pay.get(&invoice_id).copied().unwrap_or(Decimal::ZERO),
+            })
+        })
+        .collect()
+}
+
 /// Overdue invoices that still ask for money, and the open amount.
 pub(crate) fn net_debt_figures<'a>(
     invoices: impl Iterator<Item = &'a NetOpenInvoice>,

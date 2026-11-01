@@ -4149,6 +4149,21 @@ async fn build_selected_invoice_snapshot(
         ));
     }
     if selected_items.is_empty() {
+        // Overage approved after the quote was billed in full has no invoice
+        // to land on: an interim invoice without lines bills it alone (QA
+        // 2026-11-01, X3 NEW-1).
+        if invoice_type == "interim" && requested_items.is_none() {
+            let snapshot = build_invoice_snapshot_with_approved_package_overages(
+                state,
+                ctx.patient_id,
+                ctx.order_id,
+                (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO, Vec::new()),
+            )
+            .await?;
+            if invoice_snapshot_has_package_overage(&snapshot) {
+                return Ok(snapshot);
+            }
+        }
         return Err(err(
             StatusCode::CONFLICT,
             "This quote has no remaining quantities to invoice",
@@ -4172,12 +4187,20 @@ async fn build_selected_invoice_snapshot(
         {
             (total_net, total_vat, total_gross, selected_items)
         } else {
-            (
-                ctx.total_net,
-                ctx.total_vat,
-                ctx.total_gross,
-                ctx.line_items.as_array().cloned().unwrap_or_default(),
-            )
+            // Every quote line is billed here, in quote order. The stored
+            // lines keep their amounts and need the index a line credit note
+            // gives the quantity back through (QA 2026-11-01, X3 NEW-4).
+            let mut stored_lines = ctx.line_items.as_array().cloned().unwrap_or_default();
+            for (line_index, line) in stored_lines.iter_mut().enumerate() {
+                let quantity = line.get("quantity").cloned();
+                if let Some(map) = line.as_object_mut() {
+                    map.insert("quote_line_index".to_string(), json!(line_index));
+                    if let Some(quantity) = quantity {
+                        map.insert("quoted_quantity".to_string(), quantity);
+                    }
+                }
+            }
+            (ctx.total_net, ctx.total_vat, ctx.total_gross, stored_lines)
         };
         let mut snapshot = build_invoice_snapshot_with_approved_package_overages(
             state,
@@ -4592,6 +4615,18 @@ async fn lock_invoiceable_quote_tx(
     Ok(())
 }
 
+/// An active advance or final invoice of the quote; a final invoice credited
+/// in full no longer bills anything (doc 3.3).
+const ADVANCE_BLOCKED_BY_QUOTE_INVOICE_SQL: &str = "SELECT EXISTS(
+    SELECT 1
+    FROM invoices
+    WHERE quote_id = $1
+      AND status <> 'cancelled'
+      AND (invoice_type = 'advance'
+           OR (invoice_type = 'final'
+               AND (total_gross <= 0 OR credited_amount < total_gross)))
+)";
+
 async fn validate_invoice_creation_for_quote(
     state: &AppState,
     ctx: &QuoteInvoiceContext,
@@ -4602,25 +4637,31 @@ async fn validate_invoice_creation_for_quote(
     }
 
     let duplicate_exists: bool = if invoice_type == "advance" {
-        sqlx::query_scalar(
-            "SELECT EXISTS(
-                SELECT 1
-                FROM invoices
-                WHERE quote_id = $1
-                  AND invoice_type = 'advance'
-                  AND status <> 'cancelled'
-            )",
-        )
-        .bind(ctx.quote_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, quote_id = %ctx.quote_id, "check duplicate advance invoice");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to validate invoice duplication",
-            )
-        })?
+        // Beside a final invoice an advance bills the same amount a second
+        // time: its quantity consumes nothing (QA 2026-11-01, X1 N1).
+        let blocked: bool = sqlx::query_scalar(ADVANCE_BLOCKED_BY_QUOTE_INVOICE_SQL)
+            .bind(ctx.quote_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, quote_id = %ctx.quote_id, "check duplicate advance invoice");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate invoice duplication",
+                )
+            })?;
+        // The same when interim invoices already bill every line.
+        let allocated = load_allocated_quote_quantities(state, ctx.quote_id).await?;
+        let fully_billed = ctx.line_items.as_array().is_some_and(|lines| {
+            !lines.is_empty()
+                && lines.iter().enumerate().all(|(line_index, line)| {
+                    let quantity = invoice_json_decimal(line, "quantity").unwrap_or(Decimal::ZERO);
+                    allocated
+                        .get(&line_index)
+                        .is_some_and(|billed| *billed >= quantity)
+                })
+        });
+        blocked || fully_billed
     } else if invoice_type == "interim" {
         // Beside an active final invoice an interim invoice can only take the
         // quantity of a line credited in full, the quantity check guards the
@@ -14291,6 +14332,28 @@ async fn update_invoice_status(
     // the invoice; a released invoice is immutable, so it is never numbered
     // without it.
     if releasing {
+        if locked_invoice_type == "advance" {
+            // A draft advance left behind when the final invoice was made
+            // would bill the amount twice (QA 2026-11-01, X1 N1).
+            match release::active_final_invoice_on_quote(&mut transaction, invoice_id).await {
+                Ok(false) => {}
+                Ok(true) => {
+                    return coded_err(
+                        StatusCode::CONFLICT,
+                        release::ADVANCE_BESIDE_FINAL,
+                        "A final invoice already bills this quote; cancel this advance draft",
+                        json!({}),
+                    );
+                }
+                Err(error) => {
+                    tracing::error!(%error, %invoice_id, "check the final invoice beside an advance");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to update invoice",
+                    );
+                }
+            }
+        }
         if locked_invoice_type != "advance" {
             match release::cancelled_services_on_draft(&mut transaction, invoice_id).await {
                 Ok(services) if services.is_empty() => {}

@@ -195,6 +195,9 @@ pub(crate) struct OrderSettlement {
     /// Services invoiced in advance but never delivered; `gross` is what
     /// released invoices still bill for them (after credit notes).
     undelivered_lines: Vec<SettlementLine>,
+    /// Package overage nobody decided yet: outside the figures, it joins them
+    /// when approved (QA 2026-11-01, X3 NEW-7).
+    pending_overage_gross: Decimal,
     warnings: Vec<&'static str>,
 }
 
@@ -314,6 +317,7 @@ impl OrderSettlement {
             "undelivered_lines": self.undelivered_lines.iter().map(SettlementLine::to_json).collect::<Vec<_>>(),
             "lines": self.lines_json(),
             "cancelled_lines": self.cancelled_lines.iter().map(SettlementLine::to_json).collect::<Vec<_>>(),
+            "pending_overage_gross": decimal_to_string(self.pending_overage_gross),
             "warnings": self.warnings,
         })
     }
@@ -716,6 +720,22 @@ pub(crate) async fn compute_order_settlement(
     .bind(order_id)
     .fetch_all(&mut *conn)
     .await?;
+    let pending_overage_gross = sqlx::query_scalar::<_, Decimal>(
+        r#"SELECT COALESCE(SUM(line.net + ROUND(line.net * line.vat_rate / 100, 2)), 0)
+           FROM (
+               SELECT ROUND(consumption.overage_quantity * consumption.unit_price_net_snapshot, 2) AS net,
+                      consumption.vat_rate_snapshot AS vat_rate
+               FROM service_package_consumptions consumption
+               JOIN patient_service_packages patient_package
+                 ON patient_package.id = consumption.patient_service_package_id
+               WHERE COALESCE(consumption.order_id, patient_package.order_id) = $1
+                 AND consumption.overage_quantity > 0
+                 AND consumption.approval_status = 'pending'
+           ) line"#,
+    )
+    .bind(order_id)
+    .fetch_one(&mut *conn)
+    .await?;
     for row in overage_rows {
         let quantity = row
             .try_get::<Decimal, _>("overage_quantity")
@@ -875,6 +895,7 @@ pub(crate) async fn compute_order_settlement(
         lines,
         cancelled_lines,
         undelivered_lines,
+        pending_overage_gross: pending_overage_gross.round_cents(),
         warnings,
     }))
 }
