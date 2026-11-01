@@ -1912,7 +1912,8 @@ async fn demo_conversion(repeat: bool) {
     assert_eq!(ready["readiness"]["demo_onboarding"]["applied"], true);
 
     // Changing the terms or the source file invalidates the archived test proof.
-    sqlx::query("UPDATE orders SET client_terms_changed_at=now() WHERE id=$1")
+    // The hour keeps the change after the documents if the wall clock steps back.
+    sqlx::query("UPDATE orders SET client_terms_changed_at=now()+interval '1 hour' WHERE id=$1")
         .bind(artifacts.order_id)
         .execute(pool)
         .await

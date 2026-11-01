@@ -184,6 +184,22 @@ async fn seed_generated_draft_of_type(
     document_id
 }
 
+/// Moves the DSGVO revocation an hour back, so that a signature made next is
+/// after it even if the wall clock steps back between the two requests.
+async fn age_dsgvo_revocation(pool: &PgPool, patient_id: Uuid) {
+    sqlx::query(
+        r#"UPDATE patients
+           SET legal_status = jsonb_set(
+               legal_status, '{dsgvo_revoked_at}',
+               to_jsonb((legal_status->>'dsgvo_revoked_at')::timestamptz - interval '1 hour'))
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 /// `POST /admin/compliance/patient/{id}/consents` (the consent register).
 async fn revoke_consent(
     app: &axum::Router,
@@ -654,6 +670,7 @@ async fn a_revoked_dsgvo_consent_unticks_the_item_and_blocks_new_orders_until_si
     );
 
     // A consent signed after the revocation sets the item again.
+    age_dsgvo_revocation(&pool, patient_id).await;
     let renewed = seed_generated_draft(&pool, patient_id, "privacy_consents", admin_id).await;
     let (status, body) = sign_on_paper(&app, renewed, &ceo).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -740,6 +757,7 @@ async fn a_revocation_switches_compliance_completed_off_until_signed_again() {
 
     // A consent signed after the revocation: compliance can be ticked again
     // and the note of the revocation goes.
+    age_dsgvo_revocation(&pool, patient_id).await;
     let renewed = seed_generated_draft(&pool, patient_id, "privacy_consents", admin_id).await;
     let (status, body) = sign_on_paper(&app, renewed, &ceo).await;
     assert_eq!(status, StatusCode::OK, "{body}");

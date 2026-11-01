@@ -380,11 +380,19 @@ async fn fill_mode(app: &PayerApp, lead_id: Uuid, mode: &str) {
 }
 
 async fn submit_request(app: &PayerApp, lead_id: Uuid) {
-    sqlx::query("UPDATE leads SET portal_submitted_at = clock_timestamp() WHERE id = $1")
-        .bind(lead_id)
-        .execute(app.pool())
-        .await
-        .unwrap();
+    // Sent after the consent it carries: a wall clock stepped back between
+    // the two must not make the consent look newer than the request.
+    sqlx::query(
+        r#"UPDATE leads
+           SET portal_submitted_at = GREATEST(
+               clock_timestamp(),
+               (SELECT contact_consent_at FROM lead_payer_declarations WHERE lead_id = $1))
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
 }
 
 /// Names the payer from the cabinet. On a sent request that takes a request
