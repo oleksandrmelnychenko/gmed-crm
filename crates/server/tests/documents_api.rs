@@ -2655,6 +2655,209 @@ async fn booked_interpreter_sees_only_documents_opened_to_him() {
     assert_interpreter_sees_only_documents_opened_to_him(InterpreterPatientLink::Booking).await;
 }
 
+/// QA 2026-11-01 (round 7 BUG-1, BUG-2): identity, GwG and consent papers stay
+/// closed to the interpreter and the team lead whatever appointment they hang
+/// on, and a translation request does not open them. Only a share or an
+/// assignment by name does.
+#[tokio::test]
+async fn closed_papers_stay_closed_on_an_appointment_and_in_a_translation_request() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-closed-papers");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let visit_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let lead_id = seed_user(&pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
+    let lead_bearer = auth_header_for(lead_id, "teamlead_interpreter");
+    seed_patient_assignment(&pool, patient_id, lead_id, admin_id).await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+    sqlx::query("UPDATE appointments SET interpreter_id = $2 WHERE id = $1")
+        .bind(visit_id)
+        .bind(interpreter_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let status_of = |document_id: Uuid, bearer: String| {
+        let app = app.clone();
+        async move {
+            json_request(
+                &app,
+                "GET",
+                &format!("/api/v1/documents/{document_id}"),
+                &bearer,
+                None,
+            )
+            .await
+            .0
+        }
+    };
+
+    // On the interpreter's appointment: the translators' paper opens, a closed one not.
+    let open_id = seed_document(
+        &pool,
+        pm_id,
+        patient_id,
+        visit_id,
+        "released_internal",
+        false,
+        "administrative_appointment_confirmation",
+        &format!("{tag}-open"),
+    )
+    .await;
+    assert_eq!(
+        status_of(open_id, lead_bearer.clone()).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        status_of(open_id, interpreter_bearer.clone()).await,
+        StatusCode::OK
+    );
+    for art in [
+        "payer_identity",
+        "payer_funds_proof",
+        "representative_identity",
+        "representative_authority",
+        "passport_scan",
+        "gwg_identification",
+        "enhanced_due_diligence",
+        "lead_self_disclosure",
+        "payer_self_disclosure",
+        "confidentiality_release",
+    ] {
+        let closed_id = seed_document(
+            &pool,
+            pm_id,
+            patient_id,
+            visit_id,
+            "released_internal",
+            false,
+            art,
+            &format!("{tag}-{art}"),
+        )
+        .await;
+        assert_eq!(
+            status_of(closed_id, lead_bearer.clone()).await,
+            StatusCode::FORBIDDEN,
+            "team lead on {art}"
+        );
+        assert_eq!(
+            status_of(closed_id, interpreter_bearer.clone()).await,
+            StatusCode::FORBIDDEN,
+            "interpreter on {art}"
+        );
+    }
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents?patient_id={patient_id}"),
+        &lead_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.to_string().contains(&open_id.to_string()), "{body}");
+    assert!(!body.to_string().contains("payer_identity"), "{body}");
+
+    // A translation request opens a plain paper to the team lead, not a closed
+    // one, nor its translated result.
+    let plain_id = seed_unfiled_document(
+        &pool,
+        pm_id,
+        patient_id,
+        "released_internal",
+        false,
+        "administrative_appointment_confirmation",
+        &format!("{tag}-plain"),
+    )
+    .await;
+    seed_document_translation_request(&pool, plain_id, patient_id, pm_id).await;
+    assert_eq!(
+        status_of(plain_id, lead_bearer.clone()).await,
+        StatusCode::OK
+    );
+
+    let gwg_id = seed_unfiled_document(
+        &pool,
+        pm_id,
+        patient_id,
+        "released_internal",
+        false,
+        "gwg_identification",
+        &format!("{tag}-gwg"),
+    )
+    .await;
+    let gwg_result_id = seed_unfiled_document(
+        &pool,
+        pm_id,
+        patient_id,
+        "released_internal",
+        false,
+        "translation",
+        &format!("{tag}-gwg-result"),
+    )
+    .await;
+    let gwg_request_id = seed_document_translation_request(&pool, gwg_id, patient_id, pm_id).await;
+    sqlx::query(
+        "UPDATE document_translation_requests SET translated_document_id = $2 WHERE id = $1",
+    )
+    .bind(gwg_request_id)
+    .bind(gwg_result_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        status_of(gwg_id, lead_bearer.clone()).await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        status_of(gwg_result_id, lead_bearer.clone()).await,
+        StatusCode::FORBIDDEN
+    );
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/translation-requests",
+        &lead_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.to_string().contains(&plain_id.to_string()), "{body}");
+    assert!(!body.to_string().contains(&gwg_id.to_string()), "{body}");
+
+    // An explicit share or an assignment by name is a decision and opens it.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{gwg_id}/shares"),
+        &pm_bearer,
+        Some(json!({ "shared_with_user_id": interpreter_id, "channel": "portal" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        status_of(gwg_id, interpreter_bearer.clone()).await,
+        StatusCode::OK
+    );
+    sqlx::query("UPDATE document_translation_requests SET assigned_to = $2 WHERE id = $1")
+        .bind(gwg_request_id)
+        .bind(interpreter_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status_of(gwg_id, interpreter_bearer).await, StatusCode::OK);
+}
+
 #[tokio::test]
 async fn billing_can_access_financial_documents_but_not_medical_ones() {
     let Some((app, pool, admin_id, _)) = test_context().await else {

@@ -514,7 +514,7 @@ impl PatientExportAudience {
 /// GwG, no tipping-off) and a third party's files
 /// ([`super::documents::OTHER_PERSON_DOCUMENT_ARTS`]). Compared with the
 /// document's type, template and compliance kind.
-const PORTAL_EXPORT_CLOSED_TYPES: [&str; 12] = [
+pub(crate) const PORTAL_EXPORT_CLOSED_TYPES: [&str; 12] = [
     "enhanced_due_diligence",
     "gwg_identification",
     "lead_self_disclosure",

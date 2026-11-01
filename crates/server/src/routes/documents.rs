@@ -14003,6 +14003,7 @@ async fn fetch_document_row(
                     WHERE team_request.document_id = d.id
                        OR team_request.translated_document_id = d.id
                   ) AS translation_request_document,
+                  document_translates_closed_paper(d.id) AS translates_closed_paper,
                   (d.patient_id IS NULL AND d.lead_id IS NULL AND d.order_id IS NULL
                    AND d.appointment_id IS NULL AND NOT d.is_medical AND d.art = 'provider_document'
                    AND EXISTS (SELECT 1 FROM provider_document_links link WHERE link.document_id = d.id))
@@ -14919,11 +14920,13 @@ pub(crate) fn can_view_document_row(
     // assignment — does not open the patient's other documents, whether they
     // are internal, released or published to the patient portal. His own
     // uploads and the documents of his own appointment still pass the usual
-    // assignment and release rules below.
+    // assignment and release rules below. A closed paper stays closed on his
+    // appointment too (QA 2026-11-01).
     if auth.role == Role::Interpreter
         && !explicit_share
         && !is_own_upload(auth.user_id, row)
-        && !is_document_of_own_appointment(auth.user_id, row)
+        && (!is_document_of_own_appointment(auth.user_id, row)
+            || is_closed_to_interpreter_team(row))
     {
         return false;
     }
@@ -15036,9 +15039,40 @@ fn is_own_translation_document(row: &sqlx::postgres::PgRow) -> bool {
         .unwrap_or(false)
 }
 
+/// Papers the interpreters' work never opens by itself (QA 2026-11-01):
+/// consents, the GwG sheet, EDD and the statements, funds proofs, the identity
+/// scans of the patient, the payer and a representative, and a translation of
+/// any of them. Neither an appointment nor a translation request opens them
+/// to the interpreter or the team lead; a share or an assignment by name does.
+/// A row read without `translates_closed_paper` counts as closed.
+fn is_closed_to_interpreter_team(row: &sqlx::postgres::PgRow) -> bool {
+    let code = |column: &str| {
+        row.try_get::<Option<String>, _>(column)
+            .unwrap_or_default()
+            .map(|value| value.trim().to_lowercase())
+            .unwrap_or_default()
+    };
+    let category = code("category");
+    let art = code("art");
+    let template = code("generated_template_id");
+    let compliance_kind = code("compliance_kind");
+    let closed_type =
+        |value: &str| crate::routes::admin_compliance::PORTAL_EXPORT_CLOSED_TYPES.contains(&value);
+    is_consent_document_row(row)
+        || category == "compliance_aml"
+        || closed_type(&art)
+        || closed_type(&template)
+        || closed_type(&compliance_kind)
+        || compliance_kind == "identity"
+        || is_identity_document_classification(&art, Some(&category))
+        || row
+            .try_get::<bool, _>("translates_closed_paper")
+            .unwrap_or(true)
+}
+
 /// A document of the interpreters' work: an interpreter's upload, the source
 /// or result of a translation request, or a file on an appointment with an
-/// interpreter. A consent stays out even when filed on such an appointment.
+/// interpreter. A closed paper stays out, whatever hangs it there.
 fn is_interpreter_team_document(row: &sqlx::postgres::PgRow) -> bool {
     let interpreter_upload = row
         .try_get::<Option<String>, _>("ursprung")
@@ -15053,8 +15087,8 @@ fn is_interpreter_team_document(row: &sqlx::postgres::PgRow) -> bool {
         .unwrap_or_default()
         .is_some();
     interpreter_upload
-        || translation_document
-        || (interpreter_appointment && !is_consent_document_row(row))
+        || ((translation_document || interpreter_appointment)
+            && !is_closed_to_interpreter_team(row))
 }
 
 /// An interpreter works only on the translation requests assigned to him: he
@@ -26204,8 +26238,10 @@ fn payer_estimate_catalog_label(service_key: &str) -> &'static str {
 }
 
 /// The service type a line of the estimate is counted under: a pass-through
-/// cost, else the type of the catalogue service the line is, else
-/// "Leistungen". Never the text of the line.
+/// cost, else the type of the catalogue service the line is, else as on the
+/// payer's invoice ([`payer_invoice_line_label`], QA 2026-11-01): tax-free care
+/// or the agency's service, "Leistungen" for a line with no rate. Never the
+/// text of the line.
 fn payer_estimate_category(
     item: &GeneratedContractLineItem,
     catalog: &[(String, String)],
@@ -26218,7 +26254,13 @@ fn payer_estimate_category(
         .iter()
         .find(|(name, _)| !name.is_empty() && *name == description)
         .map(|(_, key)| payer_estimate_catalog_label(key))
-        .unwrap_or("Leistungen")
+        .unwrap_or_else(
+            || match item.vat_rate.as_deref().and_then(parse_eur_decimal) {
+                Some(rate) if rate.is_zero() => "Medizinische Leistungen",
+                Some(_) => "Leistungen der Agentur",
+                None => "Leistungen",
+            },
+        )
 }
 
 /// The amount a line of the estimate shows in its "Summe" column, as a number.
@@ -31173,6 +31215,7 @@ async fn list_documents(
                     WHERE team_request.document_id = d.id
                        OR team_request.translated_document_id = d.id
                   ) AS translation_request_document,
+                  document_translates_closed_paper(d.id) AS translates_closed_paper,
                   EXISTS(
                     SELECT 1
                     FROM patient_assignments pa
@@ -31418,6 +31461,7 @@ async fn list_document_intake_queue(
                     WHERE team_request.document_id = d.id
                        OR team_request.translated_document_id = d.id
                   ) AS translation_request_document,
+                  document_translates_closed_paper(d.id) AS translates_closed_paper,
                   EXISTS(
                     SELECT 1
                     FROM patient_assignments pa
@@ -31809,6 +31853,7 @@ async fn list_document_versions(
                     WHERE team_request.document_id = d.id
                        OR team_request.translated_document_id = d.id
                   ) AS translation_request_document,
+                  document_translates_closed_paper(d.id) AS translates_closed_paper,
                   EXISTS(
                     SELECT 1
                     FROM patient_assignments pa
@@ -31946,6 +31991,7 @@ async fn list_document_translation_request_queue(
                   d.art AS document_art,
                   d.category AS document_category,
                   d.lead_id, d.visibility, d.is_medical, d.art, d.category,
+                  d.generated_template_id, d.compliance_kind,
                   d.ursprung, d.uploaded_by, d.appointment_id,
                   a.interpreter_id AS appointment_interpreter_id,
                   a.owner_user_id AS appointment_owner_id,
@@ -31973,6 +32019,7 @@ async fn list_document_translation_request_queue(
                     WHERE team_request.document_id = d.id
                        OR team_request.translated_document_id = d.id
                   ) AS translation_request_document,
+                  document_translates_closed_paper(d.id) AS translates_closed_paper,
                   p.patient_id AS patient_pid,
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name
            FROM document_translation_requests dtr
@@ -40830,7 +40877,10 @@ mod tests {
         let rows = super::payer_estimate_rows(&items, &catalog);
         assert_eq!(
             rows.iter().map(|(label, _)| *label).collect::<Vec<_>>(),
-            ["Leistungen", "Dolmetscher- und Übersetzungsleistungen"]
+            [
+                "Leistungen der Agentur",
+                "Dolmetscher- und Übersetzungsleistungen"
+            ]
         );
         assert_eq!(super::format_eur_decimal(rows[0].1), "1.500,00 €");
         assert_eq!(super::format_eur_decimal(rows[1].1), "300,00 €");
@@ -40898,7 +40948,7 @@ mod tests {
             "Ausfertigung für die zahlende Person (Kostenübernehmer/in)",
             "Kostenübernehmer/in: Viktor Zahler, Ringstraße 9, 1010 Wien, Österreich",
             "LEISTUNGSART",
-            "Leistungen",
+            "Leistungen der Agentur",
             "1.500,00 €",
             "Dolmetscher- und Übersetzungsleistungen",
             "300,00 €",
@@ -44753,8 +44803,10 @@ mod tests {
         // out of the payer's declaration (QA 2026-10-31).
         for expected in [
             "LEISTUNGSART",
-            "Leistungen",
-            "910,00 €",
+            "Leistungen der Agentur",
+            "360,00 €",
+            "Medizinische Leistungen",
+            "550,00 €",
             "Dolmetscher- und Übersetzungsleistungen",
             "760,00 €",
         ] {

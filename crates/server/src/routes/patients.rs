@@ -8368,6 +8368,7 @@ async fn list_patient_documents(
                     WHERE team_request.document_id = d.id
                        OR team_request.translated_document_id = d.id
                   ) AS translation_request_document,
+                  document_translates_closed_paper(d.id) AS translates_closed_paper,
                   EXISTS(
                     SELECT 1
                     FROM document_signature_members consent_member
@@ -8917,7 +8918,8 @@ async fn load_staff_visible_patient_document_ids(
                     SELECT 1 FROM document_translation_requests team_request
                     WHERE team_request.document_id = d.id
                        OR team_request.translated_document_id = d.id
-                  ) AS translation_request_document
+                  ) AS translation_request_document,
+                  document_translates_closed_paper(d.id) AS translates_closed_paper
            FROM documents d
            WHERE d.patient_id = $1
              AND ($3::boolean OR d.status IN ('draft', 'active'))"#,
