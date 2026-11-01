@@ -334,7 +334,7 @@ export function useAppointmentDetail({
 
   const currentDetailResourceKey = selectedId ? `${selectedId}:${detailVersion}` : "";
   const {
-    canManageChecklist,
+    canViewChecklist,
     canViewCommunications,
     canViewConciergeServices,
     canViewReminders,
@@ -349,7 +349,7 @@ export function useAppointmentDetail({
         detailTab,
         isMobile,
         {
-          canManageChecklist,
+          canViewChecklist,
           canViewCommunications,
           canViewConciergeServices,
           canViewReminders,
@@ -359,7 +359,7 @@ export function useAppointmentDetail({
         selectedDetailIsBlocked,
       ),
     [
-      canManageChecklist,
+      canViewChecklist,
       canViewCommunications,
       canViewConciergeServices,
       canViewReminders,

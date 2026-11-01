@@ -59,6 +59,7 @@ async fn list_tasks(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Interpreter,
@@ -144,6 +145,7 @@ async fn get_task(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Interpreter,
@@ -575,7 +577,9 @@ async fn ensure_assignee_has_patient_scope(
 }
 
 async fn can_view_task(state: &AppState, auth: &AuthUser, row: &sqlx::postgres::PgRow) -> bool {
-    if auth.role == Role::Ceo {
+    // The CEO assistant reads everything the CEO reads and changes nothing
+    // here (RBAC 74, QA 2026-11-01).
+    if matches!(auth.role, Role::Ceo | Role::CeoAssistant) {
         return true;
     }
 

@@ -60,6 +60,10 @@ export function appointmentPermissions(actor?: Actor): AppointmentPermissions {
   const coordinates = can("appointments.status");
   const approvesReports = can("appointments.report.approve");
   const submitsReports = can("appointments.report.submit");
+  // The service checklist belongs to the roles that run the service workflow.
+  const managesChecklist = coordinates || (canEdit && can("services.edit"));
+  // The CEO assistant reads both and changes neither (QA 2026-11-01).
+  const assistant = role === "ceo_assistant";
   return {
     canViewPage: canView,
     canCreate: canEdit,
@@ -67,15 +71,15 @@ export function appointmentPermissions(actor?: Actor): AppointmentPermissions {
     canDelete: can("appointments.delete"),
     canManageStatus: coordinates,
     canAssignInterpreter: can("appointments.assign_interpreter"),
-    // The service checklist belongs to the roles that run the service workflow.
-    canManageChecklist: coordinates || (canEdit && can("services.edit")),
+    canManageChecklist: managesChecklist,
+    canViewChecklist: managesChecklist || assistant,
     canViewReminders: canView,
     canManageReminders: coordinates,
     canRespondToAssignment:
       submitsReports && (role === "interpreter" || role === "teamlead_interpreter"),
     canSubmitReport:
       submitsReports && (role === "interpreter" || role === "teamlead_interpreter"),
-    canViewReport: approvesReports || submitsReports,
+    canViewReport: approvesReports || submitsReports || assistant,
     canApproveReport: approvesReports,
     canRejectReport: approvesReports,
     canViewNotes: canView && can("patients.medical.view"),
@@ -104,6 +108,7 @@ export function blockedSlotPermissions(
     canManageStatus: false,
     canAssignInterpreter: false,
     canManageChecklist: false,
+    canViewChecklist: false,
     canManageReminders: false,
     canViewNotes: false,
     canViewCommunications: false,

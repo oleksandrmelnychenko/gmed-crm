@@ -812,6 +812,7 @@ export type AppointmentPermissions = {
   canManageStatus: boolean;
   canAssignInterpreter: boolean;
   canManageChecklist: boolean;
+  canViewChecklist: boolean;
   canViewReminders: boolean;
   canManageReminders: boolean;
   canRespondToAssignment: boolean;

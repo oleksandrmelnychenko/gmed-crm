@@ -2797,7 +2797,14 @@ function useLeadsPageContent() {
                               )
                             }
                           />
-                          <span>{t.lead_healthcare_consent_available}</span>
+                          <span>
+                            {t.lead_healthcare_consent_available}
+                            {detailMedicalHidden ? (
+                              <span className="mt-1 block text-xs text-muted-foreground" data-testid="lead-gate-healthcare-consent-hint">
+                                {t.lead_healthcare_consent_recorded_by_manager}
+                              </span>
+                            ) : null}
+                          </span>
                         </label>
                         <label className={cn("flex items-start gap-3 rounded-lg px-4 py-3 text-sm text-foreground", tokens.surface.mutedCard)}>
                           <input

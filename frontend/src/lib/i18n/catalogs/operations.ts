@@ -480,6 +480,7 @@ export interface OperationsTranslations {
   lead_promote_to_console_success: string;
   lead_console_promoted_at: string;
   lead_healthcare_consent_available: string;
+  lead_healthcare_consent_recorded_by_manager: string;
   lead_privacy_practices_accepted: string;
   lead_save_gate_data: string;
   lead_failed_resolution_title: string;
@@ -1132,6 +1133,7 @@ export const operationsRu: OperationsTranslations = {
   lead_promote_to_console_success: "Лид переведён в консольный формат.",
   lead_console_promoted_at: "Переведён в консоль",
   lead_healthcare_consent_available: "Получено согласие на обработку медицинских данных",
+  lead_healthcare_consent_recorded_by_manager: "Отмечает менеджер пациента или клиент в кабинете.",
   lead_privacy_practices_accepted: "Согласие на обработку запроса получено на бумаге",
   lead_save_gate_data: "Сохранить данные",
   lead_failed_resolution_title: "Закрыть лид",
@@ -1801,6 +1803,7 @@ export const operationsDe: OperationsTranslations = {
   lead_promote_to_console_success: "Lead wurde in den Konsolenmodus übernommen.",
   lead_console_promoted_at: "In Konsole übernommen",
   lead_healthcare_consent_available: "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor",
+  lead_healthcare_consent_recorded_by_manager: "Tragen das Patientenmanagement oder der Kunde im Portal ein.",
   lead_privacy_practices_accepted: "Einwilligung zur Bearbeitung der Anfrage auf Papier erhalten",
   lead_save_gate_data: "Daten speichern",
   lead_failed_resolution_title: "Lead schließen",

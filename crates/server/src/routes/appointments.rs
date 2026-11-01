@@ -7696,7 +7696,12 @@ async fn list_checklist(
     Extension(auth): Extension<AuthUser>,
     Path(apt_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::CeoAssistant,
+        Role::PatientManager,
+        Role::Concierge,
+    ]) {
         return e;
     }
     if let Err(resp) = ensure_checklist_access(&state, &auth, apt_id).await {
@@ -10760,7 +10765,9 @@ async fn ensure_checklist_access(
     auth: &AuthUser,
     appointment_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    if auth.role.has_full_access() || auth.role == Role::PatientManager {
+    // The assistant reaches this from the checklist's read route only.
+    if auth.role.has_full_access() || matches!(auth.role, Role::PatientManager | Role::CeoAssistant)
+    {
         return Ok(());
     }
 

@@ -2059,6 +2059,10 @@ async fn ceo_assistant_opens_appointment_detail_and_order_pipeline() {
     for path in [
         format!("/api/v1/appointments/{appointment_id}/reminders"),
         format!("/api/v1/appointments/{appointment_id}/communications"),
+        // QA 2026-11-01 (round 7 BUG-3, BUG-4): the workflow tab's reads.
+        format!("/api/v1/appointments/{appointment_id}/checklist"),
+        format!("/api/v1/appointments/{appointment_id}/report"),
+        format!("/api/v1/tasks?appointment_id={appointment_id}"),
         format!("/api/v1/orders/{order_id}/workflow-checklist"),
     ] {
         let (status, body) = json_request(&app, "GET", &path, &bearer, None).await;

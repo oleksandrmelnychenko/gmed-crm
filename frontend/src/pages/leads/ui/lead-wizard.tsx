@@ -10431,7 +10431,8 @@ ${serviceCommentLines.join("\n")}`
                       for a minor) shows here as given and locks the toggle; the toggle
                       itself records only a consent obtained outside the cabinet (paper). */}
                   <ToggleRow id={PRIVACY_CONSENT_ID} checked={privacyConsentGiven} disabled={isBusy || cabinetConsents.privacy} withDivider={false} onChange={(checked) => patch("privacyConsent", checked)} label={privacyConsentToggleLabel(cabinetConsents, tx)} />
-                  <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={healthcareConsentGiven} disabled={isBusy || cabinetConsents.healthcare} withDivider={false} onChange={(checked) => patch("healthcareConsent", checked)} label={healthcareConsentToggleLabel(cabinetConsents, tx)} />
+                  {/* Sales cannot change the Art. 9 consent (server 403), and is told who does (QA 2026-11-01). */}
+                  <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={healthcareConsentGiven} disabled={isBusy || cabinetConsents.healthcare || lead?.medical_fields_hidden === true} withDivider={false} onChange={(checked) => patch("healthcareConsent", checked)} label={healthcareConsentToggleLabel(cabinetConsents, tx)} hint={lead?.medical_fields_hidden === true && !healthcareConsentGiven ? tx("Отмечает менеджер пациента или клиент в кабинете.", "Tragen das Patientenmanagement oder der Kunde im Portal ein.") : undefined} hintTestId="lead-wizard-healthcare-consent-hint" />
                   {/* A consent staff recorded in the client's form names that way, never the
                       cabinet nor paper (owner 2026-10-30). */}
                   {cabinetConsentsNote(cabinetConsents, tx) ? (

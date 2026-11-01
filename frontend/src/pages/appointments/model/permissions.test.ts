@@ -53,6 +53,19 @@ describe("appointment role contracts", () => {
     );
   });
 
+  it("lets the CEO assistant read the checklist and the report and act on neither", () => {
+    expect(appointmentPermissions("ceo_assistant")).toEqual(
+      expect.objectContaining({
+        canViewChecklist: true,
+        canManageChecklist: false,
+        canViewReport: true,
+        canApproveReport: false,
+        canSubmitReport: false,
+      }),
+    );
+    expect(appointmentPermissions("interpreter").canViewChecklist).toBe(false);
+  });
+
   it("withholds change actions on an appointment the server says the team lead cannot change", () => {
     const teamlead = appointmentPermissions("teamlead_interpreter");
     const teamContext = appointmentRecordPermissions(teamlead, {

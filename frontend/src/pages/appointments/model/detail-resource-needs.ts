@@ -23,7 +23,7 @@ export const APPOINTMENT_DETAIL_RESOURCE_GROUPS: AppointmentDetailResourceGroup[
 
 type AppointmentDetailResourcePermissions = Pick<
   AppointmentPermissions,
-  | "canManageChecklist"
+  | "canViewChecklist"
   | "canViewCommunications"
   | "canViewConciergeServices"
   | "canViewReminders"
@@ -48,7 +48,7 @@ const DETAIL_RESOURCE_GROUP_PERMISSIONS: Record<
   AppointmentDetailResourceGroup,
   (permissions: AppointmentDetailResourcePermissions) => boolean
 > = {
-  checklist: (permissions) => permissions.canManageChecklist,
+  checklist: (permissions) => permissions.canViewChecklist,
   reminders: (permissions) => permissions.canViewReminders,
   report: (permissions) => permissions.canViewReport,
   tasks: (permissions) => permissions.canViewTasks,

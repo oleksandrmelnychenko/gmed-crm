@@ -319,7 +319,7 @@ function AppointmentWorkflowTab({
   const showInterpreterSection =
     permissions.canAssignInterpreter ||
     (permissions.canRespondToAssignment && detail.interpreter_id === currentUserId);
-  const showChecklistSection = permissions.canManageChecklist;
+  const showChecklistSection = permissions.canViewChecklist;
   const showReminderSection = permissions.canViewReminders;
   const showTaskSection = permissions.canViewTasks;
 
@@ -447,6 +447,7 @@ function AppointmentWorkflowTab({
               <MemoizedAppointmentChecklistSection
                 detail={detail}
                 items={checklistItems}
+                readOnly={!permissions.canManageChecklist}
                 onRefresh={onRefresh}
                 onError={onError}
               />
@@ -1135,11 +1136,14 @@ function createChecklistFieldAction<K extends keyof ChecklistSectionState>(
 function AppointmentChecklistSection({
   detail,
   items,
+  readOnly = false,
   onRefresh,
   onError,
 }: {
   detail: AppointmentDetail;
   items: ChecklistItem[];
+  /** Read without acting on it: the CEO assistant. */
+  readOnly?: boolean;
   onRefresh: () => void;
   onError: (message: string) => void;
 }) {
@@ -1344,7 +1348,7 @@ function AppointmentChecklistSection({
               <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
             {appointmentText("appointments_checklist")}
           </span>
-          {checklistClosed ? null : (
+          {checklistClosed || readOnly ? null : (
             <Button
               type="button"
               size="sm"
@@ -1359,7 +1363,7 @@ function AppointmentChecklistSection({
         </>
       }
       rowActions={(item) =>
-        item.is_completed || checklistClosed ? null : (
+        item.is_completed || checklistClosed || readOnly ? null : (
           <Button
             variant="outline"
             size="xs"
