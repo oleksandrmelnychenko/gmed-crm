@@ -130,6 +130,23 @@ function emptyAnswers(): PayerAnswers {
   };
 }
 
+describe("the register extract in the summary (QA 2026-11-01)", () => {
+  const identityGroup = (current: PayerQuestionnaire) =>
+    summaryGroups(current, draftFromQuestionnaire(current), PAYER_STEPS, payerLinkText("de"), "de").find((group) => group.step === "identity");
+
+  it("says the extract stands in for the ID, not «Keine Angabe» and «Keine Datei»", () => {
+    const group = identityGroup({ ...questionnaire("company"), register_extract_on_file: true });
+    expect(group?.rows).toEqual([{ label: "Handelsregisterauszug", value: "Liegt GMED vor" }]);
+    expect(group?.documents).toBeUndefined();
+  });
+
+  it("keeps the ID the payer gave anyway, and the file row without an extract", () => {
+    const given = identityGroup({ ...questionnaire("company", { id_document_number: "L01X00T47" }), register_extract_on_file: true });
+    expect(given?.rows.map((row) => row.value)).toEqual(["L01X00T47"]);
+    expect(identityGroup(questionnaire("company"))?.documents).toBeDefined();
+  });
+});
+
 function questionnaire(payerType: PayerType = "person", answers: Partial<PayerAnswers> = {}, asked = true): PayerQuestionnaire {
   return {
     patient_name: "Mia Muster",

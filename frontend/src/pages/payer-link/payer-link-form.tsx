@@ -13,6 +13,7 @@ import {
   draftFromQuestionnaire,
   fieldValue,
   fundsSourceOptions,
+  isOrganisation,
   missingByStep,
   payerSteps,
   refusedField,
@@ -358,6 +359,7 @@ function DraftForm({
   questionnaireRef.current = questionnaire;
   // Sent, or the session or the link is gone: the last autosave must not write any more.
   const closedRef = useRef(false);
+  const advancingRef = useRef(false);
 
   const linkProblem = useCallback(
     (problem: LinkProblem) => {
@@ -405,6 +407,15 @@ function DraftForm({
     [linkProblem, reload],
   );
 
+  // "Next" reads what the save it waited for returned, before the page shows it.
+  const questionnaireStored = useCallback(
+    (next: PayerQuestionnaire) => {
+      questionnaireRef.current = next;
+      onQuestionnaire(next);
+    },
+    [onQuestionnaire],
+  );
+
   const form = useAnswersForm({
     questionnaire,
     client,
@@ -412,7 +423,7 @@ function DraftForm({
     text,
     writable: consented,
     closed: closedRef,
-    onQuestionnaire,
+    onQuestionnaire: questionnaireStored,
     onSaveState: setSaveState,
     onFailure: handleFailure,
   });
@@ -467,6 +478,9 @@ function DraftForm({
     setNotice(null);
     setSubmitError(null);
     setStep(next);
+    // Staff may have filed the register extract while this page stayed open: the
+    // step and the summary then ask less (QA 2026-11-01).
+    if (isOrganisation(payerType) && consented && (next === "identity" || next === "summary")) void reload();
     // The new step starts at its top; on a phone the old one may have been scrolled far down.
     topRef.current?.scrollIntoView({ block: "start" });
   };
@@ -532,13 +546,24 @@ function DraftForm({
   // stays, the next press goes on; nothing is shown before.
   const stepMissing = missingByStep(questionnaire.missing_for_submit ?? [], payerType, steps).find((group) => group.step === step)?.keys ?? [];
   const missingShown = missingShownSteps.has(step);
-  const next = () => {
-    if (!following) return;
-    if (consented && stepMissing.length > 0 && !missingShown) {
-      setMissingShownSteps((current) => new Set(current).add(step));
-      return;
+  const next = async () => {
+    if (!following || advancingRef.current) return;
+    advancingRef.current = true;
+    try {
+      // The list counts what is saved: the answer typed just before the press is
+      // saved first, or that press only saved it (QA 2026-11-01).
+      if (consented) await form.flush();
+      const open = missingByStep(questionnaireRef.current.missing_for_submit ?? [], payerType, steps).some(
+        (group) => group.step === step && group.keys.length > 0,
+      );
+      if (consented && open && !missingShown) {
+        setMissingShownSteps((current) => new Set(current).add(step));
+        return;
+      }
+      goTo(following);
+    } finally {
+      advancingRef.current = false;
     }
-    goTo(following);
   };
 
   let content;
@@ -644,7 +669,7 @@ function DraftForm({
         )}
         {following ? (
           // Before the privacy notice is confirmed "next" says so when pressed, not beforehand.
-          <Button type="button" className="h-9 gap-1.5" onClick={next} data-testid="payer-link-next">
+          <Button type="button" className="h-9 gap-1.5" onClick={() => void next()} data-testid="payer-link-next">
             {text.next}
             <ArrowRight aria-hidden="true" className="size-4" />
           </Button>

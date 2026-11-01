@@ -128,6 +128,8 @@ export type PayerLinkText = {
   legalTopics: Record<LegalQuestion, string>;
   identityIntroOrganisation: string;
   identityExtractOnFile: string;
+  identityExtractLabel: string;
+  identityExtractOnFileShort: string;
   idDocumentTypes: Record<IdDocumentType, string>;
   identityFiles: string;
   identityUploadButton: string;
@@ -386,6 +388,8 @@ const de: PayerLinkText = {
   },
   identityExtractOnFile:
     "GMED liegt der Handelsregisterauszug der Organisation vor. Die Angaben zum Ausweis sind daher freiwillig; Sie können diesen Schritt überspringen.",
+  identityExtractLabel: "Handelsregisterauszug",
+  identityExtractOnFileShort: "Liegt GMED vor",
   identityIntroOrganisation:
     "Bitte geben Sie die Daten des Ausweisdokuments der Person an, die die Organisation vertritt, und laden Sie ein Foto oder einen Scan hoch.",
   idDocumentTypes: { passport: "Reisepass", id_card: "Personalausweis", residence_permit: "Aufenthaltstitel" },
@@ -686,6 +690,8 @@ const en: PayerLinkText = {
   },
   identityExtractOnFile:
     "GMED already holds the organisation's commercial register extract. The ID details are therefore optional, and you can skip this step.",
+  identityExtractLabel: "Commercial register extract",
+  identityExtractOnFileShort: "Held by GMED",
   identityIntroOrganisation:
     "Please enter the details of the identity document of the person who represents the organisation, and upload a photo or scan of it.",
   idDocumentTypes: { passport: "Passport", id_card: "Identity card", residence_permit: "Residence permit" },
@@ -985,6 +991,8 @@ const uk: PayerLinkText = {
   },
   identityExtractOnFile:
     "GMED уже має витяг із торгового реєстру організації. Тому дані документа необов’язкові, цей крок можна пропустити.",
+  identityExtractLabel: "Витяг із торгового реєстру",
+  identityExtractOnFileShort: "Є в GMED",
   identityIntroOrganisation:
     "Будь ласка, вкажіть дані документа особи, яка представляє організацію, і завантажте його фото або скан.",
   idDocumentTypes: {
@@ -1287,6 +1295,8 @@ const ru: PayerLinkText = {
   },
   identityExtractOnFile:
     "У GMED уже есть выписка из торгового реестра организации. Поэтому данные документа необязательны, этот шаг можно пропустить.",
+  identityExtractLabel: "Выписка из торгового реестра",
+  identityExtractOnFileShort: "Есть в GMED",
   identityIntroOrganisation:
     "Пожалуйста, укажите данные документа лица, которое представляет организацию, и загрузите его фото или скан.",
   idDocumentTypes: {

@@ -171,13 +171,17 @@ export function summaryGroups(questionnaire: PayerQuestionnaire, draft: PayerDra
     );
   });
 
+  // The extract replaces the ID: no "not stated", no "no file" for what is not asked (QA 2026-11-01).
+  const identityFiles = questionnaire.identity_documents ?? [];
+  const extractInstead = organisation && questionnaire.register_extract_on_file === true && identity.length === 0 && identityFiles.length === 0;
+
   const all: Group[] = [
     { step: "privacy", rows: privacy },
     { step: "details", rows: details },
     {
       step: "identity",
-      rows: identity,
-      documents: { label: text.identityFiles, items: questionnaire.identity_documents ?? [] },
+      rows: extractInstead ? [{ label: text.identityExtractLabel, value: text.identityExtractOnFileShort }] : identity,
+      documents: extractInstead ? undefined : { label: text.identityFiles, items: identityFiles },
     },
     { step: "owners", rows: owners },
     {
