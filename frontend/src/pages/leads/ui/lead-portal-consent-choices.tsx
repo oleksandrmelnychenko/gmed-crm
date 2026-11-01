@@ -5,6 +5,7 @@ import { StatusChip } from "@/components/ui/status-chip";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { normalizeScopeCodes, staffScopeSummary } from "@/lib/consent-recipient-scope";
 import type { LeadPortalIntake } from "../data/lead-portal-intake-api";
+import { ClientFormEditButton } from "./lead-client-form-dialog";
 import {
   PORTAL_CONSENT_CHANNELS,
   PORTAL_CONSENT_OPTIONS,
@@ -86,7 +87,10 @@ function RecipientCards({ persons, relationLabels, tx, testId }: {
   );
 }
 
-/** Read-only cabinet choices; staff never change or preset the person's consent. */
+/**
+ * The cabinet's choices, read-only here: staff change them only in the client's form,
+ * with how the client gave them (owner 2026-10-29), so «Изменить» opens that step.
+ */
 export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalIntake | null; tx: Tx }) {
   const form = intake?.consent_form;
   const disclosure = intake?.disclosure;
@@ -132,8 +136,9 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
     <div className="@container/consents rounded-xl bg-muted/30 p-2 sm:p-3">
     <div className="grid items-start gap-4 @5xl/consents:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
     <section className="@container min-w-0 rounded-xl border border-border/60 bg-card" data-testid="portal-disclosure" aria-label={tx("Информация третьим лицам", "Auskunft an Dritte")}>
-      <div className="space-y-1 border-b border-border/60 px-4 py-3.5">
+      <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3.5">
         <AdminSectionTitle className="text-sm">{tx("Информация третьим лицам", "Auskunft an Dritte")}</AdminSectionTitle>
+        <ClientFormEditButton section="disclosure" className="ml-auto" />
       </div>
       <div className="space-y-4 p-4">
       {/* Optional (owner 2026-10-19): an explicit "No" is the person's own valid
@@ -213,8 +218,9 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
       </ConsentDetails> : <p className="border-t border-border/60 px-4 py-3 text-sm leading-5 text-foreground">{tx("Отдельное решение и согласие на предоставление информации ещё не зафиксированы.", "Eine gesonderte Entscheidung und Einwilligung zur Auskunft sind noch nicht dokumentiert.")}</p>}
     </section>
     {form ? <section className="@container min-w-0 rounded-xl border border-border/60 bg-card" data-testid="portal-consent-choices" aria-label={tx("Передача данных · Anlage 1", "Datenübermittlung · Anlage 1")}>
-      <div className="space-y-1 border-b border-border/60 px-4 py-3.5">
+      <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3.5">
         <AdminSectionTitle className="text-sm">{tx("Передача данных · Anlage 1", "Datenübermittlung · Anlage 1")}</AdminSectionTitle>
+        <ClientFormEditButton section="consents" className="ml-auto" />
       </div>
       <div className="space-y-5 p-4">
       {!form.choices ? <p className="rounded-lg bg-muted/35 p-3 text-sm text-foreground">{tx("Выбор ещё не сохранён в кабинете", "Noch keine Auswahl im Kundenkabinett gespeichert")}</p> : null}

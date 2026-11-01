@@ -14,6 +14,8 @@ export type ClientFormSection =
   | "relationship_proof"
   | "follow_up"
   | "legal"
+  | "disclosure"
+  | "consents"
   | "billing"
   | "payer_organisation"
   | "services";
@@ -40,6 +42,10 @@ export function clientFormStepOf(section: ClientFormSection): StepId {
       return "billing";
     case "services":
       return "services";
+    case "disclosure":
+      return "disclosure";
+    case "consents":
+      return "documents";
     case "birth":
     case "economic_interest":
     case "enhanced_details":

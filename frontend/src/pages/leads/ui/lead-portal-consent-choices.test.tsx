@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { normalizeLeadPortalIntake, type LeadPortalIntake } from "../data/lead-portal-intake-api";
 import { normalizeConsentRecipients, normalizeLeadPortalConsentForm, normalizeLeadPortalDisclosure } from "../model/lead-portal-consents";
 import { CabinetPersonRow } from "./lead-cabinet-person-row";
+import { ClientFormEditContext } from "./lead-client-form-dialog";
 import { PortalConsentChoiceView } from "./lead-portal-consent-choices";
 import { PortalHealthConsentLine, PortalInquiryConsentLine } from "./lead-wizard-portal-intake";
 
@@ -24,6 +25,18 @@ const chip = (icon: string, text: string) =>
   new RegExp(`lucide-${icon}[^>]*>(?:(?!</span>).)*</svg>${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</span>`);
 
 describe("portal consent facts in the staff wizard", () => {
+  it("offers «Изменить» for the choices only where the wizard may open the client's form", () => {
+    const intake = state({ consent_form: savedForm });
+    const view = <PortalConsentChoiceView intake={intake} tx={tx} />;
+    expect(renderToStaticMarkup(view)).not.toContain("lead-client-form-edit-consents");
+    const html = renderToStaticMarkup(
+      <ClientFormEditContext.Provider value={{ open: () => undefined, tx }}>{view}</ClientFormEditContext.Provider>,
+    );
+    expect(html).toContain('data-testid="lead-client-form-edit-consents"');
+    expect(html).toContain('data-step="documents"');
+    expect(html).toContain('data-testid="lead-client-form-edit-disclosure"');
+  });
+
   it("shows the stored trusted list independently of a consent choice and does not grant permission", () => {
     const intake = state({ trusted_persons: [{ name: "Eva Muster", relation: "friend", contact: "eva@example.com" }] });
     const html = renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={tx} />);

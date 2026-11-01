@@ -20,6 +20,8 @@ describe("clientFormStepOf", () => {
       relationship_proof: "follow_up",
       follow_up: "follow_up",
       legal: "follow_up",
+      disclosure: "disclosure",
+      consents: "documents",
     };
     for (const [section, step] of Object.entries(expected)) {
       expect(clientFormStepOf(section as ClientFormSection)).toBe(step);
