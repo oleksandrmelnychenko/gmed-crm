@@ -377,6 +377,22 @@ export function legacyPayingParent(summary: Pick<PatientPayerSummary, "patient_i
     (email !== "" && key(person.email) === email) || (name !== "" && name !== "—" && key(person.name) === name));
 }
 
+/**
+ * The parent who pays a minor according to the contracting party, when the
+ * declaration names nobody: the cabinet records a paying parent without a
+ * named declaration, and the block stayed empty (QA 2026-11-01, W2 N5). The
+ * default payer, else the one parent left as the party.
+ */
+export function payingParentOfParty(
+  summary: Pick<PatientPayerSummary, "patient_is_minor" | "declaration" | "contracting_party">,
+): ContractingPartyRepresentative | null {
+  if (!summary.patient_is_minor || isThirdPartyPayer(summary.declaration)) return null;
+  if (summary.declaration && payerDisplayName(summary.declaration) !== "—") return null;
+  const representatives = summary.contracting_party?.representatives ?? [];
+  return representatives.find((person) => person.is_default_payer)
+    ?? (representatives.length === 1 ? representatives[0] : null);
+}
+
 /** Line 1 of the card: "Patient selbst", "Dritte/r — Privatperson", a paying parent, or that nothing was declared. */
 export function whoPaysLabel(declaration: PatientPayerDeclaration | null, tx: Tx): string {
   if (!declaration) {

@@ -142,6 +142,16 @@ describe("PatientPayerSummaryCardView", () => {
     expect(german).toMatch(/<button[^>]*>Erneut versuchen<\/button>/);
   });
 
+  it("a paying parent the declaration does not name: taken from the contracting party (W2 N5)", () => {
+    const parent = minorExample();
+    const summary = { ...parent, declaration: null, identification: null };
+    const html = render({ status: "loaded", summary });
+    expect(block(html, "who-pays")).toContain("Родитель / законный представитель");
+    expect(block(html, "name")).toContain("Anna Muster");
+    expect(block(html, "address")).toContain("Musterweg 1");
+    expect(block(html, "contact")).toContain("anna.muster@example.com");
+  });
+
   it("Billing: the projection without identification, in order, no lead link without leads.view", () => {
     const summary = { ...grandmotherPays(), identification: null };
     const html = render({ status: "loaded", summary }, { canOpenLead: false });

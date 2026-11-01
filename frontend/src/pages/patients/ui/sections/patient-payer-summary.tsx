@@ -35,6 +35,7 @@ import {
   payerInformedLabel,
   payerRelationshipLabel,
   payerSummaryLoadFailure,
+  payingParentOfParty,
   postalAddressLine,
   whoPaysLabel,
   type PatientPayerSummary,
@@ -167,6 +168,7 @@ function LoadedCard({
   const thirdParty = isThirdPartyPayer(declaration) && !parentOfBefore ? declaration : null;
   // A paying parent: name, address and contact, none of a third party's consents.
   const representative = declaration && (isRepresentativePayer(declaration) || parentOfBefore) ? declaration : null;
+  const partyParent = payingParentOfParty(summary);
   const addressWarning = recipient ? missingAddressWarning(recipient, tx) : null;
   const identificationRows = identification ? identificationLines(identification, tx) : [];
   const invoiceTo = invoiceToStatement(declaration, tx, lang, summary.patient_is_minor);
@@ -176,7 +178,9 @@ function LoadedCard({
     <SummaryCard title={tx("Плательщик", "Zahler")} state="loaded">
       <SummaryLine
         label={tx("Кто платит", "Wer zahlt")}
-        value={whoPaysLabel(parentOfBefore && declaration ? { ...declaration, payer_kind: "representative" } : declaration, tx)}
+        value={partyParent
+          ? tx("Родитель / законный представитель", "Elternteil / gesetzlicher Vertreter")
+          : whoPaysLabel(parentOfBefore && declaration ? { ...declaration, payer_kind: "representative" } : declaration, tx)}
         testId={`${TEST_ID}-who-pays`}
       />
       {invoiceTo ? (
@@ -242,7 +246,25 @@ function LoadedCard({
           />
         </>
       ) : null}
-      {representative ? (
+      {partyParent ? (
+        <>
+          <SummaryLine
+            label={tx("Имя", "Name")}
+            value={partyParent.name || "—"}
+            testId={`${TEST_ID}-name`}
+          />
+          <SummaryLine
+            label={tx("Адрес", "Adresse")}
+            value={partyParent.address ?? "—"}
+            testId={`${TEST_ID}-address`}
+          />
+          <SummaryLine
+            label={tx("Контакт", "Kontakt")}
+            value={partyParent.email ?? "—"}
+            testId={`${TEST_ID}-contact`}
+          />
+        </>
+      ) : representative ? (
         <>
           <SummaryLine
             label={tx("Имя", "Name")}
