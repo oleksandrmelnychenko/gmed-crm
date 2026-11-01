@@ -584,6 +584,10 @@ function apiErrorMessage(body: ApiErrorBody | null, res: Response) {
   if (localized) {
     return uiText(localized, undefined, apiErrorValues(body));
   }
+  // The server's 423 carries no code of its own (QA 2026-11-01).
+  if (res.status === 423 && /restricted/i.test(body?.message ?? "")) {
+    return uiText("api_patient_processing_restricted");
+  }
   return body?.message ?? body?.error ?? `${res.status} ${res.statusText}`;
 }
 

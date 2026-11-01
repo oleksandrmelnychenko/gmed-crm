@@ -572,13 +572,15 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     workflowItemCount,
     workspaceTabs,
   } = props;
-  // Art. 18 DSGVO: a restricted patient gets no new appointments or orders;
-  // the server refuses them with 423, the buttons are not offered.
+  // Art. 18 DSGVO: a restricted patient gets no new appointments or orders and
+  // no clinical changes; the server refuses them with 423, the buttons are not
+  // offered.
   const processingRestricted =
     typeof detail.legal_status === "object" &&
     detail.legal_status !== null &&
     (detail.legal_status as Record<string, unknown>).processing_restricted === true;
   const canCreateOrders = props.canCreateOrders && !processingRestricted;
+  const canStartClinicalImport = canImportClinicalDocuments && !processingRestricted;
 
   const [clinicalDocumentImportOpen, setClinicalDocumentImportOpen] = useState(false);
   const [clinicalImports, setClinicalImports] = useState<ClinicalDocumentImportSummary[]>([]);
@@ -808,7 +810,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
         patientId={id}
         lang={lang}
         canViewClinical={canViewClinical}
-        canImportDocuments={canImportClinicalDocuments}
+        canImportDocuments={canStartClinicalImport}
         importAttentionCount={clinicalImportAttentionCount}
         onScan={openClinicalDocumentImport}
       /> : null}
@@ -971,8 +973,8 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
                 birthDate: detail.birth_date,
                 patientIdentifier: detail.patient_id,
               }}
-              canManage={canManageDocuments}
-              canImportDocuments={canImportClinicalDocuments}
+              canManage={canManageDocuments && !processingRestricted}
+              canImportDocuments={canStartClinicalImport}
               documentImportOpen={clinicalDocumentImportOpen}
               onDocumentImportOpenChange={setClinicalDocumentImportOpen}
             />
@@ -1009,7 +1011,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               onResetDocumentFilters={onResetDocumentFilters}
               canManageDocuments={canManageDocuments}
               onOpenUpload={onOpenUpload}
-              onRecognizeDocument={canImportClinicalDocuments ? recognizeExistingPatientDocument : undefined}
+              onRecognizeDocument={canStartClinicalImport ? recognizeExistingPatientDocument : undefined}
               statusColors={statusColors}
               statusLabel={patientDetailStatusLabel}
               formatDate={formatDate}

@@ -91,6 +91,19 @@ describe("API validation errors", () => {
       .rejects.toMatchObject({ message: detail, status: 422, code: "invalid_request" });
   });
 
+  it("does not show the server's English text for a restricted patient", async () => {
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage("test-token");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: "Locked", message: "patient processing is restricted",
+    }), { status: 423, headers: { "Content-Type": "application/json" } })));
+    const { apiFetch } = await loadApiModule();
+    const failure = await apiFetch("/patients/p/allergies", { method: "POST", body: "{}" })
+      .catch((error: Error) => error);
+    expect((failure as Error).message).not.toContain("patient processing is restricted");
+    expect((failure as Error).message).toContain("18");
+  });
+
   it("shows a refused erasure in the user's language with the retention date", async () => {
     setWindowOrigin("http://app.local:4173");
     setTokenStorage("test-token");
