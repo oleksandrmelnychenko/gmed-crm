@@ -184,6 +184,16 @@ import { LEAD_UPLOAD_ACCEPT } from "@/pages/patient-lead/lead-request-model";
 import { useLeadIdentificationStatus } from "../model/use-lead-identification-status";
 import { removeLeadRepresentativeData, removeLeadTrustedContact, updateLeadRepresentativeDetails, type RepresentativeDetails } from "../data/lead-representation-api";
 import { EMPTY_REPRESENTATIVE_DETAILS, fillEmptyRepresentativeDetails, guardianCandidateDetails, pendingRepresentativeDetailsReady, representativeDetailsChanged, representativeDetailsErrors } from "../model/lead-representative-details";
+import { saveLeadParentBillingRole } from "../data/lead-payer-api";
+import {
+  PARENT_BILLING_ROLES,
+  isParentBillingRole,
+  parentBillingRole,
+  parentBillingRoleBody,
+  parentBillingRoleChip,
+  parentBillingRoleLabel,
+  type ParentBillingRole,
+} from "../model/parent-billing-role";
 import { LeadConfirmDialog } from "./lead-confirm-dialog";
 import { CONFIRMED_DISMISS_REASON, auxiliaryOverlayEscapedRecently } from "@/components/ui/dismissal-guard";
 import { staffRecordedLabel } from "../model/lead-portal-consents";
@@ -3855,6 +3865,13 @@ export function LeadWizard({
   // its values go with the dialog's own «Сохранить» (F-11).
   const trustedContactDetailsDraftRef = useRef<{ contactId: string; draft: RepresentativeDetails; loaded: RepresentativeDetails } | null>(null);
   const pendingRepresentativeDetailsRef = useRef(new Map<string, RepresentativeDetails>());
+  // Whether a parent receives the invoice and/or pays (owner 2026-11-02): the
+  // dialog's choice, and for a parent not on file yet the choice written once
+  // the autosave has created the parent.
+  const [trustedContactBillingRole, setTrustedContactBillingRole] = useState<ParentBillingRole | "">("");
+  const [trustedContactBillingRoleError, setTrustedContactBillingRoleError] = useState("");
+  const pendingBillingRolesRef = useRef(new Map<string, ParentBillingRole>());
+  const [pendingBillingRolesVersion, setPendingBillingRolesVersion] = useState(0);
   // A document generation in flight (the busy state shows a render later).
   const documentGenerationRef = useRef(false);
   const [pendingRepresentativeDetailsVersion, setPendingRepresentativeDetailsVersion] = useState(0);
@@ -4776,6 +4793,33 @@ export function LeadWizard({
       );
     }
   }, [leadId, pendingDetailsRepresentation, autosaveSettled, pendingRepresentativeDetailsVersion, applyStep1Representation, tx]);
+  // The role of a parent: the recipient and the payer the server stores, read
+  // back so the row and the dialog show what the screening follows.
+  const applyParentBillingRole = useCallback((contactId: string, role: ParentBillingRole) => {
+    if (!leadId) return Promise.resolve();
+    return saveLeadParentBillingRole(leadId, contactId, parentBillingRoleBody(role)).then(
+      () => {
+        void reloadPayer();
+        void reloadStep1PortalState();
+      },
+      (cause: unknown) => {
+        setServerContactError({ contactId, message: errorText(cause, tx) });
+        void reloadPayer();
+        void reloadStep1PortalState();
+      },
+    );
+  }, [leadId, reloadPayer, reloadStep1PortalState, tx]);
+  // A new parent gets the chosen role once the autosave has created it.
+  useEffect(() => {
+    const pending = pendingBillingRolesRef.current;
+    if (!leadId || !pendingDetailsRepresentation || !autosaveSettled || pending.size === 0) return;
+    for (const person of pendingDetailsRepresentation.representatives) {
+      const role = pending.get(person.id);
+      if (!role) continue;
+      pending.delete(person.id);
+      void applyParentBillingRole(person.id, role);
+    }
+  }, [leadId, pendingDetailsRepresentation, autosaveSettled, pendingBillingRolesVersion, applyParentBillingRole]);
   useEffect(() => {
     wizardStateBaseRef.current = { ...wizardStateBaseRef.current, step1_fill_mode: step1Portal.mode };
   }, [step1Portal.mode]);
@@ -6402,8 +6446,23 @@ export function LeadWizard({
     setTrustedContactEditorGuardian(guardian);
     setTrustedContactPendingDetails(EMPTY_REPRESENTATIVE_DETAILS);
     setTrustedContactCandidatePrefill(null);
+    setTrustedContactBillingRole("");
+    setTrustedContactBillingRoleError("");
     setTrustedContactEditor(emptyTrustedContact());
   };
+
+  // What a parent is for the invoices: the choice still to be written, else as stored.
+  const storedParentBillingRole = (contactId: string) => {
+    const intake = step1Portal.intake && step1Portal.intake.lead_id === leadId ? step1Portal.intake : null;
+    return parentBillingRole(
+      contactId,
+      intake ? intake.billing ?? null : undefined,
+      payer.data ? payer.data.declaration ?? null : undefined,
+      intake?.representation?.representatives.find((person) => person.id === contactId),
+    );
+  };
+  const parentBillingRoleOfContact = (contactId: string) =>
+    pendingBillingRolesRef.current.get(contactId) ?? storedParentBillingRole(contactId);
 
   const openTrustedContact = (contact: TrustedContactDraft, guardian = false) => {
     setTrustedContactEditorError("");
@@ -6415,6 +6474,8 @@ export function LeadWizard({
     setTrustedContactEditorGuardian(guardian);
     setTrustedContactPendingDetails(pendingRepresentativeDetailsRef.current.get(contact.id) ?? EMPTY_REPRESENTATIVE_DETAILS);
     setTrustedContactCandidatePrefill(null);
+    setTrustedContactBillingRole(guardian ? parentBillingRoleOfContact(contact.id) ?? "" : "");
+    setTrustedContactBillingRoleError("");
     setTrustedContactEditor({ ...contact });
   };
 
@@ -6584,6 +6645,21 @@ export function LeadWizard({
       ));
       return;
     }
+    // A paying parent stops paying only once someone else is the payer (the
+    // server refuses it too, 409 `payer_still_this_parent`).
+    const storedBillingRole = trustedContactEditorGuardian ? storedParentBillingRole(trustedContactEditor.id) : null;
+    if (
+      trustedContactBillingRole
+      && (storedBillingRole === "recipient_and_payer" || storedBillingRole === "payer")
+      && trustedContactBillingRole !== "recipient_and_payer"
+      && trustedContactBillingRole !== "payer"
+    ) {
+      setTrustedContactBillingRoleError(tx(
+        "Этот родитель сейчас плательщик. Сначала назначьте плательщиком другого родителя или третье лицо.",
+        "Dieser Elternteil ist derzeit Zahler. Bitte zuerst den anderen Elternteil oder eine dritte Person als Zahler festlegen.",
+      ));
+      return;
+    }
 
     // A representative on file: the citizenships and birth data typed in the
     // details form go with the contact in the wizard save, so the GwG row and
@@ -6643,6 +6719,22 @@ export function LeadWizard({
         pendingRepresentativeDetailsRef.current.delete(normalizedContact.id);
       }
       setPendingRepresentativeDetailsVersion((version) => version + 1);
+    }
+    // The parent's role for the invoices (owner 2026-11-02): written to the
+    // lead's recipient and payer at once, or after the autosave for a new parent.
+    if (
+      trustedContactEditorGuardian
+      && leadId
+      && trustedContactBillingRole
+      && trustedContactBillingRole !== storedParentBillingRole(normalizedContact.id)
+    ) {
+      if (representativeOnFile(normalizedContact.id)) {
+        pendingBillingRolesRef.current.delete(normalizedContact.id);
+        void applyParentBillingRole(normalizedContact.id, trustedContactBillingRole);
+      } else {
+        pendingBillingRolesRef.current.set(normalizedContact.id, trustedContactBillingRole);
+        setPendingBillingRolesVersion((version) => version + 1);
+      }
     }
     setError("");
     clearServerValidation();
@@ -9701,6 +9793,12 @@ ${serviceCommentLines.join("\n")}`
                                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                                   <span className="break-words text-sm font-medium text-foreground">{contact.name}</span>
                                   <TrustedContactRole relation={contact.relation} tx={tx} />
+                                  {(() => {
+                                    const chip = parentBillingRoleChip(parentBillingRoleOfContact(contact.id), tx);
+                                    return chip ? (
+                                      <StatusChip tone="info" data-testid="trusted-contact-billing-role-chip">{chip}</StatusChip>
+                                    ) : null;
+                                  })()}
                                   {/* On file, but not one of the persons who act for the child
                                       (a second parent under sole custody, a third one): no
                                       contract, signature or GwG sheet is made for that person. */}
@@ -12712,6 +12810,41 @@ ${serviceCommentLines.join("\n")}`
                       </p>
                     ) : null}
                   </Field>
+                  {trustedContactEditorGuardian && leadId ? (
+                    // Owner 2026-11-02: the lead's one invoice recipient and payer; only
+                    // the parents who receive the invoice or pay are screened.
+                    <Field
+                      className="sm:col-span-2"
+                      label={tx("Роль в оплате заявки", "Rolle bei der Bezahlung")}
+                      error={trustedContactBillingRoleError || undefined}
+                      errorId="trusted-contact-billing-role-error"
+                      htmlFor="trusted-contact-billing-role"
+                    >
+                      <NativeComboboxSelect
+                        id="trusted-contact-billing-role"
+                        className={selectClass}
+                        value={trustedContactBillingRole}
+                        data-testid="trusted-contact-billing-role"
+                        aria-invalid={Boolean(trustedContactBillingRoleError)}
+                        aria-describedby={trustedContactBillingRoleError ? "trusted-contact-billing-role-error" : undefined}
+                        onChange={(event) => {
+                          setTrustedContactBillingRoleError("");
+                          setTrustedContactBillingRole(isParentBillingRole(event.target.value) ? event.target.value : "");
+                        }}
+                      >
+                        <option value="">{tx("Не указано", "Nicht angegeben")}</option>
+                        {PARENT_BILLING_ROLES.map((role) => (
+                          <option key={role} value={role}>{parentBillingRoleLabel(role, tx)}</option>
+                        ))}
+                      </NativeComboboxSelect>
+                      <p className="mt-1.5 text-[11.5px] leading-tight text-muted-foreground" data-testid="trusted-contact-billing-role-hint">
+                        {tx(
+                          "Получатель счёта и плательщик заявки — по одному. Проверка по санкционным спискам идёт только для родителей, которые получают счёт или платят.",
+                          "Rechnungsempfänger und Zahler gibt es je einmal pro Anfrage. Gegen die Sanktionslisten geprüft werden nur Eltern, die die Rechnung erhalten oder zahlen.",
+                        )}
+                      </p>
+                    </Field>
+                  ) : null}
                   {/* `htmlFor`: inside a wrapping <label> a click on the day opened the calendar instead of the typing field. */}
                   <Field label={tx("Дата рождения", "Geburtsdatum")} error={trustedContactBirthDateError || undefined} errorId="trusted-contact-birth-date-error" htmlFor="trusted-contact-birth-date">
                     <Input

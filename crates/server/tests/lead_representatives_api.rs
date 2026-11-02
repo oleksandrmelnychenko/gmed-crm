@@ -3191,3 +3191,141 @@ async fn staff_fill_in_a_two_parent_minors_form_as_the_parents_do() {
         "{body}"
     );
 }
+
+/// Owner 2026-11-02: the staff dialog of a parent says whether the parent
+/// receives the invoice, pays, both or neither. It writes the lead's one
+/// recipient and payer, audited, and only those parents are screened.
+#[tokio::test]
+async fn a_parents_billing_role_names_recipient_and_payer_and_drives_screening() {
+    use gmed_server::sanctions::screening;
+
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let staff = app.staff("patient_manager");
+    let mother = Uuid::new_v4();
+    let father = Uuid::new_v4();
+    let lead = minor_lead(
+        &app,
+        json!([
+            { "id": mother, "name": "Anna Muster", "relation": "mother",
+              "email": address("anna.billing-role") },
+            { "id": father, "name": "Ben Muster", "relation": "father",
+              "email": address("ben.billing-role") }
+        ]),
+    )
+    .await;
+    let role = |person: Uuid, receives: bool, pays: bool| {
+        set_billing_role(router, &staff, lead, person, receives, pays)
+    };
+    let screened = || async {
+        let mut refs: Vec<String> = screening::load_lead_subjects(&app.suite.pool, lead)
+            .await
+            .unwrap()
+            .unwrap()
+            .subjects
+            .into_iter()
+            .filter(|subject| subject.kind == screening::SubjectKind::LeadGuardian)
+            .map(|subject| subject.subject_ref)
+            .collect();
+        refs.sort();
+        refs
+    };
+    let mut both = vec![mother.to_string(), father.to_string()];
+    both.sort();
+    // No role named yet: either parent may be the one.
+    assert_eq!(screened().await, both);
+
+    // Everything on the mother: only she is screened.
+    let (status, body) = role(mother, true, true).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body, json!({ "receives_invoice": true, "pays": true }));
+    let stored: (String, bool, Option<Uuid>) = sqlx::query_as(
+        "SELECT recipient, recipient_is_payer, representative_contact_id
+         FROM lead_invoice_recipients WHERE lead_id = $1",
+    )
+    .bind(lead)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, ("self".into(), true, Some(mother)));
+    let payer: (String, Option<Uuid>) = sqlx::query_as(
+        "SELECT payer_kind, payer_representative_id FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(payer, ("representative".into(), Some(mother)));
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log
+         WHERE entity_type = 'lead' AND entity_id = $1
+           AND action = 'update_lead_invoice_recipient'",
+    )
+    .bind(lead)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+    assert_eq!(screened().await, vec![mother.to_string()]);
+
+    // The father has no role: nothing changes.
+    let (status, body) = role(father, false, false).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body, json!({ "receives_invoice": false, "pays": false }));
+
+    // The paying mother cannot just stop paying.
+    let (status, body) = role(mother, true, false).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "payer_still_this_parent");
+
+    // The father pays: the mother still receives the invoice, without paying.
+    let (status, body) = role(father, false, true).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body, json!({ "receives_invoice": false, "pays": true }));
+    let stored: (Option<Uuid>, bool) = sqlx::query_as(
+        "SELECT representative_contact_id, recipient_is_payer
+         FROM lead_invoice_recipients WHERE lead_id = $1",
+    )
+    .bind(lead)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, (Some(mother), false));
+    assert_eq!(screened().await, both);
+
+    // The mother no longer receives it: the answer is cleared, the cabinet
+    // asks again, and only the paying father is screened.
+    let (status, body) = role(mother, false, false).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let recipients: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM lead_invoice_recipients WHERE lead_id = $1")
+            .bind(lead)
+            .fetch_one(&app.suite.pool)
+            .await
+            .unwrap();
+    assert_eq!(recipients, 0);
+    assert_eq!(screened().await, vec![father.to_string()]);
+
+    // Only a parent of the child has these roles.
+    let (status, body) = role(Uuid::new_v4(), true, false).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"], "billing_role_not_a_parent");
+}
+
+async fn set_billing_role(
+    router: &axum::Router,
+    staff: &str,
+    lead: Uuid,
+    person: Uuid,
+    receives: bool,
+    pays: bool,
+) -> (StatusCode, Value) {
+    json_request(
+        router,
+        "PUT",
+        &format!("/api/v1/leads/{lead}/representatives/{person}/billing-role"),
+        staff,
+        Some(json!({ "receives_invoice": receives, "pays": pays })),
+    )
+    .await
+}

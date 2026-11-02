@@ -3,7 +3,9 @@
 //! Subjects:
 //! * the patient of a lead (`lead_patient`);
 //! * for a minor patient, the lead's trusted contacts whose relation is
-//!   parent or guardian (`lead_guardian`), with the name parts, citizenships
+//!   parent or guardian (`lead_guardian`) — once the lead names who receives
+//!   the invoices and who pays, only those parents (owner decision
+//!   2026-11-02, [`minor_guardian_subjects`]) — with the name parts, citizenships
 //!   and residence country the parent entered in the cabinet
 //!   (`lead_representatives`, by the id of the contact). An explicit link to
 //!   an existing patient fills missing basic identity, never medical data;
@@ -346,9 +348,13 @@ pub async fn load_leads_subjects(
         let representative_rows = representatives.remove(&lead_id).unwrap_or_default();
         let recipient = recipients.remove(&lead_id);
         let contact_rows = contacts.remove(&lead_id).unwrap_or_default();
-        if let Some(mut lead) =
-            lead_subjects_from_row(&row, &payer_rows, &representative_rows, today)
-        {
+        if let Some(mut lead) = lead_subjects_from_row(
+            &row,
+            &payer_rows,
+            &representative_rows,
+            recipient.as_ref(),
+            today,
+        ) {
             lead.subjects
                 .extend(recipient_subjects(lead_id, recipient.as_ref(), &payer_rows));
             let contacts =
@@ -518,22 +524,54 @@ fn paying_parent(row: &Value, contact: &Value, parent: &Subject) -> bool {
     }
 }
 
-/// The parents and guardians of a minor lead, and the payer rows still to
-/// screen as `lead_payer`: a parent who pays is screened once, as the
-/// guardian with [`PAYING_REPRESENTATIVE_NOTE`] in `relation` (2026-10-19).
+/// The contact id of the parent a minor's invoices go to: the patient side as
+/// recipient (`recipient = 'self'`) with the parent it names or — none named —
+/// the only parent of the child, as `lead_invoice_recipient::load_for_lead`
+/// reads it. A row made from section 7 of an older request names nobody.
+fn recipient_parent(recipient: Option<&Value>, parent_ids: &[String]) -> Option<String> {
+    let row = recipient?;
+    if json_text(row, "recipient") != crate::routes::lead_invoice_recipient::RECIPIENT_SELF {
+        return None;
+    }
+    let named = json_text(row, "representative_contact_id").to_lowercase();
+    if !named.is_empty() {
+        return Some(named);
+    }
+    let from_section_seven = row.get("from_section_seven").and_then(Value::as_bool) == Some(true);
+    match parent_ids {
+        [only] if !from_section_seven => Some(only.clone()),
+        _ => None,
+    }
+}
+
+/// The parents and guardians of a minor lead who receive the invoices or pay
+/// (owner decision 2026-11-02: once the roles are named, a parent with
+/// neither is not screened; before, every parent is), and the payer rows still to screen as `lead_payer`: a parent who pays is
+/// screened once, as the guardian with [`PAYING_REPRESENTATIVE_NOTE`] in
+/// `relation` (2026-10-19).
 fn minor_guardian_subjects(
     lead_id: Uuid,
     representatives: &[crate::services::lead_guardian_identity::CanonicalGuardianIdentity],
     payer_rows: &[Value],
+    recipient: Option<&Value>,
 ) -> (Vec<SubjectRecord>, Vec<Value>) {
     let mut screened_payers: Vec<Value> = payer_rows.to_vec();
     let mut subjects = Vec::new();
+    let parent_ids: Vec<String> = representatives
+        .iter()
+        .filter(|identity| is_guardian_relation(&json_text(&identity.contact, "relation")))
+        .map(|identity| json_text(&identity.contact, "id").to_lowercase())
+        .filter(|id| !id.is_empty())
+        .collect();
+    let receiving = recipient_parent(recipient, &parent_ids);
     for identity in representatives {
         let contact = &identity.contact;
         let relation = json_text(contact, "relation");
         if !is_guardian_relation(&relation) {
             continue;
         }
+        let contact_id = json_text(contact, "id").to_lowercase();
+        let receives = !contact_id.is_empty() && receiving.as_deref() == Some(contact_id.as_str());
         // What the parent entered in the cabinet; a row of an adult role
         // (from before a corrected date of birth) says nothing here.
         let extras = (identity.role == "legal_representative").then_some(&identity.extras);
@@ -541,6 +579,7 @@ fn minor_guardian_subjects(
         let pays = screened_payers
             .iter()
             .position(|row| paying_parent(row, contact, &subject.subject));
+        let has_role = pays.is_some() || receives;
         if let Some(index) = pays {
             if json_text(&screened_payers[index], "payer_kind") == "third_party" {
                 screened_payers.remove(index);
@@ -550,8 +589,20 @@ fn minor_guardian_subjects(
                 None => PAYING_REPRESENTATIVE_NOTE.to_string(),
             });
         }
-        subjects.push(subject);
+        subjects.push((subject, has_role));
     }
+    // Until the lead says who receives the invoices or pays, every parent may
+    // be the one: all are screened, as before the roles existed.
+    let roles_named = subjects.iter().any(|(_, has_role)| *has_role)
+        || recipient.is_some_and(|row| {
+            json_text(row, "recipient")
+                == crate::routes::lead_invoice_recipient::RECIPIENT_THIRD_PARTY
+        });
+    let subjects = subjects
+        .into_iter()
+        .filter(|(_, has_role)| *has_role || !roles_named)
+        .map(|(subject, _)| subject)
+        .collect();
     (subjects, screened_payers)
 }
 
@@ -559,6 +610,7 @@ fn lead_subjects_from_row(
     row: &sqlx::postgres::PgRow,
     payer_rows: &[Value],
     representatives: &[crate::services::lead_guardian_identity::CanonicalGuardianIdentity],
+    recipient: Option<&Value>,
     today: NaiveDate,
 ) -> Option<LeadSubjects> {
     let lead_id: Uuid = row.try_get("id").ok()?;
@@ -602,7 +654,8 @@ fn lead_subjects_from_row(
     // screened once, as the representative, with the payer role noted.
     let mut screened_payers: Vec<Value> = payer_rows.to_vec();
     if crate::routes::leads::is_minor_on(date_of_birth, today) {
-        let (guardians, payers) = minor_guardian_subjects(lead_id, representatives, payer_rows);
+        let (guardians, payers) =
+            minor_guardian_subjects(lead_id, representatives, payer_rows, recipient);
         subjects.extend(guardians);
         screened_payers = payers;
     } else {
@@ -2490,39 +2543,124 @@ mod tests {
             lead_id,
             &parents,
             &[third_party(json!({"email": "anna@example.org"}))],
+            None,
         );
         assert!(payers.is_empty());
         assert!(payer_subjects(lead_id, &payers).is_empty());
-        assert_eq!(guardians.len(), 2);
+        // The father neither pays nor receives the invoices: not screened.
+        assert_eq!(guardians.len(), 1);
         assert_eq!(guardians[0].relation.as_deref(), Some("mother; payer"));
-        assert_eq!(guardians[1].relation.as_deref(), Some("father"));
 
         // Without addresses: name and date of birth decide.
         let (_, payers) = minor_guardian_subjects(
             lead_id,
             &parents,
             &[third_party(json!({"date_of_birth": "1985-03-02"}))],
+            None,
         );
         assert!(payers.is_empty());
         let (guardians, payers) = minor_guardian_subjects(
             lead_id,
             &parents,
             &[third_party(json!({"date_of_birth": "1990-01-01"}))],
+            None,
         );
         assert_eq!(payers.len(), 1, "another person stays the payer");
+        // No role named yet: both parents may be the one.
+        assert_eq!(guardians.len(), 2);
         assert_eq!(guardians[0].relation.as_deref(), Some("mother"));
 
         // The declaration names the representative itself (no copy to screen).
         let named = json!({"payer_kind": "representative", "payer_representative_id": mother_id});
         let (guardians, payers) =
-            minor_guardian_subjects(lead_id, &parents, std::slice::from_ref(&named));
+            minor_guardian_subjects(lead_id, &parents, std::slice::from_ref(&named), None);
         assert_eq!(payers, vec![named]);
+        assert_eq!(guardians.len(), 1);
         assert_eq!(guardians[0].relation.as_deref(), Some("mother; payer"));
         // An organisation is never a parent.
         let company = json!({"payer_kind": "third_party", "payer_type": "company",
                              "email": "anna@example.org"});
-        let (_, payers) = minor_guardian_subjects(lead_id, &parents, &[company]);
+        let (_, payers) = minor_guardian_subjects(lead_id, &parents, &[company], None);
         assert_eq!(payers.len(), 1);
+    }
+
+    /// Owner 2026-11-02: only the parents who receive the invoices or pay
+    /// are screened — everything on the mother, the father is not.
+    #[test]
+    fn only_the_parents_who_receive_or_pay_are_screened() {
+        let lead_id = Uuid::new_v4();
+        let mother_id = "5d0c1f0e-0000-4000-8000-000000000001";
+        let father_id = "5d0c1f0e-0000-4000-8000-000000000002";
+        let identity = |position: usize, contact: Value| {
+            crate::services::lead_guardian_identity::CanonicalGuardianIdentity {
+                contact_id: None,
+                related_patient_id: None,
+                position,
+                name: json_text(&contact, "name"),
+                citizenships: Vec::new(),
+                residences: Vec::new(),
+                role: "legal_representative".into(),
+                contact,
+                extras: json!({}),
+            }
+        };
+        let mother = identity(
+            0,
+            json!({"id": mother_id, "name": "Anna Muster", "relation": "mother"}),
+        );
+        let father = identity(
+            1,
+            json!({"id": father_id, "name": "Ben Muster", "relation": "father"}),
+        );
+        let parents = vec![mother.clone(), father];
+        let refs = |subjects: &[SubjectRecord]| -> Vec<String> {
+            subjects
+                .iter()
+                .map(|subject| subject.subject_ref.clone())
+                .collect()
+        };
+        let mother_pays =
+            json!({"payer_kind": "representative", "payer_representative_id": mother_id});
+        let recipient = |id: Option<&str>| {
+            json!({"recipient": "self", "representative_contact_id": id,
+                   "from_section_seven": false})
+        };
+
+        // Nothing answered yet: every parent may be the one.
+        let (open, _) = minor_guardian_subjects(lead_id, &parents, &[], None);
+        assert_eq!(refs(&open), [mother_id, father_id]);
+        // The mother receives and pays: only she.
+        let (both, _) = minor_guardian_subjects(
+            lead_id,
+            &parents,
+            std::slice::from_ref(&mother_pays),
+            Some(&recipient(Some(mother_id))),
+        );
+        assert_eq!(refs(&both), [mother_id]);
+        // The father receives, the mother pays: both.
+        let (split, _) = minor_guardian_subjects(
+            lead_id,
+            &parents,
+            std::slice::from_ref(&mother_pays),
+            Some(&recipient(Some(father_id))),
+        );
+        assert_eq!(refs(&split), [mother_id, father_id]);
+        assert_eq!(split[1].relation.as_deref(), Some("father"));
+        // A third party receives and pays: no parent.
+        let third = json!({"recipient": "third_party", "recipient_type": "person"});
+        let (outside, _) = minor_guardian_subjects(lead_id, &parents, &[], Some(&third));
+        assert!(outside.is_empty());
+        // The patient side without a named parent: the only parent receives;
+        // with two parents nobody is named yet, so both are screened.
+        let (only, _) = minor_guardian_subjects(
+            lead_id,
+            std::slice::from_ref(&mother),
+            &[],
+            Some(&recipient(None)),
+        );
+        assert_eq!(refs(&only), [mother_id]);
+        let (unnamed, _) = minor_guardian_subjects(lead_id, &parents, &[], Some(&recipient(None)));
+        assert_eq!(refs(&unnamed), [mother_id, father_id]);
     }
 
     #[test]

@@ -284,6 +284,9 @@ async function mount(page: Page, mock: Mock) {
       minor: true,
       representatives: mock.motherOnly ? [annaStatus] : [annaStatus, benStatus],
     } as Status,
+    /** The lead's invoice recipient (portal state's `billing`) and payer. */
+    billing: null as Json | null,
+    payer: motherPays as Json,
   };
   const calls = {
     /** Bodies of the wizard saves (`POST /leads/{id}/update`). */
@@ -301,6 +304,8 @@ async function mount(page: Page, mock: Mock) {
     detailSaves: [] as Array<{ id: string; body: { values: Json; base: Json } }>,
     /** Bodies of the login checks of a typed contact e-mail. */
     emailChecks: [] as Json[],
+    /** The roles staff gave a parent for the invoices (`PUT …/billing-role`). */
+    billingRoles: [] as Array<{ id: string; body: { receives_invoice: boolean; pays: boolean } }>,
   };
   let patientIdentification: Json = { birth_place: "Berlin", birth_country: "DE", contact_channels: ["email"], ...mock.patientId };
   let lateIntakeSent = false;
@@ -324,6 +329,21 @@ async function mount(page: Page, mock: Mock) {
       if (mock.idSaveDelayMs) await new Promise((resolve) => setTimeout(resolve, mock.idSaveDelayMs));
       patientIdentification = { ...patientIdentification, ...body, id_data_entered_by_name: "Intake QA", id_data_entered_at: new Date().toISOString() };
       await route.fulfill({ contentType: "application/json", body: JSON.stringify(patientIdentification) });
+      return;
+    }
+    const billingRole = path.match(/^\/leads\/[^/]+\/representatives\/([^/]+)\/billing-role$/);
+    if (billingRole && method === "PUT") {
+      // As the server: the one recipient and the one payer of the lead.
+      const id = billingRole[1];
+      const body = request.postDataJSON() as { receives_invoice: boolean; pays: boolean };
+      calls.billingRoles.push({ id, body });
+      if (body.pays) {
+        state.payer = { ...motherPays, declaration: { ...motherPays.declaration, payer_kind: "representative", payer_representative_id: id } };
+      }
+      if (body.receives_invoice) {
+        state.billing = { invoice_recipient: "self", invoice_recipient_is_payer: body.pays, recipient: { representative_id: id } };
+      }
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
       return;
     }
     const details = path.match(/^\/leads\/[^/]+\/representatives\/([^/]+)\/details$/);
@@ -429,11 +449,12 @@ async function mount(page: Page, mock: Mock) {
         identification_updated_at: "2026-10-05T09:20:00Z",
         identity_documents: [],
         representation,
+        ...(state.billing ? { billing: state.billing } : {}),
         // 11:40 in Berlin.
         representation_updated_at: "2026-10-05T09:40:00Z",
       };
     } else if (path === `/leads/${leadId}/payer-declaration`) {
-      response = motherPays;
+      response = state.payer;
     } else if (path === `/leads/${leadId}/identification-status`) {
       response = state.status;
     } else if (payment && method === "POST") {
@@ -964,6 +985,49 @@ test("staff explicitly choose the parent's role and linking a patient preserves 
   const written = (calls.updates.at(-1)?.trusted_contacts as Json[]).find((contact) => contact.id === ANNA_ID)!;
   expect(written.related_patient_id).toBe(linkedId);
   await expect(parents.getByRole("listitem").filter({ hasText: "Existing Mother" })).toContainText("Мать");
+});
+
+test("staff say whether a parent receives the invoice and pays (owner 2026-11-02)", async ({ page }) => {
+  const { wizard, calls } = await mount(page, { lang: "ru", step: "master" });
+  const parents = wizard.locator("#lead-wizard-guardian");
+  const anna = parents.getByRole("listitem").filter({ hasText: "Anna Muster" });
+  const ben = parents.getByRole("listitem").filter({ hasText: "Ben Muster" });
+  // The mother is declared as payer (as a person with her e-mail): the row says so.
+  await expect(anna.getByTestId("trusted-contact-billing-role-chip")).toHaveText("Платит");
+  await expect(ben.getByTestId("trusted-contact-billing-role-chip")).toHaveCount(0);
+
+  await ben.getByRole("button", { name: "Редактировать представителя" }).click();
+  const editor = page.locator("form").filter({ hasText: "Редактировать родителя или законного представителя" });
+  const role = editor.getByLabel("Роль в оплате заявки");
+  await expect(role).toContainText("Не получает счёт и не платит");
+  await expect(editor.getByTestId("trusted-contact-billing-role-hint")).toContainText("только для родителей, которые получают счёт или платят");
+  await editor.getByLabel("Кем приходится ребёнку").click();
+  await page.getByRole("option", { name: "Отец (родитель)", exact: true }).click();
+  // The fixture father has no e-mail or phone yet; a parent needs one.
+  await editor.getByLabel("Телефон").fill("+49 30 100002");
+  await role.click();
+  await page.getByRole("option", { name: "Получатель счёта и плательщик", exact: true }).click();
+  await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect.poll(() => calls.billingRoles).toEqual([{ id: BEN_ID, body: { receives_invoice: true, pays: true } }]);
+  // Read back: everything on the father now, the mother has no role.
+  await expect(ben.getByTestId("trusted-contact-billing-role-chip")).toHaveText("Получает счёт и платит");
+  await expect(anna.getByTestId("trusted-contact-billing-role-chip")).toHaveCount(0);
+
+  // Reopened, the dialog shows the stored role; an unchanged role is not sent again.
+  await ben.getByRole("button", { name: "Редактировать представителя" }).click();
+  await expect(role).toContainText("Получатель счёта и плательщик");
+  await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  expect(calls.billingRoles).toHaveLength(1);
+
+  // The paying father cannot just stop paying: the dialog says so at the field.
+  await ben.getByRole("button", { name: "Редактировать представителя" }).click();
+  await role.click();
+  await page.getByRole("option", { name: "Только получатель счёта", exact: true }).click();
+  await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(editor).toContainText("Этот родитель сейчас плательщик");
+  expect(calls.billingRoles).toHaveLength(1);
 });
 
 test("Sales links a patient seen by name and number only and keeps the contact data typed", async ({ page }) => {
