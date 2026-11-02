@@ -1672,7 +1672,7 @@ function useStaffServicesPageContent() {
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm text-slate-500 shadow-sm">
+        <div className="flex items-center gap-3 rounded-full border border-border bg-card px-5 py-3 text-sm text-muted-foreground shadow-sm">
           <LoaderCircle className="size-4 animate-spin" />
           {t.staff_services_loading}
         </div>

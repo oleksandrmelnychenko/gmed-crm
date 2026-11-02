@@ -111,7 +111,7 @@ function kindPillClass(kind: DiagnosisKind): string {
 }
 
 function diagnosisRowClass(): string {
-  return "border-border/40 bg-white";
+  return "border-border/40 bg-card";
 }
 
 function childActionLabel(kind: DiagnosisKind, tx: Bilingual): string {

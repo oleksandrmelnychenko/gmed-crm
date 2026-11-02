@@ -1272,7 +1272,7 @@ function useChatPageContent() {
             aria-expanded={showNewChat}
             aria-controls="chat-new-peer-picker"
             title={t.chat_new}
-            className={cn("flex size-9 items-center justify-center rounded-lg transition-colors", user?.role === "patient" ? "bg-[var(--brand)] text-white hover:brightness-95" : "text-muted-foreground hover:bg-muted hover:text-foreground")}
+            className={cn("flex size-9 items-center justify-center rounded-lg transition-colors", user?.role === "patient" ? "bg-[var(--brand)] text-primary-foreground hover:brightness-95" : "text-muted-foreground hover:bg-muted hover:text-foreground")}
           >
             <MessageSquarePlus className="size-[18px]" />
           </button>
@@ -1796,7 +1796,7 @@ function useChatPageContent() {
                 disabled={sending || (!input.trim() && !pendingFiles.length)}
                 aria-label={t.chat_send}
                 title={t.chat_send}
-                className={cn("flex size-10 shrink-0 items-center justify-center rounded-lg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50", user?.role === "patient" ? "bg-[var(--brand)] text-white" : "bg-foreground text-background")}
+                className={cn("flex size-10 shrink-0 items-center justify-center rounded-lg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50", user?.role === "patient" ? "bg-[var(--brand)] text-primary-foreground" : "bg-foreground text-background")}
               >
                 {sending ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
               </button>

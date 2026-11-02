@@ -88,7 +88,7 @@ type PatientProfileEditorSheetProps = {
 };
 
 const contactAddButtonClassName =
-  "h-8 rounded-lg border-[var(--brand)] bg-[var(--brand)] px-3 text-white shadow-sm hover:bg-[var(--brand)]/90 hover:text-white focus-visible:ring-[var(--brand)]/30";
+  "h-8 rounded-lg border-[var(--brand)] bg-[var(--brand)] px-3 text-primary-foreground shadow-sm hover:bg-[var(--brand)]/90 hover:text-primary-foreground focus-visible:ring-[var(--brand)]/30";
 
 function trustedContactRecordString(
   record: Record<string, unknown>,

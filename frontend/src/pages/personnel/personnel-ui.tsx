@@ -264,16 +264,16 @@ export function FilePreviewDialog({
             </Button>
           </div>
         </DialogHeader>
-        <div className="min-h-0 flex-1 bg-slate-50 p-3">
+        <div className="min-h-0 flex-1 bg-muted p-3">
           {loading ? (
-            <div className="flex h-full min-h-80 items-center justify-center rounded-lg border border-border bg-white text-sm text-muted-foreground">
+            <div className="flex h-full min-h-80 items-center justify-center rounded-lg border border-border bg-card text-sm text-muted-foreground">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
               {t.common_loading}
             </div>
           ) : error ? (
             <div
               role="alert"
-              className="flex h-full min-h-80 items-center justify-center rounded-lg border border-destructive/30 bg-white p-8 text-center text-sm text-destructive"
+              className="flex h-full min-h-80 items-center justify-center rounded-lg border border-destructive/30 bg-card p-8 text-center text-sm text-destructive"
             >
               {error}
             </div>
@@ -285,7 +285,7 @@ export function FilePreviewDialog({
               className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
             />
           ) : file ? (
-            <div className="flex h-full min-h-80 flex-col items-center justify-center rounded-lg border border-border bg-white p-8 text-center">
+            <div className="flex h-full min-h-80 flex-col items-center justify-center rounded-lg border border-border bg-card p-8 text-center">
               <FileWarning className="mb-3 size-8 text-muted-foreground" />
               <p className="max-w-md text-sm text-muted-foreground">{t.personnel_preview_unavailable}</p>
             </div>

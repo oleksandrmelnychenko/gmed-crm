@@ -22,7 +22,7 @@ export function PrivacyPage() {
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+    <div className="rounded-xl border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
       {t.portal_privacy_area_patient_only}
     </div>
   );

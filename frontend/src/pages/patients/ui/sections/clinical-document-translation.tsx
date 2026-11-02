@@ -51,7 +51,7 @@ export function ClinicalDocumentTranslationPanel({ translation, pageNumber, text
       {ready && expanded ? (
         <label className="block space-y-2 text-xs font-medium">
           <span>{textScope === "document" ? tx("Немецкий черновик · весь документ", "Deutscher Entwurf · gesamtes Dokument") : tx(`Немецкий черновик · страница ${pageNumber}`, `Deutscher Entwurf · Seite ${pageNumber}`)}</span>
-          <textarea readOnly lang="de" value={germanTranslationPage(translation, pageNumber)} className="min-h-48 max-h-[60vh] w-full resize-y rounded-lg border border-blue-200 bg-white p-4 text-sm leading-6" />
+          <textarea readOnly lang="de" value={germanTranslationPage(translation, pageNumber)} className="min-h-48 max-h-[60vh] w-full resize-y rounded-lg border border-blue-200 bg-field p-4 text-sm leading-6" />
         </label>
       ) : null}
     </section>

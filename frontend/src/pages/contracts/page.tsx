@@ -2974,7 +2974,7 @@ function useContractsPageContent() {
                     <div className="mt-5 grid gap-3 md:grid-cols-3">
                       <button
                         type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-border bg-muted/80 p-4 pb-14 text-left transition-colors hover:border-input hover:bg-accent/50"
                         onClick={() => window.open(`/patients?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
@@ -2989,7 +2989,7 @@ function useContractsPageContent() {
                       </button>
                       <button
                         type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-border bg-muted/80 p-4 pb-14 text-left transition-colors hover:border-input hover:bg-accent/50"
                         onClick={() => window.open(`/orders?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
@@ -3004,7 +3004,7 @@ function useContractsPageContent() {
                       </button>
                       <button
                         type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-border bg-muted/80 p-4 pb-14 text-left transition-colors hover:border-input hover:bg-accent/50"
                         onClick={() => window.open(`/documents?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">

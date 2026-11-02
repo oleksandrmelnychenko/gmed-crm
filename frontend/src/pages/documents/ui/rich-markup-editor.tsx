@@ -112,8 +112,8 @@ export function RichMarkupEditor({ value, onChange, lang, placeholder, labels, c
       onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
       className={cn(
-        "inline-flex size-8 items-center justify-center rounded-md text-slate-600 transition-colors hover:bg-white hover:text-slate-950",
-        pressed && "bg-white text-[var(--brand)] shadow-sm ring-1 ring-border",
+        "inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-card hover:text-foreground",
+        pressed && "bg-card text-[var(--brand)] shadow-sm ring-1 ring-border",
       )}
     >
       {icon}
@@ -130,7 +130,7 @@ export function RichMarkupEditor({ value, onChange, lang, placeholder, labels, c
         className,
       )}
     >
-      <div className="flex flex-wrap items-center gap-0.5 border-b border-border bg-slate-50 p-1" role="toolbar" aria-label={labels.toolbar}>
+      <div className="flex flex-wrap items-center gap-0.5 border-b border-border bg-muted p-1" role="toolbar" aria-label={labels.toolbar}>
         {button(labels.bold, active.bold, () => run("bold"), <Bold className="size-4" />)}
         {button(labels.heading, active.heading, toggleHeading, <Heading2 className="size-4" />)}
         {button(labels.bullet, active.bullet, () => run("insertUnorderedList"), <List className="size-4" />)}

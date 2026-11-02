@@ -179,7 +179,7 @@ function LinkedDocumentsSheet({
             </DialogDescription>
             {preview ? <div className="pt-2"><DocumentSignatureAction documentId={preview.id} title={preview.title} /></div> : null}
           </DialogHeader>
-          <div className="min-h-0 flex-1 bg-slate-50 p-3">
+          <div className="min-h-0 flex-1 bg-muted p-3">
             {preview ? (
               <iframe
                 title={preview.title || t.documents_preview}

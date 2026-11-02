@@ -4805,7 +4805,7 @@ function useStaffInvoicesPageContent() {
               ) : null}
             </div>
           </DialogHeader>
-          <div className="min-h-0 flex-1 bg-slate-50 p-3">
+          <div className="min-h-0 flex-1 bg-muted p-3">
             {invoicePdfPreview ? (
               <iframe
                 title={invoicePdfPreview.title}

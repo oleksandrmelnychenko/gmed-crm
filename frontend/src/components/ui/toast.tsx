@@ -89,23 +89,23 @@ function ToastCard({ item }: { item: ToastItem }) {
   const palette = {
     success: {
       Icon: Check,
-      ring: "border-emerald-200 bg-white",
-      iconBg: "bg-emerald-100 text-emerald-700",
+      ring: "border-emerald-200 bg-card",
+      iconColor: "text-emerald-700",
     },
     error: {
       Icon: CircleAlert,
-      ring: "border-rose-200 bg-white",
-      iconBg: "bg-rose-100 text-rose-700",
+      ring: "border-rose-200 bg-card",
+      iconColor: "text-rose-700",
     },
     warning: {
       Icon: TriangleAlert,
-      ring: "border-amber-200 bg-white",
-      iconBg: "bg-amber-100 text-amber-700",
+      ring: "border-amber-200 bg-card",
+      iconColor: "text-amber-700",
     },
     info: {
       Icon: Info,
-      ring: "border-sky-200 bg-white",
-      iconBg: "bg-sky-100 text-sky-700",
+      ring: "border-sky-200 bg-card",
+      iconColor: "text-sky-700",
     },
   }[kind];
   const { Icon } = palette;
@@ -118,7 +118,7 @@ function ToastCard({ item }: { item: ToastItem }) {
       )}
       role={kind === "error" ? "alert" : "status"}
     >
-      <div className={cn("flex items-center justify-center size-7 rounded-full shrink-0", palette.iconBg)}>
+      <div className={cn("flex items-center justify-center size-6 shrink-0", palette.iconColor)}>
         <Icon aria-hidden="true" className="size-4" strokeWidth={2} />
       </div>
       <p className="flex-1 text-[13px] text-foreground leading-[1.35] pt-0.5">{message}</p>

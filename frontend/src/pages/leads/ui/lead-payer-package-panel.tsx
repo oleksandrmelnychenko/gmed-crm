@@ -326,7 +326,7 @@ export function LeadPayerPackagePanel({
                     className={cn(
                       "min-h-7 min-w-9 rounded-md px-2.5 py-1 text-[13px] font-medium transition-colors disabled:cursor-default disabled:opacity-60",
                       chosenLanguage === option
-                        ? "bg-[var(--brand)] text-white shadow-sm"
+                        ? "bg-[var(--brand)] text-primary-foreground shadow-sm"
                         : "text-foreground hover:bg-muted",
                     )}
                     onClick={() => setLanguage(option)}

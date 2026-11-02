@@ -890,14 +890,14 @@ export function PatientDocumentsTab({
               ) : null}
             </div>
           </DialogHeader>
-          <div className="min-h-0 flex-1 bg-slate-50 p-3">
+          <div className="min-h-0 flex-1 bg-muted p-3">
             {documentPreviewBusy ? (
-              <div className="flex h-full min-h-80 items-center justify-center rounded-lg border border-border bg-white text-sm text-muted-foreground">
+              <div className="flex h-full min-h-80 items-center justify-center rounded-lg border border-border bg-card text-sm text-muted-foreground">
                 <LoaderCircle className="mr-2 size-4 animate-spin" />
                 {t.documents_loading_document}
               </div>
             ) : documentPreviewError ? (
-              <div className="flex h-full min-h-80 items-center justify-center rounded-lg border border-destructive/30 bg-white p-8 text-center text-sm text-destructive">
+              <div className="flex h-full min-h-80 items-center justify-center rounded-lg border border-destructive/30 bg-card p-8 text-center text-sm text-destructive">
                 {documentPreviewError}
               </div>
             ) : documentPreview?.url &&
@@ -911,7 +911,7 @@ export function PatientDocumentsTab({
                 className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
               />
             ) : documentPreview?.url ? (
-              <div className="flex h-full min-h-80 flex-col items-center justify-center rounded-lg border border-border bg-white p-8 text-center">
+              <div className="flex h-full min-h-80 flex-col items-center justify-center rounded-lg border border-border bg-card p-8 text-center">
                 <FileWarning className="mb-3 size-8 text-muted-foreground" />
                 <p className="max-w-md text-sm text-muted-foreground">
                   {lang === "de"

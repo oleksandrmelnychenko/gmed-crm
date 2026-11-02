@@ -705,7 +705,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
   return (
     <div className="patient-workspace space-y-3">
       <div className="patient-workspace-header flex flex-wrap items-center gap-3">
-        <div className="flex items-center justify-center size-10 shrink-0 rounded-full bg-[var(--brand)] text-[12px] font-semibold text-white">
+        <div className="flex items-center justify-center size-10 shrink-0 rounded-full bg-[var(--brand)] text-[12px] font-semibold text-primary-foreground">
           {initials}
         </div>
         <div className="min-w-[180px] flex-1 sm:min-w-[220px]">

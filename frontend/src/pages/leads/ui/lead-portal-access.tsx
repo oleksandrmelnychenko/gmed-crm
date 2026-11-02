@@ -416,7 +416,7 @@ export function LeadPortalAccessDetail({
           ) : null}
         </dl>
       ) : minor !== true && !lead.email ? (
-        <p className="leading-6 text-slate-700 dark:text-slate-300">
+        <p className="leading-6 text-foreground">
           {de
               ? "Ohne E-Mail-Adresse kann kein Zugang angelegt werden."
               : "Без электронной почты доступ создать нельзя."}
@@ -425,7 +425,7 @@ export function LeadPortalAccessDetail({
         <EmailDomainWarning email={lead.email} lang={lang} />
       ) : null}
       {ownLoginClosed && status !== "none" ? (
-        <p className="leading-6 text-slate-700 dark:text-slate-300" data-testid="lead-portal-own-login-closed">
+        <p className="leading-6 text-foreground" data-testid="lead-portal-own-login-closed">
           {de
             ? "Der eigene Zugang des Kindes ist gesperrt: Die Anfrage füllen die Eltern mit ihrem Zugang (unten) aus. Wird das Geburtsdatum auf 18 Jahre oder älter korrigiert, gilt er wieder."
             : "Собственный вход ребёнка закрыт: заявку заполняют родители через свой доступ (ниже). Если дату рождения исправить на 18 лет и старше, вход снова заработает."}
@@ -741,7 +741,7 @@ function PortalCredentialsContent({
                 aria-pressed={language === option.value}
                 className={
                   language === option.value
-                    ? "rounded-md bg-[var(--brand)] px-2 py-1 text-xs font-semibold text-white"
+                    ? "rounded-md bg-[var(--brand)] px-2 py-1 text-xs font-semibold text-primary-foreground"
                     : "rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
                 }
                 onClick={() => {
@@ -941,25 +941,25 @@ export function LeadGuardianAccess({
   if (!intake || (!intake.minor && links.length === 0)) return null;
 
   return (
-    <div className="w-full space-y-3 border-t border-slate-200 pt-4 dark:border-slate-700" data-testid="lead-guardian-access">
+    <div className="w-full space-y-3 border-t border-border pt-4" data-testid="lead-guardian-access">
       <p className="flex items-center gap-2 text-sm font-semibold text-foreground">
-        <UsersRound aria-hidden="true" className="size-4 text-slate-600 dark:text-slate-300" />
+        <UsersRound aria-hidden="true" className="size-4 text-muted-foreground" />
         {tx("Доступ родителей (несовершеннолетний)", "Zugang der Eltern (minderjährig)")}
       </p>
       {links.map((link) => {
         // The relation stays beside the name once the login exists (QA 2026-10-11, N-10).
         const relation = guardianLinkRelation(link, allCandidates);
         return (
-          <div key={link.access_id} className="grid min-w-0 items-center gap-3 rounded-xl border border-slate-300 bg-card p-3.5 shadow-xs dark:border-slate-600 @[48rem]:grid-cols-[minmax(0,1fr)_auto]">
+          <div key={link.access_id} className="grid min-w-0 items-center gap-3 rounded-xl border border-input bg-card p-3.5 shadow-xs @[48rem]:grid-cols-[minmax(0,1fr)_auto]">
             <div className="min-w-0 space-y-2">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <span className="flex min-w-0 items-center gap-2 text-sm font-semibold text-foreground"><UserRound aria-hidden="true" className="size-4 shrink-0 text-slate-600 dark:text-slate-300" /><span className="break-words">{link.name ?? "—"}</span></span>
+                <span className="flex min-w-0 items-center gap-2 text-sm font-semibold text-foreground"><UserRound aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" /><span className="break-words">{link.name ?? "—"}</span></span>
                 <StatusChip tone={link.is_active ? "success" : "warning"}>
                   {link.is_active ? <ShieldCheck aria-hidden="true" /> : null}
                   {link.is_active ? tx("Доступ выдан", "Zugang erteilt") : tx("Аккаунт отключён", "Konto deaktiviert")}
                 </StatusChip>
               </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-700 dark:text-slate-300">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-foreground">
                 {relation ? <TrustedContactRole relation={relation} tx={tx} /> : null}
                 <span className="inline-flex min-w-0 items-center gap-1.5"><Mail aria-hidden="true" className="size-3.5 shrink-0" /><span className="break-all">{link.email}</span></span>
                 <span>{tx("Последний вход: ", "Letzte Anmeldung: ")}{link.last_login_at ? formatAppDateTime(link.last_login_at) : tx("ещё не входил", "noch nie")}</span>
@@ -971,7 +971,7 @@ export function LeadGuardianAccess({
                   type="button"
                   variant="default"
                   size="sm"
-                  className="h-7 gap-1.5 rounded-md border-slate-300 bg-background px-2.5 text-xs text-foreground hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800"
+                  className="h-7 gap-1.5 rounded-md border-input bg-background px-2.5 text-xs text-foreground hover:bg-muted"
                   disabled={busy !== null}
                   onClick={() => void run(`reset-${link.access_id}`, () => resetLeadGuardianPassword(lead.id, link.access_id), link.name)}
                 >
@@ -997,13 +997,13 @@ export function LeadGuardianAccess({
       {candidates.map((candidate) => {
         const contactId = candidate.trusted_contact_id;
         return (
-          <div key={contactId ?? candidate.name ?? ""} className="grid min-w-0 items-center gap-3 rounded-xl border border-slate-300 bg-card p-3.5 shadow-xs dark:border-slate-600 @[48rem]:grid-cols-[minmax(0,1fr)_auto]">
+          <div key={contactId ?? candidate.name ?? ""} className="grid min-w-0 items-center gap-3 rounded-xl border border-input bg-card p-3.5 shadow-xs @[48rem]:grid-cols-[minmax(0,1fr)_auto]">
             <div className="min-w-0 space-y-2">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <span className="flex min-w-0 items-center gap-2 text-sm font-semibold text-foreground"><UserRound aria-hidden="true" className="size-4 shrink-0 text-slate-600 dark:text-slate-300" /><span className="break-words">{candidate.name ?? "—"}</span></span>
+                <span className="flex min-w-0 items-center gap-2 text-sm font-semibold text-foreground"><UserRound aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" /><span className="break-words">{candidate.name ?? "—"}</span></span>
                 <StatusChip tone="warning">{tx("Доступ не выдан", "Zugang nicht erteilt")}</StatusChip>
               </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-700 dark:text-slate-300">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-foreground">
                 {candidate.relation ? <TrustedContactRole relation={candidate.relation} tx={tx} /> : null}
                 <span className="inline-flex min-w-0 items-center gap-1.5"><Mail aria-hidden="true" className="size-3.5 shrink-0" /><span className="break-all">{candidate.email ?? tx("нет e-mail", "keine E-Mail")}</span></span>
               </div>
@@ -1013,7 +1013,7 @@ export function LeadGuardianAccess({
                 type="button"
                 variant="default"
                 size="sm"
-                className="h-7 w-fit gap-1.5 rounded-md bg-slate-900 px-2.5 text-xs text-white shadow-xs hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
+                className="h-7 w-fit gap-1.5 rounded-md bg-primary px-2.5 text-xs text-primary-foreground shadow-xs hover:bg-primary/90"
                 disabled={busy !== null}
                 onClick={() => void run(`issue-${contactId}`, () => issueLeadGuardianAccess(lead.id, contactId), candidate.name)}
               >
@@ -1025,7 +1025,7 @@ export function LeadGuardianAccess({
         );
       })}
       {links.length === 0 && candidates.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-slate-300 bg-card p-3 leading-6 text-slate-700 dark:border-slate-600 dark:text-slate-300">
+        <p className="rounded-lg border border-dashed border-input bg-card p-3 leading-6 text-foreground">
           {tx(
             "Добавьте в шаге «Данные клиента» мать, отца или законного представителя с e-mail.",
             "Unter „Personendaten“ Mutter, Vater oder gesetzlichen Vertreter mit E-Mail ergänzen.",

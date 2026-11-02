@@ -79,16 +79,16 @@ export function CasesRosterSection({
       {showHeader ? (
         <div className={cn("flex items-center justify-between gap-3", headerClassName)}>
           <div>
-            <h2 className={cn("text-sm font-semibold text-slate-950", titleClassName)}>
+            <h2 className={cn("text-sm font-semibold text-foreground", titleClassName)}>
               {title}
             </h2>
-            <p className={cn("mt-1 text-sm text-slate-600", subtitleClassName)}>
+            <p className={cn("mt-1 text-sm text-muted-foreground", subtitleClassName)}>
               {subtitle}
             </p>
           </div>
           <div
             className={cn(
-              "text-xs text-slate-500",
+              "text-xs text-muted-foreground",
               counterClassName,
             )}
           >
@@ -108,7 +108,7 @@ export function CasesRosterSection({
         : null}
 
       {loading ? (
-        <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
+        <div className="flex min-h-[320px] items-center justify-center text-sm text-muted-foreground">
           <LoaderCircle className="mr-2 size-4 animate-spin" />
           {loadingLabel}
         </div>
@@ -202,13 +202,13 @@ function CaseCardContent({
     <div>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="font-mono text-xs font-semibold tracking-[0.16em] text-slate-500">
+          <div className="font-mono text-xs font-semibold tracking-[0.16em] text-muted-foreground">
             {item.case_id}
           </div>
-          <h3 className="mt-2 text-lg font-semibold text-slate-950">
+          <h3 className="mt-2 text-lg font-semibold text-foreground">
             {item.patient_name}
           </h3>
-          <p className="mt-1 text-sm text-slate-600">{item.patient_pid}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{item.patient_pid}</p>
         </div>
         <Badge variant="outline" className={cn("rounded-full", statusClassName)}>
           {statusLabel}
@@ -216,19 +216,19 @@ function CaseCardContent({
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <div className="text-[11px] font-semibold text-slate-500">
+        <div className="rounded-xl border border-border bg-muted p-3">
+          <div className="text-[11px] font-semibold text-muted-foreground">
             {reasonLabel}
           </div>
-          <div className="mt-2 text-sm text-slate-900">
+          <div className="mt-2 text-sm text-foreground">
             {item.hauptanfragegrund?.trim() || notSetLabel}
           </div>
         </div>
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <div className="text-[11px] font-semibold text-slate-500">
+        <div className="rounded-xl border border-border bg-muted p-3">
+          <div className="text-[11px] font-semibold text-muted-foreground">
             {createdLabel}
           </div>
-          <div className="mt-2 text-sm text-slate-900">{createdAtLabel}</div>
+          <div className="mt-2 text-sm text-foreground">{createdAtLabel}</div>
         </div>
       </div>
     </div>

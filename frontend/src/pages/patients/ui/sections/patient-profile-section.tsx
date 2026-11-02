@@ -1100,7 +1100,7 @@ function usePatientProfileTabContent({
                     <p className="px-2 pb-1 text-[11px] font-medium text-muted-foreground">
                       {profileLang === "de" ? "Ausgewählte Leistungsarten" : "Выбранные виды работ"}
                     </p>
-                    <div className="overflow-hidden rounded-md border border-border/60 bg-white">
+                    <div className="overflow-hidden rounded-md border border-border/60 bg-card">
                       {selectedWorkTypes.map((workType) => {
                         const priceRange = selectedWorkTypePriceRange(workType);
                         return (

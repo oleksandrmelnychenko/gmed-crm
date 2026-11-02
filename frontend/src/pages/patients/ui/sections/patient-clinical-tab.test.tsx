@@ -498,8 +498,8 @@ describe("DiagnosisTreeSection", () => {
     expect(html).toContain("Nebendiagnose hinzufügen");
     expect(html).toContain("Unterdiagnose");
     expect(html).toContain("Prozedur dazu");
-    expect(html).toContain("border-orange-500 bg-orange-500 text-white");
-    expect(html.match(/border-orange-500/g)).toHaveLength(2);
+    expect(html.match(/data-variant="default"/g)).toHaveLength(2);
+    expect(html).toContain("bg-primary text-primary-foreground");
     expect(html).not.toContain("title=\"Unterdiagnose unter: Appendektomie\"");
   });
 
@@ -526,7 +526,7 @@ describe("DiagnosisTreeSection", () => {
     expect(html).toContain("border-l border-border/70 pl-4");
     expect(html).toContain("absolute -left-4 top-5 h-px w-4");
     expect(html).toContain("border-violet-300 bg-violet-50 text-violet-700");
-    expect(html).toContain("border-border/40 bg-white");
+    expect(html).toContain("border-border/40 bg-card");
     expect(html).not.toContain("bg-muted/10");
     expect(html).not.toContain("bg-muted/20");
   });

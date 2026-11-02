@@ -381,7 +381,7 @@ function useAppointmentConciergeSectionContent({
                   <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-sm font-semibold text-slate-950">
+                        <p className="text-sm font-semibold text-foreground">
                           {service.title_redacted
                             ? serviceTaxonomyLabel(service, lang)
                               || (lang === "de" ? "Serviceanfrage" : "Сервисный запрос")
@@ -402,7 +402,7 @@ function useAppointmentConciergeSectionContent({
                           {billingStatusLabel(service.billing_status)}
                         </span>
                       </div>
-                      <p className="mt-1 text-xs text-slate-500">
+                      <p className="mt-1 text-xs text-muted-foreground">
                         {service.assigned_concierge_name || tr.common_not_set}
                         {service.provider_name ? ` · ${service.provider_name}` : ""}
                         {service.starts_at
@@ -410,7 +410,7 @@ function useAppointmentConciergeSectionContent({
                           : ""}
                       </p>
                     </div>
-                    <div className="text-xs text-slate-500 xl:text-right">
+                    <div className="text-xs text-muted-foreground xl:text-right">
                       <div>
                         {t.appointments_concierge_estimate}{" "}
                         {formatMoneyLabel(

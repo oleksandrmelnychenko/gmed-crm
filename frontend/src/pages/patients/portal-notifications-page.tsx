@@ -242,7 +242,7 @@ export function PatientNotificationsPage() {
         <div className="flex flex-wrap justify-center gap-1 rounded-xl border border-border/60 bg-card p-1.5" aria-label={copy.filterLabel}>
           {([['all', copy.all], ['unread', copy.onlyUnread], ['read', copy.onlyRead]] as const).map(([value, label]) => (
             <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}
-              className={cn("inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]", filter === value ? "bg-[var(--brand)] font-semibold text-white" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
+              className={cn("inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]", filter === value ? "bg-[var(--brand)] font-semibold text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
               {value === 'read' ? <CheckCheck className="size-4" aria-hidden="true" /> : <Bell className="size-4" aria-hidden="true" />}{label}
             </button>
           ))}

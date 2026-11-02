@@ -85,19 +85,21 @@ const ExecutiveCashChart = lazy(async () => {
     return (
       <ResponsiveContainer width="100%" height={178}>
         <ComposedChart data={data} margin={{ top: 10, right: 10, bottom: 0, left: -8 }}>
-          <CartesianGrid stroke="#e5e7eb" strokeDasharray="2 4" vertical={false} />
-          <XAxis dataKey="label" axisLine={false} tickLine={false} fontSize={10} stroke="#8b8b8b" />
+          <CartesianGrid stroke="var(--border)" strokeDasharray="2 4" vertical={false} />
+          <XAxis dataKey="label" axisLine={false} tickLine={false} fontSize={10} stroke="var(--muted-foreground)" />
           <YAxis
             axisLine={false}
             tickLine={false}
             fontSize={10}
-            stroke="#8b8b8b"
+            stroke="var(--muted-foreground)"
             tickFormatter={(value) => currency.format(Number(value))}
           />
           <Tooltip
             formatter={(value, key) => [formatMoneyAmount(Number(value), "EUR"), String(key)]}
             contentStyle={{
-              border: "1px solid #e5e7eb",
+              background: "var(--popover)",
+              color: "var(--popover-foreground)",
+              border: "1px solid var(--border)",
               borderRadius: 8,
               boxShadow: "none",
               fontSize: 11,
@@ -109,9 +111,9 @@ const ExecutiveCashChart = lazy(async () => {
             type="monotone"
             dataKey="net"
             name={labels.net}
-            stroke="#171717"
+            stroke="var(--primary)"
             strokeWidth={1.5}
-            dot={{ r: 2, fill: "#171717" }}
+            dot={{ r: 2, fill: "var(--primary)" }}
             isAnimationActive={false}
           />
         </ComposedChart>

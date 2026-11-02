@@ -41,6 +41,46 @@ export const BUILTIN_THEMES: readonly AppearanceTheme[] = [DEFAULT_THEME, {
     border: "#d9e1d9", inputBorder: "#cbd6cb", focus: "#617d68", sidebar: "#f6f8f5",
     rowAlternate: "#f5f7f4", rowHover: "#eaf0e8", rowActive: "#e3ebe0", rowSelected: "#d9e5d5",
   },
+}, {
+  version: 1, id: "gmed-ocean", name: "GMED Ocean", colors: {
+    ...DEFAULT_THEME_COLORS,
+    background: "#eaf1f7", primary: "#19384f", primaryText: "#ffffff",
+    text: "#172b3c", textMuted: "#425668", muted: "#f0f5fa", accent: "#dce8f2",
+    border: "#d3dfe9", inputBorder: "#c4d3df", focus: "#536f8c", sidebar: "#f5f8fc",
+    rowAlternate: "#f4f8fb", rowHover: "#e6eef5", rowActive: "#dfeaf3", rowSelected: "#d5e3ee",
+  },
+}, {
+  version: 1, id: "gmed-lagoon", name: "GMED Lagoon", colors: {
+    ...DEFAULT_THEME_COLORS,
+    background: "#e9f2f1", primary: "#123b3b", primaryText: "#ffffff",
+    text: "#19332f", textMuted: "#405b57", muted: "#eff6f5", accent: "#dcebe8",
+    border: "#d2e3df", inputBorder: "#bdd4ce", focus: "#4c7772", sidebar: "#f4f9f7",
+    rowAlternate: "#f3f8f6", rowHover: "#e5f0ec", rowActive: "#dcebe5", rowSelected: "#d3e5df",
+  },
+}, {
+  version: 1, id: "gmed-iris", name: "GMED Iris", colors: {
+    ...DEFAULT_THEME_COLORS,
+    background: "#f0edf7", primary: "#35254f", primaryText: "#ffffff",
+    text: "#2d253b", textMuted: "#574d69", muted: "#f5f2fa", accent: "#e8e0f2",
+    border: "#e0d9eb", inputBorder: "#d1c6e1", focus: "#78618e", sidebar: "#f9f6fc",
+    rowAlternate: "#f8f5fb", rowHover: "#eee8f5", rowActive: "#e9e2f2", rowSelected: "#e4dcf0",
+  },
+}, {
+  version: 1, id: "gmed-dune", name: "GMED Dune", colors: {
+    ...DEFAULT_THEME_COLORS,
+    background: "#f3efe8", primary: "#3b3027", primaryText: "#fffaf4",
+    text: "#302b23", textMuted: "#62574a", muted: "#f7f4ee", accent: "#eae2d6",
+    border: "#e3dbcf", inputBorder: "#d3c7b6", focus: "#837053", sidebar: "#faf8f3",
+    rowAlternate: "#faf7f2", rowHover: "#f0e9de", rowActive: "#ece4d7", rowSelected: "#e7dfcf",
+  },
+}, {
+  version: 1, id: "gmed-rose", name: "GMED Rose", colors: {
+    ...DEFAULT_THEME_COLORS,
+    background: "#f6edf0", primary: "#482b38", primaryText: "#ffffff",
+    text: "#382731", textMuted: "#66505b", muted: "#faf2f5", accent: "#f0e1e8",
+    border: "#e9d9e1", inputBorder: "#d9c3ce", focus: "#946478", sidebar: "#fcf6f8",
+    rowAlternate: "#fbf5f7", rowHover: "#f4e8ee", rowActive: "#f0e2e9", rowSelected: "#ecdce3",
+  },
 }];
 
 export const MAX_THEME_JSON_LENGTH = 16_384;

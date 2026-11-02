@@ -58,12 +58,12 @@ export function SpecializationChecklistForm({
           <div
             key={item.index}
             data-specialization-checklist-item={item.label}
-            className={cn("rounded-md border border-border/60 bg-white px-2.5 py-1.5", item.child && "ml-4", compact && "rounded-none border-0 bg-transparent px-0 py-2.5")}
+            className={cn("rounded-md border border-border/60 bg-card px-2.5 py-1.5", item.child && "ml-4", compact && "rounded-none border-0 bg-transparent px-0 py-2.5")}
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className={cn("text-sm text-foreground", !item.child && "font-semibold", compact && "min-w-0 flex-1 text-[13px] font-medium leading-5")}>{item.label}</span>
               {item.yesNo ? (
-                <span role="group" aria-label={item.label} className={cn("inline-flex rounded-md border border-border bg-white p-0.5", compact && "shrink-0 gap-0.5 border-0 bg-muted/40 p-1")}>
+                <span role="group" aria-label={item.label} className={cn("inline-flex rounded-md border border-border bg-card p-0.5", compact && "shrink-0 gap-0.5 border-0 bg-muted/40 p-1")}>
                   {(["ja", "nein"] as const).map((value) => (
                     <button
                       key={value}

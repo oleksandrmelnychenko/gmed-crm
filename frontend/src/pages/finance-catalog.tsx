@@ -1863,7 +1863,7 @@ function useFinanceCatalogPageContent() {
                       "flex min-w-0 max-w-[230px] items-center overflow-hidden rounded-full border",
                       usage.isActive
                         ? "border-sky-200 bg-sky-50 text-sky-700"
-                        : "border-slate-200 bg-slate-50 text-slate-600",
+                        : "border-border bg-muted text-muted-foreground",
                     )}
                   >
                     <span className="min-w-0 truncate px-2 py-0.5 text-xs font-medium">
@@ -1877,7 +1877,7 @@ function useFinanceCatalogPageContent() {
                     {canManageTaxProfiles && servicePackage ? (
                       <button
                         type="button"
-                        className="flex size-6 shrink-0 items-center justify-center border-l border-current/15 transition-colors hover:bg-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                        className="flex size-6 shrink-0 items-center justify-center border-l border-current/15 transition-colors hover:bg-card/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                         onClick={(event) => {
                           event.stopPropagation();
                           setPriceVersionForm(withPriceBaseline({

@@ -15,7 +15,7 @@ import {
 } from "../../data/clinical-import-constructor";
 
 const controlClass =
-  "w-full rounded-lg border border-border bg-white px-3 text-sm outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100 aria-[invalid=true]:border-destructive";
+  "w-full rounded-lg border border-border bg-field px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring aria-[invalid=true]:border-destructive";
 
 const DETAIL_FIELDS: Partial<Record<ClinicalDocumentImportTarget, string[]>> = {
   examination: ["title", "performed_on"],

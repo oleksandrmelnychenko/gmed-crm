@@ -30,7 +30,7 @@ export function ContextCard({
         className={cn(
           "break-words",
           isSnapshot
-            ? "mt-0.5 text-sm font-semibold text-slate-900 leading-tight"
+            ? "mt-0.5 text-sm font-semibold text-foreground leading-tight"
             : "mt-2 text-sm font-semibold text-foreground",
         )}
       >
@@ -39,7 +39,7 @@ export function ContextCard({
       <p
         className={cn(
           isSnapshot
-            ? "mt-0.5 text-sm text-slate-600 leading-tight"
+            ? "mt-0.5 text-sm text-muted-foreground leading-tight"
             : "mt-1 text-xs text-muted-foreground",
         )}
       >

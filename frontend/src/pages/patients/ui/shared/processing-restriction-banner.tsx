@@ -85,7 +85,7 @@ export function ProcessingRestrictionBanner({
           </label>
           <textarea
             id="processing-restriction-reason"
-            className="w-full rounded-md border border-amber-300 bg-white p-2 text-sm text-foreground"
+            className="w-full rounded-md border border-amber-300 bg-field p-2 text-sm text-foreground"
             rows={3}
             maxLength={2000}
             value={reason}

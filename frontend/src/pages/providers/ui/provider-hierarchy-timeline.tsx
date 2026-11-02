@@ -500,8 +500,8 @@ function TimelineNode({
       </div>
       <div
         className={cn(
-          "group flex min-h-14 min-w-0 flex-1 items-start justify-between gap-2 rounded-lg border border-border/60 bg-white/95 px-2.5 py-2.5 text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:border-primary/35 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:items-center sm:gap-3 sm:px-3 sm:py-2",
-          active && "border-primary/55 bg-white shadow-[inset_3px_0_0_var(--primary),0_1px_3px_rgba(15,23,42,0.08)]",
+          "group flex min-h-14 min-w-0 flex-1 items-start justify-between gap-2 rounded-lg border border-border/60 bg-card/95 px-2.5 py-2.5 text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:border-primary/35 hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:items-center sm:gap-3 sm:px-3 sm:py-2",
+          active && "border-primary/55 bg-card shadow-[inset_3px_0_0_var(--primary),0_1px_3px_rgba(15,23,42,0.08)]",
         )}
       >
         {canToggle ? (

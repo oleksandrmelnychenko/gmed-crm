@@ -228,7 +228,7 @@ export function MedicationEvidenceReviewPanelContent({
 
   return (
     <section
-      className="overflow-hidden rounded-lg border border-border/70 bg-white"
+      className="overflow-hidden rounded-lg border border-border/70 bg-card"
       aria-label={tx("AI-анализ доказательств", "KI-Evidenzprüfung")}
     >
       <header className="flex flex-col gap-2 border-b border-border/60 bg-muted/15 px-3.5 py-3 sm:flex-row sm:items-start sm:justify-between">
@@ -256,7 +256,7 @@ export function MedicationEvidenceReviewPanelContent({
           <div role="alert" className="flex flex-col gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-xs text-rose-800 sm:flex-row sm:items-center sm:justify-between">
             <span>{error}</span>
             {onRetryPreview ? (
-              <Button type="button" size="sm" variant="outline" className="min-h-11 bg-white sm:min-h-8" onClick={onRetryPreview}>
+              <Button type="button" size="sm" variant="outline" className="min-h-11 bg-card sm:min-h-8" onClick={onRetryPreview}>
                 {tx("Повторить", "Erneut versuchen")}
               </Button>
             ) : null}
@@ -276,7 +276,7 @@ export function MedicationEvidenceReviewPanelContent({
                   )}
                 </span>
                 {onRefreshStale ? (
-                  <Button type="button" size="sm" variant="outline" className="min-h-11 bg-white sm:min-h-8" onClick={onRefreshStale}>
+                  <Button type="button" size="sm" variant="outline" className="min-h-11 bg-card sm:min-h-8" onClick={onRefreshStale}>
                     {tx("Обновить данные", "Daten aktualisieren")}
                   </Button>
                 ) : null}
@@ -285,7 +285,7 @@ export function MedicationEvidenceReviewPanelContent({
               <div role="alert" className="flex flex-col gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-xs text-rose-800 sm:flex-row sm:items-center sm:justify-between">
                 <span>{operationError || tx("Не удалось подготовить AI-анализ.", "Die KI-Analyse konnte nicht vorbereitet werden.")}</span>
                 {onRetryCreate ? (
-                  <Button type="button" size="sm" variant="outline" className="min-h-11 bg-white sm:min-h-8" onClick={onRetryCreate}>
+                  <Button type="button" size="sm" variant="outline" className="min-h-11 bg-card sm:min-h-8" onClick={onRetryCreate}>
                     {tx("Повторить", "Erneut versuchen")}
                   </Button>
                 ) : null}
@@ -464,13 +464,13 @@ function DraftGroup({
   );
   if (collapsible) {
     return (
-      <details open={defaultOpen || undefined} className="group/draft overflow-hidden rounded-lg border border-border/70 bg-white">
+      <details open={defaultOpen || undefined} className="group/draft overflow-hidden rounded-lg border border-border/70 bg-card">
         <summary className="cursor-pointer list-none marker:hidden">{header}</summary>
         {content}
       </details>
     );
   }
-  return <section className="overflow-hidden rounded-lg border border-border/70 bg-white">{header}{content}</section>;
+  return <section className="overflow-hidden rounded-lg border border-border/70 bg-card">{header}{content}</section>;
 }
 
 function EvidenceSnapshot({ review, lang, tx }: { review: MedicationEvidenceReview; lang: Lang; tx: Bilingual }) {
@@ -484,7 +484,7 @@ function EvidenceSnapshot({ review, lang, tx }: { review: MedicationEvidenceRevi
       ? "bg-amber-500"
       : "bg-sky-500";
   return (
-    <details className="overflow-hidden rounded-lg border border-border/70 bg-white">
+    <details className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <summary className="flex cursor-pointer list-none items-center gap-2 bg-muted/15 px-3 py-2.5 marker:hidden">
         <span className="size-1.5 rounded-full bg-orange-500" />
         <span className="text-xs font-semibold text-foreground">{tx("Снимок доказательств", "Evidenz-Snapshot")}</span>
@@ -557,7 +557,7 @@ function ProvenanceDetails({ review, lang, tx }: { review: MedicationEvidenceRev
     [review.bundle.sources],
   );
   return (
-    <details className="overflow-hidden rounded-lg border border-border/70 bg-white">
+    <details className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <summary className="flex cursor-pointer list-none items-center gap-2 bg-muted/15 px-3 py-2.5 marker:hidden">
         <span className="size-1.5 rounded-full bg-orange-500" />
         <span className="text-xs font-semibold text-foreground">{tx("Цитаты и источники", "Zitate und Quellen")}</span>
@@ -635,7 +635,7 @@ export function MedicationEvidenceReviewContent({
     return (
       <div role="alert" className="flex flex-col gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-4 text-xs text-rose-800 sm:flex-row sm:items-center sm:justify-between">
         <span>{error}</span>
-        {onRetry ? <Button type="button" size="sm" variant="outline" className="min-h-11 bg-white sm:min-h-8" onClick={onRetry}>{tx("Повторить", "Erneut versuchen")}</Button> : null}
+        {onRetry ? <Button type="button" size="sm" variant="outline" className="min-h-11 bg-card sm:min-h-8" onClick={onRetry}>{tx("Повторить", "Erneut versuchen")}</Button> : null}
       </div>
     );
   }
@@ -644,7 +644,7 @@ export function MedicationEvidenceReviewContent({
   }
   if (!review.permissions.can_read_review) {
     return (
-      <div className="rounded-lg border border-border/70 bg-white px-4 py-8 text-center text-xs text-muted-foreground">
+      <div className="rounded-lg border border-border/70 bg-card px-4 py-8 text-center text-xs text-muted-foreground">
         {tx("У вас нет доступа к результату анализа.", "Sie haben keinen Zugriff auf dieses Analyseergebnis.")}
       </div>
     );
@@ -766,7 +766,7 @@ export function MedicationAiAnalysisSection({
         ) : error && analysis?.status !== "ready" ? (
           <div role="alert" className="flex flex-col gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-xs text-rose-800 sm:flex-row sm:items-center sm:justify-between">
             <span>{error}</span>
-            <Button type="button" size="sm" variant="outline" className="min-h-11 bg-white sm:min-h-8" onClick={analysis?.status === "failed" ? onRetry : onCreate}>
+            <Button type="button" size="sm" variant="outline" className="min-h-11 bg-card sm:min-h-8" onClick={analysis?.status === "failed" ? onRetry : onCreate}>
               <AiMark className="size-3.5" />
               {tx("Повторить", "Erneut versuchen")}
             </Button>
@@ -794,7 +794,7 @@ export function MedicationAiAnalysisSection({
         ) : analysis.status === "failed" ? (
           <div role="alert" className="flex flex-col gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-xs text-rose-800 sm:flex-row sm:items-center sm:justify-between">
             <span className="flex items-start gap-2"><AiMark className="mt-0.5 size-3.5" />{tx("AI-анализ не прошёл безопасную обработку. Доказательства сохранены без изменений.", "Die KI-Analyse konnte nicht sicher verarbeitet werden. Die Evidenz blieb unverändert.")}</span>
-            <Button type="button" size="sm" variant="outline" className="min-h-11 bg-white sm:min-h-8" disabled={loading} onClick={onRetry}>
+            <Button type="button" size="sm" variant="outline" className="min-h-11 bg-card sm:min-h-8" disabled={loading} onClick={onRetry}>
               <AiMark className="size-3.5" />
               {tx("Повторить", "Erneut versuchen")}
             </Button>

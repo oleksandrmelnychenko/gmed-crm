@@ -184,13 +184,13 @@ const targetTone: Record<ClinicalDocumentImportTarget, string> = {
 };
 
 const targetCardTone: Record<ClinicalDocumentImportTarget, string> = {
-  diagnosis: "border-border/80 bg-white",
-  anamnesis: "border-border/80 bg-white",
-  medication: "border-border/80 bg-white",
-  examination: "border-border/80 bg-white",
-  lab_result: "border-border/80 bg-white",
-  vital: "border-border/80 bg-white",
-  recommendation: "border-border/80 bg-white",
+  diagnosis: "border-border/80 bg-card",
+  anamnesis: "border-border/80 bg-card",
+  medication: "border-border/80 bg-card",
+  examination: "border-border/80 bg-card",
+  lab_result: "border-border/80 bg-card",
+  vital: "border-border/80 bg-card",
+  recommendation: "border-border/80 bg-card",
 };
 
 function localizedLabNumber(value: string): number | null {
@@ -480,7 +480,7 @@ function MedicationCandidateEditor({
           aria-required={options.required}
           aria-invalid={options.required && !normalizedValue(key).trim()}
           className={cn(
-            "h-11 bg-white",
+            "h-11 bg-field",
             options.required && !normalizedValue(key).trim() && "border-amber-400",
           )}
           onFocus={onFocus}
@@ -518,7 +518,7 @@ function MedicationCandidateEditor({
   return (
     <div
       data-clinical-import-candidate-editor
-      className="space-y-4 rounded-lg border border-white/70 bg-white/55 p-4"
+      className="space-y-4 rounded-lg border border-white/70 bg-card/55 p-4"
       onClick={(event) => event.stopPropagation()}
     >
       {disposition === "blocked" ? (
@@ -544,7 +544,7 @@ function MedicationCandidateEditor({
             aria-required={requiresExplicitSeries}
             aria-invalid={ambiguousSeries}
             className={cn(
-              "h-11 w-full rounded-md border bg-white px-3 text-sm",
+              "h-11 w-full rounded-md border bg-field px-3 text-sm",
               ambiguousSeries ? "border-amber-400" : "border-input",
             )}
             onChange={(event) => updateSeriesSelection(event.target.value)}
@@ -626,7 +626,7 @@ function MedicationCandidateEditor({
             disabled={disabled}
             aria-invalid={statusNeedsConfirmation}
             className={cn(
-              "h-11 w-full rounded-md border bg-white px-3 text-sm",
+              "h-11 w-full rounded-md border bg-field px-3 text-sm",
               statusNeedsConfirmation ? "border-amber-400" : "border-input",
             )}
             onChange={(event) => updateStatus(event.target.value)}
@@ -653,7 +653,7 @@ function MedicationCandidateEditor({
           <textarea
             value={normalizedValue("hinweis")}
             disabled={disabled}
-            className="min-h-24 w-full resize-y rounded-md border border-input bg-white px-3 py-2 text-sm outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+            className="min-h-24 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring"
             onFocus={onFocus}
             onChange={(event) => update("hinweis", event.target.value)}
           />
@@ -665,14 +665,14 @@ function MedicationCandidateEditor({
           <textarea
             value={normalizedValue("grund")}
             disabled={disabled}
-            className="min-h-24 w-full resize-y rounded-md border border-input bg-white px-3 py-2 text-sm outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+            className="min-h-24 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring"
             onFocus={onFocus}
             onChange={(event) => update("grund", event.target.value)}
           />
         </label>
       </div>
 
-      <div className="grid gap-3 rounded-lg border border-border/60 bg-white/70 p-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 rounded-lg border border-border/60 bg-card/70 p-3 sm:grid-cols-2 xl:grid-cols-4">
         <label className="space-y-1">
           <span className="text-[10px] font-semibold text-muted-foreground">
             {tx("Страна источника", "Ursprungsland")}
@@ -681,7 +681,7 @@ function MedicationCandidateEditor({
             value={country}
             maxLength={2}
             disabled={disabled}
-            className="h-11 bg-white uppercase"
+            className="h-11 bg-field uppercase"
             onChange={(event) => {
               const country = event.target.value.toUpperCase().replace(/[^A-Z]/g, "");
               onSourceCountryChange(country);
@@ -709,7 +709,7 @@ function MedicationCandidateEditor({
       ) : null}
 
       {identifiers ? (
-        <p className="break-words rounded-md border border-border/60 bg-white px-3 py-2 text-[11px] text-muted-foreground">
+        <p className="break-words rounded-md border border-border/60 bg-card px-3 py-2 text-[11px] text-muted-foreground">
           <span className="font-semibold text-foreground">{tx("Идентификаторы", "Kennungen")}:</span>{" "}
           {identifiers}
         </p>
@@ -779,7 +779,7 @@ function VitalCandidateEditor({
   return (
     <div
       data-clinical-import-candidate-editor
-      className="space-y-4 rounded-xl border border-pink-200/80 bg-white/70 p-4"
+      className="space-y-4 rounded-xl border border-pink-200/80 bg-card/70 p-4"
       onClick={(event) => event.stopPropagation()}
     >
       <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-pink-100 bg-pink-50/70 px-3 py-2.5">
@@ -811,7 +811,7 @@ function VitalCandidateEditor({
             disabled={disabled}
             placeholder="YYYY-MM-DD / YYYY-MM-DDTHH:MM:SSZ"
             aria-invalid={validation.issues.includes("missing_date") || validation.issues.includes("invalid_date")}
-            className="h-11 bg-white font-mono"
+            className="h-11 bg-field font-mono"
             onFocus={onFocus}
             onChange={(event) => onPatch({
               normalized: { ...candidate.normalized, measured_at: event.target.value },
@@ -833,7 +833,7 @@ function VitalCandidateEditor({
             maxLength={2}
             disabled={disabled}
             aria-invalid={!isCanonicalClinicalImportSourceCountry(sourceCountry)}
-            className="h-11 bg-white uppercase"
+            className="h-11 bg-field uppercase"
             onFocus={onFocus}
             onChange={(event) => onSourceCountryChange(
               event.target.value.toUpperCase().replace(/[^A-Z]/g, ""),
@@ -866,7 +866,7 @@ function VitalCandidateEditor({
               inputMode="decimal"
               value={normalizedNumber(field.key)}
               disabled={disabled}
-              className="h-11 bg-white text-base font-semibold"
+              className="h-11 bg-field text-base font-semibold"
               onFocus={onFocus}
               onChange={(event) => updateNumber(field.key, event.target.value)}
             />
@@ -899,7 +899,7 @@ function VitalCandidateEditor({
               type="button"
               size="sm"
               variant="outline"
-              className="h-8 bg-white"
+              className="h-8 bg-card"
               onClick={() => updateNumber("bmi", String(calculatedBmi))}
             >
               {tx("Использовать расчётный BMI", "Berechneten BMI übernehmen")}
@@ -2182,7 +2182,7 @@ export function ClinicalDocumentImportSheet({
                                                 id={inputId}
                                                 value={typeof candidate.normalized[field] === "string" ? candidate.normalized[field] as string : ""}
                                                 disabled={snapshotReadOnly || !candidate.selected}
-                                                className="h-10 min-w-0 flex-1 bg-white disabled:text-foreground disabled:opacity-100"
+                                                className="h-10 min-w-0 flex-1 bg-field disabled:text-foreground disabled:opacity-100"
                                                 onFocus={() => setActiveCandidateId(candidate.id)}
                                                 onChange={(event) => {
                                                   const nextNormalized = { ...candidate.normalized, [field]: event.target.value };
@@ -2210,7 +2210,7 @@ export function ClinicalDocumentImportSheet({
                                         <Input
                                           value={typeof candidate.normalized.laboratory_name === "string" ? candidate.normalized.laboratory_name : ""}
                                           disabled={snapshotReadOnly || !candidate.selected}
-                                          className="h-10 bg-white disabled:text-foreground disabled:opacity-100"
+                                          className="h-10 bg-field disabled:text-foreground disabled:opacity-100"
                                           maxLength={160}
                                           placeholder={tx("Например: SYNLAB Berlin", "Zum Beispiel: SYNLAB Berlin")}
                                           onFocus={() => setActiveCandidateId(candidate.id)}
@@ -2226,7 +2226,7 @@ export function ClinicalDocumentImportSheet({
                                           type="date"
                                           value={typeof candidate.normalized.measured_on === "string" ? candidate.normalized.measured_on : ""}
                                           disabled={snapshotReadOnly || !candidate.selected}
-                                          className="h-10 bg-white !text-foreground !opacity-100 [&_.MuiPickersInputBase-sectionContent]:!text-foreground [&_.MuiPickersInputBase-sectionsContainer]:!text-foreground [&_.MuiPickersSectionList-section]:!text-foreground"
+                                          className="h-10 bg-field !text-foreground !opacity-100 [&_.MuiPickersInputBase-sectionContent]:!text-foreground [&_.MuiPickersInputBase-sectionsContainer]:!text-foreground [&_.MuiPickersSectionList-section]:!text-foreground"
                                           onChange={(event) => {
                                             const nextNormalized = { ...candidate.normalized, measured_on: event.target.value };
                                             patchCandidate(candidate.id, { normalized: nextNormalized });
@@ -2238,7 +2238,7 @@ export function ClinicalDocumentImportSheet({
                                         <Input
                                           value={typeof candidate.normalized.panel === "string" ? candidate.normalized.panel : ""}
                                           disabled={snapshotReadOnly || !candidate.selected}
-                                          className="h-10 bg-white disabled:text-foreground disabled:opacity-100"
+                                          className="h-10 bg-field disabled:text-foreground disabled:opacity-100"
                                           onChange={(event) => {
                                             const nextNormalized = { ...candidate.normalized, panel: event.target.value };
                                             patchCandidate(candidate.id, { normalized: nextNormalized });
@@ -2250,7 +2250,7 @@ export function ClinicalDocumentImportSheet({
                                         <select
                                           value={typeof candidate.normalized.abnormal_flag === "string" ? candidate.normalized.abnormal_flag : "unknown"}
                                           disabled={snapshotReadOnly || !candidate.selected}
-                                          className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm disabled:text-foreground disabled:opacity-100"
+                                          className="h-10 w-full rounded-md border border-input bg-field px-3 text-sm disabled:text-foreground disabled:opacity-100"
                                           onChange={(event) => {
                                             const nextNormalized = { ...candidate.normalized, abnormal_flag: event.target.value };
                                             patchCandidate(candidate.id, { normalized: nextNormalized });
@@ -2271,7 +2271,7 @@ export function ClinicalDocumentImportSheet({
                                           value={typeof candidate.normalized.interpretation_note === "string" ? candidate.normalized.interpretation_note : ""}
                                           disabled={snapshotReadOnly || !candidate.selected}
                                           maxLength={4000}
-                                          className="min-h-20 w-full resize-y rounded-md border border-input bg-white px-3 py-2 text-sm leading-5 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-orange-200 disabled:cursor-default disabled:text-foreground disabled:opacity-100"
+                                          className="min-h-20 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm leading-5 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:text-foreground disabled:opacity-100"
                                           placeholder={tx(
                                             "Пороговые значения, группы риска и пояснения лаборатории",
                                             "Grenzwerte, Risikogruppen und Laborhinweise",
@@ -2321,7 +2321,7 @@ export function ClinicalDocumentImportSheet({
                                     </Badge>
                                     <Badge
                                       variant="outline"
-                                      className="rounded-full border-border/60 bg-white/80 text-[10px] font-medium text-muted-foreground"
+                                      className="rounded-full border-border/60 bg-card/80 text-[10px] font-medium text-muted-foreground"
                                       title={tx(
                                         "Качество распознавания и классификации для ручной проверки, а не медицинская достоверность.",
                                         "Qualität von Erkennung und Klassifikation für die manuelle Prüfung, keine medizinische Gewissheit.",
@@ -2448,7 +2448,7 @@ export function ClinicalDocumentImportSheet({
         "Systemvorschläge direkt neben dem Original prüfen.",
       )}
       headerClassName="border-b border-border/70 bg-muted/20 px-5 py-3"
-      bodyClassName="!space-y-0 !overflow-hidden !bg-white !p-0"
+      bodyClassName="!space-y-0 !overflow-hidden !bg-card !p-0"
       bodyWrapperClassName="h-full min-h-0"
       footer={
         reviewReady || applyingReady ? (
@@ -2500,7 +2500,7 @@ export function ClinicalDocumentImportSheet({
               <Badge
                 variant="outline"
                 className={cn(
-                  "shrink-0 bg-white text-xs",
+                  "shrink-0 bg-card text-xs",
                   reviewReady && medicationReview.unresolved > 0
                     ? "border-amber-300 text-amber-900"
                     : "border-sky-300 text-sky-900",
@@ -2558,10 +2558,10 @@ export function ClinicalDocumentImportSheet({
     >
       <div
         data-clinical-import-workspace
-        className="flex h-full min-h-0 flex-col bg-white"
+        className="flex h-full min-h-0 flex-col bg-card"
       >
         {snapshotReady ? (
-          <div className="shrink-0 overflow-x-auto overflow-y-hidden overscroll-x-contain border-b border-border bg-white">
+          <div className="shrink-0 overflow-x-auto overflow-y-hidden overscroll-x-contain border-b border-border bg-card">
             <Tabs
               value={activeTab}
               onValueChange={(value) => {
@@ -2640,8 +2640,8 @@ export function ClinicalDocumentImportSheet({
           </div>
         ) : null}
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 bg-white lg:grid-cols-[minmax(520px,58fr)_minmax(400px,42fr)] xl:grid-cols-[minmax(680px,62fr)_minmax(420px,38fr)]">
-          <section className="flex min-h-0 flex-col bg-white">
+        <div className="grid min-h-0 flex-1 grid-cols-1 bg-card lg:grid-cols-[minmax(520px,58fr)_minmax(400px,42fr)] xl:grid-cols-[minmax(680px,62fr)_minmax(420px,38fr)]">
+          <section className="flex min-h-0 flex-col bg-card">
           {!documentImport ? (
             <div className="min-h-0 flex-1 overflow-y-auto p-5">
               <div className="mx-auto w-full max-w-3xl space-y-4">
@@ -2656,7 +2656,7 @@ export function ClinicalDocumentImportSheet({
                   <button
                     type="button"
                     className={cn(
-                      "flex min-h-36 w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed bg-white px-5 py-5 text-center transition-colors",
+                      "flex min-h-36 w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed bg-card px-5 py-5 text-center transition-colors",
                       "hover:border-[var(--brand)]/60 hover:bg-muted/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]/35 focus-visible:ring-offset-2",
                       file ? "border-[var(--brand)]/60" : "border-border",
                     )}
@@ -2717,7 +2717,7 @@ export function ClinicalDocumentImportSheet({
                   ) : null}
                 </section>
 
-                <section className="overflow-hidden rounded-xl border border-border/70 bg-white">
+                <section className="overflow-hidden rounded-xl border border-border/70 bg-card">
                   <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
                     <div className="flex min-w-0 items-center gap-3">
                       <History className="size-4 shrink-0 text-muted-foreground" />
@@ -3050,7 +3050,7 @@ export function ClinicalDocumentImportSheet({
                         identityPrepareMode,
                         subjectCheck.status,
                       ) ? (
-                        <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-lg border border-amber-300 bg-white/60 px-3 py-2">
+                        <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-lg border border-amber-300 bg-card/60 px-3 py-2">
                           <input
                             type="checkbox"
                             checked={patientIdentityConfirmed}
@@ -3091,7 +3091,7 @@ export function ClinicalDocumentImportSheet({
                     className={cn(
                       "mb-4 grid gap-3 rounded-xl border p-3 sm:grid-cols-[minmax(0,1fr)_minmax(240px,360px)] sm:items-center",
                       isCanonicalClinicalImportSourceCountry(sourceCountry)
-                        ? "border-border/70 bg-white"
+                        ? "border-border/70 bg-card"
                         : "border-amber-300 bg-amber-50/70",
                     )}
                   >
@@ -3117,7 +3117,7 @@ export function ClinicalDocumentImportSheet({
                         disabled={snapshotReadOnly}
                         emptyLabel={tx("Выберите страну", "Land auswählen")}
                         aria-label={tx("Страна документа", "Ursprungsland des Dokuments")}
-                        className="h-11 w-full bg-white"
+                        className="h-11 w-full bg-card"
                         onChange={(country) => updateSourceCountry(country ?? "")}
                       />
                     </label>
@@ -3158,7 +3158,7 @@ export function ClinicalDocumentImportSheet({
                       </div>
                       {selectedSourcePage?.extraction ? (
                         <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                          <Badge variant="outline" className="rounded-full bg-white font-normal">
+                          <Badge variant="outline" className="rounded-full bg-card font-normal">
                             {selectedSourcePage.extraction.source === "ocr"
                               ? "OCR"
                               : tx("Текст PDF", "PDF-Text")}
@@ -3189,8 +3189,8 @@ export function ClinicalDocumentImportSheet({
                                 className={cn(
                                   "inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-colors",
                                   selected
-                                    ? "border-orange-500 bg-orange-500 text-white"
-                                    : "border-border bg-white text-foreground hover:border-orange-200 hover:bg-orange-50",
+                                    ? "border-primary bg-primary text-primary-foreground"
+                                    : "border-border bg-card text-foreground hover:border-input hover:bg-accent",
                                 )}
                                 aria-pressed={selected}
                                 onClick={() => {
@@ -3206,7 +3206,7 @@ export function ClinicalDocumentImportSheet({
                                   className={cn(
                                     "size-1.5 rounded-full",
                                     selected
-                                      ? hasText ? "bg-white" : "bg-white/55"
+                                      ? hasText ? "bg-primary-foreground" : "bg-primary-foreground/55"
                                       : hasText ? "bg-emerald-500" : "bg-slate-300",
                                   )}
                                 />
@@ -3232,7 +3232,7 @@ export function ClinicalDocumentImportSheet({
                     {reviewReady ? (
                       <div
                         data-clinical-import-selection-actions
-                        className="sticky top-0 z-10 space-y-3 rounded-xl border border-border/70 bg-white/95 p-3 shadow-sm backdrop-blur"
+                        className="sticky top-0 z-10 space-y-3 rounded-xl border border-border/70 bg-card/95 p-3 shadow-sm backdrop-blur"
                       >
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-xs font-semibold">
@@ -3279,7 +3279,7 @@ export function ClinicalDocumentImportSheet({
                       <textarea
                         readOnly
                         value={selectedSourcePage.text}
-                        className="min-h-[560px] max-h-[72vh] w-full resize-y rounded-xl border border-border/70 bg-slate-50/70 p-5 font-mono text-[13px] leading-6 text-foreground outline-none selection:bg-orange-200 focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+                        className="min-h-[560px] max-h-[72vh] w-full resize-y rounded-xl border border-border/70 bg-muted/70 p-5 font-mono text-[13px] leading-6 text-foreground outline-none selection:bg-accent focus:border-ring focus:ring-2 focus:ring-ring"
                         onSelect={(event) => {
                           if (!reviewReady) return;
                           const field = event.currentTarget;
@@ -3344,7 +3344,7 @@ export function ClinicalDocumentImportSheet({
                                 type="button"
                                 size="sm"
                                 variant="outline"
-                                className="h-8 gap-1.5 rounded-full bg-white text-xs"
+                                className="h-8 gap-1.5 rounded-full bg-card text-xs"
                                 onClick={() => {
                                   setCandidateGrouping("type");
                                   openConstructor(target, target, false);
@@ -3361,7 +3361,7 @@ export function ClinicalDocumentImportSheet({
                     <div
                       role="group"
                       aria-label={tx("Группировка блоков", "Gruppierung der Blöcke")}
-                      className="inline-flex rounded-lg border border-border bg-white p-0.5"
+                      className="inline-flex rounded-lg border border-border bg-card p-0.5"
                     >
                       {(["type", "page"] as const).map((grouping) => (
                         <button
@@ -3370,7 +3370,7 @@ export function ClinicalDocumentImportSheet({
                           aria-pressed={candidateGrouping === grouping}
                           className={cn(
                             "h-7 rounded-md px-2.5 text-xs font-medium transition-colors",
-                            candidateGrouping === grouping ? "bg-orange-500 text-white" : "text-muted-foreground hover:text-foreground",
+                            candidateGrouping === grouping ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
                           )}
                           onClick={() => setCandidateGrouping(grouping)}
                         >
@@ -3396,7 +3396,7 @@ export function ClinicalDocumentImportSheet({
                       type="button"
                       size="sm"
                       variant="outline"
-                      className="h-7 gap-1.5 bg-white text-xs"
+                      className="h-7 gap-1.5 bg-card text-xs"
                       onClick={restoreRemovedCandidate}
                     >
                       <RotateCcw aria-hidden="true" className="size-3.5" />
@@ -3477,7 +3477,7 @@ export function ClinicalDocumentImportSheet({
                                   </Badge>
                                   <Badge
                                     variant="outline"
-                                    className="rounded-full border-border/60 bg-white/80 text-[10px] font-medium text-muted-foreground"
+                                    className="rounded-full border-border/60 bg-card/80 text-[10px] font-medium text-muted-foreground"
                                   >
                                     {tx("Уже в карте", "Bereits in der Akte")}
                                   </Badge>
@@ -3505,7 +3505,7 @@ export function ClinicalDocumentImportSheet({
 
           </section>
 
-          <aside className="flex min-h-0 flex-col bg-white">
+          <aside className="flex min-h-0 flex-col bg-card">
           {/* A block built from the recognized text opens beside it, above the
               original, so the text stays free for further selections. */}
           {reviewReady && constructorDraft?.anchor === "source" ? (
@@ -3517,7 +3517,7 @@ export function ClinicalDocumentImportSheet({
             </div>
           ) : null}
           {activeCandidate ? (
-            <div className="shrink-0 border-b border-border/70 bg-white px-4 py-3">
+            <div className="shrink-0 border-b border-border/70 bg-card px-4 py-3">
               <p className="max-h-56 overflow-y-auto whitespace-pre-wrap pr-2 text-xs leading-5 text-foreground">
                 {activeCandidate.source.text}
               </p>
@@ -3527,8 +3527,8 @@ export function ClinicalDocumentImportSheet({
           <div className="min-h-0 flex-1 p-3">
             {preview ? (
               preview.contentType.startsWith("image/") ? (
-                <div className="flex h-full items-start justify-center overflow-auto rounded-lg border border-border bg-white p-3">
-                  <img src={preview.url} alt={tx("Медицинский документ", "Medizinisches Dokument")} className="max-w-full" />
+                <div className="flex h-full items-start justify-center overflow-auto rounded-lg border border-border bg-card p-3">
+                  <img src={preview.url} alt={tx("Медицинский документ", "Medizinisches Dokument")} className="max-w-full bg-white" />
                 </div>
               ) : (
                 <iframe
@@ -3539,11 +3539,11 @@ export function ClinicalDocumentImportSheet({
                 />
               )
             ) : previewError ? (
-              <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border bg-white p-6 text-center text-sm text-muted-foreground">
+              <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">
                 {previewError}
               </div>
             ) : (
-              <div className="flex h-full flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-white p-6 text-center">
+              <div className="flex h-full flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-card p-6 text-center">
                 <FileText className="size-10 text-muted-foreground/60" />
                 <p className="text-sm font-medium">{tx("Документ появится здесь", "Dokument erscheint hier")}</p>
               </div>

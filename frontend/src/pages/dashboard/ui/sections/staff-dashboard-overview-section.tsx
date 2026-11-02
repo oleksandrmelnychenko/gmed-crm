@@ -53,28 +53,30 @@ const MonthlyLeadAreaChart = lazy(async () => {
                 <stop offset="100%" stopColor="var(--primary)" stopOpacity={0.02} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#eee" vertical={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
             <XAxis
               dataKey="month"
               fontSize={11}
               tickLine={false}
               axisLine={false}
-              stroke="#9ca3af"
+              stroke="var(--muted-foreground)"
             />
             <YAxis
               fontSize={11}
               tickLine={false}
               axisLine={false}
-              stroke="#9ca3af"
+              stroke="var(--muted-foreground)"
               allowDecimals={false}
             />
             <ChartTooltip
               contentStyle={{
+                background: "var(--popover)",
+                color: "var(--popover-foreground)",
                 borderRadius: 8,
                 border: "1px solid var(--color-border)",
                 fontSize: 12,
               }}
-              labelStyle={{ fontSize: 11, color: "#9ca3af" }}
+              labelStyle={{ fontSize: 11, color: "var(--muted-foreground)" }}
             />
             <Area
               type="monotone"

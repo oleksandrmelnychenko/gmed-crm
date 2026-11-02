@@ -89,7 +89,7 @@ export function PaperSignatureSection({ lang, electronicFormExcluded, disabled =
               htmlFor={inputId}
               className={cn(
                 buttonVariants({ variant: "default", size: "sm" }),
-                "h-8 cursor-pointer rounded-lg bg-[var(--brand)] text-white hover:brightness-95 peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
+                "h-8 cursor-pointer rounded-lg bg-[var(--brand)] text-primary-foreground hover:brightness-95 peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
                 blocked && "pointer-events-none opacity-50",
               )}
             >
@@ -148,7 +148,7 @@ export function PaperSignatureSection({ lang, electronicFormExcluded, disabled =
         <div className="flex justify-end">
           <Button
             type="button"
-            className="h-9 rounded-lg bg-[var(--brand)] text-white hover:brightness-95"
+            className="h-9 rounded-lg bg-[var(--brand)] text-primary-foreground hover:brightness-95"
             disabled={!scan || tooLarge || !dateValid || !confirmed || blocked}
             onClick={() => void submit()}
           >

@@ -195,7 +195,7 @@ export function Step1FillModeSwitch({
           className={cn(
             "min-h-7 max-sm:min-h-10 cursor-pointer rounded-md border px-2.5 py-1 text-xs leading-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-default disabled:opacity-60",
             mode === option.value
-              ? "border-[var(--brand)] bg-[var(--brand)] font-semibold text-white"
+              ? "border-[var(--brand)] bg-[var(--brand)] font-semibold text-primary-foreground"
               : "border-transparent bg-transparent text-muted-foreground hover:bg-card hover:text-foreground",
           )}
           onClick={() => onChange(option.value)}

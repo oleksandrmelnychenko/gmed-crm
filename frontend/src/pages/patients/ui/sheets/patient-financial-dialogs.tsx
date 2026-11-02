@@ -151,17 +151,17 @@ function DunningEventsList({
   return (
     <div className="mt-4 space-y-3">
       {dunningEvents.length === 0 ? (
-        <p className="text-sm text-slate-500">{l("patients_not_recorded_yet")}</p>
+        <p className="text-sm text-muted-foreground">{l("patients_not_recorded_yet")}</p>
       ) : (
         dunningEvents.map((event) => (
-          <div key={event.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+          <div key={event.id} className="rounded-xl border border-border bg-card px-4 py-3">
             <div className="flex items-center justify-between gap-3">
               <Badge variant="outline" className="rounded-full text-[10px]">
                 {dunningLevelLabel(event.level, lang)}
               </Badge>
-              <span className="text-xs text-slate-400">{formatDateTime(event.sent_at)}</span>
+              <span className="text-xs text-muted-foreground">{formatDateTime(event.sent_at)}</span>
             </div>
-            <div className="mt-2 space-y-1 text-sm text-slate-600">
+            <div className="mt-2 space-y-1 text-sm text-muted-foreground">
               <p>{l("patients_balance_due")}: {formatMoney(event.balance_due)}</p>
               {/* The automatic run is the system, not a person (QA D2-12). */}
               <p>

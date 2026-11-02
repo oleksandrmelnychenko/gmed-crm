@@ -6120,7 +6120,7 @@ function StaffDocumentsPage({
                 </div>
                 </AdminSheetScaffold>
               </div>
-              <aside className="hidden min-h-0 min-w-0 flex-col bg-slate-50 md:flex">
+              <aside className="hidden min-h-0 min-w-0 flex-col bg-muted md:flex">
                 <div className="flex items-center justify-between gap-3 border-b border-border/70 bg-background py-3 pl-4 pr-14">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-foreground">
@@ -6363,7 +6363,7 @@ function StaffDocumentsPage({
               ) : null}
             </div>
           </DialogHeader>
-          <div className="min-h-0 flex-1 bg-slate-50 p-3">
+          <div className="min-h-0 flex-1 bg-muted p-3">
             {documentPreview ? (
               <iframe
                 title={documentPreview.title || t.documents_preview}
@@ -6403,7 +6403,7 @@ function StaffDocumentsPage({
               <div className={cn("space-y-4", !embedDetailOnly && "pt-5")}>
                 <section className="space-y-4 rounded-xl bg-card/40">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-                    <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] text-white">
+                    <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] text-primary-foreground">
                       <FileText className="size-5" />
                     </div>
                     <div className="min-w-0 flex-1">
@@ -6558,7 +6558,7 @@ function StaffDocumentsPage({
                       {canManage && editForm ? (
                         <Button
                           type="button"
-                          className="h-9 gap-1.5 rounded-lg bg-[var(--brand)] px-3.5 text-white shadow-sm hover:bg-[var(--brand)]/90 focus-visible:ring-[var(--brand)]/30"
+                          className="h-9 gap-1.5 rounded-lg bg-[var(--brand)] px-3.5 text-primary-foreground shadow-sm hover:bg-[var(--brand)]/90 focus-visible:ring-[var(--brand)]/30"
                           onClick={() => {
                             setSaveError("");
                             setMetadataEditOpen(true);
@@ -6601,10 +6601,10 @@ function StaffDocumentsPage({
                   <Banner tone="error">{documentPreviewError}</Banner>
                 ) : null}
 
-                <section className="overflow-hidden rounded-2xl bg-white shadow-[0_10px_24px_rgba(15,23,42,0.035)] ring-1 ring-slate-950/[0.06]">
+                <section className="overflow-hidden rounded-2xl bg-card shadow-[0_10px_24px_rgba(15,23,42,0.035)] ring-1 ring-border/60">
                   <div className="grid xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_310px]">
                     <DocumentMetaPanel
-                      className="border-b border-slate-200/70 xl:border-b-0 xl:border-r"
+                      className="border-b border-border/70 xl:border-b-0 xl:border-r"
                       title={l("documents_links")}
                     >
                       <DocumentMetaHighlight
@@ -6614,7 +6614,7 @@ function StaffDocumentsPage({
                         }
                         accessory={
                           detail.patient_name ? (
-                            <span className="rounded-full bg-white px-2 py-1 font-mono text-[11px] font-medium text-muted-foreground ring-1 ring-slate-200/80">
+                            <span className="rounded-full bg-card px-2 py-1 font-mono text-[11px] font-medium text-muted-foreground ring-1 ring-border/80">
                               {detail.patient_pid ?? text.pidFallback}
                             </span>
                           ) : null
@@ -6634,7 +6634,7 @@ function StaffDocumentsPage({
                     </DocumentMetaPanel>
 
                     <DocumentMetaPanel
-                      className="border-b border-slate-200/70 xl:border-b-0 xl:border-r"
+                      className="border-b border-border/70 xl:border-b-0 xl:border-r"
                       title={l("documents_classification")}
                     >
                       <DocumentMetaHighlight
@@ -6775,9 +6775,9 @@ function StaffDocumentsPage({
                   </div>
 
                   {detail.notes ? (
-                    <div className="border-t border-slate-200/70 px-5 py-4">
+                    <div className="border-t border-border/70 px-5 py-4">
                       <div className="flex w-full flex-col gap-2">
-                        <div className="w-full rounded-xl border border-slate-200/70 bg-[#f9fdff] px-4 py-3">
+                        <div className="w-full rounded-xl border border-border/70 bg-muted px-4 py-3">
                           <div className="mb-2 flex items-center gap-2.5">
                             <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
                             <span className="min-w-0 break-words text-[13px] font-semibold text-foreground">
@@ -7017,25 +7017,25 @@ function StaffDocumentsPage({
                     tone="neutral"
                     accessory={
                       <div className="flex flex-wrap items-center justify-end gap-2">
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
                           <span className="font-semibold tabular-nums text-foreground">
                             {translationRequests.length}
                           </span>
                           {t.documents_translation_requests}
                         </span>
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
                           <span className="font-semibold tabular-nums text-amber-700">
                             {translationRequests.filter((request) => request.status === "pending").length}
                           </span>
                           {formatTranslationStatusLabel("requested", t)}
                         </span>
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
                           <span className="font-semibold tabular-nums text-sky-700">
                             {translationRequests.filter((request) => request.status === "in_progress").length}
                           </span>
                           {formatTranslationStatusLabel("in_progress", t)}
                         </span>
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
                           <span className="font-semibold tabular-nums text-emerald-700">
                             {translationRequests.filter((request) => request.status === "completed").length}
                           </span>
@@ -7083,7 +7083,7 @@ function StaffDocumentsPage({
                           const canShowTranslationActionMenu =
                             canActOnTranslation || Boolean(request.translated_document_id);
                           const actionMenuButtonClass =
-                            "h-8 w-full justify-start rounded-md px-2.5 text-xs font-medium text-foreground hover:bg-[#f9fdff] hover:text-foreground";
+                            "h-8 w-full justify-start rounded-md px-2.5 text-xs font-medium text-foreground hover:bg-muted hover:text-foreground";
 
                           return (
                             <details
@@ -7093,7 +7093,7 @@ function StaffDocumentsPage({
                                 request.status === "cancelled" && "opacity-75",
                               )}
                             >
-                              <summary className="relative grid cursor-pointer list-none gap-2 rounded-lg px-3 py-3 pr-12 transition hover:bg-[#f9fdff] group-open:bg-[#f9fdff] group-open:ring-1 group-open:ring-border/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                              <summary className="relative grid cursor-pointer list-none gap-2 rounded-lg px-3 py-3 pr-12 transition hover:bg-muted group-open:bg-muted group-open:ring-1 group-open:ring-border/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
                                 <div className="absolute -left-9 bottom-0 top-0 flex w-8 items-start justify-center pt-3">
                                   <span
                                     className={cn(
@@ -7119,7 +7119,7 @@ function StaffDocumentsPage({
                                       type="button"
                                       variant="ghost"
                                       size="icon-sm"
-                                      className="size-7 rounded-full bg-white text-muted-foreground shadow-sm ring-1 ring-border/60 hover:bg-[#f9fdff] hover:text-foreground"
+                                      className="size-7 rounded-full bg-card text-muted-foreground shadow-sm ring-1 ring-border/60 hover:bg-muted hover:text-foreground"
                                       aria-label={t.documents_actions}
                                       aria-expanded={translationActionMenuOpen === request.id}
                                       onClick={(event) => {
@@ -7152,13 +7152,13 @@ function StaffDocumentsPage({
                                       ? createPortal(
                                       <div
                                         data-translation-action-menu
-                                        className="fixed z-[9999] w-60 rounded-lg border border-border/60 bg-white p-1.5 shadow-xl"
+                                        className="fixed z-[9999] w-60 rounded-lg border border-border/60 bg-card p-1.5 shadow-xl"
                                         style={{
                                           left: translationActionMenuPosition.left,
                                           top: translationActionMenuPosition.top,
                                         }}
                                       >
-                                        <span className="absolute -top-1.5 right-3 size-3 rotate-45 border-l border-t border-border/60 bg-white" />
+                                        <span className="absolute -top-1.5 right-3 size-3 rotate-45 border-l border-t border-border/60 bg-card" />
                                         {request.translated_document_id ? (
                                           <Button
                                             type="button"
@@ -7317,7 +7317,7 @@ function StaffDocumentsPage({
                                     </Badge>
                                     <Badge
                                       variant="outline"
-                                      className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                                      className="rounded-full border-0 bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
                                     >
                                       {formatLanguageLabel(request.requested_language, lang)}
                                     </Badge>
@@ -7340,7 +7340,7 @@ function StaffDocumentsPage({
                                 <span className="size-1.5 rounded-full bg-border" />
                                 <span className="h-px flex-1 bg-gradient-to-r from-border/70 to-transparent" />
                               </div>
-                              <div className="mb-2 ml-20 overflow-hidden rounded-lg bg-[#fbfdff] p-2 shadow-sm">
+                              <div className="mb-2 ml-20 overflow-hidden rounded-lg bg-muted p-2 shadow-sm">
                                 {request.translated_document_id ? (
                                   <div className="flex items-center gap-3 px-3 py-2">
                                     <div className="min-w-0">
@@ -7417,7 +7417,7 @@ function StaffDocumentsPage({
                                           <Button
                                             type="button"
                                             variant="outline"
-                                            className="h-8 rounded-lg bg-white"
+                                            className="h-8 rounded-lg bg-card"
                                             disabled={translationBusy}
                                             onClick={() =>
                                               handleUseExtractedTextForTranslation(
@@ -7432,7 +7432,7 @@ function StaffDocumentsPage({
                                           <Button
                                             type="button"
                                             variant="outline"
-                                            className="h-8 rounded-lg bg-white"
+                                            className="h-8 rounded-lg bg-card"
                                             disabled={
                                               translationBusy ||
                                               !machineTranslationCapability?.external_calls_enabled ||
@@ -7455,7 +7455,7 @@ function StaffDocumentsPage({
                                         <Button
                                           type="button"
                                           variant="outline"
-                                          className="h-8 rounded-lg bg-white"
+                                          className="h-8 rounded-lg bg-card"
                                           disabled={translationBusy}
                                           onClick={() =>
                                             void handleSaveTranslationWorkspace(
@@ -7694,7 +7694,7 @@ function StaffDocumentsPage({
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       <span
                         className={cn(
-                          "inline-flex items-center rounded-full bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm",
+                          "inline-flex items-center rounded-full bg-card px-2.5 py-1 text-[11px] font-medium shadow-sm",
                           hasActivePatientPortalUser
                             ? "text-emerald-700"
                             : detail.patient_id
@@ -7708,13 +7708,13 @@ function StaffDocumentsPage({
                             ? t.documents_no_active_patient_portal_user
                             : t.documents_not_portal_eligible}
                       </span>
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
                         <span className="font-semibold tabular-nums text-foreground">
                           {activePortalShares.length}
                         </span>
                         {pluralWord(lang, activePortalShares.length, ACTIVE_PORTAL_RELEASE_WORDS)}
                       </span>
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
                         <span className="font-semibold tabular-nums text-emerald-700">
                           {confirmedPortalShares}
                         </span>
@@ -7742,7 +7742,7 @@ function StaffDocumentsPage({
                             type="button"
                             size="sm"
                             variant="outline"
-                            className="h-8 rounded-lg border-transparent bg-white shadow-sm hover:border-transparent"
+                            className="h-8 rounded-lg border-transparent bg-card shadow-sm hover:border-transparent"
                             disabled={portalBusy || activePortalShares.length === 0}
                             onClick={() => void handleRevokePortalRelease()}
                           >
@@ -7860,19 +7860,19 @@ function StaffDocumentsPage({
                     tone="neutral"
                     accessory={
                       <div className="flex flex-wrap items-center justify-end gap-2">
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
                           <span className="font-semibold tabular-nums text-foreground">
                             {shares.length}
                           </span>
                           {t.documents_total}
                         </span>
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
                           <span className="font-semibold tabular-nums text-emerald-700">
                             {shares.filter((share) => !share.revoked_at).length}
                           </span>
                           {t.common_active}
                         </span>
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
                           <span className="font-semibold tabular-nums text-amber-700">
                             {shares.filter(
                               (share) =>
@@ -7939,7 +7939,7 @@ function StaffDocumentsPage({
                             <div
                               key={share.id}
                               className={cn(
-                                "group grid gap-3 border-t border-border/50 px-3 py-3 transition first:border-t-0 hover:bg-[#f9fdff] lg:grid-cols-[minmax(170px,0.7fr)_minmax(150px,150px)_minmax(360px,1.4fr)] lg:items-center lg:gap-4",
+                                "group grid gap-3 border-t border-border/50 px-3 py-3 transition first:border-t-0 hover:bg-muted lg:grid-cols-[minmax(170px,0.7fr)_minmax(150px,150px)_minmax(360px,1.4fr)] lg:items-center lg:gap-4",
                                 share.revoked_at && "opacity-70",
                               )}
                             >
@@ -8718,7 +8718,7 @@ function documentSectionToneBorder(tone: DocumentSectionTone) {
 function documentSectionToneHeader(tone: DocumentSectionTone) {
   switch (tone) {
     case "brand":
-      return "border-[var(--brand)]/15 bg-[#f9fdff]";
+      return "border-[var(--brand)]/15 bg-muted";
     case "sky":
       return "border-sky-200/70 bg-sky-50/60";
     case "amber":
@@ -8842,7 +8842,7 @@ function ShareProviderContextPanel({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="h-8 gap-1.5 rounded-lg border-current/25 bg-white/80 text-current hover:bg-white"
+                  className="h-8 gap-1.5 rounded-lg border-current/25 bg-card/80 text-current hover:bg-card"
                   onClick={onOpenOrderServices}
                 >
                   <ArrowUpRight className="size-3.5" />
@@ -8854,7 +8854,7 @@ function ShareProviderContextPanel({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="h-8 gap-1.5 rounded-lg border-current/25 bg-white/80 text-current hover:bg-white"
+                  className="h-8 gap-1.5 rounded-lg border-current/25 bg-card/80 text-current hover:bg-card"
                   onClick={onOpenAppointment}
                 >
                   <ArrowUpRight className="size-3.5" />
@@ -8966,7 +8966,7 @@ function SectionCard({
   return (
     <section
       className={cn(
-        "overflow-hidden rounded-xl border bg-white shadow-sm",
+        "overflow-hidden rounded-xl border bg-card shadow-sm",
         neutralSurface ? "border-border/60" : documentSectionToneBorder(tone),
       )}
     >
@@ -9105,7 +9105,7 @@ function DocumentMetaFact({
       <span className="min-w-0 text-[11px] font-medium leading-4 text-muted-foreground">
         {label}
       </span>
-      <span aria-hidden className="h-px min-w-6 bg-slate-200/80" />
+      <span aria-hidden className="h-px min-w-6 bg-accent/80" />
       <span className="min-w-0 max-w-full break-words text-right text-[13px] font-semibold leading-5 text-foreground">
         {value}
       </span>

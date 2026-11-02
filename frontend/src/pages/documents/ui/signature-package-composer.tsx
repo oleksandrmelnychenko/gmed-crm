@@ -196,7 +196,7 @@ export function SignaturePackageComposer({ documentId, candidates, selection, on
               <option value="">{tx("Выберите документ", "Dokument auswählen")}</option>
               {options.map(option => <option key={option.id} value={option.id}>{option.title} · v{option.version}</option>)}
             </NativeComboboxSelect>
-            <Button type="button" variant="default" size="sm" className="bg-[var(--brand)] text-white hover:brightness-95" disabled={!chosen || disabled || !onPreview} onClick={() => onPreview?.(chosen, "review")}><Eye className="size-4" />{tx("Проверить", "Prüfen")}</Button>
+            <Button type="button" variant="default" size="sm" className="bg-[var(--brand)] text-primary-foreground hover:brightness-95" disabled={!chosen || disabled || !onPreview} onClick={() => onPreview?.(chosen, "review")}><Eye className="size-4" />{tx("Проверить", "Prüfen")}</Button>
           </div> : <Banner tone="error">{tx(`Сначала создайте документ «${label}». Без него пакет не отправляется.`, `Erstellen Sie zuerst das Dokument „${label}“. Ohne dieses wird das Paket nicht versendet.`)}</Banner>}
         </div>;
       })}

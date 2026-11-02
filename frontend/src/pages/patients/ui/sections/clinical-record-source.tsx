@@ -139,7 +139,7 @@ export function ClinicalRecordSource({
               "inline-flex max-w-full rounded-full border px-2 py-0.5 text-[10px] font-semibold",
               fromDocument
                 ? "border-orange-200 bg-orange-50 text-orange-700"
-                : "border-border/60 bg-white text-muted-foreground",
+                : "border-border/60 bg-card text-muted-foreground",
             )}
             title={fromDocument ? item.source_document_name ?? undefined : undefined}
           >
@@ -188,14 +188,14 @@ export function ClinicalRecordSource({
               ) : null}
             </div>
           </DialogHeader>
-          <div className="min-h-0 flex-1 bg-slate-50 p-3">
+          <div className="min-h-0 flex-1 bg-muted p-3">
             {previewBusy ? (
-              <div className="flex h-full min-h-80 items-center justify-center rounded-lg border border-border bg-white text-sm text-muted-foreground">
+              <div className="flex h-full min-h-80 items-center justify-center rounded-lg border border-border bg-card text-sm text-muted-foreground">
                 <LoaderCircle className="mr-2 size-4 animate-spin" />
                 {tx("Загрузка документа…", "Dokument wird geladen…")}
               </div>
             ) : previewError ? (
-              <div className="flex h-full min-h-80 items-center justify-center rounded-lg border border-destructive/30 bg-white p-8 text-center text-sm text-destructive">
+              <div className="flex h-full min-h-80 items-center justify-center rounded-lg border border-destructive/30 bg-card p-8 text-center text-sm text-destructive">
                 {previewError}
               </div>
             ) : preview?.url && supportsInlinePreview(preview.contentType) ? (
@@ -206,7 +206,7 @@ export function ClinicalRecordSource({
                 className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
               />
             ) : preview?.url ? (
-              <div className="flex h-full min-h-80 flex-col items-center justify-center rounded-lg border border-border bg-white p-8 text-center">
+              <div className="flex h-full min-h-80 flex-col items-center justify-center rounded-lg border border-border bg-card p-8 text-center">
                 <FileWarning className="mb-3 size-8 text-muted-foreground" />
                 <p className="max-w-md text-sm text-muted-foreground">
                   {tx(

@@ -1,3 +1,46 @@
+/* Pickers render through body portals. Scope their paper to the same theme as
+   the fields; public forms keep MUI's own palette. */
+.gmed-theme .gmed-picker-paper {
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+}
+.gmed-theme .gmed-picker-paper :is(.MuiButtonBase-root, .MuiClockNumber-root) {
+  color: var(--foreground);
+}
+.gmed-theme .gmed-picker-paper :is(.MuiDayCalendar-weekDayLabel, .MuiDayCalendar-weekNumberLabel, .MuiDayCalendar-weekNumber, .MuiPickersToolbarText-root, .MuiPickersToolbar-root > .MuiTypography-root) {
+  color: var(--muted-foreground);
+}
+.gmed-theme .gmed-picker-paper .MuiButtonBase-root:hover:not(.Mui-disabled):not(.Mui-selected) {
+  background: var(--accent);
+}
+.gmed-theme .gmed-picker-paper :is(.MuiPickerDay-root, .MuiPickersDay-root, .MuiMonthCalendar-button, .MuiYearCalendar-button, .MuiMenuItem-root, .MuiClock-amButton, .MuiClock-pmButton).Mui-selected {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.gmed-theme .gmed-picker-paper :is(.MuiButtonBase-root, .MuiClockNumber-root).Mui-disabled {
+  color: var(--muted-foreground);
+  opacity: .45;
+}
+.gmed-theme .gmed-picker-paper .MuiButtonBase-root.Mui-focusVisible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.gmed-theme .gmed-picker-paper :is(.MuiPickerDay-today, .MuiPickersDay-today):not(.Mui-selected) {
+  border-color: var(--primary);
+}
+.gmed-theme .gmed-picker-paper :is(.MuiDivider-root, .MuiMultiSectionDigitalClock-root, .MuiMultiSectionDigitalClockSection-root) {
+  border-color: var(--border);
+}
+.gmed-theme .gmed-picker-paper .MuiClock-clock { background: var(--muted); }
+.gmed-theme .gmed-picker-paper :is(.MuiClockPointer-root, .MuiClock-pin) { background: var(--primary); }
+.gmed-theme .gmed-picker-paper .MuiClockPointer-thumb {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.gmed-theme .gmed-picker-paper .MuiClockNumber-root.Mui-selected { color: var(--primary-foreground); }
+.gmed-theme .gmed-picker-paper .MuiPickersToolbarText-root.Mui-selected { color: var(--primary); }
+
 /* Staff controls: shared variants, with readable labels and compact desktop targets. */
 .staff-portal-theme [data-slot="button"] {
   border-radius: 8px;

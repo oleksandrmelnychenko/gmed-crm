@@ -748,7 +748,7 @@ export function SpecializationsPage() {
                               "h-8 w-full min-w-0 rounded-full px-2 text-[11px] font-semibold",
                               item.is_active
                                 ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                : "border-slate-200 bg-slate-50 text-slate-600",
+                                : "border-border bg-muted text-muted-foreground",
                             )}
                           >
                             <option value="active">{tx("Активно", "Aktiv")}</option>

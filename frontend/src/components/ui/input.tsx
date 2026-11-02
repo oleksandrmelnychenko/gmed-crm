@@ -172,14 +172,14 @@ function getPickerControlStyle(className: string | undefined) {
   const isTall = hasClassToken(className, "h-10")
   const isShellHeight = hasClassToken(className, "h-9")
   const isRoundedXl = hasClassToken(className, "rounded-xl")
-  const hasSlateBorder = hasClassToken(className, "border-slate-200")
-  const hasSlateBackground = hasClassToken(className, "bg-slate-50")
+  const hasThemeBorder = hasClassToken(className, "border-border") || hasClassToken(className, "border-slate-200")
+  const hasMutedBackground = hasClassToken(className, "bg-muted") || hasClassToken(className, "bg-slate-50")
   const hasCardBackground = hasClassToken(className, "bg-card")
   const controlHeight = isTall ? "2.5rem" : isShellHeight ? "2.25rem" : "2rem"
   const controlRadius = isRoundedXl ? "0.75rem" : "0.5rem"
-  const controlBorderColor = hasSlateBorder ? "rgb(226 232 240)" : "var(--input)"
-  const controlBackground = hasSlateBackground
-    ? "rgb(248 250 252)"
+  const controlBorderColor = hasThemeBorder ? "var(--border)" : "var(--input)"
+  const controlBackground = hasMutedBackground
+    ? "var(--muted)"
     : hasCardBackground
       ? "var(--card)"
       : "var(--field)"
@@ -391,7 +391,7 @@ function Input({
               borderColor: `${controlBorderColor} !important`,
             },
             "&.Mui-focused, &.MuiPickersInputBase-focused": {
-              boxShadow: "0 0 0 2px rgba(249, 115, 22, 0.18)",
+              boxShadow: "0 0 0 2px color-mix(in srgb, var(--ring) 25%, transparent)",
             },
             "&:not(.Mui-focused):not(.MuiPickersInputBase-focused)": {
               boxShadow: "none",
@@ -458,6 +458,8 @@ function Input({
           ampm={false}
           displayWeekNumber
           slotProps={{
+            desktopPaper: { className: "gmed-picker-paper" },
+            mobilePaper: { className: "gmed-picker-paper" },
             textField: sharedTextFieldProps,
           }}
         />
@@ -483,6 +485,8 @@ function Input({
           minutesStep={timePickerMinutesStep(step)}
           views={["hours", "minutes"]}
           slotProps={{
+            desktopPaper: { className: "gmed-picker-paper" },
+            mobilePaper: { className: "gmed-picker-paper" },
             textField: sharedTextFieldProps,
           }}
         />
@@ -501,6 +505,8 @@ function Input({
         format={DATE_FORMAT}
         displayWeekNumber
         slotProps={{
+          desktopPaper: { className: "gmed-picker-paper" },
+          mobilePaper: { className: "gmed-picker-paper" },
           textField: sharedTextFieldProps,
         }}
       />

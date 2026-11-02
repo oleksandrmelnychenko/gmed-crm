@@ -1211,7 +1211,7 @@ function useCasesPageContent() {
                           "w-full rounded-xl border p-4 text-left transition",
                           snippetForm.id === snippet.id
                             ? "border-sky-300 bg-sky-50"
-                            : "border-border bg-white hover:border-border",
+                            : "border-border bg-card hover:border-border",
                         )}
                         onClick={() => openEditSnippetDialog(snippet)}
                       >
@@ -1303,7 +1303,7 @@ function useCasesPageContent() {
                   />
                   {t.cases_snippets_active}
                 </label>
-                <div className="rounded-xl border border-dashed border-border bg-white p-3">
+                <div className="rounded-xl border border-dashed border-border bg-card p-3">
                   <p className="text-xs font-semibold text-muted-foreground">
                     {t.cases_snippets_preview}
                   </p>
@@ -1311,7 +1311,7 @@ function useCasesPageContent() {
                     {renderCaseTextSnippet(snippetForm.body, snippetPreviewContext) || t.cases_snippets_empty}
                   </p>
                 </div>
-                <code className="block rounded-xl bg-white px-3 py-2 text-[11px] text-muted-foreground">
+                <code className="block rounded-xl bg-card px-3 py-2 text-[11px] text-muted-foreground">
                   {CASE_TEXT_SNIPPET_PLACEHOLDERS.join(" · ")}
                 </code>
                 <div className="flex justify-end gap-2">

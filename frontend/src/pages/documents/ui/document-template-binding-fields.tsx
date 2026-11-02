@@ -324,7 +324,7 @@ function BindingControl({
         <textarea
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          className={cn(inputClassName, "min-h-24 resize-y py-2 text-slate-900")}
+          className={cn(inputClassName, "min-h-24 resize-y py-2 text-foreground")}
         />
       ) : (
         <Input

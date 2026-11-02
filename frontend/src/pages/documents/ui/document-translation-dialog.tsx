@@ -265,7 +265,7 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
           </div>
         </DialogHeader>
         <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-          <div className="min-h-[320px] border-b border-border/70 bg-slate-50 p-3 lg:border-b-0 lg:border-r">
+          <div className="min-h-[320px] border-b border-border/70 bg-muted p-3 lg:border-b-0 lg:border-r">
             {preview ? (
               <iframe
                 title={title}
@@ -288,7 +288,7 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
                 <NativeComboboxSelect
                   value={sourceLanguage}
                   onChange={(event) => setSourceLanguage(event.target.value)}
-                  className="h-9 w-full rounded-lg border border-border bg-white px-2 text-sm"
+                  className="h-9 w-full rounded-lg border border-border bg-card px-2 text-sm"
                 >
                   <option value="">{documentTranslationLanguageLabel(null, lang)}</option>
                   {SOURCE_LANGUAGES.map((language) => (
@@ -303,7 +303,7 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
                 <NativeComboboxSelect
                   value={targetLanguage}
                   onChange={(event) => setTargetLanguage(event.target.value)}
-                  className="h-9 w-full rounded-lg border border-border bg-white px-2 text-sm"
+                  className="h-9 w-full rounded-lg border border-border bg-card px-2 text-sm"
                 >
                   {TARGET_LANGUAGES.map((language) => (
                     <option key={language} value={language}>
@@ -381,7 +381,7 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
             {sourceText ? (
               <details className="text-xs">
                 <summary className="cursor-pointer font-medium">{tx("Распознанный исходный текст", "Erkannter Ausgangstext")}</summary>
-                <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-slate-50 p-3 font-sans text-xs leading-5">{sourceText}</pre>
+                <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted p-3 font-sans text-xs leading-5">{sourceText}</pre>
               </details>
             ) : null}
             <section className="space-y-2 border-t border-border/70 pt-3">
@@ -393,7 +393,7 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
               ) : (
                 <ul className="space-y-1.5">
                   {translations.map((item) => (
-                    <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-white px-3 py-2 text-xs">
+                    <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs">
                       <span className="min-w-0">
                         <span className="font-medium">
                           {documentTranslationLanguageLabel(item.source_language, lang)} → {documentTranslationLanguageLabel(item.target_language, lang)}

@@ -1981,7 +1981,7 @@ function usePatientDetailPageContent() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <LoaderCircle className="size-6 animate-spin text-slate-400" />
+        <LoaderCircle className="size-6 animate-spin text-muted-foreground" />
       </div>
     );
   }

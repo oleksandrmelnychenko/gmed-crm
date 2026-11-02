@@ -910,7 +910,7 @@ function useAdminCompliancePageContent() {
           <div className="truncate text-foreground">
             {privacyRequestTypeLabel(record.request_type, t)}
           </div>
-          <div className="truncate text-xs text-slate-500">
+          <div className="truncate text-xs text-muted-foreground">
             {t.compliance_created_label} {compactDt(record.requested_at)}
           </div>
         </div>
@@ -927,7 +927,7 @@ function useAdminCompliancePageContent() {
             {privacyRecordStatusLabel(record, t, lang)}
           </StatusChip>
           {record.manual_override ? (
-            <span className="truncate text-xs text-slate-500">
+            <span className="truncate text-xs text-muted-foreground">
               {t.compliance_manual_override}
             </span>
           ) : null}
@@ -946,7 +946,7 @@ function useAdminCompliancePageContent() {
       accessor: (record) => dateSortKey(record.due_at),
       width: 126,
       render: (record) => (
-        <span className="font-mono text-xs text-slate-500">
+        <span className="font-mono text-xs text-muted-foreground">
           {compactDt(record.due_at)}
         </span>
       ),
@@ -958,7 +958,7 @@ function useAdminCompliancePageContent() {
         dateSortKey(record.patient_retention_until ?? record.retention_until),
       width: 150,
       render: (record) => (
-        <span className="font-mono text-xs text-slate-500">
+        <span className="font-mono text-xs text-muted-foreground">
           {compactDt(record.patient_retention_until ?? record.retention_until)}
         </span>
       ),
@@ -969,7 +969,7 @@ function useAdminCompliancePageContent() {
       accessor: (record) => recordSummaryLabel(record.record_summary, t),
       width: 142,
       render: (record) => (
-        <span className="truncate text-xs text-slate-600">
+        <span className="truncate text-xs text-muted-foreground">
           {recordSummaryLabel(record.record_summary, t)}
         </span>
       ),
@@ -980,7 +980,7 @@ function useAdminCompliancePageContent() {
       accessor: (record) => privacyNotesLabel(record, lang),
       width: 240,
       render: (record) => (
-        <span className="truncate text-xs text-slate-600">
+        <span className="truncate text-xs text-muted-foreground">
           {privacyNotesLabel(record, lang)}
         </span>
       ),
@@ -1011,7 +1011,7 @@ function useAdminCompliancePageContent() {
           <div className="truncate text-foreground">
             {privacyRequestTypeLabel(record.request_type, t)}
           </div>
-          <div className="truncate text-xs text-slate-500">
+          <div className="truncate text-xs text-muted-foreground">
             {privacySourceLabel(record.source, t, record.created_via)}
           </div>
         </div>
@@ -1042,7 +1042,7 @@ function useAdminCompliancePageContent() {
       accessor: (record) => dateSortKey(record.due_at),
       width: 126,
       render: (record) => (
-        <span className="font-mono text-xs text-slate-500">
+        <span className="font-mono text-xs text-muted-foreground">
           {compactDt(record.due_at)}
         </span>
       ),
@@ -1053,7 +1053,7 @@ function useAdminCompliancePageContent() {
       accessor: (record) => recordSummaryLabel(record.record_summary, t),
       width: 142,
       render: (record) => (
-        <span className="truncate text-xs text-slate-600">
+        <span className="truncate text-xs text-muted-foreground">
           {recordSummaryLabel(record.record_summary, t)}
         </span>
       ),
@@ -1064,7 +1064,7 @@ function useAdminCompliancePageContent() {
       accessor: (record) => privacyNotesLabel(record, lang),
       width: 220,
       render: (record) => (
-        <span className="truncate text-xs text-slate-600">
+        <span className="truncate text-xs text-muted-foreground">
           {privacyNotesLabel(record, lang)}
         </span>
       ),
@@ -1106,13 +1106,13 @@ function useAdminCompliancePageContent() {
 
         if (record.status === "completed" && record.executed_at) {
           return (
-            <span className="truncate text-xs text-slate-500">
+            <span className="truncate text-xs text-muted-foreground">
               {t.compliance_executed_label} {compactDt(record.executed_at)}
             </span>
           );
         }
 
-        return <span className="text-xs text-slate-500">-</span>;
+        return <span className="text-xs text-muted-foreground">-</span>;
       },
     },
   ], [privacyActionBusy, t, user?.role]);

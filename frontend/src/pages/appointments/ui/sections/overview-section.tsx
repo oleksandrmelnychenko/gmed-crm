@@ -84,7 +84,7 @@ function AppointmentOverviewSection({
   return (
     <section className="space-y-2.5 rounded-xl border border-border/50 bg-card/40 p-3.5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-        <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] text-[12px] font-semibold text-white">
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] text-[12px] font-semibold text-primary-foreground">
           {patientInitials || "AP"}
         </div>
         <div className="min-w-0 flex-1">

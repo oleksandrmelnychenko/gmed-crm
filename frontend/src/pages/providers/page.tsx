@@ -229,7 +229,7 @@ const providerDetailPanelClassName = cn(
   providerDetailSectionClassName,
 );
 const providerPrimaryActionButtonClassName =
-  "h-8 rounded-lg border-[var(--brand)] bg-[var(--brand)] px-3 text-white shadow-sm hover:bg-[var(--brand)]/90 hover:text-white focus-visible:ring-[var(--brand)]/30";
+  "h-8 rounded-lg border-[var(--brand)] bg-[var(--brand)] px-3 text-primary-foreground shadow-sm hover:bg-[var(--brand)]/90 hover:text-primary-foreground focus-visible:ring-[var(--brand)]/30";
 const LINKED_PATIENTS_PAGE_SIZE = 10;
 const contactAddButtonClassName =
   providerPrimaryActionButtonClassName;
@@ -1304,9 +1304,9 @@ function EmptyPanel({
   text: string;
 }) {
   return (
-    <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50/90 px-5 py-6">
-      <p className="text-sm font-medium text-slate-900">{title}</p>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{text}</p>
+    <div className="rounded-[1.5rem] border border-dashed border-border bg-muted/90 px-5 py-6">
+      <p className="text-sm font-medium text-foreground">{title}</p>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">{text}</p>
     </div>
   );
 }
@@ -3438,10 +3438,10 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     return (
       <div className="space-y-6">
         <section className={cardClass("p-8")}>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-950">
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             {t.providers_no_access_title}
           </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
+          <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">
             {t.providers_no_access_body}
           </p>
         </section>

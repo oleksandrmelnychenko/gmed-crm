@@ -1826,7 +1826,7 @@ function useLeadsPageContent() {
       <div className="flex-1 overflow-y-auto space-y-4 px-5 py-4">
         <div className={cn("space-y-4 rounded-xl", isConciergeReadOnly && "mx-auto w-full max-w-6xl")}>
           {detailLoading ? (
-            <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
+            <div className="flex min-h-[320px] items-center justify-center text-sm text-muted-foreground">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
               {t.lead_loading_detail}
             </div>
@@ -1868,7 +1868,7 @@ function useLeadsPageContent() {
                       </Badge>
                     ) : null}
                   </div>
-                  <h2 className="mt-4 text-2xl font-semibold text-slate-950">
+                  <h2 className="mt-4 text-2xl font-semibold text-foreground">
                     {leadDisplayName(detail, tx)}
                   </h2>
                 </section>
@@ -1933,7 +1933,7 @@ function useLeadsPageContent() {
                 </section>
 
                 {detailMedicalHidden ? (
-                  <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  <p className="rounded-xl border border-border bg-muted px-4 py-3 text-sm text-muted-foreground">
                     {t.lead_medical_fields_hidden}
                   </p>
                 ) : null}
@@ -1941,11 +1941,11 @@ function useLeadsPageContent() {
                 {detailLeadType === "form" && !detailMedicalHidden ? (
                   <section className={cardClass("p-4")}>
                     {detail.message ? (
-                      <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
+                      <div className="rounded-xl bg-muted px-4 py-3 text-sm leading-6 text-foreground whitespace-pre-wrap">
                         {detail.message}
                       </div>
                     ) : (
-                      <p className="mt-3 text-sm text-slate-500">{t.common_not_set}</p>
+                      <p className="mt-3 text-sm text-muted-foreground">{t.common_not_set}</p>
                     )}
                   </section>
                 ) : null}
@@ -2018,17 +2018,17 @@ function useLeadsPageContent() {
                       <section className={cardClass("p-4")}>
                         <SectionTitle>{t.lead_section_health_concern}</SectionTitle>
                         {detail.primary_concern_text ? (
-                          <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
+                          <div className="mt-4 rounded-xl bg-muted px-4 py-3 text-sm leading-6 text-foreground whitespace-pre-wrap">
                             {detail.primary_concern_text}
                           </div>
                         ) : null}
                         {detail.additional_concerns ? (
-                          <div className="mt-3 rounded-xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
+                          <div className="mt-3 rounded-xl bg-muted px-4 py-3 text-sm leading-6 text-foreground whitespace-pre-wrap">
                             {detail.additional_concerns}
                           </div>
                         ) : null}
                         {detail.message ? (
-                          <div className="mt-3 rounded-xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
+                          <div className="mt-3 rounded-xl bg-muted px-4 py-3 text-sm leading-6 text-foreground whitespace-pre-wrap">
                             {detail.message}
                           </div>
                         ) : null}
@@ -2046,11 +2046,11 @@ function useLeadsPageContent() {
                       {detail.attachments.map((file) => (
                         <li
                           key={file.id}
-                          className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+                          className="flex items-center justify-between rounded-xl border border-border bg-muted px-3 py-2 text-sm"
                         >
                           <div>
-                            <div className="font-medium text-slate-800">{file.file_name}</div>
-                            <div className="text-xs text-slate-500">
+                            <div className="font-medium text-foreground">{file.file_name}</div>
+                            <div className="text-xs text-muted-foreground">
                               {dashOrValue(file.content_type, t)} - {formatSize(file.size_bytes, lang)}
                             </div>
                             {attachmentImportRefusalLabel(file, tx) ? (
@@ -2116,10 +2116,10 @@ function useLeadsPageContent() {
                       <StatusBadge tone="success">{statusLabel("converted", t)}</StatusBadge>
                     ) : null}
                   </div>
-                  <h2 className="mt-4 text-2xl font-semibold text-slate-950">
+                  <h2 className="mt-4 text-2xl font-semibold text-foreground">
                     {leadDisplayName(detail, tx)}
                   </h2>
-                  <p className="mt-2 text-sm text-slate-600">
+                  <p className="mt-2 text-sm text-muted-foreground">
                     {t.users_created} {formatDate(detail.created_at, locale, t.common_not_set)}
                   </p>
                 </section>
@@ -2168,7 +2168,7 @@ function useLeadsPageContent() {
                         </Badge>
                       ) : null}
                       {detail.submitted_at ? (
-                        <span className="text-xs text-slate-500">
+                        <span className="text-xs text-muted-foreground">
                           {t.lead_submitted_at} {formatDate(detail.submitted_at, locale, t.common_not_set)}
                         </span>
                       ) : null}
@@ -2249,7 +2249,7 @@ function useLeadsPageContent() {
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <SectionTitle>{t.lead_workflow_title}</SectionTitle>
-                        <p className="mt-1 text-sm text-slate-600">
+                        <p className="mt-1 text-sm text-muted-foreground">
                           {t.lead_workflow_description}
                         </p>
                       </div>
@@ -2421,7 +2421,7 @@ function useLeadsPageContent() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <SectionTitle>{t.lead_section_process_readiness}</SectionTitle>
-                      <p className="mt-1 text-sm text-slate-600">
+                      <p className="mt-1 text-sm text-muted-foreground">
                         {t.lead_process_readiness_description}
                       </p>
                     </div>
@@ -2506,7 +2506,7 @@ function useLeadsPageContent() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <SectionTitle>{t.lead_section_lifecycle}</SectionTitle>
-                      <p className="mt-1 text-sm text-slate-600">
+                      <p className="mt-1 text-sm text-muted-foreground">
                         {t.lead_lifecycle_description}
                       </p>
                     </div>
@@ -2536,25 +2536,25 @@ function useLeadsPageContent() {
                           event.transition_kind,
                           event.note ?? "",
                         ].join("|")}
-                        className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5"
+                        className="rounded-2xl border border-border bg-muted px-4 py-2.5"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div>
-                            <p className="text-sm font-medium text-slate-900">
+                            <p className="text-sm font-medium text-foreground">
                               {event.from_stage
                                 ? `${leadStageLabel(event.from_stage, t)} -> ${leadStageLabel(event.to_stage, t)}`
                                 : leadStageLabel(event.to_stage, t)}
                             </p>
-                            <p className="mt-1 text-xs text-slate-500">
+                            <p className="mt-1 text-xs text-muted-foreground">
                               {leadTransitionKindLabel(event.transition_kind, t)}
                             </p>
                           </div>
-                          <span className="text-xs text-slate-500">
+                          <span className="text-xs text-muted-foreground">
                             {formatDate(event.created_at, locale, t.common_not_set)}
                           </span>
                         </div>
                         {leadLifecycleNoteLabel(event.transition_kind, event.note, tx) ? (
-                          <p className="mt-2 text-sm text-slate-600">
+                          <p className="mt-2 text-sm text-muted-foreground">
                             {leadLifecycleNoteLabel(event.transition_kind, event.note, tx)}
                           </p>
                         ) : null}
@@ -2572,7 +2572,7 @@ function useLeadsPageContent() {
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <SectionTitle>{t.lead_qualification_gate_data}</SectionTitle>
-                        <p className="mt-1 text-sm text-slate-600">
+                        <p className="mt-1 text-sm text-muted-foreground">
                           {t.lead_qualification_gate_description}
                         </p>
                       </div>
@@ -2749,7 +2749,7 @@ function useLeadsPageContent() {
                               </option>
                             ))}
                           </NativeComboboxSelect>
-                          <p className="mt-1 text-xs text-slate-500">
+                          <p className="mt-1 text-xs text-muted-foreground">
                             {t.lead_compliance_signed_by_signature_hint}
                           </p>
                           {complianceSignedWithoutDocument(detail) ? (
@@ -2885,7 +2885,7 @@ function useLeadsPageContent() {
                             : t.lead_failed_resolution_title}
                         </SectionTitle>
                         {detail.failed_outcome.status === "none" ? (
-                          <p className="mt-1 text-sm text-slate-600">
+                          <p className="mt-1 text-sm text-muted-foreground">
                             {t.lead_failed_resolution_description}
                           </p>
                         ) : null}
@@ -3099,12 +3099,12 @@ function useLeadsPageContent() {
                       <DetailCard label={t.lead_health_risk_for_travel} value={yesNo(detail.has_health_risk_for_travel, t)} />
                     </div>
                     {detail.primary_concern_text ? (
-                      <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
+                      <div className="mt-4 rounded-2xl bg-muted px-4 py-3 text-sm leading-6 text-foreground whitespace-pre-wrap">
                         {detail.primary_concern_text}
                       </div>
                     ) : null}
                     {detail.additional_concerns ? (
-                      <div className="mt-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
+                      <div className="mt-3 rounded-2xl bg-muted px-4 py-3 text-sm leading-6 text-foreground whitespace-pre-wrap">
                         {detail.additional_concerns}
                       </div>
                     ) : null}
@@ -3147,7 +3147,7 @@ function useLeadsPageContent() {
                       <DetailCard label={t.lead_visit_timing} value={leadVisitTimingLabel(detail.visit_timing, t)} />
                     </div>
                     {detail.message ? (
-                      <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
+                      <div className="mt-4 rounded-2xl bg-muted px-4 py-3 text-sm leading-6 text-foreground whitespace-pre-wrap">
                         {detail.message}
                       </div>
                     ) : null}
@@ -3190,17 +3190,17 @@ function useLeadsPageContent() {
                     {`${t.lead_attachments} (${detailMedicalHidden ? detail.attachment_count ?? 0 : detail.attachments?.length ?? 0})`}
                   </SectionTitle>
                   {detailMedicalHidden ? (
-                    <p className="mt-3 text-sm text-slate-500">{t.lead_attachments_medical_only}</p>
+                    <p className="mt-3 text-sm text-muted-foreground">{t.lead_attachments_medical_only}</p>
                   ) : detail.attachments && detail.attachments.length > 0 ? (
                     <ul className="mt-4 space-y-1.5">
                       {detail.attachments.map((file) => (
                         <li
                           key={file.id}
-                          className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+                          className="flex items-center justify-between rounded-xl border border-border bg-muted px-3 py-2 text-sm"
                         >
                           <div>
-                            <div className="font-medium text-slate-800">{file.file_name}</div>
-                            <div className="text-xs text-slate-500">
+                            <div className="font-medium text-foreground">{file.file_name}</div>
+                            <div className="text-xs text-muted-foreground">
                               {dashOrValue(file.content_type, t)} - {formatSize(file.size_bytes, lang)}
                             </div>
                             {attachmentImportRefusalLabel(file, tx) ? (
@@ -3236,11 +3236,11 @@ function useLeadsPageContent() {
                       ))}
                     </ul>
                   ) : (
-                    <p className="mt-3 text-sm text-slate-500">{t.lead_no_files_uploaded}</p>
+                    <p className="mt-3 text-sm text-muted-foreground">{t.lead_no_files_uploaded}</p>
                   )}
                   {detail.notes ? (
-                    <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
-                      <div className="mb-1 text-xs text-slate-400">{t.lead_internal_note}</div>
+                    <div className="mt-4 rounded-2xl bg-muted px-4 py-3 text-sm leading-6 text-foreground">
+                      <div className="mb-1 text-xs text-muted-foreground">{t.lead_internal_note}</div>
                       {detail.notes}
                     </div>
                   ) : null}
@@ -3251,7 +3251,7 @@ function useLeadsPageContent() {
             )}
             </>
           ) : (
-            <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
+            <div className="flex min-h-[320px] items-center justify-center text-sm text-muted-foreground">
               {t.lead_select_from_queue}
             </div>
           )}
@@ -3692,7 +3692,7 @@ function useLeadsPageContent() {
               {pendingConvertLead ? (
                 <>
                   {t.lead_convert_dialog_start}{" "}
-                  <span className="font-medium text-slate-900">
+                  <span className="font-medium text-foreground">
                     {pendingConvertLead.first_name} {pendingConvertLead.last_name}
                   </span>{" "}
                   {t.lead_convert_dialog_end}{" "}
@@ -3809,16 +3809,16 @@ function WorkflowActionCard({
   }[tone];
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5">
+    <div className="rounded-xl border border-border bg-muted px-4 py-2.5">
       <div className="flex items-start gap-3">
-        <div className="mt-0.5 rounded-lg border border-slate-200 bg-white p-2 text-slate-600">
+        <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center text-muted-foreground">
           {icon}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <p className="text-sm font-medium text-slate-900">{title}</p>
-              <p className="mt-1 text-sm leading-5 text-slate-600">{description}</p>
+              <p className="text-sm font-medium text-foreground">{title}</p>
+              <p className="mt-1 text-sm leading-5 text-muted-foreground">{description}</p>
             </div>
             <Badge variant="outline" className={cn("rounded-full", toneClass)}>
               {status}

@@ -55,7 +55,7 @@ export function LeadPayerLinkDialog({ share, language, onLanguage, busy, canSend
               <AdminSectionTitle>{tx("Сообщение для плательщика", "Nachricht für den Zahler")}</AdminSectionTitle>
               <div className="inline-flex gap-1 rounded-lg border bg-muted/30 p-1" role="group" aria-label={tx("Язык сообщения", "Sprache der Nachricht")}>
                 {PAYER_LINK_LANGUAGES.map((option) => <button key={option} type="button" disabled={busy} aria-pressed={language === option}
-                  className={cn("h-7 rounded-md px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", language === option ? "bg-[var(--brand)] text-white shadow-sm" : "text-foreground hover:bg-muted")}
+                  className={cn("h-7 rounded-md px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", language === option ? "bg-[var(--brand)] text-primary-foreground shadow-sm" : "text-foreground hover:bg-muted")}
                   onClick={() => { onLanguage(option); setCopied(null); }}>{LANGUAGE_LABELS[option]}</button>)}
               </div>
             </div>

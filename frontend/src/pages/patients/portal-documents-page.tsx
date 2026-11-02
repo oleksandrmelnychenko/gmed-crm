@@ -589,13 +589,13 @@ function usePatientDocumentsPageContent() {
                 className={cn(
                   "inline-flex min-h-8 items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]",
                   activeCategory === tab.key
-                    ? "bg-[var(--brand)] font-semibold text-white"
+                    ? "bg-[var(--brand)] font-semibold text-primary-foreground"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
               >
                 <CategoryIcon aria-hidden="true" className="size-4 shrink-0" />
                 <span>{label}</span>
-                {count > 0 ? <span className={cn("rounded-full px-1.5 font-mono text-[11px] leading-5", activeCategory === tab.key ? "bg-white/20 text-white" : "bg-muted text-muted-foreground")}>{count}</span> : null}
+                {count > 0 ? <span className={cn("rounded-full px-1.5 font-mono text-[11px] leading-5", activeCategory === tab.key ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted text-muted-foreground")}>{count}</span> : null}
               </button>
             );
           })}

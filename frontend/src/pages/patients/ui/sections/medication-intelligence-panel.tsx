@@ -205,7 +205,7 @@ function SummaryGrid({ data, tx }: { data: MedicationIntelligenceResponse; tx: B
   ] as const;
 
   return (
-    <div className="grid overflow-hidden rounded-lg border border-border/70 bg-white sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <div className="grid overflow-hidden rounded-lg border border-border/70 bg-card sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
       {metrics.map(([label, value], index) => (
         <div
           key={label}
@@ -269,7 +269,7 @@ function OfficialSafetyAlertFinding({
             href={officialDocumentUrl}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex h-8 shrink-0 items-center justify-center rounded-md border border-border bg-white px-3 text-[11px] font-medium text-foreground hover:bg-muted/40"
+            className="inline-flex h-8 shrink-0 items-center justify-center rounded-md border border-border bg-card px-3 text-[11px] font-medium text-foreground hover:bg-muted/40"
           >
             {tx("Открыть официальный документ", "Offizielles Dokument öffnen")}
           </a>
@@ -582,7 +582,7 @@ function SourcesSection({
   ).length;
 
   return (
-    <details className="overflow-hidden rounded-lg border border-border/70 bg-white">
+    <details className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 border-b border-border/60 bg-muted/20 px-3.5 py-2.5 marker:hidden">
         <div className="flex min-w-0 items-center gap-2">
           <span className="size-2 shrink-0 rounded-full bg-orange-500" />
@@ -734,7 +734,7 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <section className="overflow-hidden rounded-lg border border-border/70 bg-white">
+    <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/60 bg-muted/20 px-3.5 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           <span className="size-2 shrink-0 rounded-full bg-orange-500" />
@@ -796,7 +796,7 @@ export function MedicationIntelligencePanelContent({
 
   return (
     <section
-      className="overflow-hidden rounded-lg border border-border/70 bg-white"
+      className="overflow-hidden rounded-lg border border-border/70 bg-card"
       aria-label={tx("Проверка медикации", "Medikationsprüfung")}
     >
       <header className="flex flex-col gap-2 border-b border-border/60 bg-muted/15 px-3.5 py-3 sm:flex-row sm:items-start sm:justify-between">
@@ -819,7 +819,7 @@ export function MedicationIntelligencePanelContent({
         <Disclaimer data={data} lang={lang} />
 
         {loading ? (
-          <div role="status" aria-live="polite" className="rounded-lg border border-border/70 bg-white px-4 py-8 text-center text-xs text-muted-foreground">
+          <div role="status" aria-live="polite" className="rounded-lg border border-border/70 bg-card px-4 py-8 text-center text-xs text-muted-foreground">
             {tx("Загружаем проверку медикации…", "Medikationsprüfung wird geladen…")}
           </div>
         ) : error ? (
@@ -836,14 +836,14 @@ export function MedicationIntelligencePanelContent({
             ) : null}
           </div>
         ) : !data ? (
-          <div className="rounded-lg border border-dashed border-border/70 bg-white px-4 py-8 text-center text-xs text-muted-foreground">
+          <div className="rounded-lg border border-dashed border-border/70 bg-card px-4 py-8 text-center text-xs text-muted-foreground">
             {tx("Проверка медикации пока недоступна.", "Die Medikationsprüfung ist noch nicht verfügbar.")}
           </div>
         ) : (
           <>
             <SummaryGrid data={data} tx={tx} />
             {isEmpty ? (
-              <div className="rounded-lg border border-dashed border-border/70 bg-white px-4 py-8 text-center text-xs leading-relaxed text-muted-foreground">
+              <div className="rounded-lg border border-dashed border-border/70 bg-card px-4 py-8 text-center text-xs leading-relaxed text-muted-foreground">
                 {tx(
                   "Нет данных для проверки. Сначала добавьте актуальную медикацию пациента.",
                   "Keine Daten für die Prüfung. Erfassen Sie zuerst die aktuelle Medikation des Patienten.",
@@ -1187,7 +1187,7 @@ export function MedicationIntelligencePanel({
                   {lang === "de" ? "Keine exakte Zuordnung gefunden; die Suche wurde nicht erweitert." : "Точного совпадения нет; поиск автоматически не расширялся."}
                 </div>
               ) : (
-                <div className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border/70 bg-white">
+                <div className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border/70 bg-card">
                   {benefitEvidence.evidence.map((item) => {
                     const officialHref = safeExternalUrl(item.official_url);
                     return (

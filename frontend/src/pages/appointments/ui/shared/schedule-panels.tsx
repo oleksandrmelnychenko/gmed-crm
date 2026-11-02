@@ -105,7 +105,7 @@ export function ConflictPanel({
             {items.map((item) => (
               <div
                 key={item.id}
-                className="rounded-xl border border-amber-200/70 bg-white/75 px-3 py-2"
+                className="rounded-xl border border-amber-200/70 bg-card/75 px-3 py-2"
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold">
@@ -147,7 +147,7 @@ export function ScheduleWarningsPanel({
             {warnings.map((warning) => (
               <div
                 key={warning.scope}
-                className="rounded-xl border border-amber-200/70 bg-white/75 px-3 py-2"
+                className="rounded-xl border border-amber-200/70 bg-card/75 px-3 py-2"
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold">

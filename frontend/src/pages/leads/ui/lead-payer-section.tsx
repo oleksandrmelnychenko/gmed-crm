@@ -946,7 +946,7 @@ export function LeadPayerDeclarationSection({
               <span className={cn(
                 "flex min-h-7 cursor-pointer items-center rounded-md border px-2.5 py-1 text-xs leading-4 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-ring/30 peer-disabled:cursor-default peer-disabled:opacity-60",
                 form.kind === kind
-                  ? "border-[var(--brand)] bg-[var(--brand)] font-semibold text-white shadow-sm"
+                  ? "border-[var(--brand)] bg-[var(--brand)] font-semibold text-primary-foreground shadow-sm"
                   : "border-transparent bg-card text-muted-foreground hover:border-border hover:bg-muted/70 hover:text-foreground",
               )}>{label}</span>
             </label>
@@ -1403,7 +1403,7 @@ export function LeadPayerDeclarationSection({
                       <button key={path} type="button" aria-pressed={showPaperPath === (path === "paper")}
                         onClick={() => setQuestionnaireView({ leadId, path })}
                         className={cn("inline-flex min-h-8 items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                          showPaperPath === (path === "paper") ? "bg-[var(--brand)] text-white shadow-sm" : "text-foreground hover:bg-muted")}>
+                          showPaperPath === (path === "paper") ? "bg-[var(--brand)] text-primary-foreground shadow-sm" : "text-foreground hover:bg-muted")}>
                         {path === "link" ? tx("По ссылке", "Per Link") : tx("На бумаге", "Auf Papier")}
                         {(path === "paper" ? paperCount > 0 : Boolean(payerLink.data?.questionnaire?.submitted_at)) ? (
                           <span className={cn("rounded-full px-1.5 font-mono", showPaperPath === (path === "paper") ? "bg-white/20" : "bg-muted")}>{path === "paper" ? paperCount : 1}</span>

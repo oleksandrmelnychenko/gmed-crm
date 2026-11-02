@@ -172,7 +172,7 @@ function MedicationRow({
     : null;
   return (
     <article className={cn(
-      "rounded-lg border bg-white px-3 py-2.5",
+      "rounded-lg border bg-card px-3 py-2.5",
       item.importable ? "border-border" : "border-rose-200",
     )}>
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -293,7 +293,7 @@ function IdentityReview({
         </p>
       ) : null}
       {preview.identity_match.fields.length > 0 ? (
-        <div className="mt-3 overflow-hidden rounded-lg border bg-white">
+        <div className="mt-3 overflow-hidden rounded-lg border bg-card">
           <div className="grid grid-cols-[minmax(90px,.7fr)_minmax(0,1fr)_minmax(0,1fr)] gap-2 border-b bg-muted/30 px-3 py-2 text-[10px] font-semibold text-muted-foreground">
             <span>{tx("Поле", "Feld")}</span>
             <span>{tx("В BMP", "Im BMP")}</span>
@@ -333,7 +333,7 @@ export function MedicationBmpImportPreviewContent({
   return (
     <div className="space-y-3">
       <div className="grid gap-3 md:grid-cols-2">
-        <section className="rounded-xl border bg-white p-3">
+        <section className="rounded-xl border bg-card p-3">
           <p className="text-[10px] font-semibold text-muted-foreground">
             {tx("План", "Plan")}
           </p>
@@ -344,7 +344,7 @@ export function MedicationBmpImportPreviewContent({
             {preview.plan.instance_id || "—"}
           </p>
         </section>
-        <section className="rounded-xl border bg-white p-3">
+        <section className="rounded-xl border bg-card p-3">
           <p className="text-[10px] font-semibold text-muted-foreground">
             {tx("Автор плана", "Aussteller")}
           </p>
@@ -368,8 +368,8 @@ export function MedicationBmpImportPreviewContent({
         </section>
       ) : null}
 
-      <section className="overflow-hidden rounded-xl border bg-slate-50/50">
-        <header className="flex flex-wrap items-center justify-between gap-2 border-b bg-white px-3 py-2.5">
+      <section className="overflow-hidden rounded-xl border bg-muted/50">
+        <header className="flex flex-wrap items-center justify-between gap-2 border-b bg-card px-3 py-2.5">
           <div className="flex items-center gap-2">
             <span aria-hidden className="size-2 rounded-full bg-[var(--brand)]" />
             <h3 className="text-sm font-semibold text-foreground">{tx("Медикаменты в BMP", "Medikamente im BMP")}</h3>
@@ -713,7 +713,7 @@ export function MedicationBmpImportAction({
           </section>
         ) : (
           <>
-            <section className="rounded-xl border bg-white p-3">
+            <section className="rounded-xl border bg-card p-3">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-semibold text-foreground">{tx("Декодированный XML", "Dekodiertes XML")}</h3>
@@ -773,7 +773,7 @@ export function MedicationBmpImportAction({
                 <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs leading-5 text-rose-800">
                   <p>{medicationBmpOperationMessage(operation, language)}</p>
                   {preview && operation !== "error" ? (
-                    <Button type="button" size="sm" variant="outline" className="mt-2 h-8 rounded-lg border-rose-200 bg-white" onClick={() => void createPreview()}>
+                    <Button type="button" size="sm" variant="outline" className="mt-2 h-8 rounded-lg border-rose-200 bg-card" onClick={() => void createPreview()}>
                       <RefreshCw className="size-3.5" />
                       {tx("Обновить предпросмотр", "Vorschau aktualisieren")}
                     </Button>
@@ -786,7 +786,7 @@ export function MedicationBmpImportAction({
                 <MedicationBmpImportPreviewContent preview={preview} language={language} />
                 <label className={cn(
                   "flex items-start gap-2.5 rounded-xl border px-3 py-3 text-xs leading-5",
-                  confirmable ? "border-border bg-white" : "border-muted bg-muted/25 text-muted-foreground",
+                  confirmable ? "border-border bg-card" : "border-muted bg-muted/25 text-muted-foreground",
                 )}>
                   <input
                     type="checkbox"

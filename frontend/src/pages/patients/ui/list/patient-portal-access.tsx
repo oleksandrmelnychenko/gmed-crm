@@ -198,7 +198,7 @@ export function PatientPortalAccessDetail({
             type="button"
             variant="default"
             size="sm"
-            className="h-auto min-h-8 max-w-full gap-1.5 whitespace-normal rounded-lg bg-[var(--brand)] px-2.5 py-1.5 text-xs text-white hover:brightness-95"
+            className="h-auto min-h-8 max-w-full gap-1.5 whitespace-normal rounded-lg bg-[var(--brand)] px-2.5 py-1.5 text-xs text-primary-foreground hover:brightness-95"
             disabled={busy}
             onClick={() => (canReset ? setConfirmOpen(true) : void issue())}
             data-testid="patient-portal-issue"
@@ -212,7 +212,7 @@ export function PatientPortalAccessDetail({
             type="button"
             variant="default"
             size="sm"
-            className="h-auto min-h-8 max-w-full gap-1.5 whitespace-normal rounded-lg bg-[var(--brand)] px-2.5 py-1.5 text-xs text-white hover:brightness-95"
+            className="h-auto min-h-8 max-w-full gap-1.5 whitespace-normal rounded-lg bg-[var(--brand)] px-2.5 py-1.5 text-xs text-primary-foreground hover:brightness-95"
             disabled={busy || emailInfo === undefined}
             onClick={() => {
               setEmailNotice("");

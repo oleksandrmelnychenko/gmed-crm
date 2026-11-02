@@ -103,7 +103,7 @@ function UploadBlock({
               htmlFor={inputId}
               className={cn(
                 buttonVariants({ variant: "default", size: "sm" }),
-                "h-8 rounded-lg bg-[var(--brand)] text-white hover:brightness-95 peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
+                "h-8 rounded-lg bg-[var(--brand)] text-primary-foreground hover:brightness-95 peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
                 (disabled || busy) && "pointer-events-none opacity-50",
               )}
             >

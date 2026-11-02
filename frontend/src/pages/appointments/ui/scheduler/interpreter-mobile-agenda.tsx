@@ -94,11 +94,11 @@ function StatsCard({
   tone: "sky" | "amber" | "slate";
 }) {
   return (
-    <div className="relative flex h-full min-w-0 flex-col rounded-lg border border-white/90 bg-white/88 p-3 pr-10 backdrop-blur">
-      <span className="block w-full whitespace-normal break-words text-left text-[11px] font-semibold leading-tight text-slate-600">
+    <div className="relative flex h-full min-w-0 flex-col rounded-lg border border-white/90 bg-card/88 p-3 pr-10 backdrop-blur">
+      <span className="block w-full whitespace-normal break-words text-left text-[11px] font-semibold leading-tight text-muted-foreground">
         {label}
       </span>
-      <p className="mt-auto pt-2 text-[2rem] leading-none font-semibold tracking-tight text-slate-950">
+      <p className="mt-auto pt-2 text-[2rem] leading-none font-semibold tracking-tight text-foreground">
         {value}
       </p>
       <span
@@ -363,7 +363,7 @@ export function InterpreterMobileAgenda({
                     : ""}
                 </p>
               </div>
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+              <span className="rounded-full border border-border bg-muted px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">
                 {section.itemCount}
               </span>
             </div>

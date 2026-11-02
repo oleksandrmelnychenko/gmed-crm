@@ -6554,7 +6554,7 @@ function useOrdersPageContent() {
                                     {formatDateTimeLabel(event.created_at)}
                                   </span>
                                 </div>
-                                <div className="mt-2 rounded-xl border border-border/70 bg-slate-50/60 px-4 py-3">
+                                <div className="mt-2 rounded-xl border border-border/70 bg-muted/60 px-4 py-3">
                                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                     <span>{l("orders_ubergang")}</span>
                                     <span className="h-px min-w-6 flex-1 bg-border/70" />
@@ -6587,7 +6587,7 @@ function useOrdersPageContent() {
                         {workflowChecklist ? (
                           <Badge
                             variant="outline"
-                            className="rounded-full border-border bg-slate-50 text-muted-foreground"
+                            className="rounded-full border-border bg-muted text-muted-foreground"
                           >
                             {l("orders_punkte")}: {workflowMetrics.total}
                           </Badge>
@@ -6707,7 +6707,7 @@ function useOrdersPageContent() {
                                     )}
                                   </span>
 
-                                  <div className="rounded-xl border border-border bg-slate-50/60 p-3">
+                                  <div className="rounded-xl border border-border bg-muted/60 p-3">
                                     <div className="grid gap-1.5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
                                       <div className="min-w-0">
                                         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -6752,7 +6752,7 @@ function useOrdersPageContent() {
                                         </Badge>
                                         <Badge
                                           variant="outline"
-                                          className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
+                                          className="rounded-full border-0 bg-card px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
                                         >
                                           {l("orders_offen")}:{" "}
                                           <span className="ml-1 font-semibold text-foreground">
@@ -6773,7 +6773,7 @@ function useOrdersPageContent() {
                                           <article
                                             key={item.id}
                                             className={cn(
-                                              "rounded-md bg-white px-3 py-2 text-xs shadow-sm ring-1 ring-border/40",
+                                              "rounded-md bg-card px-3 py-2 text-xs shadow-sm ring-1 ring-border/40",
                                               item.is_completed && "opacity-75",
                                             )}
                                           >

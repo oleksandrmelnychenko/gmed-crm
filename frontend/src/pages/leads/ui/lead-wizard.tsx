@@ -5476,7 +5476,7 @@ export function LeadWizard({
             </div>
           </div>
           {prepaymentExceedsTotal ? (
-            <Button type="button" size="sm" className="h-8 shrink-0 bg-[var(--brand)] text-white hover:brightness-95"
+            <Button type="button" size="sm" className="h-8 shrink-0 bg-[var(--brand)] text-primary-foreground hover:brightness-95"
               onClick={() => openValidationIssue({ key: "prepayment-amount", step: "commercial", message: "", fieldId: PREPAYMENT_AMOUNT_ID })}>
               {tx("К предоплате", "Zur Vorauszahlung")}<ArrowRight aria-hidden="true" className="size-3.5" />
             </Button>
@@ -11983,7 +11983,7 @@ ${serviceCommentLines.join("\n")}`
                         <Button
                           type="button"
                           size="sm"
-                          className="h-9 w-fit bg-[var(--brand)] text-white hover:brightness-95"
+                          className="h-9 w-fit bg-[var(--brand)] text-primary-foreground hover:brightness-95"
                           disabled={isBusy || !quote || !quoteIsCurrent || estimateDocumentOutdated}
                           aria-describedby={estimateDocumentOutdated ? "lead-wizard-estimate-outdated" : undefined}
                           onClick={() => void createOrAcceptQuote(true)}
@@ -12001,7 +12001,7 @@ ${serviceCommentLines.join("\n")}`
                     // prepayment and was made before its last change (DEV 2026-10-29).
                     <div id="lead-wizard-estimate-outdated" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm leading-6 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
                       <span className="flex min-w-0 flex-1 basis-80 items-start gap-2"><Info aria-hidden="true" className="mt-1 size-4 shrink-0" /><span>{tx("Документ сметы создан до последнего изменения сумм или предоплаты — создайте новую версию документа.", "Das Dokument des Kostenvoranschlags stammt von vor der letzten Änderung der Beträge oder der Vorauszahlung – erstellen Sie eine neue Version.")}</span></span>
-                      <Button type="button" variant="default" size="sm" className="h-8 shrink-0 bg-[var(--brand)] text-white hover:brightness-95" disabled={isBusy || !lines.some(validLine)} data-testid="lead-wizard-estimate-new-version"
+                      <Button type="button" variant="default" size="sm" className="h-8 shrink-0 bg-[var(--brand)] text-primary-foreground hover:brightness-95" disabled={isBusy || !lines.some(validLine)} data-testid="lead-wizard-estimate-new-version"
                         onClick={() => void generateCommercialDocument("order_cost_estimate")}>
                         {busy === "generate-order_cost_estimate" ? <LoaderCircle className="size-3 animate-spin" /> : <FileText className="size-3" />}
                         {tx("Создать новую версию", "Neue Version erstellen")}

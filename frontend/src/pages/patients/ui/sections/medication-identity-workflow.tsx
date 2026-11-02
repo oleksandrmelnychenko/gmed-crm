@@ -172,7 +172,7 @@ export function MedicationIdentityAction({
   }
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-border/70 bg-white px-3 py-2.5">
+    <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-border/70 bg-card px-3 py-2.5">
       <div className="min-w-0">
         <p className="truncate text-xs font-semibold text-foreground">{medication.name || "—"}</p>
         <p className="mt-0.5 inline-flex items-center gap-1.5 text-[10px] text-muted-foreground">
@@ -272,7 +272,7 @@ function CandidateRow({
   const product = candidate.product;
   return (
     <label className={cn(
-      "block rounded-lg border bg-white px-3 py-2.5",
+      "block rounded-lg border bg-card px-3 py-2.5",
       selected ? "border-foreground/50 ring-1 ring-foreground/10" : "border-border/70",
       canSelect && "cursor-pointer hover:bg-muted/15",
     )}>
@@ -329,7 +329,7 @@ function CandidateRow({
 
 function ReviewColumn({ title, dotClass, children }: { title: string; dotClass: string; children: ReactNode }) {
   return (
-    <section className="overflow-hidden rounded-lg border border-border/70 bg-white">
+    <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <header className="flex items-center gap-2 border-b border-border/60 bg-muted/15 px-3 py-2">
         <span className={cn("size-1.5 rounded-full", dotClass)} />
         <h4 className="text-[11px] font-semibold text-foreground">{title}</h4>
@@ -368,7 +368,7 @@ function CandidateReview({
   };
 
   return (
-    <section className="overflow-hidden rounded-lg border border-border/70 bg-white">
+    <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <header className="border-b border-border/60 bg-muted/20 px-3.5 py-2.5">
         <div className="flex items-center gap-2">
           <span className="size-2 rounded-full bg-foreground/70" />
@@ -397,11 +397,11 @@ function CandidateReview({
         <CandidateProvenance candidate={candidate} tx={tx} />
       </div>
 
-      <footer className="sticky bottom-0 z-10 border-t border-border/70 bg-white px-3.5 py-3 sm:static">
+      <footer className="sticky bottom-0 z-10 border-t border-border/70 bg-card px-3.5 py-3 sm:static">
         {candidateSet.permissions.can_confirm_identity ? (
           <label className={cn(
             "flex min-h-11 items-start gap-2.5 rounded-md border border-border/70 px-3 py-2.5 text-xs leading-relaxed",
-            canAcknowledge ? "cursor-pointer bg-white" : "bg-muted/20 text-muted-foreground",
+            canAcknowledge ? "cursor-pointer bg-card" : "bg-muted/20 text-muted-foreground",
           )}>
             <input
               type="checkbox"
@@ -461,7 +461,7 @@ export function MedicationIdentityWorkflow({
 
   if (status === "loading") {
     return (
-      <div role="status" className="rounded-lg border border-border/70 bg-white px-4 py-8 text-center text-xs text-muted-foreground">
+      <div role="status" className="rounded-lg border border-border/70 bg-card px-4 py-8 text-center text-xs text-muted-foreground">
         {tx("Ищем детерминированные совпадения…", "Deterministische Treffer werden gesucht…")}
       </div>
     );
@@ -472,7 +472,7 @@ export function MedicationIdentityWorkflow({
       <div role="alert" className="flex flex-col gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-4 text-xs text-rose-800 sm:flex-row sm:items-center sm:justify-between">
         <span>{errorMessage || tx("Не удалось загрузить кандидатов.", "Kandidaten konnten nicht geladen werden.")}</span>
         {onRetry ? (
-          <Button type="button" size="sm" variant="outline" className="min-h-11 bg-white sm:min-h-8" onClick={onRetry}>
+          <Button type="button" size="sm" variant="outline" className="min-h-11 bg-card sm:min-h-8" onClick={onRetry}>
             {tx("Повторить", "Erneut versuchen")}
           </Button>
         ) : null}
@@ -482,7 +482,7 @@ export function MedicationIdentityWorkflow({
 
   if (!candidateSet) {
     return (
-      <div className="rounded-lg border border-dashed border-border/70 bg-white px-4 py-8 text-center text-xs text-muted-foreground">
+      <div className="rounded-lg border border-dashed border-border/70 bg-card px-4 py-8 text-center text-xs text-muted-foreground">
         {tx("Набор кандидатов недоступен.", "Der Kandidatensatz ist nicht verfügbar.")}
       </div>
     );
@@ -490,7 +490,7 @@ export function MedicationIdentityWorkflow({
 
   if (!candidateSet.permissions.can_search_candidates) {
     return (
-      <div className="rounded-lg border border-border/70 bg-white px-4 py-5 text-center text-xs text-muted-foreground">
+      <div className="rounded-lg border border-border/70 bg-card px-4 py-5 text-center text-xs text-muted-foreground">
         {permissionReasonLabel(candidateSet.permissions.reason_code, tx)}
       </div>
     );
@@ -521,7 +521,7 @@ export function MedicationIdentityWorkflow({
             )}
           </span>
           {onReload ? (
-            <Button type="button" size="sm" variant="outline" className="min-h-11 bg-white sm:min-h-8" onClick={onReload}>
+            <Button type="button" size="sm" variant="outline" className="min-h-11 bg-card sm:min-h-8" onClick={onReload}>
               {tx("Обновить кандидатов", "Kandidaten neu laden")}
             </Button>
           ) : null}
@@ -530,7 +530,7 @@ export function MedicationIdentityWorkflow({
         <div role="alert" className="flex flex-col gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-3 text-xs text-rose-800 sm:flex-row sm:items-center sm:justify-between">
           <span>{errorMessage || tx("Не удалось выполнить действие.", "Die Aktion konnte nicht ausgeführt werden.")}</span>
           {onRetry ? (
-            <Button type="button" size="sm" variant="outline" className="min-h-11 bg-white sm:min-h-8" onClick={onRetry}>
+            <Button type="button" size="sm" variant="outline" className="min-h-11 bg-card sm:min-h-8" onClick={onRetry}>
               {tx("Повторить", "Erneut versuchen")}
             </Button>
           ) : null}
@@ -542,7 +542,7 @@ export function MedicationIdentityWorkflow({
       ) : null}
 
       {candidateSet.candidates.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border/70 bg-white px-4 py-8 text-center text-xs leading-relaxed text-muted-foreground">
+        <div className="rounded-lg border border-dashed border-border/70 bg-card px-4 py-8 text-center text-xs leading-relaxed text-muted-foreground">
           {tx(
             "Детерминированные кандидаты не найдены. Автоматическая связь не создаётся.",
             "Keine deterministischen Kandidaten gefunden. Es wird keine automatische Verknüpfung erstellt.",

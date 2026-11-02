@@ -54,7 +54,7 @@ const HorizontalBarsChart = lazy(async () => {
               fontSize={11}
               tickLine={false}
               axisLine={false}
-              stroke="#9ca3af"
+              stroke="var(--muted-foreground)"
               allowDecimals={false}
             />
             <YAxis
@@ -63,16 +63,18 @@ const HorizontalBarsChart = lazy(async () => {
               fontSize={11}
               tickLine={false}
               axisLine={false}
-              stroke="#6b7280"
+              stroke="var(--muted-foreground)"
               width={labelWidth}
             />
             <ChartTooltip
               contentStyle={{
+                background: "var(--popover)",
+                color: "var(--popover-foreground)",
                 borderRadius: 8,
                 border: "1px solid var(--color-border)",
                 fontSize: 12,
               }}
-              cursor={{ fill: "#fafafa" }}
+              cursor={{ fill: "var(--muted)" }}
             />
             <Bar dataKey="value" fill="#f97316" radius={[0, 4, 4, 0]} barSize={12} />
           </BarChart>
@@ -119,6 +121,8 @@ const MiniDonutChart = lazy(async () => {
             </Pie>
             <ChartTooltip
               contentStyle={{
+                background: "var(--popover)",
+                color: "var(--popover-foreground)",
                 borderRadius: 8,
                 border: "1px solid var(--color-border)",
                 fontSize: 12,

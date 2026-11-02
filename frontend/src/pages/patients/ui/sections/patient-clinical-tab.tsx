@@ -1446,7 +1446,7 @@ export function PatientRecommendationsSection({
     <div
       key={rec.id}
       className={cn(
-        "grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2.5 rounded-lg border border-border/40 bg-white px-3 py-2",
+        "grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2.5 rounded-lg border border-border/40 bg-card px-3 py-2",
         muted && "opacity-70",
       )}
     >
@@ -2113,7 +2113,7 @@ function PatientVitalsHistoryTable({
       ) : undefined}
       rowActionsLabel={tx("Действия", "Aktionen")}
       rowActionsWidth={72}
-      className="rounded-lg border-border/60 bg-white shadow-none"
+      className="rounded-lg border-border/60 bg-card shadow-none"
     />
   );
 }
@@ -2230,7 +2230,7 @@ function PatientRiskScoresTable({
       ) : undefined}
       rowActionsLabel={tx("Действия", "Aktionen")}
       rowActionsWidth={72}
-      className="rounded-lg border-border/60 bg-white shadow-none"
+      className="rounded-lg border-border/60 bg-card shadow-none"
     />
   );
 }
@@ -2416,7 +2416,7 @@ function MedicationHistoryTree({
             <details
               key={group.key}
               open={index === 0}
-              className="group rounded-lg border border-border/60 bg-white"
+              className="group rounded-lg border border-border/60 bg-card"
             >
               <summary className="grid cursor-pointer list-none gap-2 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center [&::-webkit-details-marker]:hidden">
                 <div className="min-w-0">
@@ -2467,13 +2467,13 @@ function MedicationHistoryTree({
                   </div>
                 ) : null}
 
-                <div className="overflow-hidden rounded-lg border border-border/50 bg-white">
+                <div className="overflow-hidden rounded-lg border border-border/50 bg-card">
                   {group.events.map((event) => {
                     const action = actionMeta(event.event_type);
                     const regimen = medicationHistoryRegimen(event.new_value, tx);
                     const status = medicationHistoryText(event.new_value, "status");
                     return (
-                      <article key={event.id} className="border-b border-border/50 bg-white px-3 py-2.5 last:border-b-0">
+                      <article key={event.id} className="border-b border-border/50 bg-card px-3 py-2.5 last:border-b-0">
                         <div className="flex flex-wrap items-start justify-between gap-2">
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-1.5">
@@ -3451,7 +3451,7 @@ export function PatientClinicalTab({
         title={tx("Терапия / Процедуры", "Therapie / Eingriffe")}
         items={procedures}
         sectionClassName="bg-card"
-        rowClassName="border-border/40 bg-white"
+        rowClassName="border-border/40 bg-card"
         blank={blankProcedure}
         isValid={(p) => p.label.trim() !== ""}
         canManage={canManage}
@@ -3555,7 +3555,7 @@ export function PatientClinicalTab({
       <ClinicalSection<ClinicalVerlaufEntry>
         title={tx("Течение", "Verlauf")}
         sectionClassName="bg-card"
-        rowClassName="border-border/40 bg-white"
+        rowClassName="border-border/40 bg-card"
         items={verlauf}
         blank={blankVerlaufEntry}
         isValid={(item) => item.note.trim() !== ""}
@@ -3632,7 +3632,7 @@ export function PatientClinicalTab({
           />
         ) : null}
         sectionClassName="bg-card"
-        rowClassName="border-border/40 bg-white"
+        rowClassName="border-border/40 bg-card"
         items={medications}
         blank={blankMedication}
         isValid={(m) =>
@@ -3726,7 +3726,7 @@ export function PatientClinicalTab({
       <ClinicalSection<ClinicalExamination>
         title={tx("Обследования", "Befunde")}
         sectionClassName="bg-card"
-        rowClassName="border-border/40 bg-white"
+        rowClassName="border-border/40 bg-card"
         items={visibleExaminations}
         blank={blankExamination}
         isValid={(e) => e.title.trim() !== ""}
@@ -3896,7 +3896,7 @@ export function PatientClinicalTab({
           <textarea
             value={impfstatusDraft}
             onChange={(e) => setImpfstatusDraft(e.target.value)}
-            className={cn(inputClass, "h-24 border-border/40 bg-white py-2")}
+            className={cn(inputClass, "h-24 border-border/40 bg-field py-2")}
             placeholder={tx(
               "Свободный текст о статусе вакцинации",
               "Freitext zum Impfstatus",
@@ -4008,7 +4008,7 @@ export function PatientClinicalTab({
             </div>
           </header>
 
-          <div className="grid items-end gap-2.5 border-b border-border/50 bg-white px-3 py-3 sm:grid-cols-[minmax(150px,220px)_minmax(150px,220px)_auto]">
+          <div className="grid items-end gap-2.5 border-b border-border/50 bg-card px-3 py-3 sm:grid-cols-[minmax(150px,220px)_minmax(150px,220px)_auto]">
             <Field label={tx("С", "Von")}>
               {/* The lab period is a filter, i.e. reading: usable read-only. */}
               <Input
@@ -4020,7 +4020,7 @@ export function PatientClinicalTab({
                   ...current,
                   dateFrom: event.target.value,
                 }))}
-                className="h-9 rounded-lg border-border/60 bg-white"
+                className="h-9 rounded-lg border-border/60 bg-field"
               />
             </Field>
             <Field label={tx("По", "Bis")}>
@@ -4033,7 +4033,7 @@ export function PatientClinicalTab({
                   ...current,
                   dateTo: event.target.value,
                 }))}
-                className="h-9 rounded-lg border-border/60 bg-white"
+                className="h-9 rounded-lg border-border/60 bg-field"
               />
             </Field>
             <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
@@ -4079,7 +4079,7 @@ export function PatientClinicalTab({
                 <details
                   key={group.name.toLocaleLowerCase()}
                   open={groupIndex === 0}
-                  className="group overflow-hidden rounded-lg border border-border/60 bg-white"
+                  className="group overflow-hidden rounded-lg border border-border/60 bg-card"
                 >
                   <summary className="grid cursor-pointer list-none gap-2 px-3 py-2.5 sm:grid-cols-[minmax(220px,300px)_140px_minmax(0,1fr)_auto] sm:items-center [&::-webkit-details-marker]:hidden">
                     <div className="min-w-0">
@@ -4112,7 +4112,7 @@ export function PatientClinicalTab({
                     <span aria-hidden className="text-xs text-muted-foreground transition-transform group-open:rotate-90">›</span>
                   </summary>
 
-                  <div className="border-t border-border/50 bg-slate-50/40 p-1.5">
+                  <div className="border-t border-border/50 bg-muted/40 p-1.5">
                     <PatientLabHistoryTable
                       rows={group.rows}
                       storageKey={`patient-clinical:lab-history:${group.name.toLocaleLowerCase()}`}
