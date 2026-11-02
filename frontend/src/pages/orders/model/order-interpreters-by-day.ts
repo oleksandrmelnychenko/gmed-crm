@@ -50,7 +50,54 @@ export type BatchFailure = {
   appointment_id: string;
   code?: string;
   message?: string;
+  /** Overlaps of a `schedule_conflict`, as the appointment form receives them. */
+  conflicts?: unknown;
 };
+
+const BATCH_FAILURE_TEXT: Record<string, { ru: string; de: string }> = {
+  not_in_order: {
+    ru: "Приём не относится к этому заказу.",
+    de: "Der Termin gehört nicht zu diesem Auftrag.",
+  },
+  appointment_closed: {
+    ru: "Приём завершён или отменён: переводчика не изменить.",
+    de: "Der Termin ist abgeschlossen oder abgesagt: Dolmetscher nicht änderbar.",
+  },
+  interpreter_report_exists: {
+    ru: "Переводчик уже сдал отчёт: измените приём в самом приёме.",
+    de: "Der Dolmetscher hat bereits berichtet: im Termin selbst ändern.",
+  },
+  forbidden: {
+    ru: "Нет прав изменить этот приём.",
+    de: "Keine Berechtigung für diesen Termin.",
+  },
+};
+
+/**
+ * One refusal of the batch in the UI language. A schedule conflict is worded
+ * by the appointment form's own conflict formatter (passed in, bound to the
+ * current language), so both places say the same.
+ */
+export function batchFailureMessage(
+  failure: BatchFailure,
+  lang: string,
+  formatConflict: (error: unknown, fallback: string) => string,
+): string {
+  const de = lang === "de";
+  if (failure.code === "schedule_conflict") {
+    const error = Object.assign(new Error(failure.message ?? "Appointment conflict"), {
+      status: 409,
+      body: failure,
+    });
+    return formatConflict(
+      error,
+      de ? "Zeitkonflikt mit einem anderen Termin." : "Конфликт по времени с другим приёмом.",
+    );
+  }
+  const known = failure.code ? BATCH_FAILURE_TEXT[failure.code] : undefined;
+  if (known) return de ? known.de : known.ru;
+  return failure.message ?? failure.code ?? "";
+}
 
 /** Per-appointment refusals from a 403/409 of the batch endpoint. */
 export function batchFailures(body: unknown): BatchFailure[] {

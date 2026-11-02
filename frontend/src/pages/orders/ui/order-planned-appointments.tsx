@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
+import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -107,8 +108,13 @@ export function OrderPlannedAppointments({
   const [error, setError] = useState<string | null>(null);
   const [releaseNonce, setReleaseNonce] = useState(0);
   const [releasing, setReleasing] = useState(false);
+  const [confirmRelease, setConfirmRelease] = useState(false);
+  const releasingRef = useRef(false);
 
   const releasePlan = () => {
+    setConfirmRelease(false);
+    if (releasingRef.current) return;
+    releasingRef.current = true;
     setReleasing(true);
     setError(null);
     apiFetch(`/orders/${orderId}/appointments/release-to-portal`, { method: "POST" })
@@ -116,7 +122,10 @@ export function OrderPlannedAppointments({
       .catch((reason: unknown) => {
         setError(reason instanceof Error ? reason.message : String(reason));
       })
-      .finally(() => setReleasing(false));
+      .finally(() => {
+        releasingRef.current = false;
+        setReleasing(false);
+      });
   };
 
   useEffect(() => {
@@ -162,9 +171,22 @@ export function OrderPlannedAppointments({
               count={unreleased}
               busy={releasing}
               lang={lang}
-              onRelease={releasePlan}
+              onRelease={() => setConfirmRelease(true)}
             />
           ) : null}
+          <DirtyDismissConfirmDialog
+            open={confirmRelease && unreleased > 0}
+            title={tx("Показать план пациенту?", "Plan dem Patienten zeigen?")}
+            message={tx(
+              `Пациент увидит в портале приёмы плана (${unreleased}) и получит уведомление.`,
+              `Der Patient sieht die Termine des Plans (${unreleased}) im Portal und wird benachrichtigt.`,
+            )}
+            cancelLabel={tx("Отмена", "Abbrechen")}
+            confirmLabel={tx("Показать", "Zeigen")}
+            confirmDisabled={releasing}
+            onCancel={() => setConfirmRelease(false)}
+            onConfirm={releasePlan}
+          />
           <div className="inline-flex rounded-lg border border-border/70 bg-muted/30 p-0.5" role="group">
             {(
               [

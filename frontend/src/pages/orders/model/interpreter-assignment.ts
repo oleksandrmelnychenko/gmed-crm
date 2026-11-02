@@ -35,6 +35,34 @@ export function interpreterAssignmentState(
 }
 
 /**
+ * The interpreter line of the planning summary: "2 из 3 назначено / 1 принято"
+ * over the open medical visits that need one (the readiness rule), so the
+ * count says how many are still missing. Without that count (older backend,
+ * or no medical visit yet) the plain booked/accepted numbers stay.
+ */
+export function interpreterPlanningSummary(
+  planning: InterpreterAssignmentCounters &
+    Pick<OrderPlanningPreparation, "interpreter_needed">,
+  text: (key: string, values?: Record<string, string | number>) => string,
+): string {
+  const needed = planning.interpreter_needed;
+  if (typeof needed !== "number" || needed <= 0) {
+    return text("orders_planning_interpreter_summary", {
+      assigned: planning.interpreter_assigned,
+      confirmed: planning.interpreter_confirmed,
+    });
+  }
+  const missing = Math.max(0, planning.interpreter_missing ?? 0);
+  const unconfirmed = Math.max(0, planning.interpreter_unconfirmed ?? 0);
+  const covered = Math.max(0, needed - missing);
+  return text("orders_planning_interpreter_of_summary", {
+    assigned: covered,
+    needed,
+    confirmed: Math.max(0, covered - unconfirmed),
+  });
+}
+
+/**
  * The order appointment to open for checking the interpreter: the first live
  * assignment the interpreter has not accepted yet, otherwise the first one.
  */

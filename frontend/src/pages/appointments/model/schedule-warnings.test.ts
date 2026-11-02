@@ -2,9 +2,18 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildLocalScheduleWarnings,
+  conflictItemTitle,
   formatScheduleConflictError,
 } from "./schedule-warnings";
 import type { AppointmentListItem } from "./types";
+
+describe("conflictItemTitle", () => {
+  it("names a redacted booking in the UI language instead of the English placeholder", () => {
+    const hidden = conflictItemTitle({ id: null, title: "Resource unavailable", is_redacted: true });
+    expect(["другой приём (нет доступа)", "anderer Termin (nicht einsehbar)"]).toContain(hidden);
+    expect(conflictItemTitle({ id: "a-1", title: "Kardiologie" })).toBe("Kardiologie");
+  });
+});
 
 describe("formatScheduleConflictError", () => {
   it("formats backend conflict payloads with the existing appointment details", () => {

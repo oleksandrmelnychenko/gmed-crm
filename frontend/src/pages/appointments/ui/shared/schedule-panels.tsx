@@ -2,6 +2,7 @@ import { ShieldAlert } from "lucide-react";
 
 import { appointmentText, useAppointmentLabels } from "@/pages/appointments/model/labels";
 import { formatAppointmentSlotLabel as slotLabel } from "@/pages/appointments/model/runtime-formatters";
+import { conflictItemTitle } from "@/pages/appointments/model/schedule-warnings";
 import type {
   ConflictSummary,
   LocalScheduleWarning,
@@ -79,7 +80,7 @@ export function ConflictPanel({
 }: {
   conflicts: ConflictSummary | null;
 }) {
-  const { conflictMetaLine, mergeScopedConflictItems } = useLanguageHelpers();
+  const { conflictItemTitle, conflictMetaLine, mergeScopedConflictItems } = useLanguageHelpers();
   const { appointmentText } = useAppointmentLabels();
   if (!conflicts) return null;
   const scopedItems = mergeScopedConflictItems(conflicts);
@@ -111,7 +112,7 @@ export function ConflictPanel({
                     {item.scopes.join(" / ")}
                   </span>
                   <span className="text-sm font-medium text-amber-900">
-                    {item.title}
+                    {conflictItemTitle(item)}
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-amber-800">
@@ -178,6 +179,7 @@ export function ScheduleWarningsPanel({
  * components take them from `useLanguageHelpers()` (bound to the current language).
  */
 const LANGUAGE_HELPERS = {
+  conflictItemTitle,
   conflictMetaLine,
   localWarningItemLine,
   mergeScopedConflictItems,

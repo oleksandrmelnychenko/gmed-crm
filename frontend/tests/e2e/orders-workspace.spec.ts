@@ -468,7 +468,15 @@ test("planning shows the hidden plan to the patient in one step (plan stage 4)",
   await page.goto(`/orders/${orderId}?section=planning`);
   const plan = page.getByTestId("order-planned-appointments");
   await expect(plan.getByTestId("order-planned-appointment-hidden")).toHaveCount(2);
+  // A short confirmation first: cancelling sends nothing.
   await plan.getByRole("button", {name: "Показать план пациенту (2)"}).click();
+  const confirm = page.getByRole("alertdialog");
+  await expect(confirm).toContainText("Пациент увидит в портале приёмы плана (2)");
+  await confirm.getByRole("button", {name: "Отмена"}).click();
+  await expect(confirm).toBeHidden();
+  expect(releaseCalls).toBe(0);
+  await plan.getByRole("button", {name: "Показать план пациенту (2)"}).click();
+  await page.getByRole("alertdialog").getByRole("button", {name: "Показать", exact: true}).dblclick();
   await expect(plan.getByTestId("order-planned-appointment-hidden")).toHaveCount(0);
   await expect(plan.getByTestId("order-plan-release")).toHaveCount(0);
   expect(releaseCalls).toBe(1);
@@ -508,12 +516,50 @@ test("planning warns about a doctor outside the quote and records the agreement 
   });
 
   await agreement.getByTestId("order-plan-note").fill("Plan per e-mail gesendet");
-  await agreement.getByRole("button", {name: "Отметить: отправлен пациенту"}).click();
+  // A double click records the step once.
+  await agreement.getByRole("button", {name: "Отметить: отправлен пациенту"}).dblclick();
   await expect(agreement).toContainText("Отправлен пациенту");
   await expect(agreement.getByRole("button", {name: "Пациент согласовал"})).toBeVisible();
-  expect(writes.filter(write => write.path.endsWith("/planning-preparation")).at(-1)?.body).toEqual({
+  const steps = writes.filter(write => write.path.endsWith("/planning-preparation"));
+  expect(steps).toHaveLength(1);
+  expect(steps[0].body).toEqual({
     treatment_plan_status: "sent", treatment_plan_note: "Plan per e-mail gesendet",
   });
+});
+
+test("planning names who set the plan status and warns when visits came later (QA round 13)", async ({page}) => {
+  const {order} = await prepare(page);
+  // Planning already runs in the first phase; its gate is checked only later.
+  order.phase = "discovery";
+  Object.assign(order.planning_preparation, {
+    treatment_plan_status: "finalized",
+    treatment_plan_status_updated_at: "2026-11-02T13:49:00Z",
+    treatment_plan_status_updated_by_name: "Petra Planer",
+    appointments_last_added_at: "2026-11-02T15:00:00Z",
+    non_medical_required: false, non_medical_total: 1,
+    interpreter_required: true, interpreter_assigned: 2, interpreter_confirmed: 0,
+    interpreter_needed: 3, interpreter_missing: 1, interpreter_unconfirmed: 2,
+    blocking_reasons: ["Interpreter is required but not assigned yet"],
+  });
+  await page.route(`**/api/v1/orders/${orderId}/pipeline`, route => route.fulfill({json: {
+    order_id: orderId, phase: "intake", status: "active", stages: [], medical: {visible: false, required: false}, appointments: [],
+  }}));
+  await page.route("**/api/v1/documents?*", route => route.fulfill({json: [{
+    id: "plan-pdf-old", order_id: orderId, generated_template_id: "treatment_plan", is_latest_version: true,
+    status: "draft", created_at: "2026-11-02T14:00:00Z",
+  }]}));
+  await page.goto(`/orders/${orderId}?section=planning`);
+
+  const agreement = page.getByTestId("order-plan-agreement");
+  await expect(agreement.getByTestId("order-plan-status-set")).toHaveText("Статус установил Petra Planer 02.11.2026 14:49");
+  await expect(agreement.getByTestId("order-plan-changed")).toContainText("После статуса «Финализировано» в план добавлены приёмы");
+  await expect(agreement.getByTestId("order-plan-changed")).toContainText("обновите PDF");
+  // No automatic status change.
+  await expect(agreement).toContainText("Финализировано");
+
+  await expect(page.getByText("2 из 3 назначено / 0 принято")).toBeVisible();
+  await expect(page.getByTestId("order-planning-readiness-reasons")).toContainText("Для готовности планирования ещё нужно:");
+  await expect(page.getByTestId("order-planning-non-medical-hint")).toContainText("В плане немедицинских приёмов: 1");
 });
 
 test("planning books one interpreter for a whole day in one request (plan stage 5)", async ({page}) => {
@@ -538,22 +584,44 @@ test("planning books one interpreter for a whole day in one request (plan stage 
   await page.route("**/api/v1/appointments/meta/interpreters", route => route.fulfill({json: [
     {id: "int-olga", name: "Olga Test", role: "interpreter", assignable: true},
     {id: "int-ivan", name: "Ivan Test", role: "interpreter", assignable: true},
+    {id: "int-hidden", name: "Hidden Test", role: "interpreter", assignable: true},
   ]}));
   await page.route("**/api/v1/appointments/*/interpreter-suggestions", route => route.fulfill({json: []}));
   await page.route("**/api/v1/appointments/meta/conflicts?*", route => {
     const url = new URL(route.request().url());
-    const busy = url.searchParams.get("appointment_id") === "Nachbesprechung" && url.searchParams.get("interpreter_id") === "int-ivan";
-    const conflict = {id: "x", title: "Andere Patientin", date: "2026-11-03", time_start: "13:30", time_end: "14:30", type: "medical", status: "confirmed", patient_name: "", patient_pid: "", provider_name: null};
+    const interpreter = url.searchParams.get("interpreter_id");
+    const busy = url.searchParams.get("appointment_id") === "Nachbesprechung" && (interpreter === "int-ivan" || interpreter === "int-hidden");
+    const conflict = interpreter === "int-hidden"
+      // A booking the planner may not see comes back redacted, in English.
+      ? {id: null, title: "Resource unavailable", date: "2026-11-03", time_start: "13:15", time_end: "13:45", type: null, status: null, patient_name: "", patient_pid: "", provider_name: null, is_redacted: true}
+      : {id: "x", title: "Andere Patientin", date: "2026-11-03", time_start: "13:30", time_end: "14:30", type: "medical", status: "confirmed", patient_name: "", patient_pid: "", provider_name: null};
     return route.fulfill({json: {
       patient_conflict_count: 0, interpreter_conflict_count: busy ? 1 : 0, has_conflicts: busy,
       patient_conflicts: [], interpreter_conflicts: busy ? [conflict] : [],
     }});
   });
+  // The first batch is refused for the hidden booking, as the server words it.
+  let refuseBatch = true;
+  await page.route(`**/api/v1/orders/${orderId}/appointments/assign-interpreter`, route => {
+    if (!refuseBatch) return route.fallback();
+    refuseBatch = false;
+    return route.fulfill({status: 409, json: {
+      error: "Conflict", message: "Some appointments cannot take the interpreter; nothing was changed",
+      failures: [{
+        appointment_id: "Nachbesprechung", code: "schedule_conflict",
+        message: "Appointment conflict: selected slot overlaps with existing interpreter booking Resource unavailable at 2026-11-03 13:15-13:45",
+        conflicts: {
+          patient_conflict_count: 0, interpreter_conflict_count: 1, doctor_conflict_count: 0, has_conflicts: true,
+          patient_conflicts: [], doctor_conflicts: [],
+          interpreter_conflicts: [{id: null, title: "Resource unavailable", date: "2026-11-03", time_start: "13:15", time_end: "13:45", is_redacted: true}],
+        },
+      }],
+    }});
+  });
   await page.goto(`/orders/${orderId}?section=planning`);
 
-  const callout = page.getByTestId("order-interpreter-callout");
-  await expect(callout).toHaveAttribute("data-state", "unassigned");
-  await expect(callout).toContainText("Без переводчика: 1");
+  // «Переводчики по дням» replaces the older «Назначить переводчика» hint.
+  await expect(page.getByTestId("order-interpreter-callout")).toHaveCount(0);
 
   const block = page.getByTestId("order-interpreters-by-day");
   const day = block.locator('[data-testid="order-interpreter-day"][data-date="2026-11-03"]');
@@ -568,16 +636,63 @@ test("planning books one interpreter for a whole day in one request (plan stage 
   await expect(sheet.getByRole("checkbox", {name: "Nachbesprechung"})).toBeChecked();
   await expect(sheet.getByRole("checkbox", {name: "Kardiologie"})).not.toBeChecked();
   await sheet.getByRole("checkbox", {name: "Kardiologie"}).check();
-  await chooseComboboxOption(page, sheet.getByRole("combobox", {name: "Переводчик"}), "Ivan Test");
-  await expect(sheet.getByTestId("order-interpreter-row-hint")).toContainText("Конфликт: Andere Patientin 13:30–14:30");
-
+  // A hidden booking is named in Russian, and so is the refusal of the batch.
+  await chooseComboboxOption(page, sheet.getByRole("combobox", {name: "Переводчик"}), "Hidden Test");
+  const hint = sheet.getByTestId("order-interpreter-row-hint");
+  await expect(hint).toHaveText("Конфликт: другой приём (нет доступа) 13:15–13:45");
   await sheet.getByRole("button", {name: "Назначить", exact: true}).click();
+  await expect(hint).toHaveText("Приём нельзя сохранить: переводчик уже занят в выбранное время. Выберите другое время.");
+  await expect(hint).not.toContainText("Resource unavailable");
+  await expect(hint).not.toContainText("Appointment conflict");
+
+  // Another interpreter drops the old refusal at once.
+  await chooseComboboxOption(page, sheet.getByRole("combobox", {name: "Переводчик"}), "Ivan Test");
+  await expect(hint).toHaveText("Конфликт: Andere Patientin 13:30–14:30");
+
+  // A double click sends the batch once.
+  await sheet.getByRole("button", {name: "Назначить", exact: true}).dblclick();
   await expect(sheet).toBeHidden();
   const batch = writes.filter(write => write.path.endsWith("/appointments/assign-interpreter"));
   expect(batch).toHaveLength(1);
   expect(batch[0].path).toBe(`/orders/${orderId}/appointments/assign-interpreter`);
   expect(batch[0].body.interpreter_id).toBe("int-ivan");
   expect([...(batch[0].body.appointment_ids as string[])].sort()).toEqual(["Kardiologie", "Nachbesprechung"]);
+
+  // Taking the interpreter off asks first.
+  await day.getByRole("button", {name: "Назначить переводчика на день"}).click();
+  await expect(sheet).toBeVisible();
+  await sheet.getByRole("button", {name: "Снять переводчика"}).click();
+  const confirm = page.getByRole("alertdialog");
+  await expect(confirm).toContainText("Переводчик будет снят с отмеченных приёмов");
+  await confirm.getByRole("button", {name: "Отмена"}).click();
+  expect(writes.filter(write => write.path.endsWith("/appointments/assign-interpreter"))).toHaveLength(1);
+  await sheet.getByRole("button", {name: "Снять переводчика"}).click();
+  await page.getByRole("alertdialog").getByRole("button", {name: "Снять", exact: true}).click();
+  await expect(sheet).toBeHidden();
+  const removal = writes.filter(write => write.path.endsWith("/appointments/assign-interpreter"));
+  expect(removal).toHaveLength(2);
+  expect(removal[1].body.interpreter_id).toBeNull();
+});
+
+test("the interpreter answer badge stays inside its card on a phone (QA round 13)", async ({page}) => {
+  await page.setViewportSize({width: 390, height: 900});
+  const {order} = await prepare(page);
+  Object.assign(order.planning_preparation, {interpreter_required: true});
+  await page.route(`**/api/v1/orders/${orderId}/pipeline`, route => route.fulfill({json: {
+    order_id: orderId, phase: "intake", status: "active", stages: [], medical: {visible: false, required: false}, appointments: [{
+      id: "Kardiologische Nachbesprechung", title: "Kardiologische Nachbesprechung", appointment_type: "medical",
+      date: "2026-11-10", time_start: "10:00:00", time_end: "11:00:00", status: "planned", location: null,
+      provider_name: "Charité", doctor_name: "Prof. Dr. Johannes Keller", interpreter_id: "int-long",
+      interpreter_name: "Alexandra Konstantinopolskaja-Hohenberg", interpreter_response: "pending",
+    }],
+  }}));
+  await page.goto(`/orders/${orderId}?section=planning`);
+  const row = page.getByTestId("order-interpreter-row");
+  await expect(row).toContainText("ждёт ответа");
+  const card = await page.getByTestId("order-interpreters-by-day").boundingBox();
+  const badge = await row.getByText("ждёт ответа").boundingBox();
+  expect(card && badge).toBeTruthy();
+  expect(badge!.x + badge!.width).toBeLessThanOrEqual(card!.x + card!.width);
 });
 
 test("saving a normalized note clears the dirty state", async ({page}) => {

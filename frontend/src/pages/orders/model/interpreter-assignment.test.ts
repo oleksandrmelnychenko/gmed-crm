@@ -4,8 +4,36 @@ import {
   appointmentWorkflowHref,
   interpreterAppointmentToReview,
   interpreterAssignmentState,
+  interpreterPlanningSummary,
 } from "./interpreter-assignment";
 import type { OrderPipelineAppointment } from "./order-pipeline";
+
+describe("interpreterPlanningSummary", () => {
+  const text = (key: string, values?: Record<string, string | number>) =>
+    `${key}:${JSON.stringify(values)}`;
+  const counters = {
+    interpreter_required: true,
+    interpreter_assigned: 3,
+    interpreter_confirmed: 1,
+    interpreter_missing: 1,
+    interpreter_unconfirmed: 1,
+  };
+
+  it("counts the covered medical visits out of those that need an interpreter", () => {
+    expect(interpreterPlanningSummary({ ...counters, interpreter_needed: 3 }, text)).toBe(
+      'orders_planning_interpreter_of_summary:{"assigned":2,"needed":3,"confirmed":1}',
+    );
+  });
+
+  it("keeps the plain counts without the needed number", () => {
+    expect(interpreterPlanningSummary(counters, text)).toBe(
+      'orders_planning_interpreter_summary:{"assigned":3,"confirmed":1}',
+    );
+    expect(interpreterPlanningSummary({ ...counters, interpreter_needed: 0 }, text)).toContain(
+      "orders_planning_interpreter_summary:",
+    );
+  });
+});
 
 function appointment(
   id: string,

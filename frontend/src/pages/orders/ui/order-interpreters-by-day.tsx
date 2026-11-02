@@ -1,8 +1,9 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle, Languages } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { ApiRequestError, apiFetch } from "@/lib/api";
 import { fetchInterpreterSuggestions, type InterpreterSuggestion } from "@/lib/api/clinical";
@@ -11,6 +12,7 @@ import { hasCapability } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import { appointmentSelectControlClassName } from "@/pages/appointments/appearance/surface-appearance";
 import { buildConflictQuery } from "@/pages/appointments/model/query-builders";
+import { useScheduleWarnings } from "@/pages/appointments/model/schedule-warnings";
 import {
   assignableInterpreterOptions,
   type ConflictSummary,
@@ -20,6 +22,7 @@ import { InterpreterSuggestionsPanel } from "@/pages/appointments/ui/sections/in
 import { AppointmentEditorSheet, Field } from "@/pages/appointments/ui/shared/workspace-primitives";
 
 import {
+  batchFailureMessage,
   batchFailures,
   canTakeInterpreter,
   defaultDaySelection,
@@ -48,6 +51,11 @@ type OrderInterpretersByDayProps = {
   locked?: boolean;
   /** Called after a batch was saved, so the planning readiness reloads. */
   onChanged?: () => void;
+  /**
+   * Whether the block hides itself because the order has no appointment yet;
+   * the page then keeps its older interpreter hint in its place.
+   */
+  onEmptyChange?: (empty: boolean) => void;
 };
 
 type DaySheet = {
@@ -68,6 +76,7 @@ export function OrderInterpretersByDay({
   reloadNonce,
   locked = false,
   onChanged,
+  onEmptyChange,
 }: OrderInterpretersByDayProps) {
   const de = lang === "de";
   const tx = (ru: string, german: string) => (de ? german : ru);
@@ -80,7 +89,12 @@ export function OrderInterpretersByDay({
   const [error, setError] = useState<string | null>(null);
   const [interpreters, setInterpreters] = useState<InterpreterOption[]>([]);
   const [sheet, setSheet] = useState<DaySheet | null>(null);
+  const { conflictItemTitle, formatScheduleConflictError } = useScheduleWarnings();
   const [busy, setBusy] = useState(false);
+  // Set synchronously, so a double click cannot send the batch twice before
+  // the disabled button renders.
+  const savingRef = useRef(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [failures, setFailures] = useState<Record<string, string>>({});
   const [conflictState, setConflicts] = useState<{
@@ -131,6 +145,10 @@ export function OrderInterpretersByDay({
     [loaded, orderId],
   );
   const days = useMemo(() => (appointments ? interpreterDays(appointments) : []), [appointments]);
+  const noDays = Boolean(appointments) && days.length === 0;
+  useEffect(() => {
+    onEmptyChange?.(noDays);
+  }, [noDays, onEmptyChange]);
   const sheetDay = sheet ? days.find((day) => day.date === sheet.date) ?? null : null;
   const suggestionTarget = sheetDay?.appointments.find(
     (appointment) => sheet?.selected.includes(appointment.id),
@@ -180,7 +198,7 @@ export function OrderInterpretersByDay({
             interpreterId,
           ),
         )
-          .then((summary) => [appointment.id, conflictHint(summary)] as const)
+          .then((summary) => [appointment.id, conflictHint(summary, conflictItemTitle)] as const)
           .catch(() => [appointment.id, ""] as const),
       ),
     ).then((entries) => {
@@ -193,10 +211,10 @@ export function OrderInterpretersByDay({
     return () => {
       cancelled = true;
     };
-  }, [conflictTargets, patientId, sheet?.interpreterId]);
+  }, [conflictItemTitle, conflictTargets, patientId, sheet?.interpreterId]);
 
   // Nothing to staff yet: the appointment list above already says so.
-  if (!enabled || (appointments && days.length === 0)) return null;
+  if (!enabled || noDays) return null;
 
   const openDay = (day: InterpreterDay) => {
     setSaveError(null);
@@ -213,7 +231,15 @@ export function OrderInterpretersByDay({
     });
   };
 
-  const toggle = (appointmentId: string) =>
+  // A refusal belongs to the interpreter and rows it was sent with: changing
+  // either clears it, so an old conflict is not shown for a new choice.
+  const clearRefusal = () => {
+    setFailures({});
+    setSaveError(null);
+  };
+
+  const toggle = (appointmentId: string) => {
+    clearRefusal();
     setSheet((current) =>
       current
         ? {
@@ -224,9 +250,16 @@ export function OrderInterpretersByDay({
           }
         : current,
     );
+  };
+
+  const chooseInterpreter = (interpreterId: string) => {
+    clearRefusal();
+    setSheet((current) => (current ? { ...current, interpreterId } : current));
+  };
 
   const save = async (interpreterId: string | null) => {
-    if (!sheet || sheet.selected.length === 0) return;
+    if (!sheet || sheet.selected.length === 0 || savingRef.current) return;
+    savingRef.current = true;
     setBusy(true);
     setSaveError(null);
     setFailures({});
@@ -243,7 +276,10 @@ export function OrderInterpretersByDay({
       const listed = batchFailures(body);
       setFailures(
         Object.fromEntries(
-          listed.map((item) => [item.appointment_id, item.message ?? item.code ?? ""]),
+          listed.map((item) => [
+            item.appointment_id,
+            batchFailureMessage(item, lang, formatScheduleConflictError),
+          ]),
         ),
       );
       setSaveError(
@@ -257,6 +293,7 @@ export function OrderInterpretersByDay({
             : String(reason),
       );
     } finally {
+      savingRef.current = false;
       setBusy(false);
     }
   };
@@ -317,7 +354,7 @@ export function OrderInterpretersByDay({
               size="sm"
               className="h-8 rounded-lg"
               disabled={busy || !sheet || sheet.selected.length === 0}
-              onClick={() => void save(null)}
+              onClick={() => setConfirmRemove(true)}
             >
               {tx("Снять переводчика", "Dolmetscher entfernen")}
             </Button>
@@ -338,11 +375,7 @@ export function OrderInterpretersByDay({
             <Field compact label={tx("Переводчик", "Dolmetscher")}>
               <NativeComboboxSelect
                 value={sheet.interpreterId}
-                onChange={(event) =>
-                  setSheet((current) =>
-                    current ? { ...current, interpreterId: event.target.value } : current,
-                  )
-                }
+                onChange={(event) => chooseInterpreter(event.target.value)}
                 className={appointmentSelectControlClassName}
               >
                 <option value="">{tx("Не выбран", "Nicht gewählt")}</option>
@@ -401,22 +434,41 @@ export function OrderInterpretersByDay({
               selectedInterpreterId={sheet.interpreterId}
               loading={!suggestionItems}
               error={suggestionItems?.error}
-              onSelect={(interpreterId) =>
-                setSheet((current) => (current ? { ...current, interpreterId } : current))
-              }
+              onSelect={chooseInterpreter}
             />
           </div>
         ) : null}
       </AppointmentEditorSheet>
+
+      <DirtyDismissConfirmDialog
+        open={confirmRemove && sheet !== null}
+        title={tx("Снять переводчика?", "Dolmetscher entfernen?")}
+        message={tx(
+          `Переводчик будет снят с отмеченных приёмов (${sheet?.selected.length ?? 0}); он получит уведомление.`,
+          `Der Dolmetscher wird von den markierten Terminen (${sheet?.selected.length ?? 0}) entfernt und benachrichtigt.`,
+        )}
+        cancelLabel={tx("Отмена", "Abbrechen")}
+        confirmLabel={tx("Снять", "Entfernen")}
+        destructive
+        confirmDisabled={busy}
+        onCancel={() => setConfirmRemove(false)}
+        onConfirm={() => {
+          setConfirmRemove(false);
+          void save(null);
+        }}
+      />
     </div>
   );
 }
 
-function conflictHint(summary: ConflictSummary): string {
+function conflictHint(
+  summary: ConflictSummary,
+  titleOf: (item: ConflictSummary["interpreter_conflicts"][number]) => string,
+): string {
   const first = summary.interpreter_conflicts?.[0];
   if (!first) return "";
   const time = [first.time_start?.slice(0, 5), first.time_end?.slice(0, 5)].filter(Boolean).join("–");
-  return [first.title, time].filter(Boolean).join(" ");
+  return [titleOf(first), time].filter(Boolean).join(" ");
 }
 
 type InterpreterDaysTableProps = {
@@ -477,7 +529,7 @@ export function InterpreterDaysTable({ days, lang, locked, onAssignDay }: Interp
                   data-testid="order-interpreter-row"
                   className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 text-sm"
                 >
-                  <div className="min-w-0">
+                  <div className="min-w-0 break-words">
                     <span className="font-medium text-foreground">
                       {[plannedTimeLabel(appointment), appointment.title].filter(Boolean).join(" · ")}
                     </span>
@@ -485,9 +537,12 @@ export function InterpreterDaysTable({ days, lang, locked, onAssignDay }: Interp
                       <span className="ml-2 text-xs text-muted-foreground">{appointment.doctor_name}</span>
                     ) : null}
                   </div>
-                  <div className="flex items-center gap-2 text-xs">
+                  {/* Wraps on a phone, so the answer badge stays inside the card. */}
+                  <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                     {appointment.interpreter_name ? (
-                      <span className="text-foreground">{appointment.interpreter_name}</span>
+                      <span className="min-w-0 break-words text-foreground">
+                        {appointment.interpreter_name}
+                      </span>
                     ) : (
                       <span className={missing ? "text-amber-700" : "text-muted-foreground"}>
                         {missing
@@ -496,7 +551,12 @@ export function InterpreterDaysTable({ days, lang, locked, onAssignDay }: Interp
                       </span>
                     )}
                     {response && appointment.interpreter_name ? (
-                      <StatusBadge tone={response.tone}>{de ? response.de : response.ru}</StatusBadge>
+                      <StatusBadge
+                        tone={response.tone}
+                        className="h-auto max-w-full shrink whitespace-normal text-left"
+                      >
+                        {de ? response.de : response.ru}
+                      </StatusBadge>
                     ) : null}
                   </div>
                 </li>

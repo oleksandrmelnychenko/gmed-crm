@@ -153,6 +153,22 @@ export function buildScheduleNotice(
     : "";
 }
 
+/**
+ * The title of an overlapping appointment. A booking the user may not see
+ * comes back redacted (no id, English placeholder title); it is named in the
+ * UI language instead.
+ */
+export function conflictItemTitle(item: {
+  id?: string | null;
+  title?: string | null;
+  is_redacted?: boolean | null;
+}) {
+  if (!item.id || item.is_redacted === true || !item.title?.trim()) {
+    return appointmentText("appointments_conflict_resource_unavailable");
+  }
+  return item.title;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -310,6 +326,7 @@ export function formatScheduleConflictError(error: unknown, fallback: string) {
 export const SCHEDULE_WARNING_LANGUAGE_HELPERS = {
   buildLocalScheduleWarnings,
   buildScheduleNotice,
+  conflictItemTitle,
   formatScheduleConflictError,
 };
 

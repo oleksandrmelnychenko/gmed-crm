@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  batchFailureMessage,
   batchFailures,
   defaultDaySelection,
   interpreterDays,
@@ -99,6 +100,31 @@ describe("interpreter days model", () => {
     expect(batchFailures(null)).toEqual([]);
     expect(batchFailures({ message: "x" })).toEqual([]);
   });
+
+  it("words a refusal in the UI language, a conflict through the appointment form's formatter", () => {
+    const formatConflict = vi.fn((error: unknown) =>
+      `formatted:${(error as { body: { appointment_id: string } }).body.appointment_id}`,
+    );
+    const conflict = {
+      appointment_id: "a",
+      code: "schedule_conflict",
+      message: "Appointment conflict: selected slot overlaps with existing interpreter booking Resource unavailable",
+    };
+    expect(batchFailureMessage(conflict, "ru", formatConflict)).toBe("formatted:a");
+    expect(formatConflict).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 409, body: conflict }),
+      "Конфликт по времени с другим приёмом.",
+    );
+    expect(
+      batchFailureMessage({ appointment_id: "b", code: "appointment_closed" }, "ru", formatConflict),
+    ).toBe("Приём завершён или отменён: переводчика не изменить.");
+    expect(
+      batchFailureMessage({ appointment_id: "b", code: "not_in_order" }, "de", formatConflict),
+    ).toBe("Der Termin gehört nicht zu diesem Auftrag.");
+    expect(
+      batchFailureMessage({ appointment_id: "b", code: "unknown", message: "raw" }, "ru", formatConflict),
+    ).toBe("raw");
+  });
 });
 
 describe("InterpreterDaysTable", () => {
@@ -112,6 +138,9 @@ describe("InterpreterDaysTable", () => {
     expect(html).toContain("без переводчика: 1");
     // Two days still take an interpreter; the day with only a completed visit does not.
     expect(html.match(/Назначить переводчика на день/g)).toHaveLength(2);
+    // The answer badge may wrap on a phone instead of leaving the card.
+    expect(html).toContain("whitespace-normal");
+    expect(html).toContain("flex-wrap items-center gap-x-2");
   });
 
   it("offers no action on a locked order", () => {

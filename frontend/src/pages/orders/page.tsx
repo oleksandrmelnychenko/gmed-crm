@@ -300,6 +300,7 @@ import {
 } from "./ui/order-cancellation";
 import { normalizeOrderCancellationSettlement } from "./model/order-cancellation";
 import { debtRecheckCopy } from "./model/debt-recheck";
+import { interpreterPlanningSummary } from "./model/interpreter-assignment";
 import { OrderFollowupMilestones } from "./ui/order-followup-milestones";
 import { readableServiceLineNotes } from "./model/service-line-notes";
 import {
@@ -1164,6 +1165,8 @@ function useOrdersPageContent() {
   // When the workspace last loaded (mount, a reload): a passive realtime
   // frame shortly after it does not load everything again (QA C-33).
   const workspaceLoadedAtRef = useRef(Date.now());
+  // «Переводчики по дням» hides itself while the order has no appointment.
+  const [interpreterDaysEmpty, setInterpreterDaysEmpty] = useState(false);
   const [statusSaving, setStatusSaving] = useState<OrderStatus | null>(null);
   // The change of signed terms asks in the app's own dialog, never the
   // browser's confirm() (QA 2026-10-31, R3-4), as «Отменить услугу» does.
@@ -3459,6 +3462,10 @@ function useOrdersPageContent() {
   const canReleaseOrderPlan = Boolean(
     detailNewAppointmentHref && (user?.role === "ceo" || user?.role === "patient_manager"),
   );
+  // The same condition as inside OrderInterpretersByDay.
+  const interpretersByDayShown = Boolean(
+    detailPatientId && hasCapability(user, "appointments.assign_interpreter"),
+  );
   const detailDocumentsHref = orderDetail
     ? `/documents?${detailOrderHref}${detailPatientQuery}`
     : "";
@@ -5302,6 +5309,28 @@ function useOrdersPageContent() {
                             </Badge>
                           }
                         />
+                        {/* Before the planning phase the gate is not checked yet;
+                            what it will still need is listed right here (the
+                            block below lists it once the gate applies). */}
+                        {!planningReadinessApplicable &&
+                        orderDetail.phase === "discovery" &&
+                        orderDetail.planning_preparation.blocking_reasons.length > 0 ? (
+                          <div
+                            data-testid="order-planning-readiness-reasons"
+                            className="text-xs leading-5 text-muted-foreground md:col-span-2"
+                          >
+                            <div className="font-medium text-foreground">
+                              {lang === "de"
+                                ? "Für die Planungsfreigabe fehlt noch:"
+                                : "Для готовности планирования ещё нужно:"}
+                            </div>
+                            <ul className="mt-0.5 space-y-0.5">
+                              {orderDetail.planning_preparation.blocking_reasons.map((reason) => (
+                                <li key={reason}>• {localizedBlockingReason(reason)}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
                         <OrderSummaryLine
                           label={l("orders_behandlungsplan")}
                           value={
@@ -5345,7 +5374,19 @@ function useOrdersPageContent() {
                                     orderDetail.planning_preparation
                                       .non_medical_total,
                                 })
-                              : l("orders_nicht_erforderlich")
+                              : orderDetail.planning_preparation.non_medical_total > 0
+                                ? // The flag is the staff's planning setting
+                                  // (not derived from the appointments): say
+                                  // that the plan holds such visits anyway.
+                                  <span data-testid="order-planning-non-medical-hint">
+                                    {l("orders_nicht_erforderlich")}
+                                    <span className="block text-xs text-amber-700">
+                                      {lang === "de"
+                                        ? `Im Plan: ${orderDetail.planning_preparation.non_medical_total} nicht-medizinische(r) Termin(e). Sollen sie vor der Durchführung bestätigt sein, „${l("orders_nicht_medizinische_leistungen_sind_erforderlich")}“ einschalten.`
+                                        : `В плане немедицинских приёмов: ${orderDetail.planning_preparation.non_medical_total}. Если их нужно подтвердить до исполнения, включите «${l("orders_nicht_medizinische_leistungen_sind_erforderlich")}».`}
+                                    </span>
+                                  </span>
+                                : l("orders_nicht_erforderlich")
                           }
                         />
                         <OrderSummaryLine
@@ -5353,14 +5394,10 @@ function useOrdersPageContent() {
                           value={
                             orderDetail.planning_preparation
                               .interpreter_required
-                              ? l("orders_planning_interpreter_summary", {
-                                  assigned:
-                                    orderDetail.planning_preparation
-                                      .interpreter_assigned,
-                                  confirmed:
-                                    orderDetail.planning_preparation
-                                      .interpreter_confirmed,
-                                })
+                              ? interpreterPlanningSummary(
+                                  orderDetail.planning_preparation,
+                                  l,
+                                )
                               : l("orders_nicht_erforderlich")
                           }
                         />
@@ -5401,6 +5438,15 @@ function useOrdersPageContent() {
                         lang={lang}
                         status={orderDetail.planning_preparation.treatment_plan_status}
                         note={orderDetail.planning_preparation.treatment_plan_note}
+                        statusUpdatedAt={
+                          orderDetail.planning_preparation.treatment_plan_status_updated_at
+                        }
+                        statusUpdatedByName={
+                          orderDetail.planning_preparation.treatment_plan_status_updated_by_name
+                        }
+                        appointmentsLastAddedAt={
+                          orderDetail.planning_preparation.appointments_last_added_at
+                        }
                         canEdit={
                           permissions.canManagePhase &&
                           !orderStepsLocked &&
@@ -5410,15 +5456,20 @@ function useOrdersPageContent() {
                         onChanged={triggerReload}
                       />
 
-                      <OrderInterpreterCallout
-                        orderId={orderDetail.id}
-                        patientId={detailPatientId}
-                        lang={lang}
-                        reloadNonce={reloadNonce}
-                        planning={orderDetail.planning_preparation}
-                        appointmentsHref={detailAppointmentsHref}
-                        onNavigate={staffGo}
-                      />
+                      {/* «Переводчики по дням» replaces the older hint for
+                          whoever may assign; the hint stays for the others
+                          and while the order has no appointment yet. */}
+                      {!interpretersByDayShown || interpreterDaysEmpty ? (
+                        <OrderInterpreterCallout
+                          orderId={orderDetail.id}
+                          patientId={detailPatientId}
+                          lang={lang}
+                          reloadNonce={reloadNonce}
+                          planning={orderDetail.planning_preparation}
+                          appointmentsHref={detailAppointmentsHref}
+                          onNavigate={staffGo}
+                        />
+                      ) : null}
 
                       <OrderInterpretersByDay
                         orderId={orderDetail.id}
@@ -5427,6 +5478,7 @@ function useOrdersPageContent() {
                         reloadNonce={reloadNonce}
                         locked={orderStepsLocked}
                         onChanged={() => setReloadNonce((current) => current + 1)}
+                        onEmptyChange={setInterpreterDaysEmpty}
                       />
 
                       {planningReadinessApplicable ? (

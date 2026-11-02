@@ -476,6 +476,12 @@ export type OrderPlanningPreparation = {
   plan_finalized_at: string | null;
   plan_finalized_by: string | null;
   plan_finalized_by_name: string | null;
+  /** Who set the current treatment plan status and when (absent on an older backend). */
+  treatment_plan_status_updated_at?: string | null;
+  treatment_plan_status_updated_by?: string | null;
+  treatment_plan_status_updated_by_name?: string | null;
+  /** Creation time of the newest live appointment of the order. */
+  appointments_last_added_at?: string | null;
   preparation_documents_sent_at: string | null;
   preparation_documents_sent_by: string | null;
   preparation_documents_sent_by_name: string | null;

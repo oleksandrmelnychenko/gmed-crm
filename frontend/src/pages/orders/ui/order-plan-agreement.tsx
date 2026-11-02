@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FileText, LoaderCircle } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
 import { Banner, StatusBadge } from "@/components/ui-shell";
+import { formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { fetchDocuments, generateDocument } from "@/pages/documents/data/document-api";
 import type { DocumentItem } from "@/pages/documents/model/types";
@@ -11,6 +12,7 @@ import { updateOrderPlanningPreparation } from "../data/order-api";
 import {
   PLAN_AGREEMENT_STATUS,
   planAgreementSteps,
+  planChangedSince,
   planNotePayload,
 } from "../model/order-plan-agreement";
 import type { TreatmentPlanStatus } from "../model/types";
@@ -21,6 +23,11 @@ type OrderPlanAgreementProps = {
   lang: string;
   status: TreatmentPlanStatus;
   note: string | null | undefined;
+  /** Who set the current status and when (planning payload). */
+  statusUpdatedAt?: string | null;
+  statusUpdatedByName?: string | null;
+  /** Creation time of the newest appointment of the plan. */
+  appointmentsLastAddedAt?: string | null;
   /** CEO or patient manager on an open order: may generate the PDF and record steps. */
   canEdit: boolean;
   reloadNonce: number;
@@ -88,6 +95,9 @@ export function OrderPlanAgreement({
   lang,
   status,
   note,
+  statusUpdatedAt,
+  statusUpdatedByName,
+  appointmentsLastAddedAt,
   canEdit,
   reloadNonce,
   onChanged,
@@ -97,6 +107,9 @@ export function OrderPlanAgreement({
   const [planDocument, setPlanDocument] = useState<DocumentItem | null>(null);
   const [noteDraft, setNoteDraft] = useState(note ?? "");
   const [busy, setBusy] = useState<"pdf" | "step" | null>(null);
+  // Set synchronously: a double click must not record a step twice before
+  // the disabled buttons render.
+  const busyRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => setNoteDraft(note ?? ""), [note]);
@@ -119,7 +132,8 @@ export function OrderPlanAgreement({
   const statusInfo = PLAN_AGREEMENT_STATUS[status];
 
   const generatePdf = async () => {
-    if (!patientId) return;
+    if (!patientId || busyRef.current) return;
+    busyRef.current = true;
     setBusy("pdf");
     setError(null);
     try {
@@ -138,15 +152,19 @@ export function OrderPlanAgreement({
         generated_template_id: "treatment_plan",
         is_latest_version: true,
         status: "draft",
+        created_at: new Date().toISOString(),
       } as DocumentItem);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
+      busyRef.current = false;
       setBusy(null);
     }
   };
 
   const recordStep = async (next: TreatmentPlanStatus) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy("step");
     setError(null);
     try {
@@ -159,9 +177,26 @@ export function OrderPlanAgreement({
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
+      busyRef.current = false;
       setBusy(null);
     }
   };
+
+  const { pdfStale, statusStale } = planChangedSince({
+    status,
+    statusUpdatedAt,
+    pdfCreatedAt: planDocument?.created_at,
+    appointmentsLastAddedAt,
+  });
+  const statusLabel = statusInfo ? (de ? statusInfo.de : statusInfo.ru) : status;
+  const statusSetLine =
+    status !== "draft" && statusUpdatedAt
+      ? [
+          tx("Статус установил", "Status gesetzt von"),
+          statusUpdatedByName || tx("сотрудник", "Mitarbeiter"),
+          formatAppDateTime(statusUpdatedAt) || statusUpdatedAt,
+        ].join(" ")
+      : null;
 
   const documentHref = planDocument
     ? `/documents?order_id=${encodeURIComponent(orderId)}&document=${encodeURIComponent(planDocument.id)}`
@@ -173,13 +208,36 @@ export function OrderPlanAgreement({
         <div className="text-sm font-semibold text-foreground">
           {tx("План для пациента", "Plan für den Patienten")}
         </div>
-        <StatusBadge tone={statusInfo?.tone ?? "neutral"}>
-          {statusInfo ? (de ? statusInfo.de : statusInfo.ru) : status}
-        </StatusBadge>
+        <StatusBadge tone={statusInfo?.tone ?? "neutral"}>{statusLabel}</StatusBadge>
       </div>
+      {statusSetLine ? (
+        <p data-testid="order-plan-status-set" className="mt-1 text-xs text-muted-foreground">
+          {statusSetLine}
+        </p>
+      ) : null}
 
       <div className="mt-3 space-y-3">
         {error ? <Banner tone="error">{error}</Banner> : null}
+        {pdfStale || statusStale ? (
+          <div
+            data-testid="order-plan-changed"
+            className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800"
+          >
+            {statusStale
+              ? tx(
+                  `После статуса «${statusLabel}» в план добавлены приёмы. Проверьте, нужно ли снова согласовать план с пациентом.`,
+                  `Nach dem Status „${statusLabel}“ kamen Termine zum Plan hinzu. Prüfen Sie, ob der Plan erneut abgestimmt werden muss.`,
+                )
+              : null}
+            {statusStale && pdfStale ? " " : null}
+            {pdfStale
+              ? tx(
+                  "PDF плана сформирован до последних приёмов: обновите PDF.",
+                  "Das Plan-PDF ist älter als die neuesten Termine: PDF aktualisieren.",
+                )
+              : null}
+          </div>
+        ) : null}
 
         {patientId ? (
           <div className="flex flex-wrap items-center gap-2 text-sm">
