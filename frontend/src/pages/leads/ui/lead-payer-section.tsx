@@ -140,7 +140,7 @@ function PayerField({
   required?: boolean;
 }) {
   return (
-    <label className={cn("min-w-0 space-y-1.5", className)}>
+    <label data-wizard-field className={cn("min-w-0 space-y-1", className)}>
       <span className={cn(tokens.text.label, "block font-mono")}>
         {label}
         {required ? <span aria-hidden="true" className="ml-0.5 text-destructive">*</span> : null}
@@ -696,7 +696,7 @@ export function LeadPayerDeclarationSection({
     </>
   );
 
-  const amlPart = inAmlBlock(<div className="space-y-4" data-testid="lead-payer-aml-part">
+  const amlPart = inAmlBlock(<div className="space-y-2" data-testid="lead-payer-aml-part">
         {/* Own economic interest: Да / Нет, nothing chosen while nobody answered it. */}
         <div
           role="radiogroup"
@@ -736,7 +736,7 @@ export function LeadPayerDeclarationSection({
           ) : null}
         </div>
         {form.actsOnOwnAccount === false ? (
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="wizard-form-grid grid gap-x-3 gap-y-2 sm:grid-cols-2">
             <PayerField label={tx("В чьих интересах (экономический бенефициар)", "Wirtschaftlich Berechtigter (GwG)")} required>
               <Input
                 className={inputClass}
@@ -768,7 +768,7 @@ export function LeadPayerDeclarationSection({
                   : tx("Указал пациент в кабинете", "Angabe des Patienten im Portal")}
               </StatusChip>
             ) : null}
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="wizard-form-grid grid gap-x-3 gap-y-2 sm:grid-cols-2">
               <PayerField label={tx("Источник средств пациента", "Herkunft der Mittel des Patienten")} required={sourceRequired}>
                 <NativeComboboxSelect
                   value={form.selfFundsSource}
@@ -817,7 +817,7 @@ export function LeadPayerDeclarationSection({
             ) : null}
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="wizard-form-grid grid gap-x-3 gap-y-2 sm:grid-cols-2">
             <PayerField
               label={`${form.kind === "representative" || payingParent
                 ? tx("Источник средств родителя / представителя", "Herkunft der Mittel des zahlenden Elternteils / Vertreters")
@@ -892,7 +892,7 @@ export function LeadPayerDeclarationSection({
         {leadSelfFunds && selfFundsShown ? (
           <div className="space-y-1.5 border-t border-border/60 pt-3 text-xs" data-testid="lead-payer-self-funds">
             <div className="flex flex-wrap items-center gap-2">
-              <AdminSectionTitle>
+              <AdminSectionTitle variant="mono">
                 {tx("Подтверждение источника средств — загрузил пациент в кабинете", "Nachweis der Herkunft der Mittel – vom Patienten im Portal hochgeladen")}
               </AdminSectionTitle>
               {leadSelfFunds.updatedAt ? (
@@ -957,7 +957,7 @@ export function LeadPayerDeclarationSection({
   return (
     <div id={PAYER_SECTION_ID} tabIndex={-1} className="focus:outline-none">
       <Section
-        className="rounded-xl border border-border/50 bg-card p-3.5"
+        className="rounded-xl border border-border/50 bg-card p-3"
         title={(
           <span className="inline-flex flex-wrap items-center gap-2">
             <span>{tx("Кто платит", "Wer zahlt")}</span>
@@ -1065,9 +1065,9 @@ export function LeadPayerDeclarationSection({
             {canEdit && minor && data?.status.payer_representative ? (
               <Button
                 type="button"
-                variant="outline"
+                variant="default"
                 size="xs"
-                className="ml-2 mt-1 bg-card"
+                className="ml-2 mt-1"
                 disabled={readOnly}
                 data-testid="lead-payer-paying-parent-convert"
                 onClick={() => {
@@ -1124,12 +1124,12 @@ export function LeadPayerDeclarationSection({
         />
         {thirdParty ? (
           <div className="space-y-3 border-t border-border/60 pt-3">
-            <AdminSectionTitle>
+            <AdminSectionTitle variant="mono">
               {payingParent
                 ? tx("Плательщик — родитель / законный представитель", "Zahler – Elternteil / gesetzlicher Vertreter")
                 : tx("Плательщик (третье лицо)", "Kostenübernehmer (Dritter)")}
             </AdminSectionTitle>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="wizard-form-grid grid gap-x-3 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
               {typed ? (
                 <PayerField label={tx("Тип плательщика", "Art des Zahlers")} required>
                   <NativeComboboxSelect
@@ -1252,7 +1252,7 @@ export function LeadPayerDeclarationSection({
                   <legend className="text-xs font-semibold text-foreground">
                     {tx("Юридический адрес", "Sitz")}
                   </legend>
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{addressFields}</div>
+                  <div className="wizard-form-grid grid gap-x-3 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">{addressFields}</div>
                 </fieldset>
               ) : null}
               {organisation && organisationDetailsFieldsShown(form) ? (
@@ -1310,7 +1310,7 @@ export function LeadPayerDeclarationSection({
             ) : null}
             {/* The paying parent is the contracting party: no third party's information (2026-10-19). */}
             {!payingParent ? <div className="space-y-2 rounded-xl border border-border/50 bg-card p-3.5">
-              <AdminSectionTitle>{tx("Согласия", "Einwilligungen")}</AdminSectionTitle>
+              <AdminSectionTitle variant="mono">{tx("Согласия", "Einwilligungen")}</AdminSectionTitle>
             {payingParent ? null : <div>
               <PayerCheckbox
                 checked={form.payerInformed}
@@ -1394,9 +1394,9 @@ export function LeadPayerDeclarationSection({
             {showQuestionnairePaths ? (
             <div id={PAYER_PAPER_PATH_ID} tabIndex={-1}
               onFocus={(event) => { if (event.target === event.currentTarget && paperAvailable) setQuestionnaireView({ leadId, path: "paper" }); }}
-              className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5 outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              className="space-y-2 rounded-xl border border-border/50 bg-card p-3 outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <AdminSectionTitle>{tx("Анкета плательщика", "Fragebogen des Zahlers")}</AdminSectionTitle>
+                <AdminSectionTitle variant="mono">{tx("Анкета плательщика", "Fragebogen des Zahlers")}</AdminSectionTitle>
                 {paperAvailable && payerLink ? (
                   <div role="group" aria-label={tx("Способ заполнения", "Art der Erfassung")} className="inline-flex gap-1 rounded-lg border border-border/60 bg-muted/30 p-1">
                     {(["link", "paper"] as const).map((path) => (
@@ -1483,7 +1483,7 @@ export function LeadPayerDeclarationSection({
         {recipientStatements.length > 0 || invoiceTaxEditable ? (
           <div className="space-y-3 border-t border-border/60 pt-3" data-testid="lead-payer-invoice-recipient">
             <div className="flex flex-wrap items-center gap-2">
-              <AdminSectionTitle>
+              <AdminSectionTitle variant="mono">
                 {tx("Получатель счёта (из анкеты клиента)", "Rechnungsempfänger (aus dem Kundenformular)")}
               </AdminSectionTitle>
               {cabinetBilling?.recipient_updated_at ? (
@@ -1502,7 +1502,7 @@ export function LeadPayerDeclarationSection({
               </dl>
             ) : null}
             {invoiceTaxEditable ? (
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="wizard-form-grid grid gap-x-3 gap-y-2 sm:grid-cols-2">
                 <PayerField label={tx("USt-IdNr. получателя счёта", "USt-IdNr. des Rechnungsempfängers")}>
                   <Input
                     className={inputClass}
@@ -1576,7 +1576,7 @@ function SequenceStep({ state, actor, tx }: { state: SignatureStepState; actor: 
         : state === "done" ? tx("Плательщик подписал заявление о принятии расходов", "Kostenübernehmer hat unterschrieben") : tx("Ожидается заявление о принятии расходов", "Unterschrift des Kostenübernehmers ausstehend")
       : state === "done" ? tx("GMED подписал заказ", "GMED hat den Auftrag unterzeichnet")
         : state === "blocked" ? tx("GMED: подпись пока недоступна", "GMED: Unterschrift noch gesperrt") : tx("GMED: можно подписывать", "GMED: Unterschrift möglich");
-  return <StatusChip data-signature-step={actor} data-step-state={state} className="whitespace-normal" tone={state === "done" ? "success" : state === "not_required" ? "neutral" : "warning"}>
+  return <StatusChip data-signature-step={actor} data-step-state={state} className="whitespace-normal" tone={state === "done" ? "success" : "neutral"}>
     {state === "done" ? <Check aria-hidden="true" /> : state === "blocked" ? <LockKeyhole aria-hidden="true" /> : state !== "not_required" ? <Clock3 aria-hidden="true" /> : null}{label}
   </StatusChip>;
 }
@@ -1711,7 +1711,7 @@ export function LeadPayerSignatureFlow({
 
   return (
     <Section
-      className="rounded-xl border border-border/50 bg-card p-3.5"
+      className="rounded-xl border border-border/50 bg-card p-3"
       title={tx("Порядок подписания", "Reihenfolge der Unterschriften")}
       accessory={required && canGenerate && standaloneKept ? (
         <Button
@@ -1741,7 +1741,7 @@ export function LeadPayerSignatureFlow({
             // Plain words instead of "DEMO не подтверждает юридическую подпись" (QA 2026-10-25).
             ? tx("Тестовая подпись (DEMO) подписью заказа не считается", "Eine Testunterschrift (DEMO) gilt nicht als Auftragsunterschrift")
             : tx("Заказ: подписание пакета ещё не завершено", "Auftrag: Paketunterzeichnung noch nicht abgeschlossen")}</StatusChip>
-      </div> : <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/20 p-2.5" aria-label={tx("Порядок подписания", "Reihenfolge der Unterschriften")}>
+      </div> : <div className="flex flex-wrap items-center gap-2" aria-label={tx("Порядок подписания", "Reihenfolge der Unterschriften")}>
         <SequenceStep state={sequence.client} actor="client" tx={tx} />
         <ArrowRight aria-hidden="true" className="size-3.5 text-muted-foreground" />
         <SequenceStep state={sequence.payer} actor="payer" tx={tx} />
@@ -1752,8 +1752,8 @@ export function LeadPayerSignatureFlow({
           tx={tx}
         />
       </div>}
-      {required ? (
-        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200" data-testid="lead-payer-cost-assumption-purpose">
+      {required && !packagePanelShown ? (
+        <div className="flex w-fit max-w-full items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200" data-testid="lead-payer-cost-assumption-purpose">
           <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
           <div className="min-w-0 space-y-1">
             <p><span className="font-semibold">{tx("Заявление о принятии расходов (Kostenübernahmeerklärung): ", "Kostenübernahmeerklärung: ")}</span>{costCoveragePurpose(tx)}</p>
@@ -1798,7 +1798,7 @@ export function LeadPayerSignatureFlow({
         </p>
       ) : null}
       {status && !status.agency_signed_order && agencyBlocking.length > 0 ? (
-        <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2">
+        <StatusChip tone="warning" className="w-fit max-w-full items-start rounded-lg px-2.5 py-1.5">
           <CircleAlert aria-hidden="true" className="mt-0.5" />
           <span className="min-w-0">
             <span className="block font-semibold">{signatureEvidenceShown

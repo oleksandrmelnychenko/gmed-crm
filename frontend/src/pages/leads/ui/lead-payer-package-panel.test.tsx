@@ -218,7 +218,11 @@ describe("LeadPayerPackagePanel", () => {
     );
     // Each signed document shows a «Подписан» chip beside a date chip (owner polish 2026-10-29).
     expect(html.match(/data-testid="lead-payer-package-signed-/g)).toHaveLength(4);
-    expect(textOf(html).match(/Подписан 07\.10\.2026(?!\s\d)/g)).toHaveLength(4);
+    const documentRows = html.split(/<li\b/).slice(1).map((row) => row.split("</li>")[0]);
+    expect(documentRows).toHaveLength(4);
+    for (const row of documentRows) {
+      expect(textOf(row)).toMatch(/Подписан 07\.10\.2026(?!\s\d)/);
+    }
     expect(html).toContain("Подписано 07.10.2026 10:15");
     expect(html).toContain("Идентификация плательщика (QES): подписано 07.10.2026");
   });

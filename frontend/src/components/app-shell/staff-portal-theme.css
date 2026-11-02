@@ -34,7 +34,7 @@
 }
 
 .staff-portal-theme [data-slot="record-field"] > label {
-  font-family: var(--font-sans);
+  font-family: var(--font-mono);
   font-size: 13px;
   line-height: 18px;
   color: var(--muted-foreground);
@@ -46,7 +46,7 @@
 .staff-portal-theme [data-slot="section-marker"] { display: none; }
 .staff-portal-theme [data-slot="toolbar-field"] > span { font-size: 12px; }
 .staff-portal-theme [data-wizard-field-label] {
-  font-family: var(--font-sans);
+  font-family: var(--font-mono);
   font-size: 13px;
   line-height: 18px;
   color: var(--muted-foreground);

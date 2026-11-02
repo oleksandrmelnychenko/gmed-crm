@@ -36,6 +36,12 @@
   outline-offset: 2px;
 }
 .staff-portal-theme [data-slot="button"]:disabled { opacity: .45; }
+.staff-portal-theme [data-slot="button"][data-variant="default"]:disabled {
+  background: var(--muted);
+  border-color: var(--input);
+  color: var(--muted-foreground);
+  opacity: 1;
+}
 
 @media (max-width: 639px) {
   .staff-portal-theme [data-slot="button"]:is([data-size="sm"], [data-size="default"], [data-size="lg"]) { min-height: 40px; }

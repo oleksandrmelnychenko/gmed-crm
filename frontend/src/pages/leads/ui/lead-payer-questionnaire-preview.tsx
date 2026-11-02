@@ -1,6 +1,7 @@
 import { useId, useState } from "react";
-import { ChevronDown, CircleCheck, FileText } from "lucide-react";
+import { ChevronDown, FileText } from "lucide-react";
 
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
 import { appDateKey, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
@@ -39,29 +40,30 @@ export function LeadPayerQuestionnairePreview({ state, tx }: { state: LeadPayerL
   );
 
   return (
-    <div className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card shadow-xs" data-testid="lead-payer-questionnaire-preview">
+    <div className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card" data-testid="lead-payer-questionnaire-preview">
       {/* A plain card header (owner 2026-10-19: no green band): title, then when it came. */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/50 px-4 py-2.5">
-        <CircleCheck aria-hidden="true" className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-        <p className="text-[13px] font-semibold leading-5">{tx("Заполненная анкета плательщика", "Ausgefüllte Angaben des Zahlers")}</p>
+      <div className="flex flex-wrap items-center gap-2 border-b border-border/50 px-3 py-2">
+        <AdminSectionTitle variant="mono">{tx("Заполненная анкета плательщика", "Ausgefüllte Angaben des Zahlers")}</AdminSectionTitle>
         <p className="text-xs leading-5 text-muted-foreground sm:ml-auto">{received}</p>
       </div>
-      <div className="space-y-3 px-4 py-3">
-        <dl className="grid min-w-0 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="space-y-2 p-3">
+        <dl className="grid min-w-0 gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
           {summary.map((row) => <PreviewFact key={row.key} label={row.label} value={row.key === "email" ? questionnaire.email ?? "" : row.value} />)}
           {method ? <PreviewFact label={tx("Способ оплаты", "Zahlungsart")} value={method.value} /> : null}
         </dl>
-        <p className="border-t border-border/50 pt-3 text-xs leading-5 text-muted-foreground">
+        <p className="border-t border-border/50 pt-2 text-xs leading-5 text-muted-foreground">
           {tx(
             "Подписание документов — отдельный шаг «Договор и смета».",
             "Die Dokumente werden separat im Schritt „Vertrag & Angebot“ unterschrieben.",
           )}
         </p>
       </div>
+      <div className="border-t border-border/60 px-3 py-2">
       <Button
         type="button"
-        variant="ghost"
-        className="h-auto min-h-11 w-full justify-start gap-2.5 whitespace-normal rounded-none border-t border-border/60 bg-muted/30 px-4 py-2.5 text-left text-xs font-medium hover:bg-muted/70"
+        size="sm"
+        variant="default"
+        className="gap-2 whitespace-normal text-left"
         aria-expanded={open}
         aria-controls={detailsId}
         onClick={() => setOpen((value) => !value)}
@@ -70,13 +72,14 @@ export function LeadPayerQuestionnairePreview({ state, tx }: { state: LeadPayerL
         {open ? tx("Свернуть анкету", "Angaben einklappen") : tx("Показать полную анкету", "Vollständige Angaben anzeigen")}
         <ChevronDown aria-hidden="true" className={cn("ml-auto size-4 shrink-0 transition-transform", open && "rotate-180")} />
       </Button>
+      </div>
       <div id={detailsId} hidden={!open} data-testid="lead-payer-questionnaire-details">
-        {open ? <div className="space-y-3 border-t border-border/60 bg-muted/20 p-3 sm:p-4">
+        {open ? <div className="space-y-2 border-t border-border/60 bg-muted/20 p-3">
           <PayerAnswersGroup state={state} tx={tx} lang={lang} today={today} />
           {payment.length > 0 ? (
-            <section className="space-y-3 rounded-lg border border-border/60 bg-card p-3" data-testid="lead-payer-questionnaire-payment">
+            <section className="space-y-2 rounded-lg border border-border/60 bg-card p-3" data-testid="lead-payer-questionnaire-payment">
               <h3 className="text-xs font-semibold">{tx("Способ и путь оплаты", "Zahlungsart und Zahlungsweg")}</h3>
-              <dl className="grid gap-x-5 gap-y-3 sm:grid-cols-2">
+              <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
                 {payment.map((row) => <PreviewFact key={row.key} label={row.label} value={row.value} details={row.details} warning={row.warning} />)}
               </dl>
             </section>

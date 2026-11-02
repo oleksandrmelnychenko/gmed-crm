@@ -90,6 +90,7 @@
     --field: oklch(0.985 0 0);
     --ring: oklch(0.70 0.18 45);
     --brand: #f97316;
+    --heading-marker: #f97316;
     --brand-soft: #fff4ed;
     --brand-ring: #fb923c;
     --chart-1: oklch(0.70 0.18 45);
@@ -1629,6 +1630,19 @@ html[data-native-platform] {
     transform: none !important;
     transition: none !important;
   }
+}
+
+/* Heading dots keep the orange accent even where --brand/--primary is graphite.
+   The size + fill selectors cover legacy 6/8px markers in section/table titles;
+   semantic green/red status dots, avatars, badges and progress bars are separate. */
+:is([data-slot="heading-marker"], [data-slot="section-marker"]),
+.rounded-full:is([class~="size-1.5"], [class~="size-2"]):is(
+  [class~="bg-[var(--brand)]"],
+  [class~="bg-primary"],
+  [class~="bg-orange-500"],
+  [class~="bg-foreground/70"]
+) {
+  background-color: var(--heading-marker);
 }
 
 /* Icons are plain black outlines: muted and brand tints are dropped here, outside

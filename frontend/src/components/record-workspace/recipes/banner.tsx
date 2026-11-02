@@ -24,6 +24,7 @@ export function Banner({
   return (
     <div
       role={tone === "error" ? "alert" : "status"}
+      data-slot="record-banner"
       data-testid={testId}
       className={cn(
         tone === "warning"

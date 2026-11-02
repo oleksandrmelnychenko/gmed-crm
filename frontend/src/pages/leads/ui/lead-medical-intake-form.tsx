@@ -79,7 +79,7 @@ export function LeadMedicalIntakeForm({
   onCavesChange,
 }: LeadMedicalIntakeFormProps) {
   return (
-    <section className="space-y-4">
+    <section className="space-y-2">
       {leadIntakeTypeFromLead(lead) === "questionnaire" ? (
         <LeadQuestionnaireFacts
           items={[

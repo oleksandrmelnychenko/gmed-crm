@@ -217,20 +217,24 @@ export function AdminTableCard({
 export function AdminSectionTitle({
   children,
   className,
+  variant = "default",
 }: {
   children: ReactNode;
   className?: string;
+  variant?: "default" | "mono";
 }) {
   return (
     <h3
       className={cn(
         "inline-flex min-w-0 items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground",
+        variant === "mono" && "font-mono tracking-normal",
         className,
       )}
     >
       <span
         aria-hidden
-        className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]"
+        data-slot="heading-marker"
+        className={cn("size-1.5 shrink-0 rounded-full", variant === "mono" ? "bg-orange-500" : "bg-[var(--brand)]")}
       />
       <span className="min-w-0 max-w-full break-words">{children}</span>
     </h3>

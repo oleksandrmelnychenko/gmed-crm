@@ -18,6 +18,7 @@ import "../ui/gmed-theme.css";
 import "./gmed-shell-theme.css";
 import "./staff-portal-theme.css";
 import "../ui/gmed-controls.css";
+import "../ui/form-labels.css";
 
 type AppShellFrameProps = {
   children: ReactNode;

@@ -176,9 +176,9 @@ export function LeadPayerLinkPanel({
   }
 
   return (
-    <div className="space-y-3 bg-card text-[13px]" data-testid="lead-payer-link">
+    <div className="space-y-2 bg-card text-[13px] text-foreground" data-testid="lead-payer-link">
       <div className="flex flex-wrap items-center gap-2">
-        <AdminSectionTitle>{tx("Ссылка для плательщика", "Zahler-Link")}</AdminSectionTitle>
+        <AdminSectionTitle variant="mono">{tx("Ссылка для плательщика", "Zahler-Link")}</AdminSectionTitle>
         {status && !actions.cabinet ? (
           <StatusChip tone={status.tone} data-testid="lead-payer-link-badge" data-status={link?.status}>
             {status.label}
@@ -202,13 +202,13 @@ export function LeadPayerLinkPanel({
             </p>
           ) : null}
           {link && link.emails.length > 0 ? (
-            <ul className="space-y-0.5 text-xs leading-5" data-testid="lead-payer-link-emails">
+            <ul className="flex flex-wrap gap-1.5 text-xs leading-5" data-testid="lead-payer-link-emails">
               {payerLinkEmailLines(link.emails, tx).map((line) => (
                 <li
                   key={line.kind}
                   data-testid={`lead-payer-link-email-${line.kind}`}
                   data-problem={line.problem ? "true" : undefined}
-                  className={cn("break-words", line.problem ? "text-destructive" : "text-muted-foreground")}
+                  className={cn("rounded-md border border-border bg-muted/40 px-2 py-1 break-words", line.problem ? "text-destructive" : "text-foreground")}
                 >
                   {line.text}
                 </li>
@@ -227,7 +227,7 @@ export function LeadPayerLinkPanel({
             </div>
           ) : null}
           {canEdit ? (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <div className="flex flex-wrap items-center gap-2">
               {actions.reopenOffered ? (
                 <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-foreground">
                   <input
@@ -261,8 +261,8 @@ export function LeadPayerLinkPanel({
                   <Button
                     type="button"
                     size="sm"
-                    variant="ghost"
-                    className="h-8 rounded-lg text-xs text-rose-700"
+                    variant="destructive"
+                    className="rounded-lg text-xs"
                     disabled={locked}
                     onClick={() => setConfirm("revoke")}
                   >
@@ -274,7 +274,7 @@ export function LeadPayerLinkPanel({
             </div>
           ) : null}
           {canEdit && actions.sendBlockedText ? (
-            <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-payer-link-blocked">
+            <StatusChip tone="warning" className="w-fit max-w-full items-start rounded-lg px-2.5 py-1.5" data-testid="lead-payer-link-blocked">
               <Info aria-hidden="true" className="mt-0.5" />
               <span>{actions.sendBlockedText}</span>
             </StatusChip>
@@ -312,8 +312,8 @@ export function LeadPayerLinkPanel({
                       <Button
                         type="button"
                         size="sm"
-                        variant="outline"
-                        className="h-7 rounded-lg text-xs"
+                        variant="default"
+                        className="rounded-lg text-xs"
                         disabled={disabled}
                         data-testid="lead-payer-link-previous-document"
                         onClick={() => {
@@ -335,8 +335,8 @@ export function LeadPayerLinkPanel({
       ) : null}
 
       {state.questionnaire?.submitted_at && packageSummary !== undefined ? (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-t border-border/50 pt-3" data-testid="lead-payer-link-package" data-status={packageSummary?.status ?? "none"}>
-          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-t border-border/50 pt-2" data-testid="lead-payer-link-package" data-status={packageSummary?.status ?? "none"}>
+          <span className="inline-flex items-center gap-1.5 font-mono text-xs font-medium text-foreground">
             <FileSignature aria-hidden="true" className="size-3.5" />
             {tx("Пакет на подпись", "Unterschriftenpaket")}
           </span>

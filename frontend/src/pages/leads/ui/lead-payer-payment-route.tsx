@@ -30,7 +30,7 @@ import {
 
 function RouteField({ label, error, children, className }: { label: string; error?: string; children: ReactNode; className?: string }) {
   return (
-    <label className={cn("min-w-0 space-y-1.5", className)}>
+    <label data-wizard-field className={cn("min-w-0 space-y-1", className)}>
       <span className={cn(tokens.text.label, "block font-mono")}>{label}</span>
       {children}
       {error ? <span className="block text-xs text-destructive" role="alert">{error}</span> : null}
@@ -132,7 +132,7 @@ export function LeadPayerPaymentRoute({
 
   const header = (
     <div className="flex flex-wrap items-center gap-2">
-      <AdminSectionTitle>{tx("Способ оплаты плательщика", "Zahlungsweg des Zahlers")}</AdminSectionTitle>
+      <AdminSectionTitle variant="mono">{tx("Способ оплаты плательщика", "Zahlungsweg des Zahlers")}</AdminSectionTitle>
       {source ? (
         <StatusChip tone={declaration.payment_route_source === "staff" ? "neutral" : "info"} data-testid="lead-payer-route-source">
           {source}
@@ -146,7 +146,7 @@ export function LeadPayerPaymentRoute({
     const rows = billing ? billingStatements(billing, tx, lang, true).payment.filter((row) => row.key !== "expected_total") : [];
     const answered = Boolean(declaration.payment_method) || declaration.via_third_party != null;
     return (
-      <div className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5" data-testid="lead-payer-payment-route">
+      <div className="space-y-2 rounded-xl border border-border/50 bg-card p-3" data-testid="lead-payer-payment-route">
         {header}
         {answered ? (
           <dl className="grid gap-x-5 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3">
@@ -173,16 +173,16 @@ export function LeadPayerPaymentRoute({
   const invalid = Object.keys(errors).length > 0;
 
   return (
-    <div className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5" data-testid="lead-payer-payment-route">
+    <div className="space-y-2 rounded-xl border border-border/50 bg-card p-3" data-testid="lead-payer-payment-route">
       {header}
-      <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+      <p className="wizard-notice flex w-fit max-w-full items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
         <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
         {tx(
           "Учитывается в оценке риска сразу. Если плательщик позже ответит по своей ссылке, его ответ заменит этот.",
           "Zählt sofort für die Risikobewertung. Antwortet der Zahler später über seinen Link, ersetzt seine Angabe diese.",
         )}
       </p>
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="wizard-form-grid grid gap-x-3 gap-y-2 sm:grid-cols-2">
         <RouteField label={tx("Способ оплаты", "Zahlungsart")} error={errorOf("payment_method")}>
           <NativeComboboxSelect
             value={draft.payment_method}

@@ -181,7 +181,7 @@ export function Step1FillModeSwitch({
     <div
       role="radiogroup"
       aria-label={tx("Кто заполняет данные клиента", "Wer füllt die Personendaten aus")}
-      className="inline-flex max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-muted/40 p-0.5"
+      className="inline-flex max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-muted p-0.5"
       data-testid="step1-fill-mode"
     >
       {options.map((option, index) => (
@@ -193,10 +193,10 @@ export function Step1FillModeSwitch({
           tabIndex={mode === option.value ? 0 : -1}
           disabled={disabled}
           className={cn(
-            "min-h-7 cursor-pointer rounded-md border px-2.5 py-1 text-xs leading-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-default disabled:opacity-60",
+            "min-h-7 max-sm:min-h-10 cursor-pointer rounded-md border px-2.5 py-1 text-xs leading-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-default disabled:opacity-60",
             mode === option.value
-              ? "border-[var(--brand)] bg-[var(--brand)] font-semibold text-white shadow-sm"
-              : "border-transparent bg-card text-muted-foreground hover:border-border hover:bg-muted/70 hover:text-foreground",
+              ? "border-[var(--brand)] bg-[var(--brand)] font-semibold text-white"
+              : "border-transparent bg-transparent text-muted-foreground hover:bg-card hover:text-foreground",
           )}
           onClick={() => onChange(option.value)}
           onKeyDown={(event) => {

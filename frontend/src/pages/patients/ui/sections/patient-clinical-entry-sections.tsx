@@ -136,14 +136,11 @@ function blankWarning(kind: ClinicalWarningKind): ClinicalWarning {
 }
 
 function fieldToneClasses(tone: SectionTone) {
-  const addButton =
-    "border-orange-500 bg-orange-500 text-white hover:border-orange-600 hover:bg-orange-600 hover:text-white";
   if (tone === "danger") {
     return {
       section: "border-border/70 bg-card",
       header: "border-border/60",
       row: "border-rose-300 bg-rose-50/40",
-      addButton,
     };
   }
   if (tone === "warning") {
@@ -151,14 +148,12 @@ function fieldToneClasses(tone: SectionTone) {
       section: "border-border/70 bg-card",
       header: "border-border/60",
       row: "border-orange-300 bg-orange-50/40",
-      addButton,
     };
   }
   return {
     section: "border-border/70 bg-card",
     header: "border-border/60 bg-muted/20",
     row: "border-border/50 bg-background",
-    addButton,
   };
 }
 
@@ -390,9 +385,9 @@ function ClinicalListSection<T extends { id?: string | null }>({
   const indexed = list.map((item, index) => ({ item, index }));
   return (
     <section className={cn("overflow-hidden rounded-lg border", toneClasses.section)}>
-      <header className={cn("flex flex-wrap items-center justify-between gap-3 border-b px-3.5 py-2.5", toneClasses.header)}>
+      <header className={cn("flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2", toneClasses.header)}>
         <div className="flex min-w-0 items-center gap-2">
-          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <span aria-hidden data-slot="heading-marker" className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
           <Badge variant="outline" className="h-5 rounded-full bg-background px-2 text-[10px] font-medium tabular-nums">
             {list.length}
@@ -404,8 +399,8 @@ function ClinicalListSection<T extends { id?: string | null }>({
             <Button
               type="button"
               size="sm"
-              variant="outline"
-              className={cn("h-8 rounded-lg px-3", toneClasses.addButton)}
+              variant="default"
+              className="rounded-lg px-3"
               onClick={() => setEditing({ index: null, draft: blank() })}
             >
               <Plus className="size-3.5" />
@@ -417,7 +412,7 @@ function ClinicalListSection<T extends { id?: string | null }>({
 
       <div className={cn(listView && list.length > 0 ? "min-w-0" : "space-y-1.5 p-3")}>
         {list.length === 0 ? (
-          <p className="px-1 py-4 text-center text-xs text-muted-foreground">
+          <p className="px-1 py-2 text-center text-xs text-muted-foreground">
             {tx("Пока нет записей", "Noch keine Einträge")}
           </p>
         ) : listView ? (

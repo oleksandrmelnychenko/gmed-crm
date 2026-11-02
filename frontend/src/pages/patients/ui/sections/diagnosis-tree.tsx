@@ -28,8 +28,6 @@ type DiagnosisKind = "main" | "secondary" | "prozedur";
 
 const inputClass =
   "h-9 w-full rounded-lg border border-border bg-field px-3 text-[13px] text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
-const rootAddActionClass =
-  "border border-orange-500 bg-orange-500 text-white shadow-sm hover:border-orange-600 hover:bg-orange-600 hover:text-white";
 const childAddActionClass =
   "border border-border/70 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground";
 
@@ -1125,9 +1123,9 @@ export function DiagnosisTreeSection({
 
   return (
     <section className={cn("rounded-xl border border-border/70 bg-card", className)}>
-      <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
         <div className="flex items-center gap-2">
-          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <span aria-hidden data-slot="heading-marker" className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h3 className="text-sm font-semibold text-foreground">{tx("Диагнозы", "Diagnosen")}</h3>
         </div>
         {canManage ? (
@@ -1135,8 +1133,8 @@ export function DiagnosisTreeSection({
             <Button
               type="button"
               size="sm"
-              variant="outline"
-              className={cn("h-8 rounded-lg", rootAddActionClass)}
+              variant="default"
+              className="rounded-lg"
               onClick={() => openAddRoot("main")}
             >
               <Plus className="size-3.5" />
@@ -1145,8 +1143,8 @@ export function DiagnosisTreeSection({
             <Button
               type="button"
               size="sm"
-              variant="outline"
-              className={cn("h-8 rounded-lg", rootAddActionClass)}
+              variant="default"
+              className="rounded-lg"
               onClick={() => openAddRoot("secondary")}
             >
               <Plus className="size-3.5" />
@@ -1158,7 +1156,7 @@ export function DiagnosisTreeSection({
 
       <div className="space-y-2 p-3">
         {roots.length === 0 ? (
-          <p className="px-1 py-4 text-center text-xs text-muted-foreground">
+          <p className="px-1 py-2 text-center text-xs text-muted-foreground">
             {tx("Пока нет диагнозов", "Noch keine Diagnosen")}
           </p>
         ) : (

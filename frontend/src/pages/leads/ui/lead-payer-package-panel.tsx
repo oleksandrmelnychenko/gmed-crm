@@ -4,6 +4,7 @@ import { CalendarDays, Check, FileText, Info, LoaderCircle, Send, ShieldCheck, U
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
+import { InfoHint } from "@/components/ui/info-hint";
 import { StatusChip } from "@/components/ui/status-chip";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
@@ -160,9 +161,9 @@ export function LeadPayerPackagePanel({
   }
 
   return (
-    <div className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5" data-testid="lead-payer-package">
+    <div className="min-w-0 space-y-2 rounded-xl border border-border/50 bg-card p-3" data-testid="lead-payer-package">
       <div className="flex flex-wrap items-center gap-2">
-        <AdminSectionTitle>
+        <AdminSectionTitle variant="mono">
           {tx("Документы плательщику на подпись", "Unterlagen für den Zahler zur Unterschrift")}
         </AdminSectionTitle>
         {status ? (
@@ -180,7 +181,7 @@ export function LeadPayerPackagePanel({
         <p className="flex flex-wrap items-center gap-2 text-xs leading-5 text-foreground" data-testid="lead-payer-package-signer">
           {/* The new payer signs next; nothing on file is his yet (QA 2026-11-01, U-2). */}
           <span className="font-mono text-muted-foreground">{paperIdentification?.papers_predate_payer ? tx("Подпишет:", "Unterschreibt künftig:") : tx("Подписывает:", "Unterschreibt:")}</span>
-          <StatusChip tone="warning"><UserRound aria-hidden="true" /><span className="min-w-0 break-words">{signer}</span></StatusChip>
+          <StatusChip tone="neutral"><UserRound aria-hidden="true" /><span className="min-w-0 break-words">{signer}</span></StatusChip>
         </p>
       ) : null}
 
@@ -190,13 +191,13 @@ export function LeadPayerPackagePanel({
           return (
             <li
               key={slot}
-              className="flex min-w-0 items-start gap-3 px-3 py-3"
+              className="flex min-w-0 items-start gap-2 px-3 py-1.5"
               data-testid={`lead-payer-package-document-${slot}`}
               data-document-id={document?.document_id}
             >
-              <span aria-hidden="true" className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] font-mono text-[11px] font-semibold text-white">{index + 1}</span>
+              <span aria-hidden="true" className="inline-flex h-7 w-4 shrink-0 items-center justify-center font-mono text-xs text-muted-foreground">{index + 1}</span>
               <div className="min-w-0 flex-1 space-y-1">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   {document && onOpenDocument ? (
                     <button
                       type="button"
@@ -210,6 +211,9 @@ export function LeadPayerPackagePanel({
                   ) : (
                     <span className="break-words text-sm font-semibold text-foreground">{label}</span>
                   )}
+                  <InfoHint label={label + " — " + tx("назначение документа", "Zweck des Dokuments")}>
+                    <span data-testid={`lead-payer-package-purpose-${slot}`}>{payerPackageSlotPurpose(slot, tx)}</span>
+                  </InfoHint>
                   <div className="flex flex-wrap items-center gap-1.5">
                     {document ? (
                       <>
@@ -231,13 +235,10 @@ export function LeadPayerPackagePanel({
                         {payerPaperSelfDisclosureText(tx, currentPaper)}
                       </StatusChip>
                     ) : (
-                      <StatusChip tone="warning">{tx("ещё не создан", "noch nicht erstellt")}</StatusChip>
+                      <StatusChip tone="neutral">{tx("ещё не создан", "noch nicht erstellt")}</StatusChip>
                     )}
                   </div>
                 </div>
-                <p className="break-words text-xs leading-5 text-foreground/75" data-testid={`lead-payer-package-purpose-${slot}`}>
-                  {payerPackageSlotPurpose(slot, tx)}
-                </p>
                 {document && !document.signed_at && paperSignable ? (
                   <span className="inline-flex" data-testid={`lead-payer-package-paper-sign-${slot}`}>
                     <PaperSignatureConfirmButton
@@ -272,7 +273,7 @@ export function LeadPayerPackagePanel({
       ) : null}
       {blockedText ? (
         <p
-          className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200"
+          className="flex w-fit max-w-full items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200"
           data-testid="lead-payer-package-blocked"
           data-reason={state.blocked_reason ?? undefined}
         >
@@ -290,7 +291,7 @@ export function LeadPayerPackagePanel({
         </div>
       ) : null}
       {!state.signature_enabled && !actions.sendShown ? (
-        <p className="text-xs leading-5 text-amber-700 dark:text-amber-300" data-testid="lead-payer-package-signature-disabled">
+        <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-payer-package-signature-disabled">
           {payerPackageSignatureDisabledText(tx)}
         </p>
       ) : null}
@@ -298,7 +299,7 @@ export function LeadPayerPackagePanel({
         <p
           className={cn(
             "flex w-fit max-w-full items-start gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium leading-5",
-            identification.tone === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200" : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
+            identification.tone === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200" : "border-border bg-muted/30 text-muted-foreground",
           )}
           data-testid="lead-payer-package-qes"
         >

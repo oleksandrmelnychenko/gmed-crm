@@ -1,0 +1,87 @@
+/* Wizard density stays local: tables keep their columns, short forms do not stretch. */
+/* Every section title uses the same accent, including embedded clinical forms. */
+#lead-wizard-step-panel :is([data-slot="section-marker"], [data-slot="heading-marker"]) {
+  display: none;
+}
+
+#lead-wizard-step-panel h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#lead-wizard-step-panel h3::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--heading-marker);
+}
+
+#lead-wizard-step-panel > fieldset {
+  max-width: 1440px;
+  margin-inline: auto;
+}
+
+#lead-wizard-step-panel .wizard-form-grid {
+  width: 100%;
+  max-width: 64rem;
+}
+
+#lead-wizard-step-panel .wizard-short-grid {
+  width: 100%;
+  max-width: 32rem;
+}
+
+#lead-wizard-step-panel [data-wizard-field] {
+  display: block;
+  max-width: 32rem;
+}
+
+#lead-wizard-step-panel .wizard-contract-grid {
+  max-width: 42rem;
+}
+
+@media (min-width: 640px) {
+  #lead-wizard-step-panel .wizard-contract-grid {
+    grid-template-columns: 14rem minmax(0, 1fr);
+  }
+}
+
+#lead-wizard-step-panel [data-wizard-field]:has(textarea) {
+  max-width: 64rem;
+}
+
+#lead-wizard-step-panel [data-slot="record-banner"],
+#lead-wizard-step-panel .wizard-notice {
+  width: fit-content;
+  max-width: min(100%, 80rem);
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+
+#lead-wizard-step-panel [data-slot="record-section"] > div:last-child > :not(:last-child) {
+  margin-block-start: 0;
+  margin-block-end: 8px;
+}
+
+#lead-wizard-step-panel .wizard-service-grid {
+  display: grid;
+  max-width: 64rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  align-items: start;
+  gap: 8px;
+}
+
+#lead-wizard-step-panel .wizard-review-list {
+  max-width: 64rem;
+}
+
+@media (max-width: 639px) {
+  #lead-wizard-step-panel .wizard-review-list > button {
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    min-height: 40px;
+  }
+}

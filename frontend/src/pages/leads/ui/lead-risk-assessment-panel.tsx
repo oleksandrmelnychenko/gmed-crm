@@ -48,7 +48,7 @@ import {
 } from "../model/lead-risk-assessment";
 import type { LeadRiskController } from "../model/use-lead-risk-assessment";
 
-const SECTION_CLASS = "@container/risk rounded-xl border border-border/70 bg-card p-3.5";
+const SECTION_CLASS = "@container/risk rounded-xl border border-border/70 bg-card p-3";
 const WARNING_TEXT = "text-amber-700 dark:text-amber-300";
 
 type DialogState =
@@ -108,7 +108,7 @@ function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: 
       width: 280,
       cellClassName: "whitespace-normal break-words leading-4",
       render: (trigger) => (
-        <div data-testid={`lead-risk-trigger-${trigger.key}-state`} className="flex min-w-0 flex-col items-start gap-1.5 py-2">
+        <div data-testid={`lead-risk-trigger-${trigger.key}-state`} className="flex min-w-0 flex-wrap items-center gap-1">
           <StatusChip tone={trigger.active ? "warning" : "neutral"} className="shrink-0 whitespace-normal text-left leading-5">
             {riskTriggerStateLabel({ ...trigger, inactive_since: null }, tx, (value) => formatAppDate(value))}
           </StatusChip>
@@ -132,7 +132,7 @@ function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: 
         columns={columns}
         rowId={(trigger) => `${trigger.key}-${trigger.subject}`}
         density="compact"
-        rowHeightOverrides={{ compact: 104 }}
+        rowHeightOverrides={{ compact: 44 }}
         mobilePrimaryColumnId="trigger"
         mobileDetailColumnIds={["subject", "points", "state", "first_fired_at"]}
         className="shadow-none sm:max-h-[440px] [&_.data-table-row]:cursor-default"

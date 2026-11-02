@@ -71,11 +71,11 @@ export function CabinetPersonDetails({ person, tx, lang }: { person: CabinetPers
         {citizenships.length ? <StatusChip tone="info" className="whitespace-normal" data-testid="person-cabinet-citizenships">
           <Flag aria-hidden="true" />{citizenships.map((code) => countryLabel(code, lang)).join(", ")}
         </StatusChip> : null}
-        {contact ? <StatusChip tone="warning" className="whitespace-normal">
+        {contact ? <StatusChip tone="neutral" className="whitespace-normal text-foreground">
           {contact.includes("@") ? <Mail aria-hidden="true" /> : <Phone aria-hidden="true" />}
           <span className="min-w-0 break-all">{contact}</span>
         </StatusChip> : null}
-        {phone && phone !== contact ? <StatusChip tone="warning"><Phone aria-hidden="true" />{phone}</StatusChip> : null}
+        {phone && phone !== contact ? <StatusChip tone="neutral" className="text-foreground"><Phone aria-hidden="true" />{phone}</StatusChip> : null}
       </div> : null}
       <div className="flex flex-wrap items-center gap-2" aria-label={tx("Объём информации", "Auskunftsumfang")}>
         <span className="font-mono text-xs text-foreground/80">{tx("Объём информации:", "Auskunftsumfang:")}</span>
@@ -261,7 +261,7 @@ export function CabinetPersonRow({ person, tx, lang, edit, recordedBy = null }: 
           <CabinetRecipientBadge tx={tx} />
         </div>
         <CabinetPersonDetails person={person} tx={tx} lang={lang} />
-        <StatusChip tone="warning" className="mt-2 items-start rounded-lg px-2.5 py-1.5 whitespace-normal">
+        <StatusChip tone="neutral" className="mt-2 items-start whitespace-normal">
           <Info aria-hidden="true" className="mt-0.5" />
           <span>{recordedBy ?? tx("Указал клиент в кабинете", "Vom Kunden im Kundenkabinett angegeben")}</span>
         </StatusChip>

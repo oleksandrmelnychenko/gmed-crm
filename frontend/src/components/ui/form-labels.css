@@ -1,0 +1,20 @@
+/* Captions above controls share one typeface. Wrapped controls keep their own font. */
+:is(.staff-portal-theme, .patient-portal-theme) :is(
+  [data-slot="record-field"] > label,
+  [data-wizard-field-label],
+  [data-slot="toolbar-field"] > span,
+  label:is(.block, .grid, .flex-col) > span:first-child,
+  label.block:not(:has(input, select, textarea, button)),
+  label[for]:not(:has(input, select, textarea, button)),
+  label[data-slot="label"]:not(:has(input, button))
+) {
+  font-family: var(--font-mono);
+}
+
+/* Checkbox/radio captions describe a choice rather than a field above a control. */
+:is(.staff-portal-theme, .patient-portal-theme) :is(
+  label:has(input[type="checkbox"], input[type="radio"], [role="checkbox"], [role="radio"]) > span,
+  div:has(> :is([role="checkbox"], [role="radio"], input[type="checkbox"], input[type="radio"])) > label
+) {
+  font-family: var(--font-sans);
+}

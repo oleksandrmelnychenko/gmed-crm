@@ -98,7 +98,7 @@ function PatientStatementsPanel({ title, marker, tx, children }: {
   return (
     <section className="@container/patient-statements min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card" data-testid="lead-gwg-statements">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-2.5">
-        <AdminSectionTitle>{title}</AdminSectionTitle>
+        <AdminSectionTitle variant="mono">{title}</AdminSectionTitle>
         {marker ? (
           <div className="order-last w-full sm:order-none sm:w-auto">
             <PatientFieldBadge marker={marker} tx={tx} />

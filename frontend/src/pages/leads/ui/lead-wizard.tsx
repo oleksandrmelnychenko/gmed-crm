@@ -1,4 +1,5 @@
 import { existingParentPatientFromError, fillMissingParentProfile } from "../model/parent-profile-reuse";
+import "./lead-wizard-layout.css";
 import {
   fillMissingFromSeed,
   fillMissingIdentityNames,
@@ -96,6 +97,7 @@ import { PARENT_ROLE_CHIP_CLASS, TrustedContactRole } from "./trusted-contact-ro
 import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { StatusChip } from "@/components/ui/status-chip";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect, countryCodeForDisplay, countryCodeFromStoredValue, countryLabel } from "@/components/ui/country-select";
@@ -964,7 +966,7 @@ const COST_ESTIMATE_WORK_TYPES_REASON = "Medical work types are not selected";
 const COST_ESTIMATE_OUTDATED_REASON = "Preliminary cost calculation document is missing";
 const COST_ESTIMATE_WORK_TYPES_STEP = { ru: "Оформление заказа", de: "Auftragserfassung" };
 const DELETE_REASON_MIN_CHARS = 5;
-const WIZARD_DOCUMENT_SECTION_CLASS = "min-w-0 rounded-xl border border-border/50 bg-card p-3.5";
+const WIZARD_DOCUMENT_SECTION_CLASS = "min-w-0 space-y-2 rounded-xl border border-border/50 bg-card p-3";
 
 /** Each wizard group sits on its own card against the shared muted canvas. */
 function Section({ className, ...props }: ComponentProps<typeof WorkspaceSection>) {
@@ -3289,9 +3291,9 @@ function Field({
     </>
   );
   return htmlFor ? (
-    <div className={cn("min-w-0 space-y-1.5", className)}>{content}</div>
+    <div data-wizard-field className={cn("min-w-0 space-y-1", className)}>{content}</div>
   ) : (
-    <label className={cn("min-w-0 space-y-1.5", className)}>{content}</label>
+    <label data-wizard-field className={cn("min-w-0 space-y-1", className)}>{content}</label>
   );
 }
 
@@ -3327,7 +3329,7 @@ function ToggleRow({
   const hintId = useId();
   return (
     <label className={cn(
-      "flex items-center gap-3 py-3",
+      "flex min-h-10 items-center gap-2 py-2",
       disabled ? "cursor-not-allowed" : "cursor-pointer",
       withDivider && "border-b border-border/70 last:border-b-0",
     )}>
@@ -8703,7 +8705,7 @@ ${serviceCommentLines.join("\n")}`
         onChanged={() => { void refreshDocumentsState(); }}
         documentNote={(document) => {
           const upload = byId.get(document.id);
-          return upload ? <StatusChip tone="warning">{representativeFileOrigin(upload, tx)}</StatusChip> : null;
+          return upload ? <StatusChip tone="neutral">{representativeFileOrigin(upload, tx)}</StatusChip> : null;
         }}
       /> : null}
       </>
@@ -9038,13 +9040,13 @@ ${serviceCommentLines.join("\n")}`
           </div>
         </nav>
 
-        <main ref={stepPanelRef} id="lead-wizard-step-panel" role="tabpanel" aria-labelledby={`lead-wizard-tab-${step}`} tabIndex={-1} aria-busy={loading || isBusy} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-scroll overscroll-contain bg-muted px-3 py-4 outline-none [scrollbar-gutter:stable] sm:px-5 sm:py-5">
-          <SanctionsLeadBanner leadId={leadId} refreshKey={lead} className="mb-5" />
+        <main ref={stepPanelRef} id="lead-wizard-step-panel" role="tabpanel" aria-labelledby={`lead-wizard-tab-${step}`} tabIndex={-1} aria-busy={loading || isBusy} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-scroll overscroll-contain bg-muted p-3 outline-none [scrollbar-gutter:stable]">
+          <SanctionsLeadBanner leadId={leadId} refreshKey={lead} className="mb-2" />
           {leadConverted ? (
             <div
               role="status"
               data-testid="lead-converted-banner"
-              className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-950 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-100"
+              className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-950 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-100"
             >
               <UserRoundCheck aria-hidden="true" className="size-4 shrink-0" />
               <span className="min-w-0 flex-1">
@@ -9079,7 +9081,7 @@ ${serviceCommentLines.join("\n")}`
           <PortalMarkerKindsContext.Provider value={portalMarkerKinds}>
           <ReadOnlyScope active={leadConverted} banner={false}>
           {validationIssues.length > 0 ? (
-            <div role="alert" aria-live="assertive" className="mb-5">
+            <div role="alert" aria-live="assertive" className="mb-2">
               <Banner tone="error">
                 <div className="flex items-center gap-2 font-medium">
                   <CircleAlert aria-hidden="true" className="size-4 shrink-0" />
@@ -9105,7 +9107,7 @@ ${serviceCommentLines.join("\n")}`
           {loading && !lead ? <div role="status" aria-live="polite" className="flex items-center gap-2 py-12 text-sm text-muted-foreground"><LoaderCircle aria-hidden="true" className="size-4 animate-spin" />{tx("Загрузка…", "Wird geladen…")}</div> : null}
 
           {draft && step === "master_data" ? (
-            <section className="min-w-0 space-y-5">
+            <section className="min-w-0 space-y-2">
               {sessionPrefill?.notice || showSourcePepHint ? (
                 <div
                   data-testid="lead-prefilled-from-source"
@@ -9180,6 +9182,7 @@ ${serviceCommentLines.join("\n")}`
                 title={isMinor(draft.birthDate, new Date()) ? tx("Личные данные ребёнка", "Persönliche Daten des Kindes") : tx("Личные данные", "Persönliche Daten")}
                 accessory={isRepeatIntake ? null : (
                   <div className="flex flex-wrap items-center justify-end gap-2">
+                    <Step1FillModeSwitch mode={step1Portal.mode} onChange={step1Portal.setMode} disabled={isBusy} tx={tx} />
                     {/* Everything the client fills in, staff fill in too: the client's own form (owner 2026-10-29). */}
                     {canEditClientForm || (!leadId && canEditPayerLink) ? (
                       // Shown from the start (owner 2026-10-30): the form needs the lead, so on a new
@@ -9189,14 +9192,14 @@ ${serviceCommentLines.join("\n")}`
                         "Сначала заполните имя, дату рождения, пол и e-mail и нажмите «Далее» — после создания обращения анкету можно заполнить за клиента",
                         "Zuerst Name, Geburtsdatum, Geschlecht und E-Mail ausfüllen und «Weiter» klicken – danach kann das Formular für den Kunden ausgefüllt werden",
                       )}>
-                        <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" data-testid="lead-wizard-client-form"
+                        <Button type="button" size="sm" className="gap-1.5" data-testid="lead-wizard-client-form"
+                          aria-label={tx("Заполнить анкету за клиента", "Formular für den Kunden ausfüllen")}
                           disabled={!canEditClientForm} onClick={() => openClientForm("person")}>
                           <FileText className="size-3.5" />
-                          {tx("Заполнить анкету за клиента", "Formular für den Kunden ausfüllen")}
+                          {tx("Заполнить анкету", "Formular ausfüllen")}
                         </Button>
                       </span>
                     ) : null}
-                    <Step1FillModeSwitch mode={step1Portal.mode} onChange={step1Portal.setMode} disabled={isBusy} tx={tx} />
                   </div>
                 )}
               >
@@ -9215,7 +9218,7 @@ ${serviceCommentLines.join("\n")}`
                 <div
                   role="status"
                   data-testid="lead-master-data-open-fields"
-                  className="mb-4 flex flex-wrap items-start gap-x-3 gap-y-1.5 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs leading-5 text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100"
+                  className="wizard-notice mb-2 flex flex-wrap items-start gap-x-3 gap-y-1.5 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs leading-5 text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100"
                 >
                   <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
                   <span className="min-w-0 flex-1">
@@ -9224,7 +9227,7 @@ ${serviceCommentLines.join("\n")}`
                   </span>
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="default"
                     size="xs"
                     className="shrink-0"
                     disabled={isBusy}
@@ -9243,10 +9246,10 @@ ${serviceCommentLines.join("\n")}`
                   </Button>
                 </div>
               ) : null}
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="wizard-form-grid grid gap-x-3 gap-y-2 md:grid-cols-2">
                 {intakeAsksDiscoverySource(isRepeatIntake) ? (
                 // A row of its own: the person's fields below pair up (first | last name, street | postal code).
-                <div className="grid gap-4 md:col-span-2 md:grid-cols-2">
+                <div className="grid gap-x-3 gap-y-2 md:col-span-2 md:grid-cols-2">
                   <Field label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")} htmlFor={STEP1_CONTROL_IDS.discoverySource}>
                     <NativeComboboxSelect
                       id={STEP1_CONTROL_IDS.discoverySource}
@@ -9626,7 +9629,15 @@ ${serviceCommentLines.join("\n")}`
               </Section>
               {isMinor(draft.birthDate, new Date()) ? (
                 <Section
-                  title={tx("Родитель или законный представитель", "Elternteil oder gesetzlicher Vertreter")}
+                  title={<span className="inline-flex items-center gap-1.5">
+                    {tx("Родитель или законный представитель", "Elternteil oder gesetzlicher Vertreter")}
+                    <InfoHint label={tx("О представителе ребёнка", "Zur Vertretung des Kindes")}>
+                      {tx(
+                        "Для ребёнка контакт и электронную подпись оформляет мать, отец или законный представитель. Можно выбрать существующего пациента или внести данные вручную.",
+                        "Bei Minderjährigen werden Kontakt und elektronische Unterschrift durch einen Elternteil oder gesetzlichen Vertreter angegeben. Eine bestehende Patientenakte kann verknüpft oder der Kontakt manuell erfasst werden.",
+                      )}
+                    </InfoHint>
+                  </span>}
                   accessory={(
                     <Button type="button" size="sm" variant="default" onClick={() => openNewTrustedContact(true)}>
                       <Plus aria-hidden="true" className="size-3.5" />
@@ -9642,12 +9653,7 @@ ${serviceCommentLines.join("\n")}`
                       visibleMasterError("guardian") && "ring-1 ring-destructive/50",
                     )}
                   >
-                    <p className="text-xs leading-5 text-muted-foreground">
-                      {tx(
-                        "Для ребёнка контакт и электронную подпись оформляет мать, отец или законный представитель. Можно выбрать существующего пациента или внести данные вручную.",
-                        "Bei Minderjährigen werden Kontakt und elektronische Unterschrift durch einen Elternteil oder gesetzlichen Vertreter angegeben. Eine bestehende Patientenakte kann verknüpft oder der Kontakt manuell erfasst werden.",
-                      )}
-                    </p>
+
                     {visibleMasterError("guardian") ? (
                       <p role="alert" className="text-xs font-medium text-destructive">
                         {visibleMasterError("guardian")}
@@ -9690,10 +9696,10 @@ ${serviceCommentLines.join("\n")}`
                         {draft.trustedContacts
                           .filter((contact) => isParentOrGuardianRelation(contact.relation))
                           .map((contact) => (
-                            <li key={contact.id} className="flex items-center gap-3 px-3 py-3">
+                            <li key={contact.id} className="flex items-center gap-1 px-3 py-1.5">
                               <div className="min-w-0 flex-1">
-                                <p className="truncate text-sm font-medium">{contact.name}</p>
-                                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                                  <span className="break-words text-sm font-medium text-foreground">{contact.name}</span>
                                   <TrustedContactRole relation={contact.relation} tx={tx} />
                                   {/* On file, but not one of the persons who act for the child
                                       (a second parent under sole custody, a third one): no
@@ -9703,7 +9709,8 @@ ${serviceCommentLines.join("\n")}`
                                       {tx("Не представляет ребёнка", "Vertritt das Kind nicht")}
                                     </span>
                                   ) : null}
-                                  <span className="break-all">{[contact.email, contact.phone].filter(Boolean).join(" · ")}</span>
+                                  {contact.email ? <StatusChip tone="neutral" className="max-w-full"><Mail aria-hidden="true" /><span className="min-w-0 break-all">{contact.email}</span></StatusChip> : null}
+                                  {contact.phone ? <StatusChip tone="neutral"><Phone aria-hidden="true" /><span className="whitespace-nowrap">{contact.phone}</span></StatusChip> : null}
                                   {(() => {
                                     // The parent's citizenships on the card itself (QA round 14), not only in the dialog.
                                     const codes = normalizeCitizenships(
@@ -9750,7 +9757,7 @@ ${serviceCommentLines.join("\n")}`
               {/* Inside the portal state too: the lead fills the insurance in the cabinet, its
                   fields carry the «от пациента» marker like the personal ones (QA 2026-10-11, N-03). */}
               <Section title={tx("Страхование", "Versicherung")}>
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="wizard-form-grid grid gap-x-3 gap-y-2 md:grid-cols-2">
                 <Field label={tx("Есть ли медицинская страховка", "Krankenversicherung vorhanden")} portalField="has_insurance" htmlFor={STEP1_CONTROL_IDS.hasInsurance}>
                   <NativeComboboxSelect
                     id={STEP1_CONTROL_IDS.hasInsurance}
@@ -9868,7 +9875,7 @@ ${serviceCommentLines.join("\n")}`
           ) : null}
 
           {draft && lead && step === "medical" ? (
-            <section className="space-y-5">
+            <section className="space-y-2">
               {clinicalLoadFailed ? (
                 <Banner tone="error" data-testid="lead-wizard-clinical-load-failed">
                   {tx(
@@ -9878,7 +9885,7 @@ ${serviceCommentLines.join("\n")}`
                 </Banner>
               ) : null}
               <Section title={tx("Обращение", "Anliegen")}>
-              <Field label={tx("Направивший врач", "Zuweisender Arzt")} className="block pb-2"><Input className={inputClass} value={draft.referrer} onChange={(event) => patch("referrer", event.target.value)} /></Field>
+              <Field label={tx("Направивший врач", "Zuweisender Arzt")}><Input className={inputClass} value={draft.referrer} onChange={(event) => patch("referrer", event.target.value)} /></Field>
               <PreviousRequestsPanel
                 requests={previousRequests.requests}
                 currentConcern={draft.concern}
@@ -9900,7 +9907,7 @@ ${serviceCommentLines.join("\n")}`
               <Field label={tx("Причина обращения", "Anliegen")}>
                 <textarea
                   id={SERVICE_CONCERN_ID}
-                  className={cn(textareaClass, "min-h-28 bg-card")}
+                  className={cn(textareaClass, "min-h-20 resize-y bg-card")}
                   value={draft.concern}
                   onChange={(event) => patch("concern", event.target.value)}
                 />
@@ -10042,12 +10049,12 @@ ${serviceCommentLines.join("\n")}`
 
 
           {draft && lead && step === "service" ? (
-            <section className="space-y-5">
+            <section className="space-y-2">
               <Section
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Период программы", "Programmzeitraum")}
               >
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="wizard-short-grid grid gap-x-3 gap-y-2 sm:grid-cols-2">
                   <Field
                     label={tx("Начало программы", "Programmbeginn")}
                     required={Boolean(draft.programDateTo)}
@@ -10114,7 +10121,7 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                 )}
               >
-                <div className="grid items-start gap-2 sm:grid-cols-2">
+                <div className="wizard-service-grid">
                   {Array.from(new Set([
                     ...LEAD_WIZARD_SERVICE_OPTIONS,
                     ...initialServiceOptionsRef.current,
@@ -10136,7 +10143,7 @@ ${serviceCommentLines.join("\n")}`
                       >
                         <label
                           htmlFor={checkboxId}
-                          className="flex min-h-11 cursor-pointer items-center gap-3 px-3 py-2.5"
+                          className="flex min-h-10 cursor-pointer items-center gap-2 px-2.5 py-1.5"
                         >
                           <input
                             id={checkboxId}
@@ -10190,7 +10197,7 @@ ${serviceCommentLines.join("\n")}`
           ) : null}
 
           {draft && step === "documents" ? (
-            <section className="space-y-5">
+            <section className="space-y-2">
               {leadId ? <LeadPayerPapersHint leadId={leadId} tx={tx} /> : null}
               <LeadAttachmentImportNotice
                 refused={refusedAttachments}
@@ -10429,12 +10436,12 @@ ${serviceCommentLines.join("\n")}`
                         {leadSelfDisclosureRequirementLabel(selfDisclosureRequirement, tx)}
                       </StatusChip>
                     ) : null}
-                    <StatusChip tone="warning" className="w-full items-start whitespace-normal rounded-xl px-3 py-2" data-testid="lead-wizard-self-disclosure-source">
+                    <StatusChip tone="neutral" className="wizard-notice w-fit max-w-full items-start whitespace-normal rounded-lg px-2.5 py-1.5" data-testid="lead-wizard-self-disclosure-source">
                       <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
                       <span>{leadFormSourceNote}</span>
                     </StatusChip>
                     {leadFormUnavailableHint ? (
-                      <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-wizard-self-disclosure-hint">
+                      <StatusChip tone="warning" className="wizard-notice w-fit max-w-full items-start rounded-lg px-2.5 py-1.5" data-testid="lead-wizard-self-disclosure-hint">
                         <CircleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
                         <span>{leadFormUnavailableHint}</span>
                       </StatusChip>
@@ -10469,7 +10476,7 @@ ${serviceCommentLines.join("\n")}`
                 >
                 {/* For a minor the child's consent form carries the release (owner decision 2026-10-12);
                     the adult form in the child's name is refused (QA 2026-10-12, A2-06). */}
-                <StatusChip tone="warning" className="w-full items-start whitespace-normal rounded-xl px-3 py-2" data-testid="lead-wizard-confidentiality-release-note">
+                <StatusChip tone="info" className="wizard-notice w-fit max-w-full items-start whitespace-normal rounded-lg px-2.5 py-1.5" data-testid="lead-wizard-confidentiality-release-note">
                   <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
                   <span>
                   {isMinor(draft.birthDate, new Date())
@@ -10532,7 +10539,7 @@ ${serviceCommentLines.join("\n")}`
                   {/* A consent staff recorded in the client's form names that way, never the
                       cabinet nor paper (owner 2026-10-30). */}
                   {cabinetConsentsNote(cabinetConsents, tx) ? (
-                    <StatusChip tone="warning" className="w-full items-start whitespace-normal rounded-xl px-3 py-2" data-testid="cabinet-consents-note">
+                    <StatusChip tone="info" className="wizard-notice w-fit max-w-full items-start whitespace-normal rounded-lg px-2.5 py-1.5" data-testid="cabinet-consents-note">
                       <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
                       <span className="min-w-0 leading-5">{cabinetConsentsNote(cabinetConsents, tx)}</span>
                     </StatusChip>
@@ -10561,7 +10568,7 @@ ${serviceCommentLines.join("\n")}`
                     isMinor(draft.birthDate, new Date()),
                   );
                   return (
-                <div className="space-y-3 rounded-xl border border-border/60 bg-card p-3 sm:p-4" data-testid="lead-people">
+                <div className="space-y-2 rounded-xl border border-border/60 bg-card p-3" data-testid="lead-people">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -10580,7 +10587,7 @@ ${serviceCommentLines.join("\n")}`
                     <FileText aria-hidden="true" className="size-3.5 shrink-0 text-foreground" />
                     <span className="font-mono text-foreground/80">{tx("В форму согласия попадут:", "In die Einverständniserklärung kommen:")}</span>
                     {formRecipients.names.length > 0
-                      ? formRecipients.names.map((name, index) => <StatusChip key={`${index}:${name}`} tone="warning" className="whitespace-normal"><UserRound aria-hidden="true" /><span className="min-w-0 break-words">{name}</span></StatusChip>)
+                      ? formRecipients.names.map((name, index) => <StatusChip key={`${index}:${name}`} tone="neutral" className="whitespace-normal"><UserRound aria-hidden="true" /><span className="min-w-0 break-words">{name}</span></StatusChip>)
                       : <StatusChip>{tx("никто", "niemand")}</StatusChip>}
                     <StatusChip tone={formRecipients.source === "cabinet" ? "info" : "neutral"} className="whitespace-normal">
                       {formRecipients.source === "cabinet"
@@ -10617,8 +10624,8 @@ ${serviceCommentLines.join("\n")}`
                             </div>
                             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-foreground">
                               {contact.birthDate ? <StatusChip tone="info"><CalendarDays aria-hidden="true" />{germanDocumentDate(contact.birthDate)}</StatusChip> : null}
-                              {contact.email ? <StatusChip tone="warning" className="whitespace-normal"><Mail aria-hidden="true" /><span className="min-w-0 break-all">{contact.email}</span></StatusChip> : null}
-                              {contact.phone ? <StatusChip tone="warning"><Phone aria-hidden="true" />{contact.phone}</StatusChip> : null}
+                              {contact.email ? <StatusChip tone="neutral" className="whitespace-normal text-foreground"><Mail aria-hidden="true" /><span className="min-w-0 break-all">{contact.email}</span></StatusChip> : null}
+                              {contact.phone ? <StatusChip tone="neutral" className="text-foreground"><Phone aria-hidden="true" />{contact.phone}</StatusChip> : null}
                               {contact.address ? <span className="inline-flex min-w-0 items-start gap-1.5 text-sm"><MapPin aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" /><span className="break-words">{contact.address}</span></span> : null}
                               {contact.scopeCodes?.length ? (
                                 <div className="flex w-full flex-wrap items-center gap-2" data-testid="trusted-contact-scope-summary">
@@ -10865,7 +10872,7 @@ ${serviceCommentLines.join("\n")}`
           ) : null}
 
           {draft && step === "order" ? (
-            <section className="min-w-0 space-y-5">
+            <section className="min-w-0 space-y-2">
               {commercialLookupsLoading ? (
                 <div
                   role="status"
@@ -10995,7 +11002,7 @@ ${serviceCommentLines.join("\n")}`
                       <p className="mb-2 text-xs text-destructive">{workTypesError}</p>
                     ) : null}
                     {costEstimateStatus === "no_catalog_work_types" && costEstimateHint ? (
-                      <StatusChip tone="warning" role="status" className="mb-2 w-full items-start rounded-xl px-3 py-2">
+                      <StatusChip tone="warning" role="status" className="mb-2 wizard-notice w-fit max-w-full items-start rounded-lg px-2.5 py-1.5">
                         <CircleAlert aria-hidden="true" className="mt-[3px]" />
                         <span className="min-w-0 leading-5">{costEstimateHint}</span>
                       </StatusChip>
@@ -11147,7 +11154,7 @@ ${serviceCommentLines.join("\n")}`
           ) : null}
 
           {draft && step === "commercial" ? (
-            <section className="space-y-5">
+            <section className="space-y-2">
               {patientContractReview}
               {commercialLookupsLoading ? (
                 <div
@@ -11200,7 +11207,7 @@ ${serviceCommentLines.join("\n")}`
                 >
                 {!inheritedContract && !lines.some(validLine) ? (
                   // Walk-through 2026-10-24: the button was disabled without a word.
-                  <StatusChip tone="warning" id="lead-framework-contract-needs-position" data-testid="lead-framework-contract-needs-position" className="mb-3 w-full items-start rounded-xl px-3 py-2">
+                  <StatusChip tone="warning" id="lead-framework-contract-needs-position" data-testid="lead-framework-contract-needs-position" className="mb-3 wizard-notice w-fit max-w-full items-start rounded-lg px-2.5 py-1.5">
                     <CircleAlert aria-hidden="true" className="mt-0.5" />
                     <span className="min-w-0 leading-5">
                       {tx(
@@ -11217,7 +11224,7 @@ ${serviceCommentLines.join("\n")}`
                     </span>
                   </StatusChip>
                 ) : null}
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="wizard-contract-grid grid gap-x-3 gap-y-2 sm:grid-cols-2">
                   <Field label={tx("Начало действия договора", "Vertragsbeginn")} htmlFor="lead-contract-valid-from">
                     <Input
                       id="lead-contract-valid-from"
@@ -11360,7 +11367,7 @@ ${serviceCommentLines.join("\n")}`
                     <span>{tx("Добавить услугу из каталога", "Leistung aus dem Katalog hinzufügen")}</span>
                   </label>
                   {draft.specialties.length === 0 ? (
-                    <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-order-service-needs-specialty">
+                    <StatusChip tone="warning" className="wizard-notice w-fit max-w-full items-start rounded-lg px-2.5 py-1.5" data-testid="lead-order-service-needs-specialty">
                       <CircleAlert aria-hidden="true" className="mt-[3px]" />
                       <span className="min-w-0 leading-5">
                         {tx(
@@ -11441,7 +11448,7 @@ ${serviceCommentLines.join("\n")}`
                   )}
                 >
                 {!leadConverted && lines.some(validLine) && orderDocumentPeriodIssues.length > 0 ? (
-                  <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" id="lead-order-document-needs-period" data-testid="lead-order-document-needs-period">
+                  <StatusChip tone="warning" className="wizard-notice w-fit max-w-full items-start rounded-lg px-2.5 py-1.5" id="lead-order-document-needs-period" data-testid="lead-order-document-needs-period">
                     <CircleAlert aria-hidden="true" className="mt-0.5" />
                     <span className="min-w-0 leading-5">
                       {tx("Период программы входит в заказ: сначала укажите начало и окончание программы — после подписи его нельзя изменить без новой подписи.", "Der Programmzeitraum ist Teil des Auftrags: Geben Sie zuerst Beginn und Ende des Programms an – nach der Unterschrift lässt er sich nur mit neuer Unterschrift ändern.")}
@@ -11452,7 +11459,7 @@ ${serviceCommentLines.join("\n")}`
                   </StatusChip>
                 ) : null}
                 {!leadConverted && !lines.some(validLine) ? (
-                  <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" id="lead-order-document-needs-services" data-testid="lead-order-document-needs-services">
+                  <StatusChip tone="warning" className="wizard-notice w-fit max-w-full items-start rounded-lg px-2.5 py-1.5" id="lead-order-document-needs-services" data-testid="lead-order-document-needs-services">
                     <CircleAlert aria-hidden="true" className="mt-0.5" />
                     <span className="min-w-0 leading-5">
                       {lines.length > 0
@@ -11533,7 +11540,7 @@ ${serviceCommentLines.join("\n")}`
                           </StatusChip>
                         </div>
                         {needsDocument && !manualOnly && !signedPatient && !demoSignatureChecks.includes("order_signed_patient") ? (
-                          <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-order-signature-needs-document">
+                          <StatusChip tone="warning" className="wizard-notice w-fit max-w-full items-start rounded-lg px-2.5 py-1.5" data-testid="lead-order-signature-needs-document">
                             <CircleAlert aria-hidden="true" className="mt-0.5" />
                             <span className="min-w-0 leading-5">
                               {tx(
@@ -11957,7 +11964,7 @@ ${serviceCommentLines.join("\n")}`
                   )}
                 >
                 {commercialDocuments.order_cost_estimate.length === 0 ? (
-                  <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-order-estimate-not-created">
+                  <StatusChip tone="warning" className="wizard-notice w-fit max-w-full items-start rounded-lg px-2.5 py-1.5" data-testid="lead-order-estimate-not-created">
                     <CircleAlert aria-hidden="true" className="mt-0.5" />
                     <span className="min-w-0 font-semibold leading-5">{tx("Смета к заказу ещё не создана", "Kostenvoranschlag zum Einzelauftrag wurde noch nicht erstellt")}</span>
                   </StatusChip>
@@ -12018,13 +12025,13 @@ ${serviceCommentLines.join("\n")}`
                         {costEstimateHint}
                       </p>
                     ) : (
-                      <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2">
+                      <StatusChip tone="warning" className="wizard-notice w-fit max-w-full items-start rounded-lg px-2.5 py-1.5">
                         <CircleAlert aria-hidden="true" className="mt-[3px]" />
                         <span className="flex min-w-0 flex-1 flex-col items-start gap-2 sm:flex-row sm:gap-3">
                           <span className="min-w-0 flex-1 leading-5">{costEstimateHint}</span>
                           <Button
                             type="button"
-                            variant="outline"
+                            variant="default"
                             size="sm"
                             className="h-7 shrink-0 text-xs"
                             disabled={isBusy}
@@ -12054,7 +12061,7 @@ ${serviceCommentLines.join("\n")}`
           ) : null}
 
           {lead && step === "release" ? (
-            <section className="space-y-5">
+            <section className="space-y-2">
               {leadId ? <LeadPayerPapersHint leadId={leadId} tx={tx} /> : null}
               {patientDocumentReview}
               {patientContractReview}
@@ -12064,7 +12071,7 @@ ${serviceCommentLines.join("\n")}`
                     ? tx("Проверьте все этапы. После подтверждения обращение и заказ будут связаны с существующей карточкой пациента.", "Prüfen Sie alle Schritte. Nach der Bestätigung werden Anfrage und Auftrag der bestehenden Patientenakte zugeordnet.")
                     : tx("Проверьте все этапы. После подтверждения система создаст карточку пациента и перенесёт в неё данные обращения.", "Prüfen Sie alle Schritte. Nach der Bestätigung wird die Patientenakte angelegt und die Angaben aus dem Lead werden übernommen.")}
                 </p>
-                <div>
+                <div className="wizard-review-list">
                   {/* The wizard's own steps: the server knows no "order" step
                       and its "service" readiness is the order step's specialties. */}
                   {(lead.readiness.steps.length > 0 ? STEPS : []).map((target) => {
@@ -12074,7 +12081,7 @@ ${serviceCommentLines.join("\n")}`
                       <button
                         key={item.key}
                         type="button"
-                        className="flex w-full items-center justify-between gap-3 rounded-md border-b border-border/70 px-2 py-3 text-left last:border-b-0 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                        className="flex w-full items-center justify-between gap-2 rounded-md border-b border-border/70 px-2 py-2 text-left last:border-b-0 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
                         disabled={isBusy || !target || target.id === step}
                         onClick={() => target && navigateToStep(target.id)}
                       >
