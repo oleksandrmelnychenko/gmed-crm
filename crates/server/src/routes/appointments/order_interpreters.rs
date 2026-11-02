@@ -3,7 +3,8 @@
 //! every appointment, all of them in one transaction: either every appointment
 //! gets the interpreter or none does. The interpreter gets one notification
 //! for the batch instead of one per appointment; the audit keeps a row per
-//! appointment.
+//! appointment that actually changed (an appointment already booked with the
+//! same interpreter is neither written nor audited again).
 
 use std::collections::HashSet;
 
@@ -397,6 +398,17 @@ async fn book_interpreter_in_tx(
             continue;
         }
 
+        let previous = appointment.interpreter_id;
+        let previous_response = appointment.interpreter_response.as_deref();
+        let newly_booked = previous != Some(interpreter_id)
+            || matches!(previous_response, None | Some("declined"));
+        if !newly_booked {
+            // Already booked with a standing answer (a repeated click, or a
+            // day where only some visits are new): no write, no audit row.
+            booked_pairs.push((appointment.patient_id, interpreter_id));
+            continue;
+        }
+
         // Same rule as the single assignment: a new interpreter, or the one
         // who declined, is asked again; a standing answer is kept.
         if let Err(e) = sqlx::query(
@@ -434,8 +446,6 @@ async fn book_interpreter_in_tx(
             return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"));
         }
 
-        let previous = appointment.interpreter_id;
-        let previous_response = appointment.interpreter_response.as_deref();
         if let Some(previous_id) = previous
             && previous_id != interpreter_id
         {
@@ -457,15 +467,11 @@ async fn book_interpreter_in_tx(
             }
             unbooked_pairs.push((appointment.patient_id, previous_id));
         }
-        let newly_booked = previous != Some(interpreter_id)
-            || matches!(previous_response, None | Some("declined"));
-        if newly_booked {
-            booked_notices.push((
-                BookingNoticeTarget::new(appointment.id, interpreter_id),
-                appointment.date,
-            ));
-            changed.insert(appointment.id);
-        }
+        booked_notices.push((
+            BookingNoticeTarget::new(appointment.id, interpreter_id),
+            appointment.date,
+        ));
+        changed.insert(appointment.id);
         booked_pairs.push((appointment.patient_id, interpreter_id));
 
         if let Err(e) = audit::write_in_transaction(

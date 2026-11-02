@@ -282,10 +282,23 @@ async fn batch_books_every_appointment_with_one_notification_and_audit_per_appoi
     // The audit trail written in the transaction is immediately visible.
     assert_eq!(batch_audit_count(&fx, &ids).await, 3);
 
-    // Booking the same interpreter again is not news for them.
+    // Booking the same interpreter again (a double click) is not news for
+    // them and changes nothing: no notification, no further audit rows.
     let (status, body) = assign_batch(&fx, &fx.pm, Some(interpreter), &ids).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(booking_notifications(&fx, interpreter).await.len(), 1);
+    for item in body["appointments"].as_array().unwrap() {
+        assert_eq!(item["changed"], false, "{body}");
+    }
+    assert_eq!(batch_audit_count(&fx, &ids).await, 3);
+
+    // A day with one new visit next to booked ones audits only the new one.
+    let fourth = seed_visit(&fx, fx.order_id, "medical", day(5), "14:00", "15:00").await;
+    let (status, body) =
+        assign_batch(&fx, &fx.pm, Some(interpreter), &[first, second, fourth]).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(batch_audit_count(&fx, &[first, second]).await, 2);
+    assert_eq!(batch_audit_count(&fx, &[fourth]).await, 1);
 }
 
 #[tokio::test]

@@ -1548,3 +1548,86 @@ async fn plan_agreement_records_the_plan_as_sent() {
     assert_eq!(status, "sent");
     assert_eq!(note.as_deref(), Some("Plan per E-Mail gesendet"));
 }
+
+/// «План для пациента» shows who set the status and when, and the newest
+/// appointment of the plan, so staff see a plan that changed after it was
+/// sent. A repeated click with the same status keeps the first actor/time.
+#[tokio::test]
+async fn plan_agreement_reports_status_actor_and_newest_appointment() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("plan-agreement-actor");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let pm = auth_header_for(patient_manager_id, "patient_manager");
+    let planning_uri = format!("/api/v1/orders/{order_id}/planning-preparation");
+
+    let (status, first) = json_request(
+        &app,
+        "POST",
+        &planning_uri,
+        &pm,
+        Some(json!({ "treatment_plan_status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{first:?}");
+    assert_eq!(
+        first["treatment_plan_status_updated_by"],
+        json!(patient_manager_id),
+        "{first}"
+    );
+    assert!(
+        first["treatment_plan_status_updated_by_name"].is_string(),
+        "{first}"
+    );
+    let set_at = first["treatment_plan_status_updated_at"]
+        .as_str()
+        .unwrap_or_else(|| panic!("status time missing: {first}"))
+        .to_string();
+    assert!(first["appointments_last_added_at"].is_null(), "{first}");
+
+    // The same status again (a double click) does not move the time.
+    let (status, again) = json_request(
+        &app,
+        "POST",
+        &planning_uri,
+        &pm,
+        Some(json!({ "treatment_plan_status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{again:?}");
+    assert_eq!(again["treatment_plan_status_updated_at"], json!(set_at));
+
+    sqlx::query(
+        r#"INSERT INTO appointments (
+                patient_id, order_id, appointment_type, title, date, status, created_by,
+                created_at
+           ) VALUES ($1, $2, 'medical', 'Added later', CURRENT_DATE + 3, 'planned', $3,
+                     now() + interval '1 minute')"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(patient_manager_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail:?}");
+    let added = detail["planning_preparation"]["appointments_last_added_at"]
+        .as_str()
+        .unwrap_or_else(|| panic!("newest appointment missing: {detail}"));
+    let added = chrono::DateTime::parse_from_rfc3339(added).unwrap();
+    let set_at = chrono::DateTime::parse_from_rfc3339(&set_at).unwrap();
+    assert!(added > set_at, "{added} vs {set_at}");
+}

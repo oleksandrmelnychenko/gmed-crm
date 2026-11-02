@@ -2169,6 +2169,9 @@ async fn load_order_planning_readiness(
                   opp.plan_finalized_at,
                   opp.plan_finalized_by,
                   finalized_by_user.name AS plan_finalized_by_name,
+                  opp.treatment_plan_status_updated_at,
+                  opp.treatment_plan_status_updated_by,
+                  status_by_user.name AS treatment_plan_status_updated_by_name,
                   opp.preparation_documents_sent_at,
                   opp.preparation_documents_sent_by,
                   prep_docs_user.name AS preparation_documents_sent_by_name,
@@ -2177,6 +2180,7 @@ async fn load_order_planning_readiness(
                   briefed_by_user.name AS interpreter_briefed_by_name
            FROM order_planning_preparation opp
            LEFT JOIN users finalized_by_user ON finalized_by_user.id = opp.plan_finalized_by
+           LEFT JOIN users status_by_user ON status_by_user.id = opp.treatment_plan_status_updated_by
            LEFT JOIN users prep_docs_user ON prep_docs_user.id = opp.preparation_documents_sent_by
            LEFT JOIN users briefed_by_user ON briefed_by_user.id = opp.interpreter_briefed_by
            WHERE opp.order_id = $1"#,
@@ -2238,7 +2242,12 @@ async fn load_order_planning_readiness(
                       AND interpreter_id IS NOT NULL
                       AND interpreter_response IS DISTINCT FROM 'accepted'
                       AND interpreter_response IS DISTINCT FROM 'declined'
-                ) AS interpreter_unconfirmed
+                ) AS interpreter_unconfirmed,
+                -- The newest visit of the plan: «План для пациента» warns when
+                -- it was added after the PDF or the agreement status.
+                MAX(created_at) FILTER (
+                    WHERE status <> 'cancelled'
+                ) AS appointments_last_added_at
            FROM appointments
            WHERE order_id = $1"#,
     )
@@ -2283,6 +2292,15 @@ async fn load_order_planning_readiness(
     let plan_finalized_by_name: Option<String> = planning_row
         .try_get("plan_finalized_by_name")
         .unwrap_or_default();
+    let treatment_plan_status_updated_at: Option<chrono::DateTime<chrono::Utc>> = planning_row
+        .try_get("treatment_plan_status_updated_at")
+        .unwrap_or_default();
+    let treatment_plan_status_updated_by: Option<Uuid> = planning_row
+        .try_get("treatment_plan_status_updated_by")
+        .unwrap_or_default();
+    let treatment_plan_status_updated_by_name: Option<String> = planning_row
+        .try_get("treatment_plan_status_updated_by_name")
+        .unwrap_or_default();
     let preparation_documents_sent_at: Option<chrono::DateTime<chrono::Utc>> = planning_row
         .try_get("preparation_documents_sent_at")
         .unwrap_or_default();
@@ -2300,6 +2318,9 @@ async fn load_order_planning_readiness(
         .unwrap_or_default();
     let interpreter_briefed_by_name: Option<String> = planning_row
         .try_get("interpreter_briefed_by_name")
+        .unwrap_or_default();
+    let appointments_last_added_at: Option<chrono::DateTime<chrono::Utc>> = appointment_counts
+        .try_get("appointments_last_added_at")
         .unwrap_or_default();
 
     let medical_total: i64 = appointment_counts
@@ -2403,6 +2424,10 @@ async fn load_order_planning_readiness(
             "plan_finalized_at": plan_finalized_at.map(|value| value.to_rfc3339()),
             "plan_finalized_by": plan_finalized_by,
             "plan_finalized_by_name": plan_finalized_by_name,
+            "treatment_plan_status_updated_at": treatment_plan_status_updated_at.map(|value| value.to_rfc3339()),
+            "treatment_plan_status_updated_by": treatment_plan_status_updated_by,
+            "treatment_plan_status_updated_by_name": treatment_plan_status_updated_by_name,
+            "appointments_last_added_at": appointments_last_added_at.map(|value| value.to_rfc3339()),
             "preparation_documents_sent_at": preparation_documents_sent_at.map(|value| value.to_rfc3339()),
             "preparation_documents_sent_by": preparation_documents_sent_by,
             "preparation_documents_sent_by_name": preparation_documents_sent_by_name,
@@ -7586,6 +7611,16 @@ async fn update_planning_preparation(
     match sqlx::query(
         r#"UPDATE order_planning_preparation
            SET treatment_plan_status = COALESCE($2, treatment_plan_status),
+               -- Only a real change of the status moves its actor and time
+               -- (a repeated click keeps the first one).
+               treatment_plan_status_updated_at = CASE
+                    WHEN $2 IS NOT NULL AND $2 IS DISTINCT FROM treatment_plan_status THEN now()
+                    ELSE treatment_plan_status_updated_at
+               END,
+               treatment_plan_status_updated_by = CASE
+                    WHEN $2 IS NOT NULL AND $2 IS DISTINCT FROM treatment_plan_status THEN $8
+                    ELSE treatment_plan_status_updated_by
+               END,
                treatment_plan_note = CASE WHEN $3::text IS NOT NULL THEN $3 ELSE treatment_plan_note END,
                medical_required = COALESCE($9, medical_required),
                non_medical_required = COALESCE($4, non_medical_required),
