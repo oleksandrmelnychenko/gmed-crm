@@ -480,7 +480,6 @@ function PatientProfileEditorFormSections({
                     <CitizenshipMultiSelect
                       value={form.citizenships}
                       onChange={(value) => updateField("citizenships", value)}
-                      placeholder={dictionary.patient_profile_editor_nationality}
                       className={cn("w-full", formInputClassName)}
                     />
                   </FormField>

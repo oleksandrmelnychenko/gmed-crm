@@ -116,6 +116,8 @@ export type PayerLinkText = {
   representative: string;
   seatLabel: (label: string) => string;
   representativeLabel: (label: string) => string;
+  /** The short field name in the summary, where the input hint «if several, list all» does not belong (QA round 14). */
+  citizenshipsShort: string;
   citizenshipsPlaceholder: string;
   salutations: Record<Salutation, string>;
   organisationName: Record<OrganisationType, string>;
@@ -300,6 +302,7 @@ const de: PayerLinkText = {
   representative: "Gesetzliche/r Vertreter/in",
   seatLabel: (label) => `Sitz: ${label}`,
   representativeLabel: (label) => `Gesetzliche/r Vertreter/in: ${label}`,
+  citizenshipsShort: "Staatsangehörigkeit",
   citizenshipsPlaceholder: "Land hinzufügen",
   salutations: { mr: "Herr", ms: "Frau", none: "Keine Angabe" },
   organisationName: { company: "Firma", organisation: "Name der Organisation", insurance: "Name der Versicherung" },
@@ -604,6 +607,7 @@ const en: PayerLinkText = {
   representative: "Legal representative",
   seatLabel: (label) => `Registered office: ${label}`,
   representativeLabel: (label) => `Legal representative: ${label}`,
+  citizenshipsShort: "Citizenship",
   citizenshipsPlaceholder: "Add country",
   salutations: { mr: "Mr", ms: "Ms", none: "Not specified" },
   organisationName: { company: "Company name", organisation: "Name of the organisation", insurance: "Name of the insurer" },
@@ -906,6 +910,7 @@ const uk: PayerLinkText = {
   representative: "Законний представник",
   seatLabel: (label) => `Місцезнаходження: ${label}`,
   representativeLabel: (label) => `Законний представник: ${label}`,
+  citizenshipsShort: "Громадянство",
   citizenshipsPlaceholder: "Додати країну",
   salutations: { mr: "Пан", ms: "Пані", none: "Без зазначення" },
   organisationName: { company: "Назва компанії", organisation: "Назва організації", insurance: "Назва страхової компанії" },
@@ -1212,6 +1217,7 @@ const ru: PayerLinkText = {
   representative: "Законный представитель",
   seatLabel: (label) => `Местонахождение: ${label}`,
   representativeLabel: (label) => `Законный представитель: ${label}`,
+  citizenshipsShort: "Гражданство",
   citizenshipsPlaceholder: "Добавить страну",
   salutations: { mr: "Господин", ms: "Госпожа", none: "Без указания" },
   organisationName: { company: "Название компании", organisation: "Название организации", insurance: "Название страховой компании" },

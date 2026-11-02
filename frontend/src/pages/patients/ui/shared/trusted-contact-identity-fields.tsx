@@ -47,7 +47,6 @@ export function TrustedContactIdentityFields({
             id={`trusted-citizenships-${id}`}
             value={contact.citizenships ?? []}
             onChange={(citizenships) => onChange({ citizenships })}
-            placeholder={tx("Выберите страну", "Land wählen")}
             lang={lang}
             disabled={disabled}
             className={cn("w-full", inputClassName)}

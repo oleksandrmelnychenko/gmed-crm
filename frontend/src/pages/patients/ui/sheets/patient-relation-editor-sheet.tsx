@@ -477,7 +477,6 @@ function PatientRelationEditorSheet({
                   id="relation-citizenships"
                   value={form.citizenships}
                   lang={lang}
-                  placeholder={tx("Выберите страну", "Land wählen")}
                   onChange={(citizenships) =>
                     dispatchRelationState((current) => ({
                       form: { ...current.form, citizenships },

@@ -64,7 +64,7 @@ export function getPatientRoleLabel(
   dictionary: DictionaryLike,
 ) {
   return value
-    ? dictionary[`roles_${value}`] ?? dictionary.common_unknown_value ?? dictionary.common_unknown
+    ? dictionary[`role_${value}`] ?? dictionary.common_unknown_value ?? dictionary.common_unknown
     : dictionary.common_unknown;
 }
 

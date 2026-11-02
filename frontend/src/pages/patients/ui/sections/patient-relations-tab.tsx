@@ -3,6 +3,7 @@ import { ExternalLink, Link2, Pencil, Plus, Trash2, UserRoundPlus } from "lucide
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { countryNameForDisplay } from "@/components/ui/country-select";
 import { TabsContent } from "@/components/ui/tabs";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import {
@@ -59,6 +60,23 @@ export function localizeRelationNotes(value: string | null | undefined, lang: "d
     .replace(/\bGeburtsdatum:/gi, labels.birthDate)
     .replace(/\bAdresse:/gi, labels.address)
     .replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, "$3.$2.$1");
+}
+
+/** «1972-07-05» → «05.07.1972»; anything else as given. */
+export function isoDateToGerman(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : value.trim();
+}
+
+/** The contact's citizenships as country names («Польша, Австрия»), or "" (QA round 14). */
+export function relationCitizenshipsLabel(
+  relation: Pick<RelationItem, "citizenships">,
+  lang: string,
+): string {
+  return (relation.citizenships ?? [])
+    .map((code) => countryNameForDisplay(code, lang))
+    .filter(Boolean)
+    .join(", ");
 }
 
 export function PatientRelationsTab({
@@ -186,6 +204,36 @@ export function PatientRelationsTab({
           ) : (
             <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
           ),
+      },
+      {
+        id: "birth_date",
+        label: t.patients_birth_date,
+        accessor: (relation) => relation.birth_date ?? "",
+        sortable: true,
+        width: 130,
+        render: (relation) =>
+          relation.birth_date ? (
+            <span className="font-mono text-xs tabular-nums text-foreground">
+              {isoDateToGerman(relation.birth_date)}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+          ),
+      },
+      {
+        id: "citizenships",
+        label: t.patients_nationality,
+        accessor: (relation) => relationCitizenshipsLabel(relation, lang),
+        searchable: true,
+        width: 200,
+        render: (relation) => {
+          const label = relationCitizenshipsLabel(relation, lang);
+          return label ? (
+            <span className="block truncate text-xs text-foreground" title={label}>{label}</span>
+          ) : (
+            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+          );
+        },
       },
       {
         id: "notes",

@@ -214,8 +214,7 @@ export function CabinetPersonActions({ target, tx }: { target: CabinetPersonEdit
               </div>}
               {institution ? null : <div className={`${fieldClass} sm:col-span-2`}>
                 <label htmlFor="person-cabinet-citizenships" className={labelClass}>{tx(CITIZENSHIP_FIELD_LABELS.ru, CITIZENSHIP_FIELD_LABELS.de)}</label>
-                <CitizenshipMultiSelect id="person-cabinet-citizenships" value={citizenships} onChange={setCitizenships}
-                  placeholder={tx("Выберите страну", "Land wählen")} />
+                <CitizenshipMultiSelect id="person-cabinet-citizenships" value={citizenships} onChange={setCitizenships} />
               </div>}
               {stored.contact ? <div className={fieldClass}>
                 <label htmlFor="person-cabinet-contact" className={labelClass}>{tx("Контакт (прежний)", "Kontakt (bisher)")}</label>

@@ -738,6 +738,8 @@ function storedTrustedPerson(person: LeadPortalConsentRecipient) {
     ...(person.contact ? { contact: person.contact } : {}),
     ...(person.phone ? { phone: person.phone } : {}),
     ...(person.birth_date ? { birth_date: person.birth_date } : {}),
+    // The server compares the base with the stored person (QA round 14).
+    ...(person.citizenships?.length ? { citizenships: person.citizenships } : {}),
     ...(person.scope ? { scope: person.scope } : {}),
     ...(person.scope_codes?.length ? { scope_codes: person.scope_codes } : {}),
   };

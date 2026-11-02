@@ -60,9 +60,9 @@ export type RelationItem = {
   address_zip?: string | null;
   address_city?: string | null;
   address_country?: string | null;
-  /** ISO date; not sent by the server yet (the conversion keeps it in `notes`, «Geburtsdatum: …»). */
+  /** ISO date of a separate contact; null for a linked patient or an organisation. */
   birth_date?: string | null;
-  /** ISO alpha-2 codes; not sent by the server yet. */
+  /** ISO alpha-2 codes of a separate contact (several allowed, client decision 2026-11-02). */
   citizenships?: string[] | null;
   /** Receives the patient's invoices unless an order names another payer. */
   is_default_payer?: boolean;

@@ -617,7 +617,6 @@ function PatientPersonalDataSection({
           <CitizenshipMultiSelect
             value={form.citizenships}
             onChange={onCitizenshipsChange}
-            placeholder={notSetLabel}
             disabled={readOnly}
             lang={lang}
             className={cn("w-full", formInputClassName)}

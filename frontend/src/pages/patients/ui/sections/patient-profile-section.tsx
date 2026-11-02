@@ -61,6 +61,7 @@ import {
 import { LegalStatusPill } from "../shared/legal-status-pill";
 import { PatientFormSection, humanizeFunctionalLabel } from "../shared/patient-form-primitives";
 import { PatientPayerSummaryCard } from "./patient-payer-summary";
+import { relationCitizenshipsLabel } from "./patient-relations-tab";
 
 const loadPatientLegalStatusSheet = () => import("../sheets/patient-legal-status-sheet");
 const loadPatientNotesSheet = () => import("../sheets/patient-notes-sheet");
@@ -330,6 +331,7 @@ function PatientEmergencyContactSummary({
   t: Translations;
 }) {
   const { patientRelationTypeLabel } = usePatientDetailLabels();
+  const { lang } = useLang();
   const liveRelations = useLivePatientRelations(detail.id);
   const emergencyRelations = liveRelations.items.filter((relation) => relation.is_emergency_contact);
   const hasStoredEmergencyContact = Boolean(
@@ -350,6 +352,12 @@ function PatientEmergencyContactSummary({
           label={t.patients_emergency_relation}
           value={patientRelationTypeLabel(relation.relation_type)}
         />
+        {relation.birth_date ? (
+          <ProfileSummaryLine label={t.patients_birth_date} value={formatDate(relation.birth_date)} />
+        ) : null}
+        {relationCitizenshipsLabel(relation, lang) ? (
+          <ProfileSummaryLine label={t.patients_nationality} value={relationCitizenshipsLabel(relation, lang)} />
+        ) : null}
         {relation.notes ? <ProfileSummaryLine label={t.patient_relation_notes} value={relation.notes} /> : null}
       </div>
     ));

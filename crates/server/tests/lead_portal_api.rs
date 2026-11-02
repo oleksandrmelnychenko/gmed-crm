@@ -8813,6 +8813,125 @@ async fn staff_correct_or_remove_a_trusted_person_but_never_widen_the_choice() {
     assert_eq!(choices["named_recipients"], false, "{choices}");
 }
 
+/// A person named with citizenships (client decision 2026-11-02) can be
+/// corrected and withdrawn by staff: the base is compared as normalized
+/// persons, and the citizenships stay unless staff change them (QA round 14).
+#[tokio::test]
+async fn staff_correct_and_withdraw_a_trusted_person_with_citizenships() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let pm = app.staff("patient_manager");
+    let (lead, _user, patient) =
+        lead_with_login(&app, "Mehrstaat", "mehrstaat.disclosure@example.com").await;
+    let mut oma = disclosure_person("Oma Mehrstaat", "medical");
+    oma["relation"] = json!("relative");
+    oma["citizenships"] = json!(["KZ", "DE"]);
+    let mut other = disclosure_person("Otto Named", "financial");
+    other["citizenships"] = json!(["AT"]);
+    let (status, body) = save_disclosure(
+        router,
+        lead,
+        &patient,
+        confirmed_disclosure(json!([oma, other]), true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let first = format!("/api/v1/leads/{lead}/trusted-persons/0");
+    let correct = |base: &Value, person: Value, reason: &str| json!({ "base": base, "person": person, "reason": reason });
+
+    // Without the citizenships the loaded copy is not the stored person.
+    let mut without = oma.clone();
+    without.as_object_mut().unwrap().remove("citizenships");
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        &first,
+        &pm,
+        Some(correct(&without, Value::Null, "Widerruf")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "trusted_person_changed");
+
+    // A copy that differs only in letter case and spacing is the same person.
+    let mut loose = oma.clone();
+    loose["citizenships"] = json!(["kz", " de "]);
+    loose["name"] = json!(" Oma  Mehrstaat ");
+    let mut fixed = oma.clone();
+    fixed["phone"] = json!("+49 30 5550177");
+    let (status, corrected) = json_request(
+        router,
+        "POST",
+        &first,
+        &pm,
+        Some(correct(&loose, fixed.clone(), "Neue Nummer")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{corrected}");
+    assert_eq!(corrected["trusted_persons"][0]["phone"], "+49 30 5550177");
+    assert_eq!(
+        corrected["trusted_persons"][0]["citizenships"],
+        json!(["KZ", "DE"])
+    );
+    let recipients: Value = sqlx::query_scalar(
+        "SELECT recipients FROM consent_form_choices WHERE lead_id = $1 ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(recipients[0]["phone"], "+49 30 5550177", "{recipients}");
+    assert_eq!(
+        recipients[0]["citizenships"],
+        json!(["KZ", "DE"]),
+        "{recipients}"
+    );
+
+    // Staff may change the citizenships too.
+    let mut changed = fixed.clone();
+    changed["citizenships"] = json!(["KZ"]);
+    let (status, corrected) = json_request(
+        router,
+        "POST",
+        &first,
+        &pm,
+        Some(correct(
+            &fixed,
+            changed.clone(),
+            "Nur eine Staatsangehörigkeit",
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{corrected}");
+    assert_eq!(
+        corrected["trusted_persons"][0]["citizenships"],
+        json!(["KZ"])
+    );
+
+    // The withdrawal is recorded.
+    let (status, removed) = json_request(
+        router,
+        "POST",
+        &first,
+        &pm,
+        Some(correct(&changed, Value::Null, "Widerruf am Telefon")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{removed}");
+    assert_eq!(removed["trusted_persons"].as_array().map(Vec::len), Some(1));
+    assert_eq!(removed["trusted_persons"][0]["name"], "Otto Named");
+    let recipients: Value = sqlx::query_scalar(
+        "SELECT recipients FROM consent_form_choices WHERE lead_id = $1 ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(recipients.as_array().map(Vec::len), Some(1), "{recipients}");
+    assert_eq!(recipients[0]["citizenships"], json!(["AT"]), "{recipients}");
+}
+
 #[tokio::test]
 async fn patient_form_disclosure_matches_the_cabinet_and_consent_and_rejects_stale_people() {
     let Some(app) = test_app().await else { return };

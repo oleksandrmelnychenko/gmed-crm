@@ -1794,7 +1794,6 @@ export function InterpretersPage() {
                       className={inputClass}
                       value={form.citizenships}
                       lang={lang}
-                      placeholder={lang === "de" ? "Land wählen" : "Выберите страну"}
                       onChange={(citizenships) => patchForm({ citizenships })}
                     />
                   </Field>

@@ -9618,7 +9618,6 @@ ${serviceCommentLines.join("\n")}`
                     id={STEP1_CONTROL_IDS.citizenships}
                     value={draft.citizenships}
                     className={selectClass}
-                    placeholder={tx("Гражданство", "Staatsangehörigkeit")}
                     onChange={(next) => handleAmlCountryChange({ citizenships: next })}
                   />
                 </Field>
@@ -9705,6 +9704,20 @@ ${serviceCommentLines.join("\n")}`
                                     </span>
                                   ) : null}
                                   <span className="break-all">{[contact.email, contact.phone].filter(Boolean).join(" · ")}</span>
+                                  {(() => {
+                                    // The parent's citizenships on the card itself (QA round 14), not only in the dialog.
+                                    const codes = normalizeCitizenships(
+                                      contact.representativeDetails?.citizenships
+                                        ?? portalRepresentation?.representatives.find((person) => person.id === contact.id)?.citizenships
+                                        ?? pendingRepresentativeDetailsRef.current.get(contact.id)?.citizenships
+                                        ?? [],
+                                    );
+                                    return codes.length > 0 ? (
+                                      <span className="break-words text-foreground/80" data-testid="trusted-contact-citizenships">
+                                        {`${tx("Гражданство", "Staatsangehörigkeit")}: ${codes.map((code) => countryLabel(code, lang)).join(", ")}`}
+                                      </span>
+                                    ) : null;
+                                  })()}
                                 </div>
                                 {serverContactError?.contactId === contact.id ? (
                                   <p role="alert" className="mt-1 text-xs font-medium text-destructive" data-testid="trusted-contact-server-error">

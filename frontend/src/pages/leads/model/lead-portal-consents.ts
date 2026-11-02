@@ -1,3 +1,4 @@
+import { normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
 import { normalizeScopeCodes, staffScopeSummary, type ConsentRecipientScope } from "@/lib/consent-recipient-scope";
 import type { LeadPortalConsent } from "../data/lead-portal-intake-api";
 
@@ -19,6 +20,8 @@ export type LeadPortalConsentRecipient = {
   /** The phone the person calls GMED from and the date of birth ("YYYY-MM-DD"): staff check a caller by both (owner 2026-10-26). */
   phone?: string | null;
   birth_date?: string | null;
+  /** ISO codes, optional (client decision 2026-11-02); never of an institution, never sanctions-screened. */
+  citizenships?: string[] | null;
   /** Free text of persons named before 2026-10-19. */
   scope?: string | null;
   /** The chosen scope (owner 2026-10-19); absent for legacy persons. */
@@ -108,9 +111,13 @@ export function normalizeConsentRecipients(value: unknown): LeadPortalConsentRec
     const scopeCodes = normalizeScopeCodes(raw.scope_codes);
     const phone = typeof raw.phone === "string" && raw.phone.trim() ? raw.phone.trim() : null;
     const birthDate = typeof raw.birth_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.birth_date.trim()) ? raw.birth_date.trim() : null;
+    // Kept as stored: staff corrections send the person back and the server compares it (QA round 14).
+    const citizenships = Array.isArray(raw.citizenships)
+      ? normalizeCitizenships(raw.citizenships.filter((code): code is string => typeof code === "string")) : [];
     return [{
       name, relation: typeof raw.relation === "string" ? raw.relation : "other", contact, scope,
       ...(phone ? { phone } : {}), ...(birthDate ? { birth_date: birthDate } : {}),
+      ...(citizenships.length > 0 ? { citizenships } : {}),
       ...(scopeCodes.length > 0 ? { scope_codes: scopeCodes } : {}),
     }];
   });

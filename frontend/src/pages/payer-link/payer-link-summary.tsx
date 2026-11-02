@@ -85,7 +85,7 @@ export function summaryGroups(questionnaire: PayerQuestionnaire, draft: PayerDra
         row(
           "representative_citizenships",
           draft.representative_citizenships.map(country).join(", "),
-          text.representativeLabel(label("representative_citizenships")),
+          text.representativeLabel(text.citizenshipsShort),
         ),
         email,
         row("phone", draft.phone),
@@ -99,7 +99,7 @@ export function summaryGroups(questionnaire: PayerQuestionnaire, draft: PayerDra
         row("date_of_birth", formatAppDate(draft.date_of_birth)),
         row("birth_place", draft.birth_place),
         row("birth_country", draft.birth_country ? country(draft.birth_country) : ""),
-        row("citizenships", draft.citizenships.map(country).join(", ")),
+        row("citizenships", draft.citizenships.map(country).join(", "), text.citizenshipsShort),
         ...address((value) => value),
         row("habitual_residence_country", draft.habitual_residence_country ? country(draft.habitual_residence_country) : ""),
         email,

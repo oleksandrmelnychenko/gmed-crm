@@ -15,3 +15,21 @@ export function citizenshipFieldLabel(lang: string): string {
     ? CITIZENSHIP_FIELD_LABELS[lang as keyof typeof CITIZENSHIP_FIELD_LABELS]
     : CITIZENSHIP_FIELD_LABELS.de;
 }
+
+/**
+ * The one placeholder of every citizenship picker (QA round 14): the field label already says what
+ * to enter, so the empty picker asks to choose countries instead of repeating the label.
+ */
+export const CITIZENSHIP_PLACEHOLDERS = {
+  ru: "Выберите страны",
+  de: "Länder wählen",
+  uk: "Виберіть країни",
+  en: "Choose countries",
+} as const;
+
+/** [`CITIZENSHIP_PLACEHOLDERS`] in `lang`; German for any other language. */
+export function citizenshipPlaceholder(lang: string): string {
+  return Object.prototype.hasOwnProperty.call(CITIZENSHIP_PLACEHOLDERS, lang)
+    ? CITIZENSHIP_PLACEHOLDERS[lang as keyof typeof CITIZENSHIP_PLACEHOLDERS]
+    : CITIZENSHIP_PLACEHOLDERS.de;
+}

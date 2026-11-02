@@ -5953,14 +5953,26 @@ async fn correct_trusted_person(
         Ok(persons) => persons,
         Err(error) => return internal(error, "load trusted persons"),
     };
-    if stored.get(index) != Some(&body.base) {
+    // Compare normalized persons: spacing, the letter case of country codes
+    // or a repeated citizenship in the loaded copy are no change by anyone.
+    let normalized = |person: &consent_choices::ConsentRecipient| {
+        consent_choices::clean_persons(vec![person.clone()])
+            .ok()
+            .and_then(|mut persons| persons.pop())
+            .unwrap_or_else(|| person.clone())
+    };
+    let Some(stored_base) = stored
+        .get(index)
+        .filter(|person| normalized(person) == normalized(&body.base))
+        .cloned()
+    else {
         return coded(
             StatusCode::CONFLICT,
             "trusted_person_changed",
             "The person was changed meanwhile; reload the request",
             json!({}),
         );
-    }
+    };
     let mut persons = stored.clone();
     match &body.person {
         Some(person) => persons[index] = person.clone(),
@@ -6036,9 +6048,13 @@ async fn correct_trusted_person(
         Ok(current) => current,
         Err(error) => return internal(error, "load consent choice"),
     };
-    if let Some(current) = current.filter(|current| current.recipients.contains(&body.base)) {
+    let base_normalized = normalized(&stored_base);
+    let is_base = |person: &consent_choices::ConsentRecipient| {
+        *person == stored_base || normalized(person) == base_normalized
+    };
+    if let Some(current) = current.filter(|current| current.recipients.iter().any(is_base)) {
         let mut recipients = current.recipients.clone();
-        if let Some(position) = recipients.iter().position(|person| *person == body.base) {
+        if let Some(position) = recipients.iter().position(is_base) {
             match &body.person {
                 Some(_) => recipients[position] = persons[index].clone(),
                 None => {

@@ -4,6 +4,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { useComboboxText } from "@/components/ui/combobox-text";
 import { COUNTRY_CODES, countryLabel, countrySearchText } from "@/components/ui/country-select";
 import { useLang } from "@/lib/i18n";
+import { citizenshipPlaceholder } from "@/lib/citizenship-field-label";
 import { cn } from "@/lib/utils";
 
 /**
@@ -22,13 +23,13 @@ export function normalizeCitizenships(values: readonly string[]): string[] {
 }
 
 // The label every citizenship field carries (client decision 2026-11-02).
-export { CITIZENSHIP_FIELD_LABELS, citizenshipFieldLabel } from "@/lib/citizenship-field-label";
+export { CITIZENSHIP_FIELD_LABELS, CITIZENSHIP_PLACEHOLDERS, citizenshipFieldLabel, citizenshipPlaceholder } from "@/lib/citizenship-field-label";
 
 /** Picks several citizenships from the ISO country list; chips remove one. */
 export function CitizenshipMultiSelect({
   value,
   onChange,
-  placeholder,
+  placeholder: placeholderProp,
   disabled = false,
   className,
   id,
@@ -38,7 +39,8 @@ export function CitizenshipMultiSelect({
 }: {
   value: readonly string[];
   onChange: (next: string[]) => void;
-  placeholder: string;
+  /** Defaults to the one staff placeholder «Выберите страны» in the display language. */
+  placeholder?: string;
   disabled?: boolean;
   className?: string;
   id?: string;
@@ -50,6 +52,7 @@ export function CitizenshipMultiSelect({
   const { t, lang: uiLang } = useLang();
   const removeLabel = useComboboxText()?.remove ?? t.common_remove;
   const lang = displayLang ?? uiLang;
+  const placeholder = placeholderProp ?? citizenshipPlaceholder(lang);
   const selected = normalizeCitizenships(value);
   const options = COUNTRY_CODES.map((code) => ({ value: code, label: `${countryLabel(code, lang)} (${code})` }))
     .sort((left, right) => left.label.localeCompare(right.label, lang));

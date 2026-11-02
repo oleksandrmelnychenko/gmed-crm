@@ -1170,7 +1170,6 @@ export function LeadPayerDeclarationSection({
                   <PayerField label={tx(CITIZENSHIP_FIELD_LABELS.ru, CITIZENSHIP_FIELD_LABELS.de)} required>
                     <CitizenshipMultiSelect
                       value={form.citizenships}
-                      placeholder={tx("Гражданство", "Staatsangehörigkeit")}
                       className={selectClass}
                       disabled={readOnly}
                       invalid={form.citizenships.length === 0 && dirty}

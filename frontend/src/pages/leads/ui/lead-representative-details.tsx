@@ -272,7 +272,6 @@ export function RepresentativeDetailsFields({
           value={draft.citizenships}
           lang={lang}
           disabled={disabled}
-          placeholder={tx("Выберите страны", "Länder auswählen")}
           onChange={(next) => onChange("citizenships", next)}
         />
       </div>
