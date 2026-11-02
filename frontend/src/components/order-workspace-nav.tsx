@@ -55,7 +55,6 @@ const PHASE_LABEL_KEY: Record<OrderPhase, string> = {
 // Sections whose work starts in a later phase. They stay in the rail so the
 // menu keeps its shape, marked as not reached until the order gets there.
 const SECTION_PHASE: Partial<Record<OrderSectionKey, OrderPhase>> = {
-  planning: "intake",
   execution: "execution",
   followup: "closure",
 };
