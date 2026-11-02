@@ -1,10 +1,12 @@
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
+import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 
 import "../../../src/index.css";
 import { Tabs } from "../../../src/components/ui/tabs";
 import { textareaClass } from "../../../src/components/ui-shell";
+import { AppAdapterDayjs } from "../../../src/lib/app-date-adapter";
 import { useLang } from "../../../src/lib/i18n";
 import type { RelationItem } from "../../../src/pages/patients/model/detail-tab-types";
 import { PatientRelationsTab } from "../../../src/pages/patients/ui/sections/patient-relations-tab";
@@ -68,5 +70,8 @@ function PatientRelationsFixture() {
 }
 
 createRoot(document.getElementById("root")!).render(
-  <MemoryRouter><PatientRelationsFixture /></MemoryRouter>,
+  // The relation dialog has a birth date picker; the app provides its adapter.
+  <LocalizationProvider dateAdapter={AppAdapterDayjs} adapterLocale="ru">
+    <MemoryRouter><PatientRelationsFixture /></MemoryRouter>
+  </LocalizationProvider>,
 );
