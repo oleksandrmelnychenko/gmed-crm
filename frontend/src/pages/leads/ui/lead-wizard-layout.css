@@ -1,4 +1,61 @@
 /* Wizard density stays local: tables keep their columns, short forms do not stretch. */
+/* The representative editor is portalled outside the wizard step panel. */
+.trusted-contact-editor-body {
+  padding: 12px;
+}
+
+.trusted-contact-editor-body > :not(:last-child) {
+  margin-block-end: 8px;
+}
+
+.trusted-contact-editor-body section {
+  padding: 12px;
+}
+
+.trusted-contact-editor-body [data-wizard-field] {
+  display: block;
+  min-width: 0;
+}
+
+.trusted-contact-editor-body [data-wizard-field-label] {
+  font-size: 12px;
+}
+
+.trusted-contact-editor-body [data-wizard-field] > span:first-child {
+  min-height: 24px;
+}
+
+.trusted-contact-editor-body [data-wizard-field] > span:first-child button[aria-haspopup="dialog"] {
+  width: 24px;
+  height: 24px;
+}
+
+.trusted-contact-editor-body :is(input:not([type="checkbox"]), [role="combobox"]) {
+  min-height: 34px;
+  height: 34px;
+}
+
+.trusted-contact-editor-body [data-testid="trusted-contact-scope"] label {
+  min-height: 34px;
+  padding-block: 5px;
+}
+
+.trusted-contact-details-section:empty {
+  display: none;
+}
+
+.trusted-contact-details-section > div {
+  margin-top: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+}
+
+.trusted-contact-details-section > div + div {
+  margin-top: 8px;
+}
+
 /* Every section title uses the same accent, including embedded clinical forms. */
 #lead-wizard-step-panel :is([data-slot="section-marker"], [data-slot="heading-marker"]) {
   display: none;

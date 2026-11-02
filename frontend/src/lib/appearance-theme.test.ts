@@ -1,0 +1,80 @@
+import { describe, expect, it } from "vitest";
+import {
+  addAppearanceTheme, appearanceStorageKey, BUILTIN_THEMES, DEFAULT_THEME, DEFAULT_THEME_COLORS,
+  EMPTY_APPEARANCE, MAX_CUSTOM_THEMES, MAX_THEME_JSON_LENGTH, parseAppearancePreferences,
+  parseAppearanceTheme, themeCssVariables,
+} from "./appearance-theme";
+
+const custom = { version: 1, id: "my-blue", name: "My Blue", colors: { headingMarker: "#2563EB" } };
+
+describe("portable appearance themes", () => {
+  it.each(BUILTIN_THEMES)("validates the built-in $name palette", (theme) => {
+    expect(parseAppearanceTheme(JSON.stringify(theme))).toEqual(theme);
+  });
+
+  it("fills omitted tokens from Graphite and keeps heading dots independent from dark buttons", () => {
+    const theme = parseAppearanceTheme(JSON.stringify(custom));
+    expect(theme.colors.headingMarker).toBe("#2563eb");
+    expect(theme.colors.primary).toBe(DEFAULT_THEME_COLORS.primary);
+    const css = themeCssVariables(theme);
+    expect(css["--heading-marker"]).toBe("#2563eb");
+    expect(css["--primary"]).toBe(DEFAULT_THEME_COLORS.primary);
+    expect(css["--popover"]).toBe(theme.colors.surface);
+    expect(css["--sidebar-accent"]).toBe(theme.colors.accent);
+    expect(css["--table-row-selected"]).toBe(theme.colors.rowSelected);
+  });
+
+  it.each([
+    "not json", "null", "[]", JSON.stringify({ ...custom, version: 2 }),
+    JSON.stringify({ ...custom, id: "bad id" }), JSON.stringify({ ...custom, name: " " }),
+    JSON.stringify({ ...custom, css: "body {display:none}" }),
+    JSON.stringify({ ...custom, colors: { background: "url(https://example.com)" } }),
+    JSON.stringify({ ...custom, colors: { unknown: "#ffffff" } }),
+    JSON.stringify({ ...custom, colors: { background: "#fff" } }),
+    JSON.stringify({ ...custom, colors: { text: "#ffffff" } }),
+    JSON.stringify({ ...custom, colors: { primary: "#ffffff" } }),
+    JSON.stringify({ ...custom, colors: { rowSelected: "#333333" } }),
+    JSON.stringify({ ...custom, colors: { focus: "#ffffff" } }),
+    `{"version":1,"id":"custom","name":"Custom","colors":{"__proto__":"#ffffff"}}`,
+    " ".repeat(MAX_THEME_JSON_LENGTH + 1),
+  ])("rejects malformed, executable, unknown or unreadable input %#", (input) => {
+    expect(() => parseAppearanceTheme(input)).toThrow();
+  });
+
+  it("round-trips an exported custom palette", () => {
+    const parsed = parseAppearanceTheme(JSON.stringify(custom));
+    expect(parseAppearanceTheme(JSON.stringify(parsed))).toEqual(parsed);
+  });
+});
+
+describe("appearance preferences", () => {
+  it("isolates users and safely encodes their keys", () => {
+    expect(appearanceStorageKey("first")).not.toBe(appearanceStorageKey("second"));
+    expect(appearanceStorageKey("user/a")).toBe("gmed.appearance.v1.user%2Fa");
+  });
+
+  it("recovers corrupt storage and a deleted selection", () => {
+    expect(parseAppearancePreferences("invalid")).toEqual(EMPTY_APPEARANCE);
+    expect(parseAppearancePreferences(JSON.stringify({ selectedId: "missing", themes: [] }))).toEqual(EMPTY_APPEARANCE);
+  });
+
+  it("retains valid custom palettes while discarding corrupt and reserved entries", () => {
+    const theme = parseAppearanceTheme(JSON.stringify(custom));
+    const stored = { selectedId: theme.id, themes: [null, DEFAULT_THEME, theme, theme] };
+    expect(parseAppearancePreferences(JSON.stringify(stored))).toEqual({ selectedId: theme.id, themes: [theme] });
+  });
+
+  it("updates a custom ID rather than creating duplicates and protects built-ins", () => {
+    const theme = parseAppearanceTheme(JSON.stringify(custom));
+    const added = addAppearanceTheme(EMPTY_APPEARANCE, theme);
+    expect(addAppearanceTheme(added, { ...theme, name: "Updated" }).themes).toHaveLength(1);
+    expect(() => addAppearanceTheme(added, DEFAULT_THEME)).toThrow("reserved-id");
+  });
+
+  it("caps saved palettes but allows editing an existing one at the limit", () => {
+    const themes = Array.from({ length: MAX_CUSTOM_THEMES }, (_, index) => ({ ...DEFAULT_THEME, id: `custom-${index}` }));
+    const full = { selectedId: themes[0].id, themes };
+    expect(() => addAppearanceTheme(full, { ...DEFAULT_THEME, id: "extra" })).toThrow("theme-limit");
+    expect(addAppearanceTheme(full, themes[0]).themes).toHaveLength(MAX_CUSTOM_THEMES);
+  });
+});

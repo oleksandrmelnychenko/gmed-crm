@@ -316,47 +316,50 @@ export function LeadRiskAssessmentPanel({
       <Section
         className={SECTION_CLASS}
         title={tx("Оценка риска", "Risikobewertung")}
-        accessory={riskCanRestart(assessment) ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="default"
-            className="h-8 rounded-lg"
-            disabled={disabled || restarting}
-            onClick={() => void restart()}
-            data-testid="lead-risk-restart"
-          >
-            {restarting ? <LoaderCircle aria-hidden className="size-3.5 animate-spin" /> : <RotateCcw aria-hidden className="size-3.5" />}
-            {tx("Начать оценку", "Bewertung starten")}
-          </Button>
-        ) : null}
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex" data-testid="lead-risk-level" data-level={score.level}>
-            <StatusChip tone={riskLevelTone(score.level)}>{riskLevelLabel(score.level, tx)}</StatusChip>
-          </span>
-          {score.knockout ? (
-            <span className="inline-flex" data-testid="lead-risk-knockout">
-              <StatusChip tone="error">K.o.</StatusChip>
-            </span>
-          ) : null}
-          <span className="inline-flex" data-testid="lead-risk-status">
-            <StatusChip tone={riskStatusTone(assessment.status)}>{riskStatusLabel(assessment.status, tx)}</StatusChip>
-          </span>
-        <dl className="flex flex-wrap items-center gap-2" data-testid="lead-risk-points" aria-label={riskPointsLine(score, tx)}>
-          {[
-            [tx("Баллы · максимум", "Punkte · Höchstwert"), score.points],
-            [score.triggers.some((trigger) => trigger.subject === "representative") ? tx("Пациент и представители", "Patient und Vertreter") : tx("Пациент", "Patient"), score.patient_points],
-            [tx("Плательщик", "Zahler/in"), score.payer_points],
-          ].map(([label, value]) => (
-            <div key={label} className="flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/20 px-2 py-0.5 text-xs leading-5 text-foreground">
-              <dt>{label}:</dt>
-              <dd className="font-semibold tabular-nums">{value}</dd>
+        accessory={(
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5" data-testid="lead-risk-summary">
+              <span className="inline-flex" data-testid="lead-risk-level" data-level={score.level}>
+                <StatusChip tone={riskLevelTone(score.level)}>{riskLevelLabel(score.level, tx)}</StatusChip>
+              </span>
+              {score.knockout ? (
+                <span className="inline-flex" data-testid="lead-risk-knockout">
+                  <StatusChip tone="error">K.o.</StatusChip>
+                </span>
+              ) : null}
+              <span className="inline-flex" data-testid="lead-risk-status">
+                <StatusChip tone={riskStatusTone(assessment.status)}>{riskStatusLabel(assessment.status, tx)}</StatusChip>
+              </span>
+              <dl className="flex flex-wrap items-center gap-2" data-testid="lead-risk-points" aria-label={riskPointsLine(score, tx)}>
+                {[
+                  [tx("Баллы · максимум", "Punkte · Höchstwert"), score.points],
+                  [score.triggers.some((trigger) => trigger.subject === "representative") ? tx("Пациент и представители", "Patient und Vertreter") : tx("Пациент", "Patient"), score.patient_points],
+                  [tx("Плательщик", "Zahler/in"), score.payer_points],
+                ].map(([label, value]) => (
+                  <div key={label} className="flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/20 px-2 py-0.5 text-xs leading-5 text-foreground">
+                    <dt>{label}:</dt>
+                    <dd className="font-semibold tabular-nums">{value}</dd>
+                  </div>
+                ))}
+              </dl>
             </div>
-          ))}
-        </dl>
-        </div>
-
+            {riskCanRestart(assessment) ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="default"
+                className="h-8 rounded-lg"
+                disabled={disabled || restarting}
+                onClick={() => void restart()}
+                data-testid="lead-risk-restart"
+              >
+                {restarting ? <LoaderCircle aria-hidden className="size-3.5 animate-spin" /> : <RotateCcw aria-hidden className="size-3.5" />}
+                {tx("Начать оценку", "Bewertung starten")}
+              </Button>
+            ) : null}
+          </div>
+        )}
+      >
         {preview ? (
           <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-risk-preview">
             {assessment.status === "grandfathered"

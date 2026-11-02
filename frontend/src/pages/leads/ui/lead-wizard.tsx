@@ -12546,6 +12546,8 @@ ${serviceCommentLines.join("\n")}`
           {trustedContactEditor ? (
               <AdminDialogScaffold
                 testId="trusted-contact-editor"
+                maxWidthClassName="sm:max-w-[860px]"
+                bodyClassName="trusted-contact-editor-body"
                 onSubmit={saveTrustedContact}
                 // The editor checks every field itself and says it at the field in the app's
                 // words; the browser's own bubble came first for a mistyped e-mail (QA 2026-10-25, V-A5).
@@ -12576,12 +12578,13 @@ ${serviceCommentLines.join("\n")}`
                         "Der Kontakt wird im Lead gespeichert und bei der Konvertierung in die Patientenakte übernommen.",
                       )}
                 </p>
-                <AdminFormSection title={tx("Данные представителя", "Angaben zur Person")}>
-                <div className="grid gap-4 sm:grid-cols-2 [&>div]:min-w-0">
+                <AdminFormSection title={tx("Данные представителя", "Angaben zur Person")} className="trusted-contact-person-section">
+                <div className="grid gap-x-3 gap-y-2 sm:grid-cols-2 [&>div]:min-w-0">
                   <Field
-                    className="sm:col-span-2"
+                    className="min-w-0"
                     label={tx("Выбрать из пациентов или лидов", "Aus Patienten oder Leads auswählen")}
                     htmlFor="trusted-contact-candidate"
+                    note={<InfoHint label={tx("О выборе человека", "Zur Personenauswahl")}>{tx("Данные выбранного человека заполнятся автоматически. Доступ к заявке выдаётся отдельно.", "Die Angaben der ausgewählten Person werden übernommen. Der Zugang zur Anfrage wird separat vergeben.")}</InfoHint>}
                   >
                     <NativeComboboxSelect
                       id="trusted-contact-candidate"
@@ -12599,18 +12602,15 @@ ${serviceCommentLines.join("\n")}`
                         </option>
                       ))}
                     </NativeComboboxSelect>
-                    <p className={cn(
-                      "mt-1.5 text-[11.5px] leading-tight",
-                      guardianPatientsError ? "text-destructive" : "text-muted-foreground",
-                    )}>
-                      {guardianPatientsError || (guardianPatientsLoading
-                        ? tx("Загрузка представителей…", "Vertreter werden geladen…")
-                        : tx("Данные выбранного человека заполнятся автоматически. Доступ к заявке выдаётся отдельно.", "Die Angaben der ausgewählten Person werden übernommen. Der Zugang zur Anfrage wird separat vergeben."))}
-                    </p>
+                    {guardianPatientsError || guardianPatientsLoading ? (
+                      <p role="status" className={cn("text-xs", guardianPatientsError ? "text-destructive" : "text-muted-foreground")}>
+                        {guardianPatientsError || tx("Загрузка представителей…", "Vertreter werden geladen…")}
+                      </p>
+                    ) : null}
                   </Field>
                   <Field
                     required
-                    className="sm:col-span-2"
+                    className="min-w-0"
                     label={tx("Имя и фамилия", "Vor- und Nachname")}
                     error={trustedContactEditorError || undefined}
                     errorId="trusted-contact-name-error"
@@ -12664,10 +12664,16 @@ ${serviceCommentLines.join("\n")}`
                     />
                   </Field>
                   <Field
-                    className={trustedContactEditorGuardian ? "sm:col-span-2" : undefined}
+                    className="min-w-0"
                     label={trustedContactEditorGuardian ? tx("Кем приходится ребёнку", "Beziehung zum Kind") : tx("Кем приходится клиенту", "Beziehung zur Person")}
                     required={trustedContactEditorGuardian} error={trustedContactRelationError || undefined} errorId="trusted-contact-relation-error"
-                    htmlFor="trusted-contact-relation">
+                    htmlFor="trusted-contact-relation"
+                    note={trustedContactEditorGuardian ? (
+                      <InfoHint label={tx("Как выбрать роль представителя", "Rolle der Vertretung wählen")}><span data-testid="trusted-contact-relation-hint">{tx(
+                          "Для родителя выберите «Мать» или «Отец» — и тогда, когда ребёнка воспитывает один родитель (это указывается в поле «Кто представляет ребёнка»). «Опекун» — только человек, назначенный судом вместо родителей.",
+                          "Für einen Elternteil „Mutter“ oder „Vater“ wählen – auch wenn ein Elternteil allein sorgeberechtigt ist (das steht im Feld „Wer vertritt das Kind“). „Vormund“ nur für eine vom Gericht bestellte Person anstelle der Eltern.",
+                        )}</span></InfoHint>
+                    ) : undefined}>
                     <NativeComboboxSelect
                       id="trusted-contact-relation"
                       className={selectClass}
@@ -12693,15 +12699,6 @@ ${serviceCommentLines.join("\n")}`
                         </option>
                       ))}
                     </NativeComboboxSelect>
-                    {trustedContactEditorGuardian ? (
-                      // The Linda case (2026-10-22): a father entered as "Опекун" was printed as Vormund.
-                      <p className="mt-1.5 text-[11.5px] leading-tight text-muted-foreground" data-testid="trusted-contact-relation-hint">
-                        {tx(
-                          "Для родителя выберите «Мать» или «Отец» — и тогда, когда ребёнка воспитывает один родитель (это указывается в поле «Кто представляет ребёнка»). «Опекун» — только человек, назначенный судом вместо родителей.",
-                          "Für einen Elternteil „Mutter“ oder „Vater“ wählen – auch wenn ein Elternteil allein sorgeberechtigt ist (das steht im Feld „Wer vertritt das Kind“). „Vormund“ nur für eine vom Gericht bestellte Person anstelle der Eltern.",
-                        )}
-                      </p>
-                    ) : null}
                     {trustedContactEditorGuardian
                       && trustedContactEditor.relation === "guardian"
                       && !(leadId
@@ -12777,8 +12774,10 @@ ${serviceCommentLines.join("\n")}`
                 {/* What the person may be told: printed on the consent form next to the
                     contact while the client named no recipients in the cabinet; the
                     same choices as the cabinet's trusted persons (owner 2026-10-26). */}
-                <fieldset className="space-y-1 border-t border-border/60 pt-3" data-testid="trusted-contact-scope">
-                  <legend className="text-sm font-medium text-foreground">
+                </AdminFormSection>
+                <AdminFormSection title={tx("Объём информации", "Umfang der Auskunft")} className="trusted-contact-scope-section">
+                <fieldset className="min-w-0" data-testid="trusted-contact-scope">
+                  <legend className="sr-only">
                     {tx("Объём информации (для формы согласия)", "Umfang der Auskunft (für die Einverständniserklärung)")}
                   </legend>
                   <p className="text-xs leading-5 text-muted-foreground">
@@ -12787,6 +12786,7 @@ ${serviceCommentLines.join("\n")}`
                       "Wird in der Einverständniserklärung neben dieser Person gedruckt, wenn der Kunde im Kundenkabinett keine Empfänger selbst gewählt hat. Die Wahl des Kunden geht immer vor.",
                     )}
                   </p>
+                  <div className="grid gap-x-3 sm:grid-cols-2">
                   {CONSENT_RECIPIENT_SCOPES.map((code) => (
                     <ToggleRow
                       key={code}
@@ -12797,7 +12797,10 @@ ${serviceCommentLines.join("\n")}`
                       onChange={() => patchTrustedContactEditor("scopeCodes", toggleScopeCode(trustedContactEditor.scopeCodes ?? [], code))}
                     />
                   ))}
+                  </div>
                 </fieldset>
+                </AdminFormSection>
+                <div className="trusted-contact-details-section">
                 {(() => {
                   // A representative on file: staff correct the parts the GwG sheet
                   // prints (owner 2026-10-24) and upload the identity document
@@ -12891,7 +12894,7 @@ ${serviceCommentLines.join("\n")}`
                     </>
                   );
                 })()}
-                </AdminFormSection>
+                </div>
               </AdminDialogScaffold>
           ) : null}
       </Dialog>

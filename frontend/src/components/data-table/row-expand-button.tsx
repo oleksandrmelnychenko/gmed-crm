@@ -21,12 +21,7 @@ export function RowExpandButton({
       aria-label={label}
       title={label}
       data-testid={testId}
-      className={cn(
-        "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md border shadow-xs transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1",
-        expanded
-          ? "border-primary bg-primary text-primary-foreground hover:bg-primary/90"
-          : "border-foreground/20 bg-muted text-foreground hover:border-primary hover:bg-primary hover:text-primary-foreground",
-      )}
+      className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-foreground shadow-none transition-colors duration-150 outline-none hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
       onClick={(event) => {
         event.stopPropagation();
         onToggle();
@@ -38,7 +33,7 @@ export function RowExpandButton({
     >
       <ChevronRight
         className={cn("size-4 transition-transform duration-150 motion-reduce:transition-none", expanded && "rotate-90")}
-        strokeWidth={2.5}
+        strokeWidth={2}
         aria-hidden="true"
       />
     </button>

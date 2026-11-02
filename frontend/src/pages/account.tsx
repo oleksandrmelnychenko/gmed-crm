@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import { CheckCircle2, Info, KeyRound, LogOut, Monitor, Save, Smartphone } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
+import { AppearanceSettings } from "@/components/appearance-settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
@@ -69,6 +70,7 @@ export function AccountPage() {
         </div>
         {leadCabinet ? null : (
           <>
+            <AppearanceSettings />
             <AccountSection title={l("twofactor_title")}>
               <TwoFactorSection embedded />
             </AccountSection>

@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "id": "my-theme",
+  "name": "My Theme",
+  "colors": {
+    "background": "#ebedf4",
+    "surface": "#ffffff",
+    "text": "#1a1a22",
+    "textMuted": "#4c5262",
+    "primary": "#161922",
+    "primaryText": "#f4f3f1",
+    "muted": "#f0f1f6",
+    "accent": "#e6e8f0",
+    "border": "#dfe2eb",
+    "inputBorder": "#d6dae5",
+    "field": "#ffffff",
+    "focus": "#777f9e",
+    "sidebar": "#f7f8fb",
+    "headingMarker": "#f97316",
+    "rowAlternate": "#f6f7f8",
+    "rowHover": "#eceef1",
+    "rowActive": "#e9ebef",
+    "rowSelected": "#e1e5eb"
+  }
+}
