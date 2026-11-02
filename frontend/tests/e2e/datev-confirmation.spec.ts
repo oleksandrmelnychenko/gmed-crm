@@ -84,7 +84,7 @@ test("pending revocation blocks new credentials even without stored tokens", asy
   await expect(panel.getByRole("button", { name: "DATEV · Отключить доступ", exact: true })).toBeEnabled();
 });
 
-for (const lang of ["ru", "de"]) test(`${lang} all six modules explain current GMed support without granting access`, async ({ page }) => {
+for (const lang of ["ru", "de"]) test(`${lang} all six modules explain current GMED support without granting access`, async ({ page }) => {
   await setup(page, true, lang);
   for (const module of ["belege", "belegfreigabe", "bank", "kassenbuch", "auswertungspakete", "liquiditaetsmonitor"]) {
     const card = page.getByTestId(`datev-module-${module}`);

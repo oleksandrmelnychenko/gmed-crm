@@ -210,13 +210,13 @@ for (const lang of ["ru", "de"] as const) test(`incoming invoice approval and pa
   const table = workspace.getByRole("table");
   await expect(table.getByText("LIVE-INVOICE-1", { exact: true })).toBeVisible();
   await expect(table.getByText(lang === "ru" ? "На проверке" : "Zu prüfen", { exact: true })).toBeVisible();
-  // The row action first asks who paid; a company expense can only be paid by GMed.
+  // The row action first asks who paid; a company expense can only be paid by GMED.
   const pay = workspace.getByRole("button", { name: lang === "ru" ? "Оплата" : "Zahlung", exact: true }).filter({ visible: true });
   const bounds = await pay.boundingBox();
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(1440);
   await pay.click();
   const choice = page.getByRole("dialog", { name: lang === "ru" ? "Оплата входящего счёта" : "Zahlung der Eingangsrechnung", exact: true });
-  const paidByGmed = choice.getByRole("button", { name: lang === "ru" ? /^Оплатила GMed/ : /^Von GMed bezahlt/ });
+  const paidByGmed = choice.getByRole("button", { name: lang === "ru" ? /^Оплатила GMED/ : /^Von GMED bezahlt/ });
   await expect(paidByGmed).toBeDisabled();
   expect(api.payments).toHaveLength(0);
   await choice.getByRole("button", { name: lang === "ru" ? "Подтвердить счёт" : "Rechnung freigeben", exact: true }).click();
@@ -243,9 +243,9 @@ for (const lang of ["ru", "de"] as const) test(`incoming invoice approval and pa
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
   await expect(pay).toBeVisible();
   await page.screenshot({ path: `../artifacts/design-qa/incoming-invoices-${lang}-mobile.png`, fullPage: true });
-  // The paid invoice keeps its GMed payment history reachable on a phone.
+  // The paid invoice keeps its GMED payment history reachable on a phone.
   await pay.click();
-  await expect(choice.getByRole("button", { name: lang === "ru" ? /^История оплат GMed/ : /^GMed-Zahlungsverlauf/ })).toBeEnabled();
+  await expect(choice.getByRole("button", { name: lang === "ru" ? /^История оплат GMED/ : /^GMED-Zahlungsverlauf/ })).toBeEnabled();
 });
 
 test("financial events update balances without a refresh button and coalesce during a slow request", async ({ page }) => {

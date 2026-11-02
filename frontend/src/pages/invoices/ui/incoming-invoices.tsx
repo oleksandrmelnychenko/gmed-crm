@@ -115,7 +115,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
   const payerLabel = (row: IncomingInvoice) => row.paid_by === "patient"
     ? tx("Пациент", "Patient")
     : Number(row.company_paid_gross) > 0
-      ? Number(row.remaining_gross) > 0 ? tx("GMed, частично", "GMed, teilweise") : "GMed"
+      ? Number(row.remaining_gross) > 0 ? tx("GMED, частично", "GMED, teilweise") : "GMED"
       : tx("Не оплачен", "Unbezahlt");
   const patientBillingLabel = (row: IncomingInvoice) => {
     switch (patientBillingState(row)) {
@@ -128,8 +128,8 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
     }
   };
   const paymentErrorLabel = (reason: PatientPaymentErrorReason | null) => {
-    if (reason === "company_invoice") return tx("Этот счёт не привязан к пациенту. Для него доступна только оплата GMed.", "Diese Rechnung ist keinem Patienten zugeordnet. Dafür ist nur eine Zahlung durch GMed möglich.");
-    if (reason === "company_payment_exists") return tx("Сначала отмените проведённые оплаты GMed.", "Stornieren Sie zuerst die bereits gebuchten GMed-Zahlungen.");
+    if (reason === "company_invoice") return tx("Этот счёт не привязан к пациенту. Для него доступна только оплата GMED.", "Diese Rechnung ist keinem Patienten zugeordnet. Dafür ist nur eine Zahlung durch GMED möglich.");
+    if (reason === "company_payment_exists") return tx("Сначала отмените проведённые оплаты GMED.", "Stornieren Sie zuerst die bereits gebuchten GMED-Zahlungen.");
     if (reason === "invalid_date") return tx("Укажите корректную дату оплаты, не позднее сегодняшней.", "Geben Sie ein gültiges Zahlungsdatum ein, das nicht nach dem heutigen Datum liegt.");
     if (reason === "not_approved") return tx("Сначала подтвердите неоплаченный входящий счёт.", "Prüfen Sie zuerst die unbezahlte Eingangsrechnung.");
     if (reason === "not_patient_paid") return tx("Счёт уже был изменён. Обновите список и повторите действие.", "Die Rechnung wurde bereits geändert. Aktualisieren Sie die Liste und versuchen Sie es erneut.");
@@ -219,7 +219,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
           </label>
           {paymentError ? <Banner tone="error">{paymentError}</Banner> : null}
           {paymentChoice.status === "received" ? <Banner tone="warning"><div className="flex flex-wrap items-center justify-between gap-3"><span>{tx("Сначала подтвердите реквизиты входящего счёта.", "Prüfen Sie zuerst die Eingangsrechnung.")}</span><Button type="button" size="sm" variant="outline" disabled={paymentBusy} onClick={() => void approvePaymentChoice(paymentChoice)}>{paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{tx("Подтвердить счёт", "Rechnung freigeben")}</Button></div></Banner> : null}
-          {!canMarkInvoicePaidByPatient(paymentChoice) ? <Banner tone="warning">{tx("Это расход компании без привязки к пациенту. Его можно оплатить только через GMed.", "Dies ist eine Unternehmensausgabe ohne Patientenzuordnung. Sie kann nur über GMed bezahlt werden.")}</Banner> : null}
+          {!canMarkInvoicePaidByPatient(paymentChoice) ? <Banner tone="warning">{tx("Это расход компании без привязки к пациенту. Его можно оплатить только через GMED.", "Dies ist eine Unternehmensausgabe ohne Patientenzuordnung. Sie kann nur über GMED bezahlt werden.")}</Banner> : null}
           <fieldset className="space-y-2">
             <legend className="text-xs font-medium text-muted-foreground">{tx("Кто оплатил счёт?", "Wer hat die Rechnung bezahlt?")}</legend>
             <div className={`grid gap-3 ${canMarkInvoicePaidByPatient(paymentChoice) ? "sm:grid-cols-2" : "sm:grid-cols-1"}`}>
@@ -228,13 +228,13 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
                 onClick={() => void updatePatientPayment(paymentChoice, paymentChoice.paid_by !== "patient")}>
                 <span className="mb-3 flex items-center text-foreground"><UserRound className="size-5" /></span>
                 <span className="block text-sm font-semibold text-foreground">{paymentChoice.paid_by === "patient" ? tx("Снова не оплачен", "Wieder unbezahlt") : tx("Пациент оплатил сам", "Patient hat selbst bezahlt")}</span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">{tx("Движение денег GMed не создаётся.", "Es wird keine GMed-Geldbewegung erstellt.")}</span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">{tx("Движение денег GMED не создаётся.", "Es wird keine GMED-Geldbewegung erstellt.")}</span>
               </button> : null}
               <button type="button" disabled={paymentBusy || paymentChoice.paid_by === "patient" || ["received", "expected"].includes(paymentChoice.status)}
                 className="group flex min-h-32 flex-col rounded-lg border border-border/70 bg-card p-3.5 text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => { setPaymentError(null); setPendingSettlement(paymentChoice); setPaymentChoice(null); }}>
                 <span className="mb-3 flex items-center text-foreground"><Building2 className="size-5" /></span>
-                <span className="block text-sm font-semibold text-foreground">{Number(paymentChoice.company_paid_gross) > 0 ? tx("История оплат GMed", "GMed-Zahlungsverlauf") : tx("Оплатила GMed", "Von GMed bezahlt")}</span>
+                <span className="block text-sm font-semibold text-foreground">{Number(paymentChoice.company_paid_gross) > 0 ? tx("История оплат GMED", "GMED-Zahlungsverlauf") : tx("Оплатила GMED", "Von GMED bezahlt")}</span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">{tx("Оплата проводится через счёт компании.", "Die Zahlung wird über ein Unternehmenskonto gebucht.")}</span>
               </button>
             </div>

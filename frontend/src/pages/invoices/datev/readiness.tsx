@@ -26,7 +26,7 @@ export function DatevReadiness({ profile, dirty }: { profile: DatevProfile; dirt
     </>}
     description={dirty
       ? de ? "Stand des gespeicherten Profils. Änderungen zuerst speichern." : "Показан сохранённый профиль. Сначала сохраните изменения."
-      : de ? "Eigene Angaben in GMed. DATEV-Zugriffsrechte werden erst nach der Autorisierung geprüft." : "Сведения из GMed. Права доступа к DATEV будут проверены после авторизации."}
+      : de ? "Eigene Angaben in GMED. DATEV-Zugriffsrechte werden erst nach der Autorisierung geprüft." : "Сведения из GMED. Права доступа к DATEV будут проверены после авторизации."}
   >
     <ul className="grid gap-2 sm:grid-cols-2">
       {checks.map((check) => <li key={check.id} className="flex min-w-0 items-start gap-2 rounded-md border border-border/50 bg-muted/20 px-3 py-2 text-xs leading-5">

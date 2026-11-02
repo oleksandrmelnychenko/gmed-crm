@@ -92,7 +92,7 @@ fn folder_name(last: &str, first: &str, number: Option<&str>) -> String {
     }
 }
 
-const README: &str = "Personalakten-Export (GMed)\n\
+const README: &str = "Personalakten-Export (GMED)\n\
 \n\
 Inhalt\n\
 - <Mitarbeiter>/: archivierte Dokumente unter ihrem Archivnamen.\n\

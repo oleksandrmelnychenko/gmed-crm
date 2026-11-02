@@ -133,7 +133,7 @@ test("German DATEV administration page is separate and links back to invoices", 
   await page.screenshot({ path: "../artifacts/design-qa/datev-admin-mobile.png", animations: "disabled", fullPage: true });
   await page.getByRole("button", { name: "Demo öffnen" }).click();
   await expect(page).toHaveURL(/invoices\?source=datev&datev_mode=demo/);
-  await expect(page.getByTestId("datev-workspace").getByText("GMed Demo · Testunternehmen")).toBeVisible();
+  await expect(page.getByTestId("datev-workspace").getByText("GMED Demo · Testunternehmen")).toBeVisible();
   await page.getByRole("button", { name: "DATEV-Daten", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Originalrechnungen aus DATEV" })).toBeVisible();
 });
@@ -142,13 +142,13 @@ test("DATEV profile persists module choices and does not grant DATEV access", as
   const { writes, datevRequests } = await prepare(page, "ceo");
   await page.goto("/admin/datev");
   await expect(page.getByRole("checkbox", { name: /^(Belege online|Belegfreigabe online|Bank online|Kassenbuch online|Auswertungspakete Rechnungswesen online|Liquiditätsmonitor online)$/ })).toHaveCount(6);
-  await page.getByRole("textbox", { name: "Название компании", exact: true }).fill("GMed test company");
+  await page.getByRole("textbox", { name: "Название компании", exact: true }).fill("GMED test company");
   await page.getByRole("textbox", { name: "Beraternummer", exact: true }).fill("0012345");
   await expect(page.getByRole("button", { name: "Сохранить профиль" })).toBeDisabled();
   await page.getByRole("textbox", { name: "Mandantennummer", exact: true }).fill("00012");
   await page.getByRole("checkbox", { name: "Kassenbuch online", exact: true }).uncheck();
   await confirm(page, page.locator("main"), "DATEV · Сохранить профиль");
-  await expect(page.getByRole("status")).toContainText("Профиль сохранён в GMed");
+  await expect(page.getByRole("status")).toContainText("Профиль сохранён в GMED");
   await page.reload();
   await expect(page.getByRole("textbox", { name: "Beraternummer", exact: true })).toHaveValue("0012345");
   await expect(page.getByRole("checkbox", { name: "Kassenbuch online", exact: true })).not.toBeChecked();

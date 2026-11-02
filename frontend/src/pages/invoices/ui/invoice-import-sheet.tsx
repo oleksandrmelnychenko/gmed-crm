@@ -284,7 +284,7 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                     onClick={() => { setScope("company"); setConfirmed(false); }}
                   >
                     <Building2 className="size-4 shrink-0" />
-                    <span><span className="block font-semibold">{tx("Расход компании", "Unternehmensausgabe")}</span><span className="block text-xs font-normal opacity-80">{tx("Счёт выставлен непосредственно GMed", "Rechnung direkt an GMed")}</span></span>
+                    <span><span className="block font-semibold">{tx("Расход компании", "Unternehmensausgabe")}</span><span className="block text-xs font-normal opacity-80">{tx("Счёт выставлен непосредственно GMED", "Rechnung direkt an GMED")}</span></span>
                   </Button>
                   <Button
                     type="button"

@@ -1,9 +1,9 @@
 import { useLang } from "@/lib/i18n";
 
 const ru = {
-  invoices: "Счета GMed", fromDatev: "Из DATEV", connection: "Подключение DATEV",
+  invoices: "Счета GMED", fromDatev: "Из DATEV", connection: "Подключение DATEV",
   notConnected: "Не подключено", readOnly: "Только просмотр", demo: "Демо",
-  live: "Данные DATEV", openDemo: "Открыть демо", demoCompany: "GMed Demo · тестовая компания",
+  live: "Данные DATEV", openDemo: "Открыть демо", demoCompany: "GMED Demo · тестовая компания",
   systemName: "DATEV Unternehmen online",
   connectionStatus: "Статус подключения", adminConnectionHint: "Подключение DATEV настраивает администратор.",
   connect: "Подключить DATEV", setupNeeded: "Подключение станет доступно после настройки доступа бухгалтерии.",
@@ -11,7 +11,7 @@ const ru = {
   mode: "Режим работы", sending: "Отправка в DATEV", disabled: "Недоступна",
   prerequisites: "Для реального подключения", product: "Система DATEV", productHint: "DATEV Unternehmen online", selected: "Выбрано",
   documentVersion: "Версия Belege online", documentVersionHint: "Нужно уточнить версию кабинета бухгалтерии: от неё зависит доступный обмен документами.",
-  access: "Доступ для GMed", accessHint: "Нужно зарегистрировать приложение и настроить разрешения на получение данных.",
+  access: "Доступ для GMED", accessHint: "Нужно зарегистрировать приложение и настроить разрешения на получение данных.",
   authorization: "Подтверждение бухгалтерии", authorizationHint: "Вход и предоставление доступа пройдут на официальной странице DATEV.",
   pending: "Ожидается", settings: "Настройки интеграции", integrations: "Интеграции", openInvoices: "Открыть счета DATEV",
   previewHint: "Пока доступ не настроен, можно посмотреть работу раздела на вымышленных счетах и клиентах.",
@@ -23,7 +23,7 @@ const ru = {
   count: "Счетов", linkedCount: "Привязано", needsReview: "Нужна проверка", totalAmount: "Сумма демо-счетов",
   empty: "Счета не найдены", emptyHint: "Попробуйте другой запрос или сбросьте фильтры.", clear: "Сбросить фильтры",
   reloadDemo: "Обновить демо", demoRefreshed: "Демо-примеры перечитаны. Связи сохранены; обращений к DATEV не было.",
-  view: "Просмотреть", review: "Просмотр счёта DATEV", reviewHint: "Демонстрация просмотра документа и привязки внутри GMed.",
+  view: "Просмотреть", review: "Просмотр счёта DATEV", reviewHint: "Демонстрация просмотра документа и привязки внутри GMED.",
   original: "Образец документа", download: "Скачать демо-PDF", zoomOut: "Уменьшить", zoomIn: "Увеличить", fit: "По ширине",
   client: "Демо-клиент", order: "Демо-заказ", chooseClient: "Выберите клиента", chooseOrder: "Выберите заказ",
   autoHint: "Клиент определён по документу. Проверьте его и выберите заказ.", manualHint: "Совпадение не найдено. Выберите клиента вручную.",
@@ -36,9 +36,9 @@ const ru = {
 };
 
 const de: typeof ru = {
-  invoices: "GMed-Rechnungen", fromDatev: "Aus DATEV", connection: "DATEV-Verbindung",
+  invoices: "GMED-Rechnungen", fromDatev: "Aus DATEV", connection: "DATEV-Verbindung",
   notConnected: "Nicht verbunden", readOnly: "Nur lesen", demo: "Demo",
-  live: "DATEV-Daten", openDemo: "Demo öffnen", demoCompany: "GMed Demo · Testunternehmen",
+  live: "DATEV-Daten", openDemo: "Demo öffnen", demoCompany: "GMED Demo · Testunternehmen",
   systemName: "DATEV Unternehmen online",
   connectionStatus: "Verbindungsstatus", adminConnectionHint: "Die DATEV-Verbindung wird in der Administration eingerichtet.",
   connect: "DATEV verbinden", setupNeeded: "Die Verbindung wird nach Einrichtung des Buchhaltungszugangs verfügbar.",
@@ -46,7 +46,7 @@ const de: typeof ru = {
   mode: "Betriebsmodus", sending: "An DATEV senden", disabled: "Nicht verfügbar",
   prerequisites: "Für die echte Verbindung", product: "DATEV-System", productHint: "DATEV Unternehmen online", selected: "Ausgewählt",
   documentVersion: "Version von Belege online", documentVersionHint: "Die Version der Buchhaltungsumgebung klären: Davon hängt der verfügbare Dokumentenaustausch ab.",
-  access: "Zugang für GMed", accessHint: "Anwendung registrieren und Berechtigungen zum Datenabruf einrichten.",
+  access: "Zugang für GMED", accessHint: "Anwendung registrieren und Berechtigungen zum Datenabruf einrichten.",
   authorization: "Freigabe der Buchhaltung", authorizationHint: "Anmeldung und Freigabe erfolgen auf der offiziellen DATEV-Seite.",
   pending: "Ausstehend", settings: "Integrationseinstellungen", integrations: "Integrationen", openInvoices: "DATEV-Rechnungen öffnen",
   previewHint: "Bis der Zugang eingerichtet ist, lässt sich der Bereich mit fiktiven Rechnungen und Patienten testen.",
@@ -58,7 +58,7 @@ const de: typeof ru = {
   count: "Rechnungen", linkedCount: "Zugeordnet", needsReview: "Zu prüfen", totalAmount: "Summe der Demorechnungen",
   empty: "Keine Rechnungen gefunden", emptyHint: "Andere Suche versuchen oder Filter zurücksetzen.", clear: "Filter zurücksetzen",
   reloadDemo: "Demo aktualisieren", demoRefreshed: "Demobeispiele neu geladen. Zuordnungen bleiben erhalten; keine DATEV-Abfrage erfolgt.",
-  view: "Ansehen", review: "DATEV-Rechnung ansehen", reviewHint: "Demonstration der Dokumentansicht und Zuordnung innerhalb von GMed.",
+  view: "Ansehen", review: "DATEV-Rechnung ansehen", reviewHint: "Demonstration der Dokumentansicht und Zuordnung innerhalb von GMED.",
   original: "Musterdokument", download: "Demo-PDF herunterladen", zoomOut: "Verkleinern", zoomIn: "Vergrößern", fit: "An Breite anpassen",
   client: "Demo-Patient", order: "Demo-Auftrag", chooseClient: "Patient auswählen", chooseOrder: "Auftrag auswählen",
   autoHint: "Patient anhand des Dokuments erkannt. Bitte prüfen und Auftrag auswählen.", manualHint: "Keine Übereinstimmung gefunden. Patienten manuell auswählen.",

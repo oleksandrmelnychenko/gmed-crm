@@ -4,7 +4,7 @@ export const liveRu = {
   unavailable: "Состояние неизвестно", companyMissing: "Сначала сохраните действительные Beraternummer и Mandantennummer в профиле компании.", historyError: "Не удалось загрузить журнал. Обновите статус, чтобы повторить.", exchangeMissing: "Чтение требует подписки и авторизации Export Rechnungswesen. Настройте ключи с этим доступом и подключитесь повторно.", unavailableOperations: "Импорт оригиналов из DATEV, отправка данных в DATEV и проведение платежей пока недоступны. Скачивание JSON не выполняет эти операции.",
   loading: "Загрузка подключения…", refresh: "DATEV · Обновить статус", settings: "Ключи приложения", mode: "Среда DATEV",
   id: "Client ID приложения", secret: "Client Secret", redirect: "Redirect URL", save: "DATEV · Сохранить ключи",
-  keyHint: "Ключи сохраняются зашифрованными на сервере. Redirect URL — адрес консоли GMed (DEV или PROD); он должен точно совпадать с адресом в DATEV Developer Portal.",
+  keyHint: "Ключи сохраняются зашифрованными на сервере. Redirect URL — адрес консоли GMED (DEV или PROD); он должен точно совпадать с адресом в DATEV Developer Portal.",
   exchange: "Запрашивать доступ к Export Rechnungswesen (accounting:dataexchange)",
   exchangeHint: "Включайте, если API-продукт подключён для приложения. Галочка не подтверждает права или заказ сервиса.",
   connect: "Подключить через DATEV", disconnect: "DATEV · Отключить доступ", check: "DATEV · Проверить доступ",
@@ -14,7 +14,7 @@ export const liveRu = {
   numbersHint: "Сначала сохраните Beraternummer и Mandantennummer в профиле ниже. Проверка относится только к этой компании.",
   services: "Сервисы, возвращённые DATEV", servicesHint: "Наличие сервиса в ответе не подтверждает загрузку документов или поддержку всех функций модуля.",
   noServices: "DATEV не вернул список сервисов для этой компании.",
-  readTitle: "Получение данных", readHint: "Данные Export Rechnungswesen относятся к последней архивации в DATEV. Получение не создаёт счета в GMed.",
+  readTitle: "Получение данных", readHint: "Данные Export Rechnungswesen относятся к последней архивации в DATEV. Получение не создаёт счета в GMED.",
   originals: "Загрузка оригиналов PDF/XML из Belege online пока не поддерживается этим коннектором. Файл, выгруженный вручную из DATEV, можно импортировать через входящие инвойсы.",
   fiscal: "Финансовые годы", terms: "Условия платежей", balances: "Обороты и остатки", kind: "Какие данные получить",
   year: "Начало финансового года", yearHint: "Выберите дату начала из результата «Финансовые годы»; она может отличаться от 1 января.",
@@ -26,7 +26,7 @@ export const liveRu = {
   connectLong: "DATEV · Подключить на длительный срок", forceDisconnect: "DATEV · Отключить без подтверждения",
   session: "Вход в DATEV действует до", sessionHint: "Обычный вход DATEV действует не более 11 часов, затем потребуется повторный вход. Длительный доступ (до 2 лет) выдаётся только для одной проверенной компании.",
   longTerm: "Длительный доступ", longTermFor: "Длительный доступ для компании", longTermNeedsCheck: "Длительное подключение доступно после успешной проверки доступа к компании из профиля: подключитесь обычным входом, выполните «Проверить доступ», затем отключитесь.",
-  forcedNotice: "Токены удалены в GMed, но DATEV не подтвердил отзыв. Отзовите доступ приложения на стороне DATEV (ссылка ниже).",
+  forcedNotice: "Токены удалены в GMED, но DATEV не подтвердил отзыв. Отзовите доступ приложения на стороне DATEV (ссылка ниже).",
 };
 export const liveDe: typeof liveRu = {
   connectionScope: "Die Verbindung gilt für die in DATEV freigegebenen Daten. Der Zugriff auf ein Unternehmen wird separat anhand von Beraternummer und Mandantennummer geprüft.",
@@ -34,7 +34,7 @@ export const liveDe: typeof liveRu = {
   unavailable: "Status unbekannt", companyMissing: "Zuerst gültige Beraternummer und Mandantennummer im Unternehmensprofil speichern.", historyError: "Protokoll konnte nicht geladen werden. Status aktualisieren und erneut versuchen.", exchangeMissing: "Der Abruf erfordert ein Abonnement und die Autorisierung für Export Rechnungswesen. Zugangsdaten mit diesem Zugriff einrichten und erneut verbinden.", unavailableOperations: "Originalbelege aus DATEV importieren, Daten an DATEV übertragen und Zahlungen ausführen ist derzeit nicht verfügbar. Der JSON-Download führt diese Aktionen nicht aus.",
   loading: "Verbindung wird geladen…", refresh: "DATEV · Status aktualisieren", settings: "App-Zugangsdaten", mode: "DATEV-Umgebung",
   id: "Client ID der App", secret: "Client Secret", redirect: "Redirect URL", save: "DATEV · Zugangsdaten speichern",
-  keyHint: "Zugangsdaten werden serverseitig verschlüsselt gespeichert. Die Redirect URL ist die Adresse der GMed-Konsole (DEV oder PROD) und muss exakt dem Eintrag im DATEV Developer Portal entsprechen.",
+  keyHint: "Zugangsdaten werden serverseitig verschlüsselt gespeichert. Die Redirect URL ist die Adresse der GMED-Konsole (DEV oder PROD) und muss exakt dem Eintrag im DATEV Developer Portal entsprechen.",
   exchange: "Zugriff auf Export Rechnungswesen anfordern (accounting:dataexchange)",
   exchangeHint: "Aktivieren, wenn die App dieses API-Produkt abonniert hat. Diese Auswahl bestätigt weder Berechtigungen noch eine Servicebestellung.",
   connect: "Mit DATEV verbinden", disconnect: "DATEV · Zugriff trennen", check: "DATEV · Zugriff prüfen",
@@ -44,7 +44,7 @@ export const liveDe: typeof liveRu = {
   numbersHint: "Zuerst Beraternummer und Mandantennummer im Profil unten speichern. Die Prüfung gilt nur für dieses Unternehmen.",
   services: "Von DATEV zurückgegebene Services", servicesHint: "Ein Service im Ergebnis bestätigt weder einen Belegdownload noch die Unterstützung aller Modulfunktionen.",
   noServices: "DATEV hat für dieses Unternehmen keine Services zurückgegeben.",
-  readTitle: "Daten abrufen", readHint: "Export Rechnungswesen liefert den Stand der letzten DATEV-Archivierung. Der Abruf erstellt keine Rechnungen in GMed.",
+  readTitle: "Daten abrufen", readHint: "Export Rechnungswesen liefert den Stand der letzten DATEV-Archivierung. Der Abruf erstellt keine Rechnungen in GMED.",
   originals: "PDF/XML-Originale aus Belege online können mit diesem Connector noch nicht abgerufen werden. Manuell aus DATEV exportierte Dateien können über den Rechnungseingang importiert werden.",
   fiscal: "Wirtschaftsjahre", terms: "Zahlungsbedingungen", balances: "Summen und Salden", kind: "Daten auswählen",
   year: "Beginn des Wirtschaftsjahres", yearHint: "Das Anfangsdatum aus dem Ergebnis „Wirtschaftsjahre“ auswählen; es kann vom 1. Januar abweichen.",
@@ -56,7 +56,7 @@ export const liveDe: typeof liveRu = {
   connectLong: "DATEV · Langfristig verbinden", forceDisconnect: "DATEV · Ohne Bestätigung trennen",
   session: "DATEV-Anmeldung gültig bis", sessionHint: "Eine normale DATEV-Anmeldung gilt höchstens 11 Stunden, danach ist eine neue Anmeldung nötig. Der Langzeitzugriff (bis zu 2 Jahre) wird nur für ein geprüftes Unternehmen erteilt.",
   longTerm: "Langzeitzugriff", longTermFor: "Langzeitzugriff für Unternehmen", longTermNeedsCheck: "Die langfristige Verbindung ist nach einer erfolgreichen Zugriffsprüfung des Unternehmens aus dem Profil möglich: normal verbinden, „Zugriff prüfen“ ausführen, dann trennen.",
-  forcedNotice: "Die Tokens wurden in GMed gelöscht, DATEV hat den Widerruf jedoch nicht bestätigt. Den App-Zugriff bei DATEV widerrufen (Link unten).",
+  forcedNotice: "Die Tokens wurden in GMED gelöscht, DATEV hat den Widerruf jedoch nicht bestätigt. Den App-Zugriff bei DATEV widerrufen (Link unten).",
 };
 export function liveError(code: string | undefined, de: boolean) {
   const errors: Record<string, [string,string]> = {
@@ -79,7 +79,7 @@ export function liveError(code: string | undefined, de: boolean) {
     datev_request_rejected: ["DATEV отклонил запрос как некорректный. Подключение остаётся активным; проверьте номера компании и выбранный период.", "DATEV hat die Anfrage als ungültig abgelehnt. Die Verbindung bleibt aktiv; Unternehmensnummern und Zeitraum prüfen."],
     datev_unavailable: ["DATEV сейчас недоступен. Повторите позже.", "DATEV ist derzeit nicht erreichbar. Später erneut versuchen."],
     datev_unreachable: ["Не удалось связаться с DATEV. Повторите позже.", "DATEV konnte nicht erreicht werden. Später erneut versuchen."],
-    datev_redirect_invalid: ["Нужен callback GMed: /api/v1/datev/oauth/callback. Production требует HTTPS-домен GMed.", "GMed-Callback erforderlich: /api/v1/datev/oauth/callback. Production erfordert eine HTTPS-Domain von GMed."],
+    datev_redirect_invalid: ["Нужен callback GMED: /api/v1/datev/oauth/callback. Production требует HTTPS-домен GMED.", "GMED-Callback erforderlich: /api/v1/datev/oauth/callback. Production erfordert eine HTTPS-Domain von GMED."],
     datev_rate_limited: ["DATEV ограничил частоту запросов. Повторите позже.", "DATEV-Anfragelimit erreicht. Später erneut versuchen."],
     datev_response_too_large: ["Ответ превышает лимит 8 MiB. Данные не показаны частично; нужен отдельный потоковый экспорт.", "Antwort überschreitet 8 MiB. Keine Teildaten angezeigt; ein separater Streaming-Export ist erforderlich."],
     datev_data_unavailable: ["Данные недоступны. Проверьте выбранный финансовый год и публикацию данных в DATEV.", "Daten nicht verfügbar. Wirtschaftsjahr und Bereitstellung in DATEV prüfen."],

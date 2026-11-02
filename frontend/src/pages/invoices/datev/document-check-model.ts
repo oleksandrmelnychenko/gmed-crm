@@ -72,7 +72,7 @@ export function documentCheckReport(rows: DocumentCheck[], generatedAt = new Dat
   return {
     schema_version: "1.0", report_type: "gmed_invoice_import_preflight", generated_at: generatedAt,
     datev_connection_verified: false, datev_compatibility_verified: false, accounting_writes_performed: false,
-    scope: "Session-only GMed import checks. No DATEV API call, no invoice created. Originals require manual review. Duplicate checks cover this session only. Structured XML checks are basic checks, not full schema or EN16931 validation.",
+    scope: "Session-only GMED import checks. No DATEV API call, no invoice created. Originals require manual review. Duplicate checks cover this session only. Structured XML checks are basic checks, not full schema or EN16931 validation.",
     documents: rows.map(({ id, file, status, sha256, checkedAt, duplicateOf, relatedId, summary, failure }) => ({
       id, filename: file.name, size_bytes: file.size, status, sha256, checked_at: checkedAt,
       duplicate_of: duplicateOf, related_id: relatedId, failure, ...summary,
