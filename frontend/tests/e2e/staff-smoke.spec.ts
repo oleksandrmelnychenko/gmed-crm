@@ -3681,6 +3681,17 @@ test.describe("lead onboarding wizard", () => {
         },
       },
     });
+    // The client sees these comments in the cabinet; the internal one stays with staff (owner 2026-11-02).
+    await expect(driverComment.locator("..").getByTestId("client-visible-note")).toHaveText("Für den Kunden im Portal sichtbar");
+    await expect(wizard.getByRole("textbox", { name: "Allgemeiner Kommentar", exact: true })).toBeVisible();
+    const internalNoteRequest = page.waitForRequest((request) => {
+      if (request.method() !== "POST" || !request.url().endsWith(`/leads/${readyLeadId}/update`)) return false;
+      return (request.postDataJSON() as { services_internal_note?: string }).services_internal_note === "Rückruf am Dienstag";
+    });
+    await wizard
+      .getByRole("textbox", { name: "Interner Kommentar (für den Kunden nicht sichtbar)", exact: true })
+      .fill("Rückruf am Dienstag");
+    await internalNoteRequest;
     await expect(wizard.getByRole("button", { name: "Angaben bestätigen" })).toHaveCount(0);
     await navigation.getByRole("tab", { name: /Unterlagen/i }).click();
     await expect(wizard.getByText("Ausweisdokument")).toBeVisible();

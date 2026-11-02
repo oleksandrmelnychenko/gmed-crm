@@ -569,7 +569,13 @@ struct UpdateLeadRequest {
     /// ISO 3166-1 alpha-2 codes; replaces the list (`leads.citizenships`, the
     /// one source; the legacy `wizard_state.registration_country` is removed).
     citizenships: Option<Vec<String>>,
+    /// Staff-only comment of the services step (owner 2026-11-02): never
+    /// shown to the client. `""` clears it; left out, it stays.
+    services_internal_note: Option<String>,
 }
+
+/// Longest staff-only comment of the services step, in characters.
+const SERVICES_INTERNAL_NOTE_MAX_CHARS: usize = 4000;
 
 fn normalized_contact_text(value: Option<&str>) -> Option<String> {
     value
@@ -5010,7 +5016,7 @@ async fn get_lead(
                   compliance_status, qualification_status, converted_patient_id,
                   failed_outcome_status, failed_from_status, failed_reason, failed_note,
                   failed_processed_at, failed_processed_by,
-                  notes, user_agent, created_at, updated_at,
+                  notes, services_internal_note, user_agent, created_at, updated_at,
                   requested_specialties, wizard_state, status_changed_at,
                   intake_model, prospect_patient_id, referrer_patient_id,
                   repeat_patient_id, retention_warning_sent_at,
@@ -5455,6 +5461,12 @@ async fn get_lead(
             .unwrap_or(Value::Null),
     );
     obj.insert("notes".into(), s_opt(&row, "notes"));
+    // Staff-only (owner 2026-11-02): on the staff lead detail only, never in
+    // a portal, cabinet or payer-link payload.
+    obj.insert(
+        "services_internal_note".into(),
+        s_opt(&row, "services_internal_note"),
+    );
     obj.insert(
         "requested_specialties".into(),
         row.try_get::<Value, _>("requested_specialties")
@@ -6195,8 +6207,15 @@ async fn update_lead(
         && body.wizard_state.is_none()
         && body.referrer_patient_id.is_none()
         && body.citizenships.is_none()
+        && body.services_internal_note.is_none()
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "No lead changes supplied");
+    }
+    let services_internal_note = body.services_internal_note.as_deref().map(str::trim);
+    if services_internal_note
+        .is_some_and(|note| note.chars().count() > SERVICES_INTERNAL_NOTE_MAX_CHARS)
+    {
+        return field_err("services_internal_note", "Comment is too long");
     }
 
     let current_identity = match sqlx::query(
@@ -6616,7 +6635,11 @@ async fn update_lead(
                    WHEN $42 THEN $43
                    ELSE referrer_patient_id
                END,
-               has_medical_records = COALESCE($44, has_medical_records)
+               has_medical_records = COALESCE($44, has_medical_records),
+               services_internal_note = CASE
+                   WHEN $47::text IS NULL THEN services_internal_note
+                   ELSE NULLIF($47::text, '')
+               END
            WHERE id = $1 AND qualification_status <> 'deleted'"#,
     )
     .bind(lead_id)
@@ -6669,6 +6692,7 @@ async fn update_lead(
     .bind(body.has_medical_records.as_deref())
     .bind(body.has_insurance.is_some())
     .bind(insurance_type_supplied)
+    .bind(services_internal_note)
     .execute(&mut *tx)
     .await;
     match update_result {
@@ -6808,6 +6832,8 @@ async fn update_lead(
         "referrer_patient_id": referrer_patient_id,
         // Access ids only; the revocation itself is audited by the helper.
         "guardian_access_revoked": revoked_guardian_access,
+        // Whether the staff-only services comment was sent; never its text.
+        "services_internal_note_updated": services_internal_note.is_some(),
     });
     if compliance_changed {
         audit_context["previous_compliance_status"] = json!(current_compliance_status);
@@ -11646,6 +11672,7 @@ pub(crate) async fn anonymize_lead_pii(
                remote_ip = NULL,
                user_agent = NULL,
                notes = NULL,
+               services_internal_note = NULL,
                -- The wizard draft repeats what the columns above held (referrer,
                -- passport expiry, AML answers, the commercial draft): none of it
                -- is needed on a deleted lead.

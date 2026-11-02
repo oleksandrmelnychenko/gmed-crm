@@ -361,6 +361,7 @@ import {
 } from "./lead-wizard-document-metadata";
 import { LeadGwgStatements } from "./lead-gwg-statements";
 import { ClientFormEditButton, ClientFormEditContext, LeadClientFormDialog } from "./lead-client-form-dialog";
+import { ClientVisibleNote, ServicesInternalNoteField } from "./lead-wizard-visibility";
 import { CLIENT_FORM_SERVICE_DRAFT_KEYS } from "../model/lead-client-form-steps";
 import type { StepId as ClientFormStepId } from "@/pages/patient-lead/lead-request-steps";
 import { LeadAmlPepReviews } from "./lead-aml-pep-reviews";
@@ -629,6 +630,8 @@ type Draft = {
   referrerPatientLabel: string;
   referrer: string;
   serviceNotes: string;
+  /** Staff-only comment of the services step (`leads.services_internal_note`): the client never sees it. */
+  servicesInternalNote: string;
   specialties: string[];
   selectedSpecializationWorkTypeIds: string[];
   costEstimateAdditionalLanguage: CostEstimateAdditionalLanguage;
@@ -916,6 +919,8 @@ const LeadMedicalIntakeForm = lazy(() =>
   })),
 );
 const SERVICE_CONCERN_ID = "lead-wizard-concern";
+const SERVICE_NOTES_ID = "lead-wizard-service-notes";
+const SERVICES_INTERNAL_NOTE_ID = "lead-wizard-services-internal-note";
 const RISK_ASSESSMENT_SECTION_ID = "lead-wizard-risk-assessment";
 const GWG_SHEETS_SECTION_ID = "lead-wizard-gwg-sheets";
 const ENHANCED_CHECK_SECTION_ID = "lead-wizard-enhanced-check";
@@ -1285,6 +1290,7 @@ function autosavePayload(
     services: draft.serviceNeeds,
     needs_interpreter: draft.serviceNeeds.includes("interpreter_support"),
     notes: draft.serviceNotes.trim(),
+    services_internal_note: draft.servicesInternalNote.trim(),
     requested_specialties: draft.specialties,
     consent_privacy_practices: draft.privacyConsent,
     consent_healthcare: draft.healthcareConsent,
@@ -1990,6 +1996,7 @@ function draftFromLead(lead: LeadDetail): Draft {
       : "",
     referrer: inputString(lead.wizard_state?.["referrer"]),
     serviceNotes: lead.notes ?? "",
+    servicesInternalNote: lead.services_internal_note ?? "",
     specialties: lead.requested_specialties ?? [],
     selectedSpecializationWorkTypeIds: inputStringArray(
       lead.wizard_state?.["selected_specialization_work_type_ids"]
@@ -2050,6 +2057,7 @@ function blankDraft(): Draft {
     referrerPatientLabel: "",
     referrer: "",
     serviceNotes: "",
+    servicesInternalNote: "",
     specialties: [],
     selectedSpecializationWorkTypeIds: [],
     costEstimateAdditionalLanguage: "",
@@ -3230,9 +3238,12 @@ function Field({
   required = false,
   portalField,
   htmlFor,
+  note,
 }: {
   label: ReactNode;
   children: ReactNode;
+  /** A marker on the label's line, e.g. that the client sees the field in the cabinet. */
+  note?: ReactNode;
   className?: string;
   error?: string;
   errorId?: string;
@@ -3264,7 +3275,8 @@ function Field({
         ) : (
           <span data-wizard-field-label className={cn(tokens.text.label, "block font-mono")}>{caption}</span>
         )}
-        <span className="ml-auto flex min-w-0 justify-end">
+        <span className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-1">
+          {note}
           <Step1PortalFieldNote errorId={errorId} portalField={portalField} />
         </span>
       </span>
@@ -3598,6 +3610,8 @@ export function LeadWizard({
   } = useLeadLabels();
   const { lang, t } = useLang();
   const tx: Tx = useCallback((ru, de) => (lang === "de" ? de : ru), [lang]);
+  // Fields whose text the client sees in the lead cabinet carry this marker (owner 2026-11-02).
+  const clientVisibleNote = <ClientVisibleNote tx={tx} />;
   const [createdLeadId, setCreatedLeadId] = useState<string | null>(null);
   const leadId = requestedLeadId ?? createdLeadId;
   const activePayerLeadIdRef = useRef(leadId);
@@ -9318,6 +9332,7 @@ ${serviceCommentLines.join("\n")}`
                 ) : null}
                 <Field
                   label={tx("Имя", "Vorname")}
+                  note={clientVisibleNote}
                   required
                   error={visibleMasterError("firstName")}
                   errorId={`${MASTER_FIELD_IDS.firstName}-error`}
@@ -9338,6 +9353,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label={tx("Фамилия", "Nachname")}
+                  note={clientVisibleNote}
                   required
                   error={visibleMasterError("lastName")}
                   errorId={`${MASTER_FIELD_IDS.lastName}-error`}
@@ -9356,7 +9372,7 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("lastName", event.target.value)}
                   />
                 </Field>
-                <Field label={tx("Отчество / второе имя", "Zweiter Vorname")} portalField="middle_name" htmlFor={STEP1_CONTROL_IDS.middleName}>
+                <Field label={tx("Отчество / второе имя", "Zweiter Vorname")} note={clientVisibleNote} portalField="middle_name" htmlFor={STEP1_CONTROL_IDS.middleName}>
                   <Input
                     id={STEP1_CONTROL_IDS.middleName}
                     className={inputClass}
@@ -9475,6 +9491,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label={tx("Телефон", "Telefon")}
+                  note={clientVisibleNote}
                   required={isRepeatIntake && !draft.email.trim()}
                   error={visibleMasterError("phone")}
                   errorId={`${MASTER_FIELD_IDS.phone}-error`}
@@ -9516,6 +9533,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label={tx("Улица и дом", "Straße und Hausnummer")}
+                  note={clientVisibleNote}
                   required={draft.healthcareConsent || cabinetConsents.healthcare}
                   error={visibleMasterError("street")}
                   errorId={`${MASTER_FIELD_IDS.street}-error`}
@@ -9536,6 +9554,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label={tx("Почтовый индекс", "Postleitzahl")}
+                  note={clientVisibleNote}
                   required={draft.healthcareConsent || cabinetConsents.healthcare}
                   error={visibleMasterError("zip")}
                   errorId={`${MASTER_FIELD_IDS.zip}-error`}
@@ -9556,6 +9575,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label={tx("Город", "Ort")}
+                  note={clientVisibleNote}
                   required={draft.healthcareConsent || cabinetConsents.healthcare}
                   error={visibleMasterError("city")}
                   errorId={`${MASTER_FIELD_IDS.city}-error`}
@@ -9772,6 +9792,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label={tx("Страховая компания", "Versicherer")}
+                  note={clientVisibleNote}
                   portalField="insurance_provider"
                   required={draft.hasInsurance === "yes"}
                   error={visibleMasterError("insuranceProvider")}
@@ -9792,6 +9813,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label={tx("Номер полиса", "Versicherungsnummer")}
+                  note={clientVisibleNote}
                   portalField="insurance_number"
                   required={draft.hasInsurance === "yes"}
                   error={visibleMasterError("insuranceNumber")}
@@ -10114,12 +10136,18 @@ ${serviceCommentLines.join("\n")}`
                         </label>
                         {checked ? (
                           <div className="space-y-1.5 border-t border-border px-3 pb-3 pt-2.5">
-                            <label
-                              htmlFor={commentId}
-                              className={cn(tokens.text.label, "block font-mono")}
-                            >
-                              {commentLabel}
-                            </label>
+                            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                              <label
+                                htmlFor={commentId}
+                                className={cn(tokens.text.label, "block font-mono")}
+                              >
+                                {commentLabel}
+                              </label>
+                              {/* The cabinet shows the comments of its own services only (`lead_portal_intake/services.rs`). */}
+                              {(LEAD_WIZARD_SERVICE_OPTIONS as readonly string[]).includes(normalizeLeadServiceValue(value)) ? (
+                                <ClientVisibleNote tx={tx} className="ml-auto" />
+                              ) : null}
+                            </span>
                             <textarea
                               id={commentId}
                               aria-label={`${commentLabel}: ${label}`}
@@ -10134,7 +10162,16 @@ ${serviceCommentLines.join("\n")}`
                     );
                   })}
                 </div>
-                <Field label={tx("Общий комментарий", "Allgemeiner Kommentar")}><textarea className={cn(textareaClass, "min-h-24 bg-card")} value={draft.serviceNotes} onChange={(event) => patch("serviceNotes", event.target.value)} /></Field>
+                <Field label={tx("Общий комментарий", "Allgemeiner Kommentar")} note={clientVisibleNote} htmlFor={SERVICE_NOTES_ID}><textarea id={SERVICE_NOTES_ID} className={cn(textareaClass, "min-h-24 bg-card")} value={draft.serviceNotes} onChange={(event) => patch("serviceNotes", event.target.value)} /></Field>
+                {/* Staff only (owner 2026-11-02): `leads.services_internal_note`, never sent to the cabinet or the payer link. */}
+                <ServicesInternalNoteField
+                  id={SERVICES_INTERNAL_NOTE_ID}
+                  value={draft.servicesInternalNote}
+                  onChange={(value) => patch("servicesInternalNote", value)}
+                  tx={tx}
+                  labelClassName={cn(tokens.text.label, "font-mono")}
+                  textareaClassName={cn(textareaClass, "min-h-20 resize-y bg-card")}
+                />
               </Section>
             </section>
           ) : null}

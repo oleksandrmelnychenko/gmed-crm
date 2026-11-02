@@ -10772,3 +10772,109 @@ async fn a_sent_form_keeps_the_payer_and_staff_may_enter_a_past_start() {
     .await;
     assert_sent_lock(status, &body);
 }
+
+async fn services_internal_note(pool: &PgPool, lead: Uuid) -> Option<String> {
+    sqlx::query_scalar("SELECT services_internal_note FROM leads WHERE id = $1")
+        .bind(lead)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// Owner request 2026-11-02: the services step has a staff-only comment. It
+/// is saved through the staff lead update, audited without its text, shown
+/// on the staff lead detail and never in the client's cabinet, while the
+/// general comment of the same step is the client's own answer and shows.
+#[tokio::test]
+async fn the_services_internal_note_stays_with_staff() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let (lead, _, login) = lead_with_login(&app, "Intern", "intern.note1102@example.com").await;
+    let pm = app.staff("patient_manager");
+    let secret = "Nur intern: Rueckruf Dienstag 1102";
+    let (status, saved) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead}/update"),
+        &pm,
+        Some(json!({
+            "services_internal_note": format!("  {secret}  "),
+            "notes": "Sichtbarer Kommentar 1102",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(
+        services_internal_note(pool, lead).await.as_deref(),
+        Some(secret)
+    );
+    let (status, detail) =
+        json_request(router, "GET", &format!("/api/v1/leads/{lead}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["services_internal_note"], secret, "{detail}");
+    // Audited in the transaction of the update, without the text.
+    let context: Value = sqlx::query_scalar(
+        "SELECT context FROM audit_log WHERE action = 'update_lead' AND entity_id = $1
+         ORDER BY id DESC LIMIT 1",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(context["services_internal_note_updated"], true, "{context}");
+    assert!(!context.to_string().contains(secret), "{context}");
+    // The cabinet (the client's own login, and staff in the client's form)
+    // shows the general comment, never the internal one.
+    for bearer in [&login, &pm] {
+        let (status, request) = json_request(
+            router,
+            "GET",
+            &format!("/api/v1/me/lead-requests/{lead}"),
+            bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{request}");
+        let text = request.to_string();
+        assert!(text.contains("Sichtbarer Kommentar 1102"), "{request}");
+        assert!(!text.contains(secret), "{request}");
+        assert!(!text.contains("services_internal_note"), "{request}");
+    }
+    let (status, services) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{lead}/services"),
+        &login,
+        Some(json!({ "notes": "Neu vom Kunden 1102" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{services}");
+    assert!(!services.to_string().contains(secret), "{services}");
+    // The client's own save leaves the internal note as it was.
+    assert_eq!(
+        services_internal_note(pool, lead).await.as_deref(),
+        Some(secret)
+    );
+    // Too long is refused; an empty string clears it.
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead}/update"),
+        &pm,
+        Some(json!({ "services_internal_note": "x".repeat(4001) })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["field"], "services_internal_note", "{refused}");
+    let (status, cleared) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead}/update"),
+        &pm,
+        Some(json!({ "services_internal_note": "" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cleared}");
+    assert_eq!(services_internal_note(pool, lead).await, None);
+}

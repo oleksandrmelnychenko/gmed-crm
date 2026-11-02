@@ -254,6 +254,8 @@ export interface LeadDetail extends Lead {
   prospect_patient_lifecycle: "prospective" | "active" | "inactive" | null;
   prospect_case_id: string | null;
   notes: string | null;
+  /** Staff-only comment of the services step: never shown to the client (owner 2026-11-02). */
+  services_internal_note?: string | null;
   user_agent: string | null;
   updated_at: string;
   readiness: LeadReadiness;
