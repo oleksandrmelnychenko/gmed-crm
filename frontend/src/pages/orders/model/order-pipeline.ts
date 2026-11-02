@@ -63,6 +63,9 @@ export type OrderPipelineAppointment = {
   location: string | null;
   provider_name: string | null;
   doctor_name: string | null;
+  /** Ids to plan the next visit with the same doctor; older servers leave them out. */
+  provider_id?: string | null;
+  doctor_id?: string | null;
   /** Booked interpreter; older servers leave it out. */
   interpreter_id?: string | null;
   interpreter_name: string | null;

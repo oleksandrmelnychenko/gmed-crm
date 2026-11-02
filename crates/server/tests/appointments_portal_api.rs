@@ -1335,6 +1335,41 @@ async fn pipeline_flags_appointments_outside_the_signed_quote() {
     let before = flags().await;
     assert!(before.values().all(|outside| !outside), "{before:?}");
 
+    // The planning section adds the next visit under the same doctor: the
+    // pipeline names the provider and doctor of each appointment by id.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/pipeline"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let by_id = |id: &str| {
+        body["appointments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == id)
+            .cloned()
+            .unwrap()
+    };
+    let quoted_row = by_id(&quoted.to_string());
+    assert_eq!(
+        quoted_row["provider_id"],
+        json!(clinic.to_string()),
+        "{quoted_row}"
+    );
+    assert_eq!(
+        quoted_row["doctor_id"],
+        json!(quoted_doctor.to_string()),
+        "{quoted_row}"
+    );
+    let internal_row = by_id(&internal.to_string());
+    assert!(internal_row["provider_id"].is_null(), "{internal_row}");
+    assert!(internal_row["doctor_id"].is_null(), "{internal_row}");
+
     // A draft quote naming the other doctor does not count; the accepted one
     // names the quoted doctor and the lab without a doctor.
     for (status, provider, doctor) in [

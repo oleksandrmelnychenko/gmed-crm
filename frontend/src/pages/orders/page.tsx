@@ -5421,6 +5421,9 @@ function useOrdersPageContent() {
                         reloadNonce={reloadNonce}
                         appointmentsHref={detailAppointmentsHref}
                         canReleasePlan={canReleaseOrderPlan}
+                        canPlan={Boolean(detailNewAppointmentHref)}
+                        patientId={detailPatientId}
+                        onChanged={() => setReloadNonce((current) => current + 1)}
                       />
 
                       <OrderPlanAgreement

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { chooseComboboxOption, pickerSection } from "./helpers";
+import { chooseComboboxOption, pickerSection, pickerValueInput } from "./helpers";
 
 const orderId = "00000000-0000-0000-0000-000000000901";
 const patientId = "00000000-0000-0000-0000-000000000301";
@@ -432,6 +432,8 @@ test("planning lists the order's appointments by day and by doctor (plan stage 2
   }}));
   await page.goto(`/orders/${orderId}?section=planning`);
   const plan = page.getByTestId("order-planned-appointments");
+  // A planner starts with the doctors (plan stage 3).
+  await plan.getByRole("button", {name: "По дням"}).click();
   await expect(plan.getByRole("heading", {level: 3})).toHaveText(["Пн, 02.11.2026", "Вт, 03.11.2026"]);
   await expect(plan).toContainText("08:30–09:30");
   await expect(plan).toContainText("Переводчик: Olga Test");
@@ -444,6 +446,89 @@ test("planning lists the order's appointments by day and by doctor (plan stage 2
   const href = await plan.getByRole("link", {name: "MRT Abdomen"}).getAttribute("href");
   expect(href).toContain("appointment=MRT%20Abdomen");
   expect(href).toContain("return_to=");
+});
+
+test("planning adds visits right under the doctors and a new doctor (plan stage 3)", async ({page}) => {
+  await prepare(page);
+  const created: Array<Record<string, unknown>> = [];
+  let pipelineLoads = 0;
+  const pipeline = () => ({
+    order_id: orderId, phase: "intake", status: "active", stages: [], medical: {visible: false, required: false},
+    care_team: [
+      {provider_id: "klinik", provider_name: "Klinik Nord", provider_type: "medical", doctor_id: "weber", doctor_name: "Dr. Weber",
+       doctor_title: null, doctor_specialty: null, services: 1, appointments: 1},
+      {provider_id: "klinik", provider_name: "Klinik Nord", provider_type: "medical", doctor_id: "klein", doctor_name: "Dr. Klein",
+       doctor_title: null, doctor_specialty: null, services: 1, appointments: 0},
+      {provider_id: "hotel", provider_name: "Hotel Mitte", provider_type: "non_medical", doctor_id: null, doctor_name: null,
+       doctor_title: null, doctor_specialty: null, services: 1, appointments: 0},
+    ],
+    appointments: [
+      {id: "visit-1", title: "Kardiologie", appointment_type: "medical", date: "2026-11-16", time_start: "08:30", time_end: "09:30",
+       status: "planned", location: "Klinik Nord", provider_id: "klinik", provider_name: "Klinik Nord", doctor_id: "weber",
+       doctor_name: "Dr. Weber", interpreter_name: null, interpreter_response: null},
+    ],
+  });
+  await page.route(`**/api/v1/orders/${orderId}/pipeline`, route => {
+    pipelineLoads += 1;
+    return route.fulfill({json: pipeline()});
+  });
+  await page.route(/\/api\/v1\/appointments$/, route => {
+    if (route.request().method() !== "POST") return route.fallback();
+    created.push(route.request().postDataJSON());
+    return route.fulfill({json: {id: `new-${created.length}`}});
+  });
+  await page.route(/\/api\/v1\/providers(\?.*)?$/, route => route.fulfill({json: [
+    {id: "labor", name: "Labor Süd", provider_type: "medical", address_city: "Berlin", fachbereich: null},
+    {id: "hotel", name: "Hotel Mitte", provider_type: "non_medical", address_city: "Berlin", fachbereich: null},
+  ]}));
+  await page.route("**/api/v1/providers/labor/doctors", route => route.fulfill({json: [
+    {id: "roth", name: "Dr. Roth", title: null, fachbereich: null},
+  ]}));
+
+  await page.goto(`/orders/${orderId}?section=planning`);
+  const plan = page.getByTestId("order-planned-appointments");
+  await expect(plan.getByRole("heading", {level: 3})).toHaveText([/Dr. Weber/, /Dr. Klein/]);
+  await expect(plan.getByTestId("order-appointment-entry")).toHaveCount(2);
+
+  // Weber's row starts on his last visit day; Klein has no visit yet.
+  const weberRow = plan.getByTestId("order-appointment-entry").first();
+  const pickerValue = (label: RegExp) =>
+    pickerValueInput(weberRow, label);
+  const typeInto = async (label: RegExp, digits: string) => {
+    await weberRow.getByRole("group", {name: label}).getByRole("spinbutton").first().click();
+    await page.keyboard.type(digits, {delay: 120});
+  };
+  await expect(pickerValue(/^Дата/)).toHaveValue("16.11.2026");
+  await weberRow.getByRole("button", {name: "Добавить"}).click();
+  await expect(weberRow.getByRole("alert")).toContainText("Название");
+  expect(created).toHaveLength(0);
+
+  const loadsBefore = pipelineLoads;
+  await typeInto(/^Начало/, "1300");
+  await typeInto(/^Конец/, "1330");
+  await weberRow.getByRole("textbox", {name: "Название"}).fill("Nachbesprechung");
+  await weberRow.getByRole("button", {name: "Добавить"}).click();
+  await expect.poll(() => created.length).toBe(1);
+  expect(created[0]).toMatchObject({
+    patient_id: patientId, order_id: orderId, provider_id: "klinik", doctor_id: "weber",
+    appointment_type: "medical", title: "Nachbesprechung", date: "2026-11-16", time_start: "13:00", time_end: "13:30",
+    location: "Klinik Nord",
+  });
+  await expect(weberRow.getByRole("textbox", {name: "Название"})).toHaveValue("");
+  await expect(pickerValue(/^Дата/)).toHaveValue("16.11.2026");
+  await expect.poll(() => pipelineLoads).toBeGreaterThan(loadsBefore);
+
+  // A doctor outside the order joins the plan with a row of his own.
+  await plan.getByRole("button", {name: "Добавить врача"}).click();
+  const picker = plan.getByTestId("order-planning-doctor-picker");
+  await picker.getByRole("combobox", {name: "Клиника / провайдер"}).click();
+  await expect(page.getByRole("option", {name: /Hotel Mitte/})).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await chooseComboboxOption(page, picker.getByRole("combobox", {name: "Клиника / провайдер"}), /Labor Süd/);
+  await chooseComboboxOption(page, picker.getByRole("combobox", {name: "Врач"}), "Dr. Roth");
+  await picker.getByRole("button", {name: "Добавить"}).click();
+  await expect(plan.getByRole("heading", {level: 3})).toHaveText([/Dr. Weber/, /Dr. Klein/, /Dr. Roth.*Labor Süd/]);
+  await expect(plan.getByTestId("order-appointment-entry")).toHaveCount(3);
 });
 
 test("planning shows the hidden plan to the patient in one step (plan stage 4)", async ({page}) => {

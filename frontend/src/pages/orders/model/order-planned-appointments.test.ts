@@ -4,6 +4,7 @@ import {
   groupAppointmentsByDay,
   groupAppointmentsByDoctor,
   isShownToPatient,
+  planningDoctorsFromCareTeam,
   plannedDayLabel,
   plannedTimeLabel,
   unreleasedPlanCount,
@@ -60,6 +61,42 @@ describe("order planned appointments", () => {
       ["none"],
     ]);
     expect(groups[2]).toMatchObject({ doctorName: null, providerName: "Klinik A" });
+  });
+
+  it("groups by doctor id and adds the planned doctors without a visit yet", () => {
+    const groups = groupAppointmentsByDoctor(
+      [
+        appointment("none"),
+        appointment("a", {
+          provider_id: "klinik", provider_name: "Klinik A", doctor_id: "weber", doctor_name: "Dr. Weber",
+        }),
+        appointment("b", {
+          provider_id: "klinik", provider_name: "Klinik A (alt)", doctor_id: "weber", doctor_name: "Dr. Weber",
+        }),
+      ],
+      [
+        { providerId: "klinik", providerName: "Klinik A", doctorId: "weber", doctorName: "Dr. Weber" },
+        { providerId: "labor", providerName: "Labor B", doctorId: null, doctorName: null },
+        { providerId: "labor", providerName: "Labor B", doctorId: null, doctorName: null },
+      ],
+    );
+
+    expect(groups.map((group) => [group.providerId, group.doctorId, group.appointments.length])).toEqual([
+      ["klinik", "weber", 2],
+      ["labor", null, 0],
+      [null, null, 1],
+    ]);
+  });
+
+  it("plans with the medical members of the care team only", () => {
+    const member = {
+      provider_id: "klinik", provider_name: "Klinik A", provider_type: "medical",
+      doctor_id: "weber", doctor_name: "Dr. Weber", doctor_title: null, doctor_specialty: null,
+      services: 1, appointments: 0,
+    };
+    expect(
+      planningDoctorsFromCareTeam([member, { ...member, provider_id: "hotel", provider_type: "non_medical" }]),
+    ).toEqual([{ providerId: "klinik", providerName: "Klinik A", doctorId: "weber", doctorName: "Dr. Weber" }]);
   });
 
   it("labels the day and the time", () => {

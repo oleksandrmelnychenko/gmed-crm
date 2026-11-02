@@ -288,6 +288,7 @@ async fn get_order_pipeline(
         r#"SELECT appointment.id, appointment.title, appointment.appointment_type,
                   appointment.date, appointment.time_start, appointment.time_end,
                   appointment.status, appointment.location, appointment.interpreter_response,
+                  appointment.provider_id, appointment.doctor_id,
                   appointment.portal_released_at,
                   -- Owner decision 2026-11-02 (question 5): a doctor outside
                   -- the signed quote may be planned, with a warning. Once the
@@ -477,6 +478,9 @@ async fn get_order_pipeline(
             "location": row.try_get::<Option<String>, _>("location").unwrap_or(None),
             "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or(None),
             "doctor_name": row.try_get::<Option<String>, _>("doctor_name").unwrap_or(None),
+            // The planning section adds the next visit under the same doctor.
+            "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or(None),
+            "doctor_id": row.try_get::<Option<Uuid>, _>("doctor_id").unwrap_or(None),
             "interpreter_id": row.try_get::<Option<Uuid>, _>("interpreter_id").unwrap_or(None),
             "interpreter_name": row.try_get::<Option<String>, _>("interpreter_name").unwrap_or(None),
             "interpreter_response": row.try_get::<Option<String>, _>("interpreter_response").unwrap_or(None),

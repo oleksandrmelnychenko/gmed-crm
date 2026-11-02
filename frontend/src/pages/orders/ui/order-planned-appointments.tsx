@@ -13,15 +13,19 @@ import {
   groupAppointmentsByDay,
   groupAppointmentsByDoctor,
   isShownToPatient,
+  planningDoctorsFromCareTeam,
   plannedDayLabel,
   plannedTimeLabel,
   unreleasedPlanCount,
+  type PlanningDoctor,
 } from "../model/order-planned-appointments";
 import {
   ORDER_APPOINTMENT_STATUS,
   type OrderPipeline,
   type OrderPipelineAppointment,
+  type OrderPipelineCareTeamMember,
 } from "../model/order-pipeline";
+import { AppointmentEntryRow, PlanningDoctorPicker } from "./order-appointment-entry";
 
 type OrderPlannedAppointmentsProps = {
   orderId: string;
@@ -31,6 +35,11 @@ type OrderPlannedAppointmentsProps = {
   appointmentsHref: string;
   /** The viewer plans this order and may show the plan to the patient. */
   canReleasePlan?: boolean;
+  /** The viewer may add appointments under the doctors (plan stage 3). */
+  canPlan?: boolean;
+  patientId?: string | null;
+  /** An appointment was added: the other planning blocks reload. */
+  onChanged?: () => void;
 };
 
 type GroupBy = "day" | "doctor";
@@ -101,14 +110,25 @@ export function OrderPlannedAppointments({
   reloadNonce,
   appointmentsHref,
   canReleasePlan = false,
+  canPlan = false,
+  patientId = null,
+  onChanged,
 }: OrderPlannedAppointmentsProps) {
   const de = lang === "de";
   const tx = (ru: string, german: string) => (de ? german : ru);
-  const [groupBy, setGroupBy] = useState<GroupBy>("day");
+  const planning = canPlan && Boolean(patientId);
+  // Planners start with the doctors: visits are added under them.
+  const [groupBy, setGroupBy] = useState<GroupBy>(planning ? "doctor" : "day");
   const [loaded, setLoaded] = useState<{
     orderId: string;
     items: OrderPipelineAppointment[];
+    careTeam: OrderPipelineCareTeamMember[];
   } | null>(null);
+  const [addedDoctors, setAddedDoctors] = useState<{
+    orderId: string;
+    doctors: PlanningDoctor[];
+  }>({ orderId, doctors: [] });
+  const [entryNotice, setEntryNotice] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [releaseNonce, setReleaseNonce] = useState(0);
   const [releasing, setReleasing] = useState(false);
@@ -137,7 +157,9 @@ export function OrderPlannedAppointments({
     setError(null);
     apiFetch<OrderPipeline>(`/orders/${orderId}/pipeline`)
       .then((pipeline) => {
-        if (!cancelled) setLoaded({ orderId, items: pipeline.appointments });
+        if (!cancelled) {
+          setLoaded({ orderId, items: pipeline.appointments, careTeam: pipeline.care_team ?? [] });
+        }
       })
       .catch((reason: unknown) => {
         if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
@@ -148,13 +170,24 @@ export function OrderPlannedAppointments({
   }, [orderId, reloadNonce, releaseNonce]);
 
   const appointments = loaded?.orderId === orderId ? loaded.items : null;
+  const careTeam = loaded?.orderId === orderId ? loaded.careTeam : null;
+  const extraDoctors = addedDoctors.orderId === orderId ? addedDoctors.doctors : [];
   const unreleased = appointments ? unreleasedPlanCount(appointments) : 0;
   const groups = useMemo(() => {
     if (!appointments) return [];
-    return groupBy === "day"
-      ? groupAppointmentsByDay(appointments)
-      : groupAppointmentsByDoctor(appointments);
-  }, [appointments, groupBy]);
+    if (groupBy === "day") return groupAppointmentsByDay(appointments);
+    return groupAppointmentsByDoctor(
+      appointments,
+      planning ? [...planningDoctorsFromCareTeam(careTeam ?? []), ...extraDoctors] : [],
+    );
+  }, [appointments, careTeam, extraDoctors, groupBy, planning]);
+  const entriesShown = planning && groupBy === "doctor" && Boolean(appointments);
+
+  const handleCreated = (notice: string) => {
+    setEntryNotice(notice);
+    if (onChanged) onChanged();
+    else setReleaseNonce((value) => value + 1);
+  };
 
   const groupTitle = (group: (typeof groups)[number]) => {
     if (group.date) return plannedDayLabel(group.date, lang);
@@ -226,6 +259,7 @@ export function OrderPlannedAppointments({
             {tx("Загружаем приёмы…", "Termine werden geladen…")}
           </div>
         ) : null}
+        {entryNotice ? <Banner tone="warning">{entryNotice}</Banner> : null}
         {appointments && groups.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             {tx("В плане ещё нет приёмов.", "Im Plan sind noch keine Termine.")}
@@ -239,7 +273,9 @@ export function OrderPlannedAppointments({
                 <span className="font-normal text-muted-foreground">{groupHint(group)}</span>
               ) : null}
             </h3>
-            <ul className="mt-2 divide-y divide-border/60 overflow-hidden rounded-lg border border-border/60 bg-card">
+            <div className="mt-2 overflow-hidden rounded-lg border border-border/60 bg-card">
+            {group.appointments.length > 0 ? (
+            <ul className="divide-y divide-border/60">
               {group.appointments.map((appointment) => {
                 const status = ORDER_APPOINTMENT_STATUS[appointment.status];
                 const time = plannedTimeLabel(appointment);
@@ -282,8 +318,39 @@ export function OrderPlannedAppointments({
                 );
               })}
             </ul>
+            ) : null}
+            {entriesShown && patientId && group.providerId ? (
+              <div className={group.appointments.length > 0 ? "border-t border-border/60" : undefined}>
+                <AppointmentEntryRow
+                  key={`${orderId}:${group.key}`}
+                  orderId={orderId}
+                  patientId={patientId}
+                  lang={lang}
+                  defaultDate={group.appointments.at(-1)?.date}
+                  doctor={{
+                    providerId: group.providerId,
+                    providerName: group.providerName ?? "",
+                    doctorId: group.doctorId,
+                    doctorName: group.doctorName,
+                  }}
+                  onCreated={handleCreated}
+                />
+              </div>
+            ) : null}
+            </div>
           </section>
         ))}
+        {entriesShown ? (
+          <PlanningDoctorPicker
+            lang={lang}
+            onAdd={(doctor) =>
+              setAddedDoctors((current) => ({
+                orderId,
+                doctors: [...(current.orderId === orderId ? current.doctors : []), doctor],
+              }))
+            }
+          />
+        ) : null}
       </div>
     </div>
   );
