@@ -1103,7 +1103,7 @@ export const ru = {
   nav_compliance: "DSGVO",
   nav_two_factor: "Двухфакторный вход",
   nav_incident_report: "Сообщить об инциденте",
-  nav_legal_notice: "Impressum и защита данных",
+  nav_legal_notice: "Правовая информация и защита данных",
   nav_notifications: "Уведомления",
   nav_custom_fields: "Пользовательские поля",
   nav_announcements: "Объявления",

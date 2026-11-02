@@ -55,7 +55,7 @@ describe("inquiry privacy notice", () => {
     expect(html).toContain(FORM_PRIVACY_SECTIONS[notice][0].title);
     expect(html).toContain(FORM_PRIVACY_SECTIONS[notice][13].title);
     if (notice === "ru") expect(html).not.toContain(FORM_PRIVACY_SECTIONS.de[4].title);
-    expect(html).toContain({ de: "Impressum", en: "Legal notice", uk: "Юридична інформація", ru: "Impressum" }[lang]);
+    expect(html).toContain({ de: "Impressum", en: "Legal notice", uk: "Правова інформація", ru: "Правовая информация" }[lang]);
   });
 
   it("makes the form notice available to leads and before signing in", () => {

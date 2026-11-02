@@ -137,7 +137,7 @@ const ru: LeadShellText = {
   nav: {
     lead_request: "Ваша заявка",
     account: "Аккаунт",
-    legal: "Impressum и защита данных",
+    legal: "Правовая информация и защита данных",
     dashboard: "Панель управления",
     notifications: "Мои уведомления",
     chat: "Чат",
@@ -185,7 +185,7 @@ const uk: LeadShellText = {
   nav: {
     lead_request: "Ваша заявка",
     account: "Обліковий запис",
-    legal: "Impressum і захист даних",
+    legal: "Правова інформація та захист даних",
     dashboard: "Панель керування",
     notifications: "Мої сповіщення",
     chat: "Чат",

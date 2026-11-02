@@ -28,8 +28,8 @@ const texts = Object.fromEntries(LANGS.map((lang) => [lang, flatten(leadShellTex
   Record<string, string>
 >;
 
-/** Names and German legal terms that stay as they are in every language. */
-const KEPT_WORDS = new Set(["GMED", "Impressum"]);
+/** Names that stay as they are in every language. */
+const KEPT_WORDS = new Set(["GMED"]);
 
 describe("lead cabinet shell texts", () => {
   it("has every key in all four languages, none empty", () => {

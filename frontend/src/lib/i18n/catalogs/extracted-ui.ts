@@ -4064,7 +4064,7 @@ export const extractedUiRu = {
   "consents_type_document_share_postal_mail": "Документы почтой",
   "legal_back": "Назад ко входу",
   "legal_load_error": "Не удалось загрузить данные.",
-  "legal_imprint_title": "Impressum",
+  "legal_imprint_title": "Правовая информация",
   "legal_phone": "Телефон",
   "legal_email": "E-mail",
   "legal_vat_id": "USt-IdNr.",
