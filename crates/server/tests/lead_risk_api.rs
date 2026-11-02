@@ -2313,3 +2313,135 @@ async fn the_review_queue_lists_open_leads_only() {
         assert_eq!(queued(&queue, *lead_id), closed.is_none(), "{queue}");
     }
 }
+
+/// A minor lead (synthetic) with its trusted contacts.
+async fn insert_minor_lead(app: &TestApp, first_name: &str, contacts: Value) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, date_of_birth, citizenships, country,
+                              email, created_by, trusted_contacts)
+           VALUES ($1, 'Kindtest', '2016-03-05', '{DE}', 'DE', $2, $3, $4)
+           RETURNING id"#,
+    )
+    .bind(first_name)
+    .bind(format!("lead-{}@example.com", Uuid::new_v4().simple()))
+    .bind(app.pm_id)
+    .bind(contacts)
+    .fetch_one(app.pool())
+    .await
+    .unwrap()
+}
+
+fn minor_contact(name: &str, relation: &str) -> Value {
+    json!({
+        "id": Uuid::new_v4(),
+        "name": name,
+        "relation": relation,
+        "email": format!("contact-{}@example.com", Uuid::new_v4().simple()),
+        "birth_date": "1985-03-02"
+    })
+}
+
+/// Owner 2026-11-02 (DEV): a minor represented by the mother and the father
+/// got T13 «Minderjährig, vertreten oder unter Betreuung». T13 now fires only
+/// for a representation by others than the parents or a guardianship; the
+/// T13 the parents set under the old rule is withdrawn at the next
+/// evaluation (opening the assessment), with its history event.
+#[tokio::test]
+async fn t13_fires_for_a_guardian_not_for_the_parents_of_a_minor() {
+    let Some(app) = test_app().await else { return };
+    let lead_id = insert_minor_lead(
+        &app,
+        "Lotte",
+        json!([
+            minor_contact("Olga Kindtest", "mother"),
+            minor_contact("Otto Kindtest", "father")
+        ]),
+    )
+    .await;
+    sqlx::query("INSERT INTO lead_gwg_declarations (lead_id, custody) VALUES ($1, 'joint')")
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let preview = assessment(&app, lead_id).await;
+    assert!(
+        !preview["preview"].to_string().contains("\"T13\""),
+        "{preview}"
+    );
+    let (status, started) = request(
+        &app,
+        "POST",
+        &format!("/leads/{lead_id}/risk-assessment/restart"),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    let started = assessment(&app, lead_id).await;
+    assert!(trigger(&started, "T13", "patient").is_none(), "{started}");
+
+    // As stored under the old rule: T13 of the patient, 1 point.
+    let t0 = chrono::Utc::now() - chrono::Duration::minutes(10);
+    let mut stored: Vec<Value> = sqlx::query_scalar::<_, Value>(
+        "SELECT triggers FROM lead_risk_assessments WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap()
+    .as_array()
+    .cloned()
+    .unwrap_or_default();
+    stored.push(json!({
+        "key": "T13", "subject": "patient", "variant": null, "points": 1,
+        "knockout": false, "first_fired_at": t0, "last_fired_at": t0, "active": true,
+    }));
+    sqlx::query("UPDATE lead_risk_assessments SET triggers = $2 WHERE lead_id = $1")
+        .bind(lead_id)
+        .bind(Value::Array(stored))
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let after = assessment(&app, lead_id).await;
+    assert!(trigger(&after, "T13", "patient").is_none(), "{after}");
+    assert_eq!(after["points"], started["points"], "{after}");
+    let withdrawn = after["history"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["kind"] == "trigger_withdrawn")
+        .count();
+    assert_eq!(withdrawn, 1, "{after}");
+
+    // The custody passes to a guardian (Vormund) on file: T13 fires.
+    sqlx::query("UPDATE lead_gwg_declarations SET custody = 'guardian' WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE leads SET trusted_contacts = trusted_contacts || $2::jsonb WHERE id = $1")
+        .bind(lead_id)
+        .bind(json!([minor_contact("Vera Vormund", "guardian")]))
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let guardian = assessment(&app, lead_id).await;
+    let t13 = trigger(&guardian, "T13", "patient").expect("T13 for the guardian");
+    assert_eq!(t13["points"], 1, "{guardian}");
+
+    // An adult with an authorised representative: T13 (the live preview).
+    let adult = insert_lead(&app, "Bruno", &["DE"]).await;
+    sqlx::query(
+        "INSERT INTO lead_gwg_declarations (lead_id, has_representative, under_guardianship)
+         VALUES ($1, true, false)",
+    )
+    .bind(adult)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    let preview = assessment(&app, adult).await;
+    assert!(
+        preview["preview"].to_string().contains("\"T13\""),
+        "{preview}"
+    );
+}

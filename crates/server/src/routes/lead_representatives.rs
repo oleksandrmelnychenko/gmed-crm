@@ -548,6 +548,19 @@ impl Representation {
         self.representatives.iter().find(|person| person.id == id)
     }
 
+    /// A minor represented by someone other than the parents (risk trigger
+    /// T13, owner 2026-11-02): the custody is «guardian», or a representative
+    /// on file is a guardian (Vormund, Pfleger) by relation. Parents alone —
+    /// mother, father, "parent" — or nobody recorded yet: `false`. Always
+    /// `false` for an adult (the answers decide there).
+    pub(crate) fn minor_not_by_parents(&self) -> bool {
+        self.minor
+            && (self.answers.custody() == CUSTODY_GUARDIAN
+                || self.representatives.iter().any(|person| {
+                    crate::routes::leads::is_legal_guardian_relation(person.relation.as_deref())
+                }))
+    }
+
     fn in_slot(&self, slot: &str) -> Option<&Representative> {
         self.representatives
             .iter()
@@ -5023,6 +5036,43 @@ mod tests {
         let parents = resolve(true, &contacts, &HashMap::new(), &logins, &joint);
         assert_eq!(parents[0].id, id(1));
         assert_eq!(parents[0].slot, Some(SLOT_REP1));
+    }
+
+    /// Risk trigger T13 (owner 2026-11-02): a minor represented by the
+    /// parents alone is not "represented by others"; a guardian is.
+    #[test]
+    fn a_minor_is_represented_by_others_only_with_a_guardian() {
+        let representation = |minor: bool, contacts: &[Value], answers: Answers| {
+            let representatives = resolve(minor, contacts, &HashMap::new(), &[], &answers);
+            Representation {
+                minor,
+                answers,
+                representatives,
+            }
+        };
+        let parents = vec![
+            contact(1, "Adolf Testov", "father"),
+            contact(3, "Mila Testova", "mother"),
+        ];
+        assert!(!representation(true, &parents, Answers::default()).minor_not_by_parents());
+        assert!(!representation(true, &[], Answers::default()).minor_not_by_parents());
+        let sole = Answers {
+            custody: Some(CUSTODY_SOLE_PARENT.into()),
+            ..Answers::default()
+        };
+        assert!(!representation(true, &parents[..1], sole).minor_not_by_parents());
+        let guardianship = Answers {
+            custody: Some(CUSTODY_GUARDIAN.into()),
+            ..Answers::default()
+        };
+        // The custody «guardian» counts before the Vormund is on file.
+        assert!(representation(true, &parents, guardianship.clone()).minor_not_by_parents());
+        let mut with_guardian = parents.clone();
+        with_guardian.push(contact(2, "Vera Vormund", "guardian"));
+        assert!(representation(true, &with_guardian, guardianship).minor_not_by_parents());
+        assert!(representation(true, &with_guardian, Answers::default()).minor_not_by_parents());
+        // An adult: the answers decide in the risk inputs, not this.
+        assert!(!representation(false, &with_guardian, Answers::default()).minor_not_by_parents());
     }
 
     #[test]

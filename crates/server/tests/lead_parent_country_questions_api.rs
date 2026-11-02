@@ -237,7 +237,8 @@ async fn only_the_listed_parent_gets_a_pure_preview_without_child_questions_or_a
     assert!(staff["points"].is_null());
     assert_eq!(staff["blocks"]["R"]["open"], true);
     assert_eq!(staff["representatives"][0]["name"], "Ben Synthetic");
-    assert_eq!(staff["preview"]["patient_points"], 3);
+    // No T13 for a minor represented by parents (owner 2026-11-02).
+    assert_eq!(staff["preview"]["patient_points"], 2);
     assert_draft_pure(&app).await;
     sqlx::query("UPDATE lead_representatives SET citizenships=ARRAY['DE'] WHERE lead_id=$1 AND contact_id=$2")
         .bind(app.lead).bind(app.second).execute(&app.suite.pool).await.unwrap();

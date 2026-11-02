@@ -277,6 +277,7 @@ async fn load_inner(
         ),
         has_representative: flag("has_representative"),
         under_guardianship: flag("under_guardianship"),
+        minor_not_by_parents: active.representation.minor_not_by_parents(),
         patient_pep: flag("pep_self") || flag("pep_related"),
         payer_pep: third_party
             && statement_counts

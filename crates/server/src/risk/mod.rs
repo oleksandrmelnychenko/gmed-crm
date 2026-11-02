@@ -415,8 +415,14 @@ pub struct Inputs {
     pub id_document_unreadable: bool,
     pub id_valid_until: Option<NaiveDate>,
     pub minor: bool,
+    /// Adult: "does somebody act on your behalf?" answered "yes". Not read
+    /// for a minor (the adult question is not asked of a child).
     pub has_representative: bool,
     pub under_guardianship: bool,
+    /// A minor represented by someone other than the parents: the custody is
+    /// «guardian» or a representative on file is a guardian (Vormund,
+    /// Pfleger) rather than the mother, the father or a parent.
+    pub minor_not_by_parents: bool,
     pub patient_pep: bool,
     pub payer_pep: bool,
     pub patient_sanctions_links: bool,
@@ -651,8 +657,17 @@ pub fn evaluate(inputs: &Inputs, config: &RiskConfig) -> Vec<Fired> {
     if inputs.identity_issue() {
         fire("T12", SUBJECT_PATIENT, None, None);
     }
-    // T13: a minor, a representative or a guardianship.
-    if inputs.minor || inputs.has_representative || inputs.under_guardianship {
+    // T13: represented by someone other than the parents, or under
+    // guardianship (owner 2026-11-02). A minor represented by the parents
+    // alone — or with nobody recorded yet — fires nothing; an adult with an
+    // authorised representative (Vollmacht) or a legal guardian (Betreuer)
+    // and a minor with a guardian (Vormund) do.
+    let represented_by_others = if inputs.minor {
+        inputs.minor_not_by_parents
+    } else {
+        inputs.has_representative
+    };
+    if represented_by_others || inputs.under_guardianship {
         fire("T13", SUBJECT_PATIENT, None, None);
     }
     // T14 / T15: the answers, per subject.
@@ -737,7 +752,8 @@ pub struct Merged {
     /// A new trigger or more points than stored.
     pub raised: bool,
     /// Keys withdrawn: T12 once a valid identity document is on file, T13
-    /// once nobody acts for an adult, T16 once no confirmed hit is left.
+    /// once nobody but the parents acts for the lead, T16 once no confirmed
+    /// hit is left.
     pub withdrawn: Vec<String>,
 }
 
@@ -747,7 +763,8 @@ pub struct Merged {
 /// upload does not keep it), T16 unless its subject is in `t16_kept_for`.
 fn withdrawable(entry: &Sticky, t16_kept_for: &[&str]) -> bool {
     // T13 too (owner 2026-10-10): a "yes" to the representative or guardianship
-    // question taken back left a point for good. The retired amount triggers
+    // question taken back left a point for good; since 2026-11-02 (owner) the
+    // T13 a minor's parents set under the old rule goes the same way. The retired amount triggers
     // never fire again and go as well (owner 2026-10-12).
     RETIRED_TRIGGERS.contains(&entry.key.as_str())
         || matches!(entry.key.as_str(), "T12" | "T13")
@@ -758,7 +775,7 @@ fn withdrawable(entry: &Sticky, t16_kept_for: &[&str]) -> bool {
 /// live evaluation adds new ones and raises points. A stored trigger that no
 /// longer fires stays, marked inactive (since `now`). The only ways down: a
 /// stored T12 that no longer fires (the identity document is now valid) is
-/// removed, so is a stored T13 once nobody acts for an adult lead any more,
+/// removed, so is a stored T13 once nobody but the parents acts for the lead,
 /// and a stored T16 that no longer fires unless its side has a confirmed hit
 /// (`t16_kept_for`; a confirmation is final): T16 fires only on a confirmed
 /// hit since 2026-10-11, so this removes a T16 an open hit set before, and
@@ -1208,21 +1225,47 @@ mod tests {
             })
             .is_empty()
         );
+        // T13 (owner 2026-11-02): represented by someone other than the
+        // parents, or under guardianship.
         for inputs in [
-            Inputs {
-                minor: true,
-                ..clean()
-            },
+            // An adult with an authorised representative.
             Inputs {
                 has_representative: true,
+                ..clean()
+            },
+            // An adult under legal guardianship (Betreuer).
+            Inputs {
+                has_representative: true,
+                under_guardianship: true,
                 ..clean()
             },
             Inputs {
                 under_guardianship: true,
                 ..clean()
             },
+            // A minor with a guardian (Vormund).
+            Inputs {
+                minor: true,
+                minor_not_by_parents: true,
+                ..clean()
+            },
         ] {
             assert_eq!(fire(inputs), vec![("T13", "patient", None, 1)]);
+        }
+        // A minor represented by the parents alone, or with nobody recorded
+        // yet: no T13, also with a stale adult answer left on the row.
+        for inputs in [
+            Inputs {
+                minor: true,
+                ..clean()
+            },
+            Inputs {
+                minor: true,
+                has_representative: true,
+                ..clean()
+            },
+        ] {
+            assert!(fire(inputs).is_empty());
         }
     }
 
@@ -1567,9 +1610,12 @@ mod tests {
                 identity_fingerprint: String::new(),
                 legacy_identity_fingerprint: String::new(),
             };
+        // A guardianship keeps one patient trigger (T13) beside the
+        // representative ones; parents alone no longer fire it.
         let inputs = Inputs {
             minor: true,
             has_representative: true,
+            under_guardianship: true,
             representatives: vec![
                 person(anna, "Anna", vec!["DE"], false),
                 person(otto, "Otto", vec!["RU"], true),
@@ -1657,8 +1703,24 @@ mod tests {
         let back = merge(&started.triggers, &evaluate(&clean(), &config), t0, &[]);
         assert!(back.triggers.iter().all(|trigger| trigger.key != "T13"));
         assert!(!back.withdrawn.is_empty());
-        // A minor keeps it.
+        // A minor with a guardian (Vormund) keeps it.
         let minor = merge(
+            &started.triggers,
+            &evaluate(
+                &Inputs {
+                    minor: true,
+                    minor_not_by_parents: true,
+                    ..clean()
+                },
+                &config,
+            ),
+            t0,
+            &[],
+        );
+        assert!(minor.triggers.iter().any(|trigger| trigger.key == "T13"));
+        // The T13 the parents of a minor set under the old rule (before
+        // 2026-11-02) goes at the next evaluation, without a decision.
+        let parents_only = merge(
             &started.triggers,
             &evaluate(
                 &Inputs {
@@ -1670,7 +1732,13 @@ mod tests {
             t0,
             &[],
         );
-        assert!(minor.triggers.iter().any(|trigger| trigger.key == "T13"));
+        assert!(
+            parents_only
+                .triggers
+                .iter()
+                .all(|trigger| trigger.key != "T13")
+        );
+        assert_eq!(parents_only.withdrawn, vec!["T13".to_string()]);
     }
 
     #[test]

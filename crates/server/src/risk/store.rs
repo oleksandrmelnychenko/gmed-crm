@@ -833,11 +833,17 @@ pub fn block_states(
             missing.push(FOLLOW_UP_SUBMIT.to_string());
         }
         let open = match block {
+            // A minor's representatives (parents or guardian) at the
+            // document stage whatever fired: T13 no longer fires for the
+            // parents (owner 2026-11-02), their identification still opens G.
             "G" => {
                 requested
-                    || (sticky("T13")
-                        && !missing.is_empty()
-                        && (!answers.minor_representation || answers.document_stage))
+                    || (!missing.is_empty()
+                        && if answers.minor_representation {
+                            answers.document_stage
+                        } else {
+                            sticky("T13")
+                        })
             }
             "I" => requested || (sticky("T12") && !missing.is_empty()),
             "H" => {

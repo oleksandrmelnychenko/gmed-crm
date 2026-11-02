@@ -510,8 +510,9 @@ export function riskTriggerLabel(key: string, tx: Tx, subject = "patient"): stri
       );
     case "T13":
       return tx(
-        "Несовершеннолетний, представитель или опека",
-        "Minderjährig, vertreten oder unter Betreuung",
+        // Owner 2026-11-02: a minor represented by the parents alone does not fire T13.
+        "Представлен не родителями или под опекой",
+        "Vertreten durch andere als die Eltern oder unter Betreuung",
       );
     case "T14":
       return tx("PEP: ответ «да»", "PEP: Antwort „ja“");
@@ -753,7 +754,7 @@ export function riskEventLabel(event: RiskHistoryEvent, tx: Tx): string {
       return tx("Пациент отправил доп. сведения", "Ergänzende Angaben gesendet");
     case "trigger_withdrawn":
       // T16 after a false-positive decision (or set by an open hit before 2026-10-11); T12 once a valid
-      // identity document is on file, T13 once nobody acts for the adult any more (owner 2026-10-10).
+      // identity document is on file, T13 once nobody but the parents acts for the lead (owner 2026-10-10, 2026-11-02).
       return event.cause === "hit_decision"
         ? tx("Триггер снят (ложное совпадение)", "Auslöser zurückgenommen (falsch positiv)")
         : tx("Триггер снят (условие больше не выполняется)", "Auslöser zurückgenommen (Voraussetzung entfallen)");
