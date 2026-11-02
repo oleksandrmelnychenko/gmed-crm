@@ -403,11 +403,11 @@ function usePatientAppointmentsPageContent() {
       <PortalSummary items={[
         { label: t.portal_appointments_upcoming_visits, value: upcomingAppointments.length, visible: upcomingAppointments.length > 0 },
         { label: t.portal_appointments_open_requests, value: openRequests.length, visible: openRequests.length > 0 },
-        { label: t.portal_appointments_next_slot, value: nextAppointment ? formatPortalDate(nextAppointment.date) : "", visible: Boolean(nextAppointment) },
+        { label: t.portal_appointments_next_slot, value: nextAppointment ? <PortalDateChip>{formatPortalDate(nextAppointment.date)}</PortalDateChip> : "", visible: Boolean(nextAppointment) },
       ]} />
 
-      <section className="space-y-4">
-        <section className="space-y-4">
+      <section className="space-y-3">
+        <section className="space-y-3">
           <Section
             title={t.portal_appointments_scheduled_visits}
             accessory={appointments.length > 0 ? <CountBadge>{appointments.length}</CountBadge> : undefined}
@@ -423,7 +423,7 @@ function usePatientAppointmentsPageContent() {
             ) : (
               <div className="space-y-3">
                 {appointments.map((item) => (
-                  <ListItem key={item.id} className="space-y-4">
+                  <ListItem key={item.id} className="space-y-3">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap gap-2">
@@ -444,7 +444,7 @@ function usePatientAppointmentsPageContent() {
                       </div>
                       <CalendarClock className="size-5 text-muted-foreground" />
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-2 sm:grid-cols-2">
                       <InfoRow
                         className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
                         label={t.portal_appointments_date}
@@ -518,7 +518,7 @@ function usePatientAppointmentsPageContent() {
                   ];
 
                   return (
-                    <ListItem key={item.order_id} className="space-y-4">
+                    <ListItem key={item.order_id} className="space-y-3">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-foreground">
@@ -597,7 +597,7 @@ function usePatientAppointmentsPageContent() {
                           {portalStatusLabel(item.status)}
                         </StatusBadge>
                       </div>
-                      <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="grid gap-2 sm:grid-cols-2">
                         <InfoRow
                           className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
                           label={

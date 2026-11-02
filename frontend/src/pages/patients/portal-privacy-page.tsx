@@ -246,7 +246,7 @@ export function PatientPrivacyPage() {
             {t.portal_privacy_manager_review_hint}
           </p>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-3">
             <Field label={t.portal_privacy_request_type} htmlFor="privacy-type">
               <NativeComboboxSelect
                 id="privacy-type"
@@ -317,7 +317,7 @@ export function PatientPrivacyPage() {
                     </p>
                   ) : null}
 
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_due} value={<PortalDateChip>{formatPortalDate(item.due_at)}</PortalDateChip>} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_reviewed} value={<PortalDateChip>{formatPortalDateTime(item.reviewed_at)}</PortalDateChip>} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_executed} value={<PortalDateChip>{formatPortalDateTime(item.executed_at)}</PortalDateChip>} />

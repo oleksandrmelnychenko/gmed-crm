@@ -168,7 +168,7 @@ function PatientServicesRequestSection({
 }: PatientServicesRequestSectionProps) {
   return (
     <AdminDialogScaffold title={t.services_request_title} description={t.services_request_description}>
-      <form className="space-y-4" onSubmit={(event) => void onSubmit(event)}>
+      <form className="space-y-3" onSubmit={(event) => void onSubmit(event)}>
         <Field label={t.services_form_service_type}>
           <NativeComboboxSelect
             value={form.serviceKind}
@@ -494,8 +494,8 @@ export function PatientServicesPage() {
         { label: t.services_completed, value: completedItems.length, visible: completedItems.length > 0 },
       ]} />
 
-      <section className="space-y-4">
-        <section className="space-y-4">
+      <section className="space-y-3">
+        <section className="space-y-3">
           <Section
             title={t.services_history_title}
             accessory={services.length > 0 ? <CountBadge>{services.length}</CountBadge> : undefined}
@@ -535,7 +535,7 @@ export function PatientServicesPage() {
                     <Building2 className="size-5 text-muted-foreground" />
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                     <InfoRow label={t.services_preferred_start} value={<PortalDateChip>{formatPortalDateTime(item.starts_at)}</PortalDateChip>} />
                     <InfoRow label={t.services_preferred_end} value={<PortalDateChip>{formatPortalDateTime(item.ends_at)}</PortalDateChip>} />
                     <InfoRow label={t.services_vendor} value={item.vendor_name || t.common_not_set} />
@@ -548,7 +548,7 @@ export function PatientServicesPage() {
                   </div>
 
                   {item.service_notes ? (
-                    <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
+                    <div className={cn("rounded-lg px-3 py-2 text-sm leading-6 text-foreground", tokens.surface.mutedCard)}>
                       {localizeTaskNote(item.service_notes, lang)}
                     </div>
                   ) : null}

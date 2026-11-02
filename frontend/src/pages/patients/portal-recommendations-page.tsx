@@ -252,7 +252,7 @@ export function PatientRecommendationsPage() {
             const isClosed = ["completed", "declined", "cancelled", "superseded"].includes(item.status);
 
             return (
-              <PortalListItem key={recommendationId} className="space-y-4">
+              <PortalListItem key={recommendationId} className="space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="flex flex-wrap gap-2">
@@ -276,7 +276,7 @@ export function PatientRecommendationsPage() {
                 </div>
 
                 {item.description ? (
-                  <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
+                  <div className={cn("rounded-lg px-3 py-2 text-sm leading-6 text-foreground", tokens.surface.mutedCard)}>
                     {item.description}
                   </div>
                 ) : null}

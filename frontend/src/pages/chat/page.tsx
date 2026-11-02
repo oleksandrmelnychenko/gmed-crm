@@ -32,6 +32,7 @@ import { useAuth } from "@/lib/auth";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
+import { PortalDateChip } from "@/pages/patients/ui/portal-page-layout";
 import { Input } from "@/components/ui/input";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { cn } from "@/lib/utils";
@@ -1577,7 +1578,7 @@ function useChatPageContent() {
                         className="my-4 flex items-center gap-3 text-[10px] text-muted-foreground"
                       >
                         <span className="h-px flex-1 bg-border" />
-                        <span>{formatChatDay(m.created_at)}</span>
+                        {user?.role === "patient" ? <PortalDateChip>{formatChatDay(m.created_at)}</PortalDateChip> : <span>{formatChatDay(m.created_at)}</span>}
                         <span className="h-px flex-1 bg-border" />
                       </div>
                     ) : null}

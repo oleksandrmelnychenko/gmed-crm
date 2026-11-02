@@ -1,4 +1,4 @@
-import { PortalInfoRow as InfoRow, PortalListItem as ListItem, PortalDateChip, PortalSection as Section, PortalSummary, PortalComplete } from "./ui/portal-page-layout";
+import { PortalListItem as ListItem, PortalDateChip, PortalSection as Section, PortalSummary, PortalComplete } from "./ui/portal-page-layout";
 import { startTransition, useCallback, useEffect, useMemo, useReducer } from "react";
 import {
   ArrowUpRight,
@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { StatusChip } from "@/components/ui/status-chip";
 import { OverflowMenu } from "@/components/ui/overflow-menu";
 import {
   Banner,
@@ -438,7 +439,7 @@ function usePatientDashboardPageContent() {
           { href: "/services", label: t.portal_dashboard_my_services, Icon: Sparkles, count: openServiceRequests },
           { href: "/invoices", label: t.portal_dashboard_my_invoices, Icon: ReceiptText, count: openInvoiceCount },
         ].map(({ href, label, Icon, count }) => (
-          <a key={href} href={href} className="group flex min-w-0 items-center gap-3 rounded-xl border border-border/70 bg-card p-4 text-sm font-medium transition hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <a key={href} href={href} className="group flex min-w-0 items-center gap-3 rounded-xl border border-border/70 bg-card px-3 py-3 text-sm font-medium transition hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <span className="rounded-lg bg-muted p-2"><Icon aria-hidden="true" className="size-4 text-primary" /></span>
             <span className="min-w-0 flex-1 break-words">{label}</span>
             {count > 0 ? <CountBadge>{count}</CountBadge> : <ArrowUpRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />}
@@ -446,7 +447,7 @@ function usePatientDashboardPageContent() {
         ))}
       </nav>
       <PortalSummary items={[
-        { label: t.portal_dashboard_upcoming_visits, value: nextAppointment ? formatPortalDate(nextAppointment.date) : "", visible: Boolean(nextAppointment) },
+        { label: t.portal_dashboard_upcoming_visits, value: nextAppointment ? <PortalDateChip>{formatPortalDate(nextAppointment.date)}</PortalDateChip> : "", visible: Boolean(nextAppointment) },
         { label: t.portal_documents_pending_confirmations, value: pendingConfirmations, visible: pendingConfirmations > 0 },
         { label: t.portal_dashboard_outstanding_balance, value: formatPortalCurrency(outstandingBalance), visible: outstandingBalance > 0 },
         { label: t.portal_dashboard_open_privacy_requests, value: openRequests, visible: openRequests > 0 },
@@ -544,34 +545,33 @@ function usePatientDashboardPageContent() {
               <div className="py-3"><PortalComplete>{t.portal_dashboard_no_open_portal_actions_right_now}</PortalComplete></div>
             ) : (
               topNextActions.map((item) => (
-                <ListItem key={item.id} className="space-y-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <StatusBadge className={nextActionTone(item.kind, item.priority)}>
-                          {formatNextActionKind(item.kind, t)}
-                        </StatusBadge>
-                        <CountBadge>{recommendationPriorityLabel(item.priority || "normal")}</CountBadge>
+                <ListItem key={item.id} className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge className={nextActionTone(item.kind, item.priority)}>
+                        {formatNextActionKind(item.kind, t)}
+                      </StatusBadge>
+                      <CountBadge>{recommendationPriorityLabel(item.priority || "normal")}</CountBadge>
+                    </div>
+                    <p className="mt-2 text-sm font-semibold text-foreground">{item.title}</p>
+                    {nextActionText(item) ? (
+                      <p className={cn("mt-1", tokens.text.muted)}>{nextActionText(item)}</p>
+                    ) : null}
+                    {(item.due_at || item.amount) ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        {item.due_at ? (
+                          <PortalDateChip>{item.kind === "recommendation" ? formatPortalDate(item.due_at) : formatPortalDateTime(item.due_at)}</PortalDateChip>
+                        ) : null}
+                        {item.amount ? (
+                          <StatusChip tone="warning">{t.portal_dashboard_amount}: {formatPortalCurrency(item.amount)}</StatusChip>
+                        ) : null}
                       </div>
-                      <p className="mt-2 text-sm font-semibold text-foreground">{item.title}</p>
-                      {nextActionText(item) ? (
-                        <p className={cn("mt-1", tokens.text.muted)}>{nextActionText(item)}</p>
-                      ) : null}
-                    </div>
+                    ) : null}
                   </div>
-                  {(item.due_at || item.amount) ? (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {item.due_at ? (
-                        <InfoRow label={t.portal_dashboard_due} value={<PortalDateChip>{item.kind === "recommendation" ? formatPortalDate(item.due_at) : formatPortalDateTime(item.due_at)}</PortalDateChip>} />
-                      ) : null}
-                      {item.amount ? (
-                        <InfoRow label={t.portal_dashboard_amount} value={formatPortalCurrency(item.amount)} />
-                      ) : null}
-                    </div>
-                  ) : null}
-                  <div className="flex justify-end">
-                    <a href={item.action_url} className="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90">
+                  <div className="flex shrink-0 sm:justify-end">
+                    <a href={item.action_url} className="inline-flex min-h-8 items-center gap-2 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                       {nextActionButtonLabel(item, t)}
+                      <ArrowUpRight aria-hidden="true" className="size-3.5 shrink-0" />
                     </a>
                   </div>
                 </ListItem>
@@ -589,7 +589,7 @@ function usePatientDashboardPageContent() {
             </a>
           }
         >
-          <div className="space-y-3">
+          <div className="space-y-2">
             {recentRecommendations.length === 0 ? (
               <EmptyCell>{t.portal_dashboard_no_recommendations_released_yet}</EmptyCell>
             ) : (
@@ -608,11 +608,11 @@ function usePatientDashboardPageContent() {
                       {portalStatusLabel(item.status)}
                     </StatusBadge>
                   </div>
-                  <p className={cn("mt-3", tokens.text.muted)}>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
                     {item.due_at
-                      ? `${t.portal_dashboard_due} ${formatPortalDate(item.due_at)}`
+                      ? <PortalDateChip>{formatPortalDate(item.due_at)}</PortalDateChip>
                       : t.portal_dashboard_no_due_date}
-                  </p>
+                  </div>
                 </ListItem>
               ))
             )}
@@ -631,7 +631,7 @@ function usePatientDashboardPageContent() {
             </a>
           }
         >
-          <div className="space-y-3">
+          <div className="space-y-2">
             {recentAppointments.length === 0 ? (
               <EmptyCell>{t.portal_dashboard_no_scheduled_visits_yet}</EmptyCell>
             ) : (
@@ -648,7 +648,7 @@ function usePatientDashboardPageContent() {
                       {portalStatusLabel(item.status)}
                     </StatusBadge>
                   </div>
-                  <p className={cn("mt-3", tokens.text.muted)}>{formatPortalDate(item.date)}</p>
+                  <div className="mt-2"><PortalDateChip>{formatPortalDate(item.date)}</PortalDateChip></div>
                 </ListItem>
               ))
             )}
@@ -665,26 +665,25 @@ function usePatientDashboardPageContent() {
             </a>
           }
         >
-          <div className="space-y-3">
+          <div className="space-y-2">
             {recentDocuments.length === 0 ? (
               <EmptyCell>{t.portal_dashboard_no_documents_have_been_released_to_your_portal_yet}</EmptyCell>
             ) : (
               recentDocuments.map((item) => (
                 <ListItem key={item.id}>
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">{item.auto_name}</p>
-                      <p className={cn("mt-1", tokens.text.muted)}>
-                        {portalDocumentTypeLabels(item.art, item.category).join(" / ")}
-                      </p>
-                    </div>
+                  <div className="flex items-start gap-2.5">
+                    <FileText aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-primary" />
+                    <p className="min-w-0 break-words text-sm font-semibold text-foreground">{item.auto_name}</p>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
                     <StatusBadge tone={item.confirmed ? "success" : item.requires_confirmation ? "warning" : "info"}>
                       {item.confirmed ? t.portal_dashboard_confirmed : item.requires_confirmation ? t.portal_dashboard_needs_confirmation : t.portal_dashboard_released}
                     </StatusBadge>
+                    <PortalDateChip>{formatPortalDateTime(item.shared_at)}</PortalDateChip>
+                    {portalDocumentTypeLabels(item.art, item.category).map((label) => (
+                      <StatusChip key={label} className="border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-300">{label}</StatusChip>
+                    ))}
                   </div>
-                  <p className={cn("mt-3", tokens.text.muted)}>
-                    {t.portal_dashboard_released} {formatPortalDateTime(item.shared_at)}
-                  </p>
                 </ListItem>
               ))
             )}
@@ -704,7 +703,7 @@ function usePatientDashboardPageContent() {
           <p className="text-sm text-muted-foreground">
             {t.portal_dashboard_billing_snapshots_and_current_payment_state}
           </p>
-          <div className="space-y-3">
+          <div className="space-y-2">
             {recentInvoices.length === 0 ? (
               <EmptyCell>{t.portal_dashboard_no_invoices_released_to_the_portal_yet}</EmptyCell>
             ) : (
@@ -713,17 +712,19 @@ function usePatientDashboardPageContent() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-foreground">{item.invoice_number}</p>
-                      <p className={cn("mt-1", tokens.text.muted)}>
-                        {item.order_number} / {t.portal_dashboard_due_2} {formatPortalDate(item.due_date)}
-                      </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        {item.order_number ? <StatusChip>{item.order_number}</StatusChip> : null}
+                        <span className="font-mono text-xs text-muted-foreground">{t.portal_dashboard_due_2}</span>
+                        <PortalDateChip>{formatPortalDate(item.due_date)}</PortalDateChip>
+                      </div>
                     </div>
                     <StatusBadge status={item.status} className={invoiceStatusTone(item.status)}>
                       {portalStatusLabel(item.status)}
                     </StatusBadge>
                   </div>
-                  <p className={cn("mt-3", tokens.text.muted)}>
-                    {t.portal_dashboard_open} {formatPortalCurrency(item.balance_due)}
-                  </p>
+                  <div className="mt-2"><StatusChip tone={Number(item.balance_due) > 0 ? "warning" : "success"}>
+                    {t.portal_dashboard_open}: {formatPortalCurrency(item.balance_due)}
+                  </StatusChip></div>
                 </ListItem>
               ))
             )}
@@ -743,7 +744,7 @@ function usePatientDashboardPageContent() {
           <p className="text-sm text-muted-foreground">
             {t.portal_dashboard_concierge_and_add_on_services_from_your_portal}
           </p>
-          <div className="space-y-3">
+          <div className="space-y-2">
             {recentServices.length === 0 ? (
               <EmptyCell>{t.portal_dashboard_no_services_yet}</EmptyCell>
             ) : (
@@ -760,10 +761,10 @@ function usePatientDashboardPageContent() {
                       {portalStatusLabel(item.status)}
                     </StatusBadge>
                   </div>
-                  <p className={cn("mt-3", tokens.text.muted)}>
-                    {conciergeServiceKindLabel(item.service_kind)}
-                    {item.starts_at ? ` / ${formatPortalDateTime(item.starts_at)}` : ""}
-                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <StatusChip>{conciergeServiceKindLabel(item.service_kind)}</StatusChip>
+                    {item.starts_at ? <PortalDateChip>{formatPortalDateTime(item.starts_at)}</PortalDateChip> : null}
+                  </div>
                 </ListItem>
               ))
             )}
@@ -783,7 +784,7 @@ function usePatientDashboardPageContent() {
           <p className="text-sm text-muted-foreground">
             {t.portal_dashboard_dsgvo_related_requests_you_already_submitted}
           </p>
-          <div className="space-y-3">
+          <div className="space-y-2">
             {recentRequests.length === 0 ? (
               <EmptyCell>{t.portal_dashboard_no_privacy_requests_submitted_yet}</EmptyCell>
             ) : (
@@ -794,17 +795,19 @@ function usePatientDashboardPageContent() {
                       <p className="text-sm font-semibold text-foreground">
                         {privacyRequestLabel(item.request_type)}
                       </p>
-                      <p className={cn("mt-1", tokens.text.muted)}>
-                        {t.portal_dashboard_requested} {formatPortalDateTime(item.requested_at)}
-                      </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-xs text-muted-foreground">{t.portal_dashboard_requested}</span>
+                        <PortalDateChip>{formatPortalDateTime(item.requested_at)}</PortalDateChip>
+                      </div>
                     </div>
                     <StatusBadge status={item.status} className={privacyStatusTone(item.status)}>
                       {portalStatusLabel(item.status)}
                     </StatusBadge>
                   </div>
-                  <p className={cn("mt-3", tokens.text.muted)}>
-                    {t.portal_dashboard_due} {formatPortalDate(item.due_at)}
-                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-xs text-muted-foreground">{t.portal_dashboard_due}</span>
+                    <PortalDateChip>{formatPortalDate(item.due_at)}</PortalDateChip>
+                  </div>
                 </ListItem>
               ))
             )}
@@ -824,7 +827,7 @@ function usePatientDashboardPageContent() {
           <p className="text-sm text-muted-foreground">
             {t.portal_dashboard_submitted_quality_surveys_and_review_follow_up}
           </p>
-          <div className="space-y-3">
+          <div className="space-y-2">
             {recentFeedback.length === 0 ? (
               <EmptyCell>{t.portal_dashboard_no_feedback_submitted_yet}</EmptyCell>
             ) : (
@@ -835,9 +838,10 @@ function usePatientDashboardPageContent() {
                       <p className="text-sm font-semibold text-foreground">
                         {item.appointment_title || item.provider_name || t.portal_dashboard_general_feedback}
                       </p>
-                      <p className={cn("mt-1", tokens.text.muted)}>
-                        {t.uiText.feedback_nps_label} {item.nps_score} / {formatPortalDateTime(item.submitted_at)}
-                      </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <StatusChip>{t.uiText.feedback_nps_label} {item.nps_score}</StatusChip>
+                        <PortalDateChip>{formatPortalDateTime(item.submitted_at)}</PortalDateChip>
+                      </div>
                     </div>
                     <StatusBadge status={item.status} className={feedbackStatusTone(item.status)}>
                       {feedbackStatusLabel(item.status)}

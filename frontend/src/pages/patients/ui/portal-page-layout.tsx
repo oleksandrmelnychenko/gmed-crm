@@ -10,11 +10,11 @@ export function PortalSection({ className, ...props }: ComponentProps<typeof Sec
 }
 
 export function PortalInfoRow({ className, ...props }: ComponentProps<typeof InfoRow>) {
-  return <InfoRow {...props} className={cn(className, "min-w-0 rounded-lg border-0 bg-muted/20 px-3 py-2 shadow-none [&>span:first-child]:font-mono [&>span:first-child]:text-xs [&>span:last-of-type]:text-sm [&>span]:[overflow-wrap:anywhere]")} />;
+  return <InfoRow {...props} className={cn(className, "min-w-0 rounded-lg border border-border/50 bg-card px-3 py-2 shadow-none [&>span:first-child]:font-mono [&>span:first-child]:text-xs [&>span:last-of-type]:text-sm [&>span:last-of-type]:text-foreground [&>span]:[overflow-wrap:anywhere]")} />;
 }
 
 export function PortalListItem({ className, ...props }: ComponentProps<typeof ListItem>) {
-  return <ListItem {...props} className={cn("min-w-0 rounded-xl border-border/60 bg-card p-3 shadow-none", className)} />;
+  return <ListItem {...props} className={cn("min-w-0 rounded-xl border-border/60 bg-card p-3 shadow-none [overflow-wrap:anywhere]", className)} />;
 }
 
 export function PortalStatCard({ label, value, description }: ComponentProps<typeof StatCard>) {
@@ -29,14 +29,14 @@ export function PortalStatCard({ label, value, description }: ComponentProps<typ
 
 export function PortalDateChip({ children }: { children: ReactNode }) {
   if (!children || children === "—" || children === "–") return <span>{children || "—"}</span>;
-  return <StatusChip tone="info"><CalendarDays aria-hidden="true" /><span className="min-w-0 whitespace-normal">{children}</span></StatusChip>;
+  return <StatusChip tone="info" className="tabular-nums"><CalendarDays aria-hidden="true" /><span className="min-w-0 whitespace-normal">{children}</span></StatusChip>;
 }
 
 export function PortalSummary({ items }: { items: { label: string; value: ReactNode; visible: boolean }[] }) {
   const visible = items.filter((item) => item.visible);
   if (!visible.length) return null;
   return <dl className="flex flex-wrap gap-x-5 gap-y-2 rounded-xl border border-border/60 bg-card px-3 py-2.5">
-    {visible.map((item) => <div key={item.label} className="flex items-baseline gap-2 text-sm">
+    {visible.map((item) => <div key={item.label} className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
       <dt className="font-mono text-xs text-muted-foreground">{item.label}</dt>
       <dd className="font-semibold tabular-nums text-foreground">{item.value}</dd>
     </div>)}

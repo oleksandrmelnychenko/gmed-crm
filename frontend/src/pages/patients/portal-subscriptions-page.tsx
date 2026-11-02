@@ -275,11 +275,10 @@ function SubscriptionCard({ subscription }: { subscription: PortalSubscriptionIt
         : t.portal_subscriptions_amount_hidden;
 
   return (
-    <article className={cn("space-y-3 rounded-xl p-3", tokens.surface.card)}>
+    <article className={cn("min-w-0 space-y-3 rounded-xl p-3 shadow-none [overflow-wrap:anywhere]", tokens.surface.card)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className={tokens.text.eyebrow}>{lifecycleLabel}</div>
-          <h2 className="mt-2 text-base font-semibold text-foreground">
+          <h2 className="text-base font-semibold text-foreground">
             {subscription.package_name}
           </h2>
           {subscription.description ? (
@@ -300,7 +299,7 @@ function SubscriptionCard({ subscription }: { subscription: PortalSubscriptionIt
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-2 sm:grid-cols-2">
         <InfoRow
           className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
           label={t.portal_subscriptions_period}

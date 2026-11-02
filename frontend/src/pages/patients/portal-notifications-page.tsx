@@ -205,7 +205,7 @@ export function PatientNotificationsPage() {
   if (loading) return <TabLoader />;
 
   return (
-    <TabShell className="mt-0 min-h-0 space-y-3">
+    <TabShell className="mt-0 w-full min-w-0 min-h-0 max-w-none space-y-3">
       <PageHeader
         title={copy.title}
         description={copy.description}
@@ -260,14 +260,14 @@ export function PatientNotificationsPage() {
                 <article
                   key={item.id}
                   className={cn(
-                    "rounded-xl border p-3",
+                    "min-w-0 rounded-xl border p-3 [overflow-wrap:anywhere]",
                     item.is_read ? "border-border/60 bg-card" : "border-amber-200 bg-card",
                   )}
                 >
                   <div className="flex items-start gap-3">
                     <span className={cn(
                       "flex size-8 shrink-0 items-center justify-center rounded-lg",
-                      item.is_read ? "bg-muted text-muted-foreground" : "bg-transparent text-[var(--brand)]",
+                      item.is_read ? "bg-muted text-muted-foreground" : "bg-orange-50 text-[var(--brand)] dark:bg-orange-950/30",
                     )}>
                       <Bell className="size-4" />
                     </span>
@@ -277,7 +277,7 @@ export function PatientNotificationsPage() {
                         <StatusChip>{notificationCategory(item, portalLang)}</StatusChip>
                         <StatusChip tone={item.is_read ? "neutral" : "warning"}>{item.is_read ? copy.read : copy.new}</StatusChip>
                       </div>
-                      {text.body ? <p className="mt-2 text-sm leading-6 text-muted-foreground">{text.body}</p> : null}
+                      {text.body ? <p className="mt-2 text-sm leading-6 text-foreground">{text.body}</p> : null}
                       <div className="mt-2"><PortalDateChip>{formatPortalDateTime(item.created_at)}</PortalDateChip></div>
                     </div>
                   </div>

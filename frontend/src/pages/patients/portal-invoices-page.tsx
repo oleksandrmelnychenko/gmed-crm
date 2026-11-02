@@ -767,7 +767,7 @@ function usePatientInvoicesPageContent() {
                       </StatusBadge>
                     </div>
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="grid gap-2 sm:grid-cols-3">
                     <InfoRow
                       className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
                       label={t.portal_invoices_total}
@@ -881,7 +881,7 @@ function usePatientInvoicesPageContent() {
                       </StatusBadge>
                     </div>
                   </div>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_issued_at} value={<PortalDateChip>{formatPortalDateTime(detail.issued_at)}</PortalDateChip>} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_due_date} value={<PortalDateChip>{formatPortalDate(detail.due_date)}</PortalDateChip>} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_order} value={detail.order_number} />
