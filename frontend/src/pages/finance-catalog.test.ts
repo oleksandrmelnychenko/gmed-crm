@@ -14,6 +14,8 @@ import {
   seedTaxProfileText,
   sortPriceVersionsForDisplay,
   selectableTaxProfiles,
+  activeTaxProfileId,
+  priceVersionDirty,
   taxProfileRemovable,
   taxProfileVatRateIsValid,
   validateAgencyServiceForm,
@@ -42,8 +44,32 @@ describe("taxProfileRemovable", () => {
     ]);
   });
 
+  it("never preselects an archived profile for a new price (QA round 14)", () => {
+    const profiles = [
+      { id: "active", is_active: true },
+      { id: "archived", is_active: false },
+    ];
+    expect(activeTaxProfileId(profiles, "active")).toBe("active");
+    expect(activeTaxProfileId(profiles, "archived")).toBe("");
+    expect(activeTaxProfileId(profiles, null)).toBe("");
+  });
+
+  it("asks before closing the price dialog only after a real change (QA round 14)", () => {
+    const opened = {
+      open: true, busy: false, error: "", kind: "service-package" as const, parentId: "p", versionId: "v",
+      title: "Paket", name: "Preis", netPrice: "100", currency: "EUR", vatRate: "19", taxProfileId: "t",
+      validFrom: "2026-01-01", validTo: "",
+    };
+    const baseline = JSON.stringify(["Preis", "100", "EUR", "19", "t", "2026-01-01", ""]);
+    const form = { ...opened, baseline };
+    // A refused delete leaves an error and the busy flag behind: no change.
+    expect(priceVersionDirty({ ...form, error: "Единственную версию цены удалить нельзя.", busy: false })).toBe(false);
+    expect(priceVersionDirty({ ...form, netPrice: "120" })).toBe(true);
+    expect(priceVersionDirty(opened)).toBe(false);
+  });
+
   it("explains the refused removals in both languages", () => {
-    for (const code of ["tax_profile_system", "tax_profile_default", "price_version_used"]) {
+    for (const code of ["tax_profile_system", "tax_profile_default", "price_version_used", "price_version_last", "tax_profile_inactive"]) {
       const key = ORDER_API_ERROR_KEYS[code];
       expect(key, code).toBeTruthy();
       for (const lang of ["de", "ru"] as const) {

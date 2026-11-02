@@ -180,6 +180,17 @@ export function selectableTaxProfiles<T extends Pick<TaxProfile, "id" | "is_acti
   return profiles.filter((profile) => profile.is_active || profile.id === selectedId);
 }
 
+/**
+ * The profile a new entry starts with: the given one only while it is active. An archived profile
+ * is never preselected for new use (QA round 14: «Добавить цену» kept the package's archived one).
+ */
+export function activeTaxProfileId<T extends Pick<TaxProfile, "id" | "is_active">>(
+  profiles: T[],
+  id: string | null | undefined,
+): string {
+  return id && profiles.some((profile) => profile.id === id && profile.is_active) ? id : "";
+}
+
 type ServicePackagePriceVersion = {
   id: string;
   name?: string | null;
@@ -213,6 +224,8 @@ type PriceVersionForm = {
   taxProfileId: string;
   validFrom: string;
   validTo: string;
+  /** The editable values when the dialog opened: «Отмена» asks only after a real change (QA round 14). */
+  baseline?: string;
 };
 
 type ServicePackageItem = {
@@ -335,6 +348,22 @@ function createBlankPackageForm(unitLabel: string): ServicePackageForm {
 
 function todayInputDate() {
   return appDateKey();
+}
+
+/** The values a person edits in the price dialog; busy state and errors are no change. */
+function priceVersionSignature(form: PriceVersionForm): string {
+  const { name, netPrice, currency, vatRate, taxProfileId, validFrom, validTo } = form;
+  return JSON.stringify([name, netPrice, currency, vatRate, taxProfileId, validFrom, validTo]);
+}
+
+/** The opened price dialog with its starting values (see [`priceVersionDirty`]). */
+function withPriceBaseline(form: PriceVersionForm): PriceVersionForm {
+  return { ...form, baseline: priceVersionSignature(form) };
+}
+
+/** Whether the person changed the price dialog since it opened (QA round 14: not after a 409 alone). */
+export function priceVersionDirty(form: PriceVersionForm): boolean {
+  return form.baseline !== undefined && priceVersionSignature(form) !== form.baseline;
 }
 
 const BLANK_PRICE_VERSION_FORM: PriceVersionForm = {
@@ -1295,7 +1324,7 @@ function useFinanceCatalogPageContent() {
         filterType: "enum",
         filterOptions: [
           { value: "active", label: t.common_active },
-          { value: "inactive", label: t.common_inactive },
+          { value: "inactive", label: t.finance_catalog_status_archived },
         ],
         sortable: true,
         width: 110,
@@ -1309,7 +1338,7 @@ function useFinanceCatalogPageContent() {
                 : "border-slate-200 bg-slate-50 text-slate-600",
             )}
           >
-            {profile.is_active ? t.common_active : t.common_inactive}
+            {profile.is_active ? t.common_active : t.finance_catalog_status_archived}
           </Badge>
         ),
       },
@@ -1562,7 +1591,7 @@ function useFinanceCatalogPageContent() {
         filterType: "enum",
         filterOptions: [
           { value: "active", label: t.common_active },
-          { value: "inactive", label: t.common_inactive },
+          { value: "inactive", label: t.finance_catalog_status_archived },
         ],
         sortable: true,
         width: 110,
@@ -1595,7 +1624,7 @@ function useFinanceCatalogPageContent() {
                   : "border-slate-200 bg-slate-50 text-slate-600",
               )}
             >
-              {row.isActive ? t.common_active : t.common_inactive}
+              {row.isActive ? t.common_active : t.finance_catalog_status_archived}
             </Badge>
           ),
       },
@@ -1851,7 +1880,7 @@ function useFinanceCatalogPageContent() {
                         className="flex size-6 shrink-0 items-center justify-center border-l border-current/15 transition-colors hover:bg-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                         onClick={(event) => {
                           event.stopPropagation();
-                          setPriceVersionForm({
+                          setPriceVersionForm(withPriceBaseline({
                             ...BLANK_PRICE_VERSION_FORM,
                             open: true,
                             kind: "service-package",
@@ -1859,9 +1888,9 @@ function useFinanceCatalogPageContent() {
                             title: servicePackage.name,
                             netPrice: servicePackage.base_price_net,
                             currency: servicePackage.currency || "EUR",
-                            taxProfileId: servicePackage.tax_profile_id ?? "",
+                            taxProfileId: activeTaxProfileId(taxProfiles, servicePackage.tax_profile_id),
                             validFrom: todayInputDate(),
-                          });
+                          }));
                         }}
                         aria-label={t.finance_catalog_add_price_version}
                         title={t.finance_catalog_add_price_version}
@@ -1894,7 +1923,7 @@ function useFinanceCatalogPageContent() {
         filterType: "enum",
         filterOptions: [
           { value: "active", label: t.common_active },
-          { value: "inactive", label: t.common_inactive },
+          { value: "inactive", label: t.finance_catalog_status_archived },
         ],
         sortable: true,
         width: 110,
@@ -1932,7 +1961,7 @@ function useFinanceCatalogPageContent() {
                 : "border-slate-200 bg-slate-50 text-slate-600",
             )}
           >
-            {item.is_active ? t.common_active : t.common_inactive}
+            {item.is_active ? t.common_active : t.finance_catalog_status_archived}
           </Badge>
           );
         },
@@ -2165,7 +2194,7 @@ function useFinanceCatalogPageContent() {
     setCreateOpen(false);
     setEditingTaxProfileId("");
     setPackageFormOpen(false);
-    setPriceVersionForm({
+    setPriceVersionForm(withPriceBaseline({
       ...BLANK_PRICE_VERSION_FORM,
       open: true,
       kind: "agency-service",
@@ -2180,7 +2209,7 @@ function useFinanceCatalogPageContent() {
       vatRate: valueToInput(version?.vat_rate ?? service.vat_rate) || "19",
       validFrom: version?.valid_from ?? todayInputDate(),
       validTo: version?.valid_to ?? "",
-    });
+    }));
   }
 
   function openServicePackagePriceVersion(
@@ -2190,7 +2219,7 @@ function useFinanceCatalogPageContent() {
     setCreateOpen(false);
     setEditingTaxProfileId("");
     setAgencyServiceFormOpen(false);
-    setPriceVersionForm({
+    setPriceVersionForm(withPriceBaseline({
       ...BLANK_PRICE_VERSION_FORM,
       open: true,
       kind: "service-package",
@@ -2202,10 +2231,10 @@ function useFinanceCatalogPageContent() {
         : "",
       netPrice: version?.base_price_net ?? servicePackage.base_price_net,
       currency: version?.currency ?? servicePackage.currency ?? "EUR",
-      taxProfileId: version?.tax_profile_id ?? servicePackage.tax_profile_id ?? "",
+      taxProfileId: version ? version.tax_profile_id ?? "" : activeTaxProfileId(taxProfiles, servicePackage.tax_profile_id),
       validFrom: version?.valid_from ?? todayInputDate(),
       validTo: version?.valid_to ?? "",
-    });
+    }));
   }
 
   function closePriceVersionForm() {
@@ -2898,6 +2927,7 @@ function useFinanceCatalogPageContent() {
       />
 
       <Dialog
+        dirty={priceVersionDirty(priceVersionForm)}
         requireChanges={Boolean(priceVersionForm.versionId)}
         open={priceVersionForm.open && canManageTaxProfiles}
         onOpenChange={(open) => {
@@ -3846,7 +3876,7 @@ function useFinanceCatalogPageContent() {
             <AdminSheetScaffold
               title={
                 packageForm.id
-                  ? t.finance_catalog_save_package
+                  ? t.finance_catalog_edit_package
                   : t.finance_catalog_create_package
               }
               footer={

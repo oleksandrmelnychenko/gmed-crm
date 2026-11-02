@@ -146,6 +146,15 @@ export function serviceBillingUnitLabel(
   }
 }
 
+/** The unit on its own badge, in sentence case («Единица», QA round 14); inline («/ единица») stays lowercase. */
+export function serviceBillingUnitBadgeLabel(
+  unitLabel: string | null | undefined,
+  tx: Tx,
+) {
+  const label = serviceBillingUnitLabel(unitLabel, tx);
+  return label.charAt(0).toLocaleUpperCase() + label.slice(1);
+}
+
 export function serviceBillingUnitBadgeClass(unitLabel: string | null | undefined) {
   switch (serviceBillingUnitKind(unitLabel)) {
     case "hour":

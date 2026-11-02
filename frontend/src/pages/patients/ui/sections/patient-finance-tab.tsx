@@ -94,7 +94,7 @@ export function PatientFinanceTab({ patientId, onOpenInvoices }: { patientId: st
   }, [data, range, patientId, currency]);
   const effectiveCurrency = data?.currency ?? currency ?? "EUR";
   const amount = useCallback((value: bigint) => formatMoneyAmount(financeAmount(value), effectiveCurrency || "EUR"), [effectiveCurrency]);
-  const monthLabel = useCallback((value: string) => appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}-01T12:00:00Z`)), [lang]);
+  const monthLabel = useCallback((value: string) => appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}-01T12:00:00Z`)).replace(/^\p{Ll}/u, (letter) => letter.toLocaleUpperCase()), [lang]); // «Январь 2026 г.» (QA round 14)
   const balanceLabel = (value: bigint) => value > 0n ? l.debt : value < 0n ? l.credit : l.settled;
   const periods = report.periods;
   const totals = periods.reduce((sum, period) => ({ invoices: sum.invoices + period.invoices, payments: sum.payments + period.payments, refunds: sum.refunds + period.refunds, adjustments: sum.adjustments + period.adjustments }), { invoices: 0n, payments: 0n, refunds: 0n, adjustments: 0n });

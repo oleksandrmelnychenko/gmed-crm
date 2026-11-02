@@ -32,7 +32,7 @@ import { createNewestLoadGuard, type NewestLoadGuard } from "../model/newest-loa
 import { repeatConsentNote, requestConsentStatus } from "../model/request-consents";
 import { OrderCatalogServicesTable } from "@/pages/orders/ui/order-catalog-services-table";
 import type { ServiceLine } from "@/pages/orders/model/order-service-line";
-import { servicePriceOptionValue, parseServicePriceOptionValue, money, germanDateLabel, serviceBillingUnitLabel, serviceBillingUnitBadgeClass, formatMoneyValue, priceVersionDisplayName, resolveServiceDescriptionItems } from "@/pages/orders/model/order-service-presentation";
+import { servicePriceOptionValue, parseServicePriceOptionValue, money, germanDateLabel, serviceBillingUnitLabel, serviceBillingUnitBadgeLabel, serviceBillingUnitBadgeClass, formatMoneyValue, priceVersionDisplayName, resolveServiceDescriptionItems } from "@/pages/orders/model/order-service-presentation";
 export { resolveServiceDescriptionTemplate, resolveServiceDescriptionItems } from "@/pages/orders/model/order-service-presentation";
 import { SelectedWorkTypesSummary, workTypeDurationLabel } from "@/pages/orders/ui/order-work-types-summary";
 import { costEstimateWorkTypeHint, costEstimateWorkTypeStatus } from "@/pages/orders/model/cost-estimate-work-types";
@@ -13052,7 +13052,7 @@ ${serviceCommentLines.join("\n")}`
                                     serviceBillingUnitBadgeClass(rawUnit),
                                   )}
                                 >
-                                  {unit}
+                                  {serviceBillingUnitBadgeLabel(rawUnit, tx)}
                                 </Badge>
                               ) : null}
                             </div>

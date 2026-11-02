@@ -712,9 +712,9 @@ test("planning books one interpreter for a whole day in one request (plan stage 
 
   const block = page.getByTestId("order-interpreters-by-day");
   const day = block.locator('[data-testid="order-interpreter-day"][data-date="2026-11-03"]');
-  await expect(day).toContainText("без переводчика: 1");
+  await expect(day).toContainText("Без переводчика: 1");
   await expect(day).toContainText("Olga Test");
-  await expect(day).toContainText("нужен переводчик");
+  await expect(day).toContainText("Нужен переводчик");
   await day.getByRole("button", {name: "Назначить переводчика на день"}).click();
 
   const sheet = page.getByRole("dialog");
@@ -775,9 +775,9 @@ test("the interpreter answer badge stays inside its card on a phone (QA round 13
   }}));
   await page.goto(`/orders/${orderId}?section=planning`);
   const row = page.getByTestId("order-interpreter-row");
-  await expect(row).toContainText("ждёт ответа");
+  await expect(row).toContainText("Ждёт ответа");
   const card = await page.getByTestId("order-interpreters-by-day").boundingBox();
-  const badge = await row.getByText("ждёт ответа").boundingBox();
+  const badge = await row.getByText("Ждёт ответа").boundingBox();
   expect(card && badge).toBeTruthy();
   expect(badge!.x + badge!.width).toBeLessThanOrEqual(card!.x + card!.width);
 });

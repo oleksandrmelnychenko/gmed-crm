@@ -36,10 +36,10 @@ import { plannedDayLabel, plannedTimeLabel } from "../model/order-planned-appoin
 const INTERPRETER_META_TTL_MS = 60_000;
 
 const RESPONSE_LABELS: Record<string, { ru: string; de: string; tone: "neutral" | "info" | "warning" | "success" }> = {
-  pending: { ru: "ждёт ответа", de: "Antwort offen", tone: "warning" },
-  accepted: { ru: "принял", de: "zugesagt", tone: "success" },
-  declined: { ru: "отказался", de: "abgelehnt", tone: "neutral" },
-  discussion_requested: { ru: "уточнение", de: "Rückfrage", tone: "info" },
+  pending: { ru: "Ждёт ответа", de: "Antwort offen", tone: "warning" },
+  accepted: { ru: "Принял", de: "Zugesagt", tone: "success" },
+  declined: { ru: "Отказался", de: "Abgelehnt", tone: "neutral" },
+  discussion_requested: { ru: "Уточнение", de: "Rückfrage", tone: "info" },
 };
 
 type OrderInterpretersByDayProps = {
@@ -499,8 +499,8 @@ export function InterpreterDaysTable({ days, lang, locked, onAssignDay }: Interp
               {day.missingCount > 0 ? (
                 <span className="font-normal text-amber-700">
                   {tx(
-                    `без переводчика: ${day.missingCount}`,
-                    `ohne Dolmetscher: ${day.missingCount}`,
+                    `Без переводчика: ${day.missingCount}`,
+                    `Ohne Dolmetscher: ${day.missingCount}`,
                   )}
                 </span>
               ) : null}
@@ -546,8 +546,8 @@ export function InterpreterDaysTable({ days, lang, locked, onAssignDay }: Interp
                     ) : (
                       <span className={missing ? "text-amber-700" : "text-muted-foreground"}>
                         {missing
-                          ? tx("нужен переводчик", "Dolmetscher nötig")
-                          : tx("без переводчика", "ohne Dolmetscher")}
+                          ? tx("Нужен переводчик", "Dolmetscher nötig")
+                          : tx("Без переводчика", "Ohne Dolmetscher")}
                       </span>
                     )}
                     {response && appointment.interpreter_name ? (

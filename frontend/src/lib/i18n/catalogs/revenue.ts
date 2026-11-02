@@ -85,6 +85,9 @@ export interface RevenueTranslations {
   finance_catalog_use_package_default_vat: string;
   finance_catalog_approval_required: string;
   finance_catalog_save_package: string;
+  finance_catalog_edit_package: string;
+  /** A catalog entry no longer offered for new use (QA round 14: «В архиве», not «Неактивен»). */
+  finance_catalog_status_archived: string;
   finance_catalog_create_package: string;
   finance_catalog_loading_packages: string;
   finance_catalog_empty_packages: string;
@@ -898,7 +901,7 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_vat_effective_hint: "Ставка, с которой услуга выставляется сейчас (действующая цена). В карточке каталога записано {rate}.",
   finance_catalog_loading_tax_profiles: "Загрузка налоговых профилей...",
   finance_catalog_empty_tax_profiles: "Налоговые профили пока не настроены.",
-  finance_catalog_default_badge: "по умолчанию",
+  finance_catalog_default_badge: "По умолчанию",
   finance_catalog_edit: "Изменить",
   finance_catalog_service_package_catalog: "Каталог сервисных пакетов",
   finance_catalog_new_package: "Новый пакет",
@@ -957,6 +960,8 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_use_package_default_vat: "Использовать НДС пакета или по умолчанию",
   finance_catalog_approval_required: "Требуется согласование",
   finance_catalog_save_package: "Сохранить пакет",
+  finance_catalog_edit_package: "Изменить пакет",
+  finance_catalog_status_archived: "В архиве",
   finance_catalog_create_package: "Создать пакет",
   finance_catalog_loading_packages: "Загрузка пакетов...",
   finance_catalog_empty_packages: "Сервисные пакеты пока не настроены.",
@@ -991,7 +996,7 @@ export const revenueRu: RevenueTranslations = {
     "Позиция не используется и будет удалена без возможности восстановления.",
   finance_catalog_archive_agency_service_message:
     "Позиция уже используется в системе, поэтому она будет деактивирована. Существующие связи и документы сохранятся.",
-  finance_catalog_remove_tax_profile_title: "Удаление НДС-профиля",
+  finance_catalog_remove_tax_profile_title: "Удаление налогового профиля",
   finance_catalog_delete_tax_profile_message:
     "Профиль нигде не используется и будет удалён без возможности восстановления.",
   finance_catalog_archive_tax_profile_message:
@@ -1068,8 +1073,8 @@ export const revenueRu: RevenueTranslations = {
   revenue_agency_service_empty_title: "Нет позиций каталога",
   revenue_agency_service_empty_description:
     "Создайте переиспользуемые позиции агентства, например часы переводчика или пакеты координации.",
-  revenue_agency_service_active_state: "активна",
-  revenue_agency_service_inactive_state: "неактивна",
+  revenue_agency_service_active_state: "Активна",
+  revenue_agency_service_inactive_state: "Неактивна",
   revenue_agency_service_unit_price: "Цена за единицу",
   revenue_agency_service_unit: "Единица",
   revenue_agency_service_updated: "Обновлено",
@@ -1387,6 +1392,8 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_use_package_default_vat: "Paket- oder Standard-USt. verwenden",
   finance_catalog_approval_required: "Freigabe erforderlich",
   finance_catalog_save_package: "Paket speichern",
+  finance_catalog_edit_package: "Paket bearbeiten",
+  finance_catalog_status_archived: "Archiviert",
   finance_catalog_create_package: "Paket anlegen",
   finance_catalog_loading_packages: "Pakete werden geladen...",
   finance_catalog_empty_packages: "Noch keine Servicepakete konfiguriert.",
@@ -1422,7 +1429,7 @@ export const revenueDe: RevenueTranslations = {
     "Die Position wird nicht verwendet und dauerhaft gelöscht.",
   finance_catalog_archive_agency_service_message:
     "Die Position wird bereits im System verwendet und deshalb deaktiviert. Bestehende Verknüpfungen und Dokumente bleiben erhalten.",
-  finance_catalog_remove_tax_profile_title: "USt.-Profil entfernen",
+  finance_catalog_remove_tax_profile_title: "Steuerprofil entfernen",
   finance_catalog_delete_tax_profile_message:
     "Das Profil wird nirgends verwendet und dauerhaft gelöscht.",
   finance_catalog_archive_tax_profile_message:
@@ -1500,8 +1507,8 @@ export const revenueDe: RevenueTranslations = {
   revenue_agency_service_empty_title: "Keine Katalogpositionen",
   revenue_agency_service_empty_description:
     "Legen Sie wiederverwendbare Agenturpositionen an, etwa Dolmetscherstunden oder Koordinationspakete.",
-  revenue_agency_service_active_state: "aktiv",
-  revenue_agency_service_inactive_state: "inaktiv",
+  revenue_agency_service_active_state: "Aktiv",
+  revenue_agency_service_inactive_state: "Inaktiv",
   revenue_agency_service_unit_price: "Einzelpreis",
   revenue_agency_service_unit: "Einheit",
   revenue_agency_service_updated: "Aktualisiert",

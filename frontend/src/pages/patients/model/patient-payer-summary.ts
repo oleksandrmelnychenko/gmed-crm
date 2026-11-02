@@ -550,21 +550,21 @@ export function invoiceRecipientSourceNote(
   switch (source) {
     case "payer_declaration":
       return byStaff
-        ? tx("по данным обращения · внёс сотрудник", "laut Anfrage · von Mitarbeitenden erfasst")
-        : tx("по декларации плательщика", "laut Zahlererklärung");
+        ? tx("По данным обращения · внёс сотрудник", "Laut Anfrage · von Mitarbeitenden erfasst")
+        : tx("По декларации плательщика", "Laut Zahlererklärung");
     case "invoice_address":
       return byStaff
-        ? tx("адрес для счетов по данным обращения · внёс сотрудник", "Rechnungsanschrift laut Anfrage · von Mitarbeitenden erfasst")
-        : tx("адрес для счетов по декларации", "Rechnungsanschrift laut Erklärung");
+        ? tx("Адрес для счетов по данным обращения · внёс сотрудник", "Rechnungsanschrift laut Anfrage · von Mitarbeitenden erfasst")
+        : tx("Адрес для счетов по декларации", "Rechnungsanschrift laut Erklärung");
     case "default_payer":
-      return tx("плательщик по умолчанию", "Standardzahler");
+      return tx("Плательщик по умолчанию", "Standardzahler");
     case "contracting_party":
-      return tx("сторона договора", "Vertragspartei");
+      return tx("Сторона договора", "Vertragspartei");
     case "order":
     case "head_order":
-      return tx("из заказа", "aus dem Auftrag");
+      return tx("Из заказа", "Aus dem Auftrag");
     case "none":
-      return tx("пациент", "Patient");
+      return tx("Пациент", "Patient");
   }
 }
 

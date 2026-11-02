@@ -1167,7 +1167,7 @@ export const ru = {
   dash_total_appointments: "Всего приёмов",
   dash_new_patients: "Новые пациенты",
   dash_this_week: "Эта неделя",
-  dash_this_month: "в этом месяце",
+  dash_this_month: "В этом месяце",
   dash_this_year: "Этот год",
   dash_patients_today: "Пациенты сегодня",
   dash_view_all: "Показать все",

@@ -9261,7 +9261,7 @@ fn build_treatment_plan_html(context: &GeneratedTreatmentPlanContext) -> String 
           .sheet {{ border-radius: 0; padding: 22px; }}
           .entry {{ grid-template-columns: 1fr; }}
         }}
-        </style></head><body><main><div class=\"sheet\"><div class=\"badge\">{draft_badge}</div><h1>{title}</h1><div class=\"meta-grid\">
+        </style></head><body><main><div class=\"sheet\"><h1>{title}</h1><div class=\"meta-grid\">
         <div class=\"meta-card\"><span class=\"label\">{created_on}</span><strong>{created_value}</strong></div>
         <div class=\"meta-card\"><span class=\"label\">{patient_id_label}</span><strong>{patient_pid}</strong></div>
         <div class=\"meta-card\"><span class=\"label\">{birth_date_label}</span><strong>{birth_date}</strong></div>
@@ -9279,7 +9279,6 @@ fn build_treatment_plan_html(context: &GeneratedTreatmentPlanContext) -> String 
         </div></main></body></html>",
         lang = escape_html(&context.language),
         title = escape_html(&title),
-        draft_badge = escape_html(translated_label(&context.language, "draft_badge")),
         created_on = escape_html(translated_label(&context.language, "created_on")),
         created_value = escape_html(&crate::app_time::local(context.generated_at).format("%d.%m.%Y").to_string()),
         patient_id_label = escape_html(translated_label(&context.language, "patient_id")),
@@ -9340,15 +9339,7 @@ fn build_treatment_plan_pdf(
         bold_handle,
     );
 
-    layout.text_block(
-        translated_label(&context.language, "draft_badge"),
-        10.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Primary,
-        0.0,
-        4.0,
-    );
+    // The patient's plan: no "Arbeitsdokument" above the title (QA round 14).
     layout.text_block(
         &title,
         22.0,

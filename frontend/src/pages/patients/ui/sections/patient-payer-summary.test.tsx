@@ -169,7 +169,7 @@ describe("PatientPayerSummaryCardView", () => {
     const recipient = block(html, "recipient", "</span></div>");
     expect(recipient).toContain("Anna Muster");
     expect(recipient).toContain("Musterweg 1, 10115 Berlin, Германия");
-    expect(recipient).toContain("плательщик по умолчанию");
+    expect(recipient).toContain("Плательщик по умолчанию");
     expect(html).not.toContain('data-testid="patient-payer-summary-identification"');
     expect(html).not.toContain("Идентификация");
     // The order of the line groups.
@@ -271,7 +271,7 @@ describe("PatientPayerSummaryCardView", () => {
     expect(html).not.toContain('data-testid="patient-payer-summary-representative"');
     const recipient = block(html, "recipient", "</span></div>");
     expect(recipient).toContain("Anna Muster");
-    expect(recipient).toContain("пациент");
+    expect(recipient).toContain("Пациент");
     expect(block(html, "identification-contract_partner", "</li>")).toContain("Пациент");
     expect(html).not.toContain('data-testid="patient-payer-summary-identification-payer"');
   });
@@ -341,7 +341,7 @@ describe("PatientPayerSummaryCardView", () => {
     expect(block(html, "invoice-tax")).toContain("USt-IdNr. DE123456789 · Steuernummer 30/123/45678");
     const recipient = block(html, "recipient", "</span></div>");
     expect(recipient).toContain("Beispiel GmbH");
-    expect(recipient).toContain("адрес для счетов по декларации");
+    expect(recipient).toContain("Адрес для счетов по декларации");
     // Right after "who pays".
     const order = ["who-pays", "invoice-to", "invoice-tax", "contracting-party", "recipient"]
       .map((id) => html.indexOf(`data-testid="patient-payer-summary-${id}"`));

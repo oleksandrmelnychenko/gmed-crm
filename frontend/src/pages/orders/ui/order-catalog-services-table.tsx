@@ -12,7 +12,7 @@ import { agencyServiceLineDisplayDescription, agencyServiceLineDisplayName } fro
 import { listAgencyServicePriceChoices } from "@/pages/contracts/model/contracts-model";
 import type { AgencyServiceItem } from "@/pages/contracts/model/types";
 import type { ServiceLine } from "../model/order-service-line";
-import { money, germanDateLabel, formatMoneyValue, priceVersionDisplayName, serviceBillingUnitLabel, serviceBillingUnitBadgeClass } from "../model/order-service-presentation";
+import { money, germanDateLabel, formatMoneyValue, priceVersionDisplayName, serviceBillingUnitLabel, serviceBillingUnitBadgeLabel, serviceBillingUnitBadgeClass } from "../model/order-service-presentation";
 type Tx = (ru: string, de: string) => string;
 const inputString = (value: unknown) => String(value ?? "");
 export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lang, tx, disabled, describe, selectedPriceId: resolvePriceId, onQuantityChange, onPriceChange, onDelete, totals, lineLocked }: {
@@ -64,7 +64,7 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
                   serviceBillingUnitBadgeClass(rawUnit),
                 )}
               >
-                {serviceBillingUnitLabel(rawUnit, tx)}
+                {serviceBillingUnitBadgeLabel(rawUnit, tx)}
               </Badge>
             ) : null}
           </div>

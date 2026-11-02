@@ -293,20 +293,68 @@ fn parse_optional_date(
     }
 }
 
+/// An archived tax profile chosen for a new price, package or line: the
+/// archive dialog promises it can no longer be chosen (QA round 14). Entries
+/// that already carry it keep it.
+fn tax_profile_inactive() -> axum::response::Response {
+    (
+        StatusCode::CONFLICT,
+        Json(serde_json::json!({
+            "error": "tax_profile_inactive",
+            "message": "This tax profile is archived and cannot be chosen for new entries",
+        })),
+    )
+        .into_response()
+}
+
+/// The tax profiles a package already uses (its own, its price versions',
+/// its lines'): keeping one of them on an edit is no new use of it.
+async fn package_tax_profiles_in_use(
+    state: &AppState,
+    package_id: Uuid,
+) -> Result<Vec<Uuid>, axum::response::Response> {
+    sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT tax_profile_id FROM service_packages
+           WHERE id = $1 AND tax_profile_id IS NOT NULL
+           UNION
+           SELECT tax_profile_id FROM service_package_price_versions
+           WHERE package_id = $1 AND tax_profile_id IS NOT NULL
+           UNION
+           SELECT tax_profile_id FROM service_package_items
+           WHERE package_id = $1 AND tax_profile_id IS NOT NULL"#,
+    )
+    .bind(package_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, package_id = %package_id, "load package tax profiles in use");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load tax profile",
+        )
+    })
+}
+
+/// The VAT rate of `tax_profile_id`; an archived profile only when it is one
+/// of `kept`, the profiles the edited entry already has.
 async fn tax_profile_rate(
     state: &AppState,
     tax_profile_id: Option<Uuid>,
+    kept: &[Uuid],
 ) -> Result<Decimal, axum::response::Response> {
     let Some(tax_profile_id) = tax_profile_id else {
         return Ok(Decimal::ZERO);
     };
 
-    match sqlx::query_scalar::<_, Decimal>("SELECT vat_rate FROM tax_profiles WHERE id = $1")
-        .bind(tax_profile_id)
-        .fetch_optional(&state.db)
-        .await
+    match sqlx::query_as::<_, (Decimal, bool)>(
+        "SELECT vat_rate, is_active FROM tax_profiles WHERE id = $1",
+    )
+    .bind(tax_profile_id)
+    .fetch_optional(&state.db)
+    .await
     {
-        Ok(Some(rate)) => Ok(rate),
+        Ok(Some((rate, active))) if active || kept.contains(&tax_profile_id) => Ok(rate),
+        Ok(Some(_)) => Err(tax_profile_inactive()),
         Ok(None) => Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Tax profile not found",
@@ -740,6 +788,30 @@ async fn validate_package_item_references(
                 "Package item tax profile not found",
             ));
         }
+        // An archived profile stays on a line of this package that has it,
+        // never on a new line (QA round 14).
+        let archived = sqlx::query_scalar::<_, i64>(
+            r#"SELECT COUNT(*) FROM tax_profiles profile
+               WHERE profile.id = ANY($1) AND NOT profile.is_active
+                 AND NOT EXISTS (
+                     SELECT 1 FROM service_package_items item
+                     WHERE item.package_id = $2 AND item.tax_profile_id = profile.id
+                 )"#,
+        )
+        .bind(&tax_profile_ids)
+        .bind(package_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "check archived package item tax profiles");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate package item tax profiles",
+            )
+        })?;
+        if archived > 0 {
+            return Err(tax_profile_inactive());
+        }
     }
 
     let agency_service_ids = items
@@ -875,7 +947,7 @@ async fn create_service_package(
             "base_price_net must be non-negative",
         );
     }
-    let vat_rate = match tax_profile_rate(&state, body.tax_profile_id).await {
+    let vat_rate = match tax_profile_rate(&state, body.tax_profile_id, &[]).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -1026,7 +1098,11 @@ async fn update_service_package(
             "base_price_net must be non-negative",
         );
     }
-    let vat_rate = match tax_profile_rate(&state, body.tax_profile_id).await {
+    let kept = match package_tax_profiles_in_use(&state, package_id).await {
+        Ok(kept) => kept,
+        Err(resp) => return resp,
+    };
+    let vat_rate = match tax_profile_rate(&state, body.tax_profile_id, &kept).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -1260,7 +1336,28 @@ async fn save_service_package_price_version(
             "valid_to cannot be earlier than valid_from",
         );
     }
-    let vat_rate = match tax_profile_rate(state, body.tax_profile_id).await {
+    // A new price never takes an archived profile; an edited one may keep its own.
+    let kept = match price_version_id {
+        Some(price_version_id) => match sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT tax_profile_id FROM service_package_price_versions WHERE id = $1 AND package_id = $2",
+        )
+        .bind(price_version_id)
+        .bind(package_id)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(kept) => kept.flatten().into_iter().collect::<Vec<_>>(),
+            Err(error) => {
+                tracing::error!(%error, %package_id, %price_version_id, "load price version tax profile");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to save price version",
+                );
+            }
+        },
+        None => Vec::new(),
+    };
+    let vat_rate = match tax_profile_rate(state, body.tax_profile_id, &kept).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -1630,10 +1727,15 @@ async fn delete_service_package_price_version(
         }
     };
     if count <= 1 {
-        return err(
+        // The code lets the catalog show its own text (QA round 14: raw English in the RU dialog).
+        return (
             StatusCode::CONFLICT,
-            "The only price version cannot be deleted",
-        );
+            Json(serde_json::json!({
+                "error": "price_version_last",
+                "message": "The only price version cannot be deleted",
+            })),
+        )
+            .into_response();
     }
     // GoBD: a price a patient package was sold at stays in the history.
     match sqlx::query_scalar::<_, bool>(

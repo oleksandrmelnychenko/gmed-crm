@@ -570,23 +570,23 @@ describe("label helpers", () => {
   });
 
   it("notes where the invoice recipient comes from", () => {
-    expect(invoiceRecipientSourceNote("payer_declaration", ru)).toBe("по декларации плательщика");
-    expect(invoiceRecipientSourceNote("payer_declaration", de)).toBe("laut Zahlererklärung");
-    expect(invoiceRecipientSourceNote("invoice_address", ru)).toBe("адрес для счетов по декларации");
+    expect(invoiceRecipientSourceNote("payer_declaration", ru)).toBe("По декларации плательщика");
+    expect(invoiceRecipientSourceNote("payer_declaration", de)).toBe("Laut Zahlererklärung");
+    expect(invoiceRecipientSourceNote("invoice_address", ru)).toBe("Адрес для счетов по декларации");
     expect(invoiceRecipientSourceNote("invoice_address", de)).toBe("Rechnungsanschrift laut Erklärung");
     // Staff entered it in the patient's form: no declaration of the payer (owner 2026-10-30).
-    expect(invoiceRecipientSourceNote("payer_declaration", ru, "staff")).toBe("по данным обращения · внёс сотрудник");
+    expect(invoiceRecipientSourceNote("payer_declaration", ru, "staff")).toBe("По данным обращения · внёс сотрудник");
     expect(invoiceRecipientSourceNote("invoice_address", de, "staff")).toBe("Rechnungsanschrift laut Anfrage · von Mitarbeitenden erfasst");
-    expect(invoiceRecipientSourceNote("payer_declaration", ru, "self")).toBe("по декларации плательщика");
+    expect(invoiceRecipientSourceNote("payer_declaration", ru, "self")).toBe("По декларации плательщика");
     expect(normalizePatientPayerSummary({ patient_id: "p", invoice_recipient: { source: "payer_declaration", entered_by: "staff" } })
       ?.invoice_recipient?.entered_by).toBe("staff");
-    expect(invoiceRecipientSourceNote("default_payer", ru)).toBe("плательщик по умолчанию");
+    expect(invoiceRecipientSourceNote("default_payer", ru)).toBe("Плательщик по умолчанию");
     expect(invoiceRecipientSourceNote("default_payer", de)).toBe("Standardzahler");
-    expect(invoiceRecipientSourceNote("contracting_party", ru)).toBe("сторона договора");
+    expect(invoiceRecipientSourceNote("contracting_party", ru)).toBe("Сторона договора");
     expect(invoiceRecipientSourceNote("contracting_party", de)).toBe("Vertragspartei");
-    expect(invoiceRecipientSourceNote("order", ru)).toBe("из заказа");
-    expect(invoiceRecipientSourceNote("head_order", de)).toBe("aus dem Auftrag");
-    expect(invoiceRecipientSourceNote("none", ru)).toBe("пациент");
+    expect(invoiceRecipientSourceNote("order", ru)).toBe("Из заказа");
+    expect(invoiceRecipientSourceNote("head_order", de)).toBe("Aus dem Auftrag");
+    expect(invoiceRecipientSourceNote("none", ru)).toBe("Пациент");
     expect(invoiceRecipientSourceNote("none", de)).toBe("Patient");
   });
 
@@ -696,7 +696,7 @@ describe("label helpers", () => {
       },
     })!;
     expect(summary.invoice_recipient).toMatchObject({ source: "invoice_address", role: "invoice_address", kind: "contact", name: "Beispiel GmbH" });
-    expect(invoiceRecipientSourceNote(summary.invoice_recipient!.source, ru)).toBe("адрес для счетов по декларации");
+    expect(invoiceRecipientSourceNote(summary.invoice_recipient!.source, ru)).toBe("Адрес для счетов по декларации");
   });
 
   it("lists the identification with the wizard's words", () => {

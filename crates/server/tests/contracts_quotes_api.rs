@@ -3873,6 +3873,117 @@ async fn finance_catalog_package_price_sold_to_a_patient_stays_in_the_history() 
     assert!(kept);
 }
 
+/// An archived VAT profile is never chosen for new use (QA round 14): a new
+/// price, a new package or a new line refuse it with 409; a price that
+/// already carries it keeps it on an edit. The only price says so by code.
+#[tokio::test]
+async fn finance_catalog_archived_tax_profile_is_refused_for_new_prices() {
+    let Some((app, pool, _admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("tax-profile-archived");
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing = auth_header_for(billing_id, "billing");
+    let key_suffix = Uuid::new_v4().simple().to_string();
+    let archived = seed_tax_profile(&pool, &format!("archived_{key_suffix}")).await;
+    let package_id = seed_service_package(&pool, &format!("archived_{key_suffix}")).await;
+    sqlx::query("UPDATE service_packages SET tax_profile_id = $2 WHERE id = $1")
+        .bind(package_id)
+        .bind(archived)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let only: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO service_package_price_versions
+               (package_id, name, base_price_net, tax_profile_id, valid_from)
+           VALUES ($1, 'Preis 2026', 100, $2, '2026-01-01') RETURNING id"#,
+    )
+    .bind(package_id)
+    .bind(archived)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE tax_profiles SET is_active = false WHERE id = $1")
+        .bind(archived)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // The only price version: a code the catalog translates.
+    let (status, body) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/service-packages/{package_id}/price-versions/{only}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "response: {body}");
+    assert_eq!(body["error"], "price_version_last");
+
+    // A new price with the archived profile is refused …
+    let new_price = |name: &str, valid_from: &str| {
+        json!({ "name": name, "base_price_net": 120, "currency": "EUR",
+            "tax_profile_id": archived, "valid_from": valid_from })
+    };
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/service-packages/{package_id}/price-versions"),
+        &billing,
+        Some(new_price("Preis Dezember", "2026-12-01")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "response: {body}");
+    assert_eq!(body["error"], "tax_profile_inactive");
+    let versions: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM service_package_price_versions WHERE package_id = $1",
+    )
+    .bind(package_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(versions, 1);
+
+    // … while the price that carries it keeps it on an edit.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/service-packages/{package_id}/price-versions/{only}"),
+        &billing,
+        Some(new_price("Preis 2026 (korrigiert)", "2026-01-01")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {body}");
+
+    // A new package and a new line with it are refused too.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/service-packages",
+        &billing,
+        Some(
+            json!({ "package_key": format!("new_{key_suffix}"), "name": "Neues Paket",
+            "base_price_net": 50, "tax_profile_id": archived }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "response: {body}");
+    assert_eq!(body["error"], "tax_profile_inactive");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/service-packages",
+        &billing,
+        Some(json!({ "package_key": format!("line_{key_suffix}"), "name": "Paket mit Zeile",
+            "base_price_net": 50,
+            "items": [{ "description": "Zeile", "included_quantity": 1, "tax_profile_id": archived }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "response: {body}");
+    assert_eq!(body["error"], "tax_profile_inactive");
+}
+
 #[tokio::test]
 async fn finance_catalog_removal_needs_the_catalog_edit_right() {
     let Some((app, pool, _admin_id, _)) = test_context().await else {

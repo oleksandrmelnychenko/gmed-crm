@@ -1172,7 +1172,7 @@ export const de = {
   dash_total_appointments: "Termine gesamt",
   dash_new_patients: "Neue Patienten",
   dash_this_week: "Diese Woche",
-  dash_this_month: "in diesem Monat",
+  dash_this_month: "In diesem Monat",
   dash_this_year: "Dieses Jahr",
   dash_patients_today: "Patienten heute",
   dash_view_all: "Alle anzeigen",

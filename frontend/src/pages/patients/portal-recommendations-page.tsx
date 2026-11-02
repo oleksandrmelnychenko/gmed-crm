@@ -789,8 +789,8 @@ function useStaffRecommendationsWorkspaceContent() {
         title={t.patient_recommendations_staff_patient_context}
         accessory={
           <div className="flex flex-wrap gap-2">
-            <CountBadge>{activeCount} {t.patient_recommendations_staff_active_suffix}</CountBadge>
-            <CountBadge>{releasedCount} {t.patient_recommendations_staff_released_suffix}</CountBadge>
+            <CountBadge>{t.patient_recommendations_staff_active_suffix}: {activeCount}</CountBadge>
+            <CountBadge>{t.patient_recommendations_staff_released_suffix}: {releasedCount}</CountBadge>
           </div>
         }
       >

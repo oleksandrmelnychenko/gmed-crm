@@ -641,12 +641,13 @@ export function PatientDocumentsTab({
               variant="outline"
               className="rounded-full border-amber-200 bg-amber-100 text-[10px] text-amber-800"
             >
+              {l("patients_fulfilled")}:{" "}
               {
                 documentAlerts.required_documents.filter(
                   (item) => item.fulfilled,
                 ).length
               }
-              /{documentAlerts.configured_rule_count} {l("patients_fulfilled")}
+              /{documentAlerts.configured_rule_count}
             </Badge>
           </div>
           {documentAlerts.missing_count > 0 ? (

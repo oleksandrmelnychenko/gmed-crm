@@ -45,6 +45,8 @@ export const ORDER_API_ERROR_KEYS: Record<string, string> = {
   price_version_used: "api_catalog_price_version_used",
   tax_profile_system: "api_catalog_tax_profile_system",
   tax_profile_default: "api_catalog_tax_profile_default",
+  // An archived profile is never chosen for a new price, package or line (QA round 14).
+  tax_profile_inactive: "api_catalog_tax_profile_inactive",
   // A generated consent or contract is signed only with a signed scan or a QES.
   signature_evidence_required: "api_documents_signature_evidence_required",
   // Provider service catalogue (providers.rs)

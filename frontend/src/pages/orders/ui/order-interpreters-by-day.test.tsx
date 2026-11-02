@@ -133,9 +133,9 @@ describe("InterpreterDaysTable", () => {
       <InterpreterDaysTable days={interpreterDays(plan)} lang="ru" locked={false} onAssignDay={() => {}} />,
     );
     expect(html).toContain("Anna Dolmetsch");
-    expect(html).toContain("принял");
-    expect(html).toContain("нужен переводчик");
-    expect(html).toContain("без переводчика: 1");
+    expect(html).toContain("Принял");
+    expect(html).toContain("Нужен переводчик");
+    expect(html).toContain("Без переводчика: 1");
     // Two days still take an interpreter; the day with only a completed visit does not.
     expect(html.match(/Назначить переводчика на день/g)).toHaveLength(2);
     // The answer badge may wrap on a phone instead of leaving the card.

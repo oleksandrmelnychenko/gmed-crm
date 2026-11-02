@@ -6000,6 +6000,8 @@ async fn document_templates_can_generate_treatment_plan_pdf_document() {
     let pdf_text = extract_pdf_text(&bytes);
     assert!(!pdf_text.contains("Planungsnotiz"));
     assert!(!pdf_text.contains("Patient benötigt Dolmetscherkoordination"));
+    // The patient's plan is no working document (QA round 14).
+    assert!(!pdf_text.contains("Arbeitsdokument"), "{pdf_text}");
 }
 
 #[tokio::test]

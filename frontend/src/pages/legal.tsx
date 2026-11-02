@@ -7,6 +7,7 @@ import { buildApiUrl } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { t as translationsFor, useLang } from "@/lib/i18n";
 import { isLeadPortalUser } from "@/lib/staff-route-access";
+import { useLeadCabinetLang } from "./patient-lead/lead-cabinet-language";
 import { asLeadCabinetLang } from "./patient-lead/lead-request-text";
 import { FormPrivacyNotice } from "./form-privacy-notice";
 
@@ -43,7 +44,11 @@ export function LegalNoticePage() {
   const { t, lang } = useLang();
   const { user } = useAuth();
   const { hash, search } = useLocation();
-  const noticeLang = asLeadCabinetLang(new URLSearchParams(search).get("lang")) ?? lang;
+  // A lead reads the page in the cabinet language, not in the staff UI language of the browser
+  // (QA round 14: the cabinet nav link opened in German); a `?lang=` of a link wins.
+  const cabinetLang = useLeadCabinetLang(user, lang);
+  const noticeLang = asLeadCabinetLang(new URLSearchParams(search).get("lang"))
+    ?? (isLeadPortalUser(user) ? cabinetLang : lang);
   const localizedLabels: Partial<Record<string, string>> = noticeLang === "en" ? {
     legal_imprint_title: "Legal notice", legal_privacy_title: "Privacy notice",
     legal_load_error: "The agency contact details could not be loaded.",
