@@ -620,7 +620,7 @@ function DiagnosisRow({
             ))}
             <Button
               type="button"
-              size="sm"
+              size="icon-sm"
               variant="ghost"
               className="size-7 rounded-md p-0"
               aria-label={tx("Редактировать", "Bearbeiten")}
@@ -631,7 +631,7 @@ function DiagnosisRow({
             </Button>
             <Button
               type="button"
-              size="sm"
+              size="icon-sm"
               variant="ghost"
               className="size-7 rounded-md p-0 text-destructive"
               aria-label={tx("Удалить", "Löschen")}

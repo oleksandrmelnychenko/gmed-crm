@@ -1,5 +1,4 @@
-import { ChevronRight } from "lucide-react";
-
+import { RowExpandButton } from "@/components/data-table/row-expand-button";
 import { Badge } from "@/components/ui/badge";
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import type { ColumnDef, FilterOption } from "@/components/data-table/types";
@@ -169,29 +168,17 @@ function ProviderIdentityCell({
       style={{ paddingLeft: depth > 0 ? Math.min(depth, 8) * 18 : 0 }}
     >
       {hasChildren ? (
-        <button
-          type="button"
-          aria-expanded={treeMeta?.isExpanded ?? false}
-          aria-label={
+        <RowExpandButton
+          expanded={treeMeta?.isExpanded ?? false}
+          label={
             treeMeta?.isExpanded
               ? (tr.providers_tree_collapse ?? provider.name)
               : (tr.providers_tree_expand ?? provider.name)
           }
-          className="flex size-5 shrink-0 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-          onClick={(event) => {
-            event.stopPropagation();
-            onToggleProviderCollapsed?.(provider.id);
-          }}
-        >
-          <ChevronRight
-            className={cn(
-              "size-3.5 transition-transform",
-              treeMeta?.isExpanded && "rotate-90",
-            )}
-          />
-        </button>
+          onToggle={() => onToggleProviderCollapsed?.(provider.id)}
+        />
       ) : (
-        <span className="size-5 shrink-0" aria-hidden="true" />
+        <span className="size-6 shrink-0" aria-hidden="true" />
       )}
       <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-foreground">
         {provider.name

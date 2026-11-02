@@ -449,7 +449,7 @@ export function AnamneseSection({
                   {active.id && onDelete ? (
                     <Button
                       type="button"
-                      size="sm"
+                      size="icon-sm"
                       variant="outline"
                       className="size-8 rounded-lg border-rose-200 p-0 text-rose-700 hover:bg-rose-50"
                       aria-label={tx("Удалить анамнез", "Anamnese löschen")}
@@ -648,7 +648,7 @@ export function AnamneseSection({
                         <div className="flex shrink-0 items-center gap-1">
                           <Button
                             type="button"
-                            size="sm"
+                            size="icon-sm"
                             variant="ghost"
                             className="size-7 rounded-md p-0"
                             aria-label={tx("Копировать", "Kopieren")}
@@ -659,7 +659,7 @@ export function AnamneseSection({
                           </Button>
                           <Button
                             type="button"
-                            size="sm"
+                            size="icon-sm"
                             variant="ghost"
                             className="size-7 rounded-md p-0"
                             aria-label={tx("Редактировать", "Bearbeiten")}
@@ -671,7 +671,7 @@ export function AnamneseSection({
                           {version.id && onDelete ? (
                             <Button
                               type="button"
-                              size="sm"
+                              size="icon-sm"
                               variant="ghost"
                               className="size-7 rounded-md p-0 text-rose-700 hover:bg-rose-50"
                               aria-label={tx("Удалить анамнез", "Anamnese löschen")}
@@ -795,7 +795,7 @@ export function AnamneseSection({
                       </AdminSectionTitle>
                       <Button
                         type="button"
-                        size="sm"
+                        size="icon-sm"
                         variant="ghost"
                         className="size-7 shrink-0 rounded-md p-0 text-rose-700 hover:bg-rose-50"
                         aria-label={`${lang === "de" ? "Entfernen" : "Удалить"}: ${specializationLabelForItem(

@@ -935,7 +935,7 @@ function ClinicalSection<T extends { id?: string | null }>({
       <div className="flex shrink-0 gap-1">
         <Button
           type="button"
-          size="sm"
+          size="icon-sm"
           variant="ghost"
           className="size-7 rounded-md p-0"
           aria-label={tx("Редактировать", "Bearbeiten")}
@@ -946,7 +946,7 @@ function ClinicalSection<T extends { id?: string | null }>({
         </Button>
         <Button
           type="button"
-          size="sm"
+          size="icon-sm"
           variant="ghost"
           className="size-7 rounded-md p-0 text-destructive"
           aria-label={tx("Удалить", "Löschen")}
@@ -1488,7 +1488,7 @@ export function PatientRecommendationsSection({
         <div className="flex shrink-0 gap-1">
           <Button
             type="button"
-            size="sm"
+            size="icon-sm"
             variant="ghost"
             className="size-7 rounded-md p-0"
             aria-label={tx("Редактировать", "Bearbeiten")}
@@ -1499,7 +1499,7 @@ export function PatientRecommendationsSection({
           </Button>
           <Button
             type="button"
-            size="sm"
+            size="icon-sm"
             variant="ghost"
             className="size-7 rounded-md p-0 text-destructive"
             aria-label={tx("Удалить", "Löschen")}
@@ -2088,7 +2088,7 @@ function PatientVitalsHistoryTable({
           <>
             <Button
               type="button"
-              size="sm"
+              size="icon-sm"
               variant="ghost"
               className="size-7 rounded-md p-0"
               aria-label={tx("Редактировать", "Bearbeiten")}
@@ -2099,7 +2099,7 @@ function PatientVitalsHistoryTable({
             </Button>
             <Button
               type="button"
-              size="sm"
+              size="icon-sm"
               variant="ghost"
               className="size-7 rounded-md p-0 text-destructive"
               aria-label={tx("Удалить показатель", "Vitalwert löschen")}
@@ -2206,7 +2206,7 @@ function PatientRiskScoresTable({
         <>
           <Button
             type="button"
-            size="sm"
+            size="icon-sm"
             variant="ghost"
             className="size-7 rounded-md p-0"
             aria-label={tx("Редактировать", "Bearbeiten")}
@@ -2217,7 +2217,7 @@ function PatientRiskScoresTable({
           </Button>
           <Button
             type="button"
-            size="sm"
+            size="icon-sm"
             variant="ghost"
             className="size-7 rounded-md p-0 text-destructive"
             aria-label={tx("Удалить риск-скор", "Risikoscore löschen")}

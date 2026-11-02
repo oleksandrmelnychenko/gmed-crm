@@ -3,6 +3,7 @@ import { Building2, ChevronLeft, ChevronRight, Stethoscope, UserRound } from "lu
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { RowExpandButton } from "@/components/data-table/row-expand-button";
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -358,7 +359,7 @@ function TimelinePager({
   onPageChange: (pageIndex: number) => void;
 }) {
   return (
-    <div className={cn("flex min-h-8 items-center justify-between gap-2 px-4 py-0.5", className)}>
+    <div data-slot="data-table-pager" className={cn("flex min-h-8 items-center justify-between gap-2 px-4 py-0.5", className)}>
       <span className="font-mono text-xs tabular-nums text-foreground">
         {pageStart + 1}-{Math.min(pageStart + TIMELINE_ROOTS_PAGE_SIZE, totalRoots)} / {totalRoots}
       </span>
@@ -504,48 +505,24 @@ function TimelineNode({
         )}
       >
         {canToggle ? (
-          <button
-            type="button"
-            aria-expanded={!isCollapsed}
-            aria-label={
+          <RowExpandButton
+            expanded={!isCollapsed}
+            label={
               isCollapsed
                 ? (tr.providers_tree_expand ?? provider.name)
                 : (tr.providers_tree_collapse ?? provider.name)
             }
-            title={
-              isCollapsed
-                ? (tr.providers_tree_expand ?? provider.name)
-                : (tr.providers_tree_collapse ?? provider.name)
-            }
-            className={cn(
-              "relative flex size-7 shrink-0 items-center justify-center rounded-full border bg-background transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
-              tone.dot,
-            )}
-            onClick={() => onToggleCollapsed(provider.id)}
-          >
-            <ProviderCategoryIcon
-              providerType={provider.provider_type}
-              categoryKey={provider.taxonomy_node?.code ?? null}
-              className="size-3.5"
-            />
-            <span className="absolute -bottom-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-full border border-border/60 bg-card shadow-sm">
-              <ChevronRight
-                className={cn("size-2.5 text-muted-foreground transition-transform", !isCollapsed && "rotate-90")}
-              />
-            </span>
-          </button>
+            onToggle={() => onToggleCollapsed(provider.id)}
+          />
         ) : (
           <span
-            className={cn(
-              "flex size-7 shrink-0 items-center justify-center rounded-full border bg-background",
-              tone.dot,
-            )}
+            className="flex size-6 shrink-0 items-center justify-center text-muted-foreground"
             aria-hidden="true"
           >
             <ProviderCategoryIcon
               providerType={provider.provider_type}
               categoryKey={provider.taxonomy_node?.code ?? null}
-              className="size-3.5"
+              className="size-4"
             />
           </span>
         )}

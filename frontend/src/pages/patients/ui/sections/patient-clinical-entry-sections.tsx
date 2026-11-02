@@ -357,7 +357,7 @@ function ClinicalListSection<T extends { id?: string | null }>({
       <div className="flex shrink-0 gap-1">
         <Button
           type="button"
-          size="sm"
+          size="icon-sm"
           variant="ghost"
           className="size-7 rounded-md p-0"
           aria-label={tx("Редактировать", "Bearbeiten")}
@@ -368,7 +368,7 @@ function ClinicalListSection<T extends { id?: string | null }>({
         </Button>
         <Button
           type="button"
-          size="sm"
+          size="icon-sm"
           variant="ghost"
           className="size-7 rounded-md p-0 text-destructive"
           aria-label={tx("Удалить", "Löschen")}

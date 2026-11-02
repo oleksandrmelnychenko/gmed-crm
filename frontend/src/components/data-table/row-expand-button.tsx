@@ -17,6 +17,7 @@ export function RowExpandButton({
   return (
     <button
       type="button"
+      data-slot="row-expand-button"
       aria-expanded={expanded}
       aria-label={label}
       title={label}

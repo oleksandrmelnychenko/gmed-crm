@@ -495,7 +495,7 @@ export function PatientLabResultEditAction({
   return (
     <Button
       type="button"
-      size="sm"
+      size="icon-sm"
       variant="ghost"
       className="size-7 rounded-md p-0"
       aria-label={label}
@@ -517,7 +517,7 @@ export function PatientLabResultDeleteAction({
   return (
     <Button
       type="button"
-      size="sm"
+      size="icon-sm"
       variant="ghost"
       className="size-7 rounded-md p-0 text-destructive hover:text-destructive"
       aria-label={label}

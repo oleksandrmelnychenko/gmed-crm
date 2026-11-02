@@ -119,7 +119,7 @@ function PatientsPager({
   const pageStart = pageIndex * PATIENT_PAGE_SIZE;
 
   return (
-    <div className="flex min-h-10 items-center justify-between gap-2 border-b border-border/60 bg-field px-3 py-1.5 sm:min-h-8 sm:px-4 sm:py-0.5">
+    <div data-slot="data-table-pager" className="flex min-h-10 items-center justify-between gap-2 border-b border-border/60 bg-field px-3 py-1.5 sm:min-h-8 sm:px-4 sm:py-0.5">
       <span className="font-mono text-xs tabular-nums text-foreground">
         {totalRows === 0
           ? "0 / 0"

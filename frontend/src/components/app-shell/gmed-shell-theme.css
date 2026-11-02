@@ -39,3 +39,58 @@
   .gmed-theme .app-navigation a { min-height: 34px; }
   .gmed-theme .app-navigation a.h-9 { height: 34px; }
 }
+
+/* Table actions share one bare-icon recipe, including native tables and mobile
+   cards. Explicit icon sizes exclude text actions, filters and checkboxes. */
+.gmed-theme :is([data-slot="data-table"], table, [data-slot="data-table-pager"]) [data-slot="button"][data-size^="icon"],
+.gmed-theme [data-slot="row-expand-button"] {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Filled variants need dark ink on the now-transparent surface. Ghost and
+   destructive actions retain their semantic icon colours. */
+.gmed-theme :is([data-slot="data-table"], table, [data-slot="data-table-pager"]) [data-slot="button"][data-size^="icon"]:is([data-variant="default"], [data-variant="outline"], [data-variant="secondary"]) {
+  color: var(--foreground);
+}
+
+.gmed-theme :is([data-slot="data-table"], table, [data-slot="data-table-pager"]) [data-slot="button"][data-size^="icon"]:disabled {
+  background: transparent;
+  opacity: .45;
+}
+
+.gmed-theme :is([data-slot="data-table"], table, [data-slot="data-table-pager"]) [data-slot="button"][data-size^="icon"]:hover:not(:disabled),
+.gmed-theme [data-slot="row-expand-button"]:hover {
+  background: var(--muted);
+}
+
+.gmed-theme :is([data-slot="data-table"], table, [data-slot="data-table-pager"]) [data-slot="button"][data-size^="icon"]:focus-visible,
+.gmed-theme [data-slot="row-expand-button"]:focus-visible {
+  background: var(--muted);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+.gmed-theme :is([data-slot="data-table"], table, [data-slot="data-table-pager"]) [data-slot="button"][data-size^="icon"] > svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Keep touch targets usable; compact sizing is for pointer-driven tables. */
+@media (pointer: coarse) {
+  .gmed-theme :is([data-slot="data-table"], table, [data-slot="data-table-pager"]) [data-slot="button"][data-size^="icon"],
+  .gmed-theme [data-slot="row-expand-button"] {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+  }
+}
