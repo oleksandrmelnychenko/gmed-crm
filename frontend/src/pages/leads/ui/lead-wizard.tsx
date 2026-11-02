@@ -12811,8 +12811,8 @@ ${serviceCommentLines.join("\n")}`
                     ) : null}
                   </Field>
                   {trustedContactEditorGuardian && leadId ? (
-                    // Owner 2026-11-02: the lead's one invoice recipient and payer; only
-                    // the parents who receive the invoice or pay are screened.
+                    // Owner 2026-11-02: the lead's one invoice recipient and payer. Every
+                    // parent is screened; these roles also count for the risk triggers.
                     <Field
                       className="sm:col-span-2"
                       label={tx("Роль в оплате заявки", "Rolle bei der Bezahlung")}
@@ -12839,8 +12839,8 @@ ${serviceCommentLines.join("\n")}`
                       </NativeComboboxSelect>
                       <p className="mt-1.5 text-[11.5px] leading-tight text-muted-foreground" data-testid="trusted-contact-billing-role-hint">
                         {tx(
-                          "Получатель счёта и плательщик заявки — по одному. Проверка по санкционным спискам идёт только для родителей, которые получают счёт или платят.",
-                          "Rechnungsempfänger und Zahler gibt es je einmal pro Anfrage. Gegen die Sanktionslisten geprüft werden nur Eltern, die die Rechnung erhalten oder zahlen.",
+                          "Получатель счёта и плательщик заявки — по одному. По санкционным спискам проверяются все законные представители; получатель счёта и плательщик ещё и учитываются в триггерах риска.",
+                          "Rechnungsempfänger und Zahler gibt es je einmal pro Anfrage. Alle gesetzlichen Vertreter werden gegen die Sanktionslisten geprüft; Rechnungsempfänger und Zahler zählen zusätzlich für die Risikotrigger.",
                         )}
                       </p>
                     </Field>

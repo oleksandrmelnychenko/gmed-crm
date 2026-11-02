@@ -1000,7 +1000,7 @@ test("staff say whether a parent receives the invoice and pays (owner 2026-11-02
   const editor = page.locator("form").filter({ hasText: "Редактировать родителя или законного представителя" });
   const role = editor.getByLabel("Роль в оплате заявки");
   await expect(role).toContainText("Не получает счёт и не платит");
-  await expect(editor.getByTestId("trusted-contact-billing-role-hint")).toContainText("только для родителей, которые получают счёт или платят");
+  await expect(editor.getByTestId("trusted-contact-billing-role-hint")).toContainText("проверяются все законные представители");
   await editor.getByLabel("Кем приходится ребёнку").click();
   await page.getByRole("option", { name: "Отец (родитель)", exact: true }).click();
   // The fixture father has no e-mail or phone yet; a parent needs one.

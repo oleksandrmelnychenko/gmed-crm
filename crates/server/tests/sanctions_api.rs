@@ -3478,3 +3478,56 @@ async fn a_relations_birth_date_and_citizenships_are_saved_and_queue_the_patient
         assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
     }
 }
+
+/// Owner 2026-11-02: every legal representative of a minor is screened; a
+/// confirmed hit on a parent who neither receives the invoices nor pays is a
+/// hold of the sanctions gate only, no risk trigger. Once the parent receives
+/// the invoices, the same hit is a T16 on the payer's side (recipient).
+#[tokio::test]
+async fn a_parent_without_a_billing_role_is_screened_but_raises_no_trigger() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    load_synthetic_list(&app).await;
+    let father = Uuid::new_v4();
+    let mother = Uuid::new_v4();
+    let minor = insert_lead(
+        &app,
+        "Mila",
+        "Beispiel",
+        Some("2016-04-04"),
+        &[],
+        json!([
+            { "id": father, "name": "Testomir Korneev", "relation": "father", "birth_date": "1961-03-14" },
+            { "id": mother, "name": "Anna Beispiel", "relation": "mother" }
+        ]),
+    )
+    .await;
+    let status = lead_status(&app, minor).await;
+    assert_eq!(status["screening"], "review_pending", "{status}");
+    let hits = open_hits(&app).await;
+    let hit = hits
+        .iter()
+        .find(|hit| hit["subject_kind"] == "lead_guardian")
+        .unwrap_or_else(|| panic!("the father is screened: {hits:?}"));
+    decide(
+        &app,
+        hit["id"].as_str().unwrap(),
+        "confirmed",
+        "Synthetic list entry, same person",
+    )
+    .await;
+    assert!(t16_subjects(&app, minor).await.is_empty());
+
+    // The father receives the invoices: the hit counts for the payer's side.
+    let (code, body) = request(
+        &app,
+        "PUT",
+        &format!("/leads/{minor}/representatives/{father}/billing-role"),
+        &app.pm(),
+        Some(json!({ "receives_invoice": true, "pays": false })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(t16_subjects(&app, minor).await, ["payer"]);
+}

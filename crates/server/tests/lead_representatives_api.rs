@@ -3194,7 +3194,8 @@ async fn staff_fill_in_a_two_parent_minors_form_as_the_parents_do() {
 
 /// Owner 2026-11-02: the staff dialog of a parent says whether the parent
 /// receives the invoice, pays, both or neither. It writes the lead's one
-/// recipient and payer, audited, and only those parents are screened.
+/// recipient and payer, audited. Every parent is screened; the roles are
+/// noted for the risk triggers.
 #[tokio::test]
 async fn a_parents_billing_role_names_recipient_and_payer_and_drives_screening() {
     use gmed_server::sanctions::screening;
@@ -3218,24 +3219,33 @@ async fn a_parents_billing_role_names_recipient_and_payer_and_drives_screening()
         set_billing_role(router, &staff, lead, person, receives, pays)
     };
     let screened = || async {
-        let mut refs: Vec<String> = screening::load_lead_subjects(&app.suite.pool, lead)
+        let mut refs: Vec<(String, String)> = screening::load_lead_subjects(&app.suite.pool, lead)
             .await
             .unwrap()
             .unwrap()
             .subjects
             .into_iter()
             .filter(|subject| subject.kind == screening::SubjectKind::LeadGuardian)
-            .map(|subject| subject.subject_ref)
+            .map(|subject| (subject.subject_ref, subject.relation.unwrap_or_default()))
             .collect();
         refs.sort();
-        refs
+        refs.into_iter()
+            .map(|(_, relation)| relation)
+            .collect::<Vec<_>>()
     };
-    let mut both = vec![mother.to_string(), father.to_string()];
-    both.sort();
-    // No role named yet: either parent may be the one.
-    assert_eq!(screened().await, both);
+    // In the order of the contact ids: the mother's and the father's notes.
+    let notes = |mother_note: &str, father_note: &str| {
+        let mut pairs = vec![
+            (mother.to_string(), mother_note.to_string()),
+            (father.to_string(), father_note.to_string()),
+        ];
+        pairs.sort();
+        pairs.into_iter().map(|(_, note)| note).collect::<Vec<_>>()
+    };
+    // No role named yet: both screened, without a role.
+    assert_eq!(screened().await, notes("mother", "father"));
 
-    // Everything on the mother: only she is screened.
+    // Everything on the mother: the father is screened all the same.
     let (status, body) = role(mother, true, true).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body, json!({ "receives_invoice": true, "pays": true }));
@@ -3266,7 +3276,10 @@ async fn a_parents_billing_role_names_recipient_and_payer_and_drives_screening()
     .await
     .unwrap();
     assert_eq!(audited, 1);
-    assert_eq!(screened().await, vec![mother.to_string()]);
+    assert_eq!(
+        screened().await,
+        notes("mother; invoice_recipient; payer", "father")
+    );
 
     // The father has no role: nothing changes.
     let (status, body) = role(father, false, false).await;
@@ -3291,10 +3304,13 @@ async fn a_parents_billing_role_names_recipient_and_payer_and_drives_screening()
     .await
     .unwrap();
     assert_eq!(stored, (Some(mother), false));
-    assert_eq!(screened().await, both);
+    assert_eq!(
+        screened().await,
+        notes("mother; invoice_recipient", "father; payer")
+    );
 
     // The mother no longer receives it: the answer is cleared, the cabinet
-    // asks again, and only the paying father is screened.
+    // asks again; both stay screened.
     let (status, body) = role(mother, false, false).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let recipients: i64 =
@@ -3304,7 +3320,7 @@ async fn a_parents_billing_role_names_recipient_and_payer_and_drives_screening()
             .await
             .unwrap();
     assert_eq!(recipients, 0);
-    assert_eq!(screened().await, vec![father.to_string()]);
+    assert_eq!(screened().await, notes("mother", "father; payer"));
 
     // Only a parent of the child has these roles.
     let (status, body) = role(Uuid::new_v4(), true, false).await;

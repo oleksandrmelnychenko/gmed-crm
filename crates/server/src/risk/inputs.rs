@@ -50,6 +50,34 @@ const ORDER_PAYER_SQL: &str = r#"COALESCE(
     'name:' || lower(NULLIF(btrim(o.payer_contact_name), ''))
 )"#;
 
+/// A hit on a minor's parent who pays: the role noted when it was screened,
+/// or the lead's payer naming the parent now (a role given after the CEO's
+/// decision, which keeps the snapshot as it was).
+macro_rules! guardian_pays_sql {
+    () => {
+        "(h.subject_kind = 'lead_guardian' \
+         AND (COALESCE(h.subject_snapshot->>'relation', '') = 'payer' \
+              OR COALESCE(h.subject_snapshot->>'relation', '') LIKE '%; payer' \
+              OR EXISTS (SELECT 1 FROM lead_payer_declarations pd \
+                         WHERE pd.lead_id = h.lead_id \
+                           AND pd.payer_kind = 'representative' \
+                           AND pd.payer_representative_id::text = lower(h.subject_ref))))"
+    };
+}
+
+/// A hit on a minor's parent who receives the invoices (owner 2026-11-02):
+/// noted when it was screened, or named as recipient now.
+macro_rules! guardian_receives_sql {
+    () => {
+        "(h.subject_kind = 'lead_guardian' \
+         AND (COALESCE(h.subject_snapshot->>'relation', '') LIKE '%invoice_recipient%' \
+              OR EXISTS (SELECT 1 FROM lead_invoice_recipients ir \
+                         WHERE ir.lead_id = h.lead_id \
+                           AND ir.recipient = 'self' \
+                           AND ir.representative_contact_id::text = lower(h.subject_ref))))"
+    };
+}
+
 /// A sanctions hit (`h`) on the payer's side: the third-party payer and the
 /// people behind it, the bank the payer pays through, the third-party
 /// invoice recipient who does not pay (owner decisions 2026-10-11: the
@@ -57,9 +85,12 @@ const ORDER_PAYER_SQL: &str = r#"COALESCE(
 /// contact staff named on one of the lead's orders (`payer_contact`,
 /// 2026-10-12), and a minor's parent who pays, screened once as the guardian
 /// with the payer role noted (2026-10-19,
-/// [`crate::sanctions::screening::PAYING_REPRESENTATIVE_NOTE`]). Every
-/// other hit of the lead — the patient, a guardian, the bank the patient pays
-/// through — is the patient's side (T16).
+/// [`crate::sanctions::screening::PAYING_REPRESENTATIVE_NOTE`]) or receives
+/// the invoices ([`GUARDIAN_RECEIVES_SQL`], owner 2026-11-02). The patient,
+/// an adult's representative or Betreuer and the bank the patient pays
+/// through are the patient's side (T16); a minor's parent with neither role is
+/// screened only and raises no trigger ([`MINOR_GUARDIAN_SQL`], owner
+/// 2026-11-02: «скрінити як мінімум на санкції»).
 ///
 /// Only a CONFIRMED hit counts (owner decision 2026-10-07, QA 2026-10-11
 /// A-15/A-21/A-33): "under sanctions" means a match the CEO confirmed. An
@@ -67,11 +98,23 @@ const ORDER_PAYER_SQL: &str = r#"COALESCE(
 /// [`crate::sanctions::gate`] only — it never raises the risk level, so it
 /// never opens a follow-up block, the enhanced check or the payer's proof of
 /// funds, and nothing the lead, the payer or the recipient sees changes.
-pub(crate) const PAYER_SIDE_HIT_SQL: &str = "(h.subject_kind IN ('lead_payer', 'lead_recipient', 'payer_contact') \
-     OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank') \
-     OR (h.subject_kind = 'lead_guardian' \
-         AND (COALESCE(h.subject_snapshot->>'relation', '') = 'payer' \
-              OR COALESCE(h.subject_snapshot->>'relation', '') LIKE '%; payer')))";
+pub(crate) const PAYER_SIDE_HIT_SQL: &str = concat!(
+    "(h.subject_kind IN ('lead_payer', 'lead_recipient', 'payer_contact') \
+     OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank') OR ",
+    guardian_pays_sql!(),
+    " OR ",
+    guardian_receives_sql!(),
+    ")"
+);
+
+pub(crate) const GUARDIAN_PAYS_SQL: &str = guardian_pays_sql!();
+pub(crate) const GUARDIAN_RECEIVES_SQL: &str = guardian_receives_sql!();
+
+/// A hit on a minor's parent or guardian (not an adult's representative or
+/// Betreuer, whose `relation` is the cabinet role).
+pub(crate) const MINOR_GUARDIAN_SQL: &str = "(h.subject_kind = 'lead_guardian' \
+     AND COALESCE(h.subject_snapshot->>'relation', '') \
+         NOT IN ('authorised_representative', 'legal_guardian'))";
 
 /// The inputs of a lead for the stored assessment; `None` when the lead does
 /// not exist. The payer's statement counts only once sent (owner decision
@@ -161,10 +204,15 @@ async fn load_inner(
            LEFT JOIN lead_payer_statements s ON s.lead_id = l.id
            LEFT JOIN lead_risk_assessments ra ON ra.lead_id = l.id
            LEFT JOIN LATERAL (
-               SELECT bool_or(NOT {PAYER_SIDE_HIT_SQL}) AS patient_hit,
-                      bool_or({PAYER_SIDE_HIT_SQL} AND h.subject_kind <> 'lead_recipient')
+               SELECT bool_or(NOT {PAYER_SIDE_HIT_SQL} AND NOT {MINOR_GUARDIAN_SQL})
+                          AS patient_hit,
+                      bool_or(({PAYER_SIDE_HIT_SQL}
+                               AND h.subject_kind NOT IN ('lead_recipient', 'lead_guardian'))
+                              OR {GUARDIAN_PAYS_SQL})
                           AS payer_hit,
-                      bool_or(h.subject_kind = 'lead_recipient') AS recipient_hit
+                      bool_or(h.subject_kind = 'lead_recipient'
+                              OR ({GUARDIAN_RECEIVES_SQL} AND NOT {GUARDIAN_PAYS_SQL}))
+                          AS recipient_hit
                FROM sanctions_hits h
                WHERE h.status = 'confirmed'
                  AND ((h.lead_id = l.id AND h.subject_kind <> 'patient')

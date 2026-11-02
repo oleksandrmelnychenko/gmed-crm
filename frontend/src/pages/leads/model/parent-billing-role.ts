@@ -5,8 +5,9 @@ import type { PayerDeclaration } from "./lead-payer";
  * Who a minor's parent is for the request's invoices (owner 2026-11-02): the
  * staff dialog of a parent asks it. No field of its own — it reads and writes
  * the lead's one invoice recipient (`invoice_recipient` `self` naming the
- * parent) and payer (`payer_kind` `representative`). Only parents with a
- * role are screened against the sanctions lists once the roles are named.
+ * parent) and payer (`payer_kind` `representative`). Every parent is
+ * screened against the sanctions lists; one with a role also counts for the
+ * risk triggers as recipient or payer.
  */
 export const PARENT_BILLING_ROLES = ["recipient_and_payer", "recipient", "payer", "none"] as const;
 

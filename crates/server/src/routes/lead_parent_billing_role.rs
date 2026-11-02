@@ -7,8 +7,10 @@
 //! named) and its one payer (`lead_payer_declarations`, `payer_kind =
 //! 'representative'` — a paying parent is never a third party, owner
 //! 2026-10-19), through the same functions as step 3 of the cabinet, audited
-//! in the same transaction. The sanctions screening then follows the roles
-//! (`sanctions::screening::minor_guardian_subjects`).
+//! in the same transaction. Every parent is screened against the sanctions
+//! lists; the roles decide whether a confirmed hit also counts for the risk
+//! triggers, on the payer's or the recipient's side (owner 2026-11-02,
+//! `risk::inputs::PAYER_SIDE_HIT_SQL`).
 //!
 //! * receives: the patient side is the recipient with this parent named;
 //!   "the recipient is the payer" follows `pays`. Dropping the role of the
