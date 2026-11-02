@@ -444,6 +444,36 @@ test("planning lists the order's appointments by day and by doctor (plan stage 2
   expect(href).toContain("return_to=");
 });
 
+test("planning shows the hidden plan to the patient in one step (plan stage 4)", async ({page}) => {
+  await prepare(page);
+  let released = false;
+  let releaseCalls = 0;
+  const item = (id: string, date: string, portalReleasedAt: string | null) => ({
+    id, title: id, appointment_type: "medical", date, time_start: null, time_end: null, status: "planned", location: null,
+    provider_name: "Klinik Nord", doctor_name: "Dr. Weber", interpreter_name: null, interpreter_response: null,
+    portal_released_at: portalReleasedAt,
+  });
+  await page.route(`**/api/v1/orders/${orderId}/pipeline`, route => route.fulfill({json: {
+    order_id: orderId, phase: "intake", status: "active", stages: [], medical: {visible: false, required: false}, appointments: [
+      item("Shown visit", "2026-11-02", "2026-11-01T10:00:00Z"),
+      item("MRT Abdomen", "2026-11-03", released ? "2026-11-02T10:00:00Z" : null),
+      item("Kardiologie", "2026-11-04", released ? "2026-11-02T10:00:00Z" : null),
+    ],
+  }}));
+  await page.route(`**/api/v1/orders/${orderId}/appointments/release-to-portal`, route => {
+    releaseCalls += 1;
+    released = true;
+    return route.fulfill({json: {released: 2, appointment_ids: ["MRT Abdomen", "Kardiologie"]}});
+  });
+  await page.goto(`/orders/${orderId}?section=planning`);
+  const plan = page.getByTestId("order-planned-appointments");
+  await expect(plan.getByTestId("order-planned-appointment-hidden")).toHaveCount(2);
+  await plan.getByRole("button", {name: "Показать план пациенту (2)"}).click();
+  await expect(plan.getByTestId("order-planned-appointment-hidden")).toHaveCount(0);
+  await expect(plan.getByTestId("order-plan-release")).toHaveCount(0);
+  expect(releaseCalls).toBe(1);
+});
+
 test("saving a normalized note clears the dirty state", async ({page}) => {
   const {writes} = await prepare(page);
   await page.goto(`/orders/${orderId}?section=planning`);

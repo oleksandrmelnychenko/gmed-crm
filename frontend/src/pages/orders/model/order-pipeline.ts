@@ -65,6 +65,8 @@ export type OrderPipelineAppointment = {
   doctor_name: string | null;
   interpreter_name: string | null;
   interpreter_response: string | null;
+  /** Null while the plan is not shown to the patient yet; absent from older servers. */
+  portal_released_at?: string | null;
 };
 
 export const ORDER_APPOINTMENT_STATUS: Record<string, { de: string; ru: string; tone: "neutral" | "info" | "warning" | "success" }> = {

@@ -552,6 +552,9 @@ async fn list_my_concierge_services(
            LEFT JOIN users u ON u.id = cs.assigned_concierge_id
            LEFT JOIN appointments a ON a.id = cs.appointment_id
            WHERE cs.patient_id = $1
+             -- A service booked for a planned visit shows once the visit
+             -- is released to the patient (owner decision 2026-11-02).
+             AND (a.id IS NULL OR a.portal_released_at IS NOT NULL)
            ORDER BY COALESCE(cs.starts_at, cs.created_at) DESC, cs.created_at DESC"#,
     )
     .bind(patient_id)

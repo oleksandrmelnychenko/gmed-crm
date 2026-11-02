@@ -605,7 +605,7 @@ async fn can_receive_appointment_event(
     }
 
     let row =
-        sqlx::query("SELECT patient_id, interpreter_id, owner_user_id FROM appointments WHERE id = $1")
+        sqlx::query("SELECT patient_id, interpreter_id, owner_user_id, (portal_released_at IS NOT NULL) AS portal_released FROM appointments WHERE id = $1")
             .bind(appointment_id)
             .fetch_optional(&state.db)
             .await
@@ -628,6 +628,12 @@ async fn can_receive_appointment_event(
     })?;
 
     if auth.role == Role::Patient {
+        // The portal hears nothing about a planned appointment that is not
+        // released to the patient yet (owner decision 2026-11-02).
+        let portal_released: bool = row.try_get("portal_released").unwrap_or(false);
+        if !portal_released {
+            return Ok(false);
+        }
         return can_receive_patient_event(state, auth, patient_id).await;
     }
 

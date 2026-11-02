@@ -76,6 +76,22 @@ export function groupAppointmentsByDoctor(
   ];
 }
 
+/**
+ * Whether the patient sees the appointment in the portal. A row without the
+ * field (an older server) counts as shown, as every appointment did before
+ * the release (owner decision 2026-11-02); an internal one never reaches the
+ * portal and needs no release.
+ */
+export function isShownToPatient(appointment: OrderPipelineAppointment) {
+  return appointment.portal_released_at !== null || appointment.appointment_type === "internal";
+}
+
+/** Planned appointments the patient does not see yet: what a release shows. */
+export function unreleasedPlanCount(appointments: readonly OrderPipelineAppointment[]) {
+  return plannedAppointments(appointments).filter((appointment) => !isShownToPatient(appointment))
+    .length;
+}
+
 export function plannedDayLabel(date: string, lang: string) {
   const weekdays = lang === "de" ? WEEKDAYS.de : WEEKDAYS.ru;
   return `${weekdays[dateKeyWeekday(date)]}, ${formatAppDate(date)}`;

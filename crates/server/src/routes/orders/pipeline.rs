@@ -288,6 +288,7 @@ async fn get_order_pipeline(
         r#"SELECT appointment.id, appointment.title, appointment.appointment_type,
                   appointment.date, appointment.time_start, appointment.time_end,
                   appointment.status, appointment.location, appointment.interpreter_response,
+                  appointment.portal_released_at,
                   provider.name AS provider_name, doctor.name AS doctor_name,
                   interpreter.name AS interpreter_name
            FROM appointments appointment
@@ -453,6 +454,8 @@ async fn get_order_pipeline(
             "doctor_name": row.try_get::<Option<String>, _>("doctor_name").unwrap_or(None),
             "interpreter_name": row.try_get::<Option<String>, _>("interpreter_name").unwrap_or(None),
             "interpreter_response": row.try_get::<Option<String>, _>("interpreter_response").unwrap_or(None),
+            // Null while the plan is not yet shown to the patient (owner decision 2026-11-02).
+            "portal_released_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("portal_released_at").unwrap_or(None).map(|value| value.to_rfc3339()),
         })).collect::<Vec<Value>>(),
         "services": {
             "total": services_total,

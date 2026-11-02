@@ -910,8 +910,26 @@ pub(crate) async fn build_patient_export_payload(
         "SELECT id, title, date, time_start, time_end, appointment_type, status, location, notes FROM appointments WHERE patient_id = $1 ORDER BY date DESC",
         patient_id
     ).fetch_all(&state.db).await, "appointments")?;
+    // The portal's own download lists the appointments the portal shows: a
+    // planned visit not yet released to the patient stays out of it (owner
+    // decision 2026-11-02); the staff export keeps every row.
+    let unreleased_appointment_ids: std::collections::HashSet<Uuid> = if portal {
+        require_patient_export_section(
+            sqlx::query_scalar::<_, Uuid>(
+                "SELECT id FROM appointments WHERE patient_id = $1 AND portal_released_at IS NULL",
+            )
+            .bind(patient_id)
+            .fetch_all(&state.db)
+            .await,
+            "appointments",
+        )?
+        .into_iter()
+        .collect()
+    } else {
+        std::collections::HashSet::new()
+    };
 
-    let cases = require_patient_export_section(sqlx::query(
+    let cases =require_patient_export_section(sqlx::query(
         "SELECT id, case_id, status, hauptanfragegrund, intake_snapshot, notes, created_at FROM cases WHERE patient_id = $1 ORDER BY created_at DESC",
     )
     .bind(patient_id)
@@ -1321,7 +1339,7 @@ pub(crate) async fn build_patient_export_payload(
             "created_at": patient.created_at, "updated_at": patient.updated_at,
         },
         // An internal appointment never reaches the portal.
-        "appointments": appointments.into_iter().filter(|a| !portal || a.appointment_type != "internal").map(|a| serde_json::json!({
+        "appointments": appointments.into_iter().filter(|a| !portal || (a.appointment_type != "internal" && !unreleased_appointment_ids.contains(&a.id))).map(|a| serde_json::json!({
             "id": a.id, "title": a.title, "date": a.date,
             "time_start": a.time_start, "time_end": a.time_end,
             "type": a.appointment_type, "status": a.status,

@@ -9,8 +9,10 @@ import { cn } from "@/lib/utils";
 import {
   groupAppointmentsByDay,
   groupAppointmentsByDoctor,
+  isShownToPatient,
   plannedDayLabel,
   plannedTimeLabel,
+  unreleasedPlanCount,
 } from "../model/order-planned-appointments";
 import {
   ORDER_APPOINTMENT_STATUS,
@@ -24,9 +26,51 @@ type OrderPlannedAppointmentsProps = {
   reloadNonce: number;
   /** Calendar of the order; carries the patient and the way back to the order. */
   appointmentsHref: string;
+  /** The viewer plans this order and may show the plan to the patient. */
+  canReleasePlan?: boolean;
 };
 
 type GroupBy = "day" | "doctor";
+
+type PlanReleaseButtonProps = {
+  count: number;
+  busy: boolean;
+  lang: string;
+  onRelease: () => void;
+};
+
+/**
+ * «Показать план пациенту (N)»: the planned appointments the portal does not
+ * show yet become visible to the patient at once (owner decision 2026-11-02).
+ */
+export function PlanReleaseButton({ count, busy, lang, onRelease }: PlanReleaseButtonProps) {
+  if (count <= 0) return null;
+  const label = lang === "de" ? "Plan dem Patienten zeigen" : "Показать план пациенту";
+  return (
+    <button
+      type="button"
+      data-testid="order-plan-release"
+      disabled={busy}
+      onClick={onRelease}
+      className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-60"
+    >
+      {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+      {`${label} (${count})`}
+    </button>
+  );
+}
+
+/** "не видно пациенту" next to an appointment the patient does not see yet. */
+export function HiddenFromPatientMarker({ lang }: { lang: string }) {
+  return (
+    <span
+      data-testid="order-planned-appointment-hidden"
+      className="rounded-full border border-border/70 px-1.5 py-px text-[11px] font-medium text-muted-foreground"
+    >
+      {lang === "de" ? "für Patienten nicht sichtbar" : "не видно пациенту"}
+    </span>
+  );
+}
 
 /**
  * The order's appointments right in the planning section, by day or by doctor,
@@ -37,6 +81,7 @@ export function OrderPlannedAppointments({
   lang,
   reloadNonce,
   appointmentsHref,
+  canReleasePlan = false,
 }: OrderPlannedAppointmentsProps) {
   const de = lang === "de";
   const tx = (ru: string, german: string) => (de ? german : ru);
@@ -46,6 +91,19 @@ export function OrderPlannedAppointments({
     items: OrderPipelineAppointment[];
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [releaseNonce, setReleaseNonce] = useState(0);
+  const [releasing, setReleasing] = useState(false);
+
+  const releasePlan = () => {
+    setReleasing(true);
+    setError(null);
+    apiFetch(`/orders/${orderId}/appointments/release-to-portal`, { method: "POST" })
+      .then(() => setReleaseNonce((value) => value + 1))
+      .catch((reason: unknown) => {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      })
+      .finally(() => setReleasing(false));
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -60,9 +118,10 @@ export function OrderPlannedAppointments({
     return () => {
       cancelled = true;
     };
-  }, [orderId, reloadNonce]);
+  }, [orderId, reloadNonce, releaseNonce]);
 
   const appointments = loaded?.orderId === orderId ? loaded.items : null;
+  const unreleased = appointments ? unreleasedPlanCount(appointments) : 0;
   const groups = useMemo(() => {
     if (!appointments) return [];
     return groupBy === "day"
@@ -83,28 +142,38 @@ export function OrderPlannedAppointments({
         <div className="text-sm font-semibold text-foreground">
           {tx("Приёмы заказа", "Termine des Auftrags")}
         </div>
-        <div className="inline-flex rounded-lg border border-border/70 bg-muted/30 p-0.5" role="group">
-          {(
-            [
-              ["day", tx("По дням", "Nach Tagen")],
-              ["doctor", tx("По врачам", "Nach Ärzten")],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={groupBy === value}
-              onClick={() => setGroupBy(value)}
-              className={cn(
-                "h-7 rounded-md px-2.5 text-xs font-medium transition-colors",
-                groupBy === value
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          {canReleasePlan ? (
+            <PlanReleaseButton
+              count={unreleased}
+              busy={releasing}
+              lang={lang}
+              onRelease={releasePlan}
+            />
+          ) : null}
+          <div className="inline-flex rounded-lg border border-border/70 bg-muted/30 p-0.5" role="group">
+            {(
+              [
+                ["day", tx("По дням", "Nach Tagen")],
+                ["doctor", tx("По врачам", "Nach Ärzten")],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={groupBy === value}
+                onClick={() => setGroupBy(value)}
+                className={cn(
+                  "h-7 rounded-md px-2.5 text-xs font-medium transition-colors",
+                  groupBy === value
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -159,9 +228,14 @@ export function OrderPlannedAppointments({
                           .join(" · ")}
                       </div>
                     </div>
-                    <StatusBadge tone={status?.tone ?? "neutral"}>
-                      {status ? (de ? status.de : status.ru) : appointment.status}
-                    </StatusBadge>
+                    <div className="flex items-center gap-1.5">
+                      {isShownToPatient(appointment) ? null : (
+                        <HiddenFromPatientMarker lang={lang} />
+                      )}
+                      <StatusBadge tone={status?.tone ?? "neutral"}>
+                        {status ? (de ? status.de : status.ru) : appointment.status}
+                      </StatusBadge>
+                    </div>
                   </li>
                 );
               })}

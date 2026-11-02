@@ -98,6 +98,10 @@ pub fn router() -> Router<AppState> {
             "/appointments/requests/{id}/cancel",
             post(cancel_appointment_request),
         )
+        .route(
+            "/orders/{id}/appointments/release-to-portal",
+            post(release_order_appointments_to_portal),
+        )
         .route("/appointments/meta/interpreters", get(list_interpreters))
         .route("/appointments/meta/staff", get(list_staff))
         .route("/appointments/meta/conflicts", get(get_conflicts))
@@ -630,6 +634,8 @@ async fn list_my_appointments(
            LEFT JOIN provider_doctors doctor ON doctor.id = a.doctor_id
            WHERE a.patient_id = $1
              AND a.appointment_type <> 'internal'
+             -- Only the plan released to the patient (owner decision 2026-11-02).
+             AND a.portal_released_at IS NOT NULL
            ORDER BY CASE WHEN a.date >= current_date THEN 0 ELSE 1 END,
                     CASE WHEN a.date >= current_date THEN a.date END ASC,
                     CASE WHEN a.date < current_date THEN a.date END DESC,
@@ -2710,6 +2716,216 @@ async fn get_conflicts(
     }
 }
 
+/// Shows the order's plan to the patient: every not cancelled appointment of
+/// the order that the portal does not show yet becomes visible there, in one
+/// transaction with one audit row per appointment, and each patient of the
+/// released appointments gets one notification about the plan (owner
+/// decision 2026-11-02, Excel "Nur freigegebene Termine sehen"). Planning
+/// the order is the CEO's and the patient manager's work, so the same
+/// people release it. Idempotent: a second call releases nothing.
+async fn release_order_appointments_to_portal(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+    if !auth.can(Capability::AppointmentsEdit) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let order_patient_id =
+        match sqlx::query_scalar::<_, Option<Uuid>>("SELECT patient_id FROM orders WHERE id = $1")
+            .bind(order_id)
+            .fetch_optional(&state.db)
+            .await
+        {
+            Ok(Some(value)) => value,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
+            Err(e) => {
+                tracing::error!(error = %e, order_id = %order_id, "release plan: load order");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+    // A lead's order has no patient and so no appointments to show yet.
+    let Some(order_patient_id) = order_patient_id else {
+        return Json(serde_json::json!({ "released": 0, "appointment_ids": [] })).into_response();
+    };
+    if let Err(resp) = ensure_patient_access(&state, &auth, order_patient_id).await {
+        return resp;
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, order_id = %order_id, "release plan: begin tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    let released = match sqlx::query(
+        r#"UPDATE appointments
+           SET portal_released_at = now(),
+               portal_released_by = $2
+           WHERE order_id = $1
+             AND portal_released_at IS NULL
+             AND status <> 'cancelled'
+           RETURNING id, patient_id, appointment_type, status, date, time_start"#,
+    )
+    .bind(order_id)
+    .bind(auth.user_id)
+    .fetch_all(&mut *tx)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!(error = %e, order_id = %order_id, "release plan: update appointments");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    struct ReleasedAppointment {
+        id: Uuid,
+        patient_id: Uuid,
+        appointment_type: String,
+        status: String,
+        date: chrono::NaiveDate,
+        time_start: Option<chrono::NaiveTime>,
+    }
+    let mut released: Vec<ReleasedAppointment> = released
+        .iter()
+        .filter_map(|row| {
+            Some(ReleasedAppointment {
+                id: row.try_get("id").ok()?,
+                patient_id: row.try_get("patient_id").ok()?,
+                appointment_type: row.try_get("appointment_type").unwrap_or_default(),
+                status: row.try_get("status").unwrap_or_default(),
+                date: row.try_get("date").ok()?,
+                time_start: row.try_get("time_start").unwrap_or_default(),
+            })
+        })
+        .collect();
+    released.sort_by_key(|item| (item.date, item.time_start, item.id));
+
+    for item in &released {
+        if let Err(e) = audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                "release_appointment_to_portal",
+                Some(auth.user_id),
+                "appointment",
+                Some(item.id),
+                serde_json::json!({
+                    "order_id": order_id,
+                    "patient_id": item.patient_id,
+                }),
+            ),
+        )
+        .await
+        {
+            tracing::error!(error = %e, appointment_id = %item.id, "release plan: audit");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
+
+    // One notification per patient login about the plan, linked to the
+    // patient's earliest released visit; an internal visit never reaches the
+    // portal, so it alone notifies nobody.
+    let mut notifications = Vec::new();
+    let mut notified_patients = HashSet::new();
+    for item in released
+        .iter()
+        .filter(|item| item.appointment_type != "internal")
+    {
+        if !notified_patients.insert(item.patient_id) {
+            continue;
+        }
+        let appointment_count = released
+            .iter()
+            .filter(|other| {
+                other.patient_id == item.patient_id && other.appointment_type != "internal"
+            })
+            .count();
+        let inserted = sqlx::query(
+            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+               SELECT DISTINCT u.id, 'appointment_plan_released'::text,
+                      'Your appointment plan is available'::text,
+                      'Your appointments are now shown in the patient portal.'::text,
+                      'appointment'::text, $2::uuid, $3::jsonb
+               FROM users u
+               JOIN patient_assignments pa ON pa.user_id = u.id
+               WHERE pa.patient_id = $1
+                 AND pa.revoked_at IS NULL
+                 AND u.is_active = true
+                 AND u.role = 'patient'
+               RETURNING id, user_id"#,
+        )
+        .bind(item.patient_id)
+        .bind(item.id)
+        .bind(serde_json::json!({ "appointment_count": appointment_count }))
+        .fetch_all(&mut *tx)
+        .await;
+        match inserted {
+            Ok(rows) => notifications.extend(rows.iter().filter_map(|row| {
+                Some(PendingAppointmentNotification {
+                    id: row.try_get("id").ok()?,
+                    user_id: row.try_get("user_id").ok()?,
+                    appointment_id: Some(item.id),
+                })
+            })),
+            Err(e) => {
+                tracing::error!(error = %e, order_id = %order_id, patient_id = %item.patient_id, "release plan: notify patient");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, order_id = %order_id, "release plan: commit");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    publish_appointment_notifications(&state, &notifications).await;
+    for item in &released {
+        crate::realtime::publish_appointment_event(
+            &state,
+            Some(auth.user_id),
+            "appointment.portal_released",
+            item.id,
+            serde_json::json!({ "order_id": order_id }),
+        )
+        .await;
+    }
+
+    // A confirmed visit held back its preparation documents until the
+    // patient could see it; they go out now.
+    for item in released
+        .iter()
+        .filter(|item| item.status == "confirmed" && item.appointment_type == "medical")
+    {
+        if let Err(response) =
+            crate::routes::documents::auto_send_provider_preparation_documents_for_confirmed_appointment(
+                &state,
+                auth.user_id,
+                item.id,
+            )
+            .await
+        {
+            tracing::error!(
+                appointment_id = %item.id,
+                status = ?response.status(),
+                "auto-send preparation documents after plan release failed"
+            );
+        }
+    }
+
+    Json(serde_json::json!({
+        "released": released.len(),
+        "appointment_ids": released.iter().map(|item| item.id).collect::<Vec<_>>(),
+    }))
+    .into_response()
+}
+
 async fn create_appointment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -2930,8 +3146,12 @@ async fn create_appointment(
         };
 
         let insert_result = sqlx::query(
-            "INSERT INTO appointments (id, patient_id, provider_id, doctor_id, owner_user_id, interpreter_id, order_id, appointment_type, care_path_kind, title, date, time_start, time_end, location, category, notes, recurrence_series_id, recurrence_frequency, recurrence_interval, recurrence_count, recurrence_until, recurrence_end_mode, recurrence_index, created_by, interpreter_response)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+            // An appointment of an order is part of the plan the patient sees
+            // only once it is released (owner decision 2026-11-02); one
+            // without an order, or an internal one, is released at once.
+            "INSERT INTO appointments (id, patient_id, provider_id, doctor_id, owner_user_id, interpreter_id, order_id, appointment_type, care_path_kind, title, date, time_start, time_end, location, category, notes, recurrence_series_id, recurrence_frequency, recurrence_interval, recurrence_count, recurrence_until, recurrence_end_mode, recurrence_index, created_by, interpreter_response, portal_released_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,
+                     CASE WHEN $7::uuid IS NULL OR $8 = 'internal' THEN now() END)
              RETURNING created_at",
         )
         .bind(appointment_id)
@@ -4417,8 +4637,15 @@ async fn insert_appointment_occurrence(
     care_path_kind: &str,
 ) -> Result<(), axum::response::Response> {
     sqlx::query(
-        "INSERT INTO appointments (id, patient_id, provider_id, doctor_id, owner_user_id, interpreter_id, order_id, appointment_type, title, date, time_start, time_end, location, category, notes, recurrence_series_id, recurrence_frequency, recurrence_interval, recurrence_count, recurrence_until, recurrence_end_mode, recurrence_index, created_by, interpreter_response, care_path_kind)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)",
+        // A new occurrence of a series is released to the portal when it has
+        // no order, is internal, or when the series already is.
+        "INSERT INTO appointments (id, patient_id, provider_id, doctor_id, owner_user_id, interpreter_id, order_id, appointment_type, title, date, time_start, time_end, location, category, notes, recurrence_series_id, recurrence_frequency, recurrence_interval, recurrence_count, recurrence_until, recurrence_end_mode, recurrence_index, created_by, interpreter_response, care_path_kind, portal_released_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,
+                 CASE WHEN $7::uuid IS NULL OR $8 = 'internal' THEN now()
+                      WHEN EXISTS (SELECT 1 FROM appointments series
+                                   WHERE (series.recurrence_series_id = $16::uuid OR series.id = $16::uuid)
+                                     AND series.portal_released_at IS NOT NULL) THEN now()
+                 END)",
     )
     .bind(appointment_id)
     .bind(patient_id)
@@ -6222,6 +6449,13 @@ async fn update_appointment(
                    notes = $21,
                    order_id = $22,
                    followup_milestone = $23,
+                   -- Out of an order (or internal) there is no plan to
+                   -- release: an unreleased visit becomes visible as any other.
+                   portal_released_at = CASE
+                       WHEN portal_released_at IS NULL
+                            AND ($22::uuid IS NULL OR $18 = 'internal') THEN now()
+                       ELSE portal_released_at
+                   END,
                    updated_at = now()
                WHERE id = $1"#,
         )

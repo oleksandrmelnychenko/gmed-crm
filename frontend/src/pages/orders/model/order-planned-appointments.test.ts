@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   groupAppointmentsByDay,
   groupAppointmentsByDoctor,
+  isShownToPatient,
   plannedDayLabel,
   plannedTimeLabel,
+  unreleasedPlanCount,
 } from "./order-planned-appointments";
 import type { OrderPipelineAppointment } from "./order-pipeline";
 
@@ -68,5 +70,19 @@ describe("order planned appointments", () => {
     ).toBe("10:00–11:30");
     expect(plannedTimeLabel(appointment("a", { time_start: "10:00:00" }))).toBe("10:00");
     expect(plannedTimeLabel(appointment("a"))).toBe("");
+  });
+
+  it("counts the planned appointments the patient does not see yet", () => {
+    const released = appointment("released", { portal_released_at: "2026-11-02T10:00:00Z" });
+    const legacy = appointment("legacy");
+    const hidden = appointment("hidden", { portal_released_at: null });
+    const internal = appointment("internal", { appointment_type: "internal", portal_released_at: null });
+    const cancelled = appointment("cancelled", { status: "cancelled", portal_released_at: null });
+
+    expect(isShownToPatient(released)).toBe(true);
+    expect(isShownToPatient(legacy)).toBe(true);
+    expect(isShownToPatient(hidden)).toBe(false);
+    expect(isShownToPatient(internal)).toBe(true);
+    expect(unreleasedPlanCount([released, legacy, hidden, internal, cancelled])).toBe(1);
   });
 });

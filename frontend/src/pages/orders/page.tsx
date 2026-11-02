@@ -3451,6 +3451,11 @@ function useOrdersPageContent() {
     orderDetail && detailPatientId && !orderStepsLocked && hasCapability(user, "appointments.edit")
       ? `${detailAppointmentsHref}&create=1`
       : "";
+  // Showing the plan to the patient is the planners' step (CEO, patient
+  // manager), as on the server (owner decision 2026-11-02).
+  const canReleaseOrderPlan = Boolean(
+    detailNewAppointmentHref && (user?.role === "ceo" || user?.role === "patient_manager"),
+  );
   const detailDocumentsHref = orderDetail
     ? `/documents?${detailOrderHref}${detailPatientQuery}`
     : "";
@@ -5384,6 +5389,7 @@ function useOrdersPageContent() {
                         lang={lang}
                         reloadNonce={reloadNonce}
                         appointmentsHref={detailAppointmentsHref}
+                        canReleasePlan={canReleaseOrderPlan}
                       />
 
                       <OrderInterpreterCallout

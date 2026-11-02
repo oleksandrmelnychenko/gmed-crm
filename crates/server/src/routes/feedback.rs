@@ -207,6 +207,28 @@ async fn create_my_feedback(
         Err(resp) => return resp,
     };
 
+    // The portal knows only the appointments released to the patient (owner
+    // decision 2026-11-02); a planned one is not found, as for a stranger.
+    if let Some(appointment_id) = body.appointment_id {
+        match sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM appointments WHERE id = $1 AND portal_released_at IS NULL)",
+        )
+        .bind(appointment_id)
+        .fetch_one(&state.db)
+        .await
+        {
+            Ok(false) => {}
+            Ok(true) => return err(StatusCode::NOT_FOUND, "Appointment not found"),
+            Err(e) => {
+                tracing::error!(error = %e, appointment_id = %appointment_id, "check feedback appointment release");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate appointment feedback context",
+                );
+            }
+        }
+    }
+
     match create_feedback_record(&state, &auth, patient_id, body, "patient_portal", false).await {
         Ok(response) => response,
         Err(resp) => resp,

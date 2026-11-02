@@ -109,6 +109,15 @@ function newLead(item: NotificationFacts, lang: Lang): NotificationCopy {
 }
 
 const FIXED_COPY: Record<string, { title: Texts; body: Texts | null }> = {
+  // The order's plan was released to the patient's portal
+  // (crates/server/src/routes/appointments.rs, owner decision 2026-11-02).
+  appointment_plan_released: {
+    title: { ru: "Ваш план приёмов готов", de: "Ihr Terminplan ist verfügbar" },
+    body: {
+      ru: "Приёмы теперь видны в портале пациента.",
+      de: "Ihre Termine sind jetzt im Patientenportal sichtbar.",
+    },
+  },
   // The requester of an erasure whose login stays for another child (QA 2026-11-01).
   privacy_erasure_completed: {
     title: { ru: "Запрос на удаление выполнен", de: "Löschantrag ausgeführt" },

@@ -34850,7 +34850,10 @@ async fn list_my_uploaded_documents(
                   o.order_number, a.title AS appointment_title
            FROM documents d
            LEFT JOIN orders o ON o.id = d.order_id
+           -- The title of a planned visit stays out until the plan is
+           -- released to the patient (owner decision 2026-11-02).
            LEFT JOIN appointments a ON a.id = d.appointment_id
+                                   AND a.portal_released_at IS NOT NULL
            WHERE d.patient_id = $1
              AND d.uploaded_by = $2
              AND d.ursprung = 'patient_portal'
@@ -37646,7 +37649,8 @@ pub(crate) async fn auto_send_provider_preparation_documents_for_confirmed_appoi
     appointment_id: Uuid,
 ) -> Result<AutoPreparationDocumentSendResult, axum::response::Response> {
     let appointment = match sqlx::query(
-        r#"SELECT patient_id, order_id, provider_id, doctor_id, appointment_type, status
+        r#"SELECT patient_id, order_id, provider_id, doctor_id, appointment_type, status,
+                  (portal_released_at IS NOT NULL) AS portal_released
            FROM appointments
            WHERE id = $1"#,
     )
@@ -37673,6 +37677,15 @@ pub(crate) async fn auto_send_provider_preparation_documents_for_confirmed_appoi
             .try_get::<String, _>("status")
             .unwrap_or_default()
             != "confirmed"
+    {
+        return Ok(AutoPreparationDocumentSendResult::default());
+    }
+    // The preparation documents go to the portal: not before the patient
+    // sees the appointment itself. Releasing the plan sends them then
+    // (owner decision 2026-11-02).
+    if !appointment
+        .try_get::<bool, _>("portal_released")
+        .unwrap_or(false)
     {
         return Ok(AutoPreparationDocumentSendResult::default());
     }

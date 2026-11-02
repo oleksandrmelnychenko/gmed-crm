@@ -990,3 +990,214 @@ async fn patient_can_view_order_followup_milestones_from_portal() {
     assert_eq!(items[0]["results_handoff_status"], "completed");
     assert_eq!(items[0]["followup_ready"], true);
 }
+
+async fn portal_appointment_ids(app: &axum::Router, patient_bearer: &str) -> Vec<String> {
+    let (status, body) =
+        json_request(app, "GET", "/api/v1/me/appointments", patient_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    body.as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["id"].as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+async fn count_plan_notifications(pool: &PgPool, user_id: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM user_notifications WHERE user_id = $1 AND kind = 'appointment_plan_released'",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// Owner decision 2026-11-02: an appointment planned inside an order reaches
+/// the portal only when the plan is released; one outside an order at once.
+#[tokio::test]
+async fn order_plan_reaches_the_portal_only_after_release() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("portal-plan-release");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let other_pm_id = seed_user(&pool, &format!("{tag}-pm2"), "patient_manager").await;
+    let concierge_id = seed_user(&pool, &format!("{tag}-conc"), "concierge").await;
+    let teamlead_id = seed_user(&pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, teamlead_id, admin_id).await;
+
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+    let pm_bearer = auth_header_for(patient_manager_id, "patient_manager");
+
+    let create = |body: Value| {
+        let app = app.clone();
+        let bearer = pm_bearer.clone();
+        async move {
+            let (status, body) =
+                json_request(&app, "POST", "/api/v1/appointments", &bearer, Some(body)).await;
+            assert_eq!(status, StatusCode::CREATED, "{body:?}");
+            body["id"].as_str().unwrap().to_string()
+        }
+    };
+    let planned = create(json!({
+        "patient_id": patient_id,
+        "order_id": order_id,
+        "provider_id": provider_id,
+        "doctor_id": doctor_id,
+        "appointment_type": "medical",
+        "title": "Planned cardiology visit",
+        "date": "2027-03-10",
+        "time_start": "10:00",
+        "time_end": "11:00"
+    }))
+    .await;
+    let dropped = create(json!({
+        "patient_id": patient_id,
+        "order_id": order_id,
+        "provider_id": provider_id,
+        "doctor_id": doctor_id,
+        "appointment_type": "medical",
+        "title": "Dropped visit",
+        "date": "2027-03-11",
+        "time_start": "10:00",
+        "time_end": "11:00"
+    }))
+    .await;
+    let standalone = create(json!({
+        "patient_id": patient_id,
+        "provider_id": provider_id,
+        "doctor_id": doctor_id,
+        "appointment_type": "medical",
+        "title": "Visit outside an order",
+        "date": "2027-03-12",
+        "time_start": "10:00",
+        "time_end": "11:00"
+    }))
+    .await;
+    sqlx::query("UPDATE appointments SET status = 'cancelled' WHERE id = $1::uuid")
+        .bind(&dropped)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Before the release the portal, its dashboard and its notifications
+    // know only the visit outside the order.
+    assert_eq!(
+        portal_appointment_ids(&app, &patient_bearer).await,
+        vec![standalone.clone()]
+    );
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/me/next-actions",
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert!(!body.to_string().contains(&planned), "{body}");
+    let patient_notifications: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM user_notifications WHERE user_id = $1 AND entity_type = 'appointment'",
+    )
+    .bind(patient_user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(patient_notifications, 0);
+
+    // Staff see the plan with its release state.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/pipeline"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let pipeline_appointment = body["appointments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == planned.as_str())
+        .cloned()
+        .unwrap();
+    assert!(
+        pipeline_appointment["portal_released_at"].is_null(),
+        "{pipeline_appointment}"
+    );
+
+    // Only the patient's planners release the plan.
+    let release_path = format!("/api/v1/orders/{order_id}/appointments/release-to-portal");
+    for bearer in [
+        patient_bearer.clone(),
+        auth_header_for(concierge_id, "concierge"),
+        auth_header_for(teamlead_id, "teamlead_interpreter"),
+        auth_header_for(other_pm_id, "patient_manager"),
+    ] {
+        let (status, body) = json_request(&app, "POST", &release_path, &bearer, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body:?}");
+    }
+    assert_eq!(
+        portal_appointment_ids(&app, &patient_bearer).await,
+        vec![standalone.clone()]
+    );
+
+    let (status, body) = json_request(&app, "POST", &release_path, &pm_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["released"], 1);
+    assert_eq!(body["appointment_ids"], json!([planned.clone()]));
+
+    let mut visible = portal_appointment_ids(&app, &patient_bearer).await;
+    visible.sort();
+    let mut expected = vec![planned.clone(), standalone.clone()];
+    expected.sort();
+    assert_eq!(visible, expected);
+    assert_eq!(count_plan_notifications(&pool, patient_user_id).await, 1);
+
+    let released_by: Option<Uuid> =
+        sqlx::query_scalar("SELECT portal_released_by FROM appointments WHERE id = $1::uuid")
+            .bind(&planned)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(released_by, Some(patient_manager_id));
+    let cancelled_released: bool = sqlx::query_scalar(
+        "SELECT portal_released_at IS NOT NULL FROM appointments WHERE id = $1::uuid",
+    )
+    .bind(&dropped)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        !cancelled_released,
+        "a cancelled visit is not part of the plan"
+    );
+    let audit_rows: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM audit_log
+           WHERE action = 'release_appointment_to_portal'
+             AND entity_id = $1::uuid AND user_id = $2"#,
+    )
+    .bind(&planned)
+    .bind(patient_manager_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audit_rows, 1);
+
+    // A second release changes nothing and notifies nobody again.
+    let (status, body) = json_request(&app, "POST", &release_path, &pm_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["released"], 0);
+    assert_eq!(count_plan_notifications(&pool, patient_user_id).await, 1);
+}

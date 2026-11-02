@@ -125,6 +125,8 @@ async fn load_appointment_actions(
            FROM appointments
            WHERE patient_id = $1
              AND appointment_type <> 'internal'
+             -- Only the plan released to the patient (owner decision 2026-11-02).
+             AND portal_released_at IS NOT NULL
              AND status IN ('planned', 'confirmed', 'in_progress')
              AND date >= current_date
            ORDER BY date ASC, time_start ASC NULLS LAST
