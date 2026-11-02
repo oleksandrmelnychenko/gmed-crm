@@ -474,6 +474,48 @@ test("planning shows the hidden plan to the patient in one step (plan stage 4)",
   expect(releaseCalls).toBe(1);
 });
 
+test("planning warns about a doctor outside the quote and records the agreement (plan stage 4)", async ({page}) => {
+  const {order, writes} = await prepare(page);
+  order.planning_preparation.treatment_plan_status = "draft";
+  order.planning_preparation.treatment_plan_note = "";
+  const item = (id: string, outside: boolean) => ({
+    id, title: id, appointment_type: "medical", date: "2026-11-02", time_start: null, time_end: null, status: "planned",
+    location: null, provider_name: "Klinik Nord", doctor_name: "Dr. Weber", interpreter_name: null,
+    interpreter_response: null, portal_released_at: "2026-11-01T10:00:00Z", outside_signed_quote: outside,
+  });
+  await page.route(`**/api/v1/orders/${orderId}/pipeline`, route => route.fulfill({json: {
+    order_id: orderId, phase: "intake", status: "active", stages: [], medical: {visible: false, required: false},
+    appointments: [item("Im KV", false), item("Ausserhalb KV", true)],
+  }}));
+  let generated: Record<string, unknown> | null = null;
+  await page.route("**/api/v1/documents/generate", route => {
+    generated = route.request().postDataJSON();
+    return route.fulfill({json: {id: "plan-pdf-1"}});
+  });
+  await page.goto(`/orders/${orderId}?section=planning`);
+
+  const plan = page.getByTestId("order-planned-appointments");
+  await expect(plan.getByTestId("order-planned-appointment-outside-quote")).toHaveCount(1);
+  await expect(plan.locator("li", {hasText: "Ausserhalb KV"})).toContainText("Врача нет в подписанном КВ");
+
+  const agreement = page.getByTestId("order-plan-agreement");
+  await expect(agreement).toContainText("Черновик");
+  await agreement.getByTestId("order-plan-pdf").click();
+  const pdfHref = await agreement.getByRole("link", {name: "PDF плана лечения"}).getAttribute("href");
+  expect(pdfHref).toContain("document=plan-pdf-1");
+  expect(generated).toMatchObject({
+    template_id: "treatment_plan", order_id: orderId, patient_id: patientId,
+  });
+
+  await agreement.getByTestId("order-plan-note").fill("Plan per e-mail gesendet");
+  await agreement.getByRole("button", {name: "Отметить: отправлен пациенту"}).click();
+  await expect(agreement).toContainText("Отправлен пациенту");
+  await expect(agreement.getByRole("button", {name: "Пациент согласовал"})).toBeVisible();
+  expect(writes.filter(write => write.path.endsWith("/planning-preparation")).at(-1)?.body).toEqual({
+    treatment_plan_status: "sent", treatment_plan_note: "Plan per e-mail gesendet",
+  });
+});
+
 test("saving a normalized note clears the dirty state", async ({page}) => {
   const {writes} = await prepare(page);
   await page.goto(`/orders/${orderId}?section=planning`);

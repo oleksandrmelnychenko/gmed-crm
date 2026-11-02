@@ -125,7 +125,7 @@
 |---|---|
 | ~~`billing_release_status`~~ | прибрано (рішення власника 2026-10-05): ручного дозволу бухгалтерії на замовлення немає; допуск до виконання дають відсутність боргового блокування і підписане замовлення або покриття пакетом |
 | `package_coverage_status` | `unknown` Неизвестно/Unbekannt · `covered` Покрыто/Abgedeckt · `not_covered` Не покрыто/Nicht abgedeckt |
-| `treatment_plan_status` | `draft` Черновик/Entwurf · `agreed` Согласовано/Abgestimmt · `correction_requested` Запрошена корректировка/Korrektur angefragt · `finalized` Финализировано/Finalisiert |
+| `treatment_plan_status` | `draft` Черновик/Entwurf · `sent` Отправлен пациенту/An Patienten gesendet · `agreed` Согласовано/Abgestimmt · `correction_requested` Запрошена корректировка/Korrektur angefragt · `finalized` Финализировано/Finalisiert |
 | `preparation_documents_status` | `pending` Документы ожидаются · `sent` Документы отправлены · `not_required` Документы не требуются (DE: Dokumente ausstehend/versendet/nicht erforderlich) |
 | `interpreter_briefing_status` | `not_needed` Не требуется · `pending` Брифинг ожидается · `completed` Брифинг завершён |
 | `arrival_status` | `pending` Прибытие ожидается/Ankunft ausstehend · `arrived` Прибыл/Angekommen · `not_required` |

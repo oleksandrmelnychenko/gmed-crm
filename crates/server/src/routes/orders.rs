@@ -1173,7 +1173,7 @@ fn parse_optional_datetime(
 fn is_valid_treatment_plan_status(value: &str) -> bool {
     matches!(
         value,
-        "draft" | "agreed" | "correction_requested" | "finalized"
+        "draft" | "sent" | "agreed" | "correction_requested" | "finalized"
     )
 }
 
@@ -1370,15 +1370,30 @@ async fn load_followup_visits<'e, E>(
 where
     E: sqlx::PgExecutor<'e>,
 {
+    load_followup_visits_scoped(executor, order_id, false).await
+}
+
+/// The follow-up visits; with `released_only` only those the patient portal
+/// shows (owner decision 2026-11-02).
+async fn load_followup_visits_scoped<'e, E>(
+    executor: E,
+    order_id: Uuid,
+    released_only: bool,
+) -> Result<Vec<FollowupVisit>, sqlx::Error>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     let rows = sqlx::query(&format!(
         r#"SELECT id, date, status, {FOLLOWUP_VISIT_MILESTONE_SQL} AS milestone
            FROM appointments
            WHERE order_id = $1
              AND (checklist_phase = 'followup' OR care_path_kind = 'followup')
              AND status <> 'cancelled'
+             AND (NOT $2 OR portal_released_at IS NOT NULL)
            ORDER BY date, created_at, id"#
     ))
     .bind(order_id)
+    .bind(released_only)
     .fetch_all(executor)
     .await?;
     Ok(rows
@@ -2703,6 +2718,23 @@ async fn load_order_followup_readiness(
     state: &AppState,
     order_id: Uuid,
 ) -> Result<OrderFollowupReadiness, axum::response::Response> {
+    load_order_followup_readiness_scoped(state, order_id, FollowupVisitScope::All).await
+}
+
+/// Which follow-up visits the readiness counts: staff see every visit, the
+/// patient portal only those released to the patient.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FollowupVisitScope {
+    All,
+    ReleasedToPortal,
+}
+
+async fn load_order_followup_readiness_scoped(
+    state: &AppState,
+    order_id: Uuid,
+    scope: FollowupVisitScope,
+) -> Result<OrderFollowupReadiness, axum::response::Response> {
+    let released_only = scope == FollowupVisitScope::ReleasedToPortal;
     ensure_order_followup_flow_state(state, order_id).await?;
 
     let followup_row = sqlx::query(
@@ -2739,7 +2771,7 @@ async fn load_order_followup_readiness(
 
     let patient_id: Uuid = followup_row.try_get("patient_id").unwrap_or_default();
 
-    let followup_visits = load_followup_visits(&state.db, order_id)
+    let followup_visits = load_followup_visits_scoped(&state.db, order_id, released_only)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, order_id = %order_id, "load follow-up appointment activity");
@@ -2782,9 +2814,11 @@ async fn load_order_followup_readiness(
            JOIN appointments a ON a.id = r.appointment_id
            WHERE a.order_id = $1
              -- A cancelled visit closed its reminders; they plan nothing.
-             AND a.status <> 'cancelled'"#,
+             AND a.status <> 'cancelled'
+             AND (NOT $2 OR a.portal_released_at IS NOT NULL)"#,
     )
     .bind(order_id)
+    .bind(released_only)
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
@@ -2843,10 +2877,12 @@ async fn load_order_followup_readiness(
         r#"SELECT id, date
            FROM appointments
            WHERE order_id = $1 AND status <> 'cancelled'
+             AND (NOT $2 OR portal_released_at IS NOT NULL)
            ORDER BY (status = 'completed') DESC, date DESC, created_at DESC
            LIMIT 1"#,
     )
     .bind(order_id)
+    .bind(released_only)
     .fetch_optional(&state.db)
     .await
     .unwrap_or_default();
@@ -8186,7 +8222,15 @@ async fn list_my_followup_milestones(
     let mut items = Vec::with_capacity(rows.len());
     for row in rows {
         let order_id: Uuid = row.try_get("id").unwrap_or_default();
-        let followup = match load_order_followup_readiness(&state, order_id).await {
+        // The patient's own view: follow-up visits not yet released to the
+        // portal are neither counted nor dated (owner decision 2026-11-02).
+        let followup = match load_order_followup_readiness_scoped(
+            &state,
+            order_id,
+            FollowupVisitScope::ReleasedToPortal,
+        )
+        .await
+        {
             Ok(value) => value.payload,
             Err(resp) => return resp,
         };

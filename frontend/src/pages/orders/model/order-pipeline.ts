@@ -67,6 +67,8 @@ export type OrderPipelineAppointment = {
   interpreter_response: string | null;
   /** Null while the plan is not shown to the patient yet; absent from older servers. */
   portal_released_at?: string | null;
+  /** Medical visit whose doctor/provider has no line in the order's accepted quote. */
+  outside_signed_quote?: boolean;
 };
 
 export const ORDER_APPOINTMENT_STATUS: Record<string, { de: string; ru: string; tone: "neutral" | "info" | "warning" | "success" }> = {

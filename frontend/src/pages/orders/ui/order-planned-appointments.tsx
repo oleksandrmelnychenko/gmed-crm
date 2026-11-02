@@ -60,6 +60,20 @@ export function PlanReleaseButton({ count, busy, lang, onRelease }: PlanReleaseB
   );
 }
 
+/**
+ * A doctor outside the signed quote may be planned (owner decision
+ * 2026-11-02, question 5); completing the visit then adds an invoice line.
+ */
+export function OutsideQuoteWarning({ lang }: { lang: string }) {
+  return (
+    <div data-testid="order-planned-appointment-outside-quote" className="mt-0.5 text-xs text-amber-700">
+      {lang === "de"
+        ? "Arzt nicht im unterschriebenen KV – beim Abschluss des Termins entsteht eine neue Rechnungszeile"
+        : "Врача нет в подписанном КВ — при завершении приёма появится новая строка счёта"}
+    </div>
+  );
+}
+
 /** "не видно пациенту" next to an appointment the patient does not see yet. */
 export function HiddenFromPatientMarker({ lang }: { lang: string }) {
   return (
@@ -227,6 +241,7 @@ export function OrderPlannedAppointments({
                           .filter(Boolean)
                           .join(" · ")}
                       </div>
+                      {appointment.outside_signed_quote ? <OutsideQuoteWarning lang={lang} /> : null}
                     </div>
                     <div className="flex items-center gap-1.5">
                       {isShownToPatient(appointment) ? null : (

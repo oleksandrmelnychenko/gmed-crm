@@ -1201,3 +1201,350 @@ async fn order_plan_reaches_the_portal_only_after_release() {
     assert_eq!(body["released"], 0);
     assert_eq!(count_plan_notifications(&pool, patient_user_id).await, 1);
 }
+
+#[allow(clippy::too_many_arguments)]
+async fn seed_order_appointment(
+    pool: &PgPool,
+    patient_id: Uuid,
+    order_id: Uuid,
+    provider_id: Option<Uuid>,
+    doctor_id: Option<Uuid>,
+    appointment_type: &str,
+    title: &str,
+    days_ahead: i32,
+    created_by: Uuid,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO appointments (
+                patient_id, order_id, provider_id, doctor_id, appointment_type, title, date,
+                status, created_by
+           ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_DATE + $7, 'planned', $8)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .bind(appointment_type)
+    .bind(title)
+    .bind(days_ahead)
+    .bind(created_by)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// Owner decision 2026-11-02 (question 5): a doctor outside the signed quote
+/// may be planned, and the plan warns that completing the visit adds an
+/// invoice line.
+#[tokio::test]
+async fn pipeline_flags_appointments_outside_the_signed_quote() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("plan-quote-warning");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let clinic = seed_provider(&pool, &format!("{tag}-a")).await;
+    let quoted_doctor = seed_doctor(&pool, clinic, &format!("{tag}-a1")).await;
+    let other_doctor = seed_doctor(&pool, clinic, &format!("{tag}-a2")).await;
+    let lab = seed_provider(&pool, &format!("{tag}-b")).await;
+    let lab_doctor = seed_doctor(&pool, lab, &format!("{tag}-b1")).await;
+
+    let quoted = seed_order_appointment(
+        &pool,
+        patient_id,
+        order_id,
+        Some(clinic),
+        Some(quoted_doctor),
+        "medical",
+        "Quoted doctor",
+        10,
+        admin_id,
+    )
+    .await;
+    let unquoted = seed_order_appointment(
+        &pool,
+        patient_id,
+        order_id,
+        Some(clinic),
+        Some(other_doctor),
+        "medical",
+        "Other doctor",
+        11,
+        admin_id,
+    )
+    .await;
+    let provider_line = seed_order_appointment(
+        &pool,
+        patient_id,
+        order_id,
+        Some(lab),
+        Some(lab_doctor),
+        "medical",
+        "Lab visit",
+        12,
+        admin_id,
+    )
+    .await;
+    let internal = seed_order_appointment(
+        &pool,
+        patient_id,
+        order_id,
+        None,
+        None,
+        "internal",
+        "Team call",
+        13,
+        admin_id,
+    )
+    .await;
+
+    let pm_bearer = auth_header_for(patient_manager_id, "patient_manager");
+    let flags = || {
+        let app = app.clone();
+        let bearer = pm_bearer.clone();
+        async move {
+            let (status, body) = json_request(
+                &app,
+                "GET",
+                &format!("/api/v1/orders/{order_id}/pipeline"),
+                &bearer,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body:?}");
+            body["appointments"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| {
+                    (
+                        item["id"].as_str().unwrap().to_string(),
+                        item["outside_signed_quote"].as_bool().unwrap(),
+                    )
+                })
+                .collect::<std::collections::HashMap<_, _>>()
+        }
+    };
+
+    // Before a quote is signed there is nothing to compare with.
+    let before = flags().await;
+    assert!(before.values().all(|outside| !outside), "{before:?}");
+
+    // A draft quote naming the other doctor does not count; the accepted one
+    // names the quoted doctor and the lab without a doctor.
+    for (status, provider, doctor) in [
+        ("draft", clinic, Some(other_doctor)),
+        ("accepted", clinic, Some(quoted_doctor)),
+    ] {
+        let mut lines = vec![json!({
+            "description": "Behandlungsorganisation",
+            "quantity": "1",
+            "unit_price": "100",
+            "provider_id": provider,
+            "doctor_id": doctor,
+        })];
+        if status == "accepted" {
+            lines.push(json!({
+                "description": "Labor",
+                "quantity": "1",
+                "unit_price": "50",
+                "provider_id": lab,
+                "doctor_id": null,
+            }));
+        }
+        sqlx::query(
+            r#"INSERT INTO quotes (
+                    order_id, quote_number, total_net, total_vat, total_gross,
+                    status, line_items, created_by
+               ) VALUES ($1, $2, 150, 0, 150, $3, $4, $5)"#,
+        )
+        .bind(order_id)
+        .bind(format!("KV-{tag}-{status}"))
+        .bind(status)
+        .bind(json!(lines))
+        .bind(admin_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let after = flags().await;
+    assert!(!after[&quoted.to_string()], "{after:?}");
+    assert!(after[&unquoted.to_string()], "{after:?}");
+    assert!(!after[&provider_line.to_string()], "{after:?}");
+    assert!(!after[&internal.to_string()], "{after:?}");
+}
+
+/// A recommendation from a planned visit does not name the visit in the
+/// portal before the plan is released.
+#[tokio::test]
+async fn portal_recommendation_hides_an_unreleased_source_appointment() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("portal-recommendation-source");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let appointment_id = seed_order_appointment(
+        &pool,
+        patient_id,
+        order_id,
+        None,
+        None,
+        "medical",
+        "Secret planned visit",
+        5,
+        admin_id,
+    )
+    .await;
+    sqlx::query("UPDATE appointments SET portal_released_at = NULL WHERE id = $1")
+        .bind(appointment_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"INSERT INTO patient_recommendations (patient_id, title, source_appointment_id, portal_visible)
+           VALUES ($1, 'Control in six months', $2, true)"#,
+    )
+    .bind(patient_id)
+    .bind(appointment_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+    let load = || {
+        let app = app.clone();
+        let bearer = patient_bearer.clone();
+        async move {
+            let (status, body) =
+                json_request(&app, "GET", "/api/v1/me/recommendations", &bearer, None).await;
+            assert_eq!(status, StatusCode::OK, "{body:?}");
+            body.as_array().unwrap()[0].clone()
+        }
+    };
+
+    let hidden = load().await;
+    assert!(hidden["source_appointment_title"].is_null(), "{hidden}");
+    assert!(hidden["source_appointment_id"].is_null(), "{hidden}");
+    assert!(!hidden.to_string().contains("Secret planned visit"));
+
+    sqlx::query("UPDATE appointments SET portal_released_at = now() WHERE id = $1")
+        .bind(appointment_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let shown = load().await;
+    assert_eq!(shown["source_appointment_title"], "Secret planned visit");
+    assert_eq!(shown["source_appointment_id"], appointment_id.to_string());
+}
+
+/// The portal's follow-up milestones neither count nor date a follow-up
+/// visit that is not released yet; the staff view still does.
+#[tokio::test]
+async fn portal_followup_milestones_skip_unreleased_visits() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("portal-followup-release");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let order_id = seed_order_with_phase(&pool, patient_id, admin_id, &tag, "closure").await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+
+    sqlx::query(
+        r#"INSERT INTO appointments (
+                patient_id, order_id, appointment_type, title, date, status, checklist_phase,
+                created_by, portal_released_at
+           ) VALUES
+                ($1, $2, 'medical', '1-week follow-up check-in', CURRENT_DATE + 7, 'planned', 'followup', $3, now()),
+                ($1, $2, 'medical', '1-month follow-up check-in', CURRENT_DATE + 30, 'planned', 'followup', $3, NULL)"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(patient_manager_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/me/followup-milestones",
+        &auth_header_for(patient_user_id, "patient"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let portal = &body.as_array().unwrap()[0];
+    assert_eq!(portal["followup_appointments_total"], 1, "{portal}");
+    assert_eq!(portal["followup_1w_visits"], 1, "{portal}");
+    assert_eq!(portal["followup_1m_visits"], 0, "{portal}");
+    assert!(portal["followup_1m_open_visit_date"].is_null(), "{portal}");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &auth_header_for(patient_manager_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(
+        body["followup_flow"]["followup_appointments_total"], 2,
+        "{body}"
+    );
+    assert_eq!(body["followup_flow"]["followup_1m_visits"], 1, "{body}");
+}
+
+/// The manual agreement records that the plan was sent to the patient
+/// (owner decision 2026-11-02, question 4), with its note, through the
+/// audited planning update.
+#[tokio::test]
+async fn plan_agreement_records_the_plan_as_sent() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("plan-agreement-sent");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/planning-preparation"),
+        &auth_header_for(patient_manager_id, "patient_manager"),
+        Some(json!({
+            "treatment_plan_status": "sent",
+            "treatment_plan_note": "Plan per E-Mail gesendet"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["treatment_plan_status"], "sent", "{body}");
+
+    let (status, note): (String, Option<String>) = sqlx::query_as(
+        "SELECT treatment_plan_status, treatment_plan_note FROM order_planning_preparation WHERE order_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "sent");
+    assert_eq!(note.as_deref(), Some("Plan per E-Mail gesendet"));
+}

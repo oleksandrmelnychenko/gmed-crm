@@ -24,6 +24,7 @@ export type DebtManagementStatus =
   | "cleared";
 export type TreatmentPlanStatus =
   | "draft"
+  | "sent"
   | "agreed"
   | "correction_requested"
   | "finalized";

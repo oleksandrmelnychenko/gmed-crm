@@ -289,6 +289,30 @@ async fn get_order_pipeline(
                   appointment.date, appointment.time_start, appointment.time_end,
                   appointment.status, appointment.location, appointment.interpreter_response,
                   appointment.portal_released_at,
+                  -- Owner decision 2026-11-02 (question 5): a doctor outside
+                  -- the signed quote may be planned, with a warning. Once the
+                  -- order has an accepted quote, a medical visit is outside it
+                  -- when no quote line names its provider and its doctor (a
+                  -- line without a doctor covers every doctor of the provider).
+                  (appointment.appointment_type = 'medical'
+                   AND appointment.provider_id IS NOT NULL
+                   AND EXISTS (SELECT 1 FROM quotes signed
+                               WHERE signed.order_id = appointment.order_id
+                                 AND signed.status = 'accepted')
+                   AND NOT EXISTS (
+                       SELECT 1
+                       FROM quotes signed
+                       CROSS JOIN LATERAL jsonb_array_elements(
+                           CASE WHEN jsonb_typeof(signed.line_items) = 'array'
+                                THEN signed.line_items ELSE '[]'::jsonb END
+                       ) AS line(item)
+                       WHERE signed.order_id = appointment.order_id
+                         AND signed.status = 'accepted'
+                         AND line.item ->> 'provider_id' = appointment.provider_id::text
+                         AND (line.item ->> 'doctor_id' IS NULL
+                              OR appointment.doctor_id IS NULL
+                              OR line.item ->> 'doctor_id' = appointment.doctor_id::text)
+                   )) AS outside_signed_quote,
                   provider.name AS provider_name, doctor.name AS doctor_name,
                   interpreter.name AS interpreter_name
            FROM appointments appointment
@@ -456,6 +480,8 @@ async fn get_order_pipeline(
             "interpreter_response": row.try_get::<Option<String>, _>("interpreter_response").unwrap_or(None),
             // Null while the plan is not yet shown to the patient (owner decision 2026-11-02).
             "portal_released_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("portal_released_at").unwrap_or(None).map(|value| value.to_rfc3339()),
+            // Completing it adds a new invoice line (owner decision 2026-11-02).
+            "outside_signed_quote": row.try_get::<Option<bool>, _>("outside_signed_quote").unwrap_or(None).unwrap_or(false),
         })).collect::<Vec<Value>>(),
         "services": {
             "total": services_total,

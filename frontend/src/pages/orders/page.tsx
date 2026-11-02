@@ -287,6 +287,7 @@ import { OrderSubscriptionCard } from "./ui/order-subscription-card";
 import { ScopedOrderDetail } from "./ui/scoped-order-detail";
 import { OrderInterpreterCallout } from "./ui/order-interpreter-callout";
 import { OrderPlannedAppointments } from "./ui/order-planned-appointments";
+import { OrderPlanAgreement } from "./ui/order-plan-agreement";
 import { ExternalInvoiceAllocationSheet } from "./ui/external-invoice-allocation-sheet";
 import {
   CancelLeistungDialog,
@@ -850,6 +851,7 @@ function useOrdersPageContent() {
   const treatmentPlanStatusLabel = (value: string) =>
     labelFor(value, {
       draft: l("orders_entwurf"),
+      sent: l("orders_plan_an_patienten_gesendet"),
       agreed: l("orders_abgestimmt"),
       correction_requested: l("orders_korrektur_angefragt"),
       finalized: l("orders_finalisiert"),
@@ -5392,6 +5394,21 @@ function useOrdersPageContent() {
                         canReleasePlan={canReleaseOrderPlan}
                       />
 
+                      <OrderPlanAgreement
+                        orderId={orderDetail.id}
+                        patientId={detailPatientId}
+                        lang={lang}
+                        status={orderDetail.planning_preparation.treatment_plan_status}
+                        note={orderDetail.planning_preparation.treatment_plan_note}
+                        canEdit={
+                          permissions.canManagePhase &&
+                          !orderStepsLocked &&
+                          (user?.role === "ceo" || user?.role === "patient_manager")
+                        }
+                        reloadNonce={reloadNonce}
+                        onChanged={triggerReload}
+                      />
+
                       <OrderInterpreterCallout
                         orderId={orderDetail.id}
                         patientId={detailPatientId}
@@ -5453,6 +5470,7 @@ function useOrdersPageContent() {
                                 className={selectClassName}
                               >
                                 <option value="draft">{treatmentPlanStatusLabel("draft")}</option>
+                                <option value="sent">{treatmentPlanStatusLabel("sent")}</option>
                                 <option value="agreed">{treatmentPlanStatusLabel("agreed")}</option>
                                 <option value="correction_requested">
                                   {treatmentPlanStatusLabel("correction_requested")}

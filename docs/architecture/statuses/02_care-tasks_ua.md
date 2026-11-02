@@ -220,7 +220,7 @@
 | `issue_status` | `pending` Есть открытые вопросы / Offene Punkte · `monitoring` Под наблюдением / Unter Beobachtung · `resolved` Закрыто / Geklärt · `not_required` Нет вопросов / Keine Punkte |
 | `doctor_followup_/followup_1w/1m/6m_/package_end_status` | `pending` Ожидается / Ausstehend · `scheduled` Запланировано / Geplant (портал: Назначено / Eingeplant) · `completed` Завершено / Abgeschlossen · `not_required` Не требуется / Nicht erforderlich |
 | `results_handoff_status` | `pending` · `completed` · `not_required` |
-| `treatment_plan_status` | `draft` Черновик / Entwurf · `agreed` Согласовано / Abgestimmt · `correction_requested` Запрошена корректировка / Korrektur angefragt · `finalized` Финализировано / Finalisiert |
+| `treatment_plan_status` | `draft` Черновик / Entwurf · `sent` Отправлен пациенту / An Patienten gesendet · `agreed` Согласовано / Abgestimmt · `correction_requested` Запрошена корректировка / Korrektur angefragt · `finalized` Финализировано / Finalisiert |
 | `preparation_documents_status` | `pending` · `sent` (автоматично при підтвердженні медичного терміну) · `not_required` |
 | `interpreter_briefing_status` | `not_needed` · `pending` · `completed` |
 

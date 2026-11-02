@@ -1162,6 +1162,7 @@ fn recommendation_select_sql(where_clause: &str) -> String {
                   creator.name AS created_by_name,
                   updater.name AS updated_by_name,
                   appointment.title AS source_appointment_title,
+                  (appointment.portal_released_at IS NOT NULL) AS source_appointment_released,
                   COALESCE(document.original_filename, document.auto_name) AS source_document_name,
                   source_order.order_number AS source_order_number,
                   request.status AS appointment_request_status
@@ -1239,6 +1240,19 @@ fn portal_recommendation_json(row: &sqlx::postgres::PgRow) -> serde_json::Value 
     if let Some(map) = value.as_object_mut() {
         for key in STAFF_ONLY_RECOMMENDATION_KEYS {
             map.remove(key);
+        }
+        // A source visit the patient cannot see yet stays unnamed until the
+        // plan is released (owner decision 2026-11-02).
+        let source_released = row
+            .try_get::<Option<bool>, _>("source_appointment_released")
+            .unwrap_or_default()
+            .unwrap_or(false);
+        if !source_released {
+            map.insert("source_appointment_id".to_string(), serde_json::Value::Null);
+            map.insert(
+                "source_appointment_title".to_string(),
+                serde_json::Value::Null,
+            );
         }
     }
     value
