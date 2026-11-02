@@ -42,6 +42,9 @@ export const ORDER_API_ERROR_KEYS: Record<string, string> = {
   agency_service_key_taken: "api_catalog_agency_service_key_taken",
   price_version_date_taken: "api_catalog_price_version_date_taken",
   price_version_last: "api_catalog_price_version_last",
+  price_version_used: "api_catalog_price_version_used",
+  tax_profile_system: "api_catalog_tax_profile_system",
+  tax_profile_default: "api_catalog_tax_profile_default",
   // A generated consent or contract is signed only with a signed scan or a QES.
   signature_evidence_required: "api_documents_signature_evidence_required",
   // Provider service catalogue (providers.rs)

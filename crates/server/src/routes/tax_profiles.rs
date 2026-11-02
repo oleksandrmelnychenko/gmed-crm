@@ -25,8 +25,55 @@ pub fn router() -> Router<AppState> {
             "/tax-profiles",
             get(list_tax_profiles).post(create_tax_profile),
         )
-        .route("/tax-profiles/{profile_id}", post(update_tax_profile))
+        .route(
+            "/tax-profiles/{profile_id}",
+            post(update_tax_profile).delete(delete_tax_profile),
+        )
         .route("/tax-profiles/catalog", get(list_catalog_tax_profiles))
+}
+
+/// Profiles the server resolves by key (VAT of order amendments); they are
+/// never removed from the catalogue.
+const SYSTEM_TAX_PROFILE_KEYS: [&str; 3] = ["standard_vat", "termin_fee_0", "vat_exempt_0"];
+
+/// How many records name a tax profile: catalogue rows and their price
+/// history, order lines, service groups, amendments, patient packages and
+/// consumptions (snapshots), and the line JSON of quotes, quote versions,
+/// invoices, storno documents and credit notes. `id` is the SQL expression
+/// of the profile id. A profile with any use is archived, never deleted
+/// (GoBD: what an invoice used stays).
+fn tax_profile_usage_sql(id: &str) -> String {
+    format!(
+        r#"(
+            (SELECT COUNT(*) FROM agency_service_catalog WHERE tax_profile_id = {id})
+          + (SELECT COUNT(*) FROM service_packages WHERE tax_profile_id = {id})
+          + (SELECT COUNT(*) FROM service_package_items WHERE tax_profile_id = {id})
+          + (SELECT COUNT(*) FROM service_package_price_versions WHERE tax_profile_id = {id})
+          + (SELECT COUNT(*) FROM order_leistungen WHERE tax_profile_id = {id})
+          + (SELECT COUNT(*) FROM order_service_groups WHERE tax_profile_id = {id})
+          + (SELECT COUNT(*) FROM order_amendments WHERE tax_profile_id = {id})
+          + (SELECT COUNT(*) FROM patient_service_packages WHERE tax_profile_id_snapshot = {id})
+          + (SELECT COUNT(*) FROM service_package_consumptions WHERE tax_profile_id_snapshot = {id})
+          + (SELECT COUNT(*) FROM quotes
+             WHERE line_items @> jsonb_build_array(jsonb_build_object('tax_profile_id', {id}::text)))
+          + (SELECT COUNT(*) FROM quote_versions
+             WHERE line_items @> jsonb_build_array(jsonb_build_object('tax_profile_id', {id}::text)))
+          + (SELECT COUNT(*) FROM invoices
+             WHERE line_items @> jsonb_build_array(jsonb_build_object('tax_profile_id', {id}::text)))
+          + (SELECT COUNT(*) FROM invoice_storno_documents
+             WHERE line_items @> jsonb_build_array(jsonb_build_object('tax_profile_id', {id}::text)))
+          + (SELECT COUNT(*) FROM invoice_credit_note_transactions
+             WHERE line_items @> jsonb_build_array(jsonb_build_object('tax_profile_id', {id}::text)))
+        )::BIGINT"#
+    )
+}
+
+fn coded_err(status: StatusCode, code: &str, message: &str) -> axum::response::Response {
+    (
+        status,
+        Json(serde_json::json!({ "error": code, "message": message })),
+    )
+        .into_response()
 }
 
 #[derive(Deserialize)]
@@ -155,15 +202,15 @@ async fn list_tax_profiles(
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    match sqlx::query(
-        r#"SELECT id, profile_key, name, description, vat_rate, vat_category,
-                  is_default, is_active, valid_from, valid_to, created_at, updated_at
-           FROM tax_profiles
-           ORDER BY is_default DESC, is_active DESC, profile_key"#,
-    )
-    .fetch_all(&state.db)
-    .await
-    {
+    let sql = format!(
+        r#"SELECT tp.id, tp.profile_key, tp.name, tp.description, tp.vat_rate, tp.vat_category,
+                  tp.is_default, tp.is_active, tp.valid_from, tp.valid_to, tp.created_at,
+                  tp.updated_at, {usage} AS usage_count
+           FROM tax_profiles tp
+           ORDER BY tp.is_default DESC, tp.is_active DESC, tp.profile_key"#,
+        usage = tax_profile_usage_sql("tp.id"),
+    );
+    match sqlx::query(&sql).fetch_all(&state.db).await {
         Ok(rows) => Json(
             rows.into_iter()
                 .map(|row| {
@@ -176,6 +223,8 @@ async fn list_tax_profiles(
                         "vat_category": row.try_get::<String, _>("vat_category").unwrap_or_default(),
                         "is_default": row.try_get::<bool, _>("is_default").unwrap_or(false),
                         "is_active": row.try_get::<bool, _>("is_active").unwrap_or(false),
+                        "usage_count": row.try_get::<i64, _>("usage_count").unwrap_or_default(),
+                        "is_system": SYSTEM_TAX_PROFILE_KEYS.contains(&row.try_get::<String, _>("profile_key").unwrap_or_default().as_str()),
                         "valid_from": row.try_get::<chrono::NaiveDate, _>("valid_from").map(|value| value.to_string()).unwrap_or_default(),
                         "valid_to": row.try_get::<Option<chrono::NaiveDate>, _>("valid_to").unwrap_or_default().map(|value| value.to_string()),
                         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
@@ -486,4 +535,130 @@ async fn list_catalog_tax_profiles(
             )
         }
     }
+}
+
+/// Removes a tax profile from the finance catalogue: deleted when nothing
+/// names it, otherwise archived (inactive, valid until today) so quotes,
+/// invoices and price history keep it. The default profile and the profiles
+/// the server resolves by key are refused.
+async fn delete_tax_profile(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(profile_id): Path<Uuid>,
+) -> axum::response::Response {
+    if !can_manage_tax_profiles(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let failed = |error: sqlx::Error, step: &str| {
+        tracing::error!(%error, %profile_id, step, "remove tax profile");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to remove tax profile",
+        )
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return failed(error, "begin"),
+    };
+    let profile = match sqlx::query(
+        "SELECT profile_key, is_default, is_active FROM tax_profiles WHERE id = $1 FOR UPDATE",
+    )
+    .bind(profile_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Tax profile not found"),
+        Err(error) => return failed(error, "lock"),
+    };
+    let profile_key = profile
+        .try_get::<String, _>("profile_key")
+        .unwrap_or_default();
+    if SYSTEM_TAX_PROFILE_KEYS.contains(&profile_key.as_str()) {
+        return coded_err(
+            StatusCode::CONFLICT,
+            "tax_profile_system",
+            "This tax profile is used by the system and cannot be removed",
+        );
+    }
+    if profile.try_get::<bool, _>("is_default").unwrap_or(false)
+        && profile.try_get::<bool, _>("is_active").unwrap_or(false)
+    {
+        return coded_err(
+            StatusCode::CONFLICT,
+            "tax_profile_default",
+            "The default tax profile cannot be removed; choose another default first",
+        );
+    }
+    let usage_count = match sqlx::query_scalar::<_, i64>(&format!(
+        "SELECT {}",
+        tax_profile_usage_sql("$1::uuid")
+    ))
+    .bind(profile_id)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(count) => count,
+        Err(error) => return failed(error, "count usage"),
+    };
+    let action = if usage_count > 0 {
+        if let Err(error) = sqlx::query(
+            r#"UPDATE tax_profiles
+               SET is_active = false,
+                   is_default = false,
+                   valid_to = CASE
+                       WHEN valid_to IS NULL OR valid_to > CURRENT_DATE THEN CURRENT_DATE
+                       ELSE valid_to
+                   END,
+                   updated_at = now()
+               WHERE id = $1"#,
+        )
+        .bind(profile_id)
+        .execute(&mut *tx)
+        .await
+        {
+            return failed(error, "archive");
+        }
+        "archived"
+    } else {
+        if let Err(error) = sqlx::query("DELETE FROM tax_profiles WHERE id = $1")
+            .bind(profile_id)
+            .execute(&mut *tx)
+            .await
+        {
+            return failed(error, "delete");
+        }
+        "deleted"
+    };
+    if let Err(error) = crate::audit::write_in_transaction(
+        &mut tx,
+        &crate::audit::domain_event(
+            if action == "archived" {
+                "archive_tax_profile"
+            } else {
+                "delete_tax_profile"
+            },
+            Some(auth.user_id),
+            "tax_profile",
+            Some(profile_id),
+            serde_json::json!({
+                "profile_key": profile_key,
+                "action": action,
+                "usage_count": usage_count,
+            }),
+        ),
+    )
+    .await
+    {
+        return failed(error, "audit");
+    }
+    if let Err(error) = tx.commit().await {
+        return failed(error, "commit");
+    }
+    Json(serde_json::json!({
+        "ok": true,
+        "action": action,
+        "usage_count": usage_count,
+    }))
+    .into_response()
 }

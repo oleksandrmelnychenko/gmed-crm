@@ -295,9 +295,12 @@ export function SheetFormFooter({
   hint,
   onCancel,
   onSubmit,
+  secondaryAction,
 }: {
   cancelLabel: ReactNode;
   error?: ReactNode;
+  /** An action on the left of the footer, e.g. removing the edited record. */
+  secondaryAction?: ReactNode;
   submitLabel: ReactNode;
   submittingLabel?: ReactNode;
   submitting?: boolean;
@@ -316,6 +319,7 @@ export function SheetFormFooter({
       <SheetFooterError error={error} />
       {error ? null : <SheetFooterHint hint={hint ?? noChangesHint} />}
       <div className="flex justify-end gap-2 px-4 py-3">
+        {secondaryAction ? <div className="mr-auto flex min-w-0 items-center">{secondaryAction}</div> : null}
         <Button
           type="button"
           variant="outline"

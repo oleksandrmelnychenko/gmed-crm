@@ -1970,6 +1970,34 @@ async fn delete_agency_service_price_version(
             "The only price version cannot be deleted",
         );
     }
+    // GoBD: a price an order line, service group, package item or package
+    // consumption was billed at stays in the history.
+    match sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (SELECT 1 FROM order_leistungen WHERE agency_service_price_version_id = $1)
+               OR EXISTS (SELECT 1 FROM order_service_groups WHERE agency_service_price_version_id = $1)
+               OR EXISTS (SELECT 1 FROM service_package_items WHERE agency_service_price_version_id = $1)
+               OR EXISTS (SELECT 1 FROM service_package_consumptions WHERE agency_service_price_version_id = $1)"#,
+    )
+    .bind(price_version_id)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(false) => {}
+        Ok(true) => {
+            return coded_err(
+                StatusCode::CONFLICT,
+                "price_version_used",
+                "This price version is already used and stays in the price history",
+            );
+        }
+        Err(error) => {
+            tracing::error!(%error, %service_id, %price_version_id, "check agency price version usage");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete price version",
+            );
+        }
+    }
     let deleted = match sqlx::query(
         "DELETE FROM agency_service_price_versions WHERE id = $1 AND agency_service_id = $2",
     )

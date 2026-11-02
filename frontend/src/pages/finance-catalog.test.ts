@@ -13,9 +13,45 @@ import {
   recommendedPackageItemPriceVersion,
   seedTaxProfileText,
   sortPriceVersionsForDisplay,
+  selectableTaxProfiles,
+  taxProfileRemovable,
   taxProfileVatRateIsValid,
   validateAgencyServiceForm,
 } from "./finance-catalog";
+import { ORDER_API_ERROR_KEYS } from "@/lib/order-api-errors";
+import { t as translationsFor } from "@/lib/i18n";
+
+describe("taxProfileRemovable", () => {
+  it("offers removal for ordinary profiles, never for the active default or a system profile", () => {
+    expect(taxProfileRemovable({ is_default: false, is_active: true, is_system: false })).toBe(true);
+    expect(taxProfileRemovable({ is_default: true, is_active: false, is_system: false })).toBe(true);
+    expect(taxProfileRemovable({ is_default: true, is_active: true, is_system: false })).toBe(false);
+    expect(taxProfileRemovable({ is_default: false, is_active: true, is_system: true })).toBe(false);
+  });
+
+  it("hides archived profiles from new choices but keeps the one an entry already uses", () => {
+    const profiles = [
+      { id: "active", is_active: true },
+      { id: "archived", is_active: false },
+      { id: "archived-used", is_active: false },
+    ];
+    expect(selectableTaxProfiles(profiles, "").map((profile) => profile.id)).toEqual(["active"]);
+    expect(selectableTaxProfiles(profiles, "archived-used").map((profile) => profile.id)).toEqual([
+      "active",
+      "archived-used",
+    ]);
+  });
+
+  it("explains the refused removals in both languages", () => {
+    for (const code of ["tax_profile_system", "tax_profile_default", "price_version_used"]) {
+      const key = ORDER_API_ERROR_KEYS[code];
+      expect(key, code).toBeTruthy();
+      for (const lang of ["de", "ru"] as const) {
+        expect(translationsFor(lang).uiText[key], `${lang} ${code}`).toBeTruthy();
+      }
+    }
+  });
+});
 
 describe("tax profile VAT rate", () => {
   it("accepts 0 to 100 % only (a 150 % profile must not reach invoices)", () => {

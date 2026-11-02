@@ -68,7 +68,7 @@ pub fn router() -> Router<AppState> {
         )
         .route(
             "/service-packages/{package_id}",
-            post(update_service_package),
+            post(update_service_package).delete(delete_service_package),
         )
         .route(
             "/service-packages/{package_id}/price-versions",
@@ -370,7 +370,11 @@ async fn load_service_package_payloads(
                       FROM service_package_price_versions price
                       LEFT JOIN tax_profiles price_tax ON price_tax.id = price.tax_profile_id
                       WHERE price.package_id = sp.id
-                  ), '[]'::jsonb) AS price_versions
+                  ), '[]'::jsonb) AS price_versions,
+                  (
+                      (SELECT COUNT(*) FROM patient_service_packages used WHERE used.package_id = sp.id)
+                    + (SELECT COUNT(*) FROM lead_portal_plan_requests asked WHERE asked.package_id = sp.id)
+                  )::BIGINT AS usage_count
            FROM service_packages sp
            LEFT JOIN LATERAL (
                SELECT version.id, version.base_price_net, version.base_price_vat,
@@ -521,6 +525,7 @@ async fn load_service_package_payloads(
                 "valid_from": row.try_get::<NaiveDate, _>("valid_from").map(|value| value.to_string()).unwrap_or_default(),
                 "valid_to": row.try_get::<Option<NaiveDate>, _>("valid_to").unwrap_or_default().map(|value| value.to_string()),
                 "price_versions": row.try_get::<Value, _>("price_versions").unwrap_or_else(|_| serde_json::json!([])),
+                "usage_count": row.try_get::<i64, _>("usage_count").unwrap_or_default(),
                 "items": items_by_package.remove(&id).unwrap_or_default(),
             })
         })
@@ -1460,6 +1465,121 @@ async fn update_service_package_price_version(
         .await
 }
 
+/// How many records use a package: patient assignments (their consumptions,
+/// overage invoices and snapshots hang off them) and the plan requests leads
+/// sent from the cabinet. A package with any use is archived, never deleted
+/// (GoBD: what an invoice used stays).
+const PACKAGE_USAGE_SQL: &str = r#"SELECT (
+        (SELECT COUNT(*) FROM patient_service_packages WHERE package_id = $1)
+      + (SELECT COUNT(*) FROM lead_portal_plan_requests WHERE package_id = $1)
+    )::BIGINT"#;
+
+/// Removes a package from the finance catalogue: deleted with its items and
+/// price history when nothing uses it, otherwise archived (inactive, valid
+/// until today): it can no longer be assigned or requested, assignments,
+/// consumptions and invoices keep it.
+async fn delete_service_package(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(package_id): Path<Uuid>,
+) -> axum::response::Response {
+    if !can_manage_package_catalog(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let failed = |error: sqlx::Error, step: &str| {
+        tracing::error!(%error, %package_id, step, "remove service package");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to remove service package",
+        )
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return failed(error, "begin"),
+    };
+    let package_key = match sqlx::query_scalar::<_, String>(
+        "SELECT package_key FROM service_packages WHERE id = $1 FOR UPDATE",
+    )
+    .bind(package_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(key)) => key,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Service package not found"),
+        Err(error) => return failed(error, "lock"),
+    };
+    let usage_count = match sqlx::query_scalar::<_, i64>(PACKAGE_USAGE_SQL)
+        .bind(package_id)
+        .fetch_one(&mut *tx)
+        .await
+    {
+        Ok(count) => count,
+        Err(error) => return failed(error, "count usage"),
+    };
+    let action = if usage_count > 0 {
+        if let Err(error) = sqlx::query(
+            r#"UPDATE service_packages
+               SET is_active = false,
+                   valid_to = CASE
+                       WHEN valid_to IS NULL OR valid_to > CURRENT_DATE THEN CURRENT_DATE
+                       ELSE valid_to
+                   END,
+                   updated_by = $2,
+                   updated_at = now()
+               WHERE id = $1"#,
+        )
+        .bind(package_id)
+        .bind(auth.user_id)
+        .execute(&mut *tx)
+        .await
+        {
+            return failed(error, "archive");
+        }
+        "archived"
+    } else {
+        // Items and price versions cascade with the package.
+        if let Err(error) = sqlx::query("DELETE FROM service_packages WHERE id = $1")
+            .bind(package_id)
+            .execute(&mut *tx)
+            .await
+        {
+            return failed(error, "delete");
+        }
+        "deleted"
+    };
+    if let Err(error) = crate::audit::write_in_transaction(
+        &mut tx,
+        &crate::audit::domain_event(
+            if action == "archived" {
+                "archive_service_package"
+            } else {
+                "delete_service_package"
+            },
+            Some(auth.user_id),
+            "service_package",
+            Some(package_id),
+            serde_json::json!({
+                "package_key": package_key,
+                "action": action,
+                "usage_count": usage_count,
+            }),
+        ),
+    )
+    .await
+    {
+        return failed(error, "audit");
+    }
+    if let Err(error) = tx.commit().await {
+        return failed(error, "commit");
+    }
+    Json(serde_json::json!({
+        "ok": true,
+        "action": action,
+        "usage_count": usage_count,
+    }))
+    .into_response()
+}
+
 async fn delete_service_package_price_version(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -1514,6 +1634,33 @@ async fn delete_service_package_price_version(
             StatusCode::CONFLICT,
             "The only price version cannot be deleted",
         );
+    }
+    // GoBD: a price a patient package was sold at stays in the history.
+    match sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM patient_service_packages WHERE package_price_version_id = $1)",
+    )
+    .bind(price_version_id)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(false) => {}
+        Ok(true) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": "price_version_used",
+                    "message": "This price version is already used and stays in the price history",
+                })),
+            )
+                .into_response();
+        }
+        Err(error) => {
+            tracing::error!(%error, %package_id, %price_version_id, "check package price version usage");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete price version",
+            );
+        }
     }
     let deleted = match sqlx::query(
         "DELETE FROM service_package_price_versions WHERE id = $1 AND package_id = $2",

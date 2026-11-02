@@ -113,6 +113,14 @@ export interface RevenueTranslations {
   finance_catalog_remove_agency_service_title: string;
   finance_catalog_delete_agency_service_message: string;
   finance_catalog_archive_agency_service_message: string;
+  finance_catalog_remove_tax_profile_title: string;
+  finance_catalog_delete_tax_profile_message: string;
+  finance_catalog_archive_tax_profile_message: string;
+  finance_catalog_tax_profile_locked_hint: string;
+  finance_catalog_remove_package_title: string;
+  finance_catalog_delete_package_message: string;
+  finance_catalog_archive_package_message: string;
+  finance_catalog_error_remove: string;
   finance_catalog_error_vat_rate: string;
   finance_catalog_error_package_required: string;
   finance_catalog_error_package_item_description: string;
@@ -983,6 +991,19 @@ export const revenueRu: RevenueTranslations = {
     "Позиция не используется и будет удалена без возможности восстановления.",
   finance_catalog_archive_agency_service_message:
     "Позиция уже используется в системе, поэтому она будет деактивирована. Существующие связи и документы сохранятся.",
+  finance_catalog_remove_tax_profile_title: "Удаление НДС-профиля",
+  finance_catalog_delete_tax_profile_message:
+    "Профиль нигде не используется и будет удалён без возможности восстановления.",
+  finance_catalog_archive_tax_profile_message:
+    "Профиль уже используется в услугах, пакетах, заказах, сметах или счетах, поэтому он будет переведён в архив: для новых позиций его выбрать будет нельзя, а история и документы сохранятся.",
+  finance_catalog_tax_profile_locked_hint:
+    "Профиль по умолчанию и профили, которые использует система, удалить нельзя.",
+  finance_catalog_remove_package_title: "Удаление пакета",
+  finance_catalog_delete_package_message:
+    "Пакет не назначен ни одному пациенту и будет удалён вместе с позициями и историей цен без возможности восстановления.",
+  finance_catalog_archive_package_message:
+    "Пакет уже назначен пациентам или запрошен из кабинета, поэтому он будет переведён в архив: назначить или запросить его будет нельзя, а назначения, расход и счета сохранятся.",
+  finance_catalog_error_remove: "Не удалось удалить запись каталога",
   finance_catalog_error_vat_rate: "Ставка НДС должна быть числом от 0 до 100 %.",
   finance_catalog_error_package_required: "Укажите ключ пакета и название.",
   finance_catalog_error_package_item_description:
@@ -1401,6 +1422,19 @@ export const revenueDe: RevenueTranslations = {
     "Die Position wird nicht verwendet und dauerhaft gelöscht.",
   finance_catalog_archive_agency_service_message:
     "Die Position wird bereits im System verwendet und deshalb deaktiviert. Bestehende Verknüpfungen und Dokumente bleiben erhalten.",
+  finance_catalog_remove_tax_profile_title: "USt.-Profil entfernen",
+  finance_catalog_delete_tax_profile_message:
+    "Das Profil wird nirgends verwendet und dauerhaft gelöscht.",
+  finance_catalog_archive_tax_profile_message:
+    "Das Profil wird bereits in Leistungen, Paketen, Aufträgen, Angeboten oder Rechnungen verwendet und deshalb archiviert: Für neue Positionen ist es nicht mehr wählbar, Historie und Dokumente bleiben erhalten.",
+  finance_catalog_tax_profile_locked_hint:
+    "Das Standardprofil und vom System verwendete Profile können nicht entfernt werden.",
+  finance_catalog_remove_package_title: "Paket entfernen",
+  finance_catalog_delete_package_message:
+    "Das Paket ist keinem Patienten zugeordnet und wird mit seinen Positionen und der Preishistorie dauerhaft gelöscht.",
+  finance_catalog_archive_package_message:
+    "Das Paket ist bereits Patienten zugeordnet oder im Kabinett angefragt und wird deshalb archiviert: Es kann nicht mehr zugeordnet oder angefragt werden, Zuordnungen, Verbrauch und Rechnungen bleiben erhalten.",
+  finance_catalog_error_remove: "Katalogeintrag konnte nicht entfernt werden",
   finance_catalog_error_vat_rate:
     "Der USt.-Satz muss eine Zahl von 0 bis 100 % sein.",
   finance_catalog_error_package_required: "Paketschlüssel und Name sind erforderlich.",

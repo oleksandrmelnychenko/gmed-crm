@@ -108,6 +108,10 @@ type TaxProfile = {
   is_active: boolean;
   valid_from: string;
   valid_to?: string | null;
+  /** Records that name the profile; any use archives it instead of deleting. */
+  usage_count?: number;
+  /** Resolved by key on the server; never removed. */
+  is_system?: boolean;
 };
 
 type CatalogTaxProfile = {
@@ -153,7 +157,28 @@ type ServicePackage = {
   valid_to?: string | null;
   price_versions?: ServicePackagePriceVersion[];
   items?: ServicePackageItem[];
+  /** Patient assignments and cabinet requests; any use archives it instead of deleting. */
+  usage_count?: number;
 };
+
+type CatalogRemovalResult = {
+  ok: boolean;
+  action: "archived" | "deleted";
+  usage_count: number;
+};
+
+/** Whether a tax profile may be removed: never the active default or a system profile. */
+export function taxProfileRemovable(profile: Pick<TaxProfile, "is_default" | "is_active" | "is_system">) {
+  return !profile.is_system && !(profile.is_default && profile.is_active);
+}
+
+/** Profiles offered in a VAT select: active ones, plus the one already chosen (archived profiles stay readable on old entries). */
+export function selectableTaxProfiles<T extends Pick<TaxProfile, "id" | "is_active">>(
+  profiles: T[],
+  selectedId: string | null | undefined,
+) {
+  return profiles.filter((profile) => profile.is_active || profile.id === selectedId);
+}
 
 type ServicePackagePriceVersion = {
   id: string;
@@ -861,6 +886,8 @@ function useFinanceCatalogPageContent() {
   const [priceDeleteConfirmOpen, setPriceDeleteConfirmOpen] = useState(false);
   const [agencyServiceDeleteConfirmOpen, setAgencyServiceDeleteConfirmOpen] =
     useState(false);
+  const [taxProfileRemoveConfirmOpen, setTaxProfileRemoveConfirmOpen] = useState(false);
+  const [packageRemoveConfirmOpen, setPackageRemoveConfirmOpen] = useState(false);
   const filteredAgencyServices = useMemo(() => {
     const query = catalogSearch.trim().toLowerCase();
     if (!query) return agencyServices;
@@ -892,6 +919,11 @@ function useFinanceCatalogPageContent() {
   const selectedServicePackage = packageForm.id
     ? servicePackages.find((item) => item.id === packageForm.id) ?? null
     : null;
+  const selectedTaxProfile = editingTaxProfileId
+    ? taxProfiles.find((item) => item.id === editingTaxProfileId) ?? null
+    : null;
+  const taxProfileUsed = (selectedTaxProfile?.usage_count ?? 0) > 0;
+  const packageUsed = (selectedServicePackage?.usage_count ?? 0) > 0;
   const servicePackagesById = useMemo(
     () => new Map(servicePackages.map((item) => [item.id, item] as const)),
     [servicePackages],
@@ -2536,6 +2568,46 @@ function useFinanceCatalogPageContent() {
     }
   }
 
+  async function handleRemoveTaxProfile() {
+    if (!editingTaxProfileId || taxEditBusy) return;
+    setTaxProfileRemoveConfirmOpen(false);
+    setTaxEditBusy(true);
+    setTaxEditError("");
+    try {
+      await apiFetch<CatalogRemovalResult>(`/tax-profiles/${editingTaxProfileId}`, {
+        method: "DELETE",
+      });
+      clearApiCache("/tax-profiles");
+      setEditingTaxProfileId("");
+      setTaxEditForm(BLANK_TAX_PROFILE_FORM);
+      await load();
+    } catch (err) {
+      setTaxEditError(err instanceof Error ? err.message : t.finance_catalog_error_remove);
+    } finally {
+      setTaxEditBusy(false);
+    }
+  }
+
+  async function handleRemoveServicePackage() {
+    if (!packageForm.id || packageBusy) return;
+    setPackageRemoveConfirmOpen(false);
+    setPackageBusy(true);
+    setPackageError("");
+    try {
+      await apiFetch<CatalogRemovalResult>(`/service-packages/${packageForm.id}`, {
+        method: "DELETE",
+      });
+      clearApiCache("/service-packages");
+      setPackageFormOpen(false);
+      setPackageForm(blankPackageForm());
+      await load();
+    } catch (err) {
+      setPackageError(err instanceof Error ? err.message : t.finance_catalog_error_remove);
+    } finally {
+      setPackageBusy(false);
+    }
+  }
+
   async function handleRemoveAgencyService() {
     if (!agencyServiceForm.id || agencyServiceBusy) return;
     setAgencyServiceDeleteConfirmOpen(false);
@@ -2952,7 +3024,7 @@ function useFinanceCatalogPageContent() {
                           disabled={priceVersionForm.busy}
                         >
                           <option value="">{t.finance_catalog_no_vat_profile}</option>
-                          {taxProfiles.map((profile) => (
+                          {selectableTaxProfiles(taxProfiles, priceVersionForm.taxProfileId).map((profile) => (
                             <option key={profile.id} value={profile.id}>
                               {taxProfileLabel(profile.name, profile.profile_key)} ({String(profile.vat_rate).replace(".", ",")} %)
                             </option>
@@ -3236,6 +3308,25 @@ function useFinanceCatalogPageContent() {
                   submitLabel={t.finance_catalog_save_vat_profile}
                   submitting={taxEditBusy}
                   onCancel={closeEditTaxProfile}
+                  secondaryAction={
+                    selectedTaxProfile && taxProfileRemovable(selectedTaxProfile) ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="h-9 rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        disabled={taxEditBusy}
+                        data-testid="tax-profile-remove"
+                        onClick={() => setTaxProfileRemoveConfirmOpen(true)}
+                      >
+                        <Trash2 className="size-4" />
+                        {taxProfileUsed ? t.common_archive : t.common_delete}
+                      </Button>
+                    ) : selectedTaxProfile ? (
+                      <span className="text-xs text-muted-foreground">
+                        {t.finance_catalog_tax_profile_locked_hint}
+                      </span>
+                    ) : null
+                  }
                 />
               }
             >
@@ -3710,6 +3801,38 @@ function useFinanceCatalogPageContent() {
         onConfirm={() => void handleRemoveAgencyService()}
       />
 
+      <DirtyDismissConfirmDialog
+        open={taxProfileRemoveConfirmOpen}
+        destructive
+        title={t.finance_catalog_remove_tax_profile_title}
+        message={
+          taxProfileUsed
+            ? t.finance_catalog_archive_tax_profile_message
+            : t.finance_catalog_delete_tax_profile_message
+        }
+        cancelLabel={t.common_cancel}
+        confirmLabel={taxProfileUsed ? t.common_archive : t.common_delete}
+        confirmDisabled={taxEditBusy}
+        onCancel={() => setTaxProfileRemoveConfirmOpen(false)}
+        onConfirm={() => void handleRemoveTaxProfile()}
+      />
+
+      <DirtyDismissConfirmDialog
+        open={packageRemoveConfirmOpen}
+        destructive
+        title={t.finance_catalog_remove_package_title}
+        message={
+          packageUsed
+            ? t.finance_catalog_archive_package_message
+            : t.finance_catalog_delete_package_message
+        }
+        cancelLabel={t.common_cancel}
+        confirmLabel={packageUsed ? t.common_archive : t.common_delete}
+        confirmDisabled={packageBusy}
+        onCancel={() => setPackageRemoveConfirmOpen(false)}
+        onConfirm={() => void handleRemoveServicePackage()}
+      />
+
       <Sheet
         dirty={packageForm.id ? packageFormDirty : undefined}
         requireChanges={Boolean(packageForm.id)}
@@ -3736,6 +3859,21 @@ function useFinanceCatalogPageContent() {
                   }
                   submitting={packageBusy}
                   onCancel={closePackageForm}
+                  secondaryAction={
+                    packageForm.id ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="h-9 rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        disabled={packageBusy}
+                        data-testid="package-remove"
+                        onClick={() => setPackageRemoveConfirmOpen(true)}
+                      >
+                        <Trash2 className="size-4" />
+                        {packageUsed ? t.common_archive : t.common_delete}
+                      </Button>
+                    ) : null
+                  }
                 />
               }
             >
@@ -3860,7 +3998,7 @@ function useFinanceCatalogPageContent() {
                           disabled={packageBusy}
                         >
                           <option value="__none__">{t.finance_catalog_no_vat_profile}</option>
-                          {taxProfiles.map((profile) => (
+                          {selectableTaxProfiles(taxProfiles, packageForm.taxProfileId).map((profile) => (
                             <option key={profile.id} value={profile.id}>
                               {taxProfileLabel(profile.name, profile.profile_key)} ({String(profile.vat_rate).replace(".", ",")} %)
                             </option>
@@ -4163,7 +4301,7 @@ function useFinanceCatalogPageContent() {
                               <option value="__none__">
                                 {t.finance_catalog_use_package_default_vat}
                               </option>
-                              {taxProfiles.map((profile) => (
+                              {selectableTaxProfiles(taxProfiles, item.taxProfileId).map((profile) => (
                                 <option key={profile.id} value={profile.id}>
                                   {taxProfileLabel(profile.name, profile.profile_key)} ({String(profile.vat_rate).replace(".", ",")} %)
                                 </option>

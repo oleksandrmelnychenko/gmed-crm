@@ -3534,3 +3534,373 @@ async fn quotes_expire_after_their_validity_date_and_cannot_be_accepted() {
     assert_eq!(status, StatusCode::OK, "{versions}");
     assert_eq!(versions[0]["created_by_name"], "System");
 }
+
+/// The catalogue audit rows of an entity (the request middleware adds its own
+/// `http_request` rows next to them).
+async fn audit_actions(pool: &PgPool, entity_id: Uuid) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT action FROM audit_log WHERE entity_id = $1 AND action <> 'http_request' ORDER BY created_at",
+    )
+    .bind(entity_id)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+async fn seed_tax_profile(pool: &PgPool, key: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO tax_profiles (profile_key, name, vat_rate, vat_category)
+           VALUES ($1, $2, 7, 'standard')
+           RETURNING id"#,
+    )
+    .bind(key)
+    .bind(format!("Profile {key}"))
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn seed_service_package(pool: &PgPool, key: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO service_packages (package_key, name, base_price_net)
+           VALUES ($1, 'Catalogue removal package', 100)
+           RETURNING id"#,
+    )
+    .bind(key)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn finance_catalog_tax_profile_is_deleted_when_unused_and_archived_when_used() {
+    let Some((app, pool, _admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("tax-profile-removal");
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing = auth_header_for(billing_id, "billing");
+    let key_suffix = Uuid::new_v4().simple().to_string();
+
+    let unused = seed_tax_profile(&pool, &format!("unused_{key_suffix}")).await;
+    let (status, body) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/tax-profiles/{unused}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {body}");
+    assert_eq!(body["action"], "deleted");
+    assert_eq!(body["usage_count"], 0);
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM tax_profiles WHERE id = $1)")
+            .bind(unused)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!exists);
+    assert_eq!(
+        audit_actions(&pool, unused).await,
+        vec!["delete_tax_profile"]
+    );
+
+    // Used by a package: kept for the history, no longer offered.
+    let used = seed_tax_profile(&pool, &format!("used_{key_suffix}")).await;
+    let package_key = format!("pkg_tax_{key_suffix}");
+    sqlx::query(
+        "INSERT INTO service_packages (package_key, name, tax_profile_id) VALUES ($1, 'Uses the profile', $2)",
+    )
+    .bind(&package_key)
+    .bind(used)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, listed) = json_request(&app, "GET", "/api/v1/tax-profiles", &billing, None).await;
+    assert_eq!(status, StatusCode::OK, "response: {listed}");
+    let row = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == used.to_string())
+        .expect("listed profile");
+    assert_eq!(row["usage_count"], 1);
+    assert_eq!(row["is_system"], false);
+
+    let (status, body) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/tax-profiles/{used}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {body}");
+    assert_eq!(body["action"], "archived");
+    assert_eq!(body["usage_count"], 1);
+    let (is_active, package_profile): (bool, Option<Uuid>) = sqlx::query_as(
+        r#"SELECT tp.is_active, sp.tax_profile_id
+           FROM tax_profiles tp
+           JOIN service_packages sp ON sp.package_key = $2
+           WHERE tp.id = $1"#,
+    )
+    .bind(used)
+    .bind(&package_key)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(!is_active);
+    assert_eq!(package_profile, Some(used));
+    assert_eq!(
+        audit_actions(&pool, used).await,
+        vec!["archive_tax_profile"]
+    );
+
+    // A profile the server resolves by key is never removed.
+    let system: Uuid =
+        sqlx::query_scalar("SELECT id FROM tax_profiles WHERE profile_key = 'termin_fee_0'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/tax-profiles/{system}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "response: {body}");
+    assert_eq!(body["error"], "tax_profile_system");
+}
+
+#[tokio::test]
+async fn finance_catalog_tax_profile_named_on_a_quote_line_is_only_archived() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("tax-profile-quote");
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing = auth_header_for(billing_id, "billing");
+    let profile = seed_tax_profile(&pool, &format!("quoted_{}", Uuid::new_v4().simple())).await;
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, needs_description, created_by)
+           VALUES ($1, $2, 'Tax profile on a quote line', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO quotes (
+                order_id, quote_number, total_net, total_vat, total_gross,
+                status, created_by, line_items
+           ) VALUES ($1, $2, 100, 7, 107, 'draft', $3, $4)"#,
+    )
+    .bind(order_id)
+    .bind(format!("Q-{tag}"))
+    .bind(admin_id)
+    .bind(json!([{ "description": "Line", "tax_profile_id": profile }]))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/tax-profiles/{profile}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {body}");
+    assert_eq!(body["action"], "archived");
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM tax_profiles WHERE id = $1)")
+            .bind(profile)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(exists);
+}
+
+#[tokio::test]
+async fn finance_catalog_package_is_deleted_when_unused_and_archived_when_assigned() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("package-removal");
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing = auth_header_for(billing_id, "billing");
+    let key_suffix = Uuid::new_v4().simple().to_string();
+
+    let unused = seed_service_package(&pool, &format!("unused_{key_suffix}")).await;
+    sqlx::query(
+        r#"INSERT INTO service_package_items (package_id, description, included_quantity)
+           VALUES ($1, 'Included consultation', 1)"#,
+    )
+    .bind(unused)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/service-packages/{unused}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {body}");
+    assert_eq!(body["action"], "deleted");
+    let left: i64 = sqlx::query_scalar(
+        r#"SELECT (SELECT COUNT(*) FROM service_packages WHERE id = $1)
+                + (SELECT COUNT(*) FROM service_package_items WHERE package_id = $1)"#,
+    )
+    .bind(unused)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(left, 0);
+    assert_eq!(
+        audit_actions(&pool, unused).await,
+        vec!["delete_service_package"]
+    );
+
+    let assigned = seed_service_package(&pool, &format!("assigned_{key_suffix}")).await;
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    sqlx::query("INSERT INTO patient_service_packages (patient_id, package_id) VALUES ($1, $2)")
+        .bind(patient_id)
+        .bind(assigned)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, listed) =
+        json_request(&app, "GET", "/api/v1/service-packages", &billing, None).await;
+    assert_eq!(status, StatusCode::OK, "response: {listed}");
+    let row = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == assigned.to_string())
+        .expect("listed package");
+    assert_eq!(row["usage_count"], 1);
+
+    let (status, body) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/service-packages/{assigned}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {body}");
+    assert_eq!(body["action"], "archived");
+    assert_eq!(body["usage_count"], 1);
+    let is_active: bool =
+        sqlx::query_scalar("SELECT is_active FROM service_packages WHERE id = $1")
+            .bind(assigned)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!is_active);
+    assert_eq!(
+        audit_actions(&pool, assigned).await,
+        vec!["archive_service_package"]
+    );
+}
+
+#[tokio::test]
+async fn finance_catalog_package_price_sold_to_a_patient_stays_in_the_history() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("package-price-used");
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing = auth_header_for(billing_id, "billing");
+    let package_id =
+        seed_service_package(&pool, &format!("priced_{}", Uuid::new_v4().simple())).await;
+    let sold: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO service_package_price_versions (package_id, base_price_net, valid_from)
+           VALUES ($1, 100, '2026-01-01') RETURNING id"#,
+    )
+    .bind(package_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO service_package_price_versions (package_id, base_price_net, valid_from)
+           VALUES ($1, 120, '2026-06-01')"#,
+    )
+    .bind(package_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    sqlx::query(
+        r#"INSERT INTO patient_service_packages (patient_id, package_id, package_price_version_id)
+           VALUES ($1, $2, $3)"#,
+    )
+    .bind(patient_id)
+    .bind(package_id)
+    .bind(sold)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/service-packages/{package_id}/price-versions/{sold}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "response: {body}");
+    assert_eq!(body["error"], "price_version_used");
+    let kept: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM service_package_price_versions WHERE id = $1)",
+    )
+    .bind(sold)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(kept);
+}
+
+#[tokio::test]
+async fn finance_catalog_removal_needs_the_catalog_edit_right() {
+    let Some((app, pool, _admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("catalog-removal-deny");
+    let key_suffix = Uuid::new_v4().simple().to_string();
+    let profile = seed_tax_profile(&pool, &format!("deny_{key_suffix}")).await;
+    let package_id = seed_service_package(&pool, &format!("deny_{key_suffix}")).await;
+    for role in ["sales", "concierge", "patient_manager"] {
+        let user_id = seed_user(&pool, &tag, role).await;
+        let bearer = auth_header_for(user_id, role);
+        for path in [
+            format!("/api/v1/tax-profiles/{profile}"),
+            format!("/api/v1/service-packages/{package_id}"),
+        ] {
+            let (status, body) = json_request(&app, "DELETE", &path, &bearer, None).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{role} {path}: {body}");
+        }
+    }
+    let left: i64 = sqlx::query_scalar(
+        r#"SELECT (SELECT COUNT(*) FROM tax_profiles WHERE id = $1)
+                + (SELECT COUNT(*) FROM service_packages WHERE id = $2)"#,
+    )
+    .bind(profile)
+    .bind(package_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(left, 2);
+}
