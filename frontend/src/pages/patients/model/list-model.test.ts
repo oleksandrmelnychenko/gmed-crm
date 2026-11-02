@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   collectPatientInsuranceTypeOptions,
   filterPatientsByInsuranceType,
+  makePatientTrustedContactForm,
+  patientTrustedContactIdentityPayload,
   patientTrustedContactsFromRelations,
   patientTrustedContactsToPayload,
 } from "./list-model";
@@ -69,6 +71,8 @@ describe("trusted patient contacts", () => {
         is_emergency_contact: true,
         phone: "+380 44 555 0102",
         notes: null,
+        birth_date: "1984-03-02",
+        citizenships: ["ua", "DE"],
       },
       {
         id: "relation-3",
@@ -86,6 +90,8 @@ describe("trusted patient contacts", () => {
         email: "olena@example.test",
         relation: "sibling",
         notes: "Email: olena@example.test",
+        birthDate: "",
+        citizenships: [],
       },
       {
         id: "relation-2",
@@ -96,8 +102,25 @@ describe("trusted patient contacts", () => {
         email: "",
         relation: "sibling",
         notes: "",
+        birthDate: "1984-03-02",
+        citizenships: ["UA", "DE"],
       },
     ]);
+  });
+
+  it("sends a separate contact's birth date and citizenships, never a linked record's", () => {
+    // Client decision 2026-11-02: several citizenships per person.
+    const contact = {
+      ...makePatientTrustedContactForm("mother"),
+      name: "Olga",
+      birthDate: " 1984-03-02 ",
+      citizenships: ["ua", "DE", "UA"],
+    };
+    expect(patientTrustedContactIdentityPayload(contact)).toEqual({
+      birth_date: "1984-03-02",
+      citizenships: ["UA", "DE"],
+    });
+    expect(patientTrustedContactIdentityPayload({ ...contact, relatedPatientId: "patient-1" })).toEqual({});
   });
 
   it("keeps multiple filled contacts and drops a fully empty draft", () => {

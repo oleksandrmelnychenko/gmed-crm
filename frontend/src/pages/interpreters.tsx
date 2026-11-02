@@ -19,6 +19,11 @@ import { useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
+  CitizenshipMultiSelect,
+  citizenshipFieldLabel,
+  normalizeCitizenships,
+} from "@/components/ui/citizenship-multi-select";
+import {
   DataTablePager,
   useDataTablePagination,
 } from "@/components/data-table/data-table-pager";
@@ -118,6 +123,8 @@ type CredentialForm = {
 type InterpreterProfileForm = {
   gender: string;
   birthDate: string;
+  /** ISO codes; several citizenships (client decision 2026-11-02). */
+  citizenships: string[];
   status: string;
   contractType: string;
   contractStartDate: string;
@@ -723,6 +730,9 @@ function profileToForm(profile: InterpreterProfile): InterpreterProfileForm {
   return {
     gender: text(profile.gender),
     birthDate: text(profile.birthDate),
+    citizenships: Array.isArray(profile.citizenships)
+      ? normalizeCitizenships(profile.citizenships.filter((code): code is string => typeof code === "string"))
+      : [],
     status: text(profile.status) || "active",
     contractType: text(profile.contractType),
     contractStartDate: text(profile.contractStartDate),
@@ -786,6 +796,7 @@ function formToProfile(form: InterpreterProfileForm) {
   return {
     gender: form.gender,
     birthDate: form.birthDate,
+    citizenships: normalizeCitizenships(form.citizenships),
     status: form.status,
     contractType: form.contractType,
     contractStartDate: form.contractStartDate,
@@ -1776,6 +1787,15 @@ export function InterpretersPage() {
                       onChange={(event) =>
                         patchForm({ birthDate: event.target.value })
                       }
+                    />
+                  </Field>
+                  <Field label={citizenshipFieldLabel(lang)}>
+                    <CitizenshipMultiSelect
+                      className={inputClass}
+                      value={form.citizenships}
+                      lang={lang}
+                      placeholder={lang === "de" ? "Land wählen" : "Выберите страну"}
+                      onChange={(citizenships) => patchForm({ citizenships })}
                     />
                   </Field>
                   <Field label={profileCopy.contractDates}>

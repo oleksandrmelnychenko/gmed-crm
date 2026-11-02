@@ -612,6 +612,30 @@ describe("autosave body", () => {
     expect(answersPatch(saved, tooMuch, company)).toEqual({});
   });
 
+  it("sends every citizenship of the representative and of each owner (client decision 2026-11-02)", () => {
+    const saved = draftFromQuestionnaire(
+      questionnaire("company", {
+        representative_citizenships: ["AT"],
+        beneficial_owners: [{ first_name: "Anna", last_name: "Muster", date_of_birth: null, birth_place: null, citizenships: ["DE"], street: null, zip: null, city: null, country: null, share_percent: "60.00" }],
+      }),
+    );
+    expect(saved.representative_citizenships).toEqual(["AT"]);
+    expect(saved.beneficial_owners[0].citizenships).toBe("DE");
+    const edited: PayerDraft = {
+      ...saved,
+      representative_citizenships: ["AT", "PL"],
+      beneficial_owners: [{ ...saved.beneficial_owners[0], citizenships: "DE,ua" }],
+    };
+    expect(answersPatch(saved, edited, company)).toEqual({
+      representative_citizenships: ["AT", "PL"],
+      beneficial_owners: [
+        { first_name: "Anna", last_name: "Muster", date_of_birth: null, birth_place: null, citizenships: ["DE", "UA"], street: null, zip: null, city: null, country: null, share_percent: 60 },
+      ],
+    });
+    expect(fieldOfPayerType("representative_citizenships", "person")).toBe(false);
+    expect(fieldOfPayerType("representative_citizenships", "company")).toBe(true);
+  });
+
   it("sends 'nobody above 25 %' with an empty list", () => {
     const withOwner = draftFromQuestionnaire(
       questionnaire("company", {

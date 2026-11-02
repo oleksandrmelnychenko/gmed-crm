@@ -1,3 +1,4 @@
+import { normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
 import { cabinetScopeSummary, normalizeScopeCodes, type ConsentRecipientScope } from "@/lib/consent-recipient-scope";
 import { appDateKey } from "@/lib/app-time-zone";
 import { isValidEmailAddress, isValidPhoneNumber } from "@/lib/contact-validation";
@@ -16,6 +17,8 @@ import { mergeSavedDraft } from "./lead-request-autosave";
 export type RecipientDraft = {
   name: string; relation: ConsentRecipientRelation | ""; phone: string; birthDate: string;
   contact: string; scope: string; scopeCodes: ConsentRecipientScope[]; stored?: ConsentRecipient;
+  /** ISO codes, optional (client decision 2026-11-02: several may be entered); none for an institution. */
+  citizenships?: string[];
 };
 /**
  * `answered`: the person chose an answer on this page. Only then does a "no"
@@ -28,6 +31,11 @@ export type DisclosureDraft = { allowDisclosure: boolean | null; consentGiven: b
 /** An empty row of the editor. */
 export function blankRecipient(): RecipientDraft {
   return { name: "", relation: "", phone: "", birthDate: "", contact: "", scope: "", scopeCodes: [] };
+}
+
+/** The citizenships of a draft or a stored person as unique upper-case ISO codes. */
+export function personCitizenships(values: readonly string[] | null | undefined): string[] {
+  return normalizeCitizenships(values ?? []);
 }
 
 /** A family doctor's practice or a clinic: no date of birth (the server drops one). */
@@ -56,7 +64,13 @@ export function recipientDrafts(saved: readonly ConsentRecipient[] | undefined):
   return (saved ?? []).map((person) => ({
     name: person.name, relation: person.relation, phone: person.phone ?? "", birthDate: person.birth_date ?? "",
     contact: person.contact ?? "", scope: person.scope ?? "", scopeCodes: normalizeScopeCodes(person.scope_codes), stored: person,
+    ...withCitizenships(personCitizenships(person.citizenships)),
   }));
+}
+
+/** `{ citizenships }` when there are any: the optional key is left out otherwise (stored lists omit it too). */
+function withCitizenships(codes: string[]): { citizenships?: string[] } {
+  return codes.length ? { citizenships: codes } : {};
 }
 
 /** The chosen scope in the cabinet language; a legacy free text as typed. */
@@ -91,6 +105,7 @@ export function unchangedStored(person: RecipientDraft): ConsentRecipient | null
   if (!stored) return null;
   const same = normalizedName(person.name) === stored.name && person.relation === stored.relation &&
     oneLine(person.phone) === (stored.phone ?? "") && person.birthDate.trim() === (stored.birth_date ?? "") &&
+    personCitizenships(person.citizenships).join() === personCitizenships(stored.citizenships).join() &&
     normalizeScopeCodes(person.scopeCodes).join() === normalizeScopeCodes(stored.scope_codes).join() &&
     normalizeScopeCodes(stored.scope_codes).length > 0 && contactValid(stored.contact ?? "");
   return same ? stored : null;
@@ -98,7 +113,8 @@ export function unchangedStored(person: RecipientDraft): ConsentRecipient | null
 
 /** A row with anything typed in it; an empty row is no person. */
 export function typedRecipient(person: RecipientDraft): boolean {
-  return Boolean(person.name.trim() || person.relation || person.phone.trim() || person.birthDate.trim() || person.contact.trim() || person.scopeCodes.length > 0);
+  return Boolean(person.name.trim() || person.relation || person.phone.trim() || person.birthDate.trim() || person.contact.trim() || person.scopeCodes.length > 0
+    || (person.citizenships?.length ?? 0) > 0);
 }
 const typedPersons = (drafts: readonly RecipientDraft[]) => drafts.filter(typedRecipient);
 
@@ -113,12 +129,14 @@ export function recipientsToSend(drafts: readonly RecipientDraft[]): LeadDisclos
     if (stored) {
       return {
         name: stored.name, relation: stored.relation, contact: stored.contact ?? null, phone: stored.phone ?? null,
-        birth_date: stored.birth_date ?? null, scope_codes: normalizeScopeCodes(stored.scope_codes),
+        birth_date: stored.birth_date ?? null, ...withCitizenships(personCitizenships(stored.citizenships)),
+        scope_codes: normalizeScopeCodes(stored.scope_codes),
       };
     }
     return {
       name: normalizedName(person.name), relation: person.relation as ConsentRecipientRelation, contact: null,
       phone: oneLine(person.phone) || null, birth_date: isInstitution(person.relation) ? null : person.birthDate.trim() || null,
+      ...withCitizenships(isInstitution(person.relation) ? [] : personCitizenships(person.citizenships)),
       scope_codes: normalizeScopeCodes(person.scopeCodes),
     };
   });

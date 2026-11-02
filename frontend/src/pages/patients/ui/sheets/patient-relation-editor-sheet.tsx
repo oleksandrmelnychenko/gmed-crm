@@ -10,7 +10,9 @@ import {
 } from "react";
 
 import { Button } from "@/components/ui/button";
+import { CitizenshipMultiSelect, citizenshipFieldLabel } from "@/components/ui/citizenship-multi-select";
 import { CountrySelect } from "@/components/ui/country-select";
+import { appDateKey } from "@/lib/app-time-zone";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import {
@@ -451,6 +453,39 @@ function PatientRelationEditorSheet({
                 "Organisation (Firma, Stiftung, Versicherung), keine Privatperson",
               )}
             </label>
+          )}
+
+          {/* A separate person's identity data (client decision 2026-11-02); a linked record keeps its own. */}
+          {form.relatedPatientId || form.isOrganisation ? null : (
+            <>
+              <FormField label={tx("Дата рождения", "Geburtsdatum")} htmlFor="relation-birth-date">
+                <Input
+                  id="relation-birth-date"
+                  type="date"
+                  max={appDateKey()}
+                  value={form.birthDate}
+                  onChange={(event) =>
+                    dispatchRelationState((current) => ({
+                      form: { ...current.form, birthDate: event.target.value },
+                    }))
+                  }
+                  className={inputClass}
+                />
+              </FormField>
+              <FormField label={citizenshipFieldLabel(lang)} htmlFor="relation-citizenships">
+                <CitizenshipMultiSelect
+                  id="relation-citizenships"
+                  value={form.citizenships}
+                  lang={lang}
+                  placeholder={tx("Выберите страну", "Land wählen")}
+                  onChange={(citizenships) =>
+                    dispatchRelationState((current) => ({
+                      form: { ...current.form, citizenships },
+                    }))
+                  }
+                />
+              </FormField>
+            </>
           )}
         </div>
       </FormSection>

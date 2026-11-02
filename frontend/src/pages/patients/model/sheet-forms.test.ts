@@ -86,6 +86,30 @@ describe("relation form country (QA 2026-10-11 B-25)", () => {
   });
 });
 
+describe("relation birth date and citizenships (client decision 2026-11-02)", () => {
+  it("shows and sends a separate person's date of birth and every citizenship", () => {
+    const form = relationToForm(relation({ birth_date: "1984-03-02", citizenships: ["ua", "DE", "UA"] }));
+    expect(form.birthDate).toBe("1984-03-02");
+    expect(form.citizenships).toEqual(["UA", "DE"]);
+    expect(relationFormToPayload({ ...form, citizenships: [...form.citizenships, "pl"] }, form.relatedName)).toMatchObject({
+      birth_date: "1984-03-02",
+      citizenships: ["UA", "DE", "PL"],
+    });
+    expect(blankRelationForm()).toMatchObject({ birthDate: "", citizenships: [] });
+  });
+
+  it("clears them for an organisation and leaves a linked record's stored values alone", () => {
+    const form = relationToForm(relation({ birth_date: "1984-03-02", citizenships: ["UA"] }));
+    expect(relationFormToPayload({ ...form, isOrganisation: true }, "Beispiel GmbH")).toMatchObject({
+      birth_date: "",
+      citizenships: [],
+    });
+    const linked = relationFormToPayload({ ...form, relatedPatientId: "patient-2" }, "Ben Muster");
+    expect(linked).not.toHaveProperty("birth_date");
+    expect(linked).not.toHaveProperty("citizenships");
+  });
+});
+
 describe("relation organisation box (sanctions screening, 2026-10-12)", () => {
   it("shows and sends the answer of a separate contact", () => {
     const company = relationToForm(relation({ related_name: "Polartek Shipping", is_organisation: true }));

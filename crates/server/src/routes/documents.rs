@@ -4599,6 +4599,22 @@ fn gwg_payer_beneficial_owner(
                     .and_then(|day| NaiveDate::parse_from_str(&day, "%Y-%m-%d").ok())
                     .map(|day| format!("geb. {}", day.format("%d.%m.%Y")));
                 let place = text(owner, "birth_place").map(|place| format!("in {place}"));
+                // Several citizenships (client decision 2026-11-02).
+                let citizenships = owner
+                    .get("citizenships")
+                    .and_then(Value::as_array)
+                    .map(|codes| {
+                        codes
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::trim)
+                            .filter(|code| !code.is_empty())
+                            .map(german_document_country)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .filter(|line| !line.is_empty())
+                    .map(|line| format!("Staatsangehörigkeit(en): {line}"));
                 let address = gwg_address_line(
                     text(owner, "street").as_deref(),
                     text(owner, "zip").as_deref(),
@@ -4618,6 +4634,7 @@ fn gwg_payer_beneficial_owner(
                 let details = [
                     born,
                     place,
+                    citizenships,
                     Some(address).filter(|line| !line.is_empty()),
                     share,
                 ]
@@ -27214,6 +27231,20 @@ fn build_payer_self_disclosure_pdf(
             "Gesetzliche/r Vertreter/in (Funktion)",
             representative_line.as_deref(),
         );
+        // Only when the payer gave them (client decision 2026-11-02).
+        if !data.representative_citizenships.is_empty() {
+            let citizenships = data
+                .representative_citizenships
+                .iter()
+                .map(|code| german_document_country(code))
+                .collect::<Vec<_>>()
+                .join(", ");
+            field(
+                &mut layout,
+                "Staatsangehörigkeit(en) der Vertreterin / des Vertreters",
+                Some(citizenships.as_str()),
+            );
+        }
     } else {
         section.heading(&mut layout, "Angaben zur Person");
         field(
@@ -27352,6 +27383,17 @@ fn build_payer_self_disclosure_pdf(
                 Some(owner.name.clone()).filter(|name| !name.is_empty()),
                 date(owner.date_of_birth).map(|day| format!("geb. am {day}")),
                 text(owner.birth_place.as_ref()).map(|place| format!("in {place}")),
+                (!owner.citizenships.is_empty()).then(|| {
+                    format!(
+                        "Staatsangehörigkeit(en): {}",
+                        owner
+                            .citizenships
+                            .iter()
+                            .map(|code| german_document_country(code))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                }),
                 Some(address).filter(|line| !line.is_empty()),
                 Some(format!(
                     "Anteil {} %",
@@ -39618,6 +39660,7 @@ mod tests {
             contact: Some("chosen@example.test".into()),
             phone: None,
             birth_date: None,
+            citizenships: Vec::new(),
             scope: None,
             scope_codes: vec!["organisational".into(), "medical".into()],
         }];
@@ -40185,6 +40228,7 @@ mod tests {
             contact: Some("chosen@example.test".into()),
             phone: None,
             birth_date: None,
+            citizenships: Vec::new(),
             // A legacy free-text scope prints as typed.
             scope: Some("Nur Rechnungen".into()),
             scope_codes: Vec::new(),

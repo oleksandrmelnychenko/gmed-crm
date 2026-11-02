@@ -1,4 +1,6 @@
+import { normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
 import type { LoginEmailDeliveryStatus } from "@/lib/api/types";
+import { nationalityCountryCode } from "./nationalities";
 import { appDateKeyOf, appWallClock, parseDateKey } from "@/lib/app-time-zone";
 import { actorRole, hasCapability, type Actor } from "@/lib/permissions";
 
@@ -180,6 +182,12 @@ export type PatientTrustedContactFormState = {
   email: string;
   relation: string;
   notes: string;
+  /**
+   * The person's date of birth (YYYY-MM-DD) and ISO citizenships (client decision 2026-11-02:
+   * several may be entered). Asked only for a contact not linked to a patient record.
+   */
+  birthDate?: string;
+  citizenships?: string[];
 };
 
 export type PatientFilters = {
@@ -197,6 +205,11 @@ export type PatientFormState = {
   birthDate: string;
   gender: string;
   nationality: string;
+  /**
+   * ISO codes; several citizenships (client decision 2026-11-02). Saved as `citizenships` with
+   * `nationality` = the first one, like the profile editor.
+   */
+  citizenships: string[];
   residenceCountry: string;
   languages: string;
   functionalLabels: string;
@@ -296,6 +309,7 @@ export function blankPatientForm(): PatientFormState {
     // No default: the sex is chosen explicitly (a silent "male" got saved).
     gender: "",
     nationality: "",
+    citizenships: [],
     residenceCountry: "",
     languages: "",
     functionalLabels: "",
@@ -351,6 +365,23 @@ export function makePatientTrustedContactForm(
     email: "",
     relation,
     notes: "",
+    birthDate: "",
+    citizenships: [],
+  };
+}
+
+/**
+ * The identity fields of a trusted contact for the relation payload: a separate contact's date of
+ * birth and citizenships; a contact linked to a patient record leaves them out, so the server keeps
+ * what the relation stores.
+ */
+export function patientTrustedContactIdentityPayload(
+  contact: PatientTrustedContactFormState,
+): { birth_date?: string; citizenships?: string[] } {
+  if (contact.relatedPatientId) return {};
+  return {
+    birth_date: (contact.birthDate ?? "").trim(),
+    citizenships: normalizeCitizenships(contact.citizenships ?? []),
   };
 }
 
@@ -380,6 +411,8 @@ export function patientTrustedContactsFromRelations(
     phone?: string | null;
     email?: string | null;
     notes?: string | null;
+    birth_date?: string | null;
+    citizenships?: string[] | null;
   }>,
 ): PatientTrustedContactFormState[] {
   return relations
@@ -393,6 +426,8 @@ export function patientTrustedContactsFromRelations(
       email: relation.email ?? "",
       relation: normalizePatientTrustedContactRelation(relation.relation_type),
       notes: relation.notes ?? "",
+      birthDate: relation.birth_date ?? "",
+      citizenships: normalizeCitizenships(relation.citizenships ?? []),
     }));
 }
 
@@ -547,6 +582,9 @@ export function patientToForm(detail: PatientDetail): PatientFormState {
     birthDate: detail.birth_date ?? "",
     gender: detail.gender ?? "male",
     nationality: detail.nationality ?? "",
+    citizenships: detail.citizenships?.length
+      ? normalizeCitizenships(detail.citizenships)
+      : normalizeCitizenships([nationalityCountryCode(detail.nationality)]),
     residenceCountry: detail.residence_country ?? "",
     languages: detail.languages?.join(", ") ?? "",
     functionalLabels: detail.functional_labels?.join(", ") ?? "",

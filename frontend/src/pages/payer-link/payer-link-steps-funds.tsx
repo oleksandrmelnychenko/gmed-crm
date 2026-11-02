@@ -2,6 +2,7 @@ import { useRef, type ReactNode } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
@@ -32,6 +33,7 @@ import {
   beneficialOwnersRequired,
   emptyOwner,
   isOrganisation,
+  ownerCitizenships,
   ownerProblems,
   relationshipKindsFor,
   routeDraft,
@@ -117,6 +119,17 @@ function OwnerCard({
           />,
         )}
         {labeled("birth_place", input("birth_place", 200))}
+        {labeled(
+          "citizenships",
+          <CitizenshipMultiSelect
+            id={id("citizenships")}
+            value={ownerCitizenships(owner.citizenships)}
+            lang={lang}
+            placeholder={text.citizenshipsPlaceholder}
+            onChange={(codes) => onChange("citizenships", codes.join(","))}
+          />,
+          "sm:col-span-2 lg:col-span-3",
+        )}
         {labeled("street", input("street", 200), "sm:col-span-2 lg:col-span-3")}
         {labeled("zip", input("zip", 20))}
         {labeled("city", input("city", 200))}

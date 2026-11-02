@@ -237,6 +237,28 @@ describe("trusted persons independent of consent", () => {
     expect(recipientProblems(invalid)).toEqual(["phone", "birth_date"]);
   });
 
+  it("keeps optional citizenships of a person, never of an institution (client decision 2026-11-02)", () => {
+    const olga = {
+      name: "Olga Muster", relation: "spouse", phone: "+49 30 5550102", birth_date: "1975-04-03",
+      citizenships: ["UA", "DE"], scope_codes: ["all"],
+    } satisfies ConsentRecipient;
+    const [shown] = recipientDrafts([olga]);
+    expect(shown.citizenships).toEqual(["UA", "DE"]);
+    expect(unchangedStored(shown)).toBe(olga);
+    expect(recipientsToSend([shown])[0].citizenships).toEqual(["UA", "DE"]);
+    // Another citizenship is an edit; the list goes as unique upper-case codes.
+    const edited = { ...shown, citizenships: ["UA", "DE", "pl", "UA"] };
+    expect(unchangedStored(edited)).toBeNull();
+    expect(recipientsToSend([edited])[0].citizenships).toEqual(["UA", "DE", "PL"]);
+    // None: the key is left out; an institution never sends any.
+    expect(recipientsToSend([{ ...edited, citizenships: [] }])[0]).not.toHaveProperty("citizenships");
+    expect(recipientsToSend([{ ...edited, relation: "clinic" }])[0]).not.toHaveProperty("citizenships");
+    // The editor asks with the client's label; the list shows the countries.
+    const html = renderToStaticMarkup(<TrustedPersonsEditor persons={[shown]} lang="de" onChange={() => undefined} />);
+    expect(html).toContain("Staatsangehörigkeit (bei mehreren alle angeben)");
+    expect(renderToStaticMarkup(<TrustedPersonsList persons={[olga]} lang="de" />)).toContain("trusted-person-citizenships");
+  });
+
   it("maps the server's refused field and person to the editor row", () => {
     const drafts = [friend, blankRecipient(), { ...friend, name: "Max" }];
     expect(draftIndexOfSent(drafts, 0)).toBe(0);

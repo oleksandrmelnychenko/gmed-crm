@@ -19,6 +19,7 @@ import {
   draftFromQuestionnaire,
   isOrganisation,
   missingByStep,
+  ownerCitizenships,
   type PayerDraft,
   type PayerStep,
 } from "./payer-link-model";
@@ -81,6 +82,11 @@ export function summaryGroups(questionnaire: PayerQuestionnaire, draft: PayerDra
         row("representative_first_name", draft.representative_first_name, text.representativeLabel(label("representative_first_name"))),
         row("representative_last_name", draft.representative_last_name, text.representativeLabel(label("representative_last_name"))),
         row("representative_role", draft.representative_role, text.representativeLabel(label("representative_role"))),
+        row(
+          "representative_citizenships",
+          draft.representative_citizenships.map(country).join(", "),
+          text.representativeLabel(label("representative_citizenships")),
+        ),
         email,
         row("phone", draft.phone),
         row("language", LANGUAGE_NAMES[draft.language] ?? draft.language),
@@ -119,6 +125,7 @@ export function summaryGroups(questionnaire: PayerQuestionnaire, draft: PayerDra
             [owner.first_name, owner.last_name].filter(Boolean).join(" "),
             formatAppDate(owner.date_of_birth),
             owner.birth_place,
+            ownerCitizenships(owner.citizenships).map(country).join(", "),
             [owner.street, [owner.zip, owner.city].filter(Boolean).join(" "), owner.country ? country(owner.country) : ""]
               .filter(Boolean)
               .join(", "),

@@ -1914,6 +1914,60 @@ async fn an_organisation_states_its_representative_and_beneficial_owners() {
     assert!(missing.contains(&json!("industry")), "{body}");
     assert!(!missing.contains(&json!("beneficial_owners")));
     assert!(!missing.contains(&json!("first_name")));
+    // Several citizenships of the representative and of each owner (client
+    // decision 2026-11-02), ISO codes only; optional.
+    assert_eq!(answers["representative_citizenships"], json!([]), "{body}");
+    assert!(!missing.contains(&json!("representative_citizenships")));
+    let mut anna = owner("Anna", json!(60));
+    anna["citizenships"] = json!(["de", "UA", "DE"]);
+    let (status, body) = patch(
+        &app,
+        &token,
+        &session,
+        json!({
+            "beneficial_owners": [anna, owner("Ben", json!("40"))],
+            "representative_citizenships": ["at", "PL"]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let answers = &body["answers"];
+    assert_eq!(answers["representative_citizenships"], json!(["AT", "PL"]));
+    assert_eq!(
+        answers["beneficial_owners"][0]["citizenships"],
+        json!(["DE", "UA"])
+    );
+    assert_eq!(answers["beneficial_owners"][1]["citizenships"], json!([]));
+    let (stored, owners): (Vec<String>, Value) = sqlx::query_as(
+        "SELECT representative_citizenships, beneficial_owners FROM lead_payer_statements WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(stored, ["AT", "PL"]);
+    assert_eq!(owners[0]["citizenships"], json!(["DE", "UA"]));
+    let (_, staff) = with_login(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/payer-link"),
+        &app.manager(),
+        None,
+    )
+    .await;
+    assert_eq!(
+        staff["questionnaire"]["answers"]["representative_citizenships"],
+        json!(["AT", "PL"]),
+        "{staff}"
+    );
+    for refused in [
+        json!({ "representative_citizenships": ["Polen"] }),
+        json!({ "beneficial_owners": [{ "first_name": "Anna", "last_name": "Muster",
+                                        "citizenships": ["XX"], "share_percent": 60 }] }),
+    ] {
+        let (status, body) = patch(&app, &token, &session, refused).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    }
     // A seat in a black-list country requires the enhanced check: level 2.
     let (_, info) = with_login(
         &app,

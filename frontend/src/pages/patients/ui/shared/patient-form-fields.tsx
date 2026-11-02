@@ -2,6 +2,7 @@ import { useId } from "react";
 import { Mail, Phone, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { CitizenshipMultiSelect, citizenshipFieldLabel } from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { checkboxClass } from "@/components/ui-shell";
@@ -27,10 +28,10 @@ import {
   PatientFormSection as FormSection,
   FunctionalLabelChips,
   LanguageChips,
-  NationalitySelect,
   formInputClassName,
   textareaClassName,
 } from "./patient-form-primitives";
+import { TrustedContactIdentityFields } from "./trusted-contact-identity-fields";
 
 function isGuardianOrParentRelation(value: string) {
   return ["guardian", "parent", "mother", "father"].includes(value.trim());
@@ -83,6 +84,8 @@ type PatientFormFieldsProps = {
   onChange: (field: keyof PatientFormState, value: string) => void;
   onContactsChange?: (contacts: PatientContactFormState[]) => void;
   onTrustedContactsChange?: (contacts: PatientTrustedContactFormState[]) => void;
+  /** Several citizenships as ISO codes (client decision 2026-11-02). */
+  onCitizenshipsChange?: (citizenships: string[]) => void;
   contactMode?: "simple" | "multiple";
   includeBirthAndGender?: boolean;
   readOnly?: boolean;
@@ -116,6 +119,7 @@ export function PatientFormFields({
   onChange,
   onContactsChange,
   onTrustedContactsChange,
+  onCitizenshipsChange,
   contactMode = "simple",
   includeBirthAndGender = false,
   readOnly = false,
@@ -237,8 +241,13 @@ export function PatientFormFields({
         readOnly={readOnly}
         t={t}
         l={l}
+        lang={lang}
         onBirthDateChange={handleBirthDateChange}
         onChange={onChange}
+        onCitizenshipsChange={(citizenships) => {
+          if (readOnly) return;
+          onCitizenshipsChange?.(citizenships);
+        }}
       />
 
       <PatientContactSection
@@ -460,6 +469,16 @@ export function PatientFormFields({
                       </NativeComboboxSelect>
                     </Field>
                   </div>
+                  {/* A separate person's identity data (client decision 2026-11-02); a linked record keeps its own. */}
+                  {contact.relatedPatientId ? null : (
+                    <TrustedContactIdentityFields
+                      contact={contact}
+                      lang={lang}
+                      disabled={readOnly}
+                      inputClassName={formInputClassName}
+                      onChange={(patch) => updateTrustedContact(contact.id, patch)}
+                    />
+                  )}
                   <Field label={t.patients_notes}>
                     <textarea
                       value={contact.notes}
@@ -498,8 +517,10 @@ function PatientPersonalDataSection({
   readOnly,
   t,
   l,
+  lang,
   onBirthDateChange,
   onChange,
+  onCitizenshipsChange,
 }: {
   form: PatientFormState;
   fieldErrors: PatientFieldErrors;
@@ -509,8 +530,10 @@ function PatientPersonalDataSection({
   readOnly: boolean;
   t: PatientFormTranslations;
   l: PatientFormText;
+  lang: string;
   onBirthDateChange: (value: string) => void;
   onChange: PatientFormChange;
+  onCitizenshipsChange: (citizenships: string[]) => void;
 }) {
   return (
     <FormSection title={l("patients_personal_data")}>
@@ -589,12 +612,15 @@ function PatientPersonalDataSection({
       ) : null}
 
       <div className="grid gap-3 md:grid-cols-2">
-        <Field label={t.patients_nationality}>
-          <NationalitySelect
-            value={form.nationality}
-            onChange={(value) => onChange("nationality", value)}
+        {/* Several citizenships (client decision 2026-11-02); the first is saved as nationality. */}
+        <Field label={citizenshipFieldLabel(lang)}>
+          <CitizenshipMultiSelect
+            value={form.citizenships}
+            onChange={onCitizenshipsChange}
             placeholder={notSetLabel}
             disabled={readOnly}
+            lang={lang}
+            className={cn("w-full", formInputClassName)}
           />
         </Field>
         <Field label={t.patients_residence_country}>

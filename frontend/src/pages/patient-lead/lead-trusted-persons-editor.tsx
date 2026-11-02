@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { CalendarDays, Info, Mail, Phone, Plus, Trash2, UserRound } from "lucide-react";
+import { CalendarDays, Flag, Info, Mail, Phone, Plus, Trash2, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CitizenshipMultiSelect, citizenshipFieldLabel } from "@/components/ui/citizenship-multi-select";
+import { countryLabel } from "@/components/ui/country-select";
 import { StatusChip } from "@/components/ui/status-chip";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
@@ -12,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { CONSENT_RECIPIENT_RELATIONS, MAX_CONSENT_RECIPIENTS, type ConsentRecipient, type ConsentRecipientRelation } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
 import { asLeadCabinetLang } from "./lead-request-text";
-import { blankRecipient, formatBirthDate, isInstitution, personScope, recipientProblems, typedRecipient, unchangedStored, type RecipientDraft, type RecipientField } from "./lead-trusted-persons-model";
+import { blankRecipient, formatBirthDate, isInstitution, personCitizenships, personScope, recipientProblems, typedRecipient, unchangedStored, type RecipientDraft, type RecipientField } from "./lead-trusted-persons-model";
 import { trustedPersonsText } from "./lead-trusted-persons-text";
 
 /**
@@ -38,6 +40,9 @@ export function TrustedPersonsList({ persons, lang, onRemove, disabled = false }
             <span className="font-semibold text-foreground [overflow-wrap:anywhere]">{person.name}</span>
             <StatusChip className="border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-200">{text.recipientRelations[person.relation] ?? text.recipientRelations.other}</StatusChip>
             {born ? <StatusChip tone="info"><CalendarDays aria-hidden="true" />{fields.birthDateShort} {born}</StatusChip> : null}
+            {personCitizenships(person.citizenships).length
+              ? <StatusChip tone="info" data-testid="trusted-person-citizenships"><Flag aria-hidden="true" />{personCitizenships(person.citizenships).map((code) => countryLabel(code, lang)).join(", ")}</StatusChip>
+              : null}
             {contacts.map((contact) => <StatusChip key={contact} tone="warning">
               {contact.includes("@") ? <Mail aria-hidden="true" /> : <Phone aria-hidden="true" />}
               <span className="min-w-0 [overflow-wrap:anywhere]">{contact}</span>
@@ -153,6 +158,13 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
           aria-invalid={problems.has("birth_date") || undefined} aria-describedby={describedBy("birth_date")} data-testid="trusted-person-birth-date"
           onChange={(event) => update(index, { birthDate: event.target.value })} />
         {message("birth_date", problems, index)}
+      </div>}
+      {/* Optional, several possible (client decision 2026-11-02); never screened. */}
+      {institution ? null : <div className="min-w-0 space-y-1.5 text-xs sm:col-span-2">
+        <label htmlFor={`trusted-person-citizenships-${index}`} className="font-mono font-medium leading-5 text-foreground/75">{citizenshipFieldLabel(lang)}</label>
+        <CitizenshipMultiSelect id={`trusted-person-citizenships-${index}`} className={inputClass} value={person.citizenships ?? []} disabled={disabled}
+          lang={asLeadCabinetLang(lang) ?? undefined} placeholder={fields.citizenshipsPlaceholder}
+          onChange={(citizenships) => update(index, { citizenships })} />
       </div>}
       <fieldset className="min-w-0 space-y-1.5 text-xs sm:col-span-2" aria-invalid={problems.has("scope") || undefined} aria-describedby={describedBy("scope")} data-testid="trusted-person-scope">
         <legend className="mb-1.5 font-mono font-medium leading-5 text-foreground/75">{fields.scope}</legend>

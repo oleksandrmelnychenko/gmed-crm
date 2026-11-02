@@ -379,6 +379,9 @@ struct CreatePatientRequest {
     emergency_contact_relation: Option<String>,
     patient_relations: Option<Vec<UpsertRelationRequest>>,
     notes: Option<String>,
+    /// ISO 3166-1 alpha-2 codes (client decision 2026-11-02: several may be
+    /// entered); the first one is written into `nationality` as well.
+    citizenships: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1333,6 +1336,46 @@ struct UpsertRelationRequest {
     /// answer on an update (older clients); a relation linked to a patient
     /// record is a person and stores none.
     is_organisation: Option<bool>,
+    /// The related person's date of birth (`YYYY-MM-DD`): `None` keeps the
+    /// stored value on an update (older clients), an empty string clears it.
+    birth_date: Option<String>,
+    /// The related person's citizenships as ISO 3166-1 alpha-2 codes (client
+    /// decision 2026-11-02: several may be entered): `None` keeps the stored
+    /// list on an update, an empty list clears it.
+    citizenships: Option<Vec<String>>,
+}
+
+/// The relation's identity fields as sent: `None` keeps the stored value on
+/// an update, `Some` replaces it (an empty date or list clears it).
+struct RelationIdentityFields {
+    birth_date: Option<Option<chrono::NaiveDate>>,
+    citizenships: Option<Vec<String>>,
+}
+
+impl RelationIdentityFields {
+    fn from_request(body: &UpsertRelationRequest) -> Result<Self, &'static str> {
+        let birth_date = match body.birth_date.as_deref().map(str::trim) {
+            None => None,
+            Some("") => Some(None),
+            Some(value) => {
+                let date = chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+                    .map_err(|_| "Invalid relation birth_date format (YYYY-MM-DD)")?;
+                if date > crate::app_time::today() {
+                    return Err("Relation birth date lies in the future");
+                }
+                Some(Some(date))
+            }
+        };
+        let citizenships = body
+            .citizenships
+            .as_deref()
+            .map(crate::services::citizenships::normalize_citizenships)
+            .transpose()?;
+        Ok(Self {
+            birth_date,
+            citizenships,
+        })
+    }
 }
 
 #[derive(Deserialize)]
@@ -1650,6 +1693,9 @@ fn validate_create(req: &CreatePatientRequest) -> Result<(), &'static str> {
         for relation in relations {
             validate_relation_payload_fields(relation)?;
         }
+    }
+    if let Some(codes) = req.citizenships.as_deref() {
+        crate::services::citizenships::normalize_citizenships(codes)?;
     }
     if is_minor_birth_date(parsed_birth_date, crate::app_time::today()) && !has_minor_guardian(req)
     {
@@ -2181,6 +2227,7 @@ fn validate_relation_payload_fields(body: &UpsertRelationRequest) -> Result<(), 
     {
         return Err("Relation address field is too long (max 200)");
     }
+    RelationIdentityFields::from_request(body)?;
 
     Ok(())
 }
@@ -3184,6 +3231,7 @@ async fn create_patient(
         emergency_contact_relation,
         patient_relations,
         notes,
+        citizenships,
     } = body;
 
     let first_name = first_name.trim().to_string();
@@ -3208,7 +3256,20 @@ async fn create_patient(
         })?;
 
     let pid = generate_patient_id(seq);
-    let nationality = normalize_patient_select_value(nationality);
+    let citizenships = match citizenships
+        .as_deref()
+        .map(crate::services::citizenships::normalize_citizenships)
+        .transpose()
+    {
+        Ok(codes) => codes.unwrap_or_default(),
+        Err(message) => return Err(err(StatusCode::UNPROCESSABLE_ENTITY, message)),
+    };
+    // Several citizenships; `nationality` keeps the first one for readers
+    // that expect a single country (list column, filter, documents).
+    let nationality = citizenships
+        .first()
+        .cloned()
+        .or_else(|| normalize_patient_select_value(nationality));
     let residence_country = normalize_patient_select_value(residence_country);
     let address_country = normalize_patient_select_value(address_country);
     let langs = match normalize_patient_language_values(languages) {
@@ -3310,6 +3371,21 @@ async fn create_patient(
         )
     })?;
 
+    if !citizenships.is_empty() {
+        sqlx::query("UPDATE patients SET citizenships = $2 WHERE id = $1")
+            .bind(row.id)
+            .bind(&citizenships)
+            .execute(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, patient_id = %row.id, "Failed to store patient citizenships");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create patient",
+                )
+            })?;
+    }
+
     for contact in &normalized_contacts {
         sqlx::query(
             r#"INSERT INTO patient_contacts (
@@ -3335,11 +3411,14 @@ async fn create_patient(
 
     if let Some(relations) = patient_relations {
         for relation in relations {
+            // Validated with the request (`validate_relation_payload_fields`).
+            let identity = RelationIdentityFields::from_request(&relation)
+                .map_err(|message| err(StatusCode::UNPROCESSABLE_ENTITY, message))?;
             sqlx::query(
                 r#"INSERT INTO patient_relations (
                         patient_id, related_patient_id, related_name, relation_type,
-                        is_emergency_contact, phone, notes, email
-                   ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
+                        is_emergency_contact, phone, notes, email, birth_date, citizenships
+                   ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"#,
             )
             .bind(row.id)
             .bind(relation.related_patient_id)
@@ -3349,6 +3428,8 @@ async fn create_patient(
             .bind(relation.phone.as_deref())
             .bind(relation.notes.as_deref())
             .bind(relation.email.as_deref())
+            .bind(identity.birth_date.flatten())
+            .bind(identity.citizenships.unwrap_or_default())
             .execute(&state.db)
             .await
             .map_err(|e| {
@@ -10207,6 +10288,10 @@ async fn create_relation(
     let is_organisation = body
         .is_organisation
         .filter(|_| body.related_patient_id.is_none());
+    let identity = RelationIdentityFields::from_request(&body)
+        .map_err(|message| err(StatusCode::UNPROCESSABLE_ENTITY, message))?;
+    let birth_date = identity.birth_date.flatten();
+    let citizenships = identity.citizenships.unwrap_or_default();
 
     let mut transaction = state
         .db
@@ -10224,8 +10309,8 @@ async fn create_relation(
                     patient_id, related_patient_id, related_name, relation_type,
                     is_emergency_contact, phone, notes, email, address_street,
                     address_zip, address_city, address_country, is_default_payer,
-                    is_organisation
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                    is_organisation, birth_date, citizenships
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                 RETURNING {RELATION_RETURNING}
            )
            {RELATION_SELECT_FROM_UPSERTED}"#
@@ -10244,6 +10329,8 @@ async fn create_relation(
     .bind(billing.country.1)
     .bind(is_default_payer)
     .bind(is_organisation)
+    .bind(birth_date)
+    .bind(&citizenships)
     .fetch_one(&mut *transaction)
     .await
     .map_err(|error| relation_write_failed(error, FAILED))?;
@@ -10252,6 +10339,8 @@ async fn create_relation(
         .await
         .map_err(|error| relation_write_failed(error, FAILED))?;
 
+    // Field names only for the identity data: the audit log is append-only
+    // and outlives an erasure under Art. 17 DSGVO.
     state.audit_sender.try_send(audit::domain_event(
         "create_patient_relation",
         Some(auth.user_id),
@@ -10263,6 +10352,8 @@ async fn create_relation(
             "related_patient_id": body.related_patient_id,
             "is_default_payer": is_default_payer,
             "is_organisation": is_organisation,
+            "birth_date_set": birth_date.is_some(),
+            "citizenships_count": citizenships.len(),
         }),
     ));
 
@@ -10292,6 +10383,8 @@ async fn update_relation(
     let phone = relation_opt_text(body.phone.as_deref());
     let notes = relation_opt_text(body.notes.as_deref());
     let billing = RelationBillingFields::from_request(&body);
+    let identity = RelationIdentityFields::from_request(&body)
+        .map_err(|message| err(StatusCode::UNPROCESSABLE_ENTITY, message))?;
 
     let mut transaction = state
         .db
@@ -10300,7 +10393,7 @@ async fn update_relation(
         .map_err(|error| relation_write_failed(error, FAILED))?;
     let current = sqlx::query(
         r#"SELECT related_patient_id, email, address_street, address_zip, address_city,
-                  address_country, is_default_payer, is_organisation
+                  address_country, is_default_payer, is_organisation, birth_date, citizenships
            FROM patient_relations WHERE patient_id = $1 AND id = $2 FOR UPDATE"#,
     )
     .bind(patient_uuid)
@@ -10361,6 +10454,23 @@ async fn update_relation(
                 .unwrap_or_default()
         })
     };
+    let birth_before = current
+        .try_get::<Option<chrono::NaiveDate>, _>("birth_date")
+        .unwrap_or_default();
+    let citizenships_before = current
+        .try_get::<Vec<String>, _>("citizenships")
+        .unwrap_or_default();
+    let birth_date = identity.birth_date.unwrap_or(birth_before);
+    let citizenships = identity
+        .citizenships
+        .unwrap_or_else(|| citizenships_before.clone());
+    let mut identity_changed = Vec::new();
+    if birth_date != birth_before {
+        identity_changed.push("birth_date");
+    }
+    if citizenships != citizenships_before {
+        identity_changed.push("citizenships");
+    }
 
     let row = sqlx::query(&format!(
         r#"WITH upserted AS (
@@ -10377,7 +10487,9 @@ async fn update_relation(
                     address_city = $12,
                     address_country = $13,
                     is_default_payer = $14,
-                    is_organisation = $15
+                    is_organisation = $15,
+                    birth_date = $16,
+                    citizenships = $17
                 WHERE patient_id = $1
                   AND id = $2
                 RETURNING {RELATION_RETURNING}
@@ -10399,6 +10511,8 @@ async fn update_relation(
     .bind(country)
     .bind(is_default_payer)
     .bind(is_organisation)
+    .bind(birth_date)
+    .bind(&citizenships)
     .fetch_one(&mut *transaction)
     .await
     .map_err(|error| relation_write_failed(error, FAILED))?;
@@ -10407,6 +10521,7 @@ async fn update_relation(
         .await
         .map_err(|error| relation_write_failed(error, FAILED))?;
 
+    // Field names only for the identity data (append-only audit log).
     state.audit_sender.try_send(audit::domain_event(
         "update_patient_relation",
         Some(auth.user_id),
@@ -10418,6 +10533,7 @@ async fn update_relation(
             "related_patient_id": body.related_patient_id,
             "is_default_payer": is_default_payer,
             "is_organisation": is_organisation,
+            "identity_changed_fields": identity_changed,
         }),
     ));
 

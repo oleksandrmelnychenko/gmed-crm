@@ -1,3 +1,4 @@
+import { CITIZENSHIP_FIELD_LABELS } from "@/lib/citizenship-field-label";
 import type { Lang } from "@/lib/i18n";
 
 import type {
@@ -1107,7 +1108,7 @@ const de: LeadRequestText = {
     last_name: "Nachname",
     date_of_birth: "Geburtsdatum",
     legal_sex: "Geschlecht laut Ausweis",
-    citizenships: "Staatsangehörigkeit(en)",
+    citizenships: CITIZENSHIP_FIELD_LABELS.de,
     street_address: "Straße und Hausnummer",
     zip_code: "Postleitzahl",
     city: "Ort",
@@ -1734,7 +1735,7 @@ const ru: LeadRequestText = {
     last_name: "Фамилия",
     date_of_birth: "Дата рождения",
     legal_sex: "Пол согласно документам",
-    citizenships: "Гражданство",
+    citizenships: CITIZENSHIP_FIELD_LABELS.ru,
     street_address: "Улица и дом",
     zip_code: "Почтовый индекс",
     city: "Город",
@@ -2354,7 +2355,7 @@ const uk: LeadRequestText = {
     last_name: "Прізвище",
     date_of_birth: "Дата народження",
     legal_sex: "Стать за документами",
-    citizenships: "Громадянство",
+    citizenships: CITIZENSHIP_FIELD_LABELS.uk,
     street_address: "Вулиця і будинок",
     zip_code: "Поштовий індекс",
     city: "Місто",
@@ -2974,7 +2975,7 @@ const en: LeadRequestText = {
     last_name: "Last name",
     date_of_birth: "Date of birth",
     legal_sex: "Sex as in the ID document",
-    citizenships: "Citizenship(s)",
+    citizenships: CITIZENSHIP_FIELD_LABELS.en,
     street_address: "Street and number",
     zip_code: "Postcode",
     city: "City",

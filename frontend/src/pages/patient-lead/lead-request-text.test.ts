@@ -185,7 +185,7 @@ describe("lead cabinet languages", () => {
     expect(submitFieldLabel(de, "date_of_birth")).toBe("Geburtsdatum");
     // "Who is the payer?" (owner 2026-10-11: GMED sells services, not a treatment).
     expect(submitFieldLabel(de, "payer_kind")).toBe("Wer ist der Zahler?");
-    expect(submitFieldLabel(de, "payer_citizenships")).toBe("Zahler: Staatsangehörigkeit(en)");
+    expect(submitFieldLabel(de, "payer_citizenships")).toBe("Zahler: Staatsangehörigkeit (bei mehreren alle angeben)");
     expect(submitFieldLabel(leadRequestText("uk"), "payer_last_name")).toBe("Платник: Прізвище");
   });
 

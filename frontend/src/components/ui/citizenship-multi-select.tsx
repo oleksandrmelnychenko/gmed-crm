@@ -21,6 +21,9 @@ export function normalizeCitizenships(values: readonly string[]): string[] {
   return result;
 }
 
+// The label every citizenship field carries (client decision 2026-11-02).
+export { CITIZENSHIP_FIELD_LABELS, citizenshipFieldLabel } from "@/lib/citizenship-field-label";
+
 /** Picks several citizenships from the ISO country list; chips remove one. */
 export function CitizenshipMultiSelect({
   value,

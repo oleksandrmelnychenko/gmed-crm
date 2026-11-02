@@ -767,9 +767,12 @@ pub fn payer_subjects(lead_id: Uuid, rows: &[Value]) -> Vec<SubjectRecord> {
         else {
             continue;
         };
+        // With the citizenships the payer gave for each person (client
+        // decision 2026-11-02: several may be entered).
         let person = |first_name: String,
                       last_name: String,
                       date_of_birth: Option<NaiveDate>,
+                      citizenships: Vec<String>,
                       residence: Vec<String>,
                       subject_ref: String,
                       relation: &str| SubjectRecord {
@@ -782,7 +785,7 @@ pub fn payer_subjects(lead_id: Uuid, rows: &[Value]) -> Vec<SubjectRecord> {
                 middle_name: None,
                 last_name,
                 date_of_birth,
-                citizenships: Vec::new(),
+                citizenships,
                 organisation: false,
             },
             residence,
@@ -794,6 +797,7 @@ pub fn payer_subjects(lead_id: Uuid, rows: &[Value]) -> Vec<SubjectRecord> {
                 json_text(statement, "representative_first_name"),
                 representative_last,
                 None,
+                json_codes(statement, "representative_citizenships"),
                 Vec::new(),
                 "payer-representative".to_string(),
                 "payer_representative",
@@ -813,6 +817,7 @@ pub fn payer_subjects(lead_id: Uuid, rows: &[Value]) -> Vec<SubjectRecord> {
                 json_text(owner, "first_name"),
                 last_name,
                 json_date(owner, "date_of_birth"),
+                json_codes(owner, "citizenships"),
                 json_codes(owner, "country"),
                 format!("payer-owner-{}", index + 1),
                 "payer_beneficial_owner",
@@ -1150,6 +1155,8 @@ async fn load_relation_rows(
                       'address_country', r.address_country,
                       'is_default_payer', r.is_default_payer,
                       'is_organisation', r.is_organisation,
+                      'birth_date', r.birth_date,
+                      'citizenships', to_jsonb(r.citizenships),
                       'names_payer',
                           EXISTS (SELECT 1 FROM orders o
                                   WHERE o.payer_patient_relation_id = r.id)
@@ -1347,10 +1354,10 @@ fn notes_birth_date(notes: &str) -> Option<NaiveDate> {
     })
 }
 
-/// A separate contact by its name as staff entered it (the relation has no
-/// citizenship; a birth date only in its notes, [`notes_birth_date`]): a
-/// person by given names and the last word, an organisation by the whole
-/// name.
+/// A separate contact by its name as staff entered it (a relation adds its
+/// own citizenships and birth date in [`relation_subjects`]; a payer contact
+/// has neither): a person by given names and the last word, an organisation
+/// by the whole name.
 ///
 /// `organisation` is the box "Организация" of the relation dialog
 /// (`patient_relations.is_organisation`) or of the order and invoice payer
@@ -1418,8 +1425,10 @@ pub fn contact_name_is_organisation(name: &str) -> bool {
 /// Other relations (an adult's spouse, a friend, an emergency contact) are no
 /// subjects. A relation linked to a patient record (`linked`) is screened with
 /// that record's name, birth date and citizenships — the name an invoice
-/// carries — a separate contact by its name, the birth date in its notes and
-/// the organisation box (`is_organisation`, [`contact_subject`]). The
+/// carries — a separate contact by its name, its own birth date (else the one
+/// in its notes), its own citizenships (`patient_relations.citizenships`, a
+/// person only) and the organisation box (`is_organisation`,
+/// [`contact_subject`]). The
 /// residence is the relation's address country (where its invoices go), then
 /// the linked record's countries; with the citizenships they count for the
 /// blocked-country policy ([`SubjectRecord::countries`]). One subject per
@@ -1479,11 +1488,21 @@ pub fn relation_subjects(
                     organisation: false,
                 }
             }
-            None => contact_subject(
-                &json_text(row, "related_name"),
-                notes_birth_date(&json_text(row, "notes")),
-                row.get("is_organisation").and_then(Value::as_bool),
-            ),
+            None => {
+                // The relation's own birth date and citizenships (relation
+                // dialog or lead conversion, 2026-11-02); the birth date in
+                // the notes stands in for rows without one.
+                let mut subject = contact_subject(
+                    &json_text(row, "related_name"),
+                    json_date(row, "birth_date")
+                        .or_else(|| notes_birth_date(&json_text(row, "notes"))),
+                    row.get("is_organisation").and_then(Value::as_bool),
+                );
+                if !subject.organisation {
+                    subject.citizenships = json_codes(row, "citizenships");
+                }
+                subject
+            }
         };
         subjects.push(SubjectRecord {
             kind: SubjectKind::PatientRelation,
@@ -2606,9 +2625,10 @@ mod tests {
                 "habitual_residence_country": "AE",
                 "representative_first_name": "Viktor",
                 "representative_last_name": "Zahler",
+                "representative_citizenships": ["AT", "UA"],
                 "beneficial_owners": [
                     { "first_name": "Anna", "last_name": "Muster", "date_of_birth": "1980-02-03",
-                      "country": "de", "share_percent": 60 },
+                      "citizenships": ["DE", "PL"], "country": "de", "share_percent": 60 },
                     { "first_name": "Ben", "last_name": "Muster", "share_percent": 40 }
                 ],
                 "submitted_at": if submitted { json!("2026-10-06T10:00:00+00:00") } else { Value::Null },
@@ -2646,6 +2666,10 @@ mod tests {
         );
         assert!(!representative.subject.organisation);
         assert_eq!(representative.subject.last_name, "Zahler");
+        // Every citizenship the payer gave (client decision 2026-11-02).
+        assert_eq!(representative.subject.citizenships, ["AT", "UA"]);
+        assert_eq!(sent[2].subject.citizenships, ["DE", "PL"]);
+        assert!(sent[3].subject.citizenships.is_empty());
         let owner = &sent[2];
         assert_eq!(owner.subject_ref, "payer-owner-1");
         assert_eq!(owner.relation.as_deref(), Some("payer_beneficial_owner"));
@@ -3138,6 +3162,36 @@ mod tests {
                 .date_of_birth,
             NaiveDate::from_ymd_opt(1985, 3, 2)
         );
+        // The relation's own birth date and citizenships (relation dialog,
+        // client decision 2026-11-02) win over the notes; an organisation
+        // has no citizenship.
+        let edited = relation_row(
+            Uuid::new_v4(),
+            "Anna Muster",
+            "parent",
+            json!({
+                "is_default_payer": true,
+                "birth_date": "1986-04-05",
+                "citizenships": ["UA", "DE"],
+                "notes": "Geburtsdatum: 1985-03-02",
+            }),
+        );
+        let record = &relation_subjects(patient_id, None, &[edited], today)[0];
+        assert_eq!(
+            record.subject.date_of_birth,
+            NaiveDate::from_ymd_opt(1986, 4, 5)
+        );
+        assert_eq!(record.subject.citizenships, ["UA", "DE"]);
+        assert_eq!(record.countries(), ["UA", "DE"]);
+        let company = relation_row(
+            Uuid::new_v4(),
+            "Beispiel GmbH",
+            "other",
+            json!({ "is_default_payer": true, "citizenships": ["DE"] }),
+        );
+        let record = &relation_subjects(patient_id, None, &[company], today)[0];
+        assert!(record.subject.organisation);
+        assert!(record.subject.citizenships.is_empty());
         assert_eq!(
             notes_birth_date("geburtsdatum: 02.03.1985"),
             NaiveDate::from_ymd_opt(1985, 3, 2)

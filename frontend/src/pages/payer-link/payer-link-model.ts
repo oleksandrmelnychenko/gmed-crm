@@ -1,3 +1,4 @@
+import { normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
 import {
   PAYMENT_ROUTE_FIELDS,
   billingValue,
@@ -143,7 +144,7 @@ export type PayerTextField = (typeof PAYER_TEXT_FIELDS)[number];
 export const PAYER_CHOICE_FIELDS = [...LEGAL_QUESTIONS, "beneficial_owners_none"] as const;
 export type PayerChoiceField = (typeof PAYER_CHOICE_FIELDS)[number];
 
-export type PayerListField = "citizenships" | "funds_sources";
+export type PayerListField = "citizenships" | "representative_citizenships" | "funds_sources";
 
 /** Section 8 of phase 2, asked here when the payer answers it. */
 export type PaymentRouteField = Exclude<BillingField, "invoice_to" | "invoice_name" | "invoice_street" | "invoice_zip" | "invoice_city" | "invoice_country" | "invoice_email">;
@@ -182,6 +183,7 @@ export const PAYER_FIELDS: readonly PayerField[] = [
   "representative_first_name",
   "representative_last_name",
   "representative_role",
+  "representative_citizenships",
   "beneficial_owners",
   "beneficial_owners_none",
   "relationship_kind",
@@ -225,6 +227,7 @@ const ORGANISATION_ONLY: ReadonlySet<PayerField> = new Set([
   "representative_first_name",
   "representative_last_name",
   "representative_role",
+  "representative_citizenships",
   "beneficial_owners",
   "beneficial_owners_none",
   "industry",
@@ -258,6 +261,8 @@ export const OWNER_FIELDS = [
   "last_name",
   "date_of_birth",
   "birth_place",
+  // ISO codes joined by ","; several possible (client decision 2026-11-02).
+  "citizenships",
   "street",
   "zip",
   "city",
@@ -265,12 +270,18 @@ export const OWNER_FIELDS = [
   "share_percent",
 ] as const;
 export type OwnerField = (typeof OWNER_FIELDS)[number];
+
+/** The codes of an owner's `citizenships` draft text ("UA,DE"). */
+export function ownerCitizenships(value: string): string[] {
+  return normalizeCitizenships(value.split(","));
+}
 export type OwnerDraft = Record<OwnerField, string>;
 
 export const MAX_OWNERS = 10;
 
 export type PayerDraft = Record<PayerTextField | PayerChoiceField | PaymentRouteField, string> & {
   citizenships: string[];
+  representative_citizenships: string[];
   funds_sources: string[];
   beneficial_owners: OwnerDraft[];
 };
@@ -296,6 +307,7 @@ export function emptyOwner(): OwnerDraft {
     last_name: "",
     date_of_birth: "",
     birth_place: "",
+    citizenships: "",
     street: "",
     zip: "",
     city: "",
@@ -310,6 +322,7 @@ function ownerDraft(owner: PayerBeneficialOwner): OwnerDraft {
     last_name: text(owner.last_name),
     date_of_birth: text(owner.date_of_birth),
     birth_place: text(owner.birth_place),
+    citizenships: normalizeCitizenships(owner.citizenships ?? []).join(","),
     street: text(owner.street),
     zip: text(owner.zip),
     city: text(owner.city),
@@ -327,6 +340,7 @@ export function draftFromQuestionnaire(questionnaire: Pick<PayerQuestionnaire, "
   for (const field of LEGAL_QUESTIONS) draft[field] = choice(answers[field]);
   draft.beneficial_owners_none = answers.beneficial_owners_none ? "yes" : "";
   draft.citizenships = [...(answers.citizenships ?? [])];
+  draft.representative_citizenships = [...(answers.representative_citizenships ?? [])];
   draft.funds_sources = [...(answers.funds_sources ?? [])];
   draft.beneficial_owners = (answers.beneficial_owners ?? []).map(ownerDraft);
   draft.payment_method = text(route?.payment_method);
@@ -383,7 +397,7 @@ function ownerValue(owner: OwnerDraft): string {
 
 /** The comparable form of a field: what would be sent, as text. */
 export function fieldValue(field: PayerField, draft: PayerDraft): string {
-  if (field === "citizenships" || field === "funds_sources") return draft[field].join(",");
+  if (field === "citizenships" || field === "representative_citizenships" || field === "funds_sources") return draft[field].join(",");
   if (field === "beneficial_owners") return draft.beneficial_owners.map(ownerValue).join("\u001e");
   if (isPaymentRouteField(field)) return billingValue(field, routeDraft(draft));
   const value = draft[field].trim();
@@ -422,12 +436,15 @@ export function ownersReady(owners: readonly OwnerDraft[]): boolean {
 /** The list as the server takes it (contract 3.4): names and share required, empty texts as null. */
 export function ownersPayload(owners: readonly OwnerDraft[]): PayerBeneficialOwner[] {
   return owners.map((owner) => {
-    const value = (field: Exclude<OwnerField, "share_percent">) => collapse(owner[field]) || null;
+    const value = (field: Exclude<OwnerField, "share_percent" | "citizenships">) => collapse(owner[field]) || null;
+    // Sent only when given: the list replaces the stored one, so none means none.
+    const citizenships = ownerCitizenships(owner.citizenships);
     return {
       first_name: value("first_name"),
       last_name: value("last_name"),
       date_of_birth: value("date_of_birth"),
       birth_place: value("birth_place"),
+      ...(citizenships.length ? { citizenships } : {}),
       street: value("street"),
       zip: value("zip"),
       city: value("city"),
@@ -474,7 +491,7 @@ export function answersPatch(
     if (field === "beneficial_owners") {
       if (!ownersReady(draft.beneficial_owners)) continue;
       patch[field] = ownersPayload(draft.beneficial_owners);
-    } else if (field === "citizenships" || field === "funds_sources") {
+    } else if (field === "citizenships" || field === "representative_citizenships" || field === "funds_sources") {
       patch[field] = [...draft[field]];
     } else if (field === "beneficial_owners_none") {
       patch[field] = next === "yes";

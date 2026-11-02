@@ -116,7 +116,7 @@ const STATEMENT_TEXT_MAX: usize = 2000;
 
 /// What the payer answers (API keys = columns of `lead_payer_statements`), in
 /// column order.
-const ANSWER_KEYS: [&str; 46] = [
+const ANSWER_KEYS: [&str; 47] = [
     "salutation",
     "first_name",
     "last_name",
@@ -163,6 +163,7 @@ const ANSWER_KEYS: [&str; 46] = [
     "legal_form",
     "vat_id",
     "payment_reason",
+    "representative_citizenships",
 ];
 
 /// Keys only a natural person answers.
@@ -180,7 +181,7 @@ const PERSON_KEYS: [&str; 10] = [
 ];
 
 /// Keys only a company, an organisation or an insurer answers.
-const ORGANISATION_KEYS: [&str; 12] = [
+const ORGANISATION_KEYS: [&str; 13] = [
     "organisation_name",
     "legal_form",
     "vat_id",
@@ -190,6 +191,7 @@ const ORGANISATION_KEYS: [&str; 12] = [
     "representative_first_name",
     "representative_last_name",
     "representative_role",
+    "representative_citizenships",
     "beneficial_owners",
     "beneficial_owners_none",
     "industry",
@@ -228,11 +230,12 @@ const PAYMENT_ROUTE_KEYS: [&str; 7] = [
 ];
 
 /// The fields of one beneficial owner.
-const OWNER_KEYS: [&str; 9] = [
+const OWNER_KEYS: [&str; 10] = [
     "first_name",
     "last_name",
     "date_of_birth",
     "birth_place",
+    "citizenships",
     "street",
     "zip",
     "city",
@@ -500,6 +503,9 @@ struct Owner {
     last_name: String,
     date_of_birth: Option<NaiveDate>,
     birth_place: Option<String>,
+    /// ISO 3166-1 alpha-2 codes (client decision 2026-11-02: several may be
+    /// entered); screened with the owner.
+    citizenships: Vec<String>,
     street: Option<String>,
     zip: Option<String>,
     city: Option<String>,
@@ -515,6 +521,7 @@ impl Owner {
             "last_name": self.last_name,
             "date_of_birth": date_text(self.date_of_birth),
             "birth_place": self.birth_place,
+            "citizenships": self.citizenships,
             "street": self.street,
             "zip": self.zip,
             "city": self.city,
@@ -539,6 +546,18 @@ impl Owner {
             date_of_birth: text("date_of_birth")
                 .and_then(|value| NaiveDate::parse_from_str(&value, "%Y-%m-%d").ok()),
             birth_place: text("birth_place"),
+            citizenships: value
+                .get("citizenships")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .and_then(|codes| normalize_citizenships(&codes).ok())
+                .unwrap_or_default(),
             street: text("street"),
             zip: text("zip"),
             city: text("city"),
@@ -582,6 +601,9 @@ struct Answers {
     representative_first_name: Option<String>,
     representative_last_name: Option<String>,
     representative_role: Option<String>,
+    /// The signing representative's citizenships, ISO codes (client decision
+    /// 2026-11-02); screened with the representative.
+    representative_citizenships: Vec<String>,
     beneficial_owners: Vec<Owner>,
     beneficial_owners_none: Option<bool>,
     relationship_kind: Option<String>,
@@ -636,6 +658,7 @@ impl Answers {
             "representative_first_name" => json!(self.representative_first_name),
             "representative_last_name" => json!(self.representative_last_name),
             "representative_role" => json!(self.representative_role),
+            "representative_citizenships" => json!(self.representative_citizenships),
             "beneficial_owners" => {
                 Value::Array(self.beneficial_owners.iter().map(Owner::to_json).collect())
             }
@@ -735,7 +758,7 @@ const STATEMENT_COLUMNS: &str = "source, link_id, privacy_ack_at, privacy_text_v
      relationship, occupation, industry, funds_sources, funds_description, pep_self, \
      pep_self_details, pep_related, pep_related_details, high_risk_country, \
      high_risk_country_code, sanctions_links, sanctions_links_details, legal_form, vat_id, \
-     payment_reason, declared_correct_at, submitted_at, \
+     payment_reason, representative_citizenships, declared_correct_at, submitted_at, \
      adopted_at, updated_at";
 
 /// `lead_payer_statements.source` of the answers staff entered from the
@@ -809,6 +832,7 @@ impl Statement {
                 representative_first_name: text("representative_first_name"),
                 representative_last_name: text("representative_last_name"),
                 representative_role: text("representative_role"),
+                representative_citizenships: list("representative_citizenships"),
                 beneficial_owners: owners,
                 beneficial_owners_none: answer("beneficial_owners_none"),
                 relationship_kind: text("relationship_kind"),
@@ -882,7 +906,8 @@ async fn store_answers(
                pep_related_details = $40, high_risk_country = $41,
                high_risk_country_code = $42, sanctions_links = $43,
                sanctions_links_details = $44, legal_form = $45, vat_id = $46,
-               payment_reason = $47, answered_by_user = $48, updated_at = now()
+               payment_reason = $47, answered_by_user = $48,
+               representative_citizenships = $49, updated_at = now()
            WHERE lead_id = $1"#,
     )
     .bind(lead_id)
@@ -933,6 +958,7 @@ async fn store_answers(
     .bind(&answers.vat_id)
     .bind(&answers.payment_reason)
     .bind(answered_by)
+    .bind(&answers.representative_citizenships)
     .execute(&mut *conn)
     .await
     .map(|_| ())
@@ -1095,6 +1121,7 @@ fn effective_answers(
         answers.representative_first_name = None;
         answers.representative_last_name = None;
         answers.representative_role = None;
+        answers.representative_citizenships = Vec::new();
         answers.beneficial_owners = Vec::new();
         answers.beneficial_owners_none = None;
         answers.industry = None;
@@ -1554,11 +1581,25 @@ fn owners_of(value: &Value, today: NaiveDate) -> Result<Vec<Owner>, FieldError> 
                 invalid("The share is above 0 and at most 100 percent with two decimals")
             })?;
         total += share_cents;
+        let citizenships = match item.get("citizenships") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(values)) => {
+                let codes = values
+                    .iter()
+                    .map(|value| value.as_str().map(str::to_string))
+                    .collect::<Option<Vec<_>>>()
+                    .ok_or_else(|| invalid("Use ISO 3166-1 alpha-2 country codes"))?;
+                normalize_citizenships(&codes)
+                    .map_err(|_| invalid("Use ISO 3166-1 alpha-2 country codes"))?
+            }
+            Some(_) => return Err(invalid("Use ISO 3166-1 alpha-2 country codes")),
+        };
         owners.push(Owner {
             first_name,
             last_name,
             date_of_birth,
             birth_place: text("birth_place", 200)?,
+            citizenships,
             street: text("street", 200)?,
             zip: text("zip", 20)?,
             city: text("city", 200)?,
@@ -1688,6 +1729,10 @@ fn apply_answers_patch(
             }
             "representative_role" => {
                 next.representative_role = intake::clean_text(text_of(value, key)?, key, 100)?;
+            }
+            "representative_citizenships" => {
+                next.representative_citizenships = normalize_citizenships(&list_of(value, key)?)
+                    .map_err(|_| field_error(key, "Use ISO 3166-1 alpha-2 country codes"))?;
             }
             "beneficial_owners" => next.beneficial_owners = owners_of(value, today)?,
             "beneficial_owners_none" => next.beneficial_owners_none = bool_of(value, key)?,
@@ -5979,7 +6024,8 @@ async fn reset_statement(
                    id_issued_on = NULL, id_valid_until = NULL, organisation_name = NULL,
                    register_court = NULL, register_number = NULL,
                    representative_first_name = NULL, representative_last_name = NULL,
-                   representative_role = NULL, beneficial_owners = '[]'::jsonb,
+                   representative_role = NULL, representative_citizenships = '{}',
+                   beneficial_owners = '[]'::jsonb,
                    beneficial_owners_none = NULL, relationship_kind = NULL,
                    relationship = NULL, occupation = NULL, industry = NULL,
                    funds_sources = '{}', funds_description = NULL, pep_self = NULL,
@@ -6404,6 +6450,8 @@ pub(crate) struct PayerOwnerLine {
     pub name: String,
     pub date_of_birth: Option<NaiveDate>,
     pub birth_place: Option<String>,
+    /// ISO codes (client decision 2026-11-02).
+    pub citizenships: Vec<String>,
     pub street: Option<String>,
     pub zip: Option<String>,
     pub city: Option<String>,
@@ -6451,6 +6499,8 @@ pub(crate) struct PayerSelfDisclosure {
     pub representative_first_name: Option<String>,
     pub representative_last_name: Option<String>,
     pub representative_role: Option<String>,
+    /// ISO codes (client decision 2026-11-02).
+    pub representative_citizenships: Vec<String>,
     pub id_document_type: Option<String>,
     pub id_document_number: Option<String>,
     pub id_issuing_authority: Option<String>,
@@ -6544,6 +6594,7 @@ fn disclosure_of(
             .to_string(),
         date_of_birth: owner.date_of_birth,
         birth_place: owner.birth_place.clone(),
+        citizenships: owner.citizenships.clone(),
         street: owner.street.clone(),
         zip: owner.zip.clone(),
         city: owner.city.clone(),
@@ -6599,6 +6650,7 @@ fn disclosure_of(
         representative_first_name: answers.representative_first_name,
         representative_last_name: answers.representative_last_name,
         representative_role: answers.representative_role,
+        representative_citizenships: answers.representative_citizenships,
         id_document_type: answers.id_document_type,
         id_document_number: answers.id_document_number,
         id_issuing_authority: answers.id_issuing_authority,

@@ -99,7 +99,7 @@ import { StatusChip } from "@/components/ui/status-chip";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect, countryCodeForDisplay, countryCodeFromStoredValue, countryLabel } from "@/components/ui/country-select";
-import { CitizenshipMultiSelect, normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
+import { CITIZENSHIP_FIELD_LABELS, CitizenshipMultiSelect, normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
 import { nationalityCountryCode } from "@/pages/patients/model/nationalities";
 import {
   patientDeclarationLeadId,
@@ -9593,7 +9593,7 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(value) => handleAmlCountryChange({ country: value })}
                   />
                 </Field>
-                <Field label={tx("Гражданство (можно несколько)", "Staatsangehörigkeiten (mehrere möglich)")} portalField="citizenships" htmlFor={STEP1_CONTROL_IDS.citizenships}>
+                <Field label={tx(CITIZENSHIP_FIELD_LABELS.ru, CITIZENSHIP_FIELD_LABELS.de)} portalField="citizenships" htmlFor={STEP1_CONTROL_IDS.citizenships}>
                   <CitizenshipMultiSelect
                     id={STEP1_CONTROL_IDS.citizenships}
                     value={draft.citizenships}

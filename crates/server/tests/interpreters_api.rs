@@ -1246,3 +1246,72 @@ async fn interpreter_profile_operations_exposes_live_workload() {
         "Interpreter report sync"
     );
 }
+
+/// Client decision 2026-11-02: several citizenships per person, ISO codes.
+#[tokio::test]
+async fn interpreter_profiles_keep_several_citizenships() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("interpreter-citizenships");
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let path = format!("/api/v1/interpreters/{interpreter_id}/profile");
+
+    let (status, body) = json_request(
+        &app,
+        "PUT",
+        &path,
+        &pm_bearer,
+        Some(json!({ "status": "active", "citizenships": ["ua", "DE", "UA"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["profile"]["citizenships"], json!(["UA", "DE"]));
+    let stored: Vec<String> = sqlx::query_scalar(
+        "SELECT citizenships FROM interpreter_profile_details WHERE user_id = $1",
+    )
+    .bind(interpreter_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, ["UA", "DE"]);
+
+    // A partial update keeps the list; an unknown code is refused.
+    let (status, body) = json_request(
+        &app,
+        "PUT",
+        &path,
+        &pm_bearer,
+        Some(json!({ "status": "vacation" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["profile"]["citizenships"], json!(["UA", "DE"]));
+    let (status, _) = json_request(
+        &app,
+        "PUT",
+        &path,
+        &pm_bearer,
+        Some(json!({ "citizenships": ["Ukraine"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // A staff profile without a login keeps them in its profile.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/interpreters",
+        &pm_bearer,
+        Some(json!({
+            "name": format!("Standalone Staff {tag}"),
+            "profile": { "citizenships": ["at", "PL"] }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["profile"]["citizenships"], json!(["AT", "PL"]));
+}

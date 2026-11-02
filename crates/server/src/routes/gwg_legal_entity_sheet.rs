@@ -51,6 +51,9 @@ pub(super) struct LegalEntitySheet {
     pub representative_role: Option<String>,
     pub representative_birth_date: Option<NaiveDate>,
     pub representative_address: Option<String>,
+    /// ISO codes of that person's citizenships (client decision 2026-11-02:
+    /// several may be entered).
+    pub representative_citizenships: Vec<String>,
     /// The identity document of that person, from the payer's link.
     pub id_document_type: Option<String>,
     pub id_document_number: Option<String>,
@@ -169,6 +172,17 @@ fn answer(value: Option<bool>, details: Option<&str>) -> Option<String> {
         Some(false) => Some("nein".to_string()),
         None => None,
     }
+}
+
+/// Citizenship codes as German country names, comma separated; `None`
+/// without any.
+fn citizenship_line<'a>(codes: impl Iterator<Item = &'a str>) -> Option<String> {
+    let names = codes
+        .map(str::trim)
+        .filter(|code| !code.is_empty())
+        .map(german_document_country)
+        .collect::<Vec<_>>();
+    (!names.is_empty()).then(|| names.join(", "))
 }
 
 /// The text of one beneficial owner's key, trimmed.
@@ -388,6 +402,10 @@ pub(super) fn content(sheet: &LegalEntitySheet, today: NaiveDate) -> Vec<SheetIt
     ));
     items.push(Line("Geburtsdatum", date(sheet.representative_birth_date)));
     items.push(Line(
+        "Staatsangehörigkeit(en)",
+        citizenship_line(sheet.representative_citizenships.iter().map(String::as_str)),
+    ));
+    items.push(Line(
         "Anschrift",
         trimmed(sheet.representative_address.as_deref()),
     ));
@@ -445,6 +463,17 @@ pub(super) fn content(sheet: &LegalEntitySheet, today: NaiveDate) -> Vec<SheetIt
         items.push(Line(
             "Geburtsdatum, Wohnort",
             Some(details).filter(|line| !line.is_empty()),
+        ));
+        items.push(Line(
+            "Staatsangehörigkeit(en)",
+            citizenship_line(
+                owner
+                    .get("citizenships")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str),
+            ),
         ));
         items.push(Line(
             "Art und Umfang des wirtschaftlichen Interesses",
@@ -707,7 +736,7 @@ pub(super) async fn load(
         r#"SELECT submitted_at, organisation_name, legal_form, vat_id, register_court,
                   register_number, street, zip, city, country,
                   representative_first_name, representative_last_name, representative_role,
-                  date_of_birth,
+                  representative_citizenships, date_of_birth,
                   id_document_type, id_document_number, id_issuing_authority,
                   id_issuing_country, id_issued_on, id_valid_until,
                   beneficial_owners, beneficial_owners_none, payment_reason,
@@ -824,6 +853,9 @@ pub(super) async fn load(
         sheet.representative_name = Some(representative).filter(|name| !name.is_empty());
         sheet.representative_role = text("representative_role");
         sheet.representative_birth_date = day("date_of_birth");
+        sheet.representative_citizenships = statement
+            .try_get::<Vec<String>, _>("representative_citizenships")
+            .unwrap_or_default();
         sheet.id_document_type = text("id_document_type");
         sheet.id_document_number = text("id_document_number");
         sheet.id_issuing_authority = text("id_issuing_authority");
@@ -1062,6 +1094,35 @@ mod tests {
         };
         let items = content(&not_asked, day(2026, 10, 22));
         assert_eq!(value(&items, LABEL), None);
+    }
+
+    #[test]
+    fn the_sheet_lists_every_citizenship_of_the_representative_and_the_owners() {
+        // Client decision 2026-11-02: several citizenships may be entered.
+        let sheet = LegalEntitySheet {
+            representative_citizenships: vec!["AT".to_string(), "DE".to_string()],
+            beneficial_owners: vec![json!({
+                "first_name": "Max",
+                "last_name": "Eigner",
+                "citizenships": ["AT", "UA"],
+                "share_percent": 60.5
+            })],
+            ..complete()
+        };
+        let items = content(&sheet, day(2026, 10, 22));
+        let lines = items
+            .iter()
+            .filter_map(|item| match item {
+                SheetItem::Value(label, value) if *label == "Staatsangehörigkeit(en)" => {
+                    value.clone()
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(lines, ["Österreich, Deutschland", "Österreich, Ukraine"]);
+        // Without an answer the line stays empty ("—").
+        let items = content(&complete(), day(2026, 10, 22));
+        assert_eq!(value(&items, "Staatsangehörigkeit(en)"), Some("—"));
     }
 
     #[test]

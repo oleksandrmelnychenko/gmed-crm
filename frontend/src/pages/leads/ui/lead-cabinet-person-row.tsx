@@ -1,7 +1,13 @@
 import { useState } from "react";
-import { CalendarDays, Info, Lock, Mail, Pencil, Phone, Trash2, UserRound } from "lucide-react";
+import { CalendarDays, Flag, Info, Lock, Mail, Pencil, Phone, Trash2, UserRound } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  CITIZENSHIP_FIELD_LABELS,
+  CitizenshipMultiSelect,
+  normalizeCitizenships,
+} from "@/components/ui/citizenship-multi-select";
+import { countryLabel } from "@/components/ui/country-select";
 import {
   Dialog,
   DialogContent,
@@ -57,10 +63,14 @@ export function CabinetPersonDetails({ person, tx, lang }: { person: CabinetPers
   const scopes = codes.length > 0 ? codes.map((code) => staffScopeSummary([code], lang)) : scope ? [scope] : [];
   const phone = person.phone?.trim();
   const contact = person.contact?.trim();
+  const citizenships = normalizeCitizenships(person.citizenships ?? []);
   return (
     <div className="mt-2 space-y-2 text-xs text-foreground" data-testid="person-cabinet-details">
-      {person.birth_date || phone || contact ? <div className="flex flex-wrap items-center gap-2">
+      {person.birth_date || phone || contact || citizenships.length ? <div className="flex flex-wrap items-center gap-2">
         {person.birth_date ? <StatusChip tone="info"><CalendarDays aria-hidden="true" />{germanDocumentDate(person.birth_date)}</StatusChip> : null}
+        {citizenships.length ? <StatusChip tone="info" className="whitespace-normal" data-testid="person-cabinet-citizenships">
+          <Flag aria-hidden="true" />{citizenships.map((code) => countryLabel(code, lang)).join(", ")}
+        </StatusChip> : null}
         {contact ? <StatusChip tone="warning" className="whitespace-normal">
           {contact.includes("@") ? <Mail aria-hidden="true" /> : <Phone aria-hidden="true" />}
           <span className="min-w-0 break-all">{contact}</span>
@@ -113,6 +123,7 @@ export function CabinetPersonActions({ target, tx }: { target: CabinetPersonEdit
   const [name, setName] = useState(stored.name);
   const [phone, setPhone] = useState(stored.phone ?? "");
   const [birthDate, setBirthDate] = useState(stored.birth_date ?? "");
+  const [citizenships, setCitizenships] = useState<string[]>(normalizeCitizenships(stored.citizenships ?? []));
   const [contact, setContact] = useState(stored.contact ?? "");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -123,6 +134,7 @@ export function CabinetPersonActions({ target, tx }: { target: CabinetPersonEdit
     setName(stored.name);
     setPhone(stored.phone ?? "");
     setBirthDate(stored.birth_date ?? "");
+    setCitizenships(normalizeCitizenships(stored.citizenships ?? []));
     setContact(stored.contact ?? "");
     setReason("");
     setError(null);
@@ -142,6 +154,7 @@ export function CabinetPersonActions({ target, tx }: { target: CabinetPersonEdit
         name: name.trim(),
         phone: phone.trim() || null,
         birth_date: institution ? null : birthDate || null,
+        citizenships: institution ? [] : normalizeCitizenships(citizenships),
         contact: stored.contact ? contact.trim() || null : stored.contact,
       };
       await correctLeadTrustedPerson(target.leadId, target.index, stored, person, reason.trim());
@@ -198,6 +211,11 @@ export function CabinetPersonActions({ target, tx }: { target: CabinetPersonEdit
               {institution ? null : <div className={fieldClass}>
                 <label htmlFor="person-cabinet-birth-date" className={labelClass}>{tx("Дата рождения", "Geburtsdatum")}</label>
                 <Input className="bg-card text-foreground" id="person-cabinet-birth-date" type="date" value={birthDate} onChange={(event) => setBirthDate(event.target.value)} />
+              </div>}
+              {institution ? null : <div className={`${fieldClass} sm:col-span-2`}>
+                <label htmlFor="person-cabinet-citizenships" className={labelClass}>{tx(CITIZENSHIP_FIELD_LABELS.ru, CITIZENSHIP_FIELD_LABELS.de)}</label>
+                <CitizenshipMultiSelect id="person-cabinet-citizenships" value={citizenships} onChange={setCitizenships}
+                  placeholder={tx("Выберите страну", "Land wählen")} />
               </div>}
               {stored.contact ? <div className={fieldClass}>
                 <label htmlFor="person-cabinet-contact" className={labelClass}>{tx("Контакт (прежний)", "Kontakt (bisher)")}</label>

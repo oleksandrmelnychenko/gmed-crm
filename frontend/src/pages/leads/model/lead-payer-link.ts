@@ -547,10 +547,11 @@ const joined = (...parts: Array<string | null | undefined>) =>
 export function beneficialOwnerLine(owner: PayerBeneficialOwner, tx: Tx, lang: string): string {
   const name = [owner.first_name, owner.last_name].map((part) => part?.trim()).filter(Boolean).join(" ");
   const birth = joined(formatAppDate(owner.date_of_birth), owner.birth_place);
+  const citizenships = joined(...(owner.citizenships ?? []).map((code) => countryNameForDisplay(code, lang)));
   const address = representativeAddress(owner, lang);
   const percent = owner.share_percent === null ? Number.NaN : Number(owner.share_percent);
   const share = Number.isFinite(percent) ? `${amountLabel(percent, tx)} %` : "";
-  return [name, birth, address, share].filter(Boolean).join(" · ");
+  return [name, birth, citizenships, address, share].filter(Boolean).join(" · ");
 }
 
 /**
@@ -607,6 +608,11 @@ export function payerQuestionnaireGroups(
           tx("Законный представитель", "Gesetzliche/r Vertreter/in"),
           [answers.representative_first_name, answers.representative_last_name].filter(Boolean).join(" "),
           { details: answers.representative_role },
+        ),
+        row(
+          "representative_citizenships",
+          tx("Гражданство представителя", "Staatsangehörigkeit(en) der Vertretung"),
+          joined(...(answers.representative_citizenships ?? []).map((code) => country(code))),
         ),
         row("email", tx("E-mail", "E-Mail"), email),
         row("phone", tx("Телефон", "Telefon"), answers.phone),

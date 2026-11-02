@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 
 import { inputClass, selectClass } from "@/components/ui-shell";
-import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
+import { CITIZENSHIP_FIELD_LABELS, CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { PERSON_CITY_MAX } from "@/lib/person-fields";
@@ -264,7 +264,7 @@ export function RepresentativeDetailsFields({
       </div>
       <div className="sm:col-span-2">
         <label className="mb-1 block font-mono text-xs font-medium text-muted-foreground" htmlFor={field("citizenships")}>
-          {tx("Гражданства", "Staatsangehörigkeiten")}
+          {tx(CITIZENSHIP_FIELD_LABELS.ru, CITIZENSHIP_FIELD_LABELS.de)}
         </label>
         <CitizenshipMultiSelect
           id={field("citizenships")}

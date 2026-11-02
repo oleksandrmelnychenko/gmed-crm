@@ -3380,3 +3380,101 @@ async fn a_paying_patient_records_hit_holds_the_patient_it_pays_for() {
             .unwrap();
     assert_eq!(child_hits, 0);
 }
+
+/// Client decision 2026-11-02: the relation dialog records the related
+/// person's date of birth and several citizenships; an update without them
+/// keeps the stored values, a change queues the patient for screening.
+#[tokio::test]
+async fn a_relations_birth_date_and_citizenships_are_saved_and_queue_the_patient() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let patient = insert_patient(&app, "Lena", "Gurkensalat", "2015-06-01").await;
+    let created = save_relation(
+        &app,
+        patient,
+        None,
+        json!({
+            "related_name": "Olga Gurkensalat",
+            "relation_type": "mother",
+            "birth_date": "1984-03-02",
+            "citizenships": ["ua", "DE", "UA"]
+        }),
+    )
+    .await;
+    assert_eq!(created["birth_date"], "1984-03-02", "{created}");
+    assert_eq!(created["citizenships"], json!(["UA", "DE"]), "{created}");
+    let relation_id = created["id"].as_str().unwrap().to_string();
+    let stored: (Option<chrono::NaiveDate>, Vec<String>) = sqlx::query_as(
+        "SELECT birth_date, citizenships FROM patient_relations WHERE id = $1::uuid",
+    )
+    .bind(&relation_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        stored,
+        (
+            chrono::NaiveDate::from_ymd_opt(1984, 3, 2),
+            vec!["UA".to_string(), "DE".to_string()]
+        )
+    );
+
+    // An older client that sends neither keeps them.
+    sqlx::query(
+        "DELETE FROM sanctions_screening_queue WHERE subject_type = 'patient' AND subject_id = $1",
+    )
+    .bind(patient)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    let kept = save_relation(
+        &app,
+        patient,
+        Some(&relation_id),
+        json!({ "related_name": "Olga Gurkensalat", "relation_type": "mother" }),
+    )
+    .await;
+    assert_eq!(kept["birth_date"], "1984-03-02", "{kept}");
+    assert_eq!(kept["citizenships"], json!(["UA", "DE"]), "{kept}");
+    assert!(
+        !patient_is_queued(&app, patient).await,
+        "nothing screened changed"
+    );
+
+    // Another citizenship is screened again; an empty date clears it.
+    let changed = save_relation(
+        &app,
+        patient,
+        Some(&relation_id),
+        json!({
+            "related_name": "Olga Gurkensalat",
+            "relation_type": "mother",
+            "birth_date": "",
+            "citizenships": ["PL"]
+        }),
+    )
+    .await;
+    assert_eq!(changed["birth_date"], Value::Null, "{changed}");
+    assert_eq!(changed["citizenships"], json!(["PL"]), "{changed}");
+    assert!(
+        patient_is_queued(&app, patient).await,
+        "a changed citizenship queues the patient"
+    );
+
+    // Codes only, no future birth date.
+    for body in [
+        json!({ "related_name": "Olga Gurkensalat", "relation_type": "mother", "citizenships": ["Polen"] }),
+        json!({ "related_name": "Olga Gurkensalat", "relation_type": "mother", "birth_date": "2999-01-01" }),
+    ] {
+        let (code, _) = request(
+            &app,
+            "POST",
+            &format!("/patients/{patient}/relations/{relation_id}/update"),
+            &app.ceo(),
+            Some(body),
+        )
+        .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+    }
+}

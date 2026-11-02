@@ -136,7 +136,7 @@ async fn list_interpreter_profiles(
         r#"SELECT u.id, u.name, u.email, u.role, u.is_active,
                   COALESCE(p.profile, '{}'::jsonb) AS raw_profile,
                   p.updated_at AS profile_updated_at,
-                  d.gender, d.birth_date, COALESCE(d.status, 'active') AS typed_status,
+                  d.gender, d.birth_date, d.citizenships, COALESCE(d.status, 'active') AS typed_status,
                   d.contract_type, d.contract_start_date, d.contract_end_date,
                   d.employment_kind, d.phone, d.email_secure, d.address, d.emergency_contact,
                   d.medical_knowledge, d.training_history, d.work_permit_valid_until AS detail_work_permit_valid_until,
@@ -1581,7 +1581,7 @@ async fn load_interpreter_profile_payload(
         r#"SELECT u.id, u.name, u.email, u.role, u.is_active,
                   COALESCE(p.profile, '{}'::jsonb) AS raw_profile,
                   p.updated_at AS profile_updated_at,
-                  d.gender, d.birth_date, COALESCE(d.status, 'active') AS typed_status,
+                  d.gender, d.birth_date, d.citizenships, COALESCE(d.status, 'active') AS typed_status,
                   d.contract_type, d.contract_start_date, d.contract_end_date,
                   d.employment_kind, d.phone, d.email_secure, d.address, d.emergency_contact,
                   d.medical_knowledge, d.training_history, d.work_permit_valid_until AS detail_work_permit_valid_until,
@@ -1665,6 +1665,11 @@ fn build_structured_profile(row: &sqlx::postgres::PgRow) -> Value {
 
     insert_row_string(&mut profile, "gender", row, "gender");
     insert_row_date(&mut profile, "birthDate", row, "birth_date");
+    // The typed column wins over the raw profile (client decision 2026-11-02:
+    // several citizenships); a row without details keeps the raw list.
+    if let Ok(Some(codes)) = row.try_get::<Option<Vec<String>>, _>("citizenships") {
+        profile.insert("citizenships".to_string(), json!(codes));
+    }
     insert_row_string(&mut profile, "status", row, "typed_status");
     insert_row_string(&mut profile, "contractType", row, "contract_type");
     insert_row_date(
@@ -1996,6 +2001,8 @@ async fn save_structured_interpreter_profile(
         bool_from_profile_or_nested(profile, "emailSecure", "contact", "emailSecure")
             .unwrap_or(false);
     let birth_date = date_from_profile(profile, "birthDate")?;
+    let citizenships = profile_citizenships(profile.get("citizenships").unwrap_or(&Value::Null))
+        .map_err(|message| err(StatusCode::UNPROCESSABLE_ENTITY, message))?;
     let contract_start_date = date_from_profile(profile, "contractStartDate")?;
     let contract_end_date = date_from_profile(profile, "contractEndDate")?;
     let work_permit_valid_until = date_from_profile(profile, "workPermitValidUntil")?;
@@ -2008,18 +2015,19 @@ async fn save_structured_interpreter_profile(
                 phone, email_secure, address, emergency_contact,
                 medical_knowledge, training_history, work_permit_valid_until,
                 internal_notes, retention_delete_at, erasure_request_status,
-                updated_by
+                updated_by, citizenships
            ) VALUES (
                 $1, $2, $3, $4, $5,
                 $6, $7, $8,
                 $9, $10, $11, $12,
                 $13, $14, $15,
                 $16, $17, $18,
-                $19
+                $19, $20
            )
            ON CONFLICT (user_id)
            DO UPDATE SET gender = EXCLUDED.gender,
                          birth_date = EXCLUDED.birth_date,
+                         citizenships = EXCLUDED.citizenships,
                          status = EXCLUDED.status,
                          contract_type = EXCLUDED.contract_type,
                          contract_start_date = EXCLUDED.contract_start_date,
@@ -2067,6 +2075,7 @@ async fn save_structured_interpreter_profile(
     .bind(retention_delete_at)
     .bind(string_from_profile(profile, "erasureRequestStatus"))
     .bind(updated_by)
+    .bind(&citizenships)
     .execute(&mut **tx)
     .await
     .map_err(|error| {
@@ -2728,14 +2737,36 @@ fn string_list_from_profile(profile: &Value, key: &str) -> Vec<String> {
     }
 }
 
+/// The profile's `citizenships`: a list of ISO 3166-1 alpha-2 codes (or
+/// `null` for none), normalised to unique upper-case codes.
+fn profile_citizenships(value: &Value) -> Result<Vec<String>, &'static str> {
+    let codes = match value {
+        Value::Null => return Ok(Vec::new()),
+        Value::Array(items) => items
+            .iter()
+            .map(|item| item.as_str().map(str::to_string))
+            .collect::<Option<Vec<_>>>()
+            .ok_or(crate::services::citizenships::INVALID_CITIZENSHIP)?,
+        _ => return Err(crate::services::citizenships::INVALID_CITIZENSHIP),
+    };
+    crate::services::citizenships::normalize_citizenships(&codes)
+}
+
 #[allow(clippy::result_large_err)]
 fn normalize_profile_payload(body: Value) -> Result<Value, axum::response::Response> {
-    let profile = body.get("profile").cloned().unwrap_or(body);
+    let mut profile = body.get("profile").cloned().unwrap_or(body);
     if !profile.is_object() {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Profile payload must be a JSON object",
         ));
+    }
+    // Several citizenships as ISO 3166-1 alpha-2 codes (client decision
+    // 2026-11-02); `null` clears the list.
+    if let Some(value) = profile.get("citizenships") {
+        let codes = profile_citizenships(value)
+            .map_err(|message| err(StatusCode::UNPROCESSABLE_ENTITY, message))?;
+        profile["citizenships"] = json!(codes);
     }
 
     if serde_json::to_vec(&profile)

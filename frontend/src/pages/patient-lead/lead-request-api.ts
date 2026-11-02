@@ -316,6 +316,11 @@ export type ConsentRecipient = {
   phone?: string | null;
   /** The person's date of birth ("YYYY-MM-DD", owner 2026-10-26); never of an institution (family doctor, clinic). */
   birth_date?: string | null;
+  /**
+   * The person's citizenships as ISO codes, optional (client decision 2026-11-02: several may be
+   * entered); never of an institution. Never sanctions-screened (owner decision 2026-10-12).
+   */
+  citizenships?: string[] | null;
   /** Free-text scope of persons named before 2026-10-19; shown as typed until codes are chosen. */
   scope?: string | null;
   /** The chosen scope (owner 2026-10-19); `["all"]` covers everything. */

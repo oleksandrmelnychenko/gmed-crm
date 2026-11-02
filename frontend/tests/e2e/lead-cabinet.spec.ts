@@ -1248,7 +1248,7 @@ test.describe("lead cabinet", () => {
     const missing = page.getByTestId("lead-request-missing");
     await expect(missing).toContainText("Zahler: Vorname");
     await expect(missing).toContainText("Zahler: Nachname");
-    await expect(missing).toContainText("Zahler: Staatsangehörigkeit(en)");
+    await expect(missing).toContainText("Zahler: Staatsangehörigkeit (bei mehreren alle angeben)");
     await expect(missing).toContainText("Zahler: Beziehung zu Ihnen");
     await expect(missing).toContainText("Zahler: Einverständnis zur Kontaktaufnahme");
 

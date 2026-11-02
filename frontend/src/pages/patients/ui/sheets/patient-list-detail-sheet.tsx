@@ -19,6 +19,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
@@ -42,6 +43,7 @@ import {
 import {
   blankPatientForm,
   patientContactFormsToPayload,
+  patientTrustedContactIdentityPayload,
   patientTrustedContactsFromRelations,
   patientTrustedContactsToPayload,
   parseLanguages,
@@ -190,6 +192,7 @@ type PatientProfileSectionProps = {
   onChange: (field: keyof PatientFormState, value: string) => void;
   onContactsChange: (contacts: PatientContactFormState[]) => void;
   onTrustedContactsChange: (contacts: PatientTrustedContactFormState[]) => void;
+  onCitizenshipsChange: (citizenships: string[]) => void;
 };
 
 function PatientProfileSection({
@@ -199,6 +202,7 @@ function PatientProfileSection({
   onChange,
   onContactsChange,
   onTrustedContactsChange,
+  onCitizenshipsChange,
 }: PatientProfileSectionProps) {
   const { getPatientLegalStatusSummary } = useLegalStatusLabels();
   const { formatPatientDate } = usePatientListFormatters();
@@ -234,6 +238,7 @@ function PatientProfileSection({
         onChange={canEdit ? onChange : () => undefined}
         onContactsChange={canEdit ? onContactsChange : undefined}
         onTrustedContactsChange={canEdit ? onTrustedContactsChange : undefined}
+        onCitizenshipsChange={canEdit ? onCitizenshipsChange : undefined}
         contactMode="multiple"
         readOnly={!canEdit}
       />
@@ -494,7 +499,9 @@ function PatientDetailSheet({
         phone_secondary: toOptional(contactPayload.phoneSecondary),
         email: toOptional(contactPayload.email),
         contacts: contactPayload.contacts,
-        nationality: toOptional(form.nationality),
+        // Several citizenships; `nationality` keeps the first one, like the profile editor.
+        nationality: form.citizenships[0] ?? toOptional(form.nationality),
+        citizenships: normalizeCitizenships(form.citizenships),
         residence_country: toOptional(form.residenceCountry),
         languages: parseLanguages(form.languages),
         functional_labels: parseFunctionalLabels(form.functionalLabels),
@@ -522,6 +529,7 @@ function PatientDetailSheet({
             is_emergency_contact: true,
             phone: toOptional(contact.phone),
             notes: toOptional(contact.notes),
+            ...patientTrustedContactIdentityPayload(contact),
           },
           contact.persistedId,
         );
@@ -643,6 +651,9 @@ function PatientDetailSheet({
             }
             onTrustedContactsChange={(trustedContacts) =>
               setForm((current) => ({ ...current, trustedContacts }))
+            }
+            onCitizenshipsChange={(citizenships) =>
+              setForm((current) => ({ ...current, citizenships }))
             }
           />
           {canViewAssignments ? (

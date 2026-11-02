@@ -13,6 +13,8 @@ import { isParentOrGuardianRelation } from "./lead-trusted-contacts";
 export type CabinetPerson = LeadPortalConsentRecipient & {
   phone?: string | null;
   birth_date?: string | null;
+  /** ISO codes, optional (client decision 2026-11-02); never sanctions-screened. */
+  citizenships?: string[] | null;
 };
 
 type StaffContact = { id: string; name: string; relation: string };

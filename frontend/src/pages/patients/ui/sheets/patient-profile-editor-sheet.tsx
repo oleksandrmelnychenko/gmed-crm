@@ -16,7 +16,11 @@ import {
   parseFunctionalLabels,
 } from "../shared/patient-form-primitives";
 import { Button } from "@/components/ui/button";
-import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
+import {
+  CitizenshipMultiSelect,
+  citizenshipFieldLabel,
+  normalizeCitizenships,
+} from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { EmailDomainWarning, emailDomainWarningText } from "@/components/email-domain-warning";
@@ -44,6 +48,7 @@ import {
   normalizePatientTrustedContactRelation,
   parseLanguages,
   patientContactFormsToPayload,
+  patientTrustedContactIdentityPayload,
   patientTrustedContactsFromRelations,
   type PatientContactFormState,
   type PatientDetail,
@@ -67,6 +72,7 @@ import {
   type PatientLegalStatus,
 } from "../../model/legal-status";
 import { LegalStatusPill } from "../shared/legal-status-pill";
+import { TrustedContactIdentityFields } from "../shared/trusted-contact-identity-fields";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 type PatientProfileEditorSheetProps = {
@@ -117,6 +123,12 @@ function trustedContactsFromDetail(detail: PatientDetail): PatientTrustedContact
       email: trustedContactRecordString(contact, "email"),
       relation: normalizePatientTrustedContactRelation(trustedContactRecordString(contact, "relation")),
       notes: extraNotes,
+      birthDate: /^\d{4}-\d{2}-\d{2}$/.test(trustedContactRecordString(contact, "birth_date"))
+        ? trustedContactRecordString(contact, "birth_date")
+        : "",
+      citizenships: Array.isArray(contact.citizenships)
+        ? normalizeCitizenships(contact.citizenships.filter((code): code is string => typeof code === "string"))
+        : [],
     }];
   });
   if (leadContacts.length > 0) return leadContacts;
@@ -464,7 +476,7 @@ function PatientProfileEditorFormSections({
                   </div>
                 ) : null}
                 <div className="grid gap-2.5 md:grid-cols-2">
-                  <FormField label={dictionary.patient_profile_editor_nationality}>
+                  <FormField label={citizenshipFieldLabel(lang)}>
                     <CitizenshipMultiSelect
                       value={form.citizenships}
                       onChange={(value) => updateField("citizenships", value)}
@@ -858,6 +870,15 @@ function PatientProfileEditorFormSections({
                             />
                           </FormField>
                         </div>
+                        {/* A separate person's identity data (client decision 2026-11-02); a linked record keeps its own. */}
+                        {contact.relatedPatientId ? null : (
+                          <TrustedContactIdentityFields
+                            contact={contact}
+                            lang={lang}
+                            inputClassName={formInputClassName}
+                            onChange={(patch) => patchTrustedContact(contact.id, patch)}
+                          />
+                        )}
                         <FormField label={dictionary.patient_profile_editor_notes}>
                           <textarea
                             className={cn(formTextareaClassName, "min-h-20")}
@@ -1244,6 +1265,7 @@ function PatientProfileEditorSheetContent({
               phone: contact.phone || null,
               email: contact.email,
               notes: contact.notes || null,
+              ...patientTrustedContactIdentityPayload(contact),
             },
             contact.persistedId,
           );

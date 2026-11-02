@@ -218,7 +218,17 @@ export function DetailsStep({ context, email }: { context: StepContext; email: s
         <Field context={context} field="representative_role">
           <TextInput context={context} field="representative_role" maxLength={100} />
         </Field>
-        <div className="hidden sm:block" />
+        {/* Several possible (client decision 2026-11-02); screened with the representative. */}
+        <Field context={context} field="representative_citizenships" className="sm:col-span-2 lg:col-span-3">
+          <CitizenshipMultiSelect
+            id={fieldId("representative_citizenships")}
+            value={form.draft.representative_citizenships}
+            lang={lang}
+            placeholder={text.citizenshipsPlaceholder}
+            invalid={Boolean(form.errorFor("representative_citizenships"))}
+            onChange={(next) => form.set("representative_citizenships", next)}
+          />
+        </Field>
         <Field context={context} field="phone">
           <TextInput context={context} field="phone" maxLength={200} type="tel" autoComplete="tel" />
         </Field>

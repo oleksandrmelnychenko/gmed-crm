@@ -31,6 +31,10 @@ export type RelationFormState = {
    * compares it with the listed entities by its whole name. A linked patient record is a person.
    */
   isOrganisation: boolean;
+  /** The related person's date of birth (YYYY-MM-DD); blank clears it. Not for an organisation. */
+  birthDate: string;
+  /** ISO codes; several citizenships (client decision 2026-11-02). Not for an organisation. */
+  citizenships: string[];
 };
 
 export type DocumentUploadFormState = {
@@ -94,6 +98,8 @@ export function blankRelationForm(): RelationFormState {
     addressCountry: "",
     isDefaultPayer: false,
     isOrganisation: false,
+    birthDate: "",
+    citizenships: [],
   };
 }
 
@@ -155,6 +161,8 @@ export function relationToForm(relation: RelationItem): RelationFormState {
     // The server answers how the contact is screened: the stored box, or for an older row the
     // legal form in its name; saving stores it.
     isOrganisation: !relation.related_patient_id && relation.is_organisation === true,
+    birthDate: relation.birth_date ?? "",
+    citizenships: normalizeCitizenships(relation.citizenships ?? []),
   };
 }
 
@@ -167,6 +175,7 @@ export function relationFormToPayload(
   relatedName: string,
 ): Record<string, unknown> {
   const optional = (value: string) => value.trim() || null;
+  const organisation = !form.relatedPatientId && form.isOrganisation;
   return {
     related_patient_id: form.relatedPatientId || undefined,
     related_name: relatedName.trim(),
@@ -182,6 +191,15 @@ export function relationFormToPayload(
     is_default_payer: form.isDefaultPayer,
     // A linked patient record is a person; the server stores no answer for it.
     is_organisation: form.relatedPatientId ? null : form.isOrganisation,
+    // A separate person's identity data (client decision 2026-11-02); an organisation has none
+    // (blank clears). A linked patient record keeps its own data there: left out, the server keeps
+    // what the relation stores.
+    ...(form.relatedPatientId
+      ? {}
+      : {
+          birth_date: organisation ? "" : form.birthDate.trim(),
+          citizenships: organisation ? [] : normalizeCitizenships(form.citizenships),
+        }),
   };
 }
 

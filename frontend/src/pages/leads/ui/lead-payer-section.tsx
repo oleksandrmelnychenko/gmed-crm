@@ -29,7 +29,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { StatusChip } from "@/components/ui/status-chip";
-import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
+import { CITIZENSHIP_FIELD_LABELS, CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect, countryLabel } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
@@ -1167,7 +1167,7 @@ export function LeadPayerDeclarationSection({
                     <Input className={inputClass} value={form.placeOfBirth} disabled={readOnly} onChange={(event) => patch("placeOfBirth", event.target.value)} />
                   </PayerField>
                   {addressFields}
-                  <PayerField label={tx("Гражданство", "Staatsangehörigkeit")} required>
+                  <PayerField label={tx(CITIZENSHIP_FIELD_LABELS.ru, CITIZENSHIP_FIELD_LABELS.de)} required>
                     <CitizenshipMultiSelect
                       value={form.citizenships}
                       placeholder={tx("Гражданство", "Staatsangehörigkeit")}

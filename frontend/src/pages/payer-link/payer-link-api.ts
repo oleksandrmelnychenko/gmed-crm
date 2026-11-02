@@ -40,6 +40,8 @@ export type PayerBeneficialOwner = {
   last_name: string | null;
   date_of_birth: string | null;
   birth_place: string | null;
+  /** ISO codes (client decision 2026-11-02: several may be entered); absent on an older server. */
+  citizenships?: string[] | null;
   street: string | null;
   zip: string | null;
   city: string | null;
@@ -84,6 +86,8 @@ export type PayerAnswers = {
   representative_first_name: string | null;
   representative_last_name: string | null;
   representative_role: string | null;
+  /** The signing representative's ISO citizenships (client decision 2026-11-02); absent on an older server. */
+  representative_citizenships?: string[] | null;
   beneficial_owners: PayerBeneficialOwner[] | null;
   beneficial_owners_none: boolean | null;
   relationship_kind: string | null;

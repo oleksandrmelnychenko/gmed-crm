@@ -92,6 +92,8 @@ export type PayerBeneficialOwner = {
   last_name: string | null;
   date_of_birth: string | null;
   birth_place: string | null;
+  /** ISO codes (client decision 2026-11-02: several may be entered). */
+  citizenships?: string[];
   street: string | null;
   zip: string | null;
   city: string | null;
@@ -131,6 +133,8 @@ export type PayerQuestionnaireAnswers = {
   representative_first_name: string | null;
   representative_last_name: string | null;
   representative_role: string | null;
+  /** ISO codes of the signing representative (client decision 2026-11-02). */
+  representative_citizenships?: string[];
   beneficial_owners: PayerBeneficialOwner[];
   beneficial_owners_none: boolean | null;
   relationship_kind: string | null;
@@ -340,6 +344,7 @@ function normalizeOwner(value: unknown): PayerBeneficialOwner | null {
     last_name: textOrNull(raw.last_name),
     date_of_birth: textOrNull(raw.date_of_birth),
     birth_place: textOrNull(raw.birth_place),
+    citizenships: stringList(raw.citizenships),
     street: textOrNull(raw.street),
     zip: textOrNull(raw.zip),
     city: textOrNull(raw.city),
@@ -399,6 +404,7 @@ export function normalizePayerAnswers(value: unknown): PayerQuestionnaireAnswers
   return {
     ...text,
     citizenships: stringList(raw.citizenships),
+    representative_citizenships: stringList(raw.representative_citizenships),
     beneficial_owners: Array.isArray(raw.beneficial_owners)
       ? raw.beneficial_owners.flatMap((item) => {
           const owner = normalizeOwner(item);

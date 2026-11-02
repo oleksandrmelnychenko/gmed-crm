@@ -464,7 +464,7 @@ describe("what is missing about the representation", () => {
       "payer_kind",
     ]);
     expect(missing.map((field) => submitFieldLabel(de, field, true))).toEqual([
-      "Vertreter/in: Staatsangehörigkeit(en)",
+      "Vertreter/in: Staatsangehörigkeit (bei mehreren alle angeben)",
       "Vertreter/in: Bestallungsurkunde",
       "Anderer Elternteil: Nachname",
       "Anderer Elternteil: E-Mail",

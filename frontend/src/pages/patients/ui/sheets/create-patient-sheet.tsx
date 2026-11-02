@@ -9,6 +9,7 @@ import { LoaderCircle, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Banner } from "@/components/ui-shell";
+import { normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
 import { emailDomainWarningText } from "@/components/email-domain-warning";
 import { useLang } from "@/lib/i18n";
 
@@ -17,6 +18,7 @@ import {
   blankPatientForm,
   computeAge,
   patientContactFormsToPayload,
+  patientTrustedContactIdentityPayload,
   patientTrustedContactsToPayload,
   parseLanguages,
   toOptional,
@@ -163,14 +165,18 @@ function CreatePatientSheet({
         is_emergency_contact: true,
         phone: toOptional(contact.phone),
         notes: toOptional(contact.notes),
+        ...patientTrustedContactIdentityPayload(contact),
       }));
+      // Several citizenships; `nationality` keeps the first one (list column, filter, documents).
+      const citizenships = normalizeCitizenships(form.citizenships);
       const created = await createPatient({
         title: toOptional(form.title),
         first_name: form.firstName.trim(),
         last_name: form.lastName.trim(),
         birth_date: form.birthDate,
         gender: form.gender,
-        nationality: toOptional(form.nationality),
+        nationality: citizenships[0] ?? toOptional(form.nationality),
+        citizenships,
         residence_country: toOptional(form.residenceCountry),
         languages: parseLanguages(form.languages),
         functional_labels: parseFunctionalLabels(form.functionalLabels),
@@ -245,6 +251,9 @@ function CreatePatientSheet({
         }
         onTrustedContactsChange={(trustedContacts) =>
           setForm((current) => ({ ...current, trustedContacts }))
+        }
+        onCitizenshipsChange={(citizenships) =>
+          setForm((current) => ({ ...current, citizenships }))
         }
         contactMode="multiple"
         includeBirthAndGender

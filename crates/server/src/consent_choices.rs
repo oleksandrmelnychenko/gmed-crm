@@ -426,6 +426,11 @@ pub struct ConsentRecipient {
     /// institution ([`is_institution`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub birth_date: Option<NaiveDate>,
+    /// The person's citizenships as ISO 3166-1 alpha-2 codes, optional
+    /// (client decision 2026-11-02: several may be entered); never of an
+    /// institution. Never sanctions-screened (owner decision 2026-10-12).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub citizenships: Vec<String>,
     /// The free-text scope of persons named before 2026-10-19; printed as
     /// typed while no [`Self::scope_codes`] are chosen, dropped once they are.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -460,6 +465,17 @@ impl ConsentRecipient {
         if let Some(birth_date) = self.birth_date {
             line.push_str(", geb. ");
             line.push_str(&birth_date.format("%d.%m.%Y").to_string());
+        }
+        if !self.citizenships.is_empty() {
+            line.push_str(", Staatsangehörigkeit(en): ");
+            line.push_str(
+                &self
+                    .citizenships
+                    .iter()
+                    .map(|code| crate::routes::documents::german_document_country(code))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
         }
         let text = |value: &Option<String>| {
             value
@@ -571,6 +587,13 @@ pub fn clean_persons(
             .filter(|phone| !phone.is_empty());
         // An institution has no date of birth.
         let birth_date = person.birth_date.filter(|_| !is_institution(&relation));
+        // Nor citizenships.
+        let citizenships = if is_institution(&relation) {
+            Vec::new()
+        } else {
+            crate::services::citizenships::normalize_citizenships(&person.citizenships)
+                .map_err(|_| RECIPIENTS_INVALID)?
+        };
         let scope_codes = clean_scope_codes(&person.scope_codes)?;
         let scope = person
             .scope
@@ -595,6 +618,7 @@ pub fn clean_persons(
             contact,
             phone,
             birth_date,
+            citizenships,
             scope,
             scope_codes,
         });
@@ -1192,6 +1216,7 @@ mod tests {
             contact: Some("max@example.test".into()),
             phone: None,
             birth_date: None,
+            citizenships: Vec::new(),
             scope: Some("Nur Rechnungen".into()),
             scope_codes: Vec::new(),
         }];
@@ -1317,6 +1342,7 @@ mod tests {
             contact: contact.map(Into::into),
             phone: None,
             birth_date: None,
+            citizenships: Vec::new(),
             scope: None,
             scope_codes: Vec::new(),
         };
@@ -1389,6 +1415,7 @@ mod tests {
             contact: contact.map(Into::into),
             phone: None,
             birth_date: None,
+            citizenships: Vec::new(),
             scope: None,
             scope_codes: Vec::new(),
         };
@@ -1451,6 +1478,7 @@ mod tests {
             contact: Some("max@example.test".into()),
             phone: None,
             birth_date: None,
+            citizenships: Vec::new(),
             scope: scope.map(Into::into),
             scope_codes: codes.iter().map(|code| code.to_string()).collect(),
         };
@@ -1517,6 +1545,47 @@ mod tests {
         .unwrap();
         assert!(legacy.scope_codes.is_empty());
         assert_eq!(legacy.printed_scope().as_deref(), Some("medizin"));
+    }
+
+    /// Client decision 2026-11-02: a trusted person may give several
+    /// citizenships (optional, ISO codes); printed after the date of birth,
+    /// dropped for an institution.
+    #[test]
+    fn trusted_persons_may_give_several_citizenships() {
+        let person = ConsentRecipient {
+            name: "Olga Muster".into(),
+            relation: "spouse".into(),
+            phone: Some("+49 151 000000".into()),
+            birth_date: NaiveDate::from_ymd_opt(1975, 4, 3),
+            citizenships: vec!["ua".into(), "DE".into(), "UA".into()],
+            scope_codes: vec!["all".into()],
+            ..ConsentRecipient::default()
+        };
+        let cleaned = clean_persons(vec![person.clone()]).unwrap().remove(0);
+        assert_eq!(cleaned.citizenships, ["UA", "DE"]);
+        assert_eq!(
+            cleaned.printed_line(),
+            "Olga Muster (Ehe-/Lebenspartner/in), geb. 03.04.1975, Staatsangehörigkeit(en): Ukraine, Deutschland, Tel. +49 151 000000; Umfang der Auskunft: alle Informationen"
+        );
+        let invalid = ConsentRecipient {
+            citizenships: vec!["Ukraine".into()],
+            ..person.clone()
+        };
+        assert_eq!(clean_persons(vec![invalid]), Err(RECIPIENTS_INVALID));
+        let clinic = ConsentRecipient {
+            name: "Klinik Nord".into(),
+            relation: "clinic".into(),
+            ..person
+        };
+        assert!(
+            clean_persons(vec![clinic]).unwrap()[0]
+                .citizenships
+                .is_empty()
+        );
+        // Stored persons without the key still read.
+        let stored: ConsentRecipient =
+            serde_json::from_value(json!({ "name": "Max Muster", "relation": "friend" })).unwrap();
+        assert!(stored.citizenships.is_empty());
     }
 
     /// Owner 2026-10-26: a trusted person gives the phone number they call

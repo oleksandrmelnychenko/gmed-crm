@@ -223,7 +223,7 @@ describe("lead request summary", () => {
       Geburtsort: "Kyiv",
       Geburtsland: "Ukraine",
       "Geschlecht laut Ausweis": "Weiblich",
-      "Staatsangehörigkeit(en)": "Ukraine, Deutschland",
+      "Staatsangehörigkeit (bei mehreren alle angeben)": "Ukraine, Deutschland",
     });
     expect(rows(groups, "address")).toEqual({
       "Straße und Hausnummer": "Musterstraße 1",
@@ -251,7 +251,7 @@ describe("lead request summary", () => {
       Vorname: "Viktor",
       Nachname: "Zahler",
       Geburtsdatum: "03.02.1960",
-      "Staatsangehörigkeit(en)": "Ukraine",
+      "Staatsangehörigkeit (bei mehreren alle angeben)": "Ukraine",
       "Beziehung zu Ihnen": "Elternteil",
       Ort: "München",
       Wohnsitzland: "Deutschland",
@@ -477,7 +477,7 @@ describe("lead request summary", () => {
       Vorname: "Viktor",
       Nachname: "Zahler",
       Geburtsdatum: "03.02.1960",
-      "Staatsangehörigkeit(en)": "Ukraine",
+      "Staatsangehörigkeit (bei mehreren alle angeben)": "Ukraine",
       "Beziehung zu Ihnen": "Vater",
       Ort: "München",
       Wohnsitzland: "Deutschland",
@@ -702,7 +702,7 @@ describe("lead request summary", () => {
       Vorname: "Ben",
       Nachname: "Muster",
       Geburtsdatum: "15.01.1980",
-      "Staatsangehörigkeit(en)": "Deutschland",
+      "Staatsangehörigkeit (bei mehreren alle angeben)": "Deutschland",
       "Straße und Hausnummer": "Musterstraße 2",
       Postleitzahl: "10115",
       Ort: "Berlin",
@@ -784,7 +784,7 @@ describe("lead request summary", () => {
       { label: "Vorname", value: "Anna" },
       { label: "Nachname", value: "Muster" },
       { label: "Geburtsdatum", value: "02.03.1985" },
-      { label: "Staatsangehörigkeit(en)", value: "Ukraine" },
+      { label: "Staatsangehörigkeit (bei mehreren alle angeben)", value: "Ukraine" },
       { label: "E-Mail", value: "anna.muster@example.com" },
     ]);
 

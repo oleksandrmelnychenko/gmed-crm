@@ -40,7 +40,7 @@ describe("the missing list of a parent's login", () => {
 
   it("names the parents as 'you' and 'the other parent'", () => {
     const who = { mineSlot: "rep1" as const, custody: "joint" as const };
-    expect(submitFieldLabel(ru, "rep1_citizenships", true, null, true, who)).toBe("Вы: Гражданство");
+    expect(submitFieldLabel(ru, "rep1_citizenships", true, null, true, who)).toBe("Вы: Гражданство (если несколько — укажите все)");
     expect(submitFieldLabel(ru, "rep2_first_name", true, null, true, who)).toBe("Второй родитель: Имя");
     // Without a login among the parents: no place numbers either (labels audit 2026-10-26, B5).
     expect(submitFieldLabel(ru, "rep2_first_name", true, null, true, { mineSlot: null, custody: "joint" })).toBe("Другой родитель: Имя");
