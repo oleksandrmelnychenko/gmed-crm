@@ -435,6 +435,15 @@ function OrderSummaryLine({
   );
 }
 
+function PlanningMetric({ label, value, className }: { label: string; value: ReactNode; className?: string }) {
+  return (
+    <div className={cn("min-w-0 rounded-xl border border-border/70 bg-background p-3", className)}>
+      <div className="mb-2 font-mono text-xs font-medium text-muted-foreground">{label}</div>
+      <div className="text-sm font-semibold leading-relaxed text-foreground">{value}</div>
+    </div>
+  );
+}
+
 function MiniMetric({
   label,
   value,
@@ -5267,8 +5276,8 @@ function useOrdersPageContent() {
                 ) : null}
 
                 {shouldRenderOrderSection("planning") && orderDetail.planning_preparation ? (
-                  <section className="rounded-lg border border-border/70 bg-card p-6">
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <section className="rounded-lg border border-border/70 bg-card p-4 sm:p-5">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
                           {titleWithDot(
@@ -5279,15 +5288,16 @@ function useOrdersPageContent() {
                       {detailNewAppointmentHref ? (
                         <StaffLink
                           to={detailNewAppointmentHref}
-                          className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 rounded-lg bg-field text-xs")}
+                          className={cn(buttonVariants({ size: "sm" }), "h-8 rounded-lg")}
                         >
-                          {t.appointments_new}
+                          <Plus className="size-4" />{t.appointments_new}
                         </StaffLink>
                       ) : null}
                     </div>
-                    <div className="mt-5 space-y-4">
-                      <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
-                        <OrderSummaryLine
+                    <div className="mt-4 space-y-4">
+                      <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        <PlanningMetric
+                          className="md:col-span-2 xl:col-span-3"
                           label={l("orders_planungsfreigabe")}
                           value={
                             <Badge
@@ -5317,7 +5327,7 @@ function useOrdersPageContent() {
                         orderDetail.planning_preparation.blocking_reasons.length > 0 ? (
                           <div
                             data-testid="order-planning-readiness-reasons"
-                            className="text-xs leading-5 text-muted-foreground md:col-span-2"
+                            className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm leading-6 text-amber-900 md:col-span-2 xl:col-span-3"
                           >
                             <div className="font-medium text-foreground">
                               {lang === "de"
@@ -5331,7 +5341,7 @@ function useOrdersPageContent() {
                             </ul>
                           </div>
                         ) : null}
-                        <OrderSummaryLine
+                        <PlanningMetric
                           label={l("orders_behandlungsplan")}
                           value={
                             treatmentPlanStatusLabel(
@@ -5340,7 +5350,7 @@ function useOrdersPageContent() {
                             )
                           }
                         />
-                        <OrderSummaryLine
+                        <PlanningMetric
                           label={l("orders_medizinische_termine")}
                           value={
                             orderDetail.planning_preparation.medical_required ?? true
@@ -5352,7 +5362,7 @@ function useOrdersPageContent() {
                               : l("orders_nicht_erforderlich")
                           }
                         />
-                        <OrderSummaryLine
+                        <PlanningMetric
                           label={l("orders_vorbereitungsunterlagen")}
                           value={
                             preparationDocumentStatusLabel(
@@ -5361,7 +5371,7 @@ function useOrdersPageContent() {
                             )
                           }
                         />
-                        <OrderSummaryLine
+                        <PlanningMetric
                           label={l("orders_nicht_medizinischer_ablauf")}
                           value={
                             orderDetail.planning_preparation
@@ -5380,7 +5390,7 @@ function useOrdersPageContent() {
                                   // that the plan holds such visits anyway.
                                   <span data-testid="order-planning-non-medical-hint">
                                     {l("orders_nicht_erforderlich")}
-                                    <span className="block text-xs text-amber-700">
+                                    <span className="mt-2 block rounded-lg bg-amber-50 px-2.5 py-2 text-xs font-normal leading-5 text-amber-900">
                                       {lang === "de"
                                         ? `Im Plan: ${orderDetail.planning_preparation.non_medical_total} nicht-medizinische(r) Termin(e). Sollen sie vor der Durchführung bestätigt sein, „${l("orders_nicht_medizinische_leistungen_sind_erforderlich")}“ einschalten.`
                                         : `В плане немедицинских приёмов: ${orderDetail.planning_preparation.non_medical_total}. Если их нужно подтвердить до исполнения, включите «${l("orders_nicht_medizinische_leistungen_sind_erforderlich")}».`}
@@ -5389,7 +5399,7 @@ function useOrdersPageContent() {
                                 : l("orders_nicht_erforderlich")
                           }
                         />
-                        <OrderSummaryLine
+                        <PlanningMetric
                           label={l("orders_dolmetscher")}
                           value={
                             orderDetail.planning_preparation
@@ -5401,7 +5411,7 @@ function useOrdersPageContent() {
                               : l("orders_nicht_erforderlich")
                           }
                         />
-                        <OrderSummaryLine
+                        <PlanningMetric
                           label={l("orders_dolmetscher_briefing")}
                           value={
                             interpreterBriefingStatusLabel(
@@ -5410,15 +5420,11 @@ function useOrdersPageContent() {
                             )
                           }
                         />
-                        <OrderSummaryLine
+                        <PlanningMetric
                           label={l("orders_letzter_meilenstein")}
                           value={
                             orderDetail.planning_preparation.plan_finalized_at
-                              ? l("orders_plan") +
-                                ` ${formatDateTimeLabel(
-                                  orderDetail.planning_preparation
-                                    .plan_finalized_at,
-                                )}`
+                              ? <span className="inline-flex flex-wrap items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700"><CalendarClock className="size-3.5" />{l("orders_plan")} {formatDateTimeLabel(orderDetail.planning_preparation.plan_finalized_at)}</span>
                               : l("orders_noch_kein_planungsmeilenstein")
                           }
                         />

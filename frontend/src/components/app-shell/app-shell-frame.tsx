@@ -13,6 +13,7 @@ import { leadShellText } from "@/pages/patient-lead/lead-shell-text";
 import { NavPanel } from "../nav-panel";
 import { Topbar } from "../topbar";
 import { WorkspaceRailResolver, type WorkspaceRailKind } from "./workspace-rail-resolver";
+import "./patient-portal-theme.css";
 
 type AppShellFrameProps = {
   children: ReactNode;
@@ -48,7 +49,7 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
   }, [leadPortal, cabinetLang, lang]);
 
   return (
-    <div className="h-dvh overflow-hidden bg-background">
+    <div className={cn("h-dvh overflow-hidden bg-background", patientPortal && !leadPortal && "patient-portal-theme")}>
       <a
         href="#main-content"
         className="sr-only fixed left-3 top-3 z-[60] rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background focus:not-sr-only focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -57,7 +58,7 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
       </a>
       <div className="flex h-full min-h-0 min-w-0 flex-col">
         <Topbar />
-        <div className={cn("relative flex min-h-0 min-w-0 flex-1 overflow-hidden", patientPortal ? "bg-card" : "bg-muted/60")}>
+        <div className={cn("app-shell-body relative flex min-h-0 min-w-0 flex-1 overflow-hidden", patientPortal ? "bg-card" : "bg-muted/60")}>
           <NavPanel />
           {!collapsed ? (
             <button

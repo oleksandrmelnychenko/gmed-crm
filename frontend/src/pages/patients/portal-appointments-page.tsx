@@ -10,8 +10,9 @@ import {
   type FormEvent,
   type SetStateAction,
 } from "react";
-import { CalendarClock, LoaderCircle, Plus, RefreshCw, Send } from "lucide-react";
+import { Building2, Clock3, LoaderCircle, MapPin, Plus, RefreshCw, Send, UserRound } from "lucide-react";
 
+import { StatusChip } from "@/components/ui/status-chip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -423,38 +424,31 @@ function usePatientAppointmentsPageContent() {
             ) : (
               <div className="space-y-3">
                 {appointments.map((item) => (
-                  <ListItem key={item.id} className="space-y-3">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap gap-2">
-                          <StatusBadge status={item.status} className={appointmentStatusTone(item.status)}>
-                            {portalStatusLabel(item.status)}
-                          </StatusBadge>
-                          <StatusBadge tone="neutral" className="normal-case tracking-normal">
-                            {appointmentTypeLabel(item.appointment_type)}
-                          </StatusBadge>
-                          <StatusBadge tone="brand" className="normal-case tracking-normal">
-                            {appointmentCarePathKindLabel(item.care_path_kind)}
-                          </StatusBadge>
-                        </div>
-                        <h2 className="mt-2 text-base font-semibold text-foreground">{item.title}</h2>
-                        <p className="mt-2 text-sm text-muted-foreground">
-                          {[item.provider_name, item.doctor_name, item.location].filter(Boolean).join(" / ")}
-                        </p>
+                  <ListItem key={item.id} className="space-y-2.5">
+                    <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                      <h2 className="min-w-0 text-base font-semibold leading-snug text-foreground">{item.title}</h2>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <StatusBadge status={item.status} className={appointmentStatusTone(item.status)}>
+                          {portalStatusLabel(item.status)}
+                        </StatusBadge>
+                        <StatusBadge tone="neutral" className="normal-case tracking-normal">
+                          {appointmentTypeLabel(item.appointment_type)}
+                        </StatusBadge>
+                        <StatusBadge tone="brand" className="normal-case tracking-normal">
+                          {appointmentCarePathKindLabel(item.care_path_kind)}
+                        </StatusBadge>
                       </div>
-                      <CalendarClock className="size-5 text-muted-foreground" />
                     </div>
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <InfoRow
-                        className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
-                        label={t.portal_appointments_date}
-                        value={<PortalDateChip>{formatPortalDate(item.date)}</PortalDateChip>}
-                      />
-                      <InfoRow
-                        className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
-                        label={t.portal_appointments_time}
-                        value={[item.time_start, item.time_end].filter(Boolean).join(" - ") || t.portal_appointments_not_set}
-                      />
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-foreground">
+                      {item.doctor_name ? <span className="inline-flex min-w-0 items-center gap-1.5"><UserRound aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />{item.doctor_name}</span> : null}
+                      {item.provider_name && !item.location?.toLocaleLowerCase().includes(item.provider_name.toLocaleLowerCase()) ? <span className="inline-flex min-w-0 items-center gap-1.5"><Building2 aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />{item.provider_name}</span> : null}
+                      {item.location ? (
+                        <span className="inline-flex min-w-0 items-center gap-1.5 text-muted-foreground"><MapPin aria-hidden="true" className="size-4 shrink-0" />{item.location}</span>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <PortalDateChip>{formatPortalDate(item.date)}</PortalDateChip>
+                      <StatusChip tone="info" className="tabular-nums"><Clock3 aria-hidden="true" />{[item.time_start, item.time_end].filter(Boolean).join(" – ") || t.portal_appointments_not_set}</StatusChip>
                     </div>
                   </ListItem>
                 ))}

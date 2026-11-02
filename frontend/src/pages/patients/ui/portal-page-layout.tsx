@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 
 /** The same card, border and heading rhythm as the staff workspace. */
 export function PortalSection({ className, ...props }: ComponentProps<typeof Section>) {
-  return <Section {...props} className={cn("min-w-0 rounded-xl border border-border/70 bg-card p-3 sm:p-4 [&_label.block]:font-mono [&_label.block]:text-xs", className)} />;
+  return <Section {...props} className={cn("portal-section min-w-0 rounded-xl border border-border/70 bg-card p-3 sm:p-4 [&_label.block]:font-mono [&_label.block]:text-xs", className)} />;
 }
 
 export function PortalInfoRow({ className, ...props }: ComponentProps<typeof InfoRow>) {
@@ -14,7 +14,7 @@ export function PortalInfoRow({ className, ...props }: ComponentProps<typeof Inf
 }
 
 export function PortalListItem({ className, ...props }: ComponentProps<typeof ListItem>) {
-  return <ListItem {...props} className={cn("min-w-0 rounded-xl border-border/60 bg-card p-3 shadow-none [overflow-wrap:anywhere]", className)} />;
+  return <ListItem {...props} className={cn("portal-list-item min-w-0 rounded-xl border-border/60 bg-card p-3 shadow-none [overflow-wrap:anywhere]", className)} />;
 }
 
 export function PortalStatCard({ label, value, description }: ComponentProps<typeof StatCard>) {
@@ -29,7 +29,7 @@ export function PortalStatCard({ label, value, description }: ComponentProps<typ
 
 export function PortalDateChip({ children }: { children: ReactNode }) {
   if (!children || children === "—" || children === "–") return <span>{children || "—"}</span>;
-  return <StatusChip tone="info" className="tabular-nums"><CalendarDays aria-hidden="true" /><span className="min-w-0 whitespace-normal">{children}</span></StatusChip>;
+  return <StatusChip tone="info" className="portal-date-chip tabular-nums"><CalendarDays aria-hidden="true" /><span className="min-w-0 whitespace-normal">{children}</span></StatusChip>;
 }
 
 export function PortalSummary({ items }: { items: { label: string; value: ReactNode; visible: boolean }[] }) {

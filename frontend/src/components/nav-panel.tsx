@@ -229,7 +229,7 @@ export function NavPanel() {
     <>
     <nav
       className={cn(
-        "relative z-40 flex shrink-0 flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain bg-sidebar transition-[width,transform] duration-200 ease-out motion-reduce:transition-none lg:relative lg:inset-auto lg:translate-x-0 max-lg:fixed max-lg:inset-y-12 max-lg:left-0 max-lg:w-72 max-lg:border-r max-lg:border-sidebar-border max-lg:shadow-xl",
+        "app-navigation relative z-40 flex shrink-0 flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain bg-sidebar transition-[width,transform] duration-200 ease-out motion-reduce:transition-none lg:relative lg:inset-auto lg:translate-x-0 max-lg:fixed max-lg:inset-y-12 max-lg:left-0 max-lg:w-72 max-lg:border-r max-lg:border-sidebar-border max-lg:shadow-xl",
         collapsed
           ? "w-14 items-center max-lg:pointer-events-none max-lg:-translate-x-full"
           : "w-60 max-lg:translate-x-0",
@@ -545,7 +545,7 @@ function UserCard({
     );
   }
   return (
-    <div className="flex items-center gap-2.5 rounded-lg border border-border bg-card px-2.5 py-2 shadow-sm">
+    <div className="navigation-user-card flex items-center gap-2.5 rounded-lg border border-border bg-card px-2.5 py-2 shadow-sm">
       <div className="flex items-center justify-center size-9 shrink-0 rounded-full bg-[var(--brand)] text-[12px] font-semibold text-white">
         {userInitials(name)}
       </div>

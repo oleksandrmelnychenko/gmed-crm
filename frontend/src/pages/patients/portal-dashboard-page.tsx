@@ -382,7 +382,7 @@ function usePatientDashboardPageContent() {
   }
 
   return (
-    <TabShell className="mt-0 w-full min-h-0 max-w-none space-y-3">
+    <TabShell className="portal-dashboard mt-0 w-full min-h-0 max-w-none space-y-3">
       <PageHeader
         title={`${greeting}, ${user?.name ?? patientLabel}`}
         description={t.portal_dashboard_only_explicitly_released_documents_and_privacy_workflows_are_sho}
@@ -432,7 +432,7 @@ function usePatientDashboardPageContent() {
 
       {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
 
-      <nav aria-label={t.portal_dashboard_more_sections} className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <nav aria-label={t.portal_dashboard_more_sections} className="portal-shortcuts grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
           { href: "/appointments", label: t.portal_dashboard_my_appointments, Icon: CalendarDays, count: upcomingAppointments },
           { href: "/documents", label: t.portal_dashboard_my_documents, Icon: FileText, count: releasedDocuments },
@@ -440,7 +440,7 @@ function usePatientDashboardPageContent() {
           { href: "/invoices", label: t.portal_dashboard_my_invoices, Icon: ReceiptText, count: openInvoiceCount },
         ].map(({ href, label, Icon, count }) => (
           <a key={href} href={href} className="group flex min-w-0 items-center gap-3 rounded-xl border border-border/70 bg-card px-3 py-3 text-sm font-medium transition hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            <span className="rounded-lg bg-muted p-2"><Icon aria-hidden="true" className="size-4 text-primary" /></span>
+            <span className="shrink-0"><Icon aria-hidden="true" className="size-4 text-primary" /></span>
             <span className="min-w-0 flex-1 break-words">{label}</span>
             {count > 0 ? <CountBadge>{count}</CountBadge> : <ArrowUpRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />}
           </a>
@@ -455,7 +455,7 @@ function usePatientDashboardPageContent() {
 
       {documentAlerts && documentAlerts.configured_rule_count > 0 ? (
         documentAlerts.document_pack_complete ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 px-4 py-3">
+          <div className="portal-document-complete flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 px-4 py-3">
             <PortalComplete>{t.portal_dashboard_your_minimum_document_pack_is_complete}</PortalComplete>
             <a href="/documents" className="text-sm font-medium text-primary hover:underline">{t.portal_dashboard_open_documents}</a>
           </div>
@@ -526,6 +526,8 @@ function usePatientDashboardPageContent() {
 
       <section className={cn("grid items-start gap-4", recentRecommendations.length > 0 && "lg:grid-cols-2")}>
         <Section
+          className="portal-next-actions"
+          showMarker={false}
           title={t.portal_dashboard_next_actions}
           accessory={
             <div className="flex flex-wrap items-center gap-2">
@@ -540,18 +542,18 @@ function usePatientDashboardPageContent() {
               ))}
             </div>
           ) : null}
-          <div className="space-y-3">
+          <div className="portal-action-list space-y-3">
             {topNextActions.length === 0 ? (
               <div className="py-3"><PortalComplete>{t.portal_dashboard_no_open_portal_actions_right_now}</PortalComplete></div>
             ) : (
-              topNextActions.map((item) => (
-                <ListItem key={item.id} className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              topNextActions.map((item, index) => (
+                <ListItem key={item.id} className={cn("portal-action-row flex flex-col gap-3 sm:flex-row sm:items-center", index === 0 && "portal-action-featured")}>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <StatusBadge className={nextActionTone(item.kind, item.priority)}>
                         {formatNextActionKind(item.kind, t)}
                       </StatusBadge>
-                      <CountBadge>{recommendationPriorityLabel(item.priority || "normal")}</CountBadge>
+                      {item.priority && item.priority !== "normal" ? <CountBadge>{recommendationPriorityLabel(item.priority)}</CountBadge> : null}
                     </div>
                     <p className="mt-2 text-sm font-semibold text-foreground">{item.title}</p>
                     {nextActionText(item) ? (
@@ -569,7 +571,7 @@ function usePatientDashboardPageContent() {
                     ) : null}
                   </div>
                   <div className="flex shrink-0 sm:justify-end">
-                    <a href={item.action_url} className="inline-flex min-h-8 items-center gap-2 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <a href={item.action_url} className="portal-action-link inline-flex min-h-8 items-center gap-2 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                       {nextActionButtonLabel(item, t)}
                       <ArrowUpRight aria-hidden="true" className="size-3.5 shrink-0" />
                     </a>

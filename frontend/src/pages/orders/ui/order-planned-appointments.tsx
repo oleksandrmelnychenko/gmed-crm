@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { CalendarDays, Clock3, Info, LoaderCircle } from "lucide-react";
 
+import { buttonVariants } from "@/components/ui/button";
+import { StatusChip } from "@/components/ui/status-chip";
 import { StaffLink } from "@/components/staff-link";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Banner, StatusBadge } from "@/components/ui-shell";
@@ -53,7 +55,7 @@ export function PlanReleaseButton({ count, busy, lang, onRelease }: PlanReleaseB
       data-testid="order-plan-release"
       disabled={busy}
       onClick={onRelease}
-      className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-60"
+      className={cn(buttonVariants({ size: "sm" }), "h-8 rounded-lg")}
     >
       {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
       {`${label} (${count})`}
@@ -67,10 +69,12 @@ export function PlanReleaseButton({ count, busy, lang, onRelease }: PlanReleaseB
  */
 export function OutsideQuoteWarning({ lang }: { lang: string }) {
   return (
-    <div data-testid="order-planned-appointment-outside-quote" className="mt-0.5 text-xs text-amber-700">
+    <div data-testid="order-planned-appointment-outside-quote" className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs leading-5 text-amber-900">
+      <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+      <span>
       {lang === "de"
         ? "Arzt nicht im unterschriebenen KV – beim Abschluss des Termins entsteht eine neue Rechnungszeile"
-        : "Врача нет в подписанном КВ — при завершении приёма появится новая строка счёта"}
+        : "Врача нет в подписанном КВ — при завершении приёма появится новая строка счёта"}</span>
     </div>
   );
 }
@@ -162,7 +166,8 @@ export function OrderPlannedAppointments({
   return (
     <div data-testid="order-planned-appointments" className="rounded-2xl border border-border p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-sm font-semibold text-foreground">
+        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-primary" />
           {tx("Приёмы заказа", "Termine des Auftrags")}
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -200,10 +205,10 @@ export function OrderPlannedAppointments({
                 aria-pressed={groupBy === value}
                 onClick={() => setGroupBy(value)}
                 className={cn(
-                  "h-7 rounded-md px-2.5 text-xs font-medium transition-colors",
+                  "h-8 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   groupBy === value
-                    ? "bg-card text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
               >
                 {label}
@@ -228,20 +233,20 @@ export function OrderPlannedAppointments({
         ) : null}
         {groups.map((group) => (
           <section key={group.key}>
-            <h3 className="flex flex-wrap items-baseline gap-x-2 text-xs font-semibold text-foreground">
-              {groupTitle(group)}
+            <h3 className="flex flex-wrap items-center gap-2 text-xs font-semibold text-foreground">
+              <StatusChip tone="info">{group.date ? <CalendarDays aria-hidden="true" /> : null}{groupTitle(group)}</StatusChip>
               {groupHint(group) ? (
                 <span className="font-normal text-muted-foreground">{groupHint(group)}</span>
               ) : null}
             </h3>
-            <ul className="mt-1 divide-y divide-border/60 rounded-md border border-border/60">
+            <ul className="mt-2 divide-y divide-border/60 overflow-hidden rounded-xl border border-border/60 bg-background">
               {group.appointments.map((appointment) => {
                 const status = ORDER_APPOINTMENT_STATUS[appointment.status];
                 const time = plannedTimeLabel(appointment);
                 return (
                   <li
                     key={appointment.id}
-                    className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm"
+                    className="grid items-start gap-2 px-3 py-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto]"
                   >
                     <div className="min-w-0">
                       <StaffLink
@@ -250,10 +255,10 @@ export function OrderPlannedAppointments({
                       >
                         {appointment.title}
                       </StaffLink>
-                      <div className="text-xs text-muted-foreground">
-                        {[
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                        {time ? <StatusChip tone="info" className="tabular-nums"><Clock3 aria-hidden="true" />{time}</StatusChip> : null}
+                        <span>{[
                           groupBy === "doctor" ? plannedDayLabel(appointment.date, lang) : null,
-                          time,
                           groupBy === "day" ? appointment.doctor_name : null,
                           groupBy === "day" ? appointment.provider_name : null,
                           appointment.interpreter_name
@@ -261,11 +266,11 @@ export function OrderPlannedAppointments({
                             : null,
                         ]
                           .filter(Boolean)
-                          .join(" · ")}
+                          .join(" · ")}</span>
                       </div>
                       {appointment.outside_signed_quote ? <OutsideQuoteWarning lang={lang} /> : null}
                     </div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
                       {isShownToPatient(appointment) ? null : (
                         <HiddenFromPatientMarker lang={lang} />
                       )}
