@@ -429,7 +429,7 @@ function useDataTableContent<T>({
   };
 
   return (
-    <div className={cn("flex flex-col overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm", className)}>
+    <div data-slot="data-table" className={cn("flex flex-col overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm", className)}>
       <div
         ref={scrollRef}
         className="relative hidden flex-1 overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:block"
@@ -551,7 +551,7 @@ function useDataTableContent<T>({
         {showLoading ? (
           loadingState ?? <DefaultSkeleton rows={12} height={rowHeight} />
         ) : showEmpty ? (
-          <div className="flex min-h-48 items-center justify-center p-8 text-sm text-muted-foreground">
+          <div data-slot="data-table-empty" className="flex min-h-48 items-center justify-center p-8 text-sm text-muted-foreground">
             {emptyState ?? t.common_no_results}
           </div>
         ) : (
@@ -712,7 +712,7 @@ function useDataTableContent<T>({
             ))}
           </div>
         ) : showEmpty ? (
-          <div className="flex min-h-48 items-center justify-center rounded-xl border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">
+          <div data-slot="data-table-empty" className="flex min-h-48 items-center justify-center rounded-xl border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">
             {emptyState ?? t.common_no_results}
           </div>
         ) : (
@@ -940,28 +940,28 @@ function rowToneStyle(opts: {
 }): DataTableRowStyle {
   if (opts.isSelected) {
     return {
-      "--dt-row-bg": "color-mix(in oklch, var(--primary) 8%, var(--card))",
-      "--dt-row-hover-bg": "color-mix(in oklch, var(--primary) 14%, var(--card))",
+      "--dt-row-bg": "var(--table-row-selected, color-mix(in oklch, var(--primary) 8%, var(--card)))",
+      "--dt-row-hover-bg": "var(--table-row-hover, color-mix(in oklch, var(--primary) 14%, var(--card)))",
     };
   }
 
   if (opts.isActive) {
     return {
-      "--dt-row-bg": "color-mix(in oklch, var(--muted) 72%, var(--card))",
-      "--dt-row-hover-bg": "color-mix(in oklch, var(--primary) 7%, color-mix(in oklch, var(--muted) 84%, var(--card)))",
+      "--dt-row-bg": "var(--table-row-active, color-mix(in oklch, var(--muted) 72%, var(--card)))",
+      "--dt-row-hover-bg": "var(--table-row-hover, color-mix(in oklch, var(--primary) 7%, color-mix(in oklch, var(--muted) 84%, var(--card))))",
     };
   }
 
   if (opts.isOdd) {
     return {
-      "--dt-row-bg": "color-mix(in oklch, var(--muted) 55%, var(--card))",
-      "--dt-row-hover-bg": "color-mix(in oklch, var(--primary) 5%, color-mix(in oklch, var(--muted) 78%, var(--card)))",
+      "--dt-row-bg": "var(--table-row-alternate, color-mix(in oklch, var(--muted) 55%, var(--card)))",
+      "--dt-row-hover-bg": "var(--table-row-hover, color-mix(in oklch, var(--primary) 5%, color-mix(in oklch, var(--muted) 78%, var(--card))))",
     };
   }
 
   return {
     "--dt-row-bg": "var(--card)",
-    "--dt-row-hover-bg": "color-mix(in oklch, var(--primary) 5%, color-mix(in oklch, var(--muted) 68%, var(--card)))",
+    "--dt-row-hover-bg": "var(--table-row-hover, color-mix(in oklch, var(--primary) 5%, color-mix(in oklch, var(--muted) 68%, var(--card))))",
   };
 }
 

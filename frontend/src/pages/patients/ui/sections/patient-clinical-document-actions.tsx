@@ -4,7 +4,7 @@ import { ClinicalReportPdfAction } from "./clinical-report-pdf-action";
 import { LabResultsPdfAction } from "./lab-results-pdf-action";
 import { MedicationPlanPdfAction } from "./medication-plan-pdf-action";
 
-const actionClassName = "h-auto min-h-9 max-w-full gap-1.5 rounded-lg whitespace-normal px-3 py-2 text-left sm:h-9 sm:py-0";
+const actionClassName = "h-auto min-h-9 min-w-0 max-w-full flex-1 basis-[210px] justify-start gap-2 rounded-lg whitespace-normal px-3 py-2 text-left text-xs";
 
 export function PatientClinicalDocumentActions({
   patientId, lang, canViewClinical, canImportDocuments, importAttentionCount, onScan,
@@ -22,7 +22,7 @@ export function PatientClinicalDocumentActions({
   return <div
     role="group"
     aria-label={lang === "de" ? "Medizinische Dokumente" : "Медицинские документы"}
-    className="flex w-fit max-w-full flex-wrap items-center gap-2 rounded-xl border border-border/70 bg-muted/30 p-2"
+    className="patient-clinical-actions flex w-full flex-wrap items-stretch gap-2 rounded-xl border border-border bg-card p-2"
   >
     {canViewClinical ? <>
       <ClinicalReportPdfAction patientId={patientId} className={actionClassName} />

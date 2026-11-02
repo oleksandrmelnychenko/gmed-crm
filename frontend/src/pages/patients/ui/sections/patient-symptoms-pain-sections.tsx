@@ -163,9 +163,9 @@ export function PatientSymptomsPainSections({
       searchable: true,
       sortable: true,
       required: true,
-      width: 420,
+      minWidth: 300,
       render: (item) => (
-        <span className="block max-w-[420px] truncate text-xs font-medium text-foreground">
+        <span className="block truncate text-xs font-medium text-foreground">
           {item.beschreibung || tri(lang, "case_ws_untitled_3")}
         </span>
       ),
@@ -207,7 +207,7 @@ export function PatientSymptomsPainSections({
       label: t.cases_pain_nrs_current,
       accessor: (item) => item.nrs_aktuell ?? "",
       sortable: true,
-      width: 110,
+      width: 150,
       render: (item) => item.nrs_aktuell != null ? (
         <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 font-mono text-[10px] font-medium text-rose-700">
           {t.uiText.cases_pain_nrs_label} {item.nrs_aktuell}
@@ -243,8 +243,8 @@ export function PatientSymptomsPainSections({
       accessor: (item) => item.ursache ?? "",
       filterType: "text",
       searchable: true,
-      width: 320,
-      render: (item) => <span className="block max-w-[320px] truncate text-xs text-foreground">
+      minWidth: 220,
+      render: (item) => <span className="block truncate text-xs text-foreground">
         {item.ursache?.trim() || "—"}
       </span>,
     },

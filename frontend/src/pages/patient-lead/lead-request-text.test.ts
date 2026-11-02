@@ -547,7 +547,7 @@ describe("lead cabinet languages", () => {
     expect(LEAD_CABINET_LANGS.map((option) => leadRequestText(option.value).fields.has_insurance)).toEqual([
       "Haben Sie eine Krankenversicherung?",
       "Do you have health insurance?",
-      "Чи є у вас медична страховка?",
+      "Чи є у вас медичне страхування?",
       "Есть ли у вас медицинская страховка?",
     ]);
     const ru = leadRequestText("ru");
@@ -623,7 +623,7 @@ describe("lead cabinet languages", () => {
       expect(text.recipient.payerPartyGuardian.patient).not.toBe(text.recipient.payerParty.patient);
       const words = [text.billingFields.payment_method, text.billingFields.invoice_to, text.fields.has_insurance];
       for (const word of words) {
-        expect(word, option.value).not.toMatch(/wohin|where should|куда|куди|wie werden sie bezahlen|будете платить|будете платити|how will you pay|страхування\?/i);
+        expect(word, option.value).not.toMatch(/wohin|where should|куда|куди|wie werden sie bezahlen|будете платить|будете платити|how will you pay|^Чи є у вас страхування\?/i);
       }
     }
   });

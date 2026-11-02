@@ -1,0 +1,41 @@
+/* Shared shell recipes for staff and patient workspaces. */
+.gmed-theme .app-shell-body { background: var(--sidebar); }
+
+.gmed-theme .app-navigation a {
+  color: var(--foreground);
+  font-weight: 450;
+  border-radius: 10px;
+  gap: 10px;
+}
+
+.gmed-theme .app-navigation :is(a, button) > svg {
+  width: var(--gmed-icon-size);
+  height: var(--gmed-icon-size);
+}
+
+.gmed-theme .navigation-user-card {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.gmed-theme .navigation-user-card > div:first-child {
+  width: 32px;
+  height: 32px;
+  color: var(--primary-foreground);
+}
+
+.gmed-theme nav a[aria-current="page"] {
+  background: var(--sidebar-accent);
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.gmed-theme nav a[aria-current="page"]::before {
+  display: none;
+}
+
+@media (min-width: 1024px) {
+  .gmed-theme .app-navigation a { min-height: 34px; }
+  .gmed-theme .app-navigation a.h-9 { height: 34px; }
+}

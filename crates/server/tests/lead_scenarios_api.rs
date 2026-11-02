@@ -16,7 +16,7 @@ use gmed_server::auth::jwt;
 
 const SECRET: &str = "test-secret-at-least-32-characters-long!!";
 const INQUIRY_CONSENT_VERSION: &str = "2026-10-03";
-const HEALTH_CONSENT_VERSION: &str = "2026-10-13";
+const HEALTH_CONSENT_VERSION: &str = "2026-11-02";
 const PDF: &[u8] = b"%PDF-1.4\n% synthetic scenario document\n%%EOF\n";
 
 struct Scn {

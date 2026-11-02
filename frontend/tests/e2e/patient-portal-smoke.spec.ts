@@ -1363,13 +1363,18 @@ test.describe("patient portal smoke flows", () => {
     await page
       .getByRole("button", { name: /Terminanfrage senden|Send appointment request/i })
       .click();
-    const appointmentSheet = page
+    const appointmentDialog = page
       .getByRole("dialog")
       .filter({ hasText: /Termin anfragen|Request a visit/i });
-    await expect(appointmentSheet).toBeVisible();
-    await expect(appointmentSheet).toHaveCSS("width", "390px");
+    await expect(appointmentDialog).toBeVisible();
+    await expect(appointmentDialog).toHaveCSS("width", "374px");
+    const appointmentDialogBox = await appointmentDialog.boundingBox();
+    expect(appointmentDialogBox?.height ?? 0).toBeLessThanOrEqual(828);
+    expect(appointmentDialogBox?.y ?? -1).toBeGreaterThanOrEqual(8);
+    expect((appointmentDialogBox?.y ?? 0) + (appointmentDialogBox?.height ?? 0)).toBeLessThanOrEqual(836);
+    await expect(appointmentDialog.getByRole("button", { name: /Terminanfrage senden|Send appointment request/i })).toBeInViewport();
     await page.screenshot({
-      path: testInfo.outputPath("patient-mobile-appointment-sheet.png"),
+      path: testInfo.outputPath("patient-mobile-appointment-dialog.png"),
       fullPage: false,
     });
     await page.keyboard.press("Escape");

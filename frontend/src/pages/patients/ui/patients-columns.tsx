@@ -255,7 +255,7 @@ export function buildPatientColumns(
                 onToggle={() => expansion.toggle(p.id)}
               />
             ) : null}
-            <div className="line-clamp-2 min-w-0 break-words text-left font-mono text-xs font-normal text-foreground">
+            <div className="line-clamp-2 min-w-0 break-words text-left text-[13px] font-medium text-foreground">
               {patientDisplayName(p)}
             </div>
             {dot ? (

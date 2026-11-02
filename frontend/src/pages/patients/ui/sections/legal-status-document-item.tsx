@@ -25,22 +25,22 @@ const STATUS_KEYS: Record<LegalStatusEvidenceState, string> = {
 const TONES: Record<LegalStatusEvidenceState, { chip: StatusChipTone; icon: string; text: string }> = {
   signed: {
     chip: "success",
-    icon: "bg-emerald-50 text-emerald-700",
+    icon: "text-emerald-700",
     text: "text-muted-foreground",
   },
   manual: {
     chip: "warning",
-    icon: "bg-amber-50 text-amber-700",
+    icon: "text-amber-700",
     text: "font-medium text-amber-700",
   },
   revoked: {
     chip: "error",
-    icon: "bg-rose-50 text-rose-700",
+    icon: "text-rose-700",
     text: "font-medium text-rose-700",
   },
   missing: {
     chip: "warning",
-    icon: "bg-amber-50 text-amber-700",
+    icon: "text-amber-700",
     text: "text-muted-foreground",
   },
 };
@@ -99,21 +99,24 @@ export function LegalStatusDocumentItem({
     <article
       data-testid={`legal-status-document-${kind}`}
       data-state={state}
-      className="grid min-w-0 gap-2 border-b border-border/60 bg-card px-4 py-3 last:border-b-0 sm:grid-cols-[2rem_minmax(0,1fr)_auto] sm:items-center"
+      className="grid min-w-0 gap-2 border-b border-border/60 bg-card px-3 py-2 last:border-b-0 sm:grid-cols-[1.25rem_minmax(0,1fr)_auto] sm:items-center"
     >
-      <div className={cn("hidden size-7 shrink-0 items-center justify-center rounded-md sm:flex", tone.icon)}>
+      <div className={cn("hidden size-5 shrink-0 items-center justify-center sm:flex", tone.icon)}>
         <Icon className="size-4" />
       </div>
-      <div className="min-w-0 space-y-0.5">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <p className="break-words text-sm font-medium leading-5 text-foreground">{label}</p>
-        <p
+        <StatusChip
+          tone={demoSigned ? "info" : tone.chip}
           data-testid={`legal-status-document-${kind}-state`}
-          className={cn("break-words text-xs leading-5", tone.text)}
+          className="whitespace-normal sm:whitespace-nowrap"
         >
           {demoSigned
             ? lang === "de" ? "DEMO-Unterschrift gespeichert. Kein rechtswirksamer Nachweis." : "DEMO-подпись сохранена. Юридическое подтверждение отсутствует."
             : legalStatusDocumentStateText(evidence, lang)}
-        </p>
+        </StatusChip>
+        </div>
         {hintKey ? (
           <p className="break-words text-xs leading-5 text-muted-foreground">{text(hintKey)}</p>
         ) : null}
@@ -125,9 +128,9 @@ export function LegalStatusDocumentItem({
         ) : null}
       </div>
       <div className="flex min-w-0 flex-wrap items-center justify-start gap-2 sm:justify-end">
-        <StatusChip tone={demoSigned ? "info" : tone.chip}>
+        {state !== "signed" && <StatusChip tone={demoSigned ? "info" : tone.chip}>
           {demoSigned ? lang === "de" ? "DEMO · Unterzeichnet" : "DEMO · Подписано" : text(STATUS_KEYS[state])}
-        </StatusChip>
+        </StatusChip>}
         {demoSigned && pendingDocument ? (
           <DocumentSignatureAction documentId={pendingDocument.id} title={pendingDocument.name} onDone={onSigned} />
         ) : null}

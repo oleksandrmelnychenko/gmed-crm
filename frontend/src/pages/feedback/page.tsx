@@ -555,15 +555,15 @@ function PatientRatingScale({
   return (
     <div
       className={cn(
-        "rounded-xl border p-3.5",
+        "portal-rating-scale rounded-xl border p-3",
         prominent
-          ? "border-orange-200 bg-orange-50/45"
+          ? "border-border bg-muted/40"
           : "border-border/70 bg-card",
       )}
     >
-      <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
         <span className="text-sm font-medium text-foreground">{label}</span>
-        <span className="rounded-full bg-background px-2 py-0.5 font-mono text-sm font-semibold text-foreground shadow-sm ring-1 ring-border/70">
+        <span className="text-sm font-semibold tabular-nums text-foreground">
           {value}
         </span>
       </div>
@@ -582,10 +582,10 @@ function PatientRatingScale({
               aria-pressed={selected}
               aria-label={`${label}: ${option}`}
               className={cn(
-                "flex h-9 min-w-0 items-center justify-center rounded-lg border text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400 focus-visible:ring-offset-2",
+                "flex h-9 min-w-0 items-center justify-center rounded-lg border text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                 selected
-                  ? "border-orange-500 bg-orange-500 text-white shadow-sm"
-                  : "border-border bg-background text-muted-foreground hover:border-orange-300 hover:bg-orange-50 hover:text-foreground",
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-card text-foreground hover:border-ring hover:bg-muted",
               )}
               onClick={() => onChange(option)}
             >
@@ -642,7 +642,7 @@ function PatientScoreGrid({
         />
       </div>
 
-      <section className="rounded-xl border border-border/70 bg-muted/15 p-3.5">
+      <section className="portal-detailed-ratings">
         <h3 className="mb-3 text-sm font-semibold text-foreground">
           {t.feedback_scores}
         </h3>
@@ -676,10 +676,10 @@ function PatientScoreGrid({
               type="button"
               aria-pressed={form.treatmentSuccess === option}
               className={cn(
-                "min-h-10 rounded-lg border px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400 focus-visible:ring-offset-2",
+                "min-h-10 rounded-lg border px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                 form.treatmentSuccess === option
-                  ? "border-orange-500 bg-orange-500 text-white"
-                  : "border-border bg-background text-muted-foreground hover:border-orange-300 hover:bg-orange-50 hover:text-foreground",
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-card text-foreground hover:border-ring hover:bg-muted",
               )}
               onClick={() =>
                 setForm((current) => ({
@@ -899,7 +899,7 @@ function PatientFeedbackContent({
   const { formatPortalAverage, formatPortalDateTime, portalNotSetLabel } = usePortalLabels();
   const { appointmentOptionLabel } = useLanguageHelpers();
   return (
-    <div className="w-full min-w-0 space-y-3 [&_label]:font-mono [&_label]:text-xs">
+    <div className="portal-feedback w-full min-w-0 space-y-3 [&_label]:font-sans [&_label]:text-sm">
       <PageHeader
         title={t.feedback_patient_page_title}
         description={t.feedback_patient_page_description}
@@ -985,7 +985,7 @@ function PatientFeedbackContent({
                     <button
                       key={item.id}
                       type="button"
-                      className="flex w-full items-center gap-3 rounded-xl border border-border/70 bg-card p-3.5 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
+                      className="flex w-full items-center gap-3 rounded-xl border border-border/70 bg-card p-3.5 text-left transition-colors hover:border-ring hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       onClick={() => setActiveFeedbackId(item.id)}
                     >
                       <div className="min-w-0 flex-1">

@@ -289,6 +289,7 @@ export function DataTableSurface<T>({
 
   return (
     <div
+      data-slot="data-table-surface"
       className={cn(
         "space-y-0 overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm",
         surfaceClassName,

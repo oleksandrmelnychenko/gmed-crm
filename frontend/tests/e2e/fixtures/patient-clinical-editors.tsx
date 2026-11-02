@@ -3,14 +3,18 @@ import { createRoot } from "react-dom/client";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import "../../../src/index.css";
+import "../../../src/components/ui/gmed-theme.css";
+import "../../../src/components/ui/gmed-controls.css";
+import "../../../src/components/app-shell/staff-portal-theme.css";
 import { PatientSymptomsPainSections } from "../../../src/pages/patients/ui/sections/patient-symptoms-pain-sections";
 import { PatientVitalsSheet } from "../../../src/pages/patients/ui/sheets/patient-vitals-sheet";
 
 localStorage.setItem("gmed_lang", "ru");
+document.body.classList.add("gmed-theme", "staff-portal-theme");
 
 function Fixture() {
   const [vitalsOpen, setVitalsOpen] = useState(false);
-  return <main className="space-y-4 p-4">
+  return <main className="patient-workspace space-y-4 p-4">
     <h1>Clinical editor QA</h1>
     <button type="button" onClick={() => setVitalsOpen(true)}>Open vitals</button>
     <PatientSymptomsPainSections patientId="patient-modal-qa" canManage />

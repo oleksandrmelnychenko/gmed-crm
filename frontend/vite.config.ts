@@ -32,6 +32,8 @@ export default defineConfig(({ mode, command }) => {
   }
 
   return {
+    // Parallel QA/dev servers must not replace each other's optimized modules.
+    cacheDir: process.env.VITE_CACHE_DIR || 'node_modules/.vite',
     plugins: [
       react(),
       babel({ presets: [reactCompilerPreset()] }),

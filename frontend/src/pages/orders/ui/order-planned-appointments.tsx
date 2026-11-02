@@ -55,7 +55,7 @@ export function PlanReleaseButton({ count, busy, lang, onRelease }: PlanReleaseB
       data-testid="order-plan-release"
       disabled={busy}
       onClick={onRelease}
-      className={cn(buttonVariants({ size: "sm" }), "h-8 rounded-lg")}
+      data-slot="button" data-variant="default" data-size="sm" className={buttonVariants({ size: "sm" })}
     >
       {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
       {`${label} (${count})`}
@@ -164,9 +164,9 @@ export function OrderPlannedAppointments({
     group.doctorName ? group.providerName : null;
 
   return (
-    <div data-testid="order-planned-appointments" className="rounded-2xl border border-border p-4">
+    <div data-testid="order-planned-appointments" className="rounded-lg border border-border bg-card p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+        <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
           <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-primary" />
           {tx("Приёмы заказа", "Termine des Auftrags")}
         </div>
@@ -205,9 +205,9 @@ export function OrderPlannedAppointments({
                 aria-pressed={groupBy === value}
                 onClick={() => setGroupBy(value)}
                 className={cn(
-                  "h-8 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "h-[30px] rounded-md px-2.5 max-sm:h-10 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   groupBy === value
-                    ? "bg-primary text-primary-foreground shadow-sm"
+                    ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
               >
@@ -218,7 +218,7 @@ export function OrderPlannedAppointments({
         </div>
       </div>
 
-      <div className="mt-3 space-y-3">
+      <div className="mt-2 space-y-2">
         {error ? <Banner tone="error">{error}</Banner> : null}
         {!error && !appointments ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -239,14 +239,14 @@ export function OrderPlannedAppointments({
                 <span className="font-normal text-muted-foreground">{groupHint(group)}</span>
               ) : null}
             </h3>
-            <ul className="mt-2 divide-y divide-border/60 overflow-hidden rounded-xl border border-border/60 bg-background">
+            <ul className="mt-2 divide-y divide-border/60 overflow-hidden rounded-lg border border-border/60 bg-card">
               {group.appointments.map((appointment) => {
                 const status = ORDER_APPOINTMENT_STATUS[appointment.status];
                 const time = plannedTimeLabel(appointment);
                 return (
                   <li
                     key={appointment.id}
-                    className="grid items-start gap-2 px-3 py-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto]"
+                    className="grid items-start gap-2 px-3 py-2 text-[13px] sm:grid-cols-[minmax(0,1fr)_auto]"
                   >
                     <div className="min-w-0">
                       <StaffLink

@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import {
   Banner,
   CountBadge,
-  EmptyCell,
   PageHeader,
   StatusBadge,
   TabLoader,
@@ -226,14 +225,14 @@ function SubscriptionSection({
       accessory={<CountBadge>{subscriptions.length}</CountBadge>}
     >
       {subscriptions.length === 0 ? (
-        <EmptyCell>
-          <p className="text-base font-semibold text-foreground">
+        <div className="space-y-1 text-sm">
+          <p className="font-medium text-foreground">
             {t.portal_subscriptions_empty_title}
           </p>
-          <p className="mt-2 text-sm text-muted-foreground">{emptyDescription}</p>
-        </EmptyCell>
+          <p className="text-muted-foreground">{emptyDescription}</p>
+        </div>
       ) : (
-        <div className="grid gap-3 xl:grid-cols-2">
+        <div className={cn("grid gap-3", subscriptions.length > 1 && "xl:grid-cols-2")}>
           {subscriptions.map((subscription) => (
             <SubscriptionCard key={subscription.id} subscription={subscription} />
           ))}
@@ -275,7 +274,7 @@ function SubscriptionCard({ subscription }: { subscription: PortalSubscriptionIt
         : t.portal_subscriptions_amount_hidden;
 
   return (
-    <article className={cn("min-w-0 space-y-3 rounded-xl p-3 shadow-none [overflow-wrap:anywhere]", tokens.surface.card)}>
+    <article className={cn("portal-subscription-card min-w-0 space-y-3 rounded-xl p-3 shadow-none [overflow-wrap:anywhere]", tokens.surface.card)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-base font-semibold text-foreground">
@@ -299,7 +298,7 @@ function SubscriptionCard({ subscription }: { subscription: PortalSubscriptionIt
         </div>
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="portal-subscription-details grid gap-2 sm:grid-cols-2">
         <InfoRow
           className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
           label={t.portal_subscriptions_period}
@@ -340,10 +339,9 @@ function SubscriptionCard({ subscription }: { subscription: PortalSubscriptionIt
             <PackageCheck className="size-4 text-primary" />
             {t.portal_subscriptions_usage}
           </h3>
-          <PortalDateChip>{period}</PortalDateChip>
         </div>
         {subscription.services.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+          <p className="text-sm leading-6 text-muted-foreground">
             {t.portal_subscriptions_no_services}
           </p>
         ) : (

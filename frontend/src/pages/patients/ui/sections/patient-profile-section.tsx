@@ -228,13 +228,13 @@ function ProfileDetailTile({
   return (
     <article
       className={cn(
-        "grid min-w-0 gap-2 border-b border-border/60 bg-card px-4 py-3 last:border-b-0 sm:grid-cols-[2rem_minmax(0,1fr)_auto] sm:items-center",
+        "grid min-w-0 gap-2 border-b border-border/60 bg-card px-3 py-2 last:border-b-0 sm:grid-cols-[1.25rem_minmax(0,1fr)_auto] sm:items-center",
       )}
     >
       <div
         className={cn(
-          "hidden size-7 shrink-0 items-center justify-center rounded-md sm:flex",
-          done ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700",
+          "hidden size-5 shrink-0 items-center justify-center sm:flex",
+          done ? "text-emerald-700" : "text-amber-700",
         )}
       >
         {children}
@@ -453,14 +453,14 @@ function ProfileActionCard({
     <button
       type="button"
       disabled={disabled}
-      className="group grid w-full min-w-0 grid-cols-[minmax(0,1fr)_1.75rem] items-center gap-x-3 gap-y-1 rounded-xl border border-border bg-card px-3.5 py-3 text-left shadow-xs transition-colors hover:border-primary/40 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60"
+      className="group grid w-full min-w-0 grid-cols-[minmax(0,1fr)_1.75rem] items-center gap-x-3 gap-y-1 rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:border-primary/40 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60"
       onClick={onClick}
     >
       <h3 className="min-w-0 text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
       <p className="col-start-1 row-start-2 min-w-0 text-xs leading-5 text-muted-foreground">
         {description}
       </p>
-      <span className="col-start-2 row-span-2 row-start-1 flex size-7 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground transition-colors group-hover:border-foreground/30">
+      <span className="col-start-2 row-span-2 row-start-1 flex size-5 items-center justify-center text-foreground">
         {busy ? (
           <LoaderCircle className="size-4 animate-spin" />
         ) : (
@@ -1223,7 +1223,7 @@ function usePatientProfileTabContent({
       </div>
 
       <PatientFormSection
-        className="overflow-hidden shadow-xs [&>div:last-child]:bg-muted/40"
+        className="patient-legal-section overflow-hidden"
         title={
           <span className="inline-flex items-center gap-2">
             {t.patients_legal_status}
@@ -1254,7 +1254,7 @@ function usePatientProfileTabContent({
             </div>
           </Banner>
         ) : null}
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2" data-testid="patient-legal-summary">
           {[
             {
               icon: ShieldCheck,
@@ -1262,8 +1262,8 @@ function usePatientProfileTabContent({
               value: patientDetailStatusLabel(legalStatus.contractStatus),
               tone: (legalStatus.contractStatus === "signed" ? "success" : "warning") as StatusChipTone,
               iconClass: legalStatus.contractStatus === "signed"
-                ? "bg-emerald-50 text-emerald-700"
-                : "bg-amber-50 text-amber-700",
+                ? "text-emerald-700"
+                : "text-amber-700",
             },
             {
               icon: CheckCircle2,
@@ -1271,8 +1271,8 @@ function usePatientProfileTabContent({
               value: `${legalStatusCompletion.completed}/${legalStatusCompletion.total}`,
               tone: (legalStatusCompletion.completed === legalStatusCompletion.total ? "success" : "warning") as StatusChipTone,
               iconClass: legalStatusCompletion.completed === legalStatusCompletion.total
-                ? "bg-emerald-50 text-emerald-700"
-                : "bg-amber-50 text-amber-700",
+                ? "text-emerald-700"
+                : "text-amber-700",
             },
             {
               icon: ClipboardCheck,
@@ -1280,28 +1280,26 @@ function usePatientProfileTabContent({
               value: legalStatus.complianceCompleted ? t.common_completed : t.common_pending,
               tone: (legalStatus.complianceCompleted ? "success" : "warning") as StatusChipTone,
               iconClass: legalStatus.complianceCompleted
-                ? "bg-emerald-50 text-emerald-700"
-                : "bg-amber-50 text-amber-700",
+                ? "text-emerald-700"
+                : "text-amber-700",
             },
             {
               icon: NotebookText,
               label: t.patient_profile_notes,
               value: legalStatus.notes ? l("patients_yes") : l("patients_no"),
               tone: "neutral" as StatusChipTone,
-              iconClass: "bg-slate-100 text-slate-700",
+              iconClass: "text-muted-foreground",
             },
           ].map((metric) => {
             const Icon = metric.icon;
             return (
               <div
                 key={String(metric.label)}
-                className="flex min-w-0 flex-col items-start gap-3 rounded-xl border border-border bg-card p-3.5"
+                className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5"
               >
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className={cn("flex size-7 shrink-0 items-center justify-center rounded-md", metric.iconClass)}>
-                    <Icon className="size-3.5" aria-hidden="true" />
-                  </span>
-                  <span className="min-w-0 break-words font-mono text-[11px] font-medium text-muted-foreground">{metric.label}</span>
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <Icon className={cn("size-4 shrink-0", metric.iconClass)} aria-hidden="true" />
+                  <span className="min-w-0 break-words text-[13px] font-medium text-muted-foreground">{metric.label}</span>
                 </div>
                 <StatusChip tone={metric.tone}>{metric.value}</StatusChip>
               </div>

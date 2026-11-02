@@ -92,7 +92,7 @@ mod services;
 
 /// Version of the consent texts below. A new wording needs a new version; a
 /// consent to an older version does not count any more.
-pub(crate) const HEALTH_CONSENT_VERSION: &str = "2026-10-13";
+pub(crate) const HEALTH_CONSENT_VERSION: &str = "2026-11-02";
 const INQUIRY_CONSENT_VERSION: &str = "2026-10-03";
 /// Languages of the consent texts: the portal speaks DE and RU, the lead
 /// cabinet also UA and EN (owner request 2026-10-04).
@@ -275,82 +275,82 @@ pub(crate) fn inquiry_consent_text(kind: AccessKind, language: &str) -> Option<&
 pub(crate) fn health_consent_text(kind: AccessKind, language: &str) -> Option<&'static str> {
     Some(match (kind, language) {
         (AccessKind::Own, "de") => {
-            "Ich willige ein, dass die GMed die Gesundheitsdaten, die ich in diesem Portal hochlade \
+            "Ich willige ein, dass die GMED – Agentur für Patientenbetreuung die Gesundheitsdaten, die ich in diesem Portal hochlade \
              (zum Beispiel Arztbriefe, Befunde, Bilder und Laborwerte), sowie die Beschreibung meines Anliegens verarbeitet, um meine Anfrage \
              zu prüfen und mögliche Leistungen in Deutschland vorzubereiten (Art. 9 Abs. 2 lit. a \
-             DSGVO). An Kliniken, Ärztinnen und Ärzte gibt die GMed diese Unterlagen erst nach einer \
+             DSGVO). An Kliniken, Ärztinnen und Ärzte gibt die GMED – Agentur für Patientenbetreuung diese Unterlagen erst nach einer \
              gesonderten Einwilligung weiter. Die Einwilligung ist freiwillig. Ich kann sie jederzeit \
-             im Portal oder gegenüber der GMed mit Wirkung für die Zukunft widerrufen; die \
+             im Portal oder gegenüber der GMED – Agentur für Patientenbetreuung mit Wirkung für die Zukunft widerrufen; die \
              Rechtmäßigkeit der bis dahin erfolgten Verarbeitung bleibt unberührt. Kommt keine \
              Zusammenarbeit zustande, werden die Anfrage und die Unterlagen nach Ablauf der \
              angegebenen Frist gelöscht."
         }
         (AccessKind::Own, "ru") => {
-            "Я даю согласие на то, чтобы GMed обрабатывала данные о моём здоровье, которые я загружаю \
+            "Я даю согласие на то, чтобы GMED – Agentur für Patientenbetreuung обрабатывала данные о моём здоровье, которые я загружаю \
              в этот портал (например, выписки, заключения, снимки и анализы), а также описание моего обращения, чтобы рассмотреть мою \
              заявку и подготовить возможные услуги в Германии (ст. 9 п. 2 лит. a DSGVO). Клиникам и \
-             врачам GMed передаёт эти документы только после отдельного согласия. Согласие \
-             добровольное. Я могу в любой момент отозвать его в портале или обратившись в GMed; отзыв \
+             врачам GMED – Agentur für Patientenbetreuung передаёт эти документы только после отдельного согласия. Согласие \
+             добровольное. Я могу в любой момент отозвать его в портале или обратившись в GMED – Agentur für Patientenbetreuung; отзыв \
              действует на будущее и не влияет на законность обработки до отзыва. Если сотрудничество \
              не состоится, заявка и документы удаляются по истечении указанного срока."
         }
         (AccessKind::Guardian, "de") => {
-            "Als Elternteil oder gesetzlicher Vertreter willige ich ein, dass die GMed die \
+            "Als Elternteil oder gesetzlicher Vertreter willige ich ein, dass die GMED – Agentur für Patientenbetreuung die \
              Gesundheitsdaten meines Kindes, die ich in diesem Portal hochlade (zum Beispiel \
              Arztbriefe, Befunde, Bilder und Laborwerte), sowie die Beschreibung des Anliegens verarbeitet, um die Anfrage zu prüfen und \
              mögliche Leistungen in Deutschland vorzubereiten (Art. 9 Abs. 2 lit. a DSGVO). An \
-             Kliniken, Ärztinnen und Ärzte gibt die GMed diese Unterlagen erst nach einer gesonderten \
+             Kliniken, Ärztinnen und Ärzte gibt die GMED – Agentur für Patientenbetreuung diese Unterlagen erst nach einer gesonderten \
              Einwilligung weiter. Die Einwilligung ist freiwillig. Ich kann sie jederzeit im Portal \
-             oder gegenüber der GMed mit Wirkung für die Zukunft widerrufen; die Rechtmäßigkeit der \
+             oder gegenüber der GMED – Agentur für Patientenbetreuung mit Wirkung für die Zukunft widerrufen; die Rechtmäßigkeit der \
              bis dahin erfolgten Verarbeitung bleibt unberührt. Kommt keine Zusammenarbeit zustande, \
              werden die Anfrage und die Unterlagen nach Ablauf der angegebenen Frist gelöscht."
         }
         (AccessKind::Guardian, "ru") => {
-            "Как родитель или законный представитель я даю согласие на то, чтобы GMed обрабатывала \
+            "Как родитель или законный представитель я даю согласие на то, чтобы GMED – Agentur für Patientenbetreuung обрабатывала \
              данные о здоровье моего ребёнка, которые я загружаю в этот портал (например, выписки, \
              заключения, снимки и анализы), а также описание обращения, чтобы рассмотреть заявку и подготовить возможные услуги \
-             в Германии (ст. 9 п. 2 лит. a DSGVO). Клиникам и врачам GMed передаёт эти документы \
+             в Германии (ст. 9 п. 2 лит. a DSGVO). Клиникам и врачам GMED – Agentur für Patientenbetreuung передаёт эти документы \
              только после отдельного согласия. Согласие добровольное. Я могу в любой момент отозвать \
-             его в портале или обратившись в GMed; отзыв действует на будущее и не влияет на \
+             его в портале или обратившись в GMED – Agentur für Patientenbetreuung; отзыв действует на будущее и не влияет на \
              законность обработки до отзыва. Если сотрудничество не состоится, заявка и документы \
              удаляются по истечении указанного срока."
         }
         (AccessKind::Own, "uk") => {
-            "Я даю згоду на те, щоб GMed обробляла дані про моє здоров'я, які я завантажую в цей \
+            "Я даю згоду на те, щоб GMED – Agentur für Patientenbetreuung обробляла дані про моє здоров'я, які я завантажую в цей \
              портал (наприклад, виписки, висновки, знімки та аналізи), а також опис мого звернення, щоб розглянути мою заявку й \
              підготувати можливі послуги в Німеччині (ст. 9 п. 2 літ. a DSGVO). Клінікам і лікарям \
-             GMed передає ці документи лише після окремої згоди. Згода добровільна. Я можу будь-коли \
-             відкликати її в порталі або звернувшись до GMed; відкликання діє на майбутнє і не \
+             GMED – Agentur für Patientenbetreuung передає ці документи лише після окремої згоди. Згода добровільна. Я можу будь-коли \
+             відкликати її в порталі або звернувшись до GMED – Agentur für Patientenbetreuung; відкликання діє на майбутнє і не \
              впливає на законність обробки до нього. Якщо співпраця не відбудеться, заявку та \
              документи буде видалено після закінчення зазначеного строку."
         }
         (AccessKind::Own, "en") => {
-            "I consent to GMed processing the health data I upload to this portal (for example \
+            "I consent to GMED – Agentur für Patientenbetreuung processing the health data I upload to this portal (for example \
              doctors' letters, findings, images and lab results), and the description of my concern, in order to review my request and \
-             prepare possible services in Germany (Art. 9(2)(a) GDPR). GMed passes these documents \
+             prepare possible services in Germany (Art. 9(2)(a) GDPR). GMED – Agentur für Patientenbetreuung passes these documents \
              on to clinics and doctors only after a separate consent. The consent is voluntary. I can \
-             withdraw it at any time in the portal or by contacting GMed, with effect for the \
+             withdraw it at any time in the portal or by contacting GMED – Agentur für Patientenbetreuung, with effect for the \
              future; the lawfulness of the processing up to then is not affected. If no cooperation \
              comes about, the request and the documents are deleted when the stated deadline has \
              passed."
         }
         (AccessKind::Guardian, "uk") => {
-            "Як батько, мати або законний представник я даю згоду на те, щоб GMed обробляла дані про \
+            "Як батько, мати або законний представник я даю згоду на те, щоб GMED – Agentur für Patientenbetreuung обробляла дані про \
              здоров'я моєї дитини, які я завантажую в цей портал (наприклад, виписки, висновки, \
              знімки та аналізи), а також опис звернення, щоб розглянути заявку й підготувати можливі послуги в Німеччині \
-             (ст. 9 п. 2 літ. a DSGVO). Клінікам і лікарям GMed передає ці документи лише після \
+             (ст. 9 п. 2 літ. a DSGVO). Клінікам і лікарям GMED – Agentur für Patientenbetreuung передає ці документи лише після \
              окремої згоди. Згода добровільна. Я можу будь-коли відкликати її в порталі або \
-             звернувшись до GMed; відкликання діє на майбутнє і не впливає на законність обробки до \
+             звернувшись до GMED – Agentur für Patientenbetreuung; відкликання діє на майбутнє і не впливає на законність обробки до \
              нього. Якщо співпраця не відбудеться, заявку та документи буде видалено після закінчення \
              зазначеного строку."
         }
         (AccessKind::Guardian, "en") => {
-            "As a parent or legal guardian I consent to GMed processing my child's health data that \
+            "As a parent or legal guardian I consent to GMED – Agentur für Patientenbetreuung processing my child's health data that \
              I upload to this portal (for example doctors' letters, findings, images and lab \
              results), and the description of the concern, in order to review the request and prepare possible services in Germany \
-             (Art. 9(2)(a) GDPR). GMed passes these documents on to clinics and doctors only after a \
+             (Art. 9(2)(a) GDPR). GMED – Agentur für Patientenbetreuung passes these documents on to clinics and doctors only after a \
              separate consent. The consent is voluntary. I can withdraw it at any time in the portal \
-             or by contacting GMed, with effect for the future; the lawfulness of the processing up \
+             or by contacting GMED – Agentur für Patientenbetreuung, with effect for the future; the lawfulness of the processing up \
              to then is not affected. If no cooperation comes about, the request and the documents \
              are deleted when the stated deadline has passed."
         }
@@ -9283,7 +9283,7 @@ mod tests {
         .unwrap();
         assert!(data.missing_for_submit().contains(&"name_latin"));
         assert_eq!(ConsentPurpose::InquiryProcessing.version(), "2026-10-03");
-        assert_eq!(ConsentPurpose::HealthData.version(), "2026-10-13");
+        assert_eq!(ConsentPurpose::HealthData.version(), "2026-11-02");
     }
 
     #[test]
@@ -10147,6 +10147,11 @@ mod tests {
             for language in CONSENT_LANGUAGES {
                 let text = health_consent_text(kind, language).unwrap();
                 assert!(text.contains("9"), "{language}");
+                assert!(
+                    text.contains("GMED – Agentur für Patientenbetreuung"),
+                    "{language}"
+                );
+                assert!(!text.contains("GMed"), "{language}");
                 assert!(inquiry_consent_text(kind, language).is_some(), "{language}");
             }
             assert!(health_consent_text(kind, "tr").is_none());

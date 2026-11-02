@@ -61,6 +61,8 @@ function Button({
   return (
     <ButtonPrimitive
       data-slot="button"
+      data-variant={variant}
+      data-size={size}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
       disabled={disabled || saveDisabled || readOnlyDisabled}

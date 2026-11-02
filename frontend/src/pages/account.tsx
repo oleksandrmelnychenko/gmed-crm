@@ -163,7 +163,7 @@ function ProfileSection() {
         {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
         <div className={`grid gap-3 rounded-lg border border-border bg-muted/30 p-3${portalUser ? "" : " sm:grid-cols-2"}`}>
           <Field label={l("account_profile_email")} htmlFor="account-email">
-            <Input id="account-email" value={profile?.email ?? ""} readOnly disabled className="h-9 rounded-lg border-transparent bg-transparent px-0 text-foreground disabled:opacity-100" />
+            <Input id="account-email" value={profile?.email ?? ""} readOnly className="h-9 rounded-lg border-border bg-muted/40 px-3 text-foreground" />
           </Field>
           {/* A raw role code means nothing to a lead, parent or patient. */}
           {portalUser ? null : (

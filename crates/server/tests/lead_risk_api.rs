@@ -1024,7 +1024,7 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
         &patient,
         Some(json!({
             "purpose": "health_data_processing",
-            "version": "2026-10-13",
+            "version": "2026-11-02",
             "language": "de"
         })),
     )

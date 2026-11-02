@@ -791,7 +791,7 @@ function useLeadsPageContent() {
                 testId={`lead-expand-${row.id}`}
                 onToggle={() => toggleLeadExpanded(row.id)}
               />
-              <span className="truncate font-mono text-xs text-foreground">
+              <span className="truncate text-[13px] font-medium text-foreground">
                 {leadDisplayName(row, tx)}
               </span>
               {row.portal_account ? (

@@ -14,7 +14,7 @@ export function StatCard({
   description?: ReactNode;
 }) {
   return (
-    <div className={cn("rounded-xl px-4 py-3", tokens.surface.card)}>
+    <div data-slot="stat-card" className={cn("rounded-xl px-4 py-3", tokens.surface.card)}>
       <p className={tokens.text.eyebrow}>{label}</p>
       <p className="mt-2 text-2xl font-semibold text-foreground">{value}</p>
       {description ? (

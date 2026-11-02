@@ -86,7 +86,7 @@ export function AppointmentWorkspaceNav() {
   const backTo = backSearch ? `/appointments?${backSearch}` : "/appointments";
 
   return (
-    <aside className="hidden md:flex md:w-60 lg:w-64 xl:w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+    <aside data-workspace-rail="appointment" className="hidden md:flex md:w-60 lg:w-64 xl:w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
       <div className="px-4 pt-4">
         <StaffLink
           replace

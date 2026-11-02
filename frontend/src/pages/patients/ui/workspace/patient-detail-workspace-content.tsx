@@ -703,8 +703,8 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
+    <div className="patient-workspace space-y-3">
+      <div className="patient-workspace-header flex flex-wrap items-center gap-3">
         <div className="flex items-center justify-center size-10 shrink-0 rounded-full bg-[var(--brand)] text-[12px] font-semibold text-white">
           {initials}
         </div>
@@ -761,6 +761,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             </span>
           </button>
         ) : null}
+        <div className="flex basis-full flex-wrap items-center justify-end gap-2 border-t border-border pt-2">
         {canPrintPatientLabel ? (
           <NativeComboboxSelect
             value=""
@@ -772,7 +773,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               if (!event.target.value) return;
               onPrintPatientLabel(event.target.value as PatientLabelFormatId);
             }}
-            className="h-9 rounded-lg bg-field text-[13px] gap-1.5 w-auto"
+            className="h-8 rounded-lg bg-field text-[13px] gap-1.5 w-auto"
           >
             <option value="">{l("patients_print_label")}</option>
             {PATIENT_LABEL_FORMAT_OPTIONS.map((option) => (
@@ -805,6 +806,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             {l("patients_edit_profile")}
           </Button>
         ) : null}
+        </div>
       </div>
 
       {id ? <PatientClinicalDocumentActions

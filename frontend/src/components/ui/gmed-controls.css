@@ -1,0 +1,42 @@
+/* Staff controls: shared variants, with readable labels and compact desktop targets. */
+.staff-portal-theme [data-slot="button"] {
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  gap: 6px;
+  box-shadow: none;
+}
+.staff-portal-theme [data-slot="button"]:is([data-size="sm"], [data-size="default"]) {
+  height: auto;
+  min-height: 30px;
+  padding: 5px 10px;
+}
+.staff-portal-theme [data-slot="button"][data-size="xs"] { height: auto; min-height: 26px; padding: 3px 8px; }
+.staff-portal-theme [data-slot="button"][data-size="lg"] { height: auto; min-height: 34px; padding: 7px 12px; }
+.staff-portal-theme [data-slot="button"][data-variant="default"] {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+.staff-portal-theme [data-slot="button"][data-variant="default"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary) 88%, var(--foreground));
+}
+.staff-portal-theme [data-slot="button"][data-variant="outline"] {
+  background: var(--card);
+  border-color: var(--input);
+  color: var(--foreground);
+}
+.staff-portal-theme [data-slot="button"][data-variant="outline"]:hover:not(:disabled) {
+  background: var(--muted);
+  border-color: var(--ring);
+}
+.staff-portal-theme [data-slot="button"]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.staff-portal-theme [data-slot="button"]:disabled { opacity: .45; }
+
+@media (max-width: 639px) {
+  .staff-portal-theme [data-slot="button"]:is([data-size="sm"], [data-size="default"], [data-size="lg"]) { min-height: 40px; }
+}

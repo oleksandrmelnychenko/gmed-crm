@@ -275,14 +275,14 @@ export function OrderWorkspaceNavView({
         </StaffLink>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
+      <nav aria-label={t.orders_title} className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
         {groupedSections.map(({ group, items }, groupIndex) => (
-          <div key={group} className={cn(groupIndex > 0 && "mt-4")}>
+          <section key={group}>
             {groupIndex > 0 ? (
               <div className="mx-3 mb-2 h-px bg-border/60" aria-hidden />
             ) : null}
             <div className="px-3 pb-1.5">
-              <span className="text-[10px] text-muted-foreground/70">
+              <span className="text-xs text-muted-foreground">
                 {orderSectionGroupLabel(group, lang)}
               </span>
             </div>
@@ -326,9 +326,9 @@ export function OrderWorkspaceNavView({
                 );
               })}
             </div>
-          </div>
+          </section>
         ))}
-      </div>
+      </nav>
     </aside>
   );
 }

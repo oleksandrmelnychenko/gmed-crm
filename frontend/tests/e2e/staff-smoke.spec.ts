@@ -1779,6 +1779,26 @@ test.describe("staff smoke flows", () => {
     await page.screenshot({ path: "../artifacts/design-qa/patient-demo-documents.png" });
   });
 
+  test("navigation categories persist and reveal the active route", async ({ page }) => {
+    const nav = page.locator(".app-navigation");
+    const category = nav.getByRole("button", { name: "CRM", exact: true });
+    const leads = nav.locator('a[href="/leads"]');
+    await expect(category).toHaveAttribute("aria-expanded", "true");
+    await category.press("Enter");
+    await expect(category).toHaveAttribute("aria-expanded", "false");
+    await expect(leads).toBeHidden();
+    await page.reload();
+    await expect(category).toHaveAttribute("aria-expanded", "false");
+    await expect(leads).toBeHidden();
+    await page.goto("/leads");
+    await expect(category).toHaveAttribute("aria-expanded", "true");
+    await expect(leads).toBeVisible();
+    await category.click();
+    await expect(leads).toBeHidden();
+    await category.press("Space");
+    await expect(leads).toBeVisible();
+  });
+
   test("staff can open dashboard, patients, appointments, documents and invoices", async ({
     page,
   }) => {

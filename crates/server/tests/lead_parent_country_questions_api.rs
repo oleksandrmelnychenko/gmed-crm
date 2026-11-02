@@ -748,7 +748,7 @@ async fn a_short_parent_form_can_send_the_child_request_but_cannot_create_a_cont
         &format!("/me/lead-requests/{}/consent", app.lead),
         app.parent,
         "patient",
-        Some(json!({"purpose":"health_data_processing","version":"2026-10-13","language":"de"})),
+        Some(json!({"purpose":"health_data_processing","version":"2026-11-02","language":"de"})),
     )
     .await;
     assert!(

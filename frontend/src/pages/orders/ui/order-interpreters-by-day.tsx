@@ -312,12 +312,12 @@ export function OrderInterpretersByDay({
     suggestions && suggestionTarget && suggestions.key === suggestionTarget.id ? suggestions : null;
 
   return (
-    <div data-testid="order-interpreters-by-day" className="rounded-2xl border border-border p-4">
-      <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+    <div data-testid="order-interpreters-by-day" className="rounded-lg border border-border bg-card p-3">
+      <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
         <Languages className="size-4 text-muted-foreground" />
         {tx("Переводчики по дням", "Dolmetscher nach Tagen")}
       </div>
-      <div className="mt-3 space-y-3">
+      <div className="mt-2 space-y-2">
         {error ? <Banner tone="error">{error}</Banner> : null}
         {!error && !appointments ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -509,7 +509,7 @@ export function InterpreterDaysTable({ days, lang, locked, onAssignDay }: Interp
               <Button
                 type="button"
                 size="sm"
-                variant={day.missingCount > 0 ? "default" : "outline"}
+                variant="default"
                 className="h-7 rounded-lg px-2.5 text-xs"
                 onClick={() => onAssignDay(day)}
               >

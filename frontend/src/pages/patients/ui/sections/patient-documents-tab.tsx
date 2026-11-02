@@ -463,7 +463,7 @@ export function PatientDocumentsTab({
         filterType: "text",
         sortable: true,
         required: true,
-        width: 280,
+        minWidth: 280,
         render: (doc) => (
           <span
             className="flex min-w-0 items-center gap-2"
@@ -473,7 +473,7 @@ export function PatientDocumentsTab({
             {documentTree.depthById.get(doc.id) ? (
               <span aria-hidden className="shrink-0 font-mono text-xs text-muted-foreground">└</span>
             ) : null}
-            <span className="truncate font-mono text-xs text-foreground">
+            <span className="truncate text-[13px] text-foreground">
               {documentDisplayName(doc, l)}
             </span>
             {doc.translation_source_document_id ? (
@@ -493,7 +493,7 @@ export function PatientDocumentsTab({
         accessor: (doc) => formatBusinessDocumentNumber(doc.document_number),
         filterType: "text",
         sortable: true,
-        width: 150,
+        width: 185,
         render: (doc) =>
           formatBusinessDocumentNumber(doc.document_number) ? (
             <span className="inline-flex shrink-0 rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-sky-700">
@@ -515,17 +515,18 @@ export function PatientDocumentsTab({
           label: localizeDocumentCode(category, l),
         })),
         sortable: true,
-        width: 170,
+        width: 220,
         render: (doc) =>
           doc.category ? (
             <Badge
               variant="outline"
               className={cn(
-                "rounded-full",
+                "max-w-full truncate rounded-full",
                 documentCategoryChipTone(doc.category),
               )}
+              title={documentTypeText(doc, l)}
             >
-              {documentTypeText(doc, l)}
+              <span className="truncate">{documentTypeText(doc, l)}</span>
             </Badge>
           ) : (
             <span className="text-xs text-muted-foreground">
@@ -564,7 +565,7 @@ export function PatientDocumentsTab({
           label: statusLabel(status),
         })),
         sortable: true,
-        width: 300,
+        width: 180,
         render: (doc) => (
           <DocumentStatusBadges
             documentId={doc.id}
@@ -675,6 +676,7 @@ export function PatientDocumentsTab({
         <TabLoader />
       ) : (
         <DataTableSurface
+          toolbarClassName="sm:flex-wrap sm:overflow-x-visible"
           rows={pagedDocumentRows}
           columns={documentColumns}
           rowId={(doc) => doc.id}

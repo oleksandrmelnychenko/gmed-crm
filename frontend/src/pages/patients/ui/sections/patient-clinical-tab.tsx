@@ -597,7 +597,7 @@ function groupedClinicalItems<T>(
 }
 
 function clinicalSectionToneClasses(tone: ClinicalSectionTone) {
-  const addButton = "border-orange-500 bg-orange-500 text-white hover:border-orange-600 hover:bg-orange-600 hover:text-white";
+  const addButton = "border-primary bg-primary text-primary-foreground hover:border-primary/90 hover:bg-primary/90 hover:text-primary-foreground";
   if (tone === "danger") {
     return {
       section: "border-border/70 bg-card",
@@ -1515,7 +1515,7 @@ export function PatientRecommendationsSection({
   );
 
   return (
-    <section className="rounded-xl border border-border/70 bg-slate-50/60">
+    <section className="rounded-xl border border-border/70 bg-card">
       <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
         <div className="flex items-center gap-2">
           <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -2364,7 +2364,7 @@ function MedicationHistoryTree({
   };
 
   return (
-    <section className="rounded-xl border border-border/70 bg-slate-50/60">
+    <section className="rounded-xl border border-border/70 bg-card">
       <header className="flex flex-wrap items-start justify-between gap-2 border-b border-border/60 px-4 py-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -3203,8 +3203,8 @@ export function PatientClinicalTab({
             className={cn(
               "rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
               activeSpecializationId === null
-                ? "border-amber-400 bg-amber-100 text-amber-900 ring-1 ring-amber-300/70"
-                : "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:text-amber-900",
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border bg-card text-foreground hover:bg-muted",
             )}
             aria-pressed={activeSpecializationId === null}
             onClick={() => setSelectedSpecializationId(null)}
@@ -3220,8 +3220,8 @@ export function PatientClinicalTab({
                 className={cn(
                   "rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
                   selected
-                    ? "border-amber-400 bg-amber-100 text-amber-900 ring-1 ring-amber-300/70"
-                    : "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:text-amber-900",
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border bg-card text-foreground hover:bg-muted",
                 )}
                 aria-pressed={selected}
                 onClick={() => setSelectedSpecializationId(item.id)}
@@ -3450,7 +3450,7 @@ export function PatientClinicalTab({
       <ClinicalSection<ClinicalProcedure>
         title={tx("Терапия / Процедуры", "Therapie / Eingriffe")}
         items={procedures}
-        sectionClassName="bg-slate-50/60"
+        sectionClassName="bg-card"
         rowClassName="border-border/40 bg-white"
         blank={blankProcedure}
         isValid={(p) => p.label.trim() !== ""}
@@ -3554,7 +3554,7 @@ export function PatientClinicalTab({
       {/* ---- Verlauf ---- */}
       <ClinicalSection<ClinicalVerlaufEntry>
         title={tx("Течение", "Verlauf")}
-        sectionClassName="bg-slate-50/60"
+        sectionClassName="bg-card"
         rowClassName="border-border/40 bg-white"
         items={verlauf}
         blank={blankVerlaufEntry}
@@ -3631,7 +3631,7 @@ export function PatientClinicalTab({
             onImported={() => setVersion((current) => current + 1)}
           />
         ) : null}
-        sectionClassName="bg-slate-50/60"
+        sectionClassName="bg-card"
         rowClassName="border-border/40 bg-white"
         items={medications}
         blank={blankMedication}
@@ -3725,7 +3725,7 @@ export function PatientClinicalTab({
       {/* ---- Examinations / Befunde ---- */}
       <ClinicalSection<ClinicalExamination>
         title={tx("Обследования", "Befunde")}
-        sectionClassName="bg-slate-50/60"
+        sectionClassName="bg-card"
         rowClassName="border-border/40 bg-white"
         items={visibleExaminations}
         blank={blankExamination}
@@ -3878,7 +3878,7 @@ export function PatientClinicalTab({
       />
 
       {/* ---- Impfstatus (patient state, moved from the case per RFC D4) ---- */}
-      <section className="rounded-xl border border-border/70 bg-slate-50/60">
+      <section className="rounded-xl border border-border/70 bg-card">
         <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
           <div className="flex items-center gap-2">
             <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -3940,7 +3940,7 @@ export function PatientClinicalTab({
 
       {/* ---- Vitalwerte-Verlauf (moved from Profile) ---- */}
       {(canManage || vitalsHistory.length > 0) && (
-      <section className="rounded-xl border border-border/70 bg-slate-50/60">
+      <section className="rounded-xl border border-border/70 bg-card">
         <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
           <div className="flex items-center gap-2">
             <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -3992,7 +3992,7 @@ export function PatientClinicalTab({
 
       {/* ---- Structured laboratory history ---- */}
       {canManage || labResults.length > 0 ? (
-        <section className="rounded-xl border border-border/70 bg-slate-50/60">
+        <section className="rounded-xl border border-border/70 bg-card">
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
             <div className="flex items-center gap-2">
               <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -4131,7 +4131,7 @@ export function PatientClinicalTab({
 
       {/* ---- Risikoscores (moved from Profile) ---- */}
       {(canManage || riskScores.length > 0) && (
-      <section className="rounded-xl border border-border/70 bg-slate-50/60">
+      <section className="rounded-xl border border-border/70 bg-card">
         <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
           <div className="flex items-center gap-2">
             <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />

@@ -384,7 +384,7 @@ function SectionCard({
         className,
       )}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 bg-muted/20 px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-card px-3 py-2">
         <div className="min-w-0 flex-1">
           <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
           {description ? (
@@ -393,7 +393,7 @@ function SectionCard({
         </div>
         {action ? <div className="flex max-w-full flex-wrap gap-2">{action}</div> : null}
       </div>
-      <div className="min-w-0 p-4">{children}</div>
+      <div className="min-w-0 p-3">{children}</div>
     </section>
   );
 }
@@ -437,9 +437,9 @@ function OrderSummaryLine({
 
 function PlanningMetric({ label, value, className }: { label: string; value: ReactNode; className?: string }) {
   return (
-    <div className={cn("min-w-0 rounded-xl border border-border/70 bg-background p-3", className)}>
-      <div className="mb-2 font-mono text-xs font-medium text-muted-foreground">{label}</div>
-      <div className="text-sm font-semibold leading-relaxed text-foreground">{value}</div>
+    <div className={cn("min-w-0 border-b border-border/70 px-1 py-1.5", className)}>
+      <div className="mb-0.5 text-xs font-medium text-muted-foreground">{label}</div>
+      <div className="text-[13px] font-semibold leading-5 text-foreground">{value}</div>
     </div>
   );
 }
@@ -482,9 +482,9 @@ function OrderFinancialMetric({
   return (
     <div
       className={cn(
-        "flex min-w-0 flex-col justify-between gap-2 rounded-lg border px-3.5 py-3",
+        "flex min-w-0 flex-col justify-between gap-1 rounded-lg border px-3 py-2",
         emphasis
-          ? "border-orange-200 bg-orange-50/60"
+          ? "border-border bg-muted/50"
           : "border-border/70 bg-card",
       )}
     >
@@ -492,7 +492,7 @@ function OrderFinancialMetric({
       <dd
         className={cn(
           "min-w-0 font-mono text-base font-semibold leading-5 tabular-nums",
-          emphasis ? "text-orange-800" : "text-foreground",
+          "text-foreground",
         )}
       >
         {value}
@@ -506,7 +506,7 @@ function orderAccentClass(phase: string, status: string) {
   if (status === "cancelled") return "bg-rose-500";
   if (status === "paused") return "bg-amber-500";
   if (phase === "execution" || phase === "closure") return "bg-sky-500";
-  return "bg-orange-500";
+  return "bg-primary";
 }
 
 function leistungBillingStatusClass(status: LeistungBillingStatus) {
@@ -528,17 +528,13 @@ function leistungBillingStatusClass(status: LeistungBillingStatus) {
 
 function EmptyState({ title, description, action }: EmptyStateProps) {
   return (
-    <div className={cn("rounded-xl px-6 py-10 text-center", tokens.surface.dashed)}>
-      <div className="mx-auto flex max-w-md flex-col items-center gap-3">
-        <div className="rounded-lg border border-border/70 bg-card p-3 text-muted-foreground">
-          <ClipboardList className="size-5" />
-        </div>
-        <div>
-          <h3 className="text-base font-semibold text-foreground">{title}</h3>
-          <p className="mt-2 text-sm text-muted-foreground">{description}</p>
-        </div>
-        {action}
+    <div className={cn("flex flex-wrap items-center gap-3 rounded-lg p-3", tokens.surface.dashed)}>
+      <ClipboardList className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+      <div className="min-w-0 flex-1 basis-48">
+        <h3 className="text-[13px] font-semibold leading-5 text-foreground">{title}</h3>
+        <p className="mt-0.5 text-[13px] leading-5 text-muted-foreground">{description}</p>
       </div>
+      {action}
     </div>
   );
 }
@@ -3519,7 +3515,7 @@ function useOrdersPageContent() {
     : [];
 
   return (
-    <div ref={orderWorkspaceTopRef} className={cn("space-y-6", isOrderRouteDetail && "min-h-0")}>
+    <div ref={orderWorkspaceTopRef} className={cn("order-workspace space-y-2", isOrderRouteDetail && "min-h-0")}>
       {isOrderRouteDetail ? <OrderWorkspaceNav mobile /> : null}
       {!isOrderRouteDetail ? (
         <>
@@ -3920,7 +3916,8 @@ function useOrdersPageContent() {
                 : tx.orders_title
             }
             description={l("orders_vollstandige_operative_sicht_auf_den_aktuellen_auftrag_i")}
-            bodyClassName={isOrderRouteDetail ? "pt-0" : undefined}
+            bodyClassName={isOrderRouteDetail ? "p-0" : undefined}
+            bodyWrapperClassName="min-w-0 space-y-2 rounded-xl"
             hideHeader={isOrderRouteDetail}
           >
             {detailLoading ? (
@@ -3957,7 +3954,7 @@ function useOrdersPageContent() {
                 error={detailError}
               />
             ) : (
-              <div className="min-w-0 space-y-4 rounded-xl">
+              <div className="min-w-0 space-y-2 rounded-xl">
                 {detailError ? <Banner tone="error" withIcon>{detailError}</Banner> : null}
                 {orderDetail.cancellation_reason === "contract_terminated" ? (
                   <OrderTerminationBanner
@@ -4001,8 +3998,8 @@ function useOrdersPageContent() {
                     </Banner>
                   </div>
                 ) : null}
-                <section className="relative rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-                  <div className="relative px-4 py-3 sm:px-5">
+                <section className="relative rounded-xl border border-border/70 bg-card">
+                  <div className="relative px-3 py-2.5">
                     <span
                       className={cn(
                         "absolute bottom-3 left-0 top-3 w-1 rounded-r-full",
@@ -4050,7 +4047,7 @@ function useOrdersPageContent() {
                           </h1>
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             {detailSubjectLabel}
-                            {detailSubjectReference ? (
+                            {detailSubjectReference && detailSubjectReference !== detailSubjectLabel ? (
                               <span className="ml-1.5 font-mono text-foreground">
                                 {detailSubjectReference}
                               </span>
@@ -4062,7 +4059,8 @@ function useOrdersPageContent() {
                           {detailSubjectHref ? (
                             <StaffLink
                               to={detailSubjectHref}
-                              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 rounded-md")}
+                              data-slot="button" data-size="sm" data-variant="default"
+                              className={buttonVariants({ variant: "default", size: "sm" })}
                             >
                               <UserRound className="size-3.5" />
                               {detailSubjectLabel}
@@ -4070,7 +4068,7 @@ function useOrdersPageContent() {
                           ) : (
                             <Button
                               type="button"
-                              variant="outline"
+                              variant="default"
                               size="sm"
                               className="h-8 rounded-md"
                               disabled
@@ -4081,7 +4079,8 @@ function useOrdersPageContent() {
                           )}
                           <StaffLink
                             to={detailDocumentsHref}
-                            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 rounded-md")}
+                            data-slot="button" data-size="sm" data-variant="default"
+                            className={buttonVariants({ variant: "default", size: "sm" })}
                           >
                             <FileText className="size-3.5" />
                             {l("orders_dokumente")}
@@ -4090,7 +4089,7 @@ function useOrdersPageContent() {
                         (orderDetail.lifecycle?.allowed_status_transitions?.length ?? 0) > 0 ? (
                           <OverflowMenu
                             label={lang === "de" ? "Auftrag verwalten" : "Управление заказом"}
-                            triggerClassName="h-8 rounded-md px-3 text-xs"
+                            triggerClassName="h-8 rounded-md border-primary bg-primary px-3 text-xs text-primary-foreground hover:bg-primary/90 data-popup-open:bg-primary/90"
                             triggerContent={
                               <>
                                 {lang === "de" ? "Auftrag verwalten" : "Управление заказом"}
@@ -4172,9 +4171,9 @@ function useOrdersPageContent() {
                     ) : null}
                   </div>
 
-                  <div className="rounded-b-xl border-t border-border/70 bg-muted/15 px-4 py-2 sm:px-5">
+                  <div className="rounded-b-xl border-t border-border/70 px-3 py-2">
                     <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
-                      <div className="min-w-0 space-y-1.5">
+                      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
                         <StatusChip
                           tone={orderNextStep?.kind === "terminal" && orderNextStep.status === "cancelled"
                             ? "neutral" : orderNextStepBlocked ? "warning" : "success"}
@@ -4279,7 +4278,7 @@ function useOrdersPageContent() {
                     ) : null}
                   </div>
                 </section>
-                <div ref={orderSectionAnchorRef} className="scroll-mt-4" />
+                <div ref={orderSectionAnchorRef} className="absolute h-0 scroll-mt-2" />
                 {shouldRenderOrderSection("overview") ? (
                   <>
                     <SectionCard
@@ -4389,7 +4388,7 @@ function useOrdersPageContent() {
                           ].map(([label, value]) => (
                             <div
                               key={String(label)}
-                              className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] items-start gap-3 px-4 py-3 text-xs leading-5"
+                              className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] items-start gap-2 px-3 py-2 text-xs leading-5"
                             >
                               <dt className="min-w-0 break-words text-muted-foreground">
                                 {label}
@@ -4433,7 +4432,7 @@ function useOrdersPageContent() {
                         </div>
                       </div>
 
-                      <div className="mt-4 border-t border-border/60 pt-4">
+                      <div className="mt-3 border-t border-border/60 pt-3">
                         <AdminSectionTitle>
                           {lang === "de" ? "Zugehörige Bereiche" : "Связанные данные"}
                         </AdminSectionTitle>
@@ -4844,15 +4843,6 @@ function useOrdersPageContent() {
                   </>
                 ) : null}
                 {shouldRenderOrderSection("pipeline") ? (
-                  <SectionCard
-                    className="border-0 bg-transparent [&>div]:px-0 [&>div:first-child]:bg-transparent [&>div:last-child]:pb-0"
-                    title={lang === "de" ? "Pipeline des Auftrags" : "Пайплайн заказа"}
-                    description={
-                      lang === "de"
-                        ? "Medizinische Akte, Anbieter und Ärzte, Termine, Durchführung und Abschluss – der Stand ergibt sich aus den Systemdaten."
-                        : "Медицинская часть, провайдеры и врачи, приёмы, выполнение и закрытие — состояние этапов считается по данным системы."
-                    }
-                  >
                     <OrderPipelinePanel
                       orderId={orderDetail.id}
                       lang={lang}
@@ -4865,17 +4855,11 @@ function useOrdersPageContent() {
                         staffGo(buildOrderWorkspaceHref(orderDetail.id, section, patientContextId))
                       }
                     />
-                  </SectionCard>
                 ) : null}
 
                 {shouldRenderOrderSection("gates") ? (
                   <SectionCard
                     title={lang === "de" ? "Phasen des Auftrags" : "Этапы заказа"}
-                    description={
-                      lang === "de"
-                        ? "Der Auftrag durchläuft fünf Phasen. Die offenen Punkte darunter blockieren den nächsten Schritt."
-                        : "Заказ проходит пять этапов. Открытые пункты ниже блокируют следующий шаг."
-                    }
                   >
                     <div className="grid gap-2 @min-[28rem]:grid-cols-3 @min-[38rem]:grid-cols-5">
                       {ORDER_PHASES.map((phase, index) => {
@@ -4886,23 +4870,24 @@ function useOrdersPageContent() {
                         return (
                           <div
                             key={phase}
+                            aria-current={isCurrent ? "step" : undefined}
                             className={cn(
-                              "flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2.5",
+                              "flex min-w-0 items-center gap-2 rounded-lg px-3 py-2",
                               isCurrent
-                                ? "border-orange-300 bg-orange-50 text-orange-950"
+                                ? "bg-muted text-foreground"
                                 : isCompleted
-                                  ? "border-emerald-200 bg-emerald-50/70 text-emerald-900"
-                                  : "border-border/60 bg-card text-muted-foreground",
+                                  ? "text-emerald-700"
+                                  : "text-muted-foreground",
                             )}
                           >
                             <span
                               className={cn(
-                                "flex size-5 shrink-0 items-center justify-center rounded-full font-mono text-[10px] font-semibold",
+                                "flex size-4 shrink-0 items-center justify-center text-xs font-medium",
                                 isCompleted
-                                  ? "bg-emerald-600 text-white"
+                                  ? "text-emerald-700"
                                   : isCurrent
-                                    ? "bg-orange-500 text-white"
-                                    : "bg-muted text-muted-foreground",
+                                    ? "text-foreground"
+                                    : "text-muted-foreground",
                               )}
                             >
                               {isCompleted ? (
@@ -4920,8 +4905,8 @@ function useOrdersPageContent() {
                     </div>
 
                     {orderNextStepBlocked ? (
-                      <div className="mt-4 overflow-hidden rounded-xl border border-amber-200 bg-card">
-                        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-amber-200 bg-amber-50/70 px-4 py-3">
+                      <div className="mt-2 overflow-hidden rounded-xl border border-amber-200 bg-card">
+                        <div className="flex flex-wrap items-start justify-between gap-2 border-b border-amber-200 bg-amber-50/70 px-3 py-2">
                           <div>
                             <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
                               <ShieldCheck className="size-4 text-amber-700" />
@@ -4950,7 +4935,7 @@ function useOrdersPageContent() {
                               <li key={reason}>
                                 <button
                                   type="button"
-                                  className="group flex min-h-12 w-full min-w-0 items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-amber-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-500"
+                                  className="group flex min-h-10 w-full min-w-0 items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-amber-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-500"
                                   onClick={() => {
                                     // Patient billing is settled on the invoices
                                     // page; the order itself only lists supplier
@@ -4981,7 +4966,7 @@ function useOrdersPageContent() {
                                     );
                                   }}
                                 >
-                                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-amber-100 font-mono text-xs font-semibold text-amber-900">
+                                  <span className="flex size-4 shrink-0 items-center justify-center text-xs font-semibold text-amber-900">
                                     {index + 1}
                                   </span>
                                   <span className="min-w-0 flex-1 text-sm font-medium leading-5 text-foreground">
@@ -4998,7 +4983,7 @@ function useOrdersPageContent() {
                         </ol>
                       </div>
                     ) : orderNextStep?.kind === "phase" || orderNextStep?.kind === "completion" ? (
-                      <div className="mt-4 flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                      <div className="mt-2 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-900">
                         <CheckCircle2 className="size-4 shrink-0" />
                         {orderNextStep.kind === "completion"
                           ? lang === "de"
@@ -5013,7 +4998,7 @@ function useOrdersPageContent() {
                 ) : null}
 
                 {shouldRenderOrderSection("gates") && orderDetail.process_gates ? (
-                  <section className="rounded-lg border border-border/70 bg-card p-6">
+                  <section className="rounded-lg border border-border/70 bg-card p-3">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
@@ -5021,7 +5006,7 @@ function useOrdersPageContent() {
                         </h2>
                       </div>
                     </div>
-                    <div className="mt-5 space-y-4">
+                    <div className="mt-3 space-y-3">
                       <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
                         <OrderSummaryLine
                           label={l("orders_durchfuhrungsfreigabe")}
@@ -5276,8 +5261,8 @@ function useOrdersPageContent() {
                 ) : null}
 
                 {shouldRenderOrderSection("planning") && orderDetail.planning_preparation ? (
-                  <section className="rounded-lg border border-border/70 bg-card p-4 sm:p-5">
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <section className="@container rounded-lg border border-border/70 bg-card p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
                           {titleWithDot(
@@ -5288,16 +5273,16 @@ function useOrdersPageContent() {
                       {detailNewAppointmentHref ? (
                         <StaffLink
                           to={detailNewAppointmentHref}
-                          className={cn(buttonVariants({ size: "sm" }), "h-8 rounded-lg")}
+                          data-slot="button" data-variant="default" data-size="sm" className={buttonVariants({ size: "sm" })}
                         >
                           <Plus className="size-4" />{t.appointments_new}
                         </StaffLink>
                       ) : null}
                     </div>
-                    <div className="mt-4 space-y-4">
-                      <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    <div className="mt-3 space-y-2">
+                      <div className="grid items-start gap-x-4 gap-y-2 @min-[28rem]:grid-cols-2 @min-[42rem]:grid-cols-3">
                         <PlanningMetric
-                          className="md:col-span-2 xl:col-span-3"
+                          className="flex flex-wrap items-center gap-2 @min-[28rem]:col-span-2 @min-[42rem]:col-span-3"
                           label={l("orders_planungsfreigabe")}
                           value={
                             <Badge
@@ -5327,7 +5312,7 @@ function useOrdersPageContent() {
                         orderDetail.planning_preparation.blocking_reasons.length > 0 ? (
                           <div
                             data-testid="order-planning-readiness-reasons"
-                            className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm leading-6 text-amber-900 md:col-span-2 xl:col-span-3"
+                            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-5 text-amber-900 @min-[28rem]:col-span-2 @min-[42rem]:col-span-3"
                           >
                             <div className="font-medium text-foreground">
                               {lang === "de"
@@ -5490,7 +5475,7 @@ function useOrdersPageContent() {
                       {planningReadinessApplicable ? (
                         orderDetail.planning_preparation.blocking_reasons
                           .length > 0 ? (
-                        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-800">
                           <div className="font-medium">
                             {l("orders_blocker_aus_der_planung")}
                           </div>
@@ -5503,31 +5488,34 @@ function useOrdersPageContent() {
                           </ul>
                         </div>
                       ) : (
-                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-800">
                           {l("orders_planung_und_vorbereitung_sind_fur_die_durchfuhrung_volls")}
                         </div>
                         )
                       ) : null}
 
                       {planningError ? (
-                        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[13px] text-rose-700">
                           {planningError}
                         </div>
                       ) : null}
 
                       {permissions.canManagePhase ? (
-                        <div className="grid gap-4">
-                          <div className="rounded-2xl border border-border p-4">
-                            <div className="text-sm font-semibold text-foreground">
+                        <div className="grid gap-2">
+                          <div className="rounded-lg border border-border p-3">
+                            <div className="text-[13px] font-semibold text-foreground">
                               {titleWithDot(
                                 l("orders_planungssteuerung"),
                               )}
                             </div>
-                            <div className="mt-1 text-sm text-muted-foreground">
+                            <div className="mt-1 text-[13px] text-muted-foreground">
                               {l("orders_behandlungsplan_fixieren_bedarf_an_nicht_medizinischen_l")}
                             </div>
-                            <div className="mt-4 space-y-3">
-                              <NativeComboboxSelect
+                            <div className="mt-3 grid gap-2 @min-[32rem]:grid-cols-2">
+                              <label className="grid min-w-0 content-start gap-1 text-xs font-medium text-muted-foreground">
+                                <span>{l("orders_behandlungsplan")}</span>
+                                <NativeComboboxSelect
+                                aria-label={l("orders_behandlungsplan")}
                                 value={planningForm.treatmentPlanStatus}
                                 onChange={(event) =>
                                   setPlanningForm((current) => ({
@@ -5535,7 +5523,7 @@ function useOrdersPageContent() {
                                     treatmentPlanStatus: event.target.value as OrderPlanningFormState["treatmentPlanStatus"],
                                   }))
                                 }
-                                className={selectClassName}
+                                className={cn(selectClassName, "min-h-8 py-1 text-[13px]")}
                               >
                                 <option value="draft">{treatmentPlanStatusLabel("draft")}</option>
                                 <option value="sent">{treatmentPlanStatusLabel("sent")}</option>
@@ -5545,6 +5533,7 @@ function useOrdersPageContent() {
                                 </option>
                                 <option value="finalized">{treatmentPlanStatusLabel("finalized")}</option>
                               </NativeComboboxSelect>
+                              </label>
                               <textarea
                                 value={planningForm.treatmentPlanNote}
                                 onChange={(event) =>
@@ -5553,10 +5542,11 @@ function useOrdersPageContent() {
                                     treatmentPlanNote: event.target.value,
                                   }))
                                 }
-                                className={textareaClassName}
+                                className={cn(textareaClassName, "min-h-16 text-[13px]")}
                                 placeholder={l("orders_notiz_zum_behandlungsplan")}
                               />
-                              <label className="flex items-center gap-2 text-sm text-foreground">
+                              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 @min-[32rem]:col-span-2">
+                              <label className="flex items-center gap-2 text-[13px] text-foreground">
                                 <input
                                   type="checkbox"
                                   className={checkboxClass}
@@ -5572,7 +5562,7 @@ function useOrdersPageContent() {
                                   ? "Medizinische Termine sind erforderlich"
                                   : "Медицинские приёмы требуются"}
                               </label>
-                              <label className="flex items-center gap-2 text-sm text-foreground">
+                              <label className="flex items-center gap-2 text-[13px] text-foreground">
                                 <input
                                   type="checkbox"
                                   className={checkboxClass}
@@ -5586,7 +5576,7 @@ function useOrdersPageContent() {
                                 />
                                 {l("orders_nicht_medizinische_leistungen_sind_erforderlich")}
                               </label>
-                              <label className="flex items-center gap-2 text-sm text-foreground">
+                              <label className="flex items-center gap-2 text-[13px] text-foreground">
                                 <input
                                   type="checkbox"
                                   className={checkboxClass}
@@ -5607,7 +5597,11 @@ function useOrdersPageContent() {
                                 />
                                 {l("orders_dolmetscher_ist_erforderlich")}
                               </label>
-                              <NativeComboboxSelect
+                              </div>
+                              <label className="grid min-w-0 content-start gap-1 text-xs font-medium text-muted-foreground">
+                                <span>{l("orders_vorbereitungsunterlagen")}</span>
+                                <NativeComboboxSelect
+                                aria-label={l("orders_vorbereitungsunterlagen")}
                                 value={planningForm.preparationDocumentsStatus}
                                 onChange={(event) =>
                                   setPlanningForm((current) => ({
@@ -5616,7 +5610,7 @@ function useOrdersPageContent() {
                                       event.target.value as OrderPlanningFormState["preparationDocumentsStatus"],
                                   }))
                                 }
-                                className={selectClassName}
+                                className={cn(selectClassName, "min-h-8 py-1 text-[13px]")}
                               >
                                 <option value="pending">
                                   {preparationDocumentStatusLabel("pending")}
@@ -5628,7 +5622,11 @@ function useOrdersPageContent() {
                                   {preparationDocumentStatusLabel("not_required")}
                                 </option>
                               </NativeComboboxSelect>
-                              <NativeComboboxSelect
+                              </label>
+                              <label className="grid min-w-0 content-start gap-1 text-xs font-medium text-muted-foreground">
+                                <span>{l("orders_dolmetscher_briefing")}</span>
+                                <NativeComboboxSelect
+                                aria-label={l("orders_dolmetscher_briefing")}
                                 value={planningForm.interpreterBriefingStatus}
                                 onChange={(event) =>
                                   setPlanningForm((current) => ({
@@ -5637,7 +5635,7 @@ function useOrdersPageContent() {
                                       event.target.value as OrderPlanningFormState["interpreterBriefingStatus"],
                                   }))
                                 }
-                                className={selectClassName}
+                                className={cn(selectClassName, "min-h-8 py-1 text-[13px]")}
                                 disabled={!planningForm.interpreterRequired}
                               >
                                 <option value="not_needed">
@@ -5650,7 +5648,8 @@ function useOrdersPageContent() {
                                   {interpreterBriefingStatusLabel("completed")}
                                 </option>
                               </NativeComboboxSelect>
-                              <div className="flex justify-end">
+                              </label>
+                              <div className="flex justify-end @min-[32rem]:col-span-2">
                                 <Button
                                   type="button"
                                   onClick={() =>
@@ -5667,16 +5666,16 @@ function useOrdersPageContent() {
                             </div>
                           </div>
 
-                          <div className="rounded-2xl border border-border p-4">
-                            <div className="text-sm font-semibold text-foreground">
+                          <div className="rounded-lg border border-border p-3">
+                            <div className="text-[13px] font-semibold text-foreground">
                               {titleWithDot(
                                 l("orders_operative_ubergabe"),
                               )}
                             </div>
-                            <div className="mt-1 text-sm text-muted-foreground">
+                            <div className="mt-1 text-[13px] text-muted-foreground">
                               {l("orders_verknupfte_arbeitsbereiche_nutzen_um_medizinische_slots")}
                             </div>
-                            <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-2">
+                            <div className="mt-2 grid gap-2 @min-[32rem]:grid-cols-2 @min-[56rem]:grid-cols-3">
                               {[
                                 {
                                   label: l("orders_medizinische_und_nicht_medizinische_termine"),
@@ -5697,16 +5696,16 @@ function useOrdersPageContent() {
                                 <StaffLink
                                   key={link.label}
                                   to={link.href}
-                                  className="group flex min-w-0 items-center gap-3 rounded-lg border border-border/70 bg-card px-3 py-2.5 text-left transition-colors hover:border-orange-300 hover:bg-orange-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                  className="group flex min-w-0 items-center gap-2 rounded-lg border border-primary bg-primary px-3 py-2 text-left text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                 >
-                                  <span className="flex size-8 shrink-0 items-center justify-center text-foreground">
+                                  <span className="flex size-4 shrink-0 items-center justify-center text-primary-foreground">
                                     <ArrowUpRight aria-hidden className="size-4" />
                                   </span>
                                   <span className="min-w-0">
-                                    <span className="block text-xs font-semibold text-foreground">
+                                    <span className="block text-[13px] font-medium text-primary-foreground">
                                       {link.label}
                                     </span>
-                                    <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
+                                    <span className="mt-0.5 block text-xs leading-snug text-primary-foreground/80">
                                       {link.description}
                                     </span>
                                   </span>
@@ -5714,7 +5713,7 @@ function useOrdersPageContent() {
                               ))}
                               {orderDetail.planning_preparation
                                 .treatment_plan_note ? (
-                                <div className="rounded-xl border border-border px-4 py-3 text-sm text-muted-foreground">
+                                <div className="rounded-xl border border-border px-3 py-2 text-[13px] text-muted-foreground">
                                   {
                                     orderDetail.planning_preparation
                                       .treatment_plan_note
@@ -6464,7 +6463,7 @@ function useOrdersPageContent() {
                 ) : null}
 
                 {shouldRenderOrderSection("phase") ? (
-                  <section className="rounded-lg border border-border/70 bg-card p-6">
+                  <section className="rounded-lg border border-border/70 bg-card p-3">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
@@ -6473,7 +6472,7 @@ function useOrdersPageContent() {
                       </div>
                     </div>
 
-                    <div className="mt-5 space-y-5">
+                    <div className="mt-3 space-y-3">
                       {detailRequiresPatient ? (
                         <EmptyState
                           title={

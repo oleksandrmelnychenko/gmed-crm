@@ -18,7 +18,7 @@ export function Field({
   required?: boolean;
 }) {
   return (
-    <div className={cn("space-y-1.5", className)}>
+    <div data-slot="record-field" className={cn("space-y-1.5", className)}>
       <label htmlFor={htmlFor} className={cn(tokens.text.label, "block")}>
         {label}
         {required ? (

@@ -421,7 +421,7 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
                       index > 1 && index % 2 === 1 && "md:border-l",
                     )}
                   >
-                    <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/30">
+                    <div className="flex size-6 shrink-0 items-center justify-center text-foreground [&>svg]:size-[22px]">
                       <Icon className="size-4 text-muted-foreground" />
                     </div>
                     <div className="min-w-0 flex-1">

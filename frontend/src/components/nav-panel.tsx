@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   BadgeCheck,
@@ -6,6 +6,7 @@ import {
   Building2,
   CalendarClock,
   ChartSpline,
+  ChevronDown,
   ClipboardList,
   ConciergeBell,
   FileHeart,
@@ -68,6 +69,7 @@ import { LeadPortalPlanDialog } from "@/components/lead-portal-plan-dialog";
 import { PortalSubscriptionLock } from "@/components/portal-subscription-lock";
 import { hasPortalSubscription, isBasicPortalRoute } from "@/lib/portal-subscription";
 import { usePortalPatientId } from "@/lib/portal-patient-context";
+import { useLocalStorage } from "@/components/data-table/use-local-storage";
 
 interface NavItem {
   id: string;
@@ -87,6 +89,14 @@ const STAFF_NAV_SECTIONS: StaffNavSection[] = [
   "dsgvo",
   "admin",
 ];
+
+const navSectionsSerializer = {
+  parse(raw: string): StaffNavSection[] {
+    const value: unknown = JSON.parse(raw);
+    return Array.isArray(value) ? STAFF_NAV_SECTIONS.filter((section) => value.includes(section)) : [];
+  },
+  stringify: (value: StaffNavSection[]) => JSON.stringify(value),
+};
 
 const SECTION_LABEL_KEYS: Record<StaffNavSection, string> = {
   main: "nav_main",
@@ -325,18 +335,39 @@ function StaffNavGroups({
   counters?: NavCounterMap;
   onNavigate: () => void;
 }) {
+  const location = useLocation();
+  const groupId = useId();
+  const [closedSections, setClosedSections] = useLocalStorage<StaffNavSection[]>("gmed_nav_closed_sections", [], navSectionsSerializer);
+  const [manuallyClosedLocation, setManuallyClosedLocation] = useState<typeof location | null>(null);
   const sections = STAFF_NAV_SECTIONS.filter((section) => (staffNavBySection.get(section)?.length ?? 0) > 0);
+  const activeSection = sections.find((section) => staffNavBySection.get(section)?.some((item) =>
+    item.to === "/" ? location.pathname === "/" : location.pathname === item.to || location.pathname.startsWith(`${item.to}/`),
+  ));
 
   return (
-    <div className="flex flex-col gap-4">
-      {sections.map((section) => (
+    <div className="navigation-groups flex flex-col gap-4">
+      {sections.map((section) => {
+        const open = collapsed || !closedSections.includes(section) || (activeSection === section && manuallyClosedLocation !== location);
+        const panelId = `${groupId}-${section}`;
+        return (
         <div key={section} className="flex flex-col gap-1">
           {!collapsed && (
-            <div className="px-3 pb-1 pt-0.5 font-mono text-[10px] font-medium text-sidebar-foreground/45">
+            <button
+              type="button"
+              aria-expanded={open}
+              aria-controls={panelId}
+              onClick={() => {
+                setClosedSections((current) => open ? [...new Set([...current, section])] : current.filter((item) => item !== section));
+                if (activeSection === section) setManuallyClosedLocation(open ? location : null);
+              }}
+              className="navigation-section-label flex min-h-8 w-full items-center justify-between rounded-lg px-3 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring"
+            >
               {sectionLabel(section, tr, translations)}
-            </div>
+              <ChevronDown aria-hidden="true" className={cn("navigation-section-chevron size-3.5 transition-transform motion-reduce:transition-none", !open && "-rotate-90")} />
+            </button>
           )}
           {collapsed && <SectionDivider />}
+          <div id={panelId} hidden={!open}>
           <NavGroup
             items={staffNavBySection.get(section) ?? []}
             tr={tr}
@@ -345,8 +376,10 @@ function StaffNavGroups({
             counters={counters}
             onNavigate={onNavigate}
           />
+          </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

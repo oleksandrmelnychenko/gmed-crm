@@ -2256,7 +2256,7 @@ function usePatientInvoicesTabContent({
   );
 
   return (
-    <TabsContent value="invoices" className="mt-4 min-h-[400px] space-y-4">
+    <TabsContent value="invoices" className="min-h-[400px] space-y-3">
       {financeError ? (
         <Banner tone="error" withIcon>
           {financeError}
@@ -2264,7 +2264,7 @@ function usePatientInvoicesTabContent({
       ) : null}
         {/* Period, order and package filters and the export are reading: usable read-only. */}
         <WritableScope>
-        <AdminToolbar className="items-start gap-2 rounded-xl border border-border/60 bg-card p-3 shadow-none">
+        <AdminToolbar className="items-end gap-2 rounded-xl border border-border bg-card p-2.5 shadow-none">
           <Field
             label={t.patient_invoices_from}
             htmlFor="profitability-from"
@@ -2353,7 +2353,7 @@ function usePatientInvoicesTabContent({
               ))}
             </NativeComboboxSelect>
           </Field>
-          <div className="ml-auto flex shrink-0 items-start gap-2 pt-[18px]">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             <Button
               type="button"
               variant="outline"

@@ -246,12 +246,12 @@ export function PatientTimelineTab({
               </EmptyCell>
             </div>
           ) : (
-            <div className="space-y-5 bg-muted/40 p-3 sm:p-4">
+            <div className="space-y-4 bg-card p-3">
               {groupedTimeline.map((group) => (
                 <section key={group.key} className="space-y-2" aria-label={group.label}>
                   <div className="flex items-center gap-2 px-1">
                     <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-primary" />
-                    <h3 className="font-mono text-[11px] font-medium text-muted-foreground">
+                    <h3 className="text-xs font-medium text-muted-foreground">
                       {group.label}
                     </h3>
                     <span className="h-px flex-1 bg-border" aria-hidden="true" />
@@ -281,12 +281,12 @@ export function PatientTimelineTab({
                           }
                         }}
                         className={cn(
-                          "flex w-full min-w-0 items-start gap-3 rounded-xl border border-border bg-card px-3 py-3 text-left shadow-xs transition-colors sm:px-4",
+                          "flex w-full min-w-0 items-start gap-2.5 rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors",
                           route ? "cursor-pointer hover:border-primary/40 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40" : "cursor-default",
                         )}
                       >
-                        <span className="hidden size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground sm:flex">
-                          <History className="size-4" aria-hidden="true" />
+                        <span className="mt-0.5 hidden size-5 shrink-0 items-center justify-center text-foreground sm:flex">
+                          <History className="size-5" aria-hidden="true" />
                         </span>
                         <div className="min-w-0 flex-1 space-y-2">
                           <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4">

@@ -1124,7 +1124,7 @@ export function DiagnosisTreeSection({
   const editingParentLabel = editingParent ? displayLabel(editingParent) : null;
 
   return (
-    <section className={cn("rounded-xl border border-border/70 bg-slate-50/60", className)}>
+    <section className={cn("rounded-xl border border-border/70 bg-card", className)}>
       <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
         <div className="flex items-center gap-2">
           <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />

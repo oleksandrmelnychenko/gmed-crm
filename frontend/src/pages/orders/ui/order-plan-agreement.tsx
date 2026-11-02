@@ -4,7 +4,7 @@ import { FileText, LoaderCircle } from "lucide-react";
 import { StaffLink } from "@/components/staff-link";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { formatAppDateTime } from "@/lib/app-time-zone";
-import { cn } from "@/lib/utils";
+import { buttonVariants } from "@/components/ui/button";
 import { fetchDocuments, generateDocument } from "@/pages/documents/data/document-api";
 import type { DocumentItem } from "@/pages/documents/model/types";
 
@@ -34,8 +34,7 @@ type OrderPlanAgreementProps = {
   onChanged: () => void;
 };
 
-const BUTTON =
-  "inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition-colors disabled:opacity-60";
+const BUTTON = buttonVariants({ size: "sm" });
 
 function latestPlanDocument(documents: DocumentItem[], orderId: string) {
   return (
@@ -70,12 +69,7 @@ export function PlanAgreementSteps({
           data-testid={`order-plan-step-${step.status}`}
           disabled={busy}
           onClick={() => onStep(step.status)}
-          className={cn(
-            BUTTON,
-            step.primary
-              ? "border-foreground bg-foreground text-background hover:opacity-90"
-              : "border-border bg-card text-foreground hover:bg-muted",
-          )}
+          data-slot="button" data-variant="default" data-size="sm" className={BUTTON}
         >
           {lang === "de" ? step.de : step.ru}
         </button>
@@ -203,9 +197,9 @@ export function OrderPlanAgreement({
     : null;
 
   return (
-    <div data-testid="order-plan-agreement" className="rounded-2xl border border-border p-4">
+    <div data-testid="order-plan-agreement" className="rounded-lg border border-border bg-card p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-sm font-semibold text-foreground">
+        <div className="text-[13px] font-semibold text-foreground">
           {tx("План для пациента", "Plan für den Patienten")}
         </div>
         <StatusBadge tone={statusInfo?.tone ?? "neutral"}>{statusLabel}</StatusBadge>
@@ -216,7 +210,7 @@ export function OrderPlanAgreement({
         </p>
       ) : null}
 
-      <div className="mt-3 space-y-3">
+      <div className="mt-2 space-y-2">
         {error ? <Banner tone="error">{error}</Banner> : null}
         {pdfStale || statusStale ? (
           <div
@@ -257,7 +251,7 @@ export function OrderPlanAgreement({
                 data-testid="order-plan-pdf"
                 disabled={busy !== null}
                 onClick={() => void generatePdf()}
-                className={cn(BUTTON, "border-border bg-card text-foreground hover:bg-muted")}
+                data-slot="button" data-variant="default" data-size="sm" className={BUTTON}
               >
                 {busy === "pdf" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
                 {planDocument

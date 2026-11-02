@@ -49,6 +49,7 @@ import { fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { ProviderTaxonomyCascadeSelect } from "@/pages/providers/ui/provider-taxonomy-cascade-select";
 import { cn } from "@/lib/utils";
+import { portalServiceContext } from "./model/portal-service-context";
 
 type ServiceRequestFormState = {
   serviceKind: string;
@@ -507,68 +508,73 @@ export function PatientServicesPage() {
                 <p className="mt-2 text-sm text-muted-foreground">{t.services_empty_description}</p>
               </EmptyCell>
             ) : (
-              services.map((item) => (
-                <ListItem key={item.id} className="space-y-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="flex flex-wrap gap-2">
-                        <StatusBadge status={item.status} tone={serviceStatusBadgeTone(item.status)}>
-                          {portalStatusLabel(item.status)}
-                        </StatusBadge>
-                        <CountBadge>
-                          {conciergeServiceKindLabel(item.service_kind)}
-                        </CountBadge>
-                        {portalServiceTaxonomyLabel(item, lang) ? (
+              services.map((item) => {
+                const contextParts = [item.provider_name, item.assigned_concierge_name, item.appointment_title]
+                  .filter((value): value is string => Boolean(value?.trim()));
+                const context = portalServiceContext(item);
+                return (
+                  <ListItem key={item.id} className="portal-service-card space-y-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="flex flex-wrap gap-2">
+                          <StatusBadge status={item.status} tone={serviceStatusBadgeTone(item.status)}>
+                            {portalStatusLabel(item.status)}
+                          </StatusBadge>
                           <CountBadge>
-                            {portalServiceTaxonomyLabel(item, lang)}
+                            {conciergeServiceKindLabel(item.service_kind)}
                           </CountBadge>
-                        ) : null}
-                        <CountBadge>
-                          {conciergeServiceSourceLabel(item.request_source)}
-                        </CountBadge>
+                          {portalServiceTaxonomyLabel(item, lang) ? (
+                            <CountBadge>
+                              {portalServiceTaxonomyLabel(item, lang)}
+                            </CountBadge>
+                          ) : null}
+                          <CountBadge>
+                            {conciergeServiceSourceLabel(item.request_source)}
+                          </CountBadge>
+                        </div>
+                        <h2 className="mt-2 text-base font-semibold text-foreground">{item.title}</h2>
+                        {context || contextParts.length === 0 ? <p className="mt-1 text-sm text-muted-foreground">
+                          {context || t.services_care_team_pending}
+                        </p> : null}
                       </div>
-                      <h2 className="mt-2 text-base font-semibold text-foreground">{item.title}</h2>
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        {[item.provider_name, item.assigned_concierge_name, item.appointment_title].filter(Boolean).join(" / ") || t.services_care_team_pending}
-                      </p>
+                      <Building2 className="size-5 text-muted-foreground" />
                     </div>
-                    <Building2 className="size-5 text-muted-foreground" />
-                  </div>
 
-                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                    <InfoRow label={t.services_preferred_start} value={<PortalDateChip>{formatPortalDateTime(item.starts_at)}</PortalDateChip>} />
-                    <InfoRow label={t.services_preferred_end} value={<PortalDateChip>{formatPortalDateTime(item.ends_at)}</PortalDateChip>} />
-                    <InfoRow label={t.services_vendor} value={item.vendor_name || t.common_not_set} />
-                    <InfoRow
-                      label={t.services_estimate}
-                      value={item.cost_estimate ? formatPortalCurrency(item.cost_estimate) : t.common_not_set}
-                    />
-                    <InfoRow label={t.services_booking_reference} value={item.booking_reference || t.common_not_set} />
-                    <InfoRow label={t.services_created_at} value={<PortalDateChip>{formatPortalDateTime(item.created_at)}</PortalDateChip>} />
-                  </div>
-
-                  {item.service_notes ? (
-                    <div className={cn("rounded-lg px-3 py-2 text-sm leading-6 text-foreground", tokens.surface.mutedCard)}>
-                      {localizeTaskNote(item.service_notes, lang)}
+                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                      <InfoRow label={t.services_preferred_start} value={<PortalDateChip>{formatPortalDateTime(item.starts_at)}</PortalDateChip>} />
+                      <InfoRow label={t.services_preferred_end} value={<PortalDateChip>{formatPortalDateTime(item.ends_at)}</PortalDateChip>} />
+                      <InfoRow label={t.services_vendor} value={item.vendor_name || t.common_not_set} />
+                      <InfoRow
+                        label={t.services_estimate}
+                        value={item.cost_estimate ? formatPortalCurrency(item.cost_estimate) : t.common_not_set}
+                      />
+                      <InfoRow label={t.services_booking_reference} value={item.booking_reference || t.common_not_set} />
+                      <InfoRow label={t.services_created_at} value={<PortalDateChip>{formatPortalDateTime(item.created_at)}</PortalDateChip>} />
                     </div>
-                  ) : null}
 
-                  {item.can_cancel ? (
-                    <div className="flex justify-end">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className={tokens.control.accessoryButton}
-                        disabled={cancelBusyId === item.id}
-                        onClick={() => void handleCancel(item.id)}
-                      >
-                        {cancelBusyId === item.id ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                        {t.services_cancel_request}
-                      </Button>
-                    </div>
-                  ) : null}
-                </ListItem>
-              ))
+                    {item.service_notes ? (
+                      <div className={cn("rounded-lg px-3 py-2 text-sm leading-6 text-foreground", tokens.surface.mutedCard)}>
+                        {localizeTaskNote(item.service_notes, lang)}
+                      </div>
+                    ) : null}
+
+                    {item.can_cancel ? (
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className={tokens.control.accessoryButton}
+                          disabled={cancelBusyId === item.id}
+                          onClick={() => void handleCancel(item.id)}
+                        >
+                          {cancelBusyId === item.id ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                          {t.services_cancel_request}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </ListItem>
+                );
+              })
             )}
           </Section>
         </section>

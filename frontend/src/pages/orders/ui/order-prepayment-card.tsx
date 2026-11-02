@@ -103,12 +103,12 @@ export function OrderPrepaymentCard({
 
   return (
     <section
-      className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5"
+      className="min-w-0 space-y-2 rounded-xl border border-border/50 bg-card p-3"
       data-testid="order-prepayment"
       aria-label={tx("Предоплата", "Vorauszahlung")}
     >
       <AdminSectionTitle>{tx("Предоплата", "Vorauszahlung")}</AdminSectionTitle>
-      <div className="space-y-3 text-[13px] leading-5">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[13px] leading-5">
         <p data-testid="order-prepayment-current">
           {stored.prepayment_required ? (
             <>

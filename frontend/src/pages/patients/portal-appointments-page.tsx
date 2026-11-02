@@ -12,7 +12,6 @@ import {
 } from "react";
 import { Building2, Clock3, LoaderCircle, MapPin, Plus, RefreshCw, Send, UserRound } from "lucide-react";
 
-import { StatusChip } from "@/components/ui/status-chip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -448,7 +447,7 @@ function usePatientAppointmentsPageContent() {
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <PortalDateChip>{formatPortalDate(item.date)}</PortalDateChip>
-                      <StatusChip tone="info" className="tabular-nums"><Clock3 aria-hidden="true" />{[item.time_start, item.time_end].filter(Boolean).join(" – ") || t.portal_appointments_not_set}</StatusChip>
+                      <PortalDateChip icon={Clock3}>{[item.time_start, item.time_end].filter(Boolean).join(" – ") || t.portal_appointments_not_set}</PortalDateChip>
                     </div>
                   </ListItem>
                 ))}
@@ -653,6 +652,9 @@ function usePatientAppointmentsPageContent() {
           title={t.portal_appointments_request_a_visit}
           description={t.portal_appointments_send_preferred_dates_and_context_the_care_team_reviews_and_conve}
           width="form-heavy"
+          presentation="dialog"
+          bodyClassName="bg-card"
+          bodyWrapperClassName="portal-request-form"
           onSubmit={(event) => void handleSubmitRequest(event)}
           footer={
             <>
@@ -682,43 +684,45 @@ function usePatientAppointmentsPageContent() {
           }
         >
           <Section title={t.portal_appointments_group_request_details}>
-            <Field label={t.portal_appointments_type} htmlFor="portal-appointment-type">
-              <NativeComboboxSelect
-                id="portal-appointment-type"
-                value={requestForm.appointmentType}
-                onChange={(event) =>
-                  setRequestForm((current) => ({
-                    ...current,
-                    appointmentType: event.target.value as "medical" | "non_medical",
-                    carePathKind:
-                      event.target.value === "medical" ? current.carePathKind : "regular",
-                  }))
-                }
-                className={selectClass}
-              >
-                <option value="medical">{t.portal_appointments_medical}</option>
-                <option value="non_medical">{t.portal_appointments_non_medical}</option>
-              </NativeComboboxSelect>
-            </Field>
-            <Field label={t.portal_appointments_care_path} htmlFor="portal-appointment-care-path">
-              <NativeComboboxSelect
-                id="portal-appointment-care-path"
-                value={requestForm.carePathKind}
-                onChange={(event) =>
-                  setRequestForm((current) => ({
-                    ...current,
-                    carePathKind: event.target.value as "regular" | "preventive" | "control" | "followup",
-                  }))
-                }
-                disabled={requestForm.appointmentType !== "medical"}
-                className={selectClass}
-              >
-                <option value="regular">{t.portal_appointments_regular}</option>
-                <option value="preventive">{t.portal_appointments_preventive}</option>
-                <option value="control">{t.portal_appointments_control}</option>
-                <option value="followup">{t.portal_appointments_follow_up}</option>
-              </NativeComboboxSelect>
-            </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label={t.portal_appointments_type} htmlFor="portal-appointment-type">
+                <NativeComboboxSelect
+                  id="portal-appointment-type"
+                  value={requestForm.appointmentType}
+                  onChange={(event) =>
+                    setRequestForm((current) => ({
+                      ...current,
+                      appointmentType: event.target.value as "medical" | "non_medical",
+                      carePathKind:
+                        event.target.value === "medical" ? current.carePathKind : "regular",
+                    }))
+                  }
+                  className={selectClass}
+                >
+                  <option value="medical">{t.portal_appointments_medical}</option>
+                  <option value="non_medical">{t.portal_appointments_non_medical}</option>
+                </NativeComboboxSelect>
+              </Field>
+              <Field label={t.portal_appointments_care_path} htmlFor="portal-appointment-care-path">
+                <NativeComboboxSelect
+                  id="portal-appointment-care-path"
+                  value={requestForm.carePathKind}
+                  onChange={(event) =>
+                    setRequestForm((current) => ({
+                      ...current,
+                      carePathKind: event.target.value as "regular" | "preventive" | "control" | "followup",
+                    }))
+                  }
+                  disabled={requestForm.appointmentType !== "medical"}
+                  className={selectClass}
+                >
+                  <option value="regular">{t.portal_appointments_regular}</option>
+                  <option value="preventive">{t.portal_appointments_preventive}</option>
+                  <option value="control">{t.portal_appointments_control}</option>
+                  <option value="followup">{t.portal_appointments_follow_up}</option>
+                </NativeComboboxSelect>
+              </Field>
+            </div>
           </Section>
           <Section title={t.portal_appointments_group_schedule_preferences}>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -757,31 +761,33 @@ function usePatientAppointmentsPageContent() {
             </Field>
           </Section>
           <Section title={t.portal_appointments_group_visit_context}>
-            <Field label={t.portal_appointments_specialty_or_topic} htmlFor="portal-appointment-specialty">
-              <input
-                id="portal-appointment-specialty"
-                value={requestForm.specialty}
-                onChange={(event) => setRequestForm((current) => ({ ...current, specialty: event.target.value }))}
-                placeholder={t.portal_appointments_cardiology_diagnostics_transfer_hotel_etc}
-                className={cn(inputClass, "w-full border border-input px-3 text-sm")}
-              />
-            </Field>
-            <Field label={t.portal_appointments_location_preference} htmlFor="portal-appointment-location">
-              <input
-                id="portal-appointment-location"
-                value={requestForm.location}
-                onChange={(event) => setRequestForm((current) => ({ ...current, location: event.target.value }))}
-                placeholder={t.portal_appointments_clinic_city_or_remote_request}
-                className={cn(inputClass, "w-full border border-input px-3 text-sm")}
-              />
-            </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label={t.portal_appointments_specialty_or_topic} htmlFor="portal-appointment-specialty">
+                <input
+                  id="portal-appointment-specialty"
+                  value={requestForm.specialty}
+                  onChange={(event) => setRequestForm((current) => ({ ...current, specialty: event.target.value }))}
+                  placeholder={t.portal_appointments_cardiology_diagnostics_transfer_hotel_etc}
+                  className={cn(inputClass, "w-full border border-input px-3 text-sm")}
+                />
+              </Field>
+              <Field label={t.portal_appointments_location_preference} htmlFor="portal-appointment-location">
+                <input
+                  id="portal-appointment-location"
+                  value={requestForm.location}
+                  onChange={(event) => setRequestForm((current) => ({ ...current, location: event.target.value }))}
+                  placeholder={t.portal_appointments_clinic_city_or_remote_request}
+                  className={cn(inputClass, "w-full border border-input px-3 text-sm")}
+                />
+              </Field>
+            </div>
             <Field label={t.portal_appointments_reason} htmlFor="portal-appointment-reason">
               <textarea
                 id="portal-appointment-reason"
                 value={requestForm.reason}
                 onChange={(event) => setRequestForm((current) => ({ ...current, reason: event.target.value }))}
                 placeholder={t.portal_appointments_what_do_you_need_and_what_should_the_team_consider}
-                className={cn(textareaClass, "min-h-[120px]")}
+                className={cn(textareaClass, "min-h-[80px]")}
               />
             </Field>
             <Field label={t.portal_appointments_additional_note} htmlFor="portal-appointment-notes">
@@ -790,7 +796,7 @@ function usePatientAppointmentsPageContent() {
                 value={requestForm.notes}
                 onChange={(event) => setRequestForm((current) => ({ ...current, notes: event.target.value }))}
                 placeholder={t.portal_appointments_optional_logistical_or_clinical_context}
-                className={cn(textareaClass, "min-h-[100px]")}
+                className={cn(textareaClass, "min-h-[64px]")}
               />
             </Field>
           </Section>

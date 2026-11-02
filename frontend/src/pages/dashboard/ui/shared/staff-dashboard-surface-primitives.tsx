@@ -23,25 +23,17 @@ export function DashKpi({
     <button
       type="button"
       onClick={onClick}
-      className="relative cursor-pointer overflow-hidden rounded-lg border border-border/70 bg-card p-3.5 text-left transition-colors hover:border-foreground/30"
+      className="relative cursor-pointer overflow-hidden rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background:
-            "radial-gradient(circle at top right, rgba(249,115,22,0.08), transparent 55%)",
-        }}
-      />
       <div className="relative flex items-start justify-between">
         <div>
-          <span className="text-[12px] text-muted-foreground">{label}</span>
+          <span className="text-[13px] text-muted-foreground">{label}</span>
           <p className="mt-1.5 text-[24px] font-semibold leading-none tracking-tight text-foreground">
             {value}
           </p>
-          {hint ? <p className="mt-1.5 text-[11px] text-muted-foreground">{hint}</p> : null}
+          {hint ? <p className="mt-1.5 text-xs text-muted-foreground">{hint}</p> : null}
         </div>
-        <Icon className="size-[18px] text-muted-foreground" />
+        <Icon aria-hidden="true" className="size-[22px] shrink-0 text-foreground" />
       </div>
     </button>
   );
@@ -60,10 +52,10 @@ export function QuickLink({
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center gap-3 rounded-lg border border-border/70 bg-card px-4 py-3 text-left transition-colors hover:border-foreground/30"
+      className="flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 text-left transition-colors hover:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <div className="flex shrink-0 items-center justify-center text-foreground">
-        <Icon className="size-5" />
+        <Icon aria-hidden="true" className="size-[22px]" />
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] font-medium text-foreground">{label}</div>
@@ -142,7 +134,7 @@ export function ChartCard({
   compact?: boolean;
 }) {
   return (
-    <div className={cn("min-w-0 rounded-lg border border-border/70 bg-card", compact ? "p-3" : "p-4")}>
+    <div className={cn("min-w-0 rounded-xl border border-border bg-card", compact ? "p-3" : "p-4")}>
       <div>
         <h3 className="text-[14px] font-semibold text-foreground">{title}</h3>
         {hint ? <p className="mt-0.5 text-[11.5px] text-muted-foreground">{hint}</p> : null}
@@ -179,7 +171,7 @@ export function PeriodSwitcher({
           className={cn(
             "h-7 rounded-md px-2.5 transition-colors",
             value === option
-              ? "bg-[var(--brand)] font-medium text-white"
+              ? "bg-primary font-medium text-primary-foreground"
               : "text-muted-foreground hover:text-foreground",
           )}
         >

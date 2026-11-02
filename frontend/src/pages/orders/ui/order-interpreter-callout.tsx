@@ -103,14 +103,14 @@ export function OrderInterpreterCallout({
       data-testid="order-interpreter-callout"
       data-state={state}
       className={cn(
-        "flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3",
+        "flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2",
         accepted ? "border-border/70 bg-muted/30" : "border-orange-200 bg-orange-50/60",
       )}
     >
       <div className="flex min-w-0 items-start gap-2">
         {accepted ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" /> : null}
         <div className="min-w-0">
-          <p className={cn("text-sm font-semibold", accepted ? "text-foreground" : "text-orange-950")}>
+          <p className={cn("text-[13px] font-semibold", accepted ? "text-foreground" : "text-orange-950")}>
             {title}
           </p>
           <p
@@ -126,7 +126,7 @@ export function OrderInterpreterCallout({
       <Button
         type="button"
         size="sm"
-        variant={accepted ? "outline" : "default"}
+        variant="default"
         className="h-8 shrink-0 rounded-lg"
         onClick={() => onNavigate(href)}
       >

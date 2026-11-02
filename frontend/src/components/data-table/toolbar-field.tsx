@@ -20,7 +20,7 @@ export function ToolbarField({
   children: ReactNode;
 }) {
   return (
-    <label className={cn("flex min-w-0 shrink-0 flex-col", className)}>
+    <label data-slot="toolbar-field" className={cn("flex min-w-0 shrink-0 flex-col", className)}>
       <span className="mb-0.5 flex h-4 min-w-0 items-center truncate text-[10px] font-medium leading-none text-muted-foreground">
         {label}
       </span>

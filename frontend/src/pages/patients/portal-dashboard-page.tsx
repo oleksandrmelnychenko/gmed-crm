@@ -68,6 +68,7 @@ import type {
 import { cn } from "@/lib/utils";
 import { PatientPortalMobileAccess } from "@/pages/patients/ui/patient-portal-mobile-access";
 import { missingDocumentHints } from "@/pages/patients/model/portal-required-documents";
+import { portalServiceContext } from "./model/portal-service-context";
 
 const PATIENT_DASHBOARD_REALTIME_EVENTS = [
   "appointment.created",
@@ -531,36 +532,32 @@ function usePatientDashboardPageContent() {
           title={t.portal_dashboard_next_actions}
           accessory={
             <div className="flex flex-wrap items-center gap-2">
+              {nextActionKindSummary.map(([kind, count]) => (
+                <CountBadge key={kind}>{formatNextActionKind(kind, t)}: {count}</CountBadge>
+              ))}
               {urgentNextActionCount > 0 ? <CountBadge>{t.portal_dashboard_priority}: {urgentNextActionCount}</CountBadge> : null}
             </div>
           }
         >
-          {nextActionKindSummary.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {nextActionKindSummary.map(([kind, count]) => (
-                <CountBadge key={kind}>{formatNextActionKind(kind, t)}: {count}</CountBadge>
-              ))}
-            </div>
-          ) : null}
           <div className="portal-action-list space-y-3">
             {topNextActions.length === 0 ? (
               <div className="py-3"><PortalComplete>{t.portal_dashboard_no_open_portal_actions_right_now}</PortalComplete></div>
             ) : (
               topNextActions.map((item, index) => (
                 <ListItem key={item.id} className={cn("portal-action-row flex flex-col gap-3 sm:flex-row sm:items-center", index === 0 && "portal-action-featured")}>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StatusBadge className={nextActionTone(item.kind, item.priority)}>
+                  <div className="portal-action-content min-w-0 flex-1">
+                    <div className="portal-action-badges flex flex-wrap items-center gap-2">
+                      {item.kind !== "upcoming_appointment" || nextActionKindSummary.length > 1 ? <StatusBadge className={nextActionTone(item.kind, item.priority)}>
                         {formatNextActionKind(item.kind, t)}
-                      </StatusBadge>
+                      </StatusBadge> : null}
                       {item.priority && item.priority !== "normal" ? <CountBadge>{recommendationPriorityLabel(item.priority)}</CountBadge> : null}
                     </div>
-                    <p className="mt-2 text-sm font-semibold text-foreground">{item.title}</p>
+                    <p className="portal-action-title text-sm font-semibold text-foreground">{item.title}</p>
                     {nextActionText(item) ? (
-                      <p className={cn("mt-1", tokens.text.muted)}>{nextActionText(item)}</p>
+                      <p className="portal-action-description mt-1 text-sm text-muted-foreground">{nextActionText(item)}</p>
                     ) : null}
                     {(item.due_at || item.amount) ? (
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <div className="portal-action-meta mt-2 flex flex-wrap items-center gap-2">
                         {item.due_at ? (
                           <PortalDateChip>{item.kind === "recommendation" ? formatPortalDate(item.due_at) : formatPortalDateTime(item.due_at)}</PortalDateChip>
                         ) : null}
@@ -755,9 +752,9 @@ function usePatientDashboardPageContent() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-foreground">{item.title}</p>
-                      <p className={cn("mt-1", tokens.text.muted)}>
-                        {[item.provider_name, item.assigned_concierge_name, item.appointment_title].filter(Boolean).join(" / ")}
-                      </p>
+                      {portalServiceContext(item) ? (
+                        <p className={cn("mt-1", tokens.text.muted)}>{portalServiceContext(item)}</p>
+                      ) : null}
                     </div>
                     <StatusBadge status={item.status} className={conciergeServiceStatusTone(item.status)}>
                       {portalStatusLabel(item.status)}

@@ -16,7 +16,7 @@ use uuid::Uuid;
 use gmed_server::auth::jwt;
 
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
-const CONSENT_VERSION: &str = "2026-10-13";
+const CONSENT_VERSION: &str = "2026-11-02";
 const PDF: &[u8] = b"%PDF-1.4\n% synthetic lead portal upload\n%%EOF\n";
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\n synthetic identity document";
 

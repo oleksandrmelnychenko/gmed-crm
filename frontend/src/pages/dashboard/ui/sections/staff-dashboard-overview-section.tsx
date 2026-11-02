@@ -49,8 +49,8 @@ const MonthlyLeadAreaChart = lazy(async () => {
           <AreaChart data={data} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
             <defs>
               <linearGradient id="dashLeadsGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#f97316" stopOpacity={0.32} />
-                <stop offset="100%" stopColor="#f97316" stopOpacity={0.02} />
+                <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.32} />
+                <stop offset="100%" stopColor="var(--primary)" stopOpacity={0.02} />
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#eee" vertical={false} />
@@ -79,7 +79,7 @@ const MonthlyLeadAreaChart = lazy(async () => {
             <Area
               type="monotone"
               dataKey="count"
-              stroke="#f97316"
+              stroke="var(--primary)"
               strokeWidth={2}
               fill="url(#dashLeadsGrad)"
             />

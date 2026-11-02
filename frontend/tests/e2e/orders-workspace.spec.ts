@@ -438,8 +438,9 @@ test("planning lists the order's appointments by day and by doctor (plan stage 2
   await expect(plan).not.toContainText("Abgesagt");
   await plan.getByRole("button", {name: "По врачам"}).click();
   await expect(plan.getByRole("heading", {level: 3})).toHaveText([/Dr. Weber.*Klinik Nord/, /Dr. Klein.*Klinik Nord/]);
-  await expect(plan.locator("li", {hasText: "Nachbesprechung"})).toContainText("13:00");
-  await expect(plan.locator("li", {hasText: "Nachbesprechung"})).toContainText("Вт, 03.11.2026");
+  const followup = plan.getByRole("listitem").filter({has: page.getByRole("link", {name: "Nachbesprechung", exact: true})});
+  await expect(followup).toContainText("Вт, 03.11.2026");
+  await expect(followup).toContainText("13:00");
   const href = await plan.getByRole("link", {name: "MRT Abdomen"}).getAttribute("href");
   expect(href).toContain("appointment=MRT%20Abdomen");
   expect(href).toContain("return_to=");

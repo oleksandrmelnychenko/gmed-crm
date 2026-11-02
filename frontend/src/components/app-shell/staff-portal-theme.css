@@ -1,0 +1,112 @@
+/* Staff density is independent of patient cards and clinical status colours. */
+.staff-portal-theme #main-content {
+  background: var(--background);
+  border: 0;
+  margin: 0;
+  padding: 16px;
+  border-radius: 0;
+}
+
+.staff-portal-theme .navigation-section-label {
+  font-family: var(--font-sans);
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 500;
+}
+.staff-portal-theme .navigation-groups { gap: 4px; }
+.staff-portal-theme .navigation-section-label { min-height: 28px; }
+.staff-portal-theme .app-navigation .navigation-section-chevron { width: 14px; height: 14px; }
+.staff-portal-theme .data-table-row::before { background: var(--muted-foreground); }
+
+.staff-portal-theme .patient-workspace-header {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px 14px;
+}
+.staff-portal-theme .patient-workspace { container: patient-workspace / inline-size; }
+.staff-portal-theme .patient-clinical-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@container patient-workspace (min-width: 960px) {
+  .staff-portal-theme .patient-clinical-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@container patient-workspace (max-width: 480px) {
+  .staff-portal-theme .patient-clinical-actions { grid-template-columns: minmax(0, 1fr); }
+}
+
+.staff-portal-theme [data-slot="record-field"] > label {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--muted-foreground);
+}
+.staff-portal-theme [data-slot="record-section"] h3 {
+  font-size: 14px;
+  line-height: 20px;
+}
+.staff-portal-theme [data-slot="section-marker"] { display: none; }
+.staff-portal-theme [data-slot="toolbar-field"] > span { font-size: 12px; }
+.staff-portal-theme [data-wizard-field-label] {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--muted-foreground);
+}
+
+.staff-portal-theme :is([data-slot="data-table-surface"], [data-slot="stat-card"]) {
+  border-color: var(--border);
+  border-radius: 12px;
+  box-shadow: none;
+}
+.staff-portal-theme [data-slot="data-table"] {
+  border-radius: 0;
+  border-color: var(--border);
+  box-shadow: none;
+}
+.staff-portal-theme .data-table-header-row {
+  border-radius: 0;
+  background: var(--muted);
+  color: var(--foreground);
+  font-weight: 500;
+}
+.staff-portal-theme .data-table-header-row > :is(div, button) { background: var(--muted); }
+.staff-portal-theme .patient-workspace [data-slot="data-table-empty"] { min-height: 96px; padding: 16px; }
+.staff-portal-theme .patient-workspace [data-slot="data-table-empty"] > div { padding-block: 0; }
+.staff-portal-theme [data-slot="stat-card"] { padding: 12px 14px; }
+.staff-portal-theme [data-slot="stat-card"] > p:first-child { font-size: 13px; }
+.staff-portal-theme [data-slot="stat-card"] > p:nth-child(2) { margin-top: 6px; font-size: 22px; }
+
+.staff-portal-theme .executive-dashboard {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--gmed-panel-radius);
+  padding: var(--gmed-panel-padding);
+}
+
+@media (min-width: 1024px) {
+  .staff-portal-theme #main-content { border-radius: 24px 0 0 24px; margin-bottom: 8px; }
+  .staff-portal-theme aside[data-workspace-rail] {
+    width: 248px;
+    margin: 12px 0 12px 12px;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    box-shadow: none;
+  }
+  .staff-portal-theme aside[data-workspace-rail] > div:first-child { padding: 14px 16px 0; }
+  .staff-portal-theme aside[data-workspace-rail] > div:last-child { padding: 12px 8px; }
+  .staff-portal-theme aside[data-workspace-rail] nav { display: flex; flex-direction: column; gap: 8px; }
+  .staff-portal-theme aside[data-workspace-rail] nav > section { margin-block: 0; padding-top: 8px; }
+  .staff-portal-theme aside[data-workspace-rail] nav > section:first-child { padding-top: 0; }
+  .staff-portal-theme aside[data-workspace-rail] a[aria-current] { min-height: 34px; height: auto; border-radius: 9px; }
+  .staff-portal-theme aside[data-workspace-rail] nav a { height: 32px; min-height: 32px; gap: 9px; padding: 6px 10px; font-size: 13px; color: var(--foreground); }
+  .staff-portal-theme aside[data-workspace-rail] nav a > svg:first-child { width: 20px; height: 20px; }
+}
+.staff-portal-theme .patient-workspace > [data-slot="tabs"] > [data-slot="tabs-content"] { margin-top: 0; }
+.staff-portal-theme .patient-workspace .space-y-4 > :not([hidden]) ~ :not([hidden]) { --tw-space-y-reverse: 0; margin-block-start: 12px; margin-block-end: 0; }
+.staff-portal-theme [data-slot="patient-form-section"] > div:first-child { padding: 10px 12px; }
+.staff-portal-theme [data-slot="patient-form-section"] > div:last-child { padding: 12px; }
+@media (max-width: 639px) {
+  .staff-portal-theme .navigation-section-label { min-height: 40px; }
+  .staff-portal-theme #main-content { padding: 12px; }
+  .staff-portal-theme .executive-dashboard { padding: 12px; }
+}

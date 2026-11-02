@@ -280,19 +280,19 @@ export function LinkedTasksSection({
       className={cn("overflow-hidden rounded-lg border border-border/70 bg-card", className)}
       data-testid="linked-tasks-section"
     >
-      <div className="flex flex-col gap-3 border-b border-border/70 bg-muted/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-start gap-2">
-          <span aria-hidden className="mt-1.5 size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-          <div className="min-w-0">
+      <div className="flex flex-col gap-2 border-b border-border/70 bg-card px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-2">
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
             <h3 className="text-sm font-semibold tracking-tight text-foreground">{labels.title}</h3>
-            <p className="mt-0.5 text-xs text-muted-foreground">
+            <p className="rounded-full border border-border bg-muted/25 px-2 py-0.5 text-xs text-muted-foreground">
               {loading ? (
                 <span className="inline-flex items-center gap-1.5">
                   <LoaderCircle className="size-3 animate-spin" />
                   {labels.open}: …
                 </span>
               ) : (
-                <span className={cn("font-semibold", openCount > 0 ? "text-orange-700" : "text-emerald-700")}>
+                <span className="font-medium text-foreground">
                   {labels.open}: {openCount}
                 </span>
               )}

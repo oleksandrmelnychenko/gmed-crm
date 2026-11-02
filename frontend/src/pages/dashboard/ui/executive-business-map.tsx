@@ -298,7 +298,7 @@ function MetricSignal({ label, value, note, tone }: { label: string; value: stri
     <div className="min-w-0 px-4 py-3 first:pl-0 last:pr-0 sm:border-l sm:border-border sm:first:border-l-0">
       <p className="text-[10px] font-medium text-muted-foreground">{label}</p>
       <p className="mt-1 text-[22px] font-semibold leading-none tracking-tight text-foreground">{value}</p>
-      <p className={cn("mt-1.5 truncate text-[10.5px]", tone === "good" && "text-emerald-700", tone === "danger" && "text-rose-700", tone === "neutral" && "text-muted-foreground")}>{note}</p>
+      <p className={cn("mt-1.5 truncate text-xs", tone === "good" && "text-emerald-700", tone === "danger" && "text-rose-700", tone === "neutral" && "text-muted-foreground")}>{note}</p>
     </div>
   );
 }
@@ -328,16 +328,16 @@ function BusinessDomain({
     <section className="flex min-h-[220px] min-w-0 flex-col px-4 py-4 sm:px-5">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-[13px] font-semibold text-foreground">{title}</h2>
-        <div className="inline-flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
+        <div className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
           <ToneDot tone={status} />
           {statusLabel}
         </div>
       </div>
-      <p className="mt-4 text-[11px] text-muted-foreground">{label}</p>
+      <p className="mt-4 text-xs text-muted-foreground">{label}</p>
       <p className={cn("mt-1 text-[22px] font-semibold leading-none tracking-tight tabular-nums", status === "danger" ? "text-rose-700" : status === "warning" ? "text-orange-700" : "text-foreground")}>{value}</p>
       <div className="mt-3 h-[54px] min-w-0">{chart}</div>
-      <div className="mt-2 min-h-10 border-t border-border pt-2 text-[10.5px] leading-4 text-muted-foreground">{detail}</div>
-      <button type="button" onClick={onClick} className="mt-auto inline-flex items-center gap-1 self-start pt-2 text-[11px] font-medium text-[var(--brand)] hover:underline">
+      <div className="mt-2 min-h-10 border-t border-border pt-2 text-xs leading-4 text-muted-foreground">{detail}</div>
+      <button type="button" onClick={onClick} className="mt-auto inline-flex items-center gap-1 self-start pt-2 text-xs font-medium text-[var(--brand)] hover:underline">
         {action}
         <ArrowRight className="size-3" />
       </button>
@@ -429,14 +429,14 @@ export function ExecutiveBusinessMap({
   };
 
   return (
-    <div className="space-y-0 pb-6">
+    <div className="executive-dashboard space-y-0 pb-6">
       <header className="border-b border-border pb-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-[24px] font-semibold leading-tight tracking-tight text-foreground">{greeting}</h1>
             <p className="mt-1 text-[12px] text-muted-foreground first-letter:uppercase">{date}</p>
           </div>
-          <button type="button" onClick={() => go("/reports")} className="inline-flex items-center gap-1 pt-1 text-[11.5px] font-medium text-[var(--brand)] hover:underline">
+          <button type="button" onClick={() => go("/reports")} className="inline-flex items-center gap-1 pt-1 text-[13px] font-medium text-[var(--brand)] hover:underline">
             {copy.allMetrics}
             <ArrowRight className="size-3" />
           </button>
@@ -516,7 +516,7 @@ export function ExecutiveBusinessMap({
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-[13px] font-semibold text-foreground">{copy.decisions}</h2>
-              <p className="mt-1 text-[10.5px] text-muted-foreground">{copy.taskQueue}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{copy.taskQueue}</p>
             </div>
             <span className="rounded-full border border-border px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">{decisionTasks.length}</span>
           </div>
@@ -531,7 +531,7 @@ export function ExecutiveBusinessMap({
                 <button key={task.id} type="button" onClick={() => go(`/task-manager?task=${encodeURIComponent(task.id)}`)} className="group flex w-full items-start gap-3 py-3 text-left">
                   <span className={cn("mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[9px] font-semibold text-white", tone === "danger" && "bg-rose-600", tone === "warning" && "bg-orange-500", tone === "good" && "bg-emerald-600")}>{index + 1}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[11.5px] font-medium leading-4 text-foreground [overflow-wrap:anywhere] group-hover:text-[var(--brand)]">{localizeTimelineTitle(task.title, l)}</span>
+                    <span className="block text-[13px] font-medium leading-4 text-foreground [overflow-wrap:anywhere] group-hover:text-[var(--brand)]">{localizeTimelineTitle(task.title, l)}</span>
                     <span className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground"><Clock3 className="size-3" />{dueLabel(task)}</span>
                   </span>
                   <ArrowRight className="mt-1 size-3 shrink-0 text-muted-foreground" />
@@ -539,7 +539,7 @@ export function ExecutiveBusinessMap({
               );
             })}
           </div>
-          <button type="button" onClick={() => go("/task-manager")} className="mt-3 inline-flex items-center gap-1 text-[11px] font-medium text-[var(--brand)] hover:underline">{copy.openAll}<ArrowRight className="size-3" /></button>
+          <button type="button" onClick={() => go("/task-manager")} className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-[var(--brand)] hover:underline">{copy.openAll}<ArrowRight className="size-3" /></button>
         </aside>
       </section>
 
@@ -549,9 +549,9 @@ export function ExecutiveBusinessMap({
           <div className="flex items-start justify-between gap-3 px-4 lg:px-0">
             <div>
               <h2 className="text-[13px] font-semibold text-foreground">{copy.cashMovement}</h2>
-              <p className="mt-1 text-[10.5px] text-muted-foreground">{copy.cashHint}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{copy.cashHint}</p>
             </div>
-            <button type="button" onClick={() => go("/company-finance")} className="inline-flex items-center gap-1 text-[10.5px] font-medium text-[var(--brand)] hover:underline">{copy.moneyAction}<ArrowRight className="size-3" /></button>
+            <button type="button" onClick={() => go("/company-finance")} className="inline-flex items-center gap-1 text-xs font-medium text-[var(--brand)] hover:underline">{copy.moneyAction}<ArrowRight className="size-3" /></button>
           </div>
           <div className="mt-2 h-[178px] min-w-0">
             <Suspense fallback={null}><ExecutiveCashChart data={cashData} locale={locale} labels={{ inflow: copy.inflow, outflow: copy.outflow, net: copy.net }} /></Suspense>
@@ -566,9 +566,9 @@ export function ExecutiveBusinessMap({
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <h2 className="text-[13px] font-semibold text-foreground">{copy.milestones}</h2>
-              <p className="mt-1 text-[10.5px] text-muted-foreground">{copy.calendar}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{copy.calendar}</p>
             </div>
-            <button type="button" onClick={() => go("/appointments")} className="shrink-0 text-[10.5px] font-medium text-[var(--brand)] hover:underline">{copy.calendar}</button>
+            <button type="button" onClick={() => go("/appointments")} className="shrink-0 text-xs font-medium text-[var(--brand)] hover:underline">{copy.calendar}</button>
           </div>
           <div className="mt-3 divide-y divide-border">
             {upcoming.length === 0 ? <p className="py-8 text-[12px] text-muted-foreground">{copy.noEvents}</p> : upcoming.slice(0, 5).map((appointment) => (
@@ -578,7 +578,7 @@ export function ExecutiveBusinessMap({
                   <span className="text-[12px] font-semibold text-foreground">{appDateTimeFormat(locale, { day: "2-digit" }).format(dateOrInstant(appointment.date))}</span>
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[11.5px] font-medium text-foreground group-hover:text-[var(--brand)]">{appointment.title || appointment.patient_name}</span>
+                  <span className="block truncate text-[13px] font-medium text-foreground group-hover:text-[var(--brand)]">{appointment.title || appointment.patient_name}</span>
                   <span className="mt-1 block truncate text-[10px] text-muted-foreground">{appointment.time_start?.slice(0, 5) ?? "—"} · {appointment.patient_name}</span>
                 </span>
                 <CalendarDays className="mt-1 size-3 shrink-0 text-muted-foreground" />
@@ -589,7 +589,7 @@ export function ExecutiveBusinessMap({
       </section>
 
       <div className="flex justify-end pt-4">
-        <button type="button" onClick={() => go("/reports")} className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--brand)] hover:underline">{copy.analytics}<ArrowRight className="size-3" /></button>
+        <button type="button" onClick={() => go("/reports")} className="inline-flex items-center gap-1 text-xs font-medium text-[var(--brand)] hover:underline">{copy.analytics}<ArrowRight className="size-3" /></button>
       </div>
     </div>
   );

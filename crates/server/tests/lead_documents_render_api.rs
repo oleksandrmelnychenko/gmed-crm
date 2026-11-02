@@ -37,7 +37,7 @@ use gmed_server::config::MailConfig;
 
 const SECRET: &str = "test-secret-at-least-32-characters-long!!";
 const INQUIRY_CONSENT_VERSION: &str = "2026-10-03";
-const HEALTH_CONSENT_VERSION: &str = "2026-10-13";
+const HEALTH_CONSENT_VERSION: &str = "2026-11-02";
 const PDF: &[u8] = b"%PDF-1.4\n% synthetic scenario document\n%%EOF\n";
 const LINK: &str = "/public/payer-link";
 

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   CalendarClock,
   CircleAlert,
@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
-import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
@@ -48,7 +47,7 @@ type OrderPipelinePanelProps = {
   onOpenSection: (section: OrderSectionKey) => void;
 };
 
-const linkButtonClass = cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 rounded-lg bg-field text-xs");
+const linkButtonClass = cn(buttonVariants({ size: "sm" }), "h-auto min-h-[30px] rounded-lg px-2.5 py-1 text-[13px] max-sm:min-h-10");
 
 const STAGE_ICONS: Record<OrderPipelineStageKey, LucideIcon> = {
   medical: Stethoscope,
@@ -64,24 +63,29 @@ function StageBlock({
   current,
   action,
   children,
+  sectionRef,
 }: {
   stage: OrderPipelineStage;
   lang: string;
   current: boolean;
   action?: ReactNode;
   children: ReactNode;
+  sectionRef: (element: HTMLElement | null) => void;
 }) {
   const Icon = STAGE_ICONS[stage.key];
   return (
     <section
+      ref={sectionRef}
+      tabIndex={-1}
+      aria-label={pipelineStageLabel(stage.key, lang)}
       className={cn(
-        "overflow-hidden rounded-xl border bg-card shadow-sm",
-        current ? "border-primary/40 ring-1 ring-primary/10" : "border-border/50",
+        "scroll-mt-3 overflow-hidden rounded-xl border bg-card outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        current ? "border-primary/25" : "border-border",
       )}
     >
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-4 py-3">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-3 py-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <AdminSectionTitle><Icon className="mr-1.5 inline size-3.5 text-muted-foreground" aria-hidden />{pipelineStageLabel(stage.key, lang)}</AdminSectionTitle>
+          <h2 className="flex items-center gap-2 text-[13px] font-semibold"><Icon className="size-[18px] shrink-0" aria-hidden />{pipelineStageLabel(stage.key, lang)}</h2>
           <StatusChip
             tone={
               stage.state === "done"
@@ -96,7 +100,7 @@ function StageBlock({
         </div>
         {action}
       </header>
-      <div className="space-y-3 p-4 text-[13px] leading-5">
+      <div className="space-y-2.5 p-3 text-[13px] leading-5">
         {stage.missing.length > 0 ? (
           <ul className="flex flex-wrap gap-2">
             {stage.missing.map((reason) => (
@@ -117,9 +121,9 @@ function StageBlock({
 
 function Fact({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="min-w-0 rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5">
-      <div className="font-mono text-[11px] leading-4 text-muted-foreground">{label}</div>
-      <div className="mt-1 break-words font-mono text-sm font-semibold leading-5 tabular-nums text-foreground">{value}</div>
+    <div className="min-w-0 border-b border-border/70 px-2 py-1.5">
+      <div className="text-xs leading-4 text-muted-foreground">{label}</div>
+      <div className="mt-0.5 break-words text-sm font-semibold leading-5 tabular-nums text-foreground">{value}</div>
     </div>
   );
 }
@@ -138,6 +142,7 @@ export function OrderPipelinePanel({
   const tx = (ru: string, german: string) => (de ? german : ru);
   const [pipeline, setPipeline] = useState<OrderPipeline | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const sections = useRef<Partial<Record<OrderPipelineStageKey, HTMLElement>>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -168,7 +173,7 @@ export function OrderPipelinePanel({
   const stageOf = (key: OrderPipelineStageKey) =>
     pipeline.stages.find((stage) => stage.key === key) ?? { key, state: "pending" as const, missing: [] };
   const openSection = (key: OrderPipelineStageKey, label: string) => (
-    <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg bg-field text-xs" onClick={() => onOpenSection(pipelineStageSection(key))}>
+    <Button type="button" size="sm" onClick={() => onOpenSection(pipelineStageSection(key))}>
       {label}
       <ChevronRight className="ml-1 size-3.5" />
     </Button>
@@ -178,23 +183,25 @@ export function OrderPipelinePanel({
   const medical = pipeline.medical;
 
   return (
-    <div className="@container space-y-3 rounded-xl bg-muted/50 p-3 sm:p-4">
-      <ol className="grid gap-2 @[32rem]:grid-cols-3 @[56rem]:grid-cols-5">
+    <div className="@container space-y-2">
+      <nav aria-label={tx("Этапы выполнения заказа", "Bearbeitungsschritte des Auftrags")} className="overflow-x-auto rounded-xl border border-border bg-card p-1">
+      <ol className="flex min-w-max gap-1">
         {pipeline.stages.map((stage, index) => (
           <li
             key={stage.key}
-            className={cn(
-              "flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium",
-              stage.state === "done" && "border-emerald-200 bg-emerald-50 text-emerald-800",
-              stage.state === "not_required" && "border-border/60 bg-muted/30 text-muted-foreground",
-              stage.key === current && "border-orange-300 bg-orange-50 text-orange-900",
-              stage.state !== "done" &&
-                stage.state !== "not_required" &&
-                stage.key !== current &&
-                "border-border/70 bg-card text-muted-foreground",
-            )}
+            className="min-w-max flex-1 shrink-0"
           >
-            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-background/80 font-mono text-[11px]">
+            <button type="button"
+              aria-current={stage.key === current ? "step" : undefined}
+              title={`${pipelineStageLabel(stage.key, lang)} · ${pipelineStateLabel(stage.state, lang)}`}
+              onClick={() => {
+                const section = sections.current[stage.key];
+                section?.scrollIntoView({ block: "start", behavior: "instant" });
+                section?.focus({ preventScroll: true });
+              }}
+              className={cn("flex min-h-9 w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-[13px] font-medium transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring max-sm:min-h-10", stage.key === current ? "bg-muted text-foreground" : "text-muted-foreground")}
+            >
+            <span aria-hidden className={cn("flex w-4 shrink-0 items-center justify-center text-xs tabular-nums", stage.state === "done" && "text-emerald-700")}>
               {stage.state === "done" ? (
                 <Check className="size-3" />
               ) : stage.state === "not_required" ? (
@@ -203,12 +210,15 @@ export function OrderPipelinePanel({
                 index + 1
               )}
             </span>
-            <span className="min-w-0 break-words">{pipelineStageLabel(stage.key, lang)}</span>
+            <span className="whitespace-nowrap">{pipelineStageLabel(stage.key, lang)}</span>
+            </button>
           </li>
         ))}
       </ol>
+      </nav>
 
       <StageBlock
+        sectionRef={(element) => { sections.current.medical = element ?? undefined; }}
         stage={stageOf("medical")}
         lang={lang}
         current={current === "medical"}
@@ -257,6 +267,7 @@ export function OrderPipelinePanel({
       </StageBlock>
 
       <StageBlock
+        sectionRef={(element) => { sections.current.care_team = element ?? undefined; }}
         stage={stageOf("care_team")}
         lang={lang}
         current={current === "care_team"}
@@ -306,6 +317,7 @@ export function OrderPipelinePanel({
       </StageBlock>
 
       <StageBlock
+        sectionRef={(element) => { sections.current.appointments = element ?? undefined; }}
         stage={stageOf("appointments")}
         lang={lang}
         current={current === "appointments"}
@@ -359,6 +371,7 @@ export function OrderPipelinePanel({
       </StageBlock>
 
       <StageBlock
+        sectionRef={(element) => { sections.current.execution = element ?? undefined; }}
         stage={stageOf("execution")}
         lang={lang}
         current={current === "execution"}
@@ -376,6 +389,7 @@ export function OrderPipelinePanel({
       </StageBlock>
 
       <StageBlock
+        sectionRef={(element) => { sections.current.closure = element ?? undefined; }}
         stage={stageOf("closure")}
         lang={lang}
         current={current === "closure"}

@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, type ReactNode } from "react";
 
 import { CommandPalette } from "@/components/command-palette";
 import { Toaster } from "@/components/ui/toast";
@@ -14,6 +14,10 @@ import { NavPanel } from "../nav-panel";
 import { Topbar } from "../topbar";
 import { WorkspaceRailResolver, type WorkspaceRailKind } from "./workspace-rail-resolver";
 import "./patient-portal-theme.css";
+import "../ui/gmed-theme.css";
+import "./gmed-shell-theme.css";
+import "./staff-portal-theme.css";
+import "../ui/gmed-controls.css";
 
 type AppShellFrameProps = {
   children: ReactNode;
@@ -31,6 +35,14 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
   const toggleSidebarLabel = leadShell?.toggleSidebar ?? t.ui_toggle_sidebar;
   const leadPortal = leadShell !== null;
   const patientPortal = user?.role === "patient";
+  const themeScope = leadPortal || !user ? null : patientPortal ? "patient-portal-theme" : "staff-portal-theme";
+  // Sheets and dialogs render into document.body and need the same palette.
+  // Remove the previous workspace scope on logout or a role change.
+  useLayoutEffect(() => {
+    if (!themeScope) return;
+    document.body.classList.add("gmed-theme", themeScope);
+    return () => document.body.classList.remove("gmed-theme", themeScope);
+  }, [themeScope]);
   // `<html lang>` follows the cabinet language, UA and EN included (QA 2026-10-25, G F-G6): screen
   // readers and hyphenation. Every `useLang` sets the portal language there; the cabinet's wins.
   useEffect(() => {
@@ -49,7 +61,7 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
   }, [leadPortal, cabinetLang, lang]);
 
   return (
-    <div className={cn("h-dvh overflow-hidden bg-background", patientPortal && !leadPortal && "patient-portal-theme")}>
+    <div className={cn("h-dvh overflow-hidden bg-background", themeScope && "gmed-theme", themeScope)}>
       <a
         href="#main-content"
         className="sr-only fixed left-3 top-3 z-[60] rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background focus:not-sr-only focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"

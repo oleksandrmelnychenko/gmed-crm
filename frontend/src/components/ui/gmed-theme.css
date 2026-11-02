@@ -1,0 +1,78 @@
+/* Opt-in GMED design tokens. Layout recipes belong to the consuming feature.
+   Status colours remain independent of the primary action colour. */
+.gmed-theme {
+  --gmed-icon-size: 22px;
+  --gmed-date-size: 13px;
+  --gmed-panel-padding: 16px;
+  --gmed-panel-radius: 16px;
+  --table-row-alternate: #f6f7f8;
+  --table-row-hover: #eceef1;
+  --table-row-active: #e9ebef;
+  --table-row-selected: #e1e5eb;
+  --background: #ebedf4;
+  --foreground: #1a1a22;
+  --card: #ffffff;
+  --card-foreground: #1a1a22;
+  --popover: #ffffff;
+  --popover-foreground: #1a1a22;
+  --field: #ffffff;
+  --primary: #161922;
+  --primary-foreground: #f4f3f1;
+  --brand: #161922;
+  --brand-soft: #e6e8f0;
+  --brand-ring: #777f9e;
+  --muted: #f0f1f6;
+  --muted-foreground: #4c5262;
+  --secondary: #f0f1f6;
+  --secondary-foreground: #161922;
+  --accent: #e6e8f0;
+  --accent-foreground: #161922;
+  --border: #dfe2eb;
+  --input: #d6dae5;
+  --ring: #777f9e;
+  --sidebar: #f7f8fb;
+  --sidebar-foreground: #1a1a22;
+  --sidebar-primary: #161922;
+  --sidebar-primary-foreground: #f4f3f1;
+  --sidebar-accent: #e6e8f0;
+  --sidebar-accent-foreground: #161922;
+  --sidebar-border: #dfe2eb;
+  --sidebar-ring: #777f9e;
+}
+
+.gmed-theme [class~="bg-[var(--brand)]"].text-white {
+  color: var(--primary-foreground);
+}
+
+.dark .gmed-theme {
+  --table-row-alternate: #282b32;
+  --table-row-hover: #363a44;
+  --table-row-active: #323640;
+  --table-row-selected: #404653;
+  --background: #191b24;
+  --foreground: #eceef5;
+  --card: #232631;
+  --card-foreground: #eceef5;
+  --popover: #232631;
+  --popover-foreground: #eceef5;
+  --field: #232631;
+  --primary: #e3e6f0;
+  --primary-foreground: #252734;
+  --brand: #e3e6f0;
+  --brand-soft: #343847;
+  --muted: #2e3240;
+  --muted-foreground: #a7adbf;
+  --secondary: #2e3240;
+  --secondary-foreground: #eceef5;
+  --accent: #343847;
+  --accent-foreground: #eceef5;
+  --border: #3b4051;
+  --input: #4c5266;
+  --sidebar: #20232d;
+  --sidebar-foreground: #c6cad8;
+  --sidebar-primary: #e3e6f0;
+  --sidebar-primary-foreground: #252734;
+  --sidebar-accent: #343847;
+  --sidebar-accent-foreground: #eceef5;
+  --sidebar-border: #3b4051;
+}
