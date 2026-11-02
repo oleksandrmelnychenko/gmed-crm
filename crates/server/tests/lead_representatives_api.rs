@@ -2873,6 +2873,9 @@ async fn a_wizard_save_writes_a_parents_new_name_and_citizenship_to_the_row_and_
         json!([mother_entry("Elena Paralleli"), aunt_entry.clone()]),
     )
     .await;
+    // The mother receives the invoices: her data count for the risk (owner 2026-11-02).
+    let (status, body) = set_billing_role(router, &staff, lead_id, mother, true, false).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     // The new parent card's details, written after the lead exists.
     let (status, body) = json_request(
         router,
@@ -3016,6 +3019,17 @@ async fn a_staff_details_correction_reassesses_the_risk() {
                  "email": address("anna.risk"), "phone": "+49 30 123456" }]),
     )
     .await;
+    // The mother receives the invoices: her data count for the risk (owner 2026-11-02).
+    let (status, body) = set_billing_role(
+        &app.suite.app,
+        &app.staff("patient_manager"),
+        lead_id,
+        mother,
+        true,
+        false,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     start_assessment(&app, lead_id).await;
     let raises_before = staff_raises(&app.suite.pool, lead_id).await;
     let (status, body) = json_request(

@@ -339,6 +339,18 @@ async fn set_billing_role(
         payer.as_ref(),
         &representation,
     );
+    // The roles decide which parents count for the risk triggers.
+    if after != before
+        && let Err(error) = crate::risk::store::reassess(
+            &mut tx,
+            lead_id,
+            crate::risk::store::Cause::Staff,
+            Some(auth.user_id),
+        )
+        .await
+    {
+        return database_error(error, "reassess risk");
+    }
     if let Err(error) = tx.commit().await {
         return database_error(error, "commit");
     }

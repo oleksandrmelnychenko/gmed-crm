@@ -1624,6 +1624,16 @@ async fn a_parents_document_data_entered_after_the_release_keep_it() {
     .fetch_one(app.pool())
     .await
     .unwrap();
+    // The only parent receives the invoices: her data count for the risk
+    // (owner 2026-11-02).
+    sqlx::query(
+        "INSERT INTO lead_invoice_recipients (lead_id, recipient, recipient_is_payer)
+         VALUES ($1, 'self', false)",
+    )
+    .bind(lead_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
     assert!(held(&qualify(&app, lead_id).await));
     let started = assessment(&app, lead_id).await;
     assert!(started["level"].as_i64().unwrap() >= 2, "{started}");
@@ -2443,5 +2453,57 @@ async fn t13_fires_for_a_guardian_not_for_the_parents_of_a_minor() {
     assert!(
         preview["preview"].to_string().contains("\"T13\""),
         "{preview}"
+    );
+}
+
+/// Owner 2026-11-02: a minor's parent without a billing role is screened
+/// against the sanctions lists only; its countries raise no risk trigger
+/// until it receives the invoices or pays.
+#[tokio::test]
+async fn a_parent_without_a_billing_role_raises_no_country_trigger() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let parent_id = Uuid::new_v4();
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, date_of_birth, citizenships, country,
+                              email, created_by, trusted_contacts)
+           VALUES ('Lena', 'Ohnerolle', '2016-03-05', '{DE}', 'DE', $1, $2, $3)
+           RETURNING id"#,
+    )
+    .bind(format!("lead-{}@example.com", Uuid::new_v4().simple()))
+    .bind(app.pm_id)
+    .bind(json!([{
+        "id": parent_id,
+        "name": "Olga Ohnerolle",
+        "relation": "mother",
+        "email": format!("parent-{}@example.com", Uuid::new_v4().simple()),
+        "birth_date": "1988-02-02",
+        "citizenships": ["IR"]
+    }]))
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    // Before the request is sent the live evaluation is the preview.
+    let without_role = assessment(&app, lead_id).await["preview"].clone();
+    assert!(
+        trigger(&without_role, "T1", "representative").is_none(),
+        "{without_role}"
+    );
+
+    // The mother receives the invoices: her citizenship counts.
+    let (status, body) = request(
+        &app,
+        "PUT",
+        &format!("/leads/{lead_id}/representatives/{parent_id}/billing-role"),
+        &app.pm(),
+        Some(json!({ "receives_invoice": true, "pays": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let with_role = assessment(&app, lead_id).await["preview"].clone();
+    assert!(
+        trigger(&with_role, "T1", "representative").is_some(),
+        "{with_role}"
     );
 }

@@ -261,8 +261,36 @@ async fn load_inner(
                 .filter(|payer| payer.is_representative()),
         )
     };
+    // A minor's parent or guardian counts for the risk triggers (countries,
+    // PEP and sanctions answers, block R) only while it receives the invoices
+    // or pays (owner 2026-11-02); every one stays screened against the
+    // sanctions lists. An adult's representative and Betreuer count as before.
+    let role_holders: Option<Vec<Uuid>> = if active.representation.minor {
+        let recipient = crate::routes::lead_invoice_recipient::load(conn, lead_id).await?;
+        let payer = crate::routes::lead_payer::load_declaration(conn, lead_id).await?;
+        Some(
+            active
+                .representation
+                .representatives
+                .iter()
+                .filter(|person| {
+                    let roles = crate::routes::lead_parent_billing_role::roles_of(
+                        person.id,
+                        recipient.as_ref(),
+                        payer.as_ref(),
+                        &active.representation,
+                    );
+                    roles.receives_invoice || roles.pays
+                })
+                .map(|person| person.id)
+                .collect(),
+        )
+    } else {
+        None
+    };
     let representatives = active.representation.representatives.iter()
         .filter(|person| person.slot.is_some())
+        .filter(|person| role_holders.as_ref().is_none_or(|ids| ids.contains(&person.id)))
         .map(|person| {
             use sha2::{Digest, Sha256};
             let identity = canonical.iter().find(|identity| identity.contact_id == Some(person.id));

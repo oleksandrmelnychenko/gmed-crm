@@ -50,6 +50,12 @@ async fn fixture(first_country: &str, second_country: &str) -> Option<App> {
         sqlx::query("INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,citizenships,country) VALUES($1,$2,'legal_representative','staff',$3,'DE')")
             .bind(lead).bind(id).bind(vec![country.to_string()]).execute(&suite.pool).await.unwrap();
     }
+    // Both parents have a billing role, so both count for the risk triggers
+    // (owner 2026-11-02): the first receives the invoices, the second pays.
+    sqlx::query("INSERT INTO lead_invoice_recipients(lead_id,recipient,recipient_is_payer,representative_contact_id) VALUES($1,'self',false,$2)")
+        .bind(lead).bind(first).execute(&suite.pool).await.unwrap();
+    sqlx::query("INSERT INTO lead_payer_declarations(lead_id,payer_kind,payer_representative_id) VALUES($1,'representative',$2)")
+        .bind(lead).bind(second).execute(&suite.pool).await.unwrap();
     sqlx::query("INSERT INTO lead_gwg_declarations(lead_id,custody) VALUES($1,'joint')")
         .bind(lead)
         .execute(&suite.pool)
@@ -742,6 +748,14 @@ async fn a_short_parent_form_can_send_the_child_request_but_cannot_create_a_cont
     let Some(app) = fixture("DE", "DE").await else {
         return;
     };
+    // The parent's own billing answers below name the roles.
+    for table in ["lead_invoice_recipients", "lead_payer_declarations"] {
+        sqlx::query(&format!("DELETE FROM {table} WHERE lead_id = $1"))
+            .bind(app.lead)
+            .execute(&app.suite.pool)
+            .await
+            .unwrap();
+    }
     let (status, consent) = request(
         &app,
         "POST",
