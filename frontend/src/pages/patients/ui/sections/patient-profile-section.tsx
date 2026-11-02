@@ -1078,7 +1078,7 @@ function usePatientProfileTabContent({
             || leadOrigin.serviceRequests.length > 0
             || costEstimateAdditionalLanguage ? (
               <div className="mt-2 border-t border-border pt-2 md:col-span-2">
-                <p className="px-2 pb-1 text-[11px] font-medium uppercase text-muted-foreground">
+                <p className="px-2 pb-1 text-[11px] font-medium text-muted-foreground">
                   {t.patient_profile_intake_services}
                 </p>
                 {costEstimateAdditionalLanguage ? (
@@ -1202,7 +1202,7 @@ function usePatientProfileTabContent({
                   detail.passport_status === "expiring" ? (
                     <span
                       className={cn(
-                        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.08em]",
+                        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10.5px] font-semibold",
                         detail.passport_status === "expired"
                           ? "border-rose-200 bg-rose-50 text-rose-700"
                           : "border-amber-200 bg-amber-50 text-amber-700",
@@ -1301,7 +1301,7 @@ function usePatientProfileTabContent({
                   <span className={cn("flex size-7 shrink-0 items-center justify-center rounded-md", metric.iconClass)}>
                     <Icon className="size-3.5" aria-hidden="true" />
                   </span>
-                  <span className="min-w-0 break-words font-mono text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">{metric.label}</span>
+                  <span className="min-w-0 break-words font-mono text-[11px] font-medium text-muted-foreground">{metric.label}</span>
                 </div>
                 <StatusChip tone={metric.tone}>{metric.value}</StatusChip>
               </div>

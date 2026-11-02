@@ -332,7 +332,7 @@ function StaffNavGroups({
       {sections.map((section) => (
         <div key={section} className="flex flex-col gap-1">
           {!collapsed && (
-            <div className="px-3 pb-1 pt-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-sidebar-foreground/45">
+            <div className="px-3 pb-1 pt-0.5 font-mono text-[10px] font-medium text-sidebar-foreground/45">
               {sectionLabel(section, tr, translations)}
             </div>
           )}
@@ -551,7 +551,7 @@ function UserCard({
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-[13px] font-semibold text-foreground leading-tight">{name}</p>
-        {hideRole ? null : <p className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mt-0.5">{roleText}</p>}
+        {hideRole ? null : <p className="truncate text-[10px] font-semibold text-muted-foreground mt-0.5">{roleText}</p>}
       </div>
     </div>
   );

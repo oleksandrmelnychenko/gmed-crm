@@ -1183,7 +1183,7 @@ function WeeklyAvailabilityEditor({
                 return (
                   <div key={key} className="grid w-full gap-1.5 sm:w-[18rem]">
                     <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_28px] items-end gap-2">
-                      <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-medium uppercase leading-tight text-muted-foreground">
+                      <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-medium leading-tight text-muted-foreground">
                         {fromLabel}
                         <Input
                           type="time"
@@ -1197,7 +1197,7 @@ function WeeklyAvailabilityEditor({
                           aria-label={`${weeklyAvailabilityDayLabel(row.day, lang)} ${fromLabel}`}
                         />
                       </label>
-                      <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-medium uppercase leading-tight text-muted-foreground">
+                      <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-medium leading-tight text-muted-foreground">
                         {toLabel}
                         <Input
                           type="time"

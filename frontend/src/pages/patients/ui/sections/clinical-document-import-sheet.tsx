@@ -465,7 +465,7 @@ function MedicationCandidateEditor({
     const score = confidence(key);
     return (
       <label className={cn("space-y-1", options.className)}>
-        <span className="flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <span className="flex items-center justify-between gap-2 text-[10px] font-semibold text-muted-foreground">
           <span>{label}{options.required ? " *" : ""}</span>
           {score !== null ? (
             <span className={cn(score < 0.7 && "text-amber-700")}>
@@ -535,7 +535,7 @@ function MedicationCandidateEditor({
 
       {seriesOptions.length > 0 || requiresExplicitSeries ? (
         <label className="block space-y-1 rounded-lg border border-sky-200 bg-sky-50/70 p-3">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-sky-900">
+          <span className="text-[10px] font-semibold text-sky-900">
             {tx("Линия медикамента", "Medikationsserie")}{requiresExplicitSeries ? " *" : ""}
           </span>
           <select
@@ -591,7 +591,7 @@ function MedicationCandidateEditor({
       </div>
 
       <div className="rounded-lg border border-sky-100 bg-sky-50/60 p-3">
-        <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-sky-800">
+        <p className="mb-2 text-[10px] font-semibold text-sky-800">
           {tx("Схема приёма", "Einnahmeschema")}
         </p>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -618,7 +618,7 @@ function MedicationCandidateEditor({
         {field("einnahme_von", tx("Приём с", "Einnahme von"), { type: "date" })}
         {field("einnahme_bis", tx("Приём до", "Einnahme bis"), { type: "date" })}
         <label className="space-y-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className="text-[10px] font-semibold text-muted-foreground">
             {tx("Статус", "Status")}
           </span>
           <select
@@ -647,7 +647,7 @@ function MedicationCandidateEditor({
 
       <div className="grid gap-3 lg:grid-cols-2">
         <label className="space-y-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className="text-[10px] font-semibold text-muted-foreground">
             {tx("Указания", "Hinweise")}
           </span>
           <textarea
@@ -659,7 +659,7 @@ function MedicationCandidateEditor({
           />
         </label>
         <label className="space-y-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className="text-[10px] font-semibold text-muted-foreground">
             {tx("Показания / причина", "Grund / Indikation")}
           </span>
           <textarea
@@ -674,7 +674,7 @@ function MedicationCandidateEditor({
 
       <div className="grid gap-3 rounded-lg border border-border/60 bg-white/70 p-3 sm:grid-cols-2 xl:grid-cols-4">
         <label className="space-y-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className="text-[10px] font-semibold text-muted-foreground">
             {tx("Страна источника", "Ursprungsland")}
           </span>
           <Input
@@ -803,7 +803,7 @@ function VitalCandidateEditor({
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <label className="space-y-1 sm:col-span-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className="text-[10px] font-semibold text-muted-foreground">
             {tx("Дата / время измерения", "Messdatum / -zeit")} *
           </span>
           <Input
@@ -825,7 +825,7 @@ function VitalCandidateEditor({
           </span>
         </label>
         <label className="space-y-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className="text-[10px] font-semibold text-muted-foreground">
             {tx("Страна источника", "Ursprungsland")} *
           </span>
           <Input
@@ -841,7 +841,7 @@ function VitalCandidateEditor({
           />
         </label>
         <div className="space-y-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className="text-[10px] font-semibold text-muted-foreground">
             {tx("Источник", "Quelle")}
           </span>
           <div className="flex h-11 items-center rounded-md border border-input bg-muted/30 px-3 text-xs text-muted-foreground">
@@ -854,7 +854,7 @@ function VitalCandidateEditor({
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {vitalEditorFields.map((field) => (
           <label key={field.key} className="space-y-1 rounded-lg border border-pink-100 bg-pink-50/35 p-3">
-            <span className="flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <span className="flex items-center justify-between gap-2 text-[10px] font-semibold text-muted-foreground">
               <span>{tx(field.ru, field.de)}</span>
               <span className="normal-case text-pink-700">{field.unit}</span>
             </span>
@@ -2161,7 +2161,7 @@ export function ClinicalDocumentImportSheet({
                                           <div key={field} className="space-y-1">
                                             <label
                                               htmlFor={inputId}
-                                              className="block min-h-4 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                                              className="block min-h-4 text-[10px] font-semibold text-muted-foreground"
                                             >
                                               {label}
                                             </label>
@@ -2206,7 +2206,7 @@ export function ClinicalDocumentImportSheet({
                                         );
                                       })}
                                       <label className="space-y-1 sm:col-span-2 xl:col-span-2">
-                                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{tx("Лаборатория", "Labor")}</span>
+                                        <span className="text-[10px] font-semibold text-muted-foreground">{tx("Лаборатория", "Labor")}</span>
                                         <Input
                                           value={typeof candidate.normalized.laboratory_name === "string" ? candidate.normalized.laboratory_name : ""}
                                           disabled={snapshotReadOnly || !candidate.selected}
@@ -2221,7 +2221,7 @@ export function ClinicalDocumentImportSheet({
                                         />
                                       </label>
                                       <label className="space-y-1 sm:col-span-1">
-                                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{tx("Дата", "Datum")}</span>
+                                        <span className="text-[10px] font-semibold text-muted-foreground">{tx("Дата", "Datum")}</span>
                                         <Input
                                           type="date"
                                           value={typeof candidate.normalized.measured_on === "string" ? candidate.normalized.measured_on : ""}
@@ -2234,7 +2234,7 @@ export function ClinicalDocumentImportSheet({
                                         />
                                       </label>
                                       <label className="space-y-1 sm:col-span-1 xl:col-span-2">
-                                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{tx("Группа", "Laborgruppe")}</span>
+                                        <span className="text-[10px] font-semibold text-muted-foreground">{tx("Группа", "Laborgruppe")}</span>
                                         <Input
                                           value={typeof candidate.normalized.panel === "string" ? candidate.normalized.panel : ""}
                                           disabled={snapshotReadOnly || !candidate.selected}
@@ -2246,7 +2246,7 @@ export function ClinicalDocumentImportSheet({
                                         />
                                       </label>
                                       <label className="space-y-1">
-                                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{tx("Статус", "Status")}</span>
+                                        <span className="text-[10px] font-semibold text-muted-foreground">{tx("Статус", "Status")}</span>
                                         <select
                                           value={typeof candidate.normalized.abnormal_flag === "string" ? candidate.normalized.abnormal_flag : "unknown"}
                                           disabled={snapshotReadOnly || !candidate.selected}
@@ -2264,7 +2264,7 @@ export function ClinicalDocumentImportSheet({
                                         </select>
                                       </label>
                                       <label className="space-y-1 sm:col-span-2 xl:col-span-4">
-                                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                        <span className="text-[10px] font-semibold text-muted-foreground">
                                           {tx("Примечание и дерево референсов", "Hinweis und Referenzstruktur")}
                                         </span>
                                         <textarea

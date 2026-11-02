@@ -49,7 +49,7 @@ type ServiceLineDraft = {
 const inputClassName =
   "h-9 w-full rounded-md border border-border bg-field px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
 const labelClassName =
-  "mb-1.5 block text-[11px] font-medium uppercase text-muted-foreground";
+  "mb-1.5 block text-[11px] font-medium text-muted-foreground";
 
 function bindingGroup(field: BindingFieldDef): BindingGroup {
   if (field.key.startsWith("bank_")) return "bank";
@@ -154,7 +154,7 @@ function ServiceLinesEditor({
     <div className="space-y-2 md:col-span-2">
       <div className="overflow-x-auto rounded-md border border-border">
         <table className={cn("w-full border-collapse text-sm", compact ? "min-w-[520px]" : "min-w-[880px]")}>
-          <thead className="bg-muted/60 text-[11px] uppercase text-muted-foreground">
+          <thead className="bg-muted/60 text-[11px] text-muted-foreground">
             <tr>
               <th className="px-3 py-2 text-left font-medium">
                 {lang === "de" ? "Leistung" : "Услуга"}
@@ -398,7 +398,7 @@ export function DocumentTemplateBindingFields({
         if (groupFields.length === 0) return null;
         return (
           <section key={group} className="border-t border-border py-4 first:border-t-0 first:pt-0 last:pb-0">
-            <h3 className="mb-3 text-xs font-semibold uppercase text-muted-foreground">
+            <h3 className="mb-3 text-xs font-semibold text-muted-foreground">
               {groupLabel(group, lang)}
             </h3>
             <div className="grid gap-4 md:grid-cols-2">

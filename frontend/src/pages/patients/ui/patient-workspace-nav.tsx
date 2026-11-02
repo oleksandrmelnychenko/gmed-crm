@@ -82,7 +82,7 @@ export function PatientWorkspaceNav() {
       <div className="flex-1 overflow-y-auto px-3 py-4">
         <nav aria-label={lang === "de" ? "Patientenbereiche" : "Разделы пациента"} className="space-y-4">
           {groups.map(([group, label]) => <section key={group} className="border-t border-border/60 pt-3 first:border-0 first:pt-0">
-            <h2 className="mb-1.5 px-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</h2>
+            <h2 className="mb-1.5 px-3 text-[11px] font-medium text-muted-foreground">{label}</h2>
             <div className="flex flex-col gap-0.5">
               {items.filter(item => item.group === group).map((item) => {
                 const isActive = currentTab !== null && currentTab === item.key;

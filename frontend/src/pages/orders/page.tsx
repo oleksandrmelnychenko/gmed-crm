@@ -4002,7 +4002,7 @@ function useOrdersPageContent() {
                     />
                     <div className="min-w-0 pl-2">
                       <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                        <span className="text-[11px] font-semibold text-muted-foreground">
                           {lang === "de" ? "Auftrag" : "Заказ"}
                         </span>
                         <span className="font-mono text-xs font-medium text-foreground">

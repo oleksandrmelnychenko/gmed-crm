@@ -130,7 +130,7 @@ function optionsFromChildren(children: React.ReactNode): ComboboxSelectOption[] 
           options.push({
             value: `__combobox_group_${options.length}_${groupLabel}`,
             label: (
-              <span className="text-[11px] font-semibold uppercase text-muted-foreground">
+              <span className="text-[11px] font-semibold text-muted-foreground">
                 {props.label}
               </span>
             ),

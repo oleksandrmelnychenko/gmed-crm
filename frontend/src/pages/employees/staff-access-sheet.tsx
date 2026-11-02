@@ -616,12 +616,12 @@ export function StaffAccessSheet({
                             />
                           </label>
                           {inherited && !direct ? (
-                            <span className="rounded bg-sky-50 px-1 py-0.5 text-[9px] font-semibold uppercase text-sky-700">
+                            <span className="rounded bg-sky-50 px-1 py-0.5 text-[9px] font-semibold text-sky-700">
                               {copy.inheritedRule}
                             </span>
                           ) : null}
                           {direct?.effect === "deny" ? (
-                            <span className="rounded bg-rose-50 px-1 py-0.5 text-[9px] font-semibold uppercase text-rose-700">
+                            <span className="rounded bg-rose-50 px-1 py-0.5 text-[9px] font-semibold text-rose-700">
                               {copy.directDeny}
                             </span>
                           ) : null}
@@ -765,12 +765,12 @@ export function StaffAccessSheet({
                                 />
                               </label>
                               {inherited && !direct && !directAll ? (
-                                <span className="rounded bg-sky-50 px-1 py-0.5 text-[9px] font-semibold uppercase text-sky-700">
+                                <span className="rounded bg-sky-50 px-1 py-0.5 text-[9px] font-semibold text-sky-700">
                                   {copy.inheritedRule}
                                 </span>
                               ) : null}
                               {direct?.effect === "deny" ? (
-                                <span className="rounded bg-rose-50 px-1 py-0.5 text-[9px] font-semibold uppercase text-rose-700">
+                                <span className="rounded bg-rose-50 px-1 py-0.5 text-[9px] font-semibold text-rose-700">
                                   {copy.directDeny}
                                 </span>
                               ) : null}

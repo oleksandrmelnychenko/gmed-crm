@@ -646,7 +646,7 @@ export function SpecializationsPage() {
               ) : null}
 
               <div className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain">
-                <div className="hidden min-w-[720px] grid-cols-[minmax(220px,1.5fr)_190px_110px_96px_72px] gap-3 border-b border-border/60 bg-muted/25 px-5 py-2 text-[11px] font-semibold uppercase text-muted-foreground md:grid">
+                <div className="hidden min-w-[720px] grid-cols-[minmax(220px,1.5fr)_190px_110px_96px_72px] gap-3 border-b border-border/60 bg-muted/25 px-5 py-2 text-[11px] font-semibold text-muted-foreground md:grid">
                   <span>{tx("Вид работы", "Leistungsart")}</span>
                   <span>{tx("Диапазон, EUR", "Preisspanne, EUR")}</span>
                   <span className="text-right">{tx("Описания", "Beschreibungen")}</span>

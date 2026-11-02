@@ -534,7 +534,7 @@ function useAdminNotificationsPageContent() {
           ].map(({ icon: Icon, label, value }) => (
             <article key={label} className="min-w-0 rounded-xl border border-border/70 bg-card px-4 py-3 shadow-xs">
               <div className="flex items-start justify-between gap-2">
-                <p className="min-w-0 flex-1 break-words font-mono text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+                <p className="min-w-0 flex-1 break-words font-mono text-[11px] text-muted-foreground">{label}</p>
                 <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
               </div>
               <p className="mt-2 font-mono text-2xl font-semibold tabular-nums">{value}</p>

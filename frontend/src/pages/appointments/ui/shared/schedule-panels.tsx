@@ -108,7 +108,7 @@ export function ConflictPanel({
                 className="rounded-xl border border-amber-200/70 bg-white/75 px-3 py-2"
               >
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]">
+                  <span className="rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold">
                     {item.scopes.join(" / ")}
                   </span>
                   <span className="text-sm font-medium text-amber-900">
@@ -150,7 +150,7 @@ export function ScheduleWarningsPanel({
                 className="rounded-xl border border-amber-200/70 bg-white/75 px-3 py-2"
               >
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]">
+                  <span className="rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold">
                     {warning.label}
                   </span>
                 </div>

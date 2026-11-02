@@ -14,7 +14,7 @@ export const tokens = {
   },
   text: {
     eyebrow:
-      "text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/80",
+      "text-[11px] font-semibold text-muted-foreground/80",
     label: "text-[11.5px] font-medium text-muted-foreground leading-tight",
     sectionTitle: "text-[13px] font-semibold tracking-tight text-foreground",
     body: "text-sm text-foreground",

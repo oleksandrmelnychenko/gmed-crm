@@ -341,7 +341,7 @@ export function FilterBuilder<T>({
                     >
                       <span className="truncate">{col.label}</span>
                       {groupLabel ? (
-                        <span className="ml-auto text-[10px] uppercase text-muted-foreground">{groupLabel}</span>
+                        <span className="ml-auto text-[10px] text-muted-foreground">{groupLabel}</span>
                       ) : null}
                     </button>
                   );

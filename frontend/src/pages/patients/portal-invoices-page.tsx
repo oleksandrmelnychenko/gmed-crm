@@ -569,7 +569,7 @@ function usePatientInvoicesPageContent() {
           ) : null}
           <div className="mt-4 hidden overflow-x-auto rounded-xl border border-border/70 md:block">
             <table className="w-full min-w-[860px] border-collapse text-left text-sm">
-              <thead className="bg-muted/45 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              <thead className="bg-muted/45 text-[11px] font-semibold text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3">{lang === "de" ? "Dokument" : "Документ"}</th>
                   <th className="px-4 py-3">{lang === "de" ? "Datum" : "Дата"}</th>
@@ -683,7 +683,7 @@ function usePatientInvoicesPageContent() {
           <>
           <div className="hidden overflow-x-auto rounded-xl border border-border/70 md:block">
             <table className="w-full min-w-[980px] border-collapse text-left text-sm">
-              <thead className="bg-muted/45 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              <thead className="bg-muted/45 text-[11px] font-semibold text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3">{lang === "de" ? "Rechnung / Auftrag" : "Счёт / заказ"}</th>
                   <th className="px-4 py-3">{t.portal_invoices_issued}</th>

@@ -17,11 +17,11 @@ export const appointmentMobileAgendaCardClassName =
 export const appointmentMobileAgendaSearchInputClassName =
   "h-10 rounded-xl bg-field";
 export const appointmentMobileAgendaInfoBadgeClassName =
-  "rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700";
+  "rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-[10px] font-semibold text-sky-700";
 export const appointmentMobileAgendaNeutralBadgeClassName =
-  "rounded-full border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600";
+  "rounded-full border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600";
 export const appointmentMobileAgendaWarningBadgeClassName =
-  "rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-700";
+  "rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700";
 
 export function appointmentMobileAgendaStatToneClassName(
   tone: "sky" | "amber" | "slate",

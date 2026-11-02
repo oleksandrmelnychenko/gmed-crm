@@ -82,7 +82,7 @@ type GuideSectionProps = {
 export function GuideSection({ title, children }: GuideSectionProps) {
   return (
     <section className="space-y-1.5">
-      <h4 className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <h4 className="text-[12px] font-semibold text-muted-foreground">
         {title}
       </h4>
       <div className="text-muted-foreground">{children}</div>

@@ -198,7 +198,7 @@ export function ColumnVisibilityMenu<T>({
               grouped.map(([groupKey, cols]) => (
                 <div key={groupKey || "default"} className="mb-2 last:mb-0">
                   {groupKey ? (
-                    <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground">
                       {groupLabels[groupKey] ?? t.common_unknown_value}
                     </div>
                   ) : null}
@@ -242,10 +242,10 @@ export function ColumnVisibilityMenu<T>({
                           </span>
                           <span className="min-w-0 flex-1 truncate">{col.label}</span>
                           {col.required ? (
-                            <span className="text-[10px] uppercase text-muted-foreground">{resolvedRequiredNoteLabel}</span>
+                            <span className="text-[10px] text-muted-foreground">{resolvedRequiredNoteLabel}</span>
                           ) : null}
                           {isFrozen ? (
-                            <span className="text-[10px] uppercase text-muted-foreground">{resolvedFrozenNoteLabel}</span>
+                            <span className="text-[10px] text-muted-foreground">{resolvedFrozenNoteLabel}</span>
                           ) : null}
                         </button>
                         {onFrozenColumnsChange ? (

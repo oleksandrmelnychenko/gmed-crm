@@ -57,7 +57,7 @@ export function AppointmentCalendarQuickActionsMenu({
       }}
     >
       <div className="border-b border-border px-2 pb-2">
-        <p className="truncate text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+        <p className="truncate text-xs font-semibold text-muted-foreground">
           {dictionary.appointments_quick_actions}
         </p>
         <p className="mt-1 truncate text-sm font-semibold text-foreground">
@@ -70,7 +70,7 @@ export function AppointmentCalendarQuickActionsMenu({
       <div className="mt-2 space-y-1">
         {item.recurrence_frequency ? (
           <label className="block rounded-xl border border-border bg-muted/25 px-3 py-2">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            <span className="text-[11px] font-semibold text-muted-foreground">
               {dictionary.appointments_scope_apply_status}
             </span>
             <NativeComboboxSelect

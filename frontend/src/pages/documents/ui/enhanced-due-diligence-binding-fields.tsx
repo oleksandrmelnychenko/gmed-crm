@@ -46,7 +46,7 @@ function AmlField({
 }) {
   return (
     <label className={cn("block min-w-0", className)}>
-      <span className="mb-1.5 block text-[11px] font-medium uppercase text-muted-foreground">
+      <span className="mb-1.5 block text-[11px] font-medium text-muted-foreground">
         {label}
         {required ? <span className="ml-1 text-rose-600">*</span> : null}
       </span>

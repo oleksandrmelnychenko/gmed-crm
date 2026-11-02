@@ -57,7 +57,7 @@ export function StatusActionPill({
   }, [open]);
 
   const pillClassName = cn(
-    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.08em] transition-colors",
+    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10.5px] font-semibold transition-colors",
     isActive
       ? "border-emerald-200 bg-emerald-50 text-emerald-700"
       : "border-border bg-muted text-muted-foreground",

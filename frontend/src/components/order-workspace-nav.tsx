@@ -282,7 +282,7 @@ export function OrderWorkspaceNavView({
               <div className="mx-3 mb-2 h-px bg-border/60" aria-hidden />
             ) : null}
             <div className="px-3 pb-1.5">
-              <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
+              <span className="text-[10px] text-muted-foreground/70">
                 {orderSectionGroupLabel(group, lang)}
               </span>
             </div>

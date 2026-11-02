@@ -392,7 +392,7 @@ function FeedbackReviewHeaderVariants({ item, t }: { item: PortalFeedbackItem; t
             <div className="mt-2.5 flex flex-wrap gap-2">{tags}</div>
           </div>
           <div className="flex flex-col justify-between border-l border-dashed border-border pl-4">
-            <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+            <span className="text-[10px] text-muted-foreground">
               {feedbackSourceDisplay(item.source, t)}
             </span>
             <span className="text-right text-xs font-medium leading-5 text-foreground">

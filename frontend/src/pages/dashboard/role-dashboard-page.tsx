@@ -344,7 +344,7 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
     <div className="space-y-4">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <div className="mb-2 flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+          <div className="mb-2 flex items-center gap-2 text-[11px] font-medium text-muted-foreground">
             <span className="size-1.5 rounded-full bg-[var(--brand)]" />
             {definition.eyebrow}
           </div>
@@ -539,7 +539,7 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
       {quickLinks.length > 0 || quickLinksUnavailable ? (
         <section data-testid="role-cabinet-quick-links">
           <div className="mb-2 px-1">
-            <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            <h2 className="text-[11px] font-semibold text-muted-foreground">
               {copy.quick}
             </h2>
             <p className="mt-0.5 text-[12.5px] text-foreground">

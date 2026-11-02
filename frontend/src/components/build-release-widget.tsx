@@ -97,7 +97,7 @@ export function BuildReleaseWidget({ onOpen }: { onOpen?: () => void }) {
         <span>{channelLabel}</span>
         {/* Phones show only the channel; the panel names the build time. */}
         <span aria-hidden="true" className="hidden text-[#566b62] sm:inline">·</span>
-        <span className="hidden uppercase md:inline">{text.button}</span>
+        <span className="hidden md:inline">{text.button}</span>
         <span className="hidden tracking-normal sm:inline">{buildTime}</span>
       </button>
 
@@ -112,7 +112,7 @@ export function BuildReleaseWidget({ onOpen }: { onOpen?: () => void }) {
           <div className="border-b border-border bg-card px-4 py-3.5 text-foreground">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="flex items-center gap-2 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                <p className="flex items-center gap-2 font-mono text-[10px] font-medium text-muted-foreground">
                   <span className="text-[#587363]">{channelLabel}</span>
                   <span aria-hidden="true" className="text-border">·</span>
                   {text.dialog}

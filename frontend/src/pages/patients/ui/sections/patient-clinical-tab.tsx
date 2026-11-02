@@ -707,7 +707,7 @@ export function PatientMedicationTable({
                       {item.einnahme_bis ? (
                         <span
                           className={cn(
-                            "mt-0.5 block text-[10px] font-semibold uppercase tracking-wide",
+                            "mt-0.5 block text-[10px] font-semibold",
                             ended ? "text-rose-700" : "text-emerald-700",
                           )}
                         >
@@ -1018,7 +1018,7 @@ function ClinicalSection<T extends { id?: string | null }>({
                   if (rows.length === 0) return null;
                   return (
                     <div key={group.key} className="space-y-1.5">
-                      <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      <p className="px-1 text-[11px] font-semibold text-muted-foreground">
                         {group.label}
                       </p>
                       {rows.map(({ item, index }) => renderRow(item, index))}
@@ -1549,7 +1549,7 @@ export function PatientRecommendationsSection({
           <div className="space-y-1.5">
             <button
               type="button"
-              className="flex w-full items-center gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+              className="flex w-full items-center gap-2 px-1 text-[11px] font-semibold text-muted-foreground"
               onClick={() => setShowDone((current) => !current)}
             >
               <span>{tx("Выполнено", "Erledigt")}</span>
@@ -2449,19 +2449,19 @@ function MedicationHistoryTree({
                 {current ? (
                   <div className="mb-2.5 overflow-hidden rounded-lg border border-emerald-200/80 bg-emerald-50/25">
                     <div className="grid gap-1.5 border-b border-emerald-200/70 px-3 py-2.5 sm:grid-cols-[minmax(11rem,0.4fr)_minmax(0,1fr)] sm:items-center">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Текущее состояние", "Aktueller Stand")}</p>
+                      <p className="text-[10px] font-semibold text-emerald-800">{tx("Текущее состояние", "Aktueller Stand")}</p>
                       <p className="text-xs font-semibold text-foreground">{localizedMedicationStatus(current.status, tx)}</p>
                     </div>
                     <div className="grid gap-1.5 border-b border-emerald-200/70 px-3 py-2.5 sm:grid-cols-[minmax(11rem,0.4fr)_minmax(0,1fr)] sm:items-center">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Схема", "Schema")}</p>
+                      <p className="text-[10px] font-semibold text-emerald-800">{tx("Схема", "Schema")}</p>
                       <p className="break-words text-xs text-foreground">{currentRegimen || "—"}</p>
                     </div>
                     <div className="grid gap-1.5 border-b border-emerald-200/70 px-3 py-2.5 sm:grid-cols-[minmax(11rem,0.4fr)_minmax(0,1fr)] sm:items-center">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Дата источника", "Quelldatum")}</p>
+                      <p className="text-[10px] font-semibold text-emerald-800">{tx("Дата источника", "Quelldatum")}</p>
                       <p className="text-xs text-foreground">{current.source_date || current.einnahme_von || "—"}</p>
                     </div>
                     <div className="grid gap-1.5 px-3 py-2.5 sm:grid-cols-[minmax(11rem,0.4fr)_minmax(0,1fr)] sm:items-center">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Страна", "Land")}</p>
+                      <p className="text-[10px] font-semibold text-emerald-800">{tx("Страна", "Land")}</p>
                       <p className="text-xs text-foreground">{current.source_country || "—"}</p>
                     </div>
                   </div>

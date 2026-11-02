@@ -249,7 +249,7 @@ export function mergePatientDoctors(
 function ColumnTitle({ children, count }: { children: ReactNode; count?: number }) {
   return (
     <div className="mb-1.5 flex items-baseline gap-1.5">
-      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{children}</h3>
+      <h3 className="text-[11px] font-semibold text-muted-foreground">{children}</h3>
       {typeof count === "number" && count > 0 ? (
         <span className="text-[10px] font-medium text-muted-foreground/60">{count}</span>
       ) : null}
@@ -359,7 +359,7 @@ function formatBirthDate(value: string | null | undefined): string {
 function DemoItem({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="min-w-0">
-      <p className="text-[10px] uppercase tracking-wide text-muted-foreground/70">{label}</p>
+      <p className="text-[10px] text-muted-foreground/70">{label}</p>
       <p className="min-w-0 max-w-full break-words text-[13px] font-semibold text-foreground">
         {value && String(value).trim() ? value : <span className="text-muted-foreground">—</span>}
       </p>
@@ -555,7 +555,7 @@ export function PatientOverviewCard({
             {row.item.handelsname || tx("Без названия", "Ohne Namen")}
           </span>
           {row.item.einnahme_bis ? (
-            <span className="mt-0.5 block truncate text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+            <span className="mt-0.5 block truncate text-[10px] font-semibold text-emerald-700">
               {tx("Приём до", "Einnahme bis")} {formatAppDate(row.item.einnahme_bis) || row.item.einnahme_bis.slice(0, 10)}
             </span>
           ) : null}

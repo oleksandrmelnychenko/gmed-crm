@@ -218,7 +218,7 @@ function SummaryGrid({ data, tx }: { data: MedicationIntelligenceResponse; tx: B
             index === 5 && "sm:border-t",
           )}
         >
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="text-[10px] font-semibold text-muted-foreground">
             {label}
           </p>
           <p className="mt-1 font-mono text-lg font-semibold tabular-nums text-foreground">
@@ -255,7 +255,7 @@ function OfficialSafetyAlertFinding({
     <article className="px-3.5 py-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+          <p className="text-[10px] font-semibold text-amber-700">
             {isBfarm
               ? "BfArM Rote-Hand-Brief"
               : tx("Официальное предупреждение безопасности", "Offizieller Sicherheitshinweis")}
@@ -436,7 +436,7 @@ function MedicationsTable({
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[720px] border-collapse text-left">
-        <thead className="bg-muted/20 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <thead className="bg-muted/20 text-[10px] font-semibold text-muted-foreground">
           <tr>
             <th className="px-3.5 py-2 font-semibold">{tx("Препарат", "Medikament")}</th>
             <th className="px-3.5 py-2 font-semibold">{tx("ACT-значение", "ACT-Bedeutung")}</th>

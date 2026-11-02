@@ -66,7 +66,7 @@ export function ClinicalImportCandidateDetails({
     >
       {specs.map((spec) => (
         <label key={spec.key} className={cn("space-y-1", candidate.target === "examination" && spec.key === "title" && "sm:col-span-2 xl:col-span-3")}>
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className="text-[10px] font-semibold text-muted-foreground">
             {spec.label[de ? "de" : "ru"]}
           </span>
           {spec.kind === "select" ? (

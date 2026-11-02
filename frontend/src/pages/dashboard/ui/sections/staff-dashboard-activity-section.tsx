@@ -84,7 +84,7 @@ export function StaffDashboardActivitySection({
                   onClick={() => onOpenAppointment(appointment.id)}
                 >
                   <div className="flex size-10 shrink-0 flex-col items-center justify-center rounded-lg bg-muted/60 text-center">
-                    <span className="text-[9px] font-medium uppercase text-muted-foreground">
+                    <span className="text-[9px] font-medium text-muted-foreground">
                       {formatMonth(appointment.date)}
                     </span>
                     <span className="text-[13px] font-semibold leading-tight">

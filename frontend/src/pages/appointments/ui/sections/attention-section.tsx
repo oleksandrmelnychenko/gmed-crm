@@ -35,7 +35,7 @@ function AppointmentAttentionSection({
           </div>
           <p className="text-xs text-muted-foreground">{subtitle}</p>
         </div>
-        <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-800">
+        <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800">
           {attention.attention_score}{" "}
           {attentionIssueLabel(attention.attention_score)}
         </span>

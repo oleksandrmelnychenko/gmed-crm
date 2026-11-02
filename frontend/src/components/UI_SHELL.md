@@ -26,7 +26,7 @@ import { tokens, inputClass, textareaClass, STATUS_TONE } from "@/components/ui-
 
 tokens.radius.md          // "rounded-xl"
 tokens.surface.card       // "border border-border/50 bg-card"
-tokens.text.eyebrow       // "text-[11px] font-semibold uppercase ..."
+tokens.text.eyebrow       // "text-[11px] font-semibold ..." (sentence case, no forced uppercase)
 tokens.control.inputHeight // "h-9"
 ```
 

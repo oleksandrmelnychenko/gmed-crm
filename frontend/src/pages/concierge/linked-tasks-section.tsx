@@ -327,7 +327,7 @@ export function LinkedTasksSection({
         <p className="px-4 py-5 text-sm text-muted-foreground">{labels.empty}</p>
       ) : (
         <div role="list" aria-label={labels.title}>
-          <div className="hidden grid-cols-[minmax(0,1fr)_8rem_minmax(8rem,0.42fr)_10rem_2rem] gap-3 border-b border-border/60 px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:grid">
+          <div className="hidden grid-cols-[minmax(0,1fr)_8rem_minmax(8rem,0.42fr)_10rem_2rem] gap-3 border-b border-border/60 px-4 py-2 text-[11px] font-medium text-muted-foreground md:grid">
             <span>{labels.task}</span>
             <span>{labels.status}</span>
             <span>{labels.assignee}</span>

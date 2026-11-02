@@ -412,11 +412,11 @@ function SessionsSection() {
                   </p>
                   <dl className="flex min-w-0 flex-wrap gap-x-6 gap-y-2 text-xs">
                     {session.ip_address ? <div className="space-y-0.5">
-                      <dt className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">IP</dt>
+                      <dt className="font-mono text-[10px] text-muted-foreground">IP</dt>
                       <dd className="break-all font-mono tabular-nums">{session.ip_address}</dd>
                     </div> : null}
                     <div className="space-y-0.5">
-                      <dt className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">{l("account_sessions_last_seen")}</dt>
+                      <dt className="font-mono text-[10px] text-muted-foreground">{l("account_sessions_last_seen")}</dt>
                       <dd className="font-mono tabular-nums">{formatDate(session.last_activity_at)}</dd>
                     </div>
                   </dl>

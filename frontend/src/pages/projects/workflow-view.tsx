@@ -362,7 +362,7 @@ function WorkflowCanvas({
         <div className="relative" style={{ width: graph.width * zoom, height: graph.height * zoom }}>
           <div className="absolute left-0 top-0" style={{ width: graph.width, height: graph.height, transform: `scale(${zoom})`, transformOrigin: "top left" }}>
           <div className="absolute left-7 top-[88px] z-20 h-[150px] w-[232px] rounded-xl border border-orange-200 bg-orange-50/80 p-4 shadow-sm">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-orange-700"><span className="size-2 rounded-full bg-orange-500" />{labels.start}</div>
+            <div className="flex items-center gap-2 text-xs font-semibold text-orange-700"><span className="size-2 rounded-full bg-orange-500" />{labels.start}</div>
             <p className="mt-3 line-clamp-2 text-sm font-semibold text-foreground">{project.name}</p>
             <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{project.description || labels.startHint}</p>
             <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground"><FolderKanban className="size-3.5" />{graph.nodes.length} {labels.tasks.toLocaleLowerCase()}</div>
@@ -381,7 +381,7 @@ function WorkflowCanvas({
                   style={{ left: WORKFLOW_STAGE_START_X + index * WORKFLOW_STAGE_WIDTH }}
                 >
                   <span className={cn("size-2 rounded-full", statusAccent(stage))} />
-                  <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{statusLabel(stage, labels)}</span>
+                  <span className="text-xs font-semibold text-muted-foreground">{statusLabel(stage, labels)}</span>
                   <Badge variant="secondary" className="h-5 min-w-5 justify-center px-1.5 text-[10px]">{count}</Badge>
                 </div>
               </div>
@@ -731,7 +731,7 @@ export function ProjectWorkflowView({
                   ) : null}
 
                   <div className="mt-4 flex items-center justify-between gap-2">
-                    <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels.dependsOn}</h4>
+                    <h4 className="text-xs font-semibold text-muted-foreground">{labels.dependsOn}</h4>
                     {canEditDependencies && tasks.length > 1 ? <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setDependencyDialogOpen(true)}><Plus />{labels.addDependency}</Button> : null}
                   </div>
                   <div className="mt-2 grid gap-2">
@@ -749,7 +749,7 @@ export function ProjectWorkflowView({
                     }) : <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">{labels.noDependencies}</p>}
                   </div>
 
-                  <h4 className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels.unlocks}</h4>
+                  <h4 className="mt-4 text-xs font-semibold text-muted-foreground">{labels.unlocks}</h4>
                   <div className="mt-2 grid gap-1.5">
                     {outgoing.length ? outgoing.map((dependency) => {
                       const task = tasksById.get(dependency.task_id);

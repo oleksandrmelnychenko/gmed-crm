@@ -296,7 +296,7 @@ function ToneDot({ tone }: { tone: "good" | "warning" | "danger" }) {
 function MetricSignal({ label, value, note, tone }: { label: string; value: string; note: string; tone: "neutral" | "good" | "danger" }) {
   return (
     <div className="min-w-0 px-4 py-3 first:pl-0 last:pr-0 sm:border-l sm:border-border sm:first:border-l-0">
-      <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">{label}</p>
+      <p className="text-[10px] font-medium text-muted-foreground">{label}</p>
       <p className="mt-1 text-[22px] font-semibold leading-none tracking-tight text-foreground">{value}</p>
       <p className={cn("mt-1.5 truncate text-[10.5px]", tone === "good" && "text-emerald-700", tone === "danger" && "text-rose-700", tone === "neutral" && "text-muted-foreground")}>{note}</p>
     </div>
@@ -327,7 +327,7 @@ function BusinessDomain({
   return (
     <section className="flex min-h-[220px] min-w-0 flex-col px-4 py-4 sm:px-5">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-[13px] font-semibold uppercase tracking-[0.08em] text-foreground">{title}</h2>
+        <h2 className="text-[13px] font-semibold text-foreground">{title}</h2>
         <div className="inline-flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
           <ToneDot tone={status} />
           {statusLabel}
@@ -434,7 +434,7 @@ export function ExecutiveBusinessMap({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-[24px] font-semibold leading-tight tracking-tight text-foreground">{greeting}</h1>
-            <p className="mt-1 text-[12px] capitalize text-muted-foreground">{date}</p>
+            <p className="mt-1 text-[12px] text-muted-foreground first-letter:uppercase">{date}</p>
           </div>
           <button type="button" onClick={() => go("/reports")} className="inline-flex items-center gap-1 pt-1 text-[11.5px] font-medium text-[var(--brand)] hover:underline">
             {copy.allMetrics}
@@ -515,7 +515,7 @@ export function ExecutiveBusinessMap({
         <aside className="min-w-0 border-t border-border px-4 py-4 sm:px-5 xl:border-l xl:border-t-0">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-[13px] font-semibold uppercase tracking-[0.08em] text-foreground">{copy.decisions}</h2>
+              <h2 className="text-[13px] font-semibold text-foreground">{copy.decisions}</h2>
               <p className="mt-1 text-[10.5px] text-muted-foreground">{copy.taskQueue}</p>
             </div>
             <span className="rounded-full border border-border px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">{decisionTasks.length}</span>
@@ -574,7 +574,7 @@ export function ExecutiveBusinessMap({
             {upcoming.length === 0 ? <p className="py-8 text-[12px] text-muted-foreground">{copy.noEvents}</p> : upcoming.slice(0, 5).map((appointment) => (
               <button key={appointment.id} type="button" onClick={() => go(`/appointments?appointment=${encodeURIComponent(appointment.id)}`)} className="flex w-full items-start gap-3 py-3 text-left group">
                 <span className="flex size-8 shrink-0 flex-col items-center justify-center border-r border-border pr-2 text-center">
-                  <span className="text-[9px] uppercase text-muted-foreground">{appDateTimeFormat(locale, { month: "short" }).format(dateOrInstant(appointment.date))}</span>
+                  <span className="text-[9px] text-muted-foreground">{appDateTimeFormat(locale, { month: "short" }).format(dateOrInstant(appointment.date))}</span>
                   <span className="text-[12px] font-semibold text-foreground">{appDateTimeFormat(locale, { day: "2-digit" }).format(dateOrInstant(appointment.date))}</span>
                 </span>
                 <span className="min-w-0 flex-1">

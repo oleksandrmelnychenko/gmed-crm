@@ -251,7 +251,7 @@ export function PatientTimelineTab({
                 <section key={group.key} className="space-y-2" aria-label={group.label}>
                   <div className="flex items-center gap-2 px-1">
                     <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-primary" />
-                    <h3 className="font-mono text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
+                    <h3 className="font-mono text-[11px] font-medium text-muted-foreground">
                       {group.label}
                     </h3>
                     <span className="h-px flex-1 bg-border" aria-hidden="true" />

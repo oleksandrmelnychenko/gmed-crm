@@ -81,7 +81,7 @@ export function PortalFact({
 }) {
   return (
     <div className={cn("min-w-0", className)} data-testid={testId}>
-      <dt className="font-mono text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">{label}</dt>
+      <dt className="font-mono text-[11px] font-medium text-muted-foreground">{label}</dt>
       <dd className="mt-0.5 text-[13px] font-medium leading-snug text-foreground">{children}</dd>
     </div>
   );

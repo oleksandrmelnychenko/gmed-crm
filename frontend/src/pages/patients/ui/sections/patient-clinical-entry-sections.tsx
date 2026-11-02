@@ -674,7 +674,7 @@ export function PatientMedicationTable({
             </span>
             {row.item.einnahme_bis ? (
               <span className={cn(
-                "mt-0.5 block truncate text-[10px] font-semibold uppercase tracking-wide",
+                "mt-0.5 block truncate text-[10px] font-semibold",
                 ended ? "text-rose-700" : "text-emerald-700",
               )}>
                 {ended ? tx("Приём завершён", "Einnahme beendet") : tx("Приём до", "Einnahme bis")}{" "}

@@ -735,7 +735,7 @@ export function ConciergeTaskManager({
         <div className={cn("grid items-start gap-3 md:grid-cols-2", visibleStatuses.length > 2 && "xl:grid-cols-3 2xl:grid-cols-6")}>
           {visibleStatuses.map((status) => {
             const rows = filtered.filter((task) => task.status === status);
-            return <section key={status} data-testid={`task-column-${status}`} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} parentTask={tasksById.get(task.parent_task_id ?? "")} subCount={subCounts.get(task.id)} assignedToRole={assigneeRoles.get(task.assigned_to)} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} canAddExpense={canAddExpenseToTask(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onExpense={onExpense} onStatusChange={onStatusChange} onWorkflow={(item) => setWorkflowTaskId(item.id)} />)}</div></section>;
+            return <section key={status} data-testid={`task-column-${status}`} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} parentTask={tasksById.get(task.parent_task_id ?? "")} subCount={subCounts.get(task.id)} assignedToRole={assigneeRoles.get(task.assigned_to)} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} canAddExpense={canAddExpenseToTask(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onExpense={onExpense} onStatusChange={onStatusChange} onWorkflow={(item) => setWorkflowTaskId(item.id)} />)}</div></section>;
           })}
         </div>
       ) : null}
@@ -785,7 +785,7 @@ export function ConciergeTaskManager({
               </div>
             ) : (
               <div className="min-w-[760px]">
-                <div className="grid grid-cols-[3.5rem_repeat(7,minmax(0,1fr))] border-b bg-muted/25 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <div className="grid grid-cols-[3.5rem_repeat(7,minmax(0,1fr))] border-b bg-muted/25 text-[11px] font-semibold text-muted-foreground">
                   <div className="flex items-center justify-center border-r px-1 py-2">{labels.calendarWeekShort}</div>
                   {weekdayLabels.map((label) => <div key={label} className="border-r px-2 py-2 text-center last:border-r-0">{label}</div>)}
                 </div>

@@ -774,7 +774,7 @@ function AdminActivityMetrics({ metrics, t }: AdminActivityMetricsProps) {
           className="min-w-0 rounded-xl border border-border/70 bg-card p-3.5"
         >
           <div className="flex items-start justify-between gap-2">
-            <p className="font-mono text-[10.5px] font-medium uppercase leading-4 tracking-[0.03em] text-muted-foreground">
+            <p className="font-mono text-[10.5px] font-medium leading-4 text-muted-foreground">
               {label}
             </p>
             <Icon

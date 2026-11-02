@@ -304,7 +304,7 @@ export function OrdersValuedBars({
         const percent = (value / max) * 100;
         return (
           <div key={item.phase} className="flex items-center gap-3">
-            <div className="w-[100px] shrink-0 capitalize text-[13px] text-foreground">
+            <div className="w-[100px] shrink-0 text-[13px] first-letter:uppercase text-foreground">
               {orderPhaseLabel(item.phase, lang)}
             </div>
             <div className="flex-1">

@@ -88,7 +88,7 @@ export function CasesRosterSection({
           </div>
           <div
             className={cn(
-              "text-xs uppercase tracking-[0.12em] text-slate-500",
+              "text-xs text-slate-500",
               counterClassName,
             )}
           >
@@ -217,7 +217,7 @@ function CaseCardContent({
 
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+          <div className="text-[11px] font-semibold text-slate-500">
             {reasonLabel}
           </div>
           <div className="mt-2 text-sm text-slate-900">
@@ -225,7 +225,7 @@ function CaseCardContent({
           </div>
         </div>
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+          <div className="text-[11px] font-semibold text-slate-500">
             {createdLabel}
           </div>
           <div className="mt-2 text-sm text-slate-900">{createdAtLabel}</div>

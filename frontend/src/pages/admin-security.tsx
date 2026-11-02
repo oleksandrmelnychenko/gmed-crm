@@ -122,7 +122,7 @@ function SecurityMetric({
   return (
     <article className="min-w-0 rounded-xl border border-border/70 bg-card p-3.5">
       <div className="flex items-start justify-between gap-2">
-        <p className="min-w-0 break-words font-mono text-[10.5px] font-medium uppercase leading-4 tracking-[0.03em] text-muted-foreground">
+        <p className="min-w-0 break-words font-mono text-[10.5px] font-medium leading-4 text-muted-foreground">
           {label}
         </p>
         {Icon ? (
@@ -1065,7 +1065,7 @@ function useAdminSecurityPageContent() {
                   {maintEnabled ? t.common_active : t.common_inactive}
                 </StatusChip>
                 <div className="min-w-0 flex-1 space-y-1">
-                  <p className="font-mono text-[10.5px] uppercase tracking-[0.03em] text-muted-foreground">
+                  <p className="font-mono text-[10.5px] text-muted-foreground">
                     {t.security_maintenance_msg}
                   </p>
                   <p className="break-words text-xs leading-5 text-foreground">

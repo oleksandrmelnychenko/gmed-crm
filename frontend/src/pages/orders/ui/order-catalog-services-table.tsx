@@ -291,19 +291,19 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
                         className="ml-auto flex w-fit max-w-full flex-wrap items-start justify-end gap-x-8 gap-y-2 text-right"
                       >
                         <div className="min-w-[7rem]">
-                          <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{tx("Нетто", "Netto")}</dt>
+                          <dt className="text-[10px] font-medium text-muted-foreground">{tx("Нетто", "Netto")}</dt>
                           <dd className="mt-1 inline-flex whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono text-xs font-medium tabular-nums text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
                             {formatMoneyLabel(totals.net)}
                           </dd>
                         </div>
                         <div className="min-w-[7rem]">
-                          <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{tx("НДС", "MwSt.")}</dt>
+                          <dt className="text-[10px] font-medium text-muted-foreground">{tx("НДС", "MwSt.")}</dt>
                           <dd className="mt-1 inline-flex whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono text-xs font-medium tabular-nums text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
                             {formatMoneyLabel(totals.vat)}
                           </dd>
                         </div>
                         <div className="min-w-[8rem] border-l border-border pl-6">
-                          <dt className="text-[10px] font-semibold uppercase tracking-wide text-foreground">{tx("Итого", "Gesamt")}</dt>
+                          <dt className="text-[10px] font-semibold text-foreground">{tx("Итого", "Gesamt")}</dt>
                           <dd className="mt-1 inline-flex whitespace-nowrap rounded-full border border-emerald-300 bg-emerald-100 px-2.5 py-1 font-mono text-xs font-semibold tabular-nums text-emerald-900 dark:border-emerald-700 dark:bg-emerald-900/55 dark:text-emerald-100">
                             {formatMoneyLabel(totals.gross)}
                           </dd>

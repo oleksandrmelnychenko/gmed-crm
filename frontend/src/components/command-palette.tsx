@@ -271,7 +271,7 @@ export function CommandPalette() {
               return (
                 <div key={item.key}>
                   {showHeader ? (
-                    <div className="px-2.5 pb-1 pt-2 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/70">
+                    <div className="px-2.5 pb-1 pt-2 font-mono text-[10px] font-medium text-muted-foreground/70">
                       {sectionLabels[item.section]}
                     </div>
                   ) : null}

@@ -739,7 +739,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             title={balanceTitle}
             onClick={() => handleWorkspaceTabChange("finance")}
           >
-            <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            <span className="block text-[10px] font-medium text-muted-foreground">
               {t.invoices_workspace_balance}
             </span>
             <span

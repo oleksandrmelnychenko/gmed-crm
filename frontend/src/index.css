@@ -1255,7 +1255,6 @@ html[data-native-platform] {
   font-size: 0.58rem;
   font-weight: 600;
   letter-spacing: 0.03em;
-  text-transform: uppercase;
   color: var(--apt-event-accent);
   opacity: 0.95;
 }

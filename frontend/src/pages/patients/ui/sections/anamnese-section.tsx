@@ -591,7 +591,7 @@ export function AnamneseSection({
 
         {historyOpen ? (
           <div className="overflow-hidden rounded-lg border border-border/60 bg-card">
-            <p className="border-b border-border/60 bg-muted/20 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <p className="border-b border-border/60 bg-muted/20 px-3 py-2 text-[11px] font-semibold text-muted-foreground">
               {tx("История версий", "Versionsverlauf")}
             </p>
             {historyLoading ? (
@@ -611,7 +611,7 @@ export function AnamneseSection({
                     >
                       <div className="grid min-w-0 flex-1 gap-2 md:grid-cols-[10rem_minmax(0,1fr)]">
                         <div className="min-w-0">
-                          <p className="text-[10px] font-medium uppercase text-muted-foreground">
+                          <p className="text-[10px] font-medium text-muted-foreground">
                             {tx("Дата и время анамнеза", "Zeitpunkt der Anamnese")}
                           </p>
                           <p className="mt-1">
@@ -636,7 +636,7 @@ export function AnamneseSection({
                           </div>
                         </div>
                         <div className="min-w-0">
-                          <p className="text-[10px] font-medium uppercase text-muted-foreground">
+                          <p className="text-[10px] font-medium text-muted-foreground">
                             {tx("Содержимое", "Inhalt")}
                           </p>
                           <p className="mt-0.5 min-w-0 max-w-full break-words text-[11px] text-muted-foreground">

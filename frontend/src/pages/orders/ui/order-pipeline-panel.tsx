@@ -118,7 +118,7 @@ function StageBlock({
 function Fact({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="min-w-0 rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5">
-      <div className="font-mono text-[11px] uppercase tracking-[0.04em] leading-4 text-muted-foreground">{label}</div>
+      <div className="font-mono text-[11px] leading-4 text-muted-foreground">{label}</div>
       <div className="mt-1 break-words font-mono text-sm font-semibold leading-5 tabular-nums text-foreground">{value}</div>
     </div>
   );

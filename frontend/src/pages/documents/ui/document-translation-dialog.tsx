@@ -385,7 +385,7 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
               </details>
             ) : null}
             <section className="space-y-2 border-t border-border/70 pt-3">
-              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <h4 className="text-xs font-semibold text-muted-foreground">
                 {tx("Переводы этого документа", "Übersetzungen dieses Dokuments")}
               </h4>
               {translations.length === 0 ? (

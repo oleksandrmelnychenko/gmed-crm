@@ -98,7 +98,7 @@ export function ScopedOrderDetail({
       </p>
       <section className="rounded-xl border border-border/70 bg-card p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          <span className="text-xs font-semibold text-muted-foreground">
             {labels.order}
           </span>
           <span className="font-mono text-xs font-medium text-foreground">{detail.order_number}</span>

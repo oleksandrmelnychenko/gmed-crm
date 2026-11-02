@@ -351,7 +351,7 @@ function NotFoundPage() {
   return (
     <div className="flex min-h-[calc(100vh-3rem)] items-center justify-center px-6">
       <div className="max-w-lg rounded-3xl border border-border bg-card p-8 text-center shadow-sm">
-        <p className="text-sm font-semibold uppercase tracking-[0.28em] text-muted-foreground">
+        <p className="text-sm font-semibold text-muted-foreground">
           404
         </p>
         <h1 className="mt-3 text-2xl font-semibold text-foreground">

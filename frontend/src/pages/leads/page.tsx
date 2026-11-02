@@ -2545,7 +2545,7 @@ function useLeadsPageContent() {
                                 ? `${leadStageLabel(event.from_stage, t)} -> ${leadStageLabel(event.to_stage, t)}`
                                 : leadStageLabel(event.to_stage, t)}
                             </p>
-                            <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">
+                            <p className="mt-1 text-xs text-slate-500">
                               {leadTransitionKindLabel(event.transition_kind, t)}
                             </p>
                           </div>
@@ -3240,7 +3240,7 @@ function useLeadsPageContent() {
                   )}
                   {detail.notes ? (
                     <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
-                      <div className="mb-1 text-xs uppercase tracking-wide text-slate-400">{t.lead_internal_note}</div>
+                      <div className="mb-1 text-xs text-slate-400">{t.lead_internal_note}</div>
                       {detail.notes}
                     </div>
                   ) : null}

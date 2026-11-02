@@ -813,7 +813,6 @@ export function buildPatientLabelPrintHtml(payload: PatientLabelPayload) {
         font-size: 8pt;
         font-weight: 700;
         letter-spacing: 0.12em;
-        text-transform: uppercase;
         color: #475569;
       }
 

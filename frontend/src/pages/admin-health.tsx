@@ -76,7 +76,7 @@ function HealthMetric({
   return (
     <article className="min-w-0 rounded-xl border border-border/60 bg-card p-3.5">
       <div className="flex items-start justify-between gap-2">
-        <p className="min-w-0 font-mono text-[10.5px] font-medium uppercase leading-4 tracking-[0.03em] text-muted-foreground">
+        <p className="min-w-0 font-mono text-[10.5px] font-medium leading-4 text-muted-foreground">
           {label}
         </p>
         {Icon ? (
@@ -590,7 +590,7 @@ function AdminHealthDetailSheet({
               <AdminSectionTitle>{t.health_section_database}</AdminSectionTitle>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
-                  <div className="font-mono text-[10.5px] uppercase tracking-wide text-muted-foreground">
+                  <div className="font-mono text-[10.5px] text-muted-foreground">
                     {t.health_db_size}
                   </div>
                   <div className="mt-1 text-base font-semibold">
@@ -598,7 +598,7 @@ function AdminHealthDetailSheet({
                   </div>
                 </div>
                 <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
-                  <div className="font-mono text-[10.5px] uppercase tracking-wide text-muted-foreground">
+                  <div className="font-mono text-[10.5px] text-muted-foreground">
                     {t.health_connections}
                   </div>
                   <div className="mt-1 text-base font-semibold">
@@ -629,7 +629,7 @@ function AdminHealthDetailSheet({
               <AdminSectionTitle>{t.health_section_access}</AdminSectionTitle>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
-                  <div className="font-mono text-[10.5px] uppercase tracking-wide text-muted-foreground">
+                  <div className="font-mono text-[10.5px] text-muted-foreground">
                     {t.health_users_total}
                   </div>
                   <div className="mt-1 text-base font-semibold">
@@ -637,7 +637,7 @@ function AdminHealthDetailSheet({
                   </div>
                 </div>
                 <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
-                  <div className="font-mono text-[10.5px] uppercase tracking-wide text-muted-foreground">
+                  <div className="font-mono text-[10.5px] text-muted-foreground">
                     {t.health_users_active}
                   </div>
                   <div className="mt-1 text-base font-semibold">
@@ -645,7 +645,7 @@ function AdminHealthDetailSheet({
                   </div>
                 </div>
                 <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
-                  <div className="font-mono text-[10.5px] uppercase tracking-wide text-muted-foreground">
+                  <div className="font-mono text-[10.5px] text-muted-foreground">
                     {t.health_users_locked}
                   </div>
                   <div className="mt-1 text-base font-semibold">
@@ -653,7 +653,7 @@ function AdminHealthDetailSheet({
                   </div>
                 </div>
                 <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
-                  <div className="font-mono text-[10.5px] uppercase tracking-wide text-muted-foreground">
+                  <div className="font-mono text-[10.5px] text-muted-foreground">
                     {t.health_sessions_active}
                   </div>
                   <div className="mt-1 text-base font-semibold">

@@ -149,7 +149,7 @@ function AppointmentTimelineSection({
           {groupedTimeline.map((group) => (
             <div key={group.key}>
               <div className="flex items-center gap-2 border-b border-border/60 bg-muted/25 px-3 py-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                <span className="text-[10px] font-semibold text-muted-foreground">
                   {group.label}
                 </span>
               </div>

@@ -549,7 +549,7 @@ function useQueueSheetContent({
                 </div>
                 <span
                   className={cn(
-                    "rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                    "rounded-full border px-2 py-1 text-[10px] font-semibold",
                     requestStatusClassName(item.status),
                   )}
                 >
@@ -980,7 +980,7 @@ function useQueueSheetContent({
                 </div>
                 <span
                   className={cn(
-                    "rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                    "rounded-full border px-2 py-1 text-[10px] font-semibold",
                     appointmentStatusBadgeClassName(item.status),
                   )}
                 >

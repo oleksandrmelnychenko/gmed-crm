@@ -479,9 +479,9 @@ export function PatientDocumentsTab({
             {doc.translation_source_document_id ? (
               <Badge
                 variant="outline"
-                className="shrink-0 rounded-full border-sky-200 bg-sky-50 text-[10px] uppercase text-sky-700"
+                className="shrink-0 rounded-full border-sky-200 bg-sky-50 text-[10px] text-sky-700"
               >
-                {doc.document_language ?? (lang === "de" ? "Übersetzung" : "перевод")}
+                {doc.document_language?.toUpperCase() ?? (lang === "de" ? "Übersetzung" : "Перевод")}
               </Badge>
             ) : null}
           </span>

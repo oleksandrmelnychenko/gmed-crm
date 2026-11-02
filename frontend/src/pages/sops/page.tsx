@@ -1094,7 +1094,7 @@ function useSopsPageContent() {
                       </div>
                     </div>
                     <div className="flex flex-col justify-between gap-3 border-l border-dashed border-border pl-4">
-                      <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                      <span className="text-[10px] text-muted-foreground">
                         {text.columns.updated}
                       </span>
                       <div className="text-right">

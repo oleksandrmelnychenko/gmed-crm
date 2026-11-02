@@ -759,7 +759,7 @@ function useDataTableContent<T>({
                     <div className="min-w-0 flex-1">
                       {mobilePrimaryColumn ? (
                         <div>
-                          <p className="mb-1 text-[10px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+                          <p className="mb-1 text-[10px] font-medium text-muted-foreground">
                             {mobilePrimaryColumn.label}
                           </p>
                           <div className="min-w-0 text-sm font-semibold text-foreground [&_.truncate]:whitespace-normal">
@@ -896,7 +896,7 @@ function ColumnHeaderContextMenu<T>({
       <div className="flex items-center justify-between gap-2 border-b border-border px-2.5 py-2">
         <span className="min-w-0 truncate text-xs font-medium">{column.label}</span>
         {isFrozen ? (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium uppercase text-primary">
+          <span className="inline-flex shrink-0 items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
             <Pin className="size-3" />
             {labels?.frozen ?? t.table_columns_frozen}
           </span>

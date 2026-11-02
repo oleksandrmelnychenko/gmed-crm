@@ -294,7 +294,7 @@ function IdentityReview({
       ) : null}
       {preview.identity_match.fields.length > 0 ? (
         <div className="mt-3 overflow-hidden rounded-lg border bg-white">
-          <div className="grid grid-cols-[minmax(90px,.7fr)_minmax(0,1fr)_minmax(0,1fr)] gap-2 border-b bg-muted/30 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="grid grid-cols-[minmax(90px,.7fr)_minmax(0,1fr)_minmax(0,1fr)] gap-2 border-b bg-muted/30 px-3 py-2 text-[10px] font-semibold text-muted-foreground">
             <span>{tx("Поле", "Feld")}</span>
             <span>{tx("В BMP", "Im BMP")}</span>
             <span>{tx("В профиле", "Im Profil")}</span>
@@ -334,7 +334,7 @@ export function MedicationBmpImportPreviewContent({
     <div className="space-y-3">
       <div className="grid gap-3 md:grid-cols-2">
         <section className="rounded-xl border bg-white p-3">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="text-[10px] font-semibold text-muted-foreground">
             {tx("План", "Plan")}
           </p>
           <p className="mt-1 break-words text-sm font-semibold text-foreground">
@@ -345,7 +345,7 @@ export function MedicationBmpImportPreviewContent({
           </p>
         </section>
         <section className="rounded-xl border bg-white p-3">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="text-[10px] font-semibold text-muted-foreground">
             {tx("Автор плана", "Aussteller")}
           </p>
           <p className="mt-1 break-words text-sm font-semibold text-foreground">
@@ -388,7 +388,7 @@ export function MedicationBmpImportPreviewContent({
         <div className="space-y-3 p-3">
           {preview.sections.map((section) => (
             <div key={`${section.index}:${section.code ?? section.title ?? "section"}`} className="space-y-1.5">
-              <p className="px-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <p className="px-0.5 text-[10px] font-semibold text-muted-foreground">
                 {section.title || (
                   section.category === "besondere"
                     ? tx("По особым показаниям", "Zu besonderen Zeiten")

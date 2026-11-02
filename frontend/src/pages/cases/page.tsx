@@ -1304,7 +1304,7 @@ function useCasesPageContent() {
                   {t.cases_snippets_active}
                 </label>
                 <div className="rounded-xl border border-dashed border-border bg-white p-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  <p className="text-xs font-semibold text-muted-foreground">
                     {t.cases_snippets_preview}
                   </p>
                   <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">

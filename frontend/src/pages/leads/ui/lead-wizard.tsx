@@ -12899,7 +12899,7 @@ ${serviceCommentLines.join("\n")}`
                     key={item.label}
                     className="min-w-0 border-b border-border px-4 py-3 last:border-b-0 sm:border-r sm:[&:nth-child(2n)]:border-r-0 lg:border-b-0 lg:[&:nth-child(2n)]:border-r lg:last:border-r-0"
                   >
-                    <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <dt className="text-[10px] font-semibold text-muted-foreground">
                       {item.label}
                     </dt>
                     <dd className="mt-1 break-words text-sm font-medium text-foreground">{item.value}</dd>
@@ -13019,7 +13019,7 @@ ${serviceCommentLines.join("\n")}`
                         </header>
                         <div className="space-y-3 px-4 py-3">
                           <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2.5">
-                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            <p className="text-[10px] font-semibold text-muted-foreground">
                               {tx("Полное описание", "Vollständige Beschreibung")}
                             </p>
                             {descriptionItems.length > 0 ? (
@@ -13043,7 +13043,7 @@ ${serviceCommentLines.join("\n")}`
                               { label: tx("Итого", "Gesamt"), value: formatMoneyLabel(lineGross, line.currency), isTotal: true },
                             ].map((item) => (
                               <div key={item.label} className="rounded-md border border-border/70 bg-muted/25 px-3 py-2">
-                                <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{item.label}</dt>
+                                <dt className="text-[10px] font-medium text-muted-foreground">{item.label}</dt>
                                 <dd className="mt-0.5 whitespace-nowrap font-mono text-xs font-medium tabular-nums text-foreground">
                                   {item.isTotal ? (
                                     <Badge
@@ -13075,7 +13075,7 @@ ${serviceCommentLines.join("\n")}`
                   { label: tx("Итого", "Gesamt"), value: estimate.gross, strong: true },
                 ].map((item) => (
                   <div key={item.label} className="border-b border-border px-4 py-3 text-right last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
-                    <dt className={cn("uppercase tracking-wide", item.strong ? "text-xs font-semibold text-foreground" : "text-[10px] font-medium text-muted-foreground")}>{item.label}</dt>
+                    <dt className={item.strong ? "text-xs font-semibold text-foreground" : "text-[10px] font-medium text-muted-foreground"}>{item.label}</dt>
                     <dd className={cn("mt-0.5 whitespace-nowrap font-mono text-sm tabular-nums text-foreground", item.strong && "text-[15px] font-semibold")}>
                       {item.strong ? (
                         <Badge

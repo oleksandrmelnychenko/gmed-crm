@@ -82,7 +82,7 @@ export function SpecializationDiagnosesSection({
         <div className="space-y-5">
           {diagnoses.length > 0 ? (
             <section className="space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <h3 className="text-xs font-semibold text-muted-foreground">
                 {labels.diagnoses}
               </h3>
               {diagnoses.map((diagnosis, index) => (
@@ -130,7 +130,7 @@ export function SpecializationDiagnosesSection({
 
           {examinations.length > 0 ? (
             <section className="space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <h3 className="text-xs font-semibold text-muted-foreground">
                 {labels.examinations}
               </h3>
               {examinations.map((examination, index) => (
@@ -165,7 +165,7 @@ export function SpecializationDiagnosesSection({
 
           {narratives.length > 0 ? (
             <section className="space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <h3 className="text-xs font-semibold text-muted-foreground">
                 {labels.narratives}
               </h3>
               {narratives.map((narrative, index) => {

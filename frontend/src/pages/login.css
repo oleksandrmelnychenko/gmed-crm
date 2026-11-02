@@ -39,7 +39,6 @@
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .gmed-login-card {
@@ -134,7 +133,6 @@
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .gmed-login-password {
@@ -283,7 +281,6 @@
   line-height: 1;
   letter-spacing: 0.06em;
   text-decoration: none;
-  text-transform: uppercase;
 }
 
 .gmed-login-home:hover {

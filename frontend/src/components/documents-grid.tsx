@@ -434,9 +434,9 @@ export function DocumentsGrid({
           {item.translation_source_document_id ? (
             <Badge
               variant="outline"
-              className="shrink-0 rounded-full border-sky-200 bg-sky-50 text-[10px] uppercase text-sky-700"
+              className="shrink-0 rounded-full border-sky-200 bg-sky-50 text-[10px] text-sky-700"
             >
-              {item.document_language ?? "translation"}
+              {item.document_language?.toUpperCase() ?? "Translation"}
             </Badge>
           ) : null}
           {item.needs_categorization ? (

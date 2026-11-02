@@ -121,7 +121,7 @@ export function SectionHeader({
   return (
     <div className="mb-1 mt-2 flex items-end justify-between px-1">
       <div>
-        <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+        <h2 className="text-[11px] font-semibold text-muted-foreground">
           {title}
         </h2>
         {hint ? <p className="mt-0.5 text-[13px] text-foreground">{hint}</p> : null}

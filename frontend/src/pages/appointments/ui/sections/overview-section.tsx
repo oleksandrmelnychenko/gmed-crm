@@ -358,7 +358,7 @@ function RecurringSeriesDetails({
         {detail.recurring_scope_preview.length > 0 ? (
           <div className="overflow-hidden rounded-lg border border-border/60 bg-card">
             <div className="flex items-center gap-2 border-b border-border/60 bg-muted/25 px-3 py-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              <span className="text-[10px] font-semibold text-muted-foreground">
                 {t.appointments_active_series_path}
               </span>
             </div>
@@ -397,7 +397,7 @@ function RecurringSeriesDetails({
         {detail.recurring_lineage_history.length > 0 ? (
           <div className="overflow-hidden rounded-lg border border-border/60 bg-card">
             <div className="flex items-center gap-2 border-b border-border/60 bg-muted/25 px-3 py-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              <span className="text-[10px] font-semibold text-muted-foreground">
                 {t.appointments_lineage_history}
               </span>
             </div>

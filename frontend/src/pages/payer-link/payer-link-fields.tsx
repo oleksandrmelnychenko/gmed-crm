@@ -196,5 +196,5 @@ export function ChoiceInput<Value extends string>({
 }
 
 export function SubHeading({ children }: { children: ReactNode }) {
-  return <p className="pt-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground sm:col-span-2 lg:col-span-3">{children}</p>;
+  return <p className="pt-1 text-xs font-semibold text-muted-foreground sm:col-span-2 lg:col-span-3">{children}</p>;
 }
