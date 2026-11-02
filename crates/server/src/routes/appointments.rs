@@ -21,6 +21,8 @@ use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 use sqlx::Row;
 
+mod order_interpreters;
+
 const APPOINTMENT_SCHEDULE_CONSTRAINTS: &[&str] = &[
     "appointments_patient_schedule_excl",
     "appointments_interpreter_schedule_excl",
@@ -129,6 +131,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/appointments/{id}/assign-interpreter",
             post(assign_interpreter),
+        )
+        .route(
+            "/orders/{id}/appointments/assign-interpreter",
+            post(order_interpreters::assign_order_interpreter),
         )
         .route(
             "/appointments/{id}/interpreter-response",

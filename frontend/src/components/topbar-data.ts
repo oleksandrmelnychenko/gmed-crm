@@ -576,6 +576,8 @@ type InterpreterWorkNotificationBody = {
   response_reset?: boolean | null;
   reason?: string | null;
   occurrence_count?: number | null;
+  batch_count?: number | null;
+  batch_last_date?: string | null;
   deleted?: boolean | null;
 };
 
@@ -617,6 +619,16 @@ function interpreterBookingNoticeParts(
   const count = Number(data.occurrence_count);
   if (Number.isFinite(count) && count > 1) {
     parts.push(lang === "de" ? `Serie: ${count} Termine` : `Серия: ${count} приёмов`);
+  }
+  // Several appointments of an order booked or released at once (one notice).
+  const batchCount = Number(data.batch_count);
+  if (Number.isFinite(batchCount) && batchCount > 1) {
+    const until = data.batch_last_date ? formatAppDate(data.batch_last_date) : "";
+    parts.push(
+      lang === "de"
+        ? `${batchCount} Termine${until ? ` bis ${until}` : ""}`
+        : `Приёмов: ${batchCount}${until ? `, до ${until}` : ""}`,
+    );
   }
   return parts;
 }

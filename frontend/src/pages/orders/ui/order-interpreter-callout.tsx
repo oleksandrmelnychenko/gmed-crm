@@ -11,17 +11,14 @@ import {
   interpreterAssignmentState,
 } from "../model/interpreter-assignment";
 import type { OrderPipeline, OrderPipelineAppointment } from "../model/order-pipeline";
-import type { OrderPlanningPreparation } from "../model/types";
+import type { InterpreterAssignmentCounters } from "../model/interpreter-assignment";
 
 type OrderInterpreterCalloutProps = {
   orderId: string;
   patientId: string | null;
   lang: string;
   reloadNonce: number;
-  planning: Pick<
-    OrderPlanningPreparation,
-    "interpreter_required" | "interpreter_assigned" | "interpreter_confirmed"
-  >;
+  planning: InterpreterAssignmentCounters;
   /** Appointment calendar of the order, used while no interpreter is assigned. */
   appointmentsHref: string;
   onNavigate: (href: string) => void;
@@ -77,8 +74,13 @@ export function OrderInterpreterCallout({
       : state === "awaiting_acceptance"
         ? de ? "Dolmetscher hat noch nicht zugesagt" : "Переводчик ещё не принял назначение"
         : de ? "Dolmetscher ist zugewiesen und hat zugesagt" : "Переводчик назначен и принял назначение";
+  const missing = planning.interpreter_missing ?? 0;
   const description =
-    state === "unassigned"
+    state === "unassigned" && planning.interpreter_assigned > 0 && missing > 0
+      ? de
+        ? `Ohne Dolmetscher: ${missing} Arzttermin(e). Jeder Arzttermin braucht einen Dolmetscher.`
+        : `Без переводчика: ${missing} мед. приём(а). Переводчик нужен на каждом медицинском приёме.`
+      : state === "unassigned"
       ? de
         ? "Der Dolmetscher wird einem konkreten Termin dieses Auftrags zugewiesen."
         : "Переводчик назначается на конкретный приём этого заказа."

@@ -516,6 +516,70 @@ test("planning warns about a doctor outside the quote and records the agreement 
   });
 });
 
+test("planning books one interpreter for a whole day in one request (plan stage 5)", async ({page}) => {
+  const {order, writes} = await prepare(page);
+  // One booked visit out of two medical ones is not enough any more.
+  Object.assign(order.planning_preparation, {
+    interpreter_required: true, interpreter_assigned: 1, interpreter_confirmed: 0,
+    interpreter_missing: 1, interpreter_unconfirmed: 1,
+  });
+  const item = (id: string, overrides: Record<string, unknown>) => ({
+    id, title: id, appointment_type: "medical", date: "2026-11-03", time_start: null, time_end: null,
+    status: "planned", location: null, provider_name: "Klinik Nord", doctor_name: "Dr. Weber",
+    interpreter_id: null, interpreter_name: null, interpreter_response: null, ...overrides,
+  });
+  await page.route(`**/api/v1/orders/${orderId}/pipeline`, route => route.fulfill({json: {
+    order_id: orderId, phase: "intake", status: "active", stages: [], medical: {visible: false, required: false}, appointments: [
+      item("Kardiologie", {time_start: "09:00:00", time_end: "10:00:00", interpreter_id: "int-olga", interpreter_name: "Olga Test", interpreter_response: "pending"}),
+      item("Nachbesprechung", {time_start: "13:00:00", time_end: "14:00:00"}),
+      item("Transfer", {date: "2026-11-04", appointment_type: "non_medical"}),
+    ],
+  }}));
+  await page.route("**/api/v1/appointments/meta/interpreters", route => route.fulfill({json: [
+    {id: "int-olga", name: "Olga Test", role: "interpreter", assignable: true},
+    {id: "int-ivan", name: "Ivan Test", role: "interpreter", assignable: true},
+  ]}));
+  await page.route("**/api/v1/appointments/*/interpreter-suggestions", route => route.fulfill({json: []}));
+  await page.route("**/api/v1/appointments/meta/conflicts?*", route => {
+    const url = new URL(route.request().url());
+    const busy = url.searchParams.get("appointment_id") === "Nachbesprechung" && url.searchParams.get("interpreter_id") === "int-ivan";
+    const conflict = {id: "x", title: "Andere Patientin", date: "2026-11-03", time_start: "13:30", time_end: "14:30", type: "medical", status: "confirmed", patient_name: "", patient_pid: "", provider_name: null};
+    return route.fulfill({json: {
+      patient_conflict_count: 0, interpreter_conflict_count: busy ? 1 : 0, has_conflicts: busy,
+      patient_conflicts: [], interpreter_conflicts: busy ? [conflict] : [],
+    }});
+  });
+  await page.goto(`/orders/${orderId}?section=planning`);
+
+  const callout = page.getByTestId("order-interpreter-callout");
+  await expect(callout).toHaveAttribute("data-state", "unassigned");
+  await expect(callout).toContainText("Без переводчика: 1");
+
+  const block = page.getByTestId("order-interpreters-by-day");
+  const day = block.locator('[data-testid="order-interpreter-day"][data-date="2026-11-03"]');
+  await expect(day).toContainText("без переводчика: 1");
+  await expect(day).toContainText("Olga Test");
+  await expect(day).toContainText("нужен переводчик");
+  await day.getByRole("button", {name: "Назначить переводчика на день"}).click();
+
+  const sheet = page.getByRole("dialog");
+  await expect(sheet).toBeVisible();
+  // Only the visit without an interpreter is preselected; the booked one can be added.
+  await expect(sheet.getByRole("checkbox", {name: "Nachbesprechung"})).toBeChecked();
+  await expect(sheet.getByRole("checkbox", {name: "Kardiologie"})).not.toBeChecked();
+  await sheet.getByRole("checkbox", {name: "Kardiologie"}).check();
+  await chooseComboboxOption(page, sheet.getByRole("combobox", {name: "Переводчик"}), "Ivan Test");
+  await expect(sheet.getByTestId("order-interpreter-row-hint")).toContainText("Конфликт: Andere Patientin 13:30–14:30");
+
+  await sheet.getByRole("button", {name: "Назначить", exact: true}).click();
+  await expect(sheet).toBeHidden();
+  const batch = writes.filter(write => write.path.endsWith("/appointments/assign-interpreter"));
+  expect(batch).toHaveLength(1);
+  expect(batch[0].path).toBe(`/orders/${orderId}/appointments/assign-interpreter`);
+  expect(batch[0].body.interpreter_id).toBe("int-ivan");
+  expect([...(batch[0].body.appointment_ids as string[])].sort()).toEqual(["Kardiologie", "Nachbesprechung"]);
+});
+
 test("saving a normalized note clears the dirty state", async ({page}) => {
   const {writes} = await prepare(page);
   await page.goto(`/orders/${orderId}?section=planning`);

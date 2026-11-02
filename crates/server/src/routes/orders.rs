@@ -2220,7 +2220,25 @@ async fn load_order_planning_readiness(
                     WHERE interpreter_id IS NOT NULL
                       AND interpreter_response = 'accepted'
                       AND status <> 'cancelled'
-                ) AS interpreter_confirmed
+                ) AS interpreter_confirmed,
+                -- Every open medical visit needs its own interpreter; a
+                -- declined booking counts as missing (planning stage 5).
+                COUNT(*) FILTER (
+                    WHERE appointment_type = 'medical'
+                      AND status NOT IN ('cancelled', 'completed')
+                ) AS interpreter_needed,
+                COUNT(*) FILTER (
+                    WHERE appointment_type = 'medical'
+                      AND status NOT IN ('cancelled', 'completed')
+                      AND (interpreter_id IS NULL OR interpreter_response = 'declined')
+                ) AS interpreter_missing,
+                COUNT(*) FILTER (
+                    WHERE appointment_type = 'medical'
+                      AND status NOT IN ('cancelled', 'completed')
+                      AND interpreter_id IS NOT NULL
+                      AND interpreter_response IS DISTINCT FROM 'accepted'
+                      AND interpreter_response IS DISTINCT FROM 'declined'
+                ) AS interpreter_unconfirmed
            FROM appointments
            WHERE order_id = $1"#,
     )
@@ -2306,8 +2324,24 @@ async fn load_order_planning_readiness(
     let treatment_plan_ready = treatment_plan_status == "finalized";
     let medical_bookings_ready = !medical_required || medical_confirmed > 0;
     let non_medical_bookings_ready = !non_medical_required || non_medical_confirmed > 0;
-    let interpreter_assignment_ready = !interpreter_required || interpreter_assigned > 0;
-    let interpreter_confirmation_ready = !interpreter_required || interpreter_confirmed > 0;
+    let interpreter_needed: i64 = appointment_counts
+        .try_get("interpreter_needed")
+        .unwrap_or_default();
+    let interpreter_missing: i64 = appointment_counts
+        .try_get("interpreter_missing")
+        .unwrap_or_default();
+    let interpreter_unconfirmed: i64 = appointment_counts
+        .try_get("interpreter_unconfirmed")
+        .unwrap_or_default();
+
+    // One booked interpreter no longer settles a plan of many visits: every
+    // open medical appointment needs one, and every such booking is accepted.
+    // Non-medical bookings (transfer, hotel) may run without an interpreter;
+    // an order without medical visits still needs at least one booking.
+    let interpreter_assignment_ready =
+        !interpreter_required || (interpreter_assigned > 0 && interpreter_missing == 0);
+    let interpreter_confirmation_ready = !interpreter_required
+        || (interpreter_confirmed > 0 && interpreter_missing == 0 && interpreter_unconfirmed == 0);
     let interpreter_briefing_ready =
         !interpreter_required || interpreter_briefing_status == "completed";
     let preparation_documents_ready = preparation_documents_status != "pending";
@@ -2361,6 +2395,9 @@ async fn load_order_planning_readiness(
             "interpreter_confirmation_ready": interpreter_confirmation_ready,
             "interpreter_assigned": interpreter_assigned,
             "interpreter_confirmed": interpreter_confirmed,
+            "interpreter_needed": interpreter_needed,
+            "interpreter_missing": interpreter_missing,
+            "interpreter_unconfirmed": interpreter_unconfirmed,
             "interpreter_briefing_ready": interpreter_briefing_ready,
             "preparation_documents_ready": preparation_documents_ready,
             "plan_finalized_at": plan_finalized_at.map(|value| value.to_rfc3339()),

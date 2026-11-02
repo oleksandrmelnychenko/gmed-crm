@@ -7,16 +7,29 @@ export type InterpreterAssignmentState =
   | "awaiting_acceptance"
   | "accepted";
 
-/** Where the order's interpreter assignment stands, from the planning counters. */
+export type InterpreterAssignmentCounters = Pick<
+  OrderPlanningPreparation,
+  | "interpreter_required"
+  | "interpreter_assigned"
+  | "interpreter_confirmed"
+  | "interpreter_missing"
+  | "interpreter_unconfirmed"
+>;
+
+/**
+ * Where the order's interpreter assignment stands, from the planning counters.
+ * Every open medical appointment needs its own interpreter, so one booking
+ * among several visits is still "unassigned".
+ */
 export function interpreterAssignmentState(
-  planning: Pick<
-    OrderPlanningPreparation,
-    "interpreter_required" | "interpreter_assigned" | "interpreter_confirmed"
-  >,
+  planning: InterpreterAssignmentCounters,
 ): InterpreterAssignmentState {
   if (!planning.interpreter_required) return "not_required";
-  if (planning.interpreter_assigned <= 0) return "unassigned";
-  return planning.interpreter_confirmed >= planning.interpreter_assigned
+  if (planning.interpreter_assigned <= 0 || (planning.interpreter_missing ?? 0) > 0) {
+    return "unassigned";
+  }
+  return planning.interpreter_confirmed >= planning.interpreter_assigned &&
+    (planning.interpreter_unconfirmed ?? 0) === 0
     ? "accepted"
     : "awaiting_acceptance";
 }

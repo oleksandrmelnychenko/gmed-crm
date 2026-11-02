@@ -313,6 +313,7 @@ async fn get_order_pipeline(
                               OR appointment.doctor_id IS NULL
                               OR line.item ->> 'doctor_id' = appointment.doctor_id::text)
                    )) AS outside_signed_quote,
+                  appointment.interpreter_id,
                   provider.name AS provider_name, doctor.name AS doctor_name,
                   interpreter.name AS interpreter_name
            FROM appointments appointment
@@ -476,6 +477,7 @@ async fn get_order_pipeline(
             "location": row.try_get::<Option<String>, _>("location").unwrap_or(None),
             "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or(None),
             "doctor_name": row.try_get::<Option<String>, _>("doctor_name").unwrap_or(None),
+            "interpreter_id": row.try_get::<Option<Uuid>, _>("interpreter_id").unwrap_or(None),
             "interpreter_name": row.try_get::<Option<String>, _>("interpreter_name").unwrap_or(None),
             "interpreter_response": row.try_get::<Option<String>, _>("interpreter_response").unwrap_or(None),
             // Null while the plan is not yet shown to the patient (owner decision 2026-11-02).

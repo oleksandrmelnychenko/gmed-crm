@@ -286,6 +286,7 @@ import { OrderPipelinePanel } from "./ui/order-pipeline-panel";
 import { OrderSubscriptionCard } from "./ui/order-subscription-card";
 import { ScopedOrderDetail } from "./ui/scoped-order-detail";
 import { OrderInterpreterCallout } from "./ui/order-interpreter-callout";
+import { OrderInterpretersByDay } from "./ui/order-interpreters-by-day";
 import { OrderPlannedAppointments } from "./ui/order-planned-appointments";
 import { OrderPlanAgreement } from "./ui/order-plan-agreement";
 import { ExternalInvoiceAllocationSheet } from "./ui/external-invoice-allocation-sheet";
@@ -5417,6 +5418,15 @@ function useOrdersPageContent() {
                         planning={orderDetail.planning_preparation}
                         appointmentsHref={detailAppointmentsHref}
                         onNavigate={staffGo}
+                      />
+
+                      <OrderInterpretersByDay
+                        orderId={orderDetail.id}
+                        patientId={detailPatientId}
+                        lang={lang}
+                        reloadNonce={reloadNonce}
+                        locked={orderStepsLocked}
+                        onChanged={() => setReloadNonce((current) => current + 1)}
                       />
 
                       {planningReadinessApplicable ? (

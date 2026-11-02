@@ -163,6 +163,12 @@ describe("interpreter work notifications", () => {
     expect(booked.title).toBe("Sie wurden als Dolmetscher gebucht");
     expect(booked.body).toBe("Kardiologie · 02.10.2026 09:30 — Bitte den Einsatz bestätigen oder ablehnen — Serie: 3 Termine");
 
+    const batch = localizedNotificationCopy(notice("interpreter_booking_assigned", {
+      appointment_title: "Kardiologie", appointment_date: "2026-10-02", time_start: "09:30",
+      batch_count: 4, batch_last_date: "2026-10-05",
+    }), "ru");
+    expect(batch.body).toBe("Kardiologie · 02.10.2026 09:30 — Подтвердите или отклоните участие — Приёмов: 4, до 05.10.2026");
+
     expect(localizedNotificationCopy(notice("interpreter_booking_removed", { appointment_title: "Kardiologie" }), "ru").title)
       .toBe("Вас сняли с назначения");
 

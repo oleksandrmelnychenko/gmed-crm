@@ -40,6 +40,26 @@ describe("interpreterAssignmentState", () => {
     expect(interpreterAssignmentState(planning(true, 0, 0))).toBe("unassigned");
   });
 
+  it("keeps asking while an open medical appointment has no interpreter", () => {
+    expect(
+      interpreterAssignmentState({ ...planning(true, 1, 1), interpreter_missing: 2 }),
+    ).toBe("unassigned");
+    expect(
+      interpreterAssignmentState({
+        ...planning(true, 3, 3),
+        interpreter_missing: 0,
+        interpreter_unconfirmed: 0,
+      }),
+    ).toBe("accepted");
+    expect(
+      interpreterAssignmentState({
+        ...planning(true, 3, 3),
+        interpreter_missing: 0,
+        interpreter_unconfirmed: 1,
+      }),
+    ).toBe("awaiting_acceptance");
+  });
+
   it("is settled only once every assignment is accepted", () => {
     expect(interpreterAssignmentState(planning(true, 1, 0))).toBe("awaiting_acceptance");
     expect(interpreterAssignmentState(planning(true, 2, 1))).toBe("awaiting_acceptance");

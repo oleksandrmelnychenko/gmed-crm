@@ -467,6 +467,10 @@ export type OrderPlanningPreparation = {
   interpreter_confirmation_ready: boolean;
   interpreter_assigned: number;
   interpreter_confirmed: number;
+  /** Open medical appointments that need an interpreter, and those still without one / not accepted. */
+  interpreter_needed?: number;
+  interpreter_missing?: number;
+  interpreter_unconfirmed?: number;
   interpreter_briefing_ready: boolean;
   preparation_documents_ready: boolean;
   plan_finalized_at: string | null;
