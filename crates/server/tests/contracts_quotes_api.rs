@@ -3826,16 +3826,16 @@ async fn finance_catalog_package_price_sold_to_a_patient_stays_in_the_history() 
     let package_id =
         seed_service_package(&pool, &format!("priced_{}", Uuid::new_v4().simple())).await;
     let sold: Uuid = sqlx::query_scalar(
-        r#"INSERT INTO service_package_price_versions (package_id, base_price_net, valid_from)
-           VALUES ($1, 100, '2026-01-01') RETURNING id"#,
+        r#"INSERT INTO service_package_price_versions (package_id, name, base_price_net, valid_from)
+           VALUES ($1, 'Preis 2026', 100, '2026-01-01') RETURNING id"#,
     )
     .bind(package_id)
     .fetch_one(&pool)
     .await
     .unwrap();
     sqlx::query(
-        r#"INSERT INTO service_package_price_versions (package_id, base_price_net, valid_from)
-           VALUES ($1, 120, '2026-06-01')"#,
+        r#"INSERT INTO service_package_price_versions (package_id, name, base_price_net, valid_from)
+           VALUES ($1, 'Preis Juni', 120, '2026-06-01')"#,
     )
     .bind(package_id)
     .execute(&pool)
