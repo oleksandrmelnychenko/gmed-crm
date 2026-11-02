@@ -82,6 +82,7 @@ import { PayerQuestionnaireSection } from "./lead-request-payer-questionnaire";
 import { missingFieldKeys, missingListKeys, recipientIsPayer } from "./lead-request-field-target";
 import { draftFromRecipient, flowOf, knowsRecipient, payerChoices, payerFitsFlow } from "./lead-request-recipient-model";
 import { RepresentationSection, RepresentativeUpload } from "./lead-request-representation";
+import { AgencyContactLine, HealthConsentText, useAgencyContact } from "./health-consent-text";
 import { useServerDraftSync } from "./lead-request-server-sync";
 import { inquiryConsentMissing, refusedIdentityUploadKeys, type StepId } from "./lead-request-steps";
 import { actsAsVormund, asLeadCabinetLang, childSectionTitle, hasInsuranceLabel, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
@@ -1181,6 +1182,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
     (request.identification !== undefined && "request_reason" in request.identification) ||
     request.progress.missing_for_submit.includes("request_reason");
   const consentReady = consentGiven(request, HEALTH_CONSENT);
+  const agencyContact = useAgencyContact();
   const [uploading, setUploading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -1223,8 +1225,9 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
   const consentSection = (
     <Section title={text.healthConsentTitle}>
       <p className="whitespace-pre-line rounded-lg border border-border/60 bg-muted/20 px-3 py-3 text-sm leading-6 text-foreground/85">
-        {consentText(request, HEALTH_CONSENT, lang)}
+        <HealthConsentText text={consentText(request, HEALTH_CONSENT, lang)} lang={lang} />
       </p>
+      <AgencyContactLine contact={agencyContact} label={text.healthConsentContact} />
       <ConsentCheckbox
         request={request}
         purpose={HEALTH_CONSENT}

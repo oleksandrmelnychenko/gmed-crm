@@ -106,6 +106,8 @@ export type LeadRequestText = {
   documentsIntro: string;
   healthConsentTitle: string;
   healthConsentLabel: string;
+  /** Lead-in of the GMED contact line under the health consent (e-mail and phone follow). */
+  healthConsentContact: string;
   uploadButton: string;
   uploading: string;
   fileTooLarge: (name: string) => string;
@@ -1151,6 +1153,7 @@ const de: LeadRequestText = {
     "Laden Sie ärztliche Unterlagen hoch, die Sie bereits haben (Arztbriefe, Befunde, Bilder, Laborwerte). PDF, JPG oder PNG, bis 25 MB pro Datei.",
   healthConsentTitle: "Einwilligung zu Gesundheitsdaten",
   healthConsentLabel: "Ich willige ein (erforderlich für das Anliegen und die Unterlagen).",
+  healthConsentContact: "Fragen zur Einwilligung oder zum Widerruf an GMED:",
   uploadButton: "Dateien auswählen",
   uploading: "Wird hochgeladen…",
   fileTooLarge: (name) => `${name} ist größer als 25 MB.`,
@@ -1776,6 +1779,7 @@ const ru: LeadRequestText = {
     "Загрузите медицинские документы, которые у вас уже есть (выписки, заключения, снимки, анализы). PDF, JPG или PNG, до 25 МБ на файл.",
   healthConsentTitle: "Согласие на обработку данных о здоровье",
   healthConsentLabel: "Я даю согласие на обработку описания обращения и документов.",
+  healthConsentContact: "Вопросы о согласии или его отзыве — в GMED:",
   uploadButton: "Выбрать файлы",
   uploading: "Загружается…",
   fileTooLarge: (name) => `${name} больше 25 МБ.`,
@@ -2395,6 +2399,7 @@ const uk: LeadRequestText = {
     "Завантажте медичні документи, які у вас уже є (виписки, висновки, знімки, аналізи). PDF, JPG або PNG, до 25 МБ на файл.",
   healthConsentTitle: "Згода на обробку даних про здоров’я",
   healthConsentLabel: "Я даю згоду на обробку опису звернення та документів.",
+  healthConsentContact: "Питання щодо згоди або її відкликання — до GMED:",
   uploadButton: "Вибрати файли",
   uploading: "Завантажується…",
   fileTooLarge: (name) => `${name} більший за 25 МБ.`,
@@ -3014,6 +3019,7 @@ const en: LeadRequestText = {
     "Upload medical documents you already have (doctors' letters, findings, images, lab results). PDF, JPG or PNG, up to 25 MB per file.",
   healthConsentTitle: "Consent to health data processing",
   healthConsentLabel: "I consent to processing the description of my concern and documents.",
+  healthConsentContact: "Questions about the consent or withdrawing it, to GMED:",
   uploadButton: "Choose files",
   uploading: "Uploading…",
   fileTooLarge: (name) => `${name} is larger than 25 MB.`,

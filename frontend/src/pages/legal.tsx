@@ -78,10 +78,12 @@ export function LegalNoticePage() {
     };
   }, []);
 
-  // A link to "/legal#privacy" (the consent in the lead cabinet) opens at the privacy notice.
+  // A link to "/legal#privacy" (the consent in the lead cabinet) opens at the privacy notice;
+  // "#form-privacy-section-9" (the deadline in the health consent) at its retention section.
   useEffect(() => {
-    if (hash === "#privacy" && (notice || failed)) {
-      document.getElementById("privacy")?.scrollIntoView({ block: "start" });
+    const target = hash.startsWith("#") ? hash.slice(1) : "";
+    if ((target === "privacy" || target.startsWith("form-privacy-section-")) && (notice || failed)) {
+      document.getElementById(target)?.scrollIntoView({ block: "start" });
     }
   }, [hash, notice, failed]);
 
