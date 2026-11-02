@@ -5972,7 +5972,7 @@ async fn document_templates_can_generate_treatment_plan_pdf_document() {
     let preview_html = body["preview_html"].as_str().unwrap();
     assert!(preview_html.contains("Behandlungsplan"));
     assert!(preview_html.contains("Bitte nüchtern bleiben"));
-    assert!(preview_html.contains("Patient benötigt Dolmetscherkoordination"));
+    assert!(!preview_html.contains("Patient benötigt Dolmetscherkoordination"));
 
     let (status, detail_body) = json_request(
         &app,
@@ -5998,8 +5998,8 @@ async fn document_templates_can_generate_treatment_plan_pdf_document() {
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 1000);
     let pdf_text = extract_pdf_text(&bytes);
-    assert!(pdf_text.contains("Planungsnotiz"));
-    assert!(pdf_text.contains("Patient benötigt Dolmetscherkoordination"));
+    assert!(!pdf_text.contains("Planungsnotiz"));
+    assert!(!pdf_text.contains("Patient benötigt Dolmetscherkoordination"));
 }
 
 #[tokio::test]

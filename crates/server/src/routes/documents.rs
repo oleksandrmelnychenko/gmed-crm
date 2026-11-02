@@ -17945,28 +17945,9 @@ async fn generate_document(
                 );
             }
 
-            let treatment_plan_note = if let Some(order_uuid) = order_id {
-                match sqlx::query_scalar::<_, Option<String>>(
-                    r#"SELECT treatment_plan_note
-                       FROM order_planning_preparation
-                       WHERE order_id = $1"#,
-                )
-                .bind(order_uuid)
-                .fetch_optional(&state.db)
-                .await
-                {
-                    Ok(value) => value.flatten(),
-                    Err(e) => {
-                        tracing::error!(error = %e, order_id = %order_uuid, "load treatment plan planning note");
-                        return err(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "Failed to load treatment plan context",
-                        );
-                    }
-                }
-            } else {
-                None
-            };
+            // The planning note is the staff's agreement note (QA 2026-11-02);
+            // the plan the patient receives never prints it.
+            let treatment_plan_note: Option<String> = None;
 
             let agency = match load_agency_contract_settings(&state).await {
                 Ok(value) => value,

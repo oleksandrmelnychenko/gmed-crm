@@ -1159,7 +1159,7 @@ test.describe("lead cabinet: what is missing, at its field (QA 2026-10-22)", () 
     await expect(stepBox.getByText("Pflichtfeld")).toHaveCount(0);
     await page.getByRole("button", { name: "Weiter", exact: true }).click();
     const list = page.getByTestId("lead-request-step-missing");
-    await expect(list).toContainText("Sie: Staatsangehörigkeit(en)");
+    await expect(list).toContainText("Sie: Staatsangehörigkeit (bei mehreren alle angeben)");
     await expect(list).toContainText("Anderer Elternteil: Nachname");
     await expect(list).not.toContainText("1. Vertreter/in");
     // The field says it below itself, the one filled in does not.

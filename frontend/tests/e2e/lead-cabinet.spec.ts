@@ -1351,7 +1351,7 @@ test.describe("lead cabinet", () => {
     await expect(missing).toContainText("Warum erfolgt die Zahlung über die Organisation?");
     await expect(missing).not.toContainText("Beziehung zu Ihnen");
     await expect(missing).not.toContainText("Zahler: Vorname");
-    await expect(missing).not.toContainText("Zahler: Staatsangehörigkeit(en)");
+    await expect(missing).not.toContainText("Zahler: Staatsangehörigkeit (bei mehreren alle angeben)");
 
     await step(page, "billing");
     await expect(type).toContainText("Eine Organisation");
