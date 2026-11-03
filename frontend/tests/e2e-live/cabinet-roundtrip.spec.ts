@@ -39,7 +39,7 @@ test("cabinet edits, upload, submission and staff data survive a real API round 
   // Seed prerequisites through public API; the browser changes these records,
   // uploads the document and submits the request below.
   await post("consent", { purpose: "lead_inquiry_processing", version: "2026-10-03", language: "de" });
-  await post("consent", { purpose: "health_data_processing", version: "2026-10-13", language: "de" });
+  await post("consent", { purpose: "health_data_processing", version: "2026-11-02", language: "de" });
   await post("personal-data", {
     date_of_birth: "1979-02-03", legal_sex: "female", citizenships: ["DE"],
     street_address: "Musterstraße 1", zip_code: "10115", city: "Berlin", country: "DE",
