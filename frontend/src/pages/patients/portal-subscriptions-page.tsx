@@ -143,7 +143,7 @@ export function PatientSubscriptionsPage() {
             <CountBadge>{t.portal_subscriptions_eyebrow}</CountBadge>
             <Button
               type="button"
-              variant="outline"
+              variant="default"
               className={tokens.control.primaryButton}
               onClick={() => staffGo("/invoices")}
             >
@@ -152,7 +152,7 @@ export function PatientSubscriptionsPage() {
             </Button>
             <Button
               type="button"
-              variant="outline"
+              variant="default"
               className={tokens.control.primaryButton}
               disabled={refreshing}
               onClick={() => {
@@ -194,16 +194,18 @@ export function PatientSubscriptionsPage() {
         subscriptions={grouped.active}
         emptyDescription={t.portal_subscriptions_empty_description}
       />
-      <SubscriptionSection
-        title={t.portal_subscriptions_upcoming}
-        subscriptions={grouped.upcoming}
-        emptyDescription={t.portal_subscriptions_empty_description}
-      />
-      <SubscriptionSection
-        title={t.portal_subscriptions_completed}
-        subscriptions={grouped.completed}
-        emptyDescription={t.portal_subscriptions_empty_description}
-      />
+      <div className={cn("grid gap-3", !grouped.upcoming.length && !grouped.completed.length && "md:grid-cols-2")}>
+        <SubscriptionSection
+          title={t.portal_subscriptions_upcoming}
+          subscriptions={grouped.upcoming}
+          emptyDescription={t.portal_subscriptions_empty_description}
+        />
+        <SubscriptionSection
+          title={t.portal_subscriptions_completed}
+          subscriptions={grouped.completed}
+          emptyDescription={t.portal_subscriptions_empty_description}
+        />
+      </div>
     </div>
   );
 }

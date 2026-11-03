@@ -472,7 +472,7 @@ export function PatientServicesPage() {
         description={t.services_description}
         actions={
           <Button
-            variant="outline"
+            variant="default"
             className={tokens.control.primaryButton}
             onClick={() => setVersion((value) => value + 1)}
           >

@@ -224,7 +224,7 @@ export function PatientPrivacyPage() {
               {t.portal_privacy_open_requests}: {openRequests.length}
             </CountBadge>
             <Button
-              variant="outline"
+              variant="default"
               className={tokens.control.primaryButton}
               onClick={() => dispatchPrivacyState((current) => ({ version: current.version + 1 }))}
             >
@@ -299,11 +299,11 @@ export function PatientPrivacyPage() {
               {requests.map((item) => (
                 <ListItem key={item.id} className="space-y-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                       <p className="text-sm font-semibold text-foreground">
                         {privacyRequestLabel(item.request_type)}
                       </p>
-                      <div className="mt-2"><PortalDateChip>{t.portal_privacy_submitted} {formatPortalDateTime(item.requested_at)}</PortalDateChip></div>
+                      <PortalDateChip>{t.portal_privacy_submitted} {formatPortalDateTime(item.requested_at)}</PortalDateChip>
                     </div>
                     <StatusBadge status={item.status} tone={privacyStatusBadgeTone(item.status)}>
                       {waitsForOpenBusiness(item)
@@ -325,13 +325,13 @@ export function PatientPrivacyPage() {
                   </div>
 
                   {item.reason ? (
-                    <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
+                    <div className={cn("rounded-lg px-3 py-2 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
                       {item.reason}
                     </div>
                   ) : null}
                   {item.decision_reason ? (
                     <div
-                      className={cn("mt-2 rounded-lg px-4 py-3 text-sm text-foreground", tokens.surface.mutedCard)}
+                      className={cn("mt-2 rounded-lg px-3 py-2 text-sm text-foreground", tokens.surface.mutedCard)}
                       data-testid="privacy-decision-reason"
                     >
                       <span className="font-medium">{uiText("privacy_decision_reason_label", lang)}:</span>{" "}

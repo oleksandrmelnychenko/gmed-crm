@@ -443,13 +443,13 @@ function usePatientInvoicesPageContent() {
           <>
             <CountBadge>{t.portal_invoices_patient_portal}</CountBadge>
             <a href="/documents">
-              <Button variant="outline" className={tokens.control.primaryButton}>
+              <Button variant="default" className={tokens.control.primaryButton}>
                 <Upload className="size-4" />
                 {t.portal_invoices_open_documents}
               </Button>
             </a>
             <Button
-              variant="outline"
+              variant="default"
               className={tokens.control.primaryButton}
               onClick={() => dispatchInvoicesState((current) => ({ version: current.version + 1 }))}
             >

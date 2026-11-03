@@ -382,7 +382,7 @@ function usePatientAppointmentsPageContent() {
           <>
             <CountBadge>{t.portal_appointments_patient_portal}</CountBadge>
             <Button
-              variant="outline"
+              variant="default"
               className="h-9 rounded-lg"
               onClick={() => setVersion((value) => value + 1)}
             >

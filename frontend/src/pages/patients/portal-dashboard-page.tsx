@@ -393,7 +393,7 @@ function usePatientDashboardPageContent() {
           // switch in the top bar (QA 2026-10-11).
           <>
             <Button
-              variant="outline"
+              variant="default"
               className={tokens.control.primaryButton}
               onClick={() => void handleExportData()}
               disabled={exportBusy}
@@ -402,7 +402,7 @@ function usePatientDashboardPageContent() {
               {t.portal_dashboard_export_my_data}
             </Button>
             <Button
-              variant="outline"
+              variant="default"
               className={tokens.control.primaryButton}
               onClick={() => dispatchDashboardState((current) => ({ version: current.version + 1 }))}
             >

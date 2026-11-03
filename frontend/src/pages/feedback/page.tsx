@@ -310,7 +310,7 @@ function EmptyState({
   description: string;
 }) {
   return (
-    <div className={cn("rounded-xl px-6 py-10 text-center", tokens.surface.dashed)}>
+    <div className={cn("rounded-xl px-4 py-6 text-center", tokens.surface.dashed)}>
       <h3 className="text-base font-semibold text-foreground">{title}</h3>
       <p className="mx-auto mt-2 max-w-2xl text-sm text-muted-foreground">{description}</p>
     </div>
@@ -620,8 +620,8 @@ function PatientScoreGrid({
   ] as const;
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-3 lg:grid-cols-2">
+    <div className="space-y-3">
+      <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1.8fr)]">
         <PatientRatingScale
           prominent
           label={t.feedback_overall}
@@ -661,7 +661,7 @@ function PatientScoreGrid({
         </div>
       </section>
 
-      <section className="rounded-xl border border-border/70 bg-card p-3.5">
+      <section className="rounded-xl border border-border/70 bg-card p-3">
         <span className="text-sm font-medium text-foreground">
           {t.feedback_treatment_success}
         </span>
@@ -904,7 +904,7 @@ function PatientFeedbackContent({
         title={t.feedback_patient_page_title}
         description={t.feedback_patient_page_description}
         actions={
-          <Button variant="outline" className="h-9 rounded-lg" onClick={() => setVersion((value) => value + 1)}>
+          <Button variant="default" className="h-9 rounded-lg" onClick={() => setVersion((value) => value + 1)}>
             {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
             {t.common_refresh}
           </Button>
@@ -914,7 +914,7 @@ function PatientFeedbackContent({
       {notice ? <Banner tone="success">{notice}</Banner> : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
 
-      <div className="grid overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 sm:grid-cols-3 [&>article:not(:last-child)_.admin-inline-metric-separator]:sm:block">
+      <div className="grid overflow-hidden rounded-xl border border-border bg-card px-3 py-3 sm:grid-cols-3 [&>article:not(:last-child)_.admin-inline-metric-separator]:sm:block">
         <AdminInlineMetric icon={MessageSquare} label={t.feedback_submitted_feedback_metric} value={feedback.length} tone="sky" />
         <AdminInlineMetric
           icon={Star}
@@ -930,7 +930,7 @@ function PatientFeedbackContent({
           title={titleWithDot(t.feedback_new_survey_title)}
           description={t.feedback_new_survey_description}
         >
-          <form className="space-y-3 p-3 sm:p-4" onSubmit={(event) => void onSubmit(event)}>
+          <form className="space-y-3 p-3" onSubmit={(event) => void onSubmit(event)}>
             <Field label={t.feedback_visit}>
               <NativeComboboxSelect
                 value={form.appointmentId || "__general__"}
@@ -956,11 +956,11 @@ function PatientFeedbackContent({
 
             <PatientScoreGrid t={t} form={form} setForm={setForm} />
 
-            <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
+            <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3">
               <FeedbackFormNotes t={t} form={form} setForm={setForm} />
             </section>
 
-            <Button type="submit" className="h-9 w-full rounded-lg" disabled={submitting || submitDisabled}>
+            <Button type="submit" className="h-9 w-full rounded-lg sm:w-auto" disabled={submitting || submitDisabled}>
               {submitting ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
               {t.feedback_submit_button}
             </Button>
@@ -972,7 +972,7 @@ function PatientFeedbackContent({
           description={t.feedback_history_description}
           count={feedback.length}
         >
-          <div className="p-3 sm:p-4">
+          <div className="p-3">
             {feedback.length === 0 ? (
               <EmptyState
                 title={t.feedback_empty_title}
@@ -985,7 +985,7 @@ function PatientFeedbackContent({
                     <button
                       key={item.id}
                       type="button"
-                      className="flex w-full items-center gap-3 rounded-xl border border-border/70 bg-card p-3.5 text-left transition-colors hover:border-ring hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="flex w-full items-center gap-3 rounded-xl border border-border/70 bg-card p-3 text-left transition-colors hover:border-ring hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       onClick={() => setActiveFeedbackId(item.id)}
                     >
                       <div className="min-w-0 flex-1">

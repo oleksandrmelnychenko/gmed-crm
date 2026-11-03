@@ -224,7 +224,7 @@ export function PatientRecommendationsPage() {
           <>
             <CountBadge>{t.portal_recommendations_patient_portal}</CountBadge>
             <CountBadge>{t.portal_recommendations_active}: {activeCount}</CountBadge>
-            <Button variant="outline" className={tokens.control.primaryButton} onClick={() => dispatchRecommendationsState((current) => ({ version: current.version + 1 }))}>
+            <Button variant="default" className={tokens.control.primaryButton} onClick={() => dispatchRecommendationsState((current) => ({ version: current.version + 1 }))}>
               <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
               {t.portal_recommendations_refresh}
             </Button>
@@ -245,7 +245,7 @@ export function PatientRecommendationsPage() {
           </p>
         </EmptyCell>
       ) : (
-        <section className="grid gap-3 xl:grid-cols-2">
+        <section className="grid items-start gap-3 xl:grid-cols-2">
           {recommendations.map((item) => {
             const recommendationId = item.recommendation_id || item.id;
             const disabled = busyId?.startsWith(`${recommendationId}:`) ?? false;
@@ -289,7 +289,7 @@ export function PatientRecommendationsPage() {
                 ) : null}
 
                 {!isClosed ? (
-                  <div className="flex flex-wrap gap-3">
+                  <div className="flex flex-wrap gap-2">
                     <ActionButton
                       busy={busyId === `${recommendationId}:schedule`}
                       disabled={disabled || appointmentRequestStands(item)}

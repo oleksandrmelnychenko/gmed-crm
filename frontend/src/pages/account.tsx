@@ -35,12 +35,12 @@ function useUiText() {
 
 function AccountSection({ title, accessory, children }: { title: string; accessory?: ReactNode; children: ReactNode }) {
   return (
-    <section className="min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-xs">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-4 py-3">
+    <section className="min-w-0 overflow-hidden rounded-xl border border-border bg-card">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-3 py-2.5">
         <AdminSectionTitle>{title}</AdminSectionTitle>
         {accessory}
       </div>
-      <div className="space-y-4 p-4">{children}</div>
+      <div className="space-y-3 p-3">{children}</div>
     </section>
   );
 }
@@ -57,10 +57,10 @@ export function AccountPage() {
   // (owner decision 2026-10-05); a lost one is replaced by staff.
   const leadCabinet = isLeadPortalUser(user);
   return (
-    <div className={user?.role === "patient" ? "w-full min-w-0 space-y-3 [&_label]:font-mono [&_label]:text-xs" : "space-y-4"} data-testid="account-page">
+    <div className={user?.role === "patient" ? "w-full min-w-0 space-y-3 [&_label]:font-mono [&_label]:text-xs" : "space-y-3"} data-testid="account-page">
       <PageHeader title={l("account_title")} description={l("account_subtitle")} />
-      <div className={user?.role === "patient" ? "space-y-3" : "space-y-4 rounded-2xl border border-border/60 bg-muted/40 p-3 sm:p-4"}>
-        <div className={leadCabinet ? "min-w-0" : "grid items-start gap-4 xl:grid-cols-2"}>
+      <div className="space-y-3">
+        <div className={leadCabinet ? "min-w-0" : "grid items-start gap-3 xl:grid-cols-2"}>
           <ProfileSection />
           {leadCabinet ? null : (
             <AccountSection title={l("account_password_title")}>
@@ -160,7 +160,7 @@ function ProfileSection() {
 
   return (
     <AccountSection title={l("account_profile_title")}>
-      <form className="space-y-4" onSubmit={(event) => void submit(event)} data-testid="account-profile-form">
+      <form className="space-y-3" onSubmit={(event) => void submit(event)} data-testid="account-profile-form">
         {error ? <Banner tone="error">{error}</Banner> : null}
         {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
         <div className={`grid gap-3 rounded-lg border border-border bg-muted/30 p-3${portalUser ? "" : " sm:grid-cols-2"}`}>
@@ -174,7 +174,7 @@ function ProfileSection() {
             </Field>
           )}
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field label={l("account_profile_name")} htmlFor="account-name" required>
             <Input
               id="account-name"
@@ -279,10 +279,10 @@ export function ChangePasswordForm({ onChanged, compact = false }: { onChanged?:
   };
 
   return (
-    <form className="space-y-4" onSubmit={(event) => void submit(event)} data-testid="account-password-form">
+    <form className="space-y-3" onSubmit={(event) => void submit(event)} data-testid="account-password-form">
       {error ? <Banner tone="error">{error}</Banner> : null}
       {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
-      <div className={compact ? "grid gap-4" : "grid gap-4 md:grid-cols-3"}>
+      <div className={compact ? "grid gap-3" : "grid gap-3 md:grid-cols-3"}>
         <Field label={l("account_password_current")} htmlFor="account-password-current" required>
           <Input
             id="account-password-current"

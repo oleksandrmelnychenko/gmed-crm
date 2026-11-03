@@ -214,7 +214,7 @@ export function PatientNotificationsPage() {
             <CountBadge>{copy.unread}: {unreadCount}</CountBadge>
             <Button
               type="button"
-              variant="outline"
+              variant="default"
               className={tokens.control.primaryButton}
               disabled={refreshing}
               onClick={() => setVersion((current) => current + 1)}

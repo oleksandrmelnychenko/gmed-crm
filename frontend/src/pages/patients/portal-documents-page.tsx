@@ -480,7 +480,7 @@ function usePatientDocumentsPageContent() {
               {t.portal_documents_my_uploads}: {uploads.length}
             </CountBadge> : null}
             <Button
-              variant="outline"
+              variant="default"
               className="h-9 rounded-lg"
               onClick={() => {
                 // "Aktualisieren" asks the server again, not the 15-second client cache.
