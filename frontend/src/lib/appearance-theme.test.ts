@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  addAppearanceTheme, appearanceStorageKey, BUILTIN_THEMES, contrastRatio, DEFAULT_THEME, DEFAULT_THEME_COLORS, withContrast,
+  addAppearanceTheme, appearanceStorageKey, BUILTIN_THEMES, contrastRatio, DEFAULT_THEME, DEFAULT_THEME_COLORS, withContrast, withControls,
   EMPTY_APPEARANCE, MAX_CUSTOM_THEMES, MAX_THEME_JSON_LENGTH, parseAppearancePreferences,
   parseAppearanceTheme, themeCssVariables,
 } from "./appearance-theme";
@@ -107,5 +107,30 @@ describe("contrast levels apart from the theme", () => {
     expect(parseAppearancePreferences(JSON.stringify({ selectedId: DEFAULT_THEME.id, themes: [], contrast: "high" }))).toEqual(EMPTY_APPEARANCE);
     const theme = parseAppearanceTheme(JSON.stringify(custom));
     expect(addAppearanceTheme({ ...EMPTY_APPEARANCE, contrast: "soft" }, theme).contrast).toBe("soft");
+  });
+});
+
+describe("own control colours", () => {
+  it("accepts control colours in theme JSON and falls back when they are absent", () => {
+    const withControlKeys = parseAppearanceTheme(JSON.stringify({ ...custom, colors: { placeholder: "#6B7280", dropdown: "#FAFAFA", dropdownHighlight: "#EEF2FF" } }));
+    expect(withControlKeys.colors.placeholder).toBe("#6b7280");
+    const css = themeCssVariables(withControlKeys);
+    expect(css["--control-placeholder"]).toBe("#6b7280");
+    expect(css["--control-popover"]).toBe("#fafafa");
+    expect(css["--control-highlight"]).toBe("#eef2ff");
+    const fallback = themeCssVariables(DEFAULT_THEME);
+    expect(fallback["--control-placeholder"]).toBe(DEFAULT_THEME.colors.textMuted);
+    expect(fallback["--control-popover"]).toBe(DEFAULT_THEME.colors.surface);
+    expect(fallback["--control-highlight"]).toBe(DEFAULT_THEME.colors.accent);
+    expect(() => parseAppearanceTheme(JSON.stringify({ ...custom, colors: { dropdown: "red" } }))).toThrow("invalid-color");
+  });
+
+  it("stores valid control colours, drops broken ones and lets them win over the theme", () => {
+    const stored = { selectedId: DEFAULT_THEME.id, themes: [], controls: { inputBorder: "#112233", placeholder: "url(x)", text: "#000000" } };
+    const preferences = parseAppearancePreferences(JSON.stringify(stored));
+    expect(preferences.controls).toEqual({ inputBorder: "#112233" });
+    expect(withControls(DEFAULT_THEME, preferences.controls).colors.inputBorder).toBe("#112233");
+    expect(withControls(DEFAULT_THEME, undefined)).toBe(DEFAULT_THEME);
+    expect(parseAppearancePreferences(JSON.stringify({ ...stored, controls: { focus: "nope" } }))).toEqual(EMPTY_APPEARANCE);
   });
 });

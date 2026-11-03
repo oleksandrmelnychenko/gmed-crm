@@ -23,7 +23,7 @@ export const CONTRAST_LEVEL_TEXT = {
   uk: { title: "Контраст", levels: { standard: "Стандартний", soft: "Мʼякий", softer: "Дуже мʼякий" } },
 } as const;
 
-const ITEM_CLASS = "flex min-h-8 w-full cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground";
+const ITEM_CLASS = "flex min-h-8 w-full cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none data-highlighted:bg-[var(--control-highlight,var(--accent))] data-highlighted:text-accent-foreground";
 
 export function AppearanceMenu({ onOpen }: { onOpen?: () => void }) {
   const { user } = useAuth();
@@ -45,7 +45,7 @@ export function AppearanceMenu({ onOpen }: { onOpen?: () => void }) {
       </Menu.Trigger>
       <Menu.Portal>
         <Menu.Positioner align="end" sideOffset={6} collisionPadding={12} className="isolate z-[150]">
-          <Menu.Popup aria-label={text.title} className="w-60 max-w-[calc(100vw-1.5rem)] rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg outline-none">
+          <Menu.Popup aria-label={text.title} className="w-60 max-w-[calc(100vw-1.5rem)] rounded-lg border border-border bg-[var(--control-popover,var(--popover))] p-1 text-popover-foreground shadow-lg outline-none">
             <Menu.RadioGroup
               aria-label={text.title}
               value={theme.id}

@@ -452,7 +452,7 @@ html[data-native-platform] {
   input::placeholder,
   textarea::placeholder {
     /* WCAG 1.4.3: hints stay at muted-text contrast (owner 2026-11-03). */
-    color: var(--muted-foreground);
+    color: var(--control-placeholder, var(--muted-foreground));
     opacity: 1;
     }
   html {

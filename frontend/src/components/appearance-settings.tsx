@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { Check, Contrast, Download, Palette, Upload } from "lucide-react";
+import { AppearanceControlColors } from "@/components/appearance-control-colors";
 import { CONTRAST_LEVEL_TEXT } from "@/components/appearance-menu";
 import { openContrastMeter } from "@/components/contrast-meter";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import {
-  addAppearanceTheme, BUILTIN_THEMES, CONTRAST_LEVELS, DEFAULT_THEME, MAX_THEME_JSON_LENGTH,
+  addAppearanceTheme, BUILTIN_THEMES, CONTRAST_LEVELS, DEFAULT_THEME, withControls, MAX_THEME_JSON_LENGTH,
   parseAppearanceTheme, ThemeValidationError, type AppearanceTheme, type ThemeErrorCode,
 } from "@/lib/appearance-theme";
 import { useAppearanceTheme } from "@/lib/use-appearance-theme";
@@ -68,7 +69,9 @@ export function AppearanceSettings() {
   const { lang } = useLang();
   const text = TEXT[lang as keyof typeof TEXT] ?? TEXT.en;
   const contrastText = CONTRAST_LEVEL_TEXT[lang as keyof typeof CONTRAST_LEVEL_TEXT] ?? CONTRAST_LEVEL_TEXT.en;
-  const { theme, themes, preferences, contrast, save } = useAppearanceTheme(user?.id ?? null);
+  const { theme: selectedTheme, themes, preferences, contrast, controls, save } = useAppearanceTheme(user?.id ?? null);
+  // Export and the JSON template carry the person's own control colours (owner 2026-11-03).
+  const theme = useMemo(() => withControls(selectedTheme, controls), [selectedTheme, controls]);
   const [draft, setDraft] = useState(() => portableTheme(theme, themes.map((item) => item.id)));
   const [notice, setNotice] = useState<{ error: boolean; message: string } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -126,6 +129,7 @@ export function AppearanceSettings() {
             try { save({ ...preferences, selectedId: DEFAULT_THEME.id, themes: preferences.themes.filter((item) => item.id !== theme.id) }); setNotice(null); } catch (cause) { fail(cause); }
           }}>{text.remove}</Button> : null}
         </div>
+        <AppearanceControlColors onError={fail} />
         <details className="max-w-3xl rounded-lg border border-border p-3">
           <summary className="cursor-pointer text-sm font-medium">{text.custom}</summary>
           <div className="mt-3 space-y-3">

@@ -72,7 +72,7 @@ export function SelectField({
         >
           <Select.Popup
             data-overlay-interaction-root=""
-            className="relative isolate z-[150] min-w-(--anchor-width) max-w-[min(32rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-xl duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+            className="relative isolate z-[150] min-w-(--anchor-width) max-w-[min(32rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-border bg-[var(--control-popover,var(--popover))] text-popover-foreground shadow-xl duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
           >
             <Select.List className="max-h-[min(18rem,var(--available-height))] overflow-y-auto p-1">
               {options.map((option) => (
@@ -80,7 +80,7 @@ export function SelectField({
                   key={option.value}
                   value={option.value}
                   disabled={option.disabled}
-                  className="relative flex min-h-8 w-full cursor-pointer select-none items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-sm outline-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground"
+                  className="relative flex min-h-8 w-full cursor-pointer select-none items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-sm outline-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-[var(--control-highlight,var(--accent))] data-highlighted:text-accent-foreground"
                 >
                   <Select.ItemText className="min-w-0 flex-1 truncate">
                     {option.label}

@@ -4,7 +4,7 @@ import { CommandPalette } from "@/components/command-palette";
 import { ContrastMeter } from "@/components/contrast-meter";
 import { Toaster } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth";
-import { DEFAULT_THEME, themeCssVariables, withContrast } from "@/lib/appearance-theme";
+import { DEFAULT_THEME, themeCssVariables, withContrast, withControls } from "@/lib/appearance-theme";
 import { useAppearanceTheme } from "@/lib/use-appearance-theme";
 import { useLang } from "@/lib/i18n";
 import { useNavState } from "@/lib/nav-state";
@@ -40,11 +40,11 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
   const leadPortal = leadShell !== null;
   const patientPortal = user?.role === "patient";
   const themeScope = leadPortal || !user ? null : patientPortal ? "patient-portal-theme" : "staff-portal-theme";
-  const { theme, contrast } = useAppearanceTheme(themeScope ? user?.id ?? null : null);
+  const { theme, contrast, controls } = useAppearanceTheme(themeScope ? user?.id ?? null : null);
   // The default uses the existing stylesheet unchanged, including its legacy dark palette.
-  // A contrast level other than standard writes the full palette, Graphite included.
-  const themeVariables = useMemo(() => theme.id === DEFAULT_THEME.id && contrast === "standard"
-    ? {} : themeCssVariables(withContrast(theme, contrast)), [theme, contrast]);
+  // A contrast level or own control colours write the full palette, Graphite included.
+  const themeVariables = useMemo(() => theme.id === DEFAULT_THEME.id && contrast === "standard" && !controls
+    ? {} : themeCssVariables(withControls(withContrast(theme, contrast), controls)), [theme, contrast, controls]);
   // Sheets and dialogs render into document.body and need the same palette.
   // Remove the previous workspace scope on logout or a role change.
   useLayoutEffect(() => {

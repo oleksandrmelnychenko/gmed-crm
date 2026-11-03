@@ -20,7 +20,7 @@ export type OverflowMenuItem = {
 };
 
 const ITEM_CLASS =
-  "flex min-h-9 w-full cursor-pointer select-none items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm outline-none data-disabled:cursor-default data-disabled:opacity-70 data-highlighted:bg-accent data-highlighted:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground";
+  "flex min-h-9 w-full cursor-pointer select-none items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm outline-none data-disabled:cursor-default data-disabled:opacity-70 data-highlighted:bg-[var(--control-highlight,var(--accent))] data-highlighted:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground";
 
 /**
  * A "more" button whose menu holds the secondary actions of a crowded bar
@@ -56,7 +56,7 @@ export function OverflowMenu({
       </Menu.Trigger>
       <Menu.Portal>
         <Menu.Positioner align={align} sideOffset={6} collisionPadding={12} className="isolate z-[150]">
-          <Menu.Popup className="min-w-52 max-w-[min(20rem,calc(100vw-1.5rem))] overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-xl outline-none duration-100 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 motion-reduce:animate-none">
+          <Menu.Popup className="min-w-52 max-w-[min(20rem,calc(100vw-1.5rem))] overflow-hidden rounded-lg border border-border bg-[var(--control-popover,var(--popover))] p-1 text-popover-foreground shadow-xl outline-none duration-100 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 motion-reduce:animate-none">
             {items.map((item) => (
               <Menu.Item
                 key={item.key}

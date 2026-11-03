@@ -360,7 +360,7 @@ function ComboboxSelect({
           actionsRef.current?.close()
         }}
         className={cn(
-          "flex h-9 w-full min-w-0 cursor-pointer items-center justify-between gap-2 rounded-lg border border-input bg-field px-3 py-2 text-sm text-foreground transition-colors outline-none hover:bg-muted/35 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/35 disabled:cursor-not-allowed disabled:opacity-50 data-placeholder:text-muted-foreground [&_span]:min-w-0 [&_span]:truncate",
+          "flex h-9 w-full min-w-0 cursor-pointer items-center justify-between gap-2 rounded-lg border border-input bg-field px-3 py-2 text-sm text-foreground transition-colors outline-none hover:bg-muted/35 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/35 disabled:cursor-not-allowed disabled:opacity-50 data-placeholder:text-[var(--control-placeholder,var(--muted-foreground))] [&_span]:min-w-0 [&_span]:truncate",
           className,
           triggerClassName,
         )}
@@ -380,14 +380,14 @@ function ComboboxSelect({
         >
           <ComboboxPrimitive.Popup
             data-overlay-interaction-root=""
-            className="relative isolate z-[150] min-w-(--anchor-width) max-w-[min(32rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-xl duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+            className="relative isolate z-[150] min-w-(--anchor-width) max-w-[min(32rem,calc(100vw-2rem))] overflow-hidden rounded-lg border border-border bg-[var(--control-popover,var(--popover))] text-popover-foreground shadow-xl duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
           >
-            <div className="flex items-center gap-2 border-b border-border bg-popover px-2.5 py-2">
+            <div className="flex items-center gap-2 border-b border-border bg-[var(--control-popover,var(--popover))] px-2.5 py-2">
               <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
               <ComboboxPrimitive.Input data-overlay-dirty-ignore=""
                 autoComplete={autoComplete}
                 placeholder={resolvedSearchPlaceholder}
-                className="h-7 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                className="h-7 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--control-placeholder,var(--muted-foreground))]"
               />
             </div>
             <ComboboxPrimitive.List className="max-h-[min(18rem,var(--available-height))] overflow-y-auto p-1">
@@ -412,7 +412,7 @@ function ComboboxSelect({
                     value={option.value}
                     disabled={option.disabled}
                     className={cn(
-                      "relative flex min-h-8 w-full cursor-pointer select-none items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-sm outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground",
+                      "relative flex min-h-8 w-full cursor-pointer select-none items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-sm outline-none data-highlighted:bg-[var(--control-highlight,var(--accent))] data-highlighted:text-accent-foreground",
                       disabledClassName,
                     )}
                   >

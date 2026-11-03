@@ -191,7 +191,7 @@ export function MedicationNameFields({ value, onChange, lang, inputClassName }: 
                 ref={(node) => { inputs.current[field] = node; }}
                 required={field === "wirkstoff"}
                 className={cn(
-                  "w-full min-w-0 border border-input px-2.5 py-1 text-base outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25 aria-invalid:border-destructive md:text-sm",
+                  "w-full min-w-0 border border-input px-2.5 py-1 text-base outline-none placeholder:text-[var(--control-placeholder,var(--muted-foreground))] focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25 aria-invalid:border-destructive md:text-sm",
                   inputClassName,
                 )}
                 autoComplete="off"
@@ -213,9 +213,9 @@ export function MedicationNameFields({ value, onChange, lang, inputClassName }: 
               />
               <Autocomplete.Portal>
                 <Autocomplete.Positioner align="start" sideOffset={4} className="isolate z-[150]" data-overlay-interaction-root="">
-                  <Autocomplete.Popup data-overlay-interaction-root="" className="w-(--anchor-width) max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-xl">
+                  <Autocomplete.Popup data-overlay-interaction-root="" className="w-(--anchor-width) max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-[var(--control-popover,var(--popover))] text-popover-foreground shadow-xl">
                     <Autocomplete.List className="max-h-60 overflow-y-auto p-1">
-                      {(item: string) => <Autocomplete.Item key={item} value={item} className="cursor-pointer rounded-md px-3 py-2 text-sm break-words outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground">{item}</Autocomplete.Item>}
+                      {(item: string) => <Autocomplete.Item key={item} value={item} className="cursor-pointer rounded-md px-3 py-2 text-sm break-words outline-none data-highlighted:bg-[var(--control-highlight,var(--accent))] data-highlighted:text-accent-foreground">{item}</Autocomplete.Item>}
                     </Autocomplete.List>
                     {!items.length ? <div role="status" className="px-3 py-2 text-xs text-muted-foreground">
                       {!ready ? tx("Поиск…", "Suche…") : !result

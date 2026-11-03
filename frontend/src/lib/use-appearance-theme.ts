@@ -28,5 +28,6 @@ export function useAppearanceTheme(userId: string | null) {
     window.dispatchEvent(new Event(CHANGE_EVENT));
   }, [key]);
   const contrast = preferences.contrast ?? "standard";
-  return { theme, themes, preferences, contrast, save };
+  const controls = preferences.controls;
+  return { theme, themes, preferences, contrast, controls, save };
 }

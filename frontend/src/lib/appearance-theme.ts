@@ -21,7 +21,15 @@ export const DEFAULT_THEME_COLORS = {
 } as const;
 
 export type ThemeColor = keyof typeof DEFAULT_THEME_COLORS;
-export type ThemeColors = Record<ThemeColor, string>;
+/** Optional control colours; when a palette omits them they follow textMuted, surface and accent. */
+export const CONTROL_ONLY_COLORS = ["placeholder", "dropdown", "dropdownHighlight"] as const;
+export type ControlOnlyColor = (typeof CONTROL_ONLY_COLORS)[number];
+/** Colours a person can set for controls apart from the theme (owner 2026-11-03). */
+export const CONTROL_COLORS = ["inputBorder", "field", "placeholder", "focus", "dropdown", "dropdownHighlight"] as const;
+export type ControlColor = (typeof CONTROL_COLORS)[number];
+export type ControlColors = Partial<Record<ControlColor, string>>;
+export type ThemeColors = Record<ThemeColor, string> & Partial<Record<ControlOnlyColor, string>>;
+const HEX_COLOR = /^#[\da-f]{6}$/i;
 export type AppearanceTheme = {
   version: 1;
   id: string;
@@ -106,10 +114,11 @@ export function parseAppearanceTheme(json: string): AppearanceTheme {
   }
   const colors: ThemeColors = { ...DEFAULT_THEME_COLORS };
   for (const [key, color] of Object.entries(value.colors)) {
-    if (!Object.hasOwn(DEFAULT_THEME_COLORS, key) || typeof color !== "string" || !/^#[\da-f]{6}$/i.test(color)) {
+    const known = Object.hasOwn(DEFAULT_THEME_COLORS, key) || (CONTROL_ONLY_COLORS as readonly string[]).includes(key);
+    if (!known || typeof color !== "string" || !HEX_COLOR.test(color)) {
       throw new ThemeValidationError("invalid-color", key);
     }
-    colors[key as ThemeColor] = color.toLowerCase();
+    colors[key as keyof ThemeColors] = color.toLowerCase();
   }
   // The palette is currently light-only. Semantic status chips keep their own colours.
   // Validate the backgrounds on which normal/secondary UI text actually appears.
@@ -148,6 +157,9 @@ export function themeCssVariables(theme: AppearanceTheme): Record<string, string
     "--heading-marker": c.headingMarker,
     "--table-row-alternate": c.rowAlternate, "--table-row-hover": c.rowHover,
     "--table-row-active": c.rowActive, "--table-row-selected": c.rowSelected,
+    "--control-placeholder": c.placeholder ?? c.textMuted,
+    "--control-popover": c.dropdown ?? c.surface,
+    "--control-highlight": c.dropdownHighlight ?? c.accent,
   };
 }
 
@@ -199,7 +211,23 @@ export function withContrast(theme: AppearanceTheme, level: ContrastLevel): Appe
   };
 }
 
-export type AppearancePreferences = { selectedId: string; themes: AppearanceTheme[]; contrast?: ContrastLevel };
+export type AppearancePreferences = { selectedId: string; themes: AppearanceTheme[]; contrast?: ContrastLevel; controls?: ControlColors };
+
+/** A person's own control colours win over the theme and the contrast level. */
+export function withControls(theme: AppearanceTheme, controls: ControlColors | undefined): AppearanceTheme {
+  if (!controls || !Object.keys(controls).length) return theme;
+  return { ...theme, colors: { ...theme.colors, ...controls } };
+}
+
+function parseControlColors(value: unknown): ControlColors {
+  if (!isObject(value)) return {};
+  const controls: ControlColors = {};
+  for (const key of CONTROL_COLORS) {
+    const color = value[key];
+    if (typeof color === "string" && HEX_COLOR.test(color)) controls[key] = color.toLowerCase();
+  }
+  return controls;
+}
 export const EMPTY_APPEARANCE: AppearancePreferences = { selectedId: DEFAULT_THEME.id, themes: [] };
 export const appearanceStorageKey = (userId: string) => `gmed.appearance.v1.${encodeURIComponent(userId)}`;
 
@@ -217,7 +245,8 @@ export function parseAppearancePreferences(raw: string | null): AppearancePrefer
     }
     const selectedId = [...BUILTIN_THEMES, ...themes].some((item) => item.id === stored.selectedId) ? String(stored.selectedId) : DEFAULT_THEME.id;
     const contrast = isContrastLevel(stored.contrast) && stored.contrast !== "standard" ? { contrast: stored.contrast } : {};
-    return { selectedId, themes, ...contrast };
+    const controls = parseControlColors(stored.controls);
+    return { selectedId, themes, ...contrast, ...(Object.keys(controls).length ? { controls } : {}) };
   } catch { return EMPTY_APPEARANCE; }
 }
 

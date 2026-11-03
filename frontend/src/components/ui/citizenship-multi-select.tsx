@@ -101,7 +101,7 @@ export function CitizenshipMultiSelect({
         id={id}
         value=""
         onChange={(event) => toggle(event.target.value)}
-        className="h-7 w-auto min-w-[10rem] flex-1 border-0 bg-transparent px-2 shadow-none hover:bg-transparent focus-visible:ring-0 data-placeholder:text-muted-foreground"
+        className="h-7 w-auto min-w-[10rem] flex-1 border-0 bg-transparent px-2 shadow-none hover:bg-transparent focus-visible:ring-0 data-placeholder:text-[var(--control-placeholder,var(--muted-foreground))]"
         aria-invalid={invalid || undefined}
         disabled={disabled || (maxItems !== undefined && selected.length >= maxItems)}
         selectedValues={selected}
