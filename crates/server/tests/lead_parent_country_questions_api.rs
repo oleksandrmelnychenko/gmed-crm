@@ -782,6 +782,19 @@ async fn a_short_parent_form_can_send_the_child_request_but_cannot_create_a_cont
             Some(json!({"phone":"+49 30 000000"})),
         )
         .await;
+        assert_eq!(status, StatusCode::OK, "{body}"); // Each parent answers PEP and sanctions before the send (owner 2026-11-03).
+        let (status, body) = request(
+            &app,
+            "POST",
+            &format!(
+                "/me/lead-requests/{}/representatives/{id}/country-questions",
+                app.lead
+            ),
+            app.parent,
+            "patient",
+            Some(json!({"pep_self":false,"pep_related":false,"sanctions_links":false})),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{body}");
     }
     for (part, fields) in [

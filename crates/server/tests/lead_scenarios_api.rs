@@ -544,6 +544,9 @@ async fn fill_joint_custody_request(app: &Scn, father_citizenship: &str) -> Mino
         let (status, body) = app.upload(&path, anna).await;
         assert_eq!(status, StatusCode::CREATED, "{path}: {body}");
     }
+    for person in [mother, father] {
+        answer_pep(app, &base, person, anna).await;
+    }
     // "Ich" of the mother's login is the mother.
     let body = app
         .ok(
@@ -653,6 +656,19 @@ async fn staff_set_contact(app: &Scn, lead: Uuid, contact: Uuid, patch: Value) {
         &format!("/leads/{lead}/update"),
         &app.pm(),
         Some(json!({ "trusted_contacts": contacts })),
+    )
+    .await;
+}
+
+/// A representative's own PEP and sanctions answers, as the cabinet sends them
+/// (owner 2026-11-03: every legal representative answers them before the send).
+async fn answer_pep(app: &Scn, base: &str, person: Uuid, auth: &str) {
+    app.ok(
+        StatusCode::OK,
+        "POST",
+        &format!("{base}/representatives/{person}/country-questions"),
+        auth,
+        Some(json!({ "pep_self": false, "pep_related": false, "sanctions_links": false })),
     )
     .await;
 }
@@ -1333,6 +1349,7 @@ async fn scenario_minor_with_a_court_guardian() {
         let (code, body) = app.upload(&path, &greta).await;
         assert_eq!(code, StatusCode::CREATED, "{path}: {body}");
     }
+    answer_pep(&app, &base, guardian, &greta).await;
     let view = app.cabinet(lead, &greta).await;
     // "The recipient pays" (ticked by default) names the Vormund as payer at
     // once (owner decision 2026-10-23): she is the paying representative,
@@ -2011,6 +2028,7 @@ async fn scenario_adult_with_a_legal_guardian() {
         let (code, body) = app.upload(&path, &karl).await;
         assert_eq!(code, StatusCode::CREATED, "{path}: {body}");
     }
+    answer_pep(&app, &base, betreuer, &karl).await;
     let view = app.cabinet(lead, &karl).await;
     assert_eq!(missing(&view), Vec::<String>::new(), "{view}");
     assert_eq!(view["minor"], false);

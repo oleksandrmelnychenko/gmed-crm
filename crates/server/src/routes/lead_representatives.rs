@@ -1403,7 +1403,15 @@ fn place_missing(loaded: &Loaded, today: NaiveDate, slot: &str, required: &[&str
 
 fn representation_missing(loaded: &Loaded, today: NaiveDate, full_minor: bool) -> Vec<String> {
     let representation = &loaded.representation;
-    let place = |slot: &str, required: &[&str]| place_missing(loaded, today, slot, required);
+    // Every person who signs for the patient answers PEP and sanctions for
+    // themselves before the request goes out (owner 2026-11-03).
+    let place = |slot: &str, required: &[&str]| {
+        let mut missing = place_missing(loaded, today, slot, required);
+        if let Some(person) = representation.in_slot(slot) {
+            missing.extend(pep_missing(slot, person));
+        }
+        missing
+    };
     let mut missing = Vec::new();
     if representation.minor {
         if representation.answers.custody.is_none() {
@@ -1417,9 +1425,12 @@ fn representation_missing(loaded: &Loaded, today: NaiveDate, full_minor: bool) -
         missing.extend(place(SLOT_REP1, required));
         match representation.answers.custody() {
             CUSTODY_JOINT => missing.extend(place(SLOT_REP2, required)),
-            CUSTODY_GUARDIAN if full_minor => {
-                missing.extend(place(SLOT_REP1, &["authority_upload"]))
-            }
+            CUSTODY_GUARDIAN if full_minor => missing.extend(place_missing(
+                loaded,
+                today,
+                SLOT_REP1,
+                &["authority_upload"],
+            )),
             _ => {}
         }
         return missing;
@@ -5640,6 +5651,7 @@ mod tests {
         parent.extras = Extras {
             country: Some("DE".into()),
             citizenships: vec!["DE".into()],
+            country_questions: parent.extras.country_questions.clone(),
             ..Default::default()
         };
         let mut child = loaded(

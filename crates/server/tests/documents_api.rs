@@ -12486,7 +12486,7 @@ async fn seed_joint_custody_lead(
         let id: Uuid = contact["id"].as_str().unwrap().parse().unwrap();
         let (first, last) = contact["name"].as_str().unwrap().split_once(' ').unwrap();
         sqlx::query(
-            "INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,citizenships,street,zip,city,country,id_document_type,id_document_number,id_issuing_authority,id_issuing_country,id_issued_on,id_valid_until) VALUES($1,$2,'legal_representative','staff',$3,$4,'{DE}',$5,'80331','München','DE','passport',$6,'Stadt München','DE','2020-01-02','2035-01-02')",
+            "INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,citizenships,street,zip,city,country,id_document_type,id_document_number,id_issuing_authority,id_issuing_country,id_issued_on,id_valid_until,country_questions) VALUES($1,$2,'legal_representative','staff',$3,$4,'{DE}',$5,'80331','München','DE','passport',$6,'Stadt München','DE','2020-01-02','2035-01-02',jsonb_build_object('pep_self',false,'pep_related',false,'sanctions_links',false))",
         )
         .bind(lead)
         .bind(id)
@@ -13145,7 +13145,7 @@ async fn minor_lead_contract_documents_use_the_current_legal_representatives() {
             for (index, (first, last, _)) in people.iter().enumerate() {
                 let contact: Uuid = contacts[index]["id"].as_str().unwrap().parse().unwrap();
                 sqlx::query(
-                    "INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,citizenships,street,zip,city,country,id_document_type,id_document_number,id_issuing_authority,id_issuing_country,id_issued_on,id_valid_until) VALUES($1,$2,'legal_representative','staff',$3,$4,'{DE}',$5,'80331','München','DE','passport',$6,'Stadt München','DE','2020-01-02','2035-01-02')"
+                    "INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,citizenships,street,zip,city,country,id_document_type,id_document_number,id_issuing_authority,id_issuing_country,id_issued_on,id_valid_until,country_questions) VALUES($1,$2,'legal_representative','staff',$3,$4,'{DE}',$5,'80331','München','DE','passport',$6,'Stadt München','DE','2020-01-02','2035-01-02',jsonb_build_object('pep_self',false,'pep_related',false,'sanctions_links',false))"
                 ).bind(lead).bind(contact).bind(first).bind(last)
                     .bind(format!("Elternweg {}", index+21)).bind(format!("QA-{scenario}-{index}"))
                     .execute(&pool).await.unwrap();

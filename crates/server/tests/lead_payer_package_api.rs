@@ -2143,7 +2143,7 @@ async fn a_paying_parent_signs_the_same_package_and_is_identified_on_the_own_lin
     sqlx::query("INSERT INTO lead_gwg_declarations(lead_id,custody) VALUES($1,'joint') ON CONFLICT(lead_id) DO UPDATE SET custody=EXCLUDED.custody")
         .bind(child).execute(pool).await.unwrap();
     for (contact, first_name) in [(mother, "Anna"), (father, "Ben")] {
-        sqlx::query("INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,birth_place,birth_country,citizenships,street,zip,city,country,id_document_type,id_document_number,id_issuing_authority,id_issuing_country,id_valid_until) VALUES($1,$2,'legal_representative','staff',$3,'Muster','Berlin','DE',ARRAY['DE'],'Musterweg 1','10115','Berlin','DE','passport',$4,'Synthetic office','DE',(current_date+interval '10 years')::date)")
+        sqlx::query("INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,birth_place,birth_country,citizenships,street,zip,city,country,id_document_type,id_document_number,id_issuing_authority,id_issuing_country,id_valid_until,country_questions) VALUES($1,$2,'legal_representative','staff',$3,'Muster','Berlin','DE',ARRAY['DE'],'Musterweg 1','10115','Berlin','DE','passport',$4,'Synthetic office','DE',(current_date+interval '10 years')::date,jsonb_build_object('pep_self',false,'pep_related',false,'sanctions_links',false))")
             .bind(child).bind(contact).bind(first_name).bind(format!("SYNTHETIC-{contact}")).execute(pool).await.unwrap();
         let boundary = format!("----gmed-parent-{}", Uuid::new_v4().simple());
         let mut upload = Vec::new();

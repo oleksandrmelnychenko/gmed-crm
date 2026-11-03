@@ -242,6 +242,20 @@ fn missing(body: &Value) -> Vec<String> {
 /// The representation keys of the missing list (with the two adult answers)
 /// and, once the risk assessment runs, of follow-up block G (an adult's
 /// representative or guardian, trigger flow 2026-10-07).
+/// The person's own PEP and sanctions answers, as the cabinet sends them
+/// (owner 2026-11-03: every representative answers them before the send).
+async fn answer_pep(app: &axum::Router, person_path: &str, bearer: &str) {
+    let (status, body) = json_request(
+        app,
+        "POST",
+        &format!("{person_path}/country-questions"),
+        bearer,
+        Some(json!({ "pep_self": false, "pep_related": false, "sanctions_links": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
 fn missing_representation(body: &Value) -> Vec<String> {
     let mut keys: Vec<String> = missing(body)
         .into_iter()
@@ -298,6 +312,9 @@ const ADULT_FIELDS: [&str; 9] = [
     "id_upload",
     "authority_upload",
 ];
+
+/// The PEP and sanctions answers every representative gives for themselves.
+const PEP_FIELDS: [&str; 3] = ["pep_self", "pep_related", "sanctions_links"];
 
 const MINOR_FIELDS: [&str; 6] = [
     "first_name",
@@ -763,9 +780,16 @@ async fn an_adult_names_the_person_who_acts_for_him() {
     assert!(person["id_valid_until"].is_null(), "{person}");
     assert_eq!(
         missing_representation(&body),
-        vec!["agent_id_upload", "agent_authority_upload"],
+        vec![
+            "agent_id_upload",
+            "agent_authority_upload",
+            "agent_pep_self",
+            "agent_pep_related",
+            "agent_sanctions_links",
+        ],
         "{body}"
     );
+    answer_pep(router, &agent_path, &patient).await;
 
     // The person is a trusted contact of the lead (the keys the wizard
     // writes) with a row for the rest; the aunt is untouched.
@@ -1141,9 +1165,16 @@ async fn an_adult_under_guardianship_names_the_guardian_and_a_no_removes_the_per
     assert_eq!(person["can_remove"], true, "{person}");
     assert_eq!(
         missing_representation(&body),
-        vec!["guardian_id_upload", "guardian_authority_upload"],
+        vec![
+            "guardian_id_upload",
+            "guardian_authority_upload",
+            "guardian_pep_self",
+            "guardian_pep_related",
+            "guardian_sanctions_links",
+        ],
         "{body}"
     );
+    answer_pep(router, &guardian_path, &patient).await;
     // A save that changes nothing answers with the request and writes nothing.
     let saves = audit_contexts(pool, "lead_portal_update_representative", lead_id)
         .await
@@ -1532,6 +1563,7 @@ async fn both_parents_of_a_minor_are_asked_for_by_default() {
             .filter(|field| !["first_name", "last_name", "email"].contains(field))
             .collect::<Vec<_>>(),
     );
+    expected.extend(keys("rep1", &PEP_FIELDS));
     expected.extend(keys("rep2", &MINOR_FIELDS));
     assert_eq!(missing_representation(&body), expected, "{body}");
 
@@ -1595,7 +1627,9 @@ async fn both_parents_of_a_minor_are_asked_for_by_default() {
         (origin.as_str(), role.as_str()),
         ("staff", "legal_representative")
     );
+    answer_pep(router, &mother_path, &parent).await;
     let expected = keys("rep2", &MINOR_FIELDS);
+    let body = json_request(router, "GET", &request, &parent, None).await.1;
     assert_eq!(missing_representation(&body), expected, "{body}");
 
     // She names the father. Two signers of one request need two addresses.
@@ -1623,6 +1657,7 @@ async fn both_parents_of_a_minor_are_asked_for_by_default() {
     second["email"] = json!(father_email);
     let (status, body) = json_request(router, "POST", &father_path, &parent, Some(second)).await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
+    answer_pep(router, &father_path, &parent).await;
     let other = representative(&body, father);
     assert_eq!(other["slot"], "rep2", "{other}");
     assert_eq!(other["relation"], "parent", "{other}");

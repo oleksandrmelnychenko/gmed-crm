@@ -8237,6 +8237,15 @@ async fn representative_follow_up_tracks_files_and_requires_current_inquiry_cons
                 .to_string(),
         );
     }
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{person}/country-questions"),
+        &patient,
+        Some(json!({"pep_self": false, "pep_related": false, "sanctions_links": false})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     // Staff explicitly requested G; it remains open after the answer is complete.
     sqlx::query("UPDATE lead_risk_assessments SET requested_blocks=ARRAY['G'], follow_up_answered_at=NULL WHERE lead_id=$1")
         .bind(lead).execute(pool).await.unwrap();

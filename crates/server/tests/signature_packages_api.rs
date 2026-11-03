@@ -2387,7 +2387,7 @@ async fn the_paying_parent_signs_a_contract_package_alone() {
         .await
         .unwrap();
     for (contact, first_name) in [(mother, "Anna"), (father, "Bernd")] {
-        sqlx::query("INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,birth_place,birth_country,citizenships,street,zip,city,country,id_document_type,id_document_number,id_issuing_authority,id_issuing_country,id_valid_until) VALUES($1,$2,'legal_representative','staff',$3,'Beispiel','Berlin','DE',ARRAY['DE'],'Synthetic street 1','10115','Berlin','DE','passport',$4,'Synthetic office','DE',(current_date+interval '10 years')::date)")
+        sqlx::query("INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,birth_place,birth_country,citizenships,street,zip,city,country,id_document_type,id_document_number,id_issuing_authority,id_issuing_country,id_valid_until,country_questions) VALUES($1,$2,'legal_representative','staff',$3,'Beispiel','Berlin','DE',ARRAY['DE'],'Synthetic street 1','10115','Berlin','DE','passport',$4,'Synthetic office','DE',(current_date+interval '10 years')::date,jsonb_build_object('pep_self',false,'pep_related',false,'sanctions_links',false))")
             .bind(lead).bind(contact).bind(first_name).bind(format!("SYNTHETIC-{contact}")).execute(&env.pool).await.unwrap();
         let identity = upload(&env, holder, Doc::new("representative_identity", 1)).await;
         sqlx::query("UPDATE documents SET patient_id=NULL,lead_id=$2 WHERE id=$1")
@@ -2484,7 +2484,7 @@ async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() 
         .await
         .unwrap();
     for (contact, first_name) in [(mother, "Anna"), (father, "Bernd")] {
-        sqlx::query("INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,birth_place,birth_country,citizenships,street,zip,city,country,id_document_type,id_document_number,id_issuing_authority,id_issuing_country,id_valid_until) VALUES($1,$2,'legal_representative','staff',$3,'Beispiel','Berlin','DE',ARRAY['DE'],'Synthetic street 1','10115','Berlin','DE','passport',$4,'Synthetic office','DE',(current_date+interval '10 years')::date)")
+        sqlx::query("INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,birth_place,birth_country,citizenships,street,zip,city,country,id_document_type,id_document_number,id_issuing_authority,id_issuing_country,id_valid_until,country_questions) VALUES($1,$2,'legal_representative','staff',$3,'Beispiel','Berlin','DE',ARRAY['DE'],'Synthetic street 1','10115','Berlin','DE','passport',$4,'Synthetic office','DE',(current_date+interval '10 years')::date,jsonb_build_object('pep_self',false,'pep_related',false,'sanctions_links',false))")
             .bind(lead).bind(contact).bind(first_name).bind(format!("SYNTHETIC-{contact}")).execute(&env.pool).await.unwrap();
         let identity = upload(&env, holder, Doc::new("representative_identity", 1)).await;
         sqlx::query("UPDATE documents SET patient_id=NULL,lead_id=$2 WHERE id=$1")

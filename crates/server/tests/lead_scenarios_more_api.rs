@@ -738,6 +738,9 @@ async fn fill_joint_custody_request(app: &Scn) -> MinorRequest {
         let (status, body) = app.upload(&path, anna).await;
         assert_eq!(status, StatusCode::CREATED, "{path}: {body}");
     }
+    for person in [mother, father] {
+        answer_pep(app, &base, person, anna).await;
+    }
     app.ok(
         StatusCode::OK,
         "POST",
@@ -790,6 +793,19 @@ async fn submit(app: &Scn, lead: Uuid, auth: &str) -> Value {
         Some(json!({ "declared_correct": true })),
     )
     .await
+}
+
+/// A representative's own PEP and sanctions answers, as the cabinet sends them
+/// (owner 2026-11-03: every legal representative answers them before the send).
+async fn answer_pep(app: &Scn, base: &str, person: Uuid, auth: &str) {
+    app.ok(
+        StatusCode::OK,
+        "POST",
+        &format!("{base}/representatives/{person}/country-questions"),
+        auth,
+        Some(json!({ "pep_self": false, "pep_related": false, "sanctions_links": false })),
+    )
+    .await;
 }
 
 async fn enter_identity_data(app: &Scn, lead: Uuid, representative: Uuid, number: &str) {

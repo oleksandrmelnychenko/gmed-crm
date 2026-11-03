@@ -8817,10 +8817,11 @@ async fn seed_minor_contract_identity(app: &TestApp, lead_id: Uuid) {
         sqlx::query(
             "INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,
                  birth_place,citizenships,street,zip,city,country,id_document_type,id_document_number,
-                 id_issuing_authority,id_issuing_country,id_valid_until)
+                 id_issuing_authority,id_issuing_country,id_valid_until,country_questions)
              VALUES($1,$2,'legal_representative','portal',$3,'Muster','Berlin',ARRAY['DE'],$4,'10115','Berlin','DE',
-                 'passport',$5,'Synthetic authority','DE','2099-01-01')
+                 'passport',$5,'Synthetic authority','DE','2099-01-01',jsonb_build_object('pep_self',false,'pep_related',false,'sanctions_links',false))
              ON CONFLICT(lead_id,contact_id) DO UPDATE SET birth_place=EXCLUDED.birth_place,
+                 country_questions=EXCLUDED.country_questions,
                  citizenships=EXCLUDED.citizenships,street=EXCLUDED.street,zip=EXCLUDED.zip,
                  city=EXCLUDED.city,country=EXCLUDED.country,id_document_type=EXCLUDED.id_document_type,
                  id_document_number=EXCLUDED.id_document_number,id_issuing_authority=EXCLUDED.id_issuing_authority,
