@@ -341,7 +341,7 @@ export function InvoiceRecipientSection({
   return (
     <>
       <Section title={text.recipient.section}>
-        <div className="space-y-4" data-testid="lead-request-invoice-recipient">
+        <div className="space-y-3" data-testid="lead-request-invoice-recipient">
           <div role="radiogroup" aria-labelledby="lead-request-invoice_recipient-label" className="space-y-1.5">
             <p id="lead-request-invoice_recipient-label" className={cn(tokens.text.label, "block")}>
               {text.recipient.question}

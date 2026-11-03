@@ -3312,7 +3312,7 @@ function useLeadsPageContent() {
             columns={leadColumns}
             renderRowDetail={renderLeadRowDetail}
             rowId={(row) => row.id}
-            defaultDensity="comfortable"
+            defaultDensity="compact"
             defaultFrozenColumns={LEAD_DEFAULT_FROZEN_COLUMNS}
             dictionary={t as unknown as Record<string, string>}
             groupLabels={leadColumnGroupLabelsByName}

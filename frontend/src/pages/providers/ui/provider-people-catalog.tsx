@@ -1736,7 +1736,7 @@ export function ProviderPeopleCatalog({
               />
             ) : null
           }
-          defaultDensity="comfortable"
+          defaultDensity="compact"
           defaultFrozenColumns={DEFAULT_FROZEN_COLUMNS}
           defaultHiddenColumns={DEFAULT_HIDDEN_COLUMNS}
           dictionary={labels}

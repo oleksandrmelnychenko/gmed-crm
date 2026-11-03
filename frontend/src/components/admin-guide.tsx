@@ -18,7 +18,7 @@ type AdminGuideButtonProps = {
   children?: ReactNode;
   /** Render the standard data-table toolbar guide section. Defaults to true. */
   showTableToolbarGuide?: boolean;
-  /** Visual size of the trigger button. Defaults to h-9 w-9 outline. */
+  /** Visual size of the trigger button. Defaults to a compact, bare icon. */
   buttonClassName?: string;
 };
 
@@ -27,7 +27,7 @@ export function AdminGuideButton({
   description,
   children,
   showTableToolbarGuide = true,
-  buttonClassName = "size-9 rounded-lg bg-card",
+  buttonClassName = "size-8 rounded-lg",
 }: AdminGuideButtonProps) {
   const { t } = useLang();
   const [open, setOpen] = useState(false);
@@ -36,7 +36,7 @@ export function AdminGuideButton({
     <>
       <Button
         type="button"
-        variant="outline"
+        variant="ghost"
         size="icon-sm"
         className={buttonClassName}
         title={t.admin_guide_open}
@@ -62,7 +62,7 @@ export function AdminGuideButton({
             <Button
               type="button"
               variant="default"
-              className="h-9 rounded-lg"
+              className="h-8 rounded-lg"
               onClick={() => setOpen(false)}
             >
               {t.common_close}

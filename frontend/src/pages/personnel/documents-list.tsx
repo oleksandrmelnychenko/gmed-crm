@@ -274,7 +274,7 @@ export function PersonnelDocumentsTable({
       columns={columns}
       rowId={(row) => row.document.id}
       expandRow={expandRow}
-      defaultDensity="comfortable"
+      defaultDensity="compact"
       defaultHiddenColumns={showInternal ? ["sha256"] : []}
       dictionary={tr}
       storageKey={storageKey}

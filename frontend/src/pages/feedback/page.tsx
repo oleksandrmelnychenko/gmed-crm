@@ -340,7 +340,7 @@ function FeedbackTextSection({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-border/70 bg-card p-6">
+    <section className="min-w-0 rounded-lg border border-border/70 bg-card p-3">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
@@ -832,7 +832,7 @@ function RankingList({
           <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
         </div>
       </div>
-      <div className={cn("mt-5", horizontal ? "grid gap-1.5 md:grid-cols-2 xl:grid-cols-5" : "space-y-1.5")}>
+      <div className={cn("mt-3", horizontal ? "grid gap-1.5 md:grid-cols-2 2xl:grid-cols-5" : "space-y-1.5")}>
         {rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">{empty}</p>
         ) : (
@@ -1988,8 +1988,8 @@ function useStaffFeedbackWorkspaceContent() {
 
       <div className="space-y-4">
         {summary ? (
-          <div className="grid gap-3 xl:grid-cols-4">
-              <section className="rounded-lg border border-border/70 bg-card p-6 xl:col-span-2">
+          <div className="grid items-start gap-3 md:grid-cols-2 2xl:grid-cols-4">
+              <section className="min-w-0 rounded-lg border border-border/70 bg-card p-3 md:col-span-2">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2 className={tokens.text.sectionTitle}>
@@ -1997,14 +1997,14 @@ function useStaffFeedbackWorkspaceContent() {
                     </h2>
                   </div>
                 </div>
-                <div className="mt-5 grid gap-2.5 xl:grid-cols-2">
-                  <div className="grid gap-1.5 rounded-xl bg-card p-3">
+                <div className="mt-3 grid gap-x-5 gap-y-1.5 sm:grid-cols-2">
+                  <div className="grid gap-1.5">
                     <FeedbackSummaryLine label={t.feedback_overall_average} value={formatAverage(summary.average_scores.overall)} />
                     <FeedbackSummaryLine label={t.feedback_interpreter_average} value={formatAverage(summary.average_scores.interpreter)} />
                     <FeedbackSummaryLine label={t.feedback_concierge_average} value={formatAverage(summary.average_scores.concierge)} />
                     <FeedbackSummaryLine label={t.feedback_treatment_average} value={formatAverage(summary.average_scores.treatment)} />
                   </div>
-                  <div className="grid gap-1.5 rounded-xl bg-card p-3">
+                  <div className="grid gap-1.5">
                     <FeedbackSummaryLine label={t.feedback_service_average} value={formatAverage(summary.average_scores.service)} />
                     <FeedbackSummaryLine label={t.feedback_ambience_average} value={formatAverage(summary.average_scores.infrastructure)} />
                     <FeedbackSummaryLine label={t.feedback_value_average} value={formatAverage(summary.average_scores.price_value)} />
@@ -2038,7 +2038,7 @@ function useStaffFeedbackWorkspaceContent() {
                 }))}
               />
 
-              <div className="xl:col-span-4">
+              <div className="md:col-span-2 2xl:col-span-4">
                 <RankingList
                   title={t.feedback_clinic_ranking_title}
                   empty={t.feedback_no_clinic_ranking}
@@ -2063,7 +2063,7 @@ function useStaffFeedbackWorkspaceContent() {
             rows={feedback}
             columns={feedbackColumns}
             rowId={(row) => row.id}
-            defaultDensity="comfortable"
+            defaultDensity="compact"
             defaultFrozenColumns={FEEDBACK_DEFAULT_FROZEN_COLUMNS}
             defaultHiddenColumns={FEEDBACK_DEFAULT_HIDDEN_COLUMNS}
             dictionary={feedbackTableDictionary}

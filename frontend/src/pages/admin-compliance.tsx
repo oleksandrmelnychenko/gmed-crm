@@ -1125,7 +1125,7 @@ function useAdminCompliancePageContent() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <PageHeader
         title={t.compliance_title}
         description={t.compliance_subtitle}
@@ -1146,7 +1146,7 @@ function useAdminCompliancePageContent() {
         )}
       />
 
-      <div className="min-w-0 space-y-4 rounded-2xl border border-border/70 bg-muted/40 p-3 sm:p-4" data-testid="compliance-workspace">
+      <div className="min-w-0 space-y-3" data-testid="compliance-workspace">
       {readOnly ? <ReadOnlyBanner /> : null}
 
       {actionError ? <Banner tone="error">{actionError}</Banner> : null}
@@ -1255,7 +1255,7 @@ function useAdminCompliancePageContent() {
                 <DataTableSurface
                   rows={patientPrivacyRequests}
                   columns={patientPrivacyColumns}
-                  defaultDensity="comfortable"
+                  defaultDensity="compact"
                   defaultSort={[{ field: "due_at", dir: "asc" }]}
                   dictionary={t as unknown as Record<string, string>}
                   rowId={(record) => record.id}
@@ -1327,7 +1327,7 @@ function useAdminCompliancePageContent() {
                 <DataTableSurface
                   rows={privacyQueue}
                   columns={privacyQueueColumns}
-                  defaultDensity="comfortable"
+                  defaultDensity="compact"
                   defaultSort={[{ field: "due_at", dir: "asc" }]}
                   dictionary={t as unknown as Record<string, string>}
                   rowId={(record) => record.id}
@@ -1351,7 +1351,7 @@ function useAdminCompliancePageContent() {
                 title={t.compliance_create_request}
                 description={privacySheetPatient?.label ?? ""}
               >
-                <section className="space-y-4 rounded-xl border border-border bg-card p-4">
+                <section className="space-y-3 rounded-xl border border-border bg-card p-4">
                   <AdminSectionTitle>{t.compliance_privacy_requests_title}</AdminSectionTitle>
                   {/* The dialog names the patient the request is filed for (QA B3-02). */}
                   <div
@@ -1431,7 +1431,7 @@ function useAdminCompliancePageContent() {
                     reviewSheetRecord.patient_name,
                   )}
                 >
-                  <section className="space-y-4 rounded-xl border border-border bg-card p-4">
+                  <section className="space-y-3 rounded-xl border border-border bg-card p-4">
                     <AdminSectionTitle>{t.compliance_privacy_review_queue}</AdminSectionTitle>
                     <div className="flex flex-wrap items-center gap-2">
                       <StatusChip tone={privacyStatusTone(reviewSheetRecord.status)}>

@@ -251,7 +251,7 @@ function AdminCustomFieldCreateSheet({
             )}
           >
             {createError ? <Banner tone="error">{createError}</Banner> : null}
-            <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+            <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3.5">
               <AdminSectionTitle>{t.cf_new}</AdminSectionTitle>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
@@ -387,7 +387,7 @@ function AdminCustomFieldsTable({
       <DataTableSurface
         rows={activeFields}
         columns={columns}
-        defaultDensity="comfortable"
+        defaultDensity="compact"
         dictionary={t}
         rowId={(field) => field.id}
         emptyState={<EmptyCell>{t.cf_no_fields}</EmptyCell>}
@@ -646,7 +646,7 @@ export function AdminCustomFieldsPage() {
   ]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <AdminCustomFieldsPageHeader
         t={t as unknown as Record<string, string>}
         onCreate={() => setShowCreate(true)}

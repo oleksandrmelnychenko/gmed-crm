@@ -220,7 +220,7 @@ function AdminAnnouncementCreateSheet({
           >
             {createError ? <Banner tone="error">{createError}</Banner> : null}
 
-            <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+            <section className={cn("space-y-3 rounded-xl p-3.5", tokens.surface.softCard)}>
               <AdminSectionTitle>{t.ann_new}</AdminSectionTitle>
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label={`${t.field_name} *`} htmlFor="announcement-title">
@@ -351,7 +351,7 @@ function AdminAnnouncementsTable({
       <DataTableSurface
         rows={pagination.pagedRows}
         columns={columns}
-        defaultDensity="comfortable"
+        defaultDensity="compact"
         dictionary={t as unknown as Record<string, string>}
         rowId={(announcement) => announcement.id}
         emptyState={<EmptyCell>{t.ann_no_announcements}</EmptyCell>}
@@ -719,7 +719,7 @@ export function AdminAnnouncementsPage() {
 
   return (
     <>
-      <div className="space-y-4">
+      <div className="space-y-3">
         <PageHeader
           title={t.ann_title}
           description={t.ann_subtitle}

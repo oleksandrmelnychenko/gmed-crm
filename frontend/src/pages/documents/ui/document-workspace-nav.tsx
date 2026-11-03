@@ -61,7 +61,7 @@ export function DocumentWorkspaceNav({
     <nav
       data-workspace-tabs="documents"
       aria-label={t.nav_documents}
-      className="mx-auto flex w-fit max-w-full items-center justify-center gap-2 overflow-x-auto px-2 py-1"
+      className="mx-auto flex w-fit max-w-full items-center justify-center gap-1 overflow-x-auto p-1"
     >
       {items.map((item) => {
         const isActive = currentKey === item.key;
@@ -77,9 +77,9 @@ export function DocumentWorkspaceNav({
                 size: "sm",
                 variant: "ghost",
               }),
-              "h-11 min-w-fit rounded-xl px-4 text-sm font-medium",
+              "h-8 min-w-fit rounded-lg px-3 text-[13px] font-medium",
               isActive
-                ? "bg-orange-500 text-white shadow-sm hover:bg-orange-600 hover:text-white"
+                ? "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground"
                 : "text-foreground hover:bg-muted",
             )}
           >

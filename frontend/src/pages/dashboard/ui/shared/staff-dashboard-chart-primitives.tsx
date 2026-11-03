@@ -499,7 +499,7 @@ export function TopProvidersTable({
     <DataTableSurface
       rows={rankedRows}
       columns={columns}
-      defaultDensity="comfortable"
+      defaultDensity="compact"
       dictionary={tr as Record<string, string>}
       rowId={(row) => row.id}
       onRowClick={(row) => onOpen(row.id)}

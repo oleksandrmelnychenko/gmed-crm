@@ -765,7 +765,7 @@ function RepresentativeBlock({
     <div
       role="group"
       aria-labelledby={`lead-request-representative-${slot}-title`}
-      className="space-y-3 rounded-xl border border-border bg-card px-4 py-4 shadow-xs"
+      className="space-y-3 rounded-xl border border-border bg-card px-3 py-3"
       data-testid={`lead-request-representative-${slot}`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1162,7 +1162,7 @@ export function RepresentationSection({
   if (mode === "follow_up") {
     // Block G: the persons the answers of the first step name, with the rest of their data and the uploads.
     return (
-      <div className="space-y-4" data-testid="lead-request-representation-follow-up">
+      <div className="space-y-3" data-testid="lead-request-representation-follow-up">
         {problems}
         {shown.map(block)}
       </div>
@@ -1177,7 +1177,7 @@ export function RepresentationSection({
           {showDocumentDetails ? text.parentShortForm : text.parentDocumentDetails}
         </Button>
       ) : undefined}>
-        <div className="space-y-4" data-testid="lead-request-representation">
+        <div className="space-y-3" data-testid="lead-request-representation">
           {representation.document_stage === false && !showDocumentDetails ? <CabinetHint>{draft.custody === "guardian" ? text.parentShortFormIntroVormund : text.parentShortFormIntro}</CabinetHint> : null}
           {lockedByGmed ? <CabinetHint testId="lead-request-representation-locked">{text.representativeLockedByGmed}</CabinetHint> : null}
           <StatusChip tone="warning" className="items-start whitespace-normal rounded-lg px-2.5 py-1.5" data-testid="lead-request-representation-name-hint">
@@ -1235,7 +1235,7 @@ export function RepresentationSection({
   // "Does somebody act on your behalf?" first; only its "yes" asks whether that is a court-appointed
   // representative (owner 2026-10-11), and that answer decides whose details the form asks.
   return (
-    <div className="space-y-4" data-testid="lead-request-representation">
+    <div className="space-y-3" data-testid="lead-request-representation">
       <Section title={text.sectionRepresentation}>
         <div className="space-y-3">
           <LabeledField id="lead-request-has_representative" label={text.hasRepresentativeQuestion} required question>

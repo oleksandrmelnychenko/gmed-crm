@@ -56,7 +56,7 @@ export function AdminFormSection({ title, children, className }: {
   className?: string;
 }) {
   return (
-    <section className={cn("min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5", className)}>
+    <section className={cn("min-w-0 space-y-2.5 rounded-xl border border-border/50 bg-card p-3", className)}>
       <AdminSectionTitle>{title}</AdminSectionTitle>
       {children}
     </section>

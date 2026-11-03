@@ -533,7 +533,7 @@ function useAdminAccessPageContent() {
 
   return (
     <>
-      <div className="space-y-4">
+      <div className="space-y-3">
         <PageHeader
           title={t.access_title}
           description={t.access_subtitle}
@@ -627,7 +627,7 @@ function useAdminAccessPageContent() {
                 <DataTableSurface
                   rows={accessRows}
                   columns={accessColumns}
-                  defaultDensity="comfortable"
+                  defaultDensity="compact"
                   dictionary={tr}
                   defaultFrozenColumns={["field"]}
                   rowId={(row) => row.field}

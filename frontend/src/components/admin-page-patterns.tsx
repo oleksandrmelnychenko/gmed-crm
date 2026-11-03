@@ -14,7 +14,7 @@ import { useOverlaySaveDisabled } from "@/components/ui/dismissal-guard";
 
 type MetricTone = "sky" | "emerald" | "amber" | "slate" | "rose";
 
-const SHEET_BODY_WRAPPER_BASE_CLASS = "space-y-4 rounded-xl";
+const SHEET_BODY_WRAPPER_BASE_CLASS = "space-y-3 rounded-xl";
 
 function resolveSheetBodyWrapperClassName({
   bodyWrapperClassName,
@@ -109,9 +109,9 @@ export function AdminToolbar({
   return (
     <div
       className={cn(
-        "relative z-30 flex w-full flex-wrap items-center gap-1.5 rounded-lg border border-border bg-card/80 p-2 shadow-sm",
-        "[&_[data-slot=input]]:bg-background [&_[data-slot=input]]:text-[13px]",
-        "[&_[data-slot=select-trigger]]:bg-background [&_[data-slot=select-trigger]]:text-[13px]",
+        "relative z-30 flex w-full flex-wrap items-center gap-1.5 rounded-lg border border-border bg-card p-2",
+        "[&_[data-slot=input]]:bg-field [&_[data-slot=input]]:text-[13px]",
+        "[&_[data-slot=select-trigger]]:bg-field [&_[data-slot=select-trigger]]:text-[13px]",
         className,
       )}
     >
@@ -126,7 +126,7 @@ export function AdminToolbar({
  * cards into 82 px columns at 375 px and their texts overlapped (QA E-32).
  */
 export const ADMIN_INLINE_METRICS_GRID =
-  "grid grid-cols-1 gap-y-3 overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 min-[360px]:grid-cols-2 xl:grid-flow-col xl:grid-cols-none xl:auto-cols-fr [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block";
+  "grid grid-cols-1 gap-y-2 overflow-hidden rounded-xl border border-border bg-card px-2 py-2.5 min-[360px]:grid-cols-2 xl:grid-flow-col xl:grid-cols-none xl:auto-cols-fr [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block";
 
 export function AdminInlineMetric({
   icon: Icon,
@@ -156,14 +156,14 @@ export function AdminInlineMetric({
       )}
     >
       <div className="flex items-baseline gap-1.5">
-        <Icon className="size-4 shrink-0 text-muted-foreground/55" />
+        <Icon className="size-4 shrink-0 text-foreground" />
         <p className="font-mono text-lg font-semibold leading-none tabular-nums text-foreground">
           {displayValue}
         </p>
       </div>
       {hasTwoLabels ? (
         <>
-          <p className="mt-[4px] break-words text-[11px] leading-tight text-muted-foreground/75">
+          <p className="mt-[4px] break-words text-[11px] leading-tight text-muted-foreground">
             {description}
           </p>
           <p className="mt-0.5 break-words text-xs font-medium leading-tight text-muted-foreground">
@@ -195,7 +195,7 @@ export function AdminTableCard({
 }) {
   const hasHeader = title !== undefined || count !== undefined || Boolean(accessory);
   return (
-    <div className={cn("space-y-2", className)}>
+    <div className={cn("min-w-0 space-y-2", className)}>
       {hasHeader ? (
         <div className="flex flex-wrap items-start justify-between gap-3 px-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -276,7 +276,7 @@ export function AdminSheetScaffold({
       )}
       <div
         className={cn(
-          "flex-1 overflow-y-auto space-y-4 px-5 py-4",
+          "flex-1 overflow-y-auto space-y-3 px-4 py-3",
           bodyClassName,
         )}
       >
@@ -322,12 +322,12 @@ export function SheetFormFooter({
     <div className="shrink-0 bg-popover">
       <SheetFooterError error={error} />
       {error ? null : <SheetFooterHint hint={hint ?? noChangesHint} />}
-      <div className="flex justify-end gap-2 px-4 py-3">
+      <div className="flex justify-end gap-2 px-4 py-2.5">
         {secondaryAction ? <div className="mr-auto flex min-w-0 items-center">{secondaryAction}</div> : null}
         <Button
           type="button"
           variant="outline"
-          className="h-9 rounded-lg"
+          className="h-8 rounded-lg"
           onClick={handleCancel}
           disabled={submitting}
         >
@@ -335,7 +335,7 @@ export function SheetFormFooter({
         </Button>
         <Button
           type={onSubmit ? "button" : "submit"}
-          className="h-9 rounded-lg"
+          className="h-8 rounded-lg"
           disabled={submitting || submitDisabled || saveDisabled}
           onClick={onSubmit}
         >
@@ -370,7 +370,7 @@ export function SheetActionsFooter({
     <div className="shrink-0 bg-popover">
       <SheetFooterError error={error} />
       {error ? null : <SheetFooterHint hint={hint ?? noChangesText} />}
-      <div className="flex flex-wrap justify-end gap-2 px-4 py-3">{children}</div>
+      <div className="flex flex-wrap justify-end gap-2 px-4 py-2.5">{children}</div>
     </div>
   );
 }

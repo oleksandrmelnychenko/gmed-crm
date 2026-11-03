@@ -681,7 +681,7 @@ export function PatientDocumentsTab({
           rows={pagedDocumentRows}
           columns={documentColumns}
           rowId={(doc) => doc.id}
-          defaultDensity="comfortable"
+          defaultDensity="compact"
           onRowClick={(doc) => void openPatientDocumentPreview(doc)}
           rowActions={(doc) => (
             <>

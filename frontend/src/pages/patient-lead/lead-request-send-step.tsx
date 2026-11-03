@@ -133,7 +133,7 @@ export function SendStep({
   }
 
   return (
-    <section className="flex flex-col gap-4" data-testid="lead-request-send">
+    <section className="flex flex-col gap-3" data-testid="lead-request-send">
       {request.submitted_at ? (
         <>
           <SuccessBanner>

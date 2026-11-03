@@ -1862,7 +1862,7 @@ function useStaffServicesPageContent() {
             <AdminSheetScaffold
               title={selectedService.title}
               description={`${selectedService.patient_name} · ${serviceKindLabel(selectedService.service_kind, t)}`}
-              bodyClassName="space-y-4 px-5 py-4"
+              bodyClassName="space-y-3 px-4 py-3"
               footer={
                 editMode && editForm ? (
                   <SheetFormFooter
@@ -2444,7 +2444,7 @@ function useStaffServicesPageContent() {
                 />
               }
             >
-              <div className="space-y-4 rounded-xl">
+              <div className="space-y-3 rounded-xl">
                 {createError ? (
                   <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
                     {createError}

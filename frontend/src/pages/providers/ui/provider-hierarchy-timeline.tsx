@@ -304,7 +304,7 @@ export function ProviderHierarchyTimeline({
         />
       ) : null}
       {tree.length === 0 ? (
-        <div className="px-4 py-6 text-sm text-muted-foreground">
+        <div className="px-3 py-3 text-sm text-muted-foreground">
           {tr.providers_hierarchy_timeline_empty ?? tr.common_no_results}
         </div>
       ) : (

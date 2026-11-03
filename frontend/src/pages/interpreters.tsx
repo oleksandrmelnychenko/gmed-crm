@@ -1574,7 +1574,7 @@ export function InterpretersPage() {
           rows={employeesPagination.pagedRows}
           columns={employeeColumns}
           rowId={(employee) => employee.id}
-          defaultDensity="comfortable"
+          defaultDensity="compact"
           dictionary={t as unknown as Record<string, string>}
           activeRowId={selectedId || undefined}
           onRowClick={(employee) => setSelectedId(employee.id)}

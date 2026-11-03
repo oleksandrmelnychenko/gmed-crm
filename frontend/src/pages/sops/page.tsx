@@ -837,7 +837,7 @@ function useSopsPageContent() {
 
   return (
     <>
-      <div className="space-y-5">
+      <div className="min-w-0 space-y-3">
         <PageHeader
           title={text.title}
           description={text.subtitle}
@@ -894,7 +894,7 @@ function useSopsPageContent() {
               rows={visibleQueue}
               columns={queueColumns}
               rowId={(row) => row.id}
-              density="comfortable"
+              density="compact"
               onRowClick={(row) => openReview(row)}
               rowActions={(row) => (
                 <Button
@@ -918,7 +918,7 @@ function useSopsPageContent() {
           </AdminTableCard>
         ) : null}
 
-        <section className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
+        <section className="grid min-w-0 grid-cols-1 gap-3 2xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)]">
           <AdminTableCard
             title={titleWithDot(text.libraryTitle)}
             description={text.libraryDescription}
@@ -939,7 +939,7 @@ function useSopsPageContent() {
               rows={visibleItems}
               columns={libraryColumns}
               rowId={(row) => row.id}
-              density="comfortable"
+              density="compact"
               activeRowId={selectedItemId || null}
               onRowClick={(row) => setSelectedItemId(row.id)}
               rowActions={(row) => (
@@ -1007,7 +1007,7 @@ function useSopsPageContent() {
             />
           </AdminTableCard>
 
-          <div className="space-y-5">
+          <div className="min-w-0 space-y-3">
             <AdminTableCard
               title={titleWithDot(text.targetingModelTitle)}
               description={text.targetingModelDescription}

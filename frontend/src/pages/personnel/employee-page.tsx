@@ -468,7 +468,7 @@ function JournalTable({ events, tr }: { events: PersonnelEvent[]; tr: Record<str
       rows={events}
       columns={columns}
       rowId={(event) => event.id}
-      defaultDensity="comfortable"
+      defaultDensity="compact"
       dictionary={tr}
       storageKey="personnel-employee-journal"
       mobilePrimaryColumnId="action"

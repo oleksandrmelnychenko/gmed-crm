@@ -260,7 +260,7 @@ export function IntegrityTab({ canManage }: { canManage: boolean }) {
               columns={runColumns}
               rowId={(run) => run.id}
               activeRowId={failingRun?.id ?? null}
-              defaultDensity="comfortable"
+              defaultDensity="compact"
               dictionary={tr}
               storageKey="personnel-integrity-runs"
               onRowClick={(run) => setSelectedRunId(run.id)}
@@ -316,7 +316,7 @@ export function IntegrityTab({ canManage }: { canManage: boolean }) {
               rows={anchors}
               columns={anchorColumns}
               rowId={(anchor) => anchor.id}
-              defaultDensity="comfortable"
+              defaultDensity="compact"
               dictionary={tr}
               storageKey="personnel-integrity-anchors"
               rowActions={(anchor) =>

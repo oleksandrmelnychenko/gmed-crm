@@ -148,7 +148,7 @@ export function PayerQuestionnaireSection({
 
   return (
     <Section title={text.payerQuestionnaireTitle}>
-      <div className="space-y-4" data-testid="lead-request-payer-questionnaire">
+      <div className="space-y-3" data-testid="lead-request-payer-questionnaire">
         <p className="text-sm leading-relaxed text-muted-foreground">
           {text.payerQuestionnaireIntro(text.sectionLegalRepresentatives)}
         </p>
@@ -435,7 +435,7 @@ function PayerQuestionnaireForm({
   const fileInput = useRef<HTMLInputElement | null>(null);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="space-y-3 rounded-xl border border-border/60 bg-card p-3" data-testid="lead-request-payer-notice">
         <h4 className="flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />{text.payerNoticeTitle}</h4>
         <CabinetHint><p className="whitespace-pre-line">{text.payerNotice}</p></CabinetHint>
@@ -493,7 +493,7 @@ function PayerQuestionnaireForm({
           {text.payerNoticeFirst}
         </p>
       ) : null}
-        <fieldset disabled={readOnly} className="min-w-0 space-y-5" data-testid="lead-request-payer-fields">
+        <fieldset disabled={readOnly} className="min-w-0 space-y-3" data-testid="lead-request-payer-fields">
           <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
             {showAdditionalIdentity ? <>
             <LabeledField id={fieldId("salutation")} label={labelOf("salutation")} error={errorFor("salutation")}>
@@ -663,7 +663,7 @@ function PayerQuestionnaireForm({
           </div>
           ) : null}
 
-          <div className="space-y-5" data-testid="lead-request-payer-legal">
+          <div className="space-y-3" data-testid="lead-request-payer-legal">
             {PAYER_LEGAL_QUESTIONS.map((question) => {
               const details = PAYER_LEGAL_DETAILS[question];
               return (

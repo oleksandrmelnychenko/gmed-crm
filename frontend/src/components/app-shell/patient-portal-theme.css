@@ -3,7 +3,7 @@
   border: 0;
   border-radius: 0;
   margin: 0;
-  padding: 20px;
+  padding: 16px;
 }
 
 .patient-portal-theme .portal-dashboard {
@@ -48,14 +48,14 @@
 
 .patient-portal-theme .portal-section {
   border-radius: var(--gmed-panel-radius);
-  padding: var(--gmed-panel-padding);
+  padding: 12px;
   border-color: var(--border);
   box-shadow: none;
 }
 
 .patient-portal-theme .portal-section h3 { font-size: 15px; }
-.patient-portal-theme .portal-section > div:first-child { margin-bottom: 12px; }
-.patient-portal-theme .portal-section > div:first-child [aria-hidden].rounded-full { display: none; }
+.patient-portal-theme .portal-section > div:first-child { margin-bottom: 8px; }
+.patient-portal-theme .portal-section > div:first-child [aria-hidden].rounded-full { background: var(--heading-marker); }
 
 .patient-portal-theme .portal-info-row {
   border: 0;
@@ -78,11 +78,12 @@
   line-height: 22px;
   font-weight: 500;
 }
-.patient-portal-theme .portal-section :is(label.block, .font-mono),
-.patient-portal-theme .portal-invoice-sheet .font-mono {
-  font-family: var(--font-sans);
+.patient-portal-theme .portal-section label.block {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 18px;
 }
-.patient-portal-theme .portal-section :is(p.text-xs, label.block),
+.patient-portal-theme .portal-section p.text-xs,
 .patient-portal-theme .portal-invoice-sheet p.text-xs {
   font-size: 14px;
   line-height: 21px;
@@ -91,21 +92,21 @@
   border: 0;
   border-top: 1px solid var(--border);
   border-radius: 0;
-  padding: 14px 0 0;
+  padding: 10px 0 0;
 }
 .patient-portal-theme .portal-subscription-details {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
-  column-gap: 24px;
+  column-gap: 16px;
 }
 .patient-portal-theme .portal-invoice-sheet h2 { font-size: 15px; }
-.patient-portal-theme .portal-invoice-sheet h2 > [aria-hidden] { display: none; }
+.patient-portal-theme .portal-invoice-sheet h2 > [aria-hidden] { background: var(--heading-marker); }
 
 .patient-portal-theme .portal-request-form .portal-section {
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--border);
   border-radius: 0;
-  padding: 0 0 16px;
+  padding: 0 0 12px;
 }
 .patient-portal-theme .portal-request-form .portal-section:last-of-type {
   border-bottom: 0;
@@ -182,18 +183,18 @@
 }
 .patient-portal-theme .portal-action-featured p.font-semibold { font-size: 16px; }
 .patient-portal-theme .portal-action-link {
-  border-radius: 999px;
-  padding: 10px 16px;
-  min-height: 40px;
+  border-radius: 8px;
+  padding: 7px 12px;
+  min-height: 36px;
 }
 .patient-portal-theme .portal-action-row:not(.portal-action-featured) .portal-action-link {
-  background: transparent;
-  color: var(--foreground);
-  border: 1px solid var(--border);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border: 1px solid var(--primary);
 }
 .patient-portal-theme .portal-action-row:not(.portal-action-featured) .portal-action-link:hover {
-  background: var(--muted);
-  border-color: var(--ring);
+  background: color-mix(in srgb, var(--primary) 88%, var(--foreground));
+  border-color: var(--primary);
 }
 
 .patient-portal-theme .portal-feedback form {
@@ -233,7 +234,7 @@
 }
 
 @media (max-width: 1199px) {
-  .patient-portal-theme #main-content { padding: 20px; }
+  .patient-portal-theme #main-content { padding: 16px; }
   .patient-portal-theme .portal-shortcuts > a { padding: 12px; gap: 10px; }
   .patient-portal-theme .portal-action-content { display: block; }
   .patient-portal-theme .portal-action-meta { margin-top: 8px; }
@@ -247,4 +248,28 @@
   .patient-portal-theme .portal-shortcuts > a > span:last-child { font-size: 18px; }
   .patient-portal-theme .portal-action-row { gap: 10px; padding: 12px 10px; }
   .patient-portal-theme .portal-action-link { min-height: 44px; }
+}
+
+/* Form captions stay distinct from values and rating choices. */
+.patient-portal-theme .portal-feedback label.block {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.patient-portal-theme [data-slot="button"][data-variant="default"] {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  box-shadow: none;
+}
+.patient-portal-theme [data-slot="button"][data-variant="default"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary) 88%, var(--foreground));
+}
+.patient-portal-theme [data-slot="button"][data-size^="icon"]:is([data-variant="outline"], [data-variant="secondary"], [data-variant="ghost"]) {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.patient-portal-theme [data-slot="button"][data-size^="icon"]:is([data-variant="outline"], [data-variant="secondary"], [data-variant="ghost"]):hover:not(:disabled) {
+  background: var(--muted);
 }

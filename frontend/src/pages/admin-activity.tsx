@@ -766,12 +766,12 @@ function AdminActivityMetrics({ metrics, t }: AdminActivityMetricsProps) {
   return (
     <div
       data-testid="activity-metrics"
-      className="grid min-w-0 grid-cols-1 gap-3 min-[360px]:grid-cols-2 xl:grid-cols-4"
+      className="grid min-w-0 grid-cols-1 gap-2 min-[360px]:grid-cols-2 xl:grid-cols-4"
     >
       {cards.map(({ label, value, icon: Icon }) => (
         <article
           key={label}
-          className="min-w-0 rounded-xl border border-border/70 bg-card p-3.5"
+          className="min-w-0 rounded-xl border border-border/70 bg-card p-3"
         >
           <div className="flex items-start justify-between gap-2">
             <p className="font-mono text-[10.5px] font-medium leading-4 text-muted-foreground">
@@ -782,7 +782,7 @@ function AdminActivityMetrics({ metrics, t }: AdminActivityMetricsProps) {
               aria-hidden
             />
           </div>
-          <p className="mt-2 font-mono text-xl font-semibold tabular-nums">
+          <p className="mt-1 font-mono text-xl font-semibold tabular-nums">
             {value}
           </p>
           <p className="mt-1 text-[11px] text-muted-foreground">
@@ -838,7 +838,7 @@ function AdminActivityDetailSheet({
       >
         {selectedActivity ? (
           <>
-            <section className="min-w-0 space-y-3 rounded-xl border border-border/60 bg-card p-3.5">
+            <section className="min-w-0 space-y-3 rounded-xl border border-border/60 bg-card p-3">
               <h3
                 className={cn(
                   tokens.text.sectionTitle,
@@ -899,7 +899,7 @@ function AdminActivityDetailSheet({
               </div>
             </section>
 
-            <section className="min-w-0 space-y-3 rounded-xl border border-border/60 bg-card p-3.5">
+            <section className="min-w-0 space-y-3 rounded-xl border border-border/60 bg-card p-3">
               <h3
                 className={cn(
                   tokens.text.sectionTitle,
@@ -1081,7 +1081,7 @@ function AdminActivityViewSelector({
           : t.activity_view_activity_hint;
 
   return (
-    <section className="flex flex-col gap-3 rounded-xl border border-border/60 bg-card px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+    <section className="flex flex-col gap-3 rounded-xl border border-border/60 bg-card px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between">
       <div className="min-w-0 space-y-2">
         <div className="grid grid-cols-2 gap-1 rounded-lg border border-border/70 bg-muted p-1 sm:inline-flex">
           {options.map((option) => {
@@ -1414,18 +1414,13 @@ export function AdminActivityPage() {
         accessor: (activity) => `${activity.user_name} ${activity.user_email}`,
         width: 260,
         render: (activity) => (
-          <div className="flex min-w-0 items-center gap-2.5">
-            <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-foreground">
+          <div className="flex min-w-0 items-center gap-2" title={[actorLabel(activity, t), activity.user_email].filter(Boolean).join(" · ")}>
+            <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-foreground">
               {activityInitials(actorLabel(activity, t))}
             </div>
-            <div className="min-w-0">
-              <div className="truncate text-xs font-medium text-foreground">
-                {actorLabel(activity, t)}
-              </div>
-              <div className="truncate text-[11px] text-foreground">
-                {activity.user_email || "—"}
-              </div>
-            </div>
+            <span className="min-w-0 truncate text-xs font-medium text-foreground">
+              {actorLabel(activity, t)}
+            </span>
           </div>
         ),
       },
@@ -1482,7 +1477,7 @@ export function AdminActivityPage() {
     <>
       <div
         data-testid="activity-workspace"
-        className="min-w-0 space-y-4 rounded-xl bg-muted p-3 sm:p-4"
+        className="min-w-0 space-y-3"
       >
         <PageHeader
           title={t.activity_title}
@@ -1495,8 +1490,8 @@ export function AdminActivityPage() {
               />
               <Button
                 type="button"
-                variant="outline"
-                className="h-8 rounded-lg gap-1.5 bg-card px-3 text-xs"
+                variant="default"
+                className="h-8 rounded-lg gap-1.5 px-3 text-xs"
                 disabled={loading}
                 onClick={() =>
                   void loadData({
@@ -1527,7 +1522,7 @@ export function AdminActivityPage() {
           onChange={setView}
         />
 
-        <section className="min-w-0 space-y-4 overflow-hidden rounded-xl border border-border/70 bg-card p-3 shadow-xs sm:p-4">
+        <section className="min-w-0 space-y-3 overflow-hidden rounded-xl border border-border/70 bg-card p-3">
           <AdminActivityToolbarSection
             actionOptions={actionOptions}
             anyFilterActive={anyFilterActive}
@@ -1593,7 +1588,7 @@ export function AdminActivityPage() {
                 <DataTableSurface
                   rows={activities}
                   columns={columns}
-                  defaultDensity="comfortable"
+                  defaultDensity="compact"
                   defaultSort={[{ field: "created_at", dir: "desc" }]}
                   dictionary={t as unknown as Record<string, string>}
                   rowId={(activity) => activity.id}

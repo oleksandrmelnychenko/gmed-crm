@@ -81,9 +81,9 @@ function SecuritySection({
   return (
     <section
       id={id}
-      className="min-w-0 scroll-mt-4 overflow-hidden rounded-xl border border-border/70 bg-card shadow-xs"
+      className="min-w-0 scroll-mt-4 overflow-hidden rounded-xl border border-border/70 bg-card"
     >
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 px-4 py-3">
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 px-3 py-2.5">
         <div className="min-w-0 space-y-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <AdminSectionTitle>{title}</AdminSectionTitle>
@@ -101,7 +101,7 @@ function SecuritySection({
         </div>
         {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
       </header>
-      <div className="min-w-0 space-y-4 p-3 sm:p-4">{children}</div>
+      <div className="min-w-0 space-y-3 p-3">{children}</div>
     </section>
   );
 }
@@ -120,7 +120,7 @@ function SecurityMetric({
   tone?: StatusChipTone;
 }) {
   return (
-    <article className="min-w-0 rounded-xl border border-border/70 bg-card p-3.5">
+    <article className="min-w-0 rounded-xl border border-border/70 bg-card p-3">
       <div className="flex items-start justify-between gap-2">
         <p className="min-w-0 break-words font-mono text-[10.5px] font-medium leading-4 text-muted-foreground">
           {label}
@@ -181,7 +181,7 @@ function SecurityDialog({
         onSubmit={onSubmit}
         maxWidthClassName="sm:w-[calc(100vw-2rem)] sm:max-w-[640px]"
         footer={
-          <div className="flex flex-wrap justify-end gap-2 px-4 py-3">
+          <div className="flex flex-wrap justify-end gap-2 px-3 py-2.5">
             {footer}
           </div>
         }
@@ -960,7 +960,7 @@ function useAdminSecurityPageContent() {
   return (
     <>
       <div
-        className="min-w-0 space-y-4 rounded-xl bg-muted p-3 sm:p-4"
+        className="min-w-0 space-y-3"
         data-testid="security-workspace"
       >
         <PageHeader
@@ -1144,7 +1144,7 @@ function useAdminSecurityPageContent() {
                   <DataTableSurface
                     rows={suspiciousEventsPagination.pagedRows}
                     columns={suspiciousEventColumns}
-                    defaultDensity="comfortable"
+                    defaultDensity="compact"
                     defaultSort={[{ field: "created_at", dir: "desc" }]}
                     dictionary={t as unknown as Record<string, string>}
                     rowId={(event) => String(event.id)}
@@ -1174,7 +1174,7 @@ function useAdminSecurityPageContent() {
                   <DataTableSurface
                     rows={auditAnalytics.top_sensitive_readers}
                     columns={readerColumns}
-                    defaultDensity="comfortable"
+                    defaultDensity="compact"
                     defaultSort={[{ field: "event_count", dir: "desc" }]}
                     dictionary={t as unknown as Record<string, string>}
                     rowId={(reader) =>
@@ -1209,7 +1209,7 @@ function useAdminSecurityPageContent() {
                 <DataTableSurface
                   rows={ipRegistryPagination.pagedRows}
                   columns={ipColumns}
-                  defaultDensity="comfortable"
+                  defaultDensity="compact"
                   dictionary={t as unknown as Record<string, string>}
                   rowId={(ip) => ip.id}
                   toolbarAfter={
@@ -1240,7 +1240,7 @@ function useAdminSecurityPageContent() {
                 <DataTableSurface
                   rows={loginHistoryPagination.pagedRows}
                   columns={geoColumns}
-                  defaultDensity="comfortable"
+                  defaultDensity="compact"
                   defaultSort={[{ field: "created_at", dir: "desc" }]}
                   dictionary={t as unknown as Record<string, string>}
                   rowId={(entry) =>
@@ -1319,7 +1319,7 @@ function useAdminSecurityPageContent() {
         <Banner tone="warning" withIcon>
           {t.security_maintenance_hint}
         </Banner>
-        <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+        <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <AdminSectionTitle>{t.security_maintenance}</AdminSectionTitle>
             <StatusChip tone={maintEnabled ? "warning" : "success"}>
@@ -1374,7 +1374,7 @@ function useAdminSecurityPageContent() {
         }
       >
         {ipError ? <Banner tone="error">{ipError}</Banner> : null}
-        <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+        <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3">
           <AdminSectionTitle>{t.security_ip_whitelist}</AdminSectionTitle>
           <Field label={t.security_ip_cidr} htmlFor="whitelist-cidr">
             <Input

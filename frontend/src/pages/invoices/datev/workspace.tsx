@@ -55,7 +55,7 @@ export function DatevWorkspace({ active, demo, onModeChange, onConnection }: {
       </dl>
       {notice ? <p role="status" className="rounded-lg bg-muted/30 px-3 py-2 text-xs">{notice === "saved" ? text.saved : text.demoRefreshed}</p> : null}
       <DataTableSurface
-        rows={rows} columns={columns} rowId={(row) => row.id} defaultDensity="comfortable" defaultFrozenColumns={["number"]}
+        rows={rows} columns={columns} rowId={(row) => row.id} defaultDensity="compact" defaultFrozenColumns={["number"]}
         onRowClick={setSelected} pagination={{ pageSize: 25 }}
         toolbarStart={<>
           <div className="relative min-w-[200px] flex-1 sm:max-w-sm"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input aria-label={text.search} placeholder={text.search} value={search} onChange={(event) => setSearch(event.target.value)} className="h-8 pl-8 text-xs" /></div>

@@ -471,7 +471,7 @@ export function BillingSections({
       {part === "route" ? (
       <RouteFrame bare={bare || !asksPaymentRoute(context.routeBy)} title={text.sectionPaymentRoute}>
         {asksPaymentRoute(context.routeBy) ? (
-          <div className="space-y-4" data-testid="lead-request-payment-route">
+          <div className="space-y-3" data-testid="lead-request-payment-route">
             <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
               {paymentMethodField}
               {/* "Other" says in words what the list does not offer. */}

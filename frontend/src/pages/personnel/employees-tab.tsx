@@ -173,7 +173,7 @@ export function EmployeesTab({ onOpenIntake }: { onOpenIntake: () => void }) {
             rows={rows}
             columns={columns}
             rowId={(row) => row.id}
-            defaultDensity="comfortable"
+            defaultDensity="compact"
             defaultFrozenColumns={["name"]}
             dictionary={tr}
             storageKey="personnel-employees"

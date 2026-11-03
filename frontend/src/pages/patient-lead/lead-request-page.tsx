@@ -428,7 +428,7 @@ export function LeadCabinetFrame({
   return (
     <CabinetLanguageContext.Provider value={switchContext}>
       <ComboboxTextContext.Provider value={comboboxTextFor(lang)}>
-      <div className="mx-auto w-full max-w-[96rem] space-y-5" data-testid="lead-cabinet">
+      <div className="mx-auto w-full max-w-[80rem] space-y-3" data-testid="lead-cabinet">
         {claimed === 0 ? (
           <div className="flex justify-end">
             <CabinetLanguageSwitch lang={lang} onLang={onLang} />
@@ -469,7 +469,7 @@ function CabinetLanguageSwitch({ lang, onLang }: { lang: LeadCabinetLang; onLang
           className={cn(
             "min-w-10 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
             lang === option.value
-              ? "bg-[var(--brand)] text-white"
+              ? "bg-[var(--heading-marker)] text-white"
               : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
           )}
           onClick={() => onLang(option.value)}
@@ -708,7 +708,7 @@ function LeadRequestView({
         {/* The title and the deadline share one line (wrapping on a phone). */}
         <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border/60 px-4 py-3 sm:px-5">
           <h1 className="flex items-center gap-2.5 text-base font-semibold leading-tight">
-            <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+            <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--heading-marker)]" />
             {/* "Request for your child" only for a parent of a minor, "the child you represent" for its
                 guardian (Vormund); an adult's representative reads "Request for <name>". */}
             {guardian ? guardianCabinetTitle(text, request, patientName) : text.title}
@@ -744,7 +744,7 @@ function LeadRequestView({
           <div
             key={step}
             ref={stepRef}
-            className="flex min-w-0 flex-1 flex-col bg-muted px-4 pt-4 sm:px-5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200 [&>section]:flex [&>section]:flex-1 [&>section]:flex-col"
+            className="flex min-w-0 flex-1 flex-col bg-muted px-4 pt-3 sm:px-5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200 [&>section]:flex [&>section]:flex-1 [&>section]:flex-col"
             data-testid="lead-request-step"
             data-current-step={step}
           >
@@ -852,7 +852,7 @@ function StepNavBar({
               className={cn(
                 "lead-wizard-step-tab relative shrink-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                 selected
-                  ? "bg-[var(--brand)] font-semibold text-white"
+                  ? "bg-[var(--heading-marker)] font-semibold text-white"
                   : "text-foreground hover:bg-muted",
               )}
               onClick={() => onSelect(id)}

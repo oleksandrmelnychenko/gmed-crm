@@ -516,7 +516,7 @@ export function LegalQuestionsSection({
   bare?: boolean;
 }) {
   const questions = (
-      <div className="space-y-5" data-testid="lead-request-legal">
+      <div className="space-y-3" data-testid="lead-request-legal">
         {LEGAL_QUESTIONS.filter((question) => !(minor && question === "pep_self")).map((question) => (
           <div key={question} className="space-y-3" data-testid={`lead-request-legal-${question}`}>
             <IdentificationFormField form={form} field={question} text={text} guardian={guardian} required question>

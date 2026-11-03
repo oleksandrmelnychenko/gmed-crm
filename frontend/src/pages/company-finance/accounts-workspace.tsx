@@ -655,8 +655,8 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
             <article key={account.id} className={cn("rounded-lg border border-border/70 bg-card p-3 shadow-sm", !account.is_active && "opacity-60")}>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-start gap-3">
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                    <Icon className="size-3.5" />
+                  <span className="flex size-6 shrink-0 items-center justify-center text-foreground">
+                    <Icon className="size-4" />
                   </span>
                   <div className="min-w-0">
                     <h3 className="truncate font-semibold">{account.name}</h3>

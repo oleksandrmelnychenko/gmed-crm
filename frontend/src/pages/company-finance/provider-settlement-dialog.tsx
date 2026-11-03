@@ -384,7 +384,7 @@ export function ProviderSettlementDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 sm:p-4">
         {loadError ? <ShellBanner tone="error">{loadError}</ShellBanner> : null}
         {loading && !settlement ? (
           <div className="flex justify-center py-10"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
@@ -488,7 +488,7 @@ export function ProviderSettlementDialog({
 
             <SettlementSection title={text.history} action={<Badge variant="secondary">{(settlement.transactions ?? []).length}</Badge>}>
               {(settlement.transactions ?? []).length === 0 ? (
-                <p className="px-3.5 py-6 text-center text-xs text-muted-foreground">{text.noHistory}</p>
+                <p className="px-3 py-3 text-center text-xs text-muted-foreground">{text.noHistory}</p>
               ) : (
                 <div className="divide-y divide-border/60">
                   {settlement.transactions.map((item) => {

@@ -54,7 +54,7 @@ export function ProviderChildrenSection({
       </div>
 
       {providerChildren.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border bg-muted/30 px-5 py-6">
+        <div className="rounded-lg border border-dashed border-border bg-muted/30 px-3 py-3">
           <p className="text-sm font-medium text-foreground">{emptyTitle}</p>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">{emptyText}</p>
         </div>

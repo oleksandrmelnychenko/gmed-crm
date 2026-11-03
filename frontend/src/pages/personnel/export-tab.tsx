@@ -155,7 +155,7 @@ export function ExportTab() {
             rows={employees}
             columns={columns}
             rowId={(row) => row.id}
-            defaultDensity="comfortable"
+            defaultDensity="compact"
             dictionary={tr}
             selectionEnabled
             selectedIds={selected}

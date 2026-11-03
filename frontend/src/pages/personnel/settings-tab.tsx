@@ -333,7 +333,7 @@ export function SettingsTab({
           rows={categories}
           columns={retentionColumns}
           rowId={(category) => category.code}
-          defaultDensity="comfortable"
+          defaultDensity="compact"
           dictionary={tr}
           storageKey="personnel-retention-periods"
           disableRowHover
@@ -361,7 +361,7 @@ export function SettingsTab({
           rows={due?.documents ?? []}
           columns={dueColumns}
           rowId={(document) => document.id}
-          defaultDensity="comfortable"
+          defaultDensity="compact"
           dictionary={tr}
           storageKey="personnel-retention-due"
           rowActions={(document) => (

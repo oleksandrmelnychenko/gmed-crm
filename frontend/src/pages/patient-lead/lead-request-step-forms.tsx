@@ -203,14 +203,14 @@ export function StepFrame({
     nav.onNext?.();
   };
   return (
-    <section className="flex flex-col gap-4" data-testid={testId}>
+    <section className="flex flex-col gap-3" data-testid={testId}>
       {locked ? <SentLockHint text={text} /> : null}
       {showMissing ? <MissingList title={text.stepMissingTitle} labels={labels} fields={fields} step={step} testId="lead-request-step-missing" /> : null}
       <MissingShownContext.Provider value={showMissing}>
         <StepMissingContext.Provider value={stepMissing}>
           {open}
           {locked ? (
-            <fieldset disabled className="m-0 min-w-0 space-y-4 border-0 p-0" data-testid="lead-request-step-locked">
+            <fieldset disabled className="m-0 min-w-0 space-y-3 border-0 p-0" data-testid="lead-request-step-locked">
               {children}
             </fieldset>
           ) : (
@@ -640,7 +640,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
 
       {/* An older server does not know who acts for the lead. Adult or minor: the block starts anew with the other questions. */}
       {request.representation ? (
-        <div id={SECTION_ANCHORS.representatives} className="scroll-mt-4 space-y-6">
+        <div id={SECTION_ANCHORS.representatives} className="scroll-mt-4 space-y-3">
           <RepresentationSection
             childAddress={draft}
             key={request.minor ? "minor" : "adult"}
@@ -962,7 +962,7 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
   // The paying parent answers the own payment route also after the send (the server allows it).
   const ownRouteAfterSend = Boolean(request.submitted_at) && request.billing?.payment_route_by === "guardian";
   const paymentRoute = request.billing ? (
-    <div id={SECTION_ANCHORS.paymentRoute} className="scroll-mt-4 space-y-6">
+    <div id={SECTION_ANCHORS.paymentRoute} className="scroll-mt-4 space-y-3">
       <BillingSections
         request={request}
         billing={request.billing}
@@ -1004,7 +1004,7 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
             label={hasInsuranceLabel(text, request)}
             error={errorFor("has_insurance")}
             question
-            className="sm:col-span-2 lg:col-span-3"
+            className="w-full max-w-xl sm:col-span-2 lg:col-span-3"
           >
             <NativeComboboxSelect
               {...fieldProps("has_insurance")}
@@ -1075,7 +1075,7 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
       </Section>
       {/* The invoice recipient first, who pays with it (owner spec 2026-10-11). */}
       {request.billing && flowKnown && request.payer !== undefined ? (
-        <div id={SECTION_ANCHORS.payer} className="scroll-mt-4 space-y-6">
+        <div id={SECTION_ANCHORS.payer} className="scroll-mt-4 space-y-3">
           <InvoiceRecipientSection
             request={request}
             text={text}
@@ -1089,7 +1089,7 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
       ) : null}
       {/* An older server: who pays, then section 7 as it was asked. */}
       {!flowKnown && request.payer !== undefined ? (
-        <div id={SECTION_ANCHORS.payer} className="scroll-mt-4 space-y-6">
+        <div id={SECTION_ANCHORS.payer} className="scroll-mt-4 space-y-3">
           <PayerSection
             key={request.payer?.answered_by_payer ? "payer-answered" : "payer"}
             request={request}
@@ -1122,7 +1122,7 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
       ) : null}
       {/* How the patient side will pay: once the payer is named. The details are follow-up block C. */}
       {request.billing && flowKnown && payerNamed && request.follow_up !== undefined && !ownRouteAfterSend ? (
-        <div id={SECTION_ANCHORS.paymentRoute} className="scroll-mt-4 space-y-6">
+        <div id={SECTION_ANCHORS.paymentRoute} className="scroll-mt-4 space-y-3">
           <BillingSections
             request={request}
             billing={request.billing}
@@ -1139,7 +1139,7 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
       {request.payer_questionnaire && !request.submitted_at ? payerQuestionnaire : null}
       {/* An older server still asks the payment route with the base form. */}
       {request.billing && request.follow_up === undefined ? (
-        <div id={SECTION_ANCHORS.paymentRoute} className="scroll-mt-4 space-y-6">
+        <div id={SECTION_ANCHORS.paymentRoute} className="scroll-mt-4 space-y-3">
           <BillingSections
             request={request}
             billing={request.billing}

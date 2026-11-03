@@ -27,7 +27,7 @@ export function AdminApiConnectionsPage() {
   const admin = user?.role === "ceo" || user?.role === "it_admin";
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <PageHeader
         title={t.nav_api_connections}
         description={tx(

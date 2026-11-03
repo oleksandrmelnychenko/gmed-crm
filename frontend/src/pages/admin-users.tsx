@@ -1049,7 +1049,7 @@ function useAdminUsersPageContent() {
   const fieldLabelClass = "text-[11.5px] font-medium text-muted-foreground leading-tight";
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <PageHeader
         title={t.users_title}
         description={t.users_subtitle}
@@ -1588,7 +1588,7 @@ function useAdminUsersPageContent() {
                 onPageChange={usersPagination.onPageChange}
               />
             }
-            defaultDensity="comfortable"
+            defaultDensity="compact"
             defaultFrozenColumns={["name", "email"]}
             defaultSort={[{ field: "created_at", dir: "desc" }]}
             dictionary={tr}

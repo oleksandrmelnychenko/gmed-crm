@@ -158,7 +158,7 @@ function HotelStatisticsPageContent() {
     {error || directoryError ? <div role="alert" className="flex flex-wrap items-center gap-3 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive"><CircleAlert className="size-5 shrink-0" /><div className="min-w-0 flex-1">{error ? <p>{error}</p> : null}{directoryError ? <p>{createHotelCopy[lang].directoryError}</p> : null}</div>{error !== labels.invalidDates ? <Button variant="outline" size="sm" disabled={loading} onClick={() => setVersion(value => value + 1)}><RefreshCw className="size-4" />{labels.retry}</Button> : null}</div> : null}
     {loading ? <div role="status" className={`${panelClass} flex min-h-40 items-center justify-center gap-2.5 p-5 text-sm text-muted-foreground`}><LoaderCircle className="size-5 animate-spin text-primary" />{labels.loading}</div> : workspace && !error ? <>
       {undated > 0 ? <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-900">{labels.noDate}: {undated}</p> : null}
-      {!rows.length ? <div className={`${panelClass} flex min-h-40 flex-col items-center justify-center gap-3 p-6 text-center text-muted-foreground`}><Building2 className="size-9 text-orange-400" /><p>{groups.length ? createHotelCopy[lang].noPeriodStays : labels.noData}</p></div> : null}
+      {!rows.length ? <div className={`${panelClass} flex min-h-40 flex-col items-center justify-center gap-2 p-3 text-center text-muted-foreground`}><Building2 className="size-6 text-foreground" /><p>{groups.length ? createHotelCopy[lang].noPeriodStays : labels.noData}</p></div> : null}
       {rows.length ? <>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="hotel-kpis">
           <Metric label={labels.patients} value={String(summary.patients)} detail={`${labels.bookings}: ${summary.bookings} · ${labels.future}: ${summary.future}`} />
@@ -184,7 +184,7 @@ function HotelStatisticsPageContent() {
       <HotelTable groups={groups} lang={lang} currency={filters.currency} resetKey={JSON.stringify([period, filters])} onOpen={openHotel} />
     </> : null}
     <Dialog open={Boolean(selectedHotel)} dirty={dirtyRows.size > 0} onOpenChange={open => { if (!open) setSelected(null); }}><DialogContent data-testid="hotel-detail-dialog" className="left-1/2 right-auto top-1/2 bottom-auto flex max-h-[calc(100dvh-16px)] w-[calc(100vw-16px)] -translate-x-1/2 -translate-y-1/2 flex-col gap-0 overflow-hidden rounded-xl border-border/70 bg-card p-0 pb-0 shadow-2xl sm:max-h-[92dvh] sm:w-[calc(100vw-2rem)] sm:max-w-[1480px] sm:pb-0"><DialogHeader className="shrink-0 gap-1.5 border-b border-border/70 bg-muted/20 px-5 py-4 pr-14"><DialogTitle className="flex items-center gap-2"><span className="size-2 shrink-0 rounded-full bg-orange-500" />{selectedHotel?.name || labels.noHotel}</DialogTitle><DialogDescription>{labels.details} · {dateLabel(period.from)} — {dateLabel(period.to)}</DialogDescription></DialogHeader>
-      <div className="min-h-0 space-y-4 overflow-y-auto bg-muted/10 p-4 sm:p-5">
+      <div className="min-h-0 space-y-3 overflow-y-auto bg-muted/10 p-3">
         {selectedHotel ? <>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm"><span className="font-medium">{selectedHotel.city || selectedDirectoryHotel?.country || "—"}</span><span className="text-muted-foreground">{labels.patients}: {selectedHotel.patients}</span><span className="text-muted-foreground">{labels.bookings}: {selectedHotel.bookings}</span><span className="text-muted-foreground">{labels.nights}: {selectedHotel.nights}</span></div>
           <div className="grid items-start gap-4 lg:grid-cols-2"><HotelBreakfastTermsEditor key={`terms:${selectedHotel.key}`} providerId={selectedHotel.providerId} role={user?.role ?? ""} lang={lang} onDirty={onRoomDirty} onSaved={() => setVersion(value => value + 1)} /><HotelDocuments key={selectedHotel.key} providerId={selectedHotel.providerId} role={user?.role ?? ""} lang={lang} onDirty={onRoomDirty} /></div>
@@ -205,7 +205,7 @@ function HotelStatisticsPageContent() {
             <td className="block py-2 md:table-cell md:px-3 md:py-2.5">{stay.task_id ? <StaffLink className="inline-flex items-center gap-1 text-xs text-orange-600 hover:underline" to={"/task-manager?task=" + stay.task_id}>{labels.task}<ArrowUpRight className="size-3" /></StaffLink> : null}</td>
           </tr>; })}</tbody>
         </table></div>
-        {!detailStays.length ? <p className="py-6 text-center text-sm text-muted-foreground">{labels.noStays}</p> : null}
+        {!detailStays.length ? <p className="py-3 text-center text-sm text-muted-foreground">{labels.noStays}</p> : null}
         </section>
       </div>
       <footer className="shrink-0 space-y-3 border-t border-border/70 bg-muted/20 px-5 py-3">{error ? <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error}<Button size="sm" variant="outline" disabled={loading} onClick={() => setVersion(value => value + 1)}>{labels.refresh}</Button></div> : null}<div className="flex justify-end"><DialogClose render={<Button variant="outline" />}><X className="size-4" />{labels.close}</DialogClose></div></footer>

@@ -238,7 +238,7 @@ export function PatientNotificationsPage() {
 
       {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
 
-      <section className="space-y-4">
+      <section className="space-y-3">
         <div className="flex flex-wrap justify-center gap-1 rounded-xl border border-border/60 bg-card p-1.5" aria-label={copy.filterLabel}>
           {([['all', copy.all], ['unread', copy.onlyUnread], ['read', copy.onlyRead]] as const).map(([value, label]) => (
             <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}

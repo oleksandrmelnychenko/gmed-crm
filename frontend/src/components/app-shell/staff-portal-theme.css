@@ -43,7 +43,7 @@
   font-size: 14px;
   line-height: 20px;
 }
-.staff-portal-theme [data-slot="section-marker"] { display: none; }
+.staff-portal-theme [data-slot="section-marker"] { background: var(--heading-marker); }
 .staff-portal-theme [data-slot="toolbar-field"] > span { font-size: 12px; }
 .staff-portal-theme [data-wizard-field-label] {
   font-family: var(--font-mono);
@@ -69,11 +69,26 @@
   font-weight: 500;
 }
 .staff-portal-theme .data-table-header-row > :is(div, button) { background: var(--muted); }
-.staff-portal-theme .patient-workspace [data-slot="data-table-empty"] { min-height: 96px; padding: 16px; }
-.staff-portal-theme .patient-workspace [data-slot="data-table-empty"] > div { padding-block: 0; }
+.staff-portal-theme [data-slot="data-table-empty"] { min-height: 96px; padding: 16px; }
+.staff-portal-theme [data-slot="data-table-empty"] > div { padding-block: 0; }
 .staff-portal-theme [data-slot="stat-card"] { padding: 12px 14px; }
 .staff-portal-theme [data-slot="stat-card"] > p:first-child { font-size: 13px; }
 .staff-portal-theme [data-slot="stat-card"] > p:nth-child(2) { margin-top: 6px; font-size: 22px; }
+
+/* Regular segmented tabs share the selected action colour. Underlined tabs
+   retain their own navigation treatment. */
+.staff-portal-theme [data-slot="tabs-list"][data-variant="default"] > [data-slot="tabs-trigger"][data-active] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  box-shadow: none;
+}
+.staff-portal-theme [data-slot="tabs-list"][data-variant="default"] > [data-slot="tabs-trigger"][data-active]:hover {
+  color: var(--primary-foreground);
+}
+.staff-portal-theme nav[data-workspace-tabs] a[aria-current="page"] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
 
 .staff-portal-theme .executive-dashboard {
   background: var(--card);

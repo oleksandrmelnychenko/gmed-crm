@@ -52,12 +52,12 @@ function HealthSection({
   actions?: ReactNode;
 }) {
   return (
-    <section className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card shadow-xs">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
+    <section className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-3 py-2.5">
         <AdminSectionTitle>{title}</AdminSectionTitle>
         {actions}
       </header>
-      <div className="min-w-0 space-y-4 p-3 sm:p-4">{children}</div>
+      <div className="min-w-0 space-y-3 p-3">{children}</div>
     </section>
   );
 }
@@ -74,7 +74,7 @@ function HealthMetric({
   icon?: LucideIcon;
 }) {
   return (
-    <article className="min-w-0 rounded-xl border border-border/60 bg-card p-3.5">
+    <article className="min-w-0 rounded-xl border border-border/60 bg-card p-3">
       <div className="flex items-start justify-between gap-2">
         <p className="min-w-0 font-mono text-[10.5px] font-medium leading-4 text-muted-foreground">
           {label}
@@ -574,7 +574,7 @@ function AdminHealthDetailSheet({
           description={detailMeta.description}
           maxWidthClassName="sm:w-[calc(100vw-2rem)] sm:max-w-[800px]"
           footer={
-            <div className="flex justify-end px-4 py-3">
+            <div className="flex justify-end px-3 py-2.5">
               <Button
                 variant="outline"
                 className="h-8 text-xs"
@@ -586,7 +586,7 @@ function AdminHealthDetailSheet({
           }
         >
           {detailPanel === "database" ? (
-            <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+            <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3">
               <AdminSectionTitle>{t.health_section_database}</AdminSectionTitle>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
@@ -625,7 +625,7 @@ function AdminHealthDetailSheet({
           ) : null}
 
           {detailPanel === "access" ? (
-            <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+            <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3">
               <AdminSectionTitle>{t.health_section_access}</AdminSectionTitle>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
@@ -675,7 +675,7 @@ function AdminHealthDetailSheet({
           ) : null}
 
           {detailPanel === "data" ? (
-            <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+            <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3">
               <AdminSectionTitle>{t.health_section_data}</AdminSectionTitle>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
@@ -715,7 +715,7 @@ function AdminHealthDetailSheet({
           ) : null}
 
           {detailPanel === "ai" ? (
-            <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+            <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3">
               <div className="flex items-center gap-2">
                 <AiMark className="size-4 text-foreground" />
                 <AdminSectionTitle>{aiCopy.section}</AdminSectionTitle>
@@ -1155,7 +1155,7 @@ export function AdminHealthPage() {
   return (
     <div
       data-testid="health-workspace"
-      className="min-w-0 space-y-4 rounded-xl bg-muted p-3 sm:p-4"
+      className="min-w-0 space-y-3"
     >
       <PageHeader
         title={t.health_title}
@@ -1243,7 +1243,7 @@ export function AdminHealthPage() {
                 <DataTableSurface
                   rows={databaseTablesPagination.pagedRows}
                   columns={databaseTableColumns}
-                  defaultDensity="comfortable"
+                  defaultDensity="compact"
                   dictionary={t as unknown as Record<string, string>}
                   rowId={(table) => table.table}
                   toolbarAfter={

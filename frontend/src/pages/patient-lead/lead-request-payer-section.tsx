@@ -446,7 +446,7 @@ export function PayerSection({
 
   // Several cards (owner 2026-10-09): who pays, the payer, contact, residence and the consents.
   return (
-    <div className="space-y-4" data-testid="lead-request-payer">
+    <div className="space-y-3" data-testid="lead-request-payer">
       <Section title={text.recipient.payerSection}>
         <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
           <LabeledField

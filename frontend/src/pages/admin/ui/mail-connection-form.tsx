@@ -235,7 +235,7 @@ export function MailConnectionForm({ canConfigure }: { canConfigure: boolean }) 
       >
         <div className="space-y-4 p-3.5">
           <div className="flex items-center gap-3">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+            <span className="flex size-6 shrink-0 items-center justify-center text-emerald-700">
               <Mail aria-hidden="true" className="size-5" />
             </span>
             <p className="min-w-0 text-sm font-medium">

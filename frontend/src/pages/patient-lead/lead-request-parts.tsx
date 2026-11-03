@@ -72,7 +72,7 @@ export function GoToSectionButton({
       type="button"
       variant="outline"
       size="sm"
-      className="mt-2 h-auto min-h-8 max-w-full gap-1.5 whitespace-normal border-amber-300 bg-white py-1.5 text-left text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-900/30"
+      className="mt-2 h-auto min-h-9 max-w-full gap-1.5 whitespace-normal border-primary bg-primary py-1.5 text-left text-primary-foreground hover:bg-primary/90"
       data-testid={testId}
       data-target-step={step}
       data-target-anchor={anchor}
@@ -301,7 +301,7 @@ export function CabinetSection({
   accessory,
   children,
   className,
-  compact = false,
+  compact = true,
 }: {
   title: ReactNode;
   accessory?: ReactNode;
@@ -313,7 +313,7 @@ export function CabinetSection({
     <section className={cn("min-w-0 overflow-hidden rounded-xl border border-border/60 bg-card", className)}>
       <div className={cn("flex flex-wrap items-center justify-between gap-2", compact ? "px-3 pt-3" : "px-4 pt-4")}>
         <div className="flex min-w-0 items-center gap-2">
-          <div aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <div aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--heading-marker)]" />
           <h3 className="min-w-0 max-w-full break-words text-sm font-semibold text-foreground">{title}</h3>
         </div>
         {accessory ? <div className="min-w-0 max-w-full">{accessory}</div> : null}
@@ -326,7 +326,7 @@ export function CabinetSection({
 /** Shared explanatory note for the cabinet, including its conditional steps. */
 export function CabinetHint({ children, testId, className }: { children: ReactNode; testId?: string; className?: string }) {
   return (
-    <div role="note" data-testid={testId} className={cn("flex min-w-0 items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200", className)}>
+    <div role="note" data-testid={testId} className={cn("flex min-w-0 items-start gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground", className)}>
       <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
       <div className="min-w-0 flex-1">{children}</div>
     </div>
@@ -467,7 +467,7 @@ export function LabeledField({
     </label>
   );
   return (
-    <div className={cn("min-w-0 space-y-1.5", className)} onFocusCapture={serverChanged ? dismissServerChanged : undefined}>
+    <div className={cn("min-w-0 space-y-1", className)} onFocusCapture={serverChanged ? dismissServerChanged : undefined}>
       {aside ? (
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
           {labelElement}

@@ -220,7 +220,7 @@ function PatientServicesRequestSection({
           />
         </Field>
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field
             label={t.services_form_preferred_vendor}
             htmlFor="portal-service-vendor"
@@ -247,7 +247,7 @@ function PatientServicesRequestSection({
           </Field>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field label={t.services_preferred_start}>
             <Input
               type="datetime-local"

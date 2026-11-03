@@ -746,7 +746,7 @@ function usePatientInvoicesPageContent() {
                   key={invoice.id}
                   onClick={() => dispatchInvoicesState({ selectedInvoiceId: invoice.id })}
                   className={cn(
-                    "space-y-4",
+                    "space-y-3",
                     selectedInvoiceId === invoice.id && "border-primary/60 bg-primary/5 ring-2 ring-primary/15",
                   )}
                 >
@@ -798,7 +798,7 @@ function usePatientInvoicesPageContent() {
             title={detail ? detail.invoice_number : t.portal_invoices_invoice_detail}
             description={t.portal_invoices_commercial_totals_line_items_and_payment_proof_handoff_for_the_s}
             headerClassName="px-4 py-3"
-            bodyClassName="min-h-0 overscroll-y-contain space-y-4 px-5 py-4"
+            bodyClassName="min-h-0 overscroll-y-contain space-y-3 px-4 py-3"
           >
             <div className="space-y-3">
             {detailBusy ? (
@@ -811,12 +811,12 @@ function usePatientInvoicesPageContent() {
                 {detailError}
               </Banner>
             ) : !detail ? (
-              <div className={cn("rounded-xl px-4 py-6 text-sm text-muted-foreground", tokens.surface.dashed)}>
+              <div className={cn("rounded-xl px-3 py-3 text-sm text-muted-foreground", tokens.surface.dashed)}>
                 {t.portal_invoices_choose_an_invoice_card_to_open_the_detail_workspace}
               </div>
             ) : (
               <>
-                <section className={cn("rounded-xl p-3 sm:p-4", tokens.surface.card)}>
+                <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
@@ -908,7 +908,7 @@ function usePatientInvoicesPageContent() {
                 </section>
 
                 {detailCreditNotes.length > 0 ? (
-                  <section className={cn("rounded-xl p-5", tokens.surface.card)}>
+                  <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
                       <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
                       <span>{t.finance_credit_note_portal_title}</span>
@@ -916,7 +916,7 @@ function usePatientInvoicesPageContent() {
                     <p className={cn("mt-1", tokens.text.muted)}>
                       {lang === "de" ? "Hier sehen Sie freigegebene Gutschriften und Stornierungen." : "Здесь показаны доступные вам кредит-ноты и их отмены."}
                     </p>
-                    <div className="mt-5 space-y-2">
+                    <div className="mt-3 space-y-2">
                       {detailCreditNotes.map((credit) => {
                         const isReversal = credit.transaction_type === "reversal";
                         return (
@@ -958,7 +958,7 @@ function usePatientInvoicesPageContent() {
                 ) : null}
 
                 {invoiceAmountsVisible(detail) ? (
-                  <section className={cn("rounded-xl p-5", tokens.surface.card)}>
+                  <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
                       <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
                       <span>{t.portal_invoices_payment_history}</span>
@@ -966,9 +966,9 @@ function usePatientInvoicesPageContent() {
                     <p className={cn("mt-1", tokens.text.muted)}>
                       {t.portal_invoices_payment_history_description}
                     </p>
-                    <div className="mt-5 space-y-2">
+                    <div className="mt-3 space-y-2">
                       {detailPayments.length === 0 ? (
-                        <div className={cn("rounded-xl px-4 py-6 text-sm text-muted-foreground", tokens.surface.dashed)}>
+                        <div className={cn("rounded-xl px-3 py-3 text-sm text-muted-foreground", tokens.surface.dashed)}>
                           {t.portal_invoices_no_payments}
                         </div>
                       ) : (
@@ -1022,7 +1022,7 @@ function usePatientInvoicesPageContent() {
                 ) : null}
 
                 {invoiceAmountsVisible(detail) && detailRefunds.length > 0 ? (
-                  <section className={cn("rounded-xl p-5", tokens.surface.card)}>
+                  <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
                       <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
                       <span>{lang === "de" ? "Rückzahlungen" : "Возвраты"}</span>
@@ -1032,7 +1032,7 @@ function usePatientInvoicesPageContent() {
                         ? "Hier sehen Sie tatsächlich ausgezahlte Guthaben und eventuelle Stornierungen."
                         : "Здесь показаны фактически возвращённые суммы и возможные сторнирования."}
                     </p>
-                    <div className="mt-5 space-y-2">
+                    <div className="mt-3 space-y-2">
                       {detailRefunds.map((refund) => {
                         const isReversal = refund.transaction_type === "reversal";
                         return (
@@ -1082,7 +1082,7 @@ function usePatientInvoicesPageContent() {
 
                 {detailDunningLetters.length > 0 ? (
                   <section
-                    className={cn("rounded-xl p-5", tokens.surface.card)}
+                    className={cn("rounded-xl p-3", tokens.surface.card)}
                     data-testid="portal-dunning-letters"
                   >
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
@@ -1094,7 +1094,7 @@ function usePatientInvoicesPageContent() {
                         ? "Jedes Schreiben nennt den offenen Betrag und die neue Zahlungsfrist."
                         : "В каждом письме указаны сумма к оплате и новый срок оплаты."}
                     </p>
-                    <div className="mt-5 space-y-2">
+                    <div className="mt-3 space-y-2">
                       {detailDunningLetters.map((letter) => (
                         <div
                           key={letter.id}
@@ -1133,7 +1133,7 @@ function usePatientInvoicesPageContent() {
                   </section>
                 ) : null}
 
-                <section className={cn("rounded-xl p-5", tokens.surface.card)}>
+                <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
@@ -1165,7 +1165,7 @@ function usePatientInvoicesPageContent() {
                   </div>
                 </section>
 
-                <section className={cn("rounded-xl p-5", tokens.surface.card)}>
+                <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                   <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
                     <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
                     <span>{t.portal_invoices_line_items}</span>
@@ -1173,7 +1173,7 @@ function usePatientInvoicesPageContent() {
                   <p className={cn("mt-1", tokens.text.muted)}>{t.portal_invoices_materialized_billing_lines_for_the_current_invoice_snapshot}</p>
                   <div className="mt-5 space-y-3">
                     {!detail.line_items || detail.line_items.length === 0 ? (
-                      <div className={cn("rounded-xl px-4 py-6 text-sm text-muted-foreground", tokens.surface.dashed)}>
+                      <div className={cn("rounded-xl px-3 py-3 text-sm text-muted-foreground", tokens.surface.dashed)}>
                         {t.portal_invoices_no_line_items_available}
                       </div>
                     ) : (
@@ -1272,7 +1272,7 @@ function InvoiceLineCard({ line, currency }: { line: PortalInvoiceLineItem; curr
     present(line.vat_rate) ? `${t.uiText.finance_catalog_vat_label} ${decimal(line.vat_rate)} %` : null,
   ].filter(Boolean);
   return (
-    <article className={cn("rounded-xl px-4 py-4", tokens.surface.mutedCard)}>
+    <article className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-foreground">{description}</p>

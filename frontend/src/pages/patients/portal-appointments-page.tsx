@@ -725,7 +725,7 @@ function usePatientAppointmentsPageContent() {
             </div>
           </Section>
           <Section title={t.portal_appointments_group_schedule_preferences}>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-2">
               <Field label={t.portal_appointments_preferred_from} htmlFor="portal-appointment-preferred-from">
                 <Input
                   id="portal-appointment-preferred-from"

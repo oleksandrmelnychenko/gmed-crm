@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 
 /** Shared portal surfaces; colours come from the opt-in GMED theme. */
 export function PortalSection({ className, ...props }: ComponentProps<typeof Section>) {
-  return <Section {...props} className={cn("portal-section min-w-0 rounded-xl border border-border/70 bg-card p-3 sm:p-4 [&_label.block]:font-sans [&_label.block]:text-sm", className)} />;
+  return <Section {...props} className={cn("portal-section min-w-0 rounded-xl border border-border/70 bg-card p-3 [&_label.block]:font-mono [&_label.block]:text-xs", className)} />;
 }
 
 export function PortalInfoRow({ className, ...props }: ComponentProps<typeof InfoRow>) {

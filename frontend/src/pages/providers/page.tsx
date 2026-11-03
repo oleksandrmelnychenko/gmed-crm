@@ -223,7 +223,7 @@ const availabilityTimeInputClassName = cn(
   "h-9 min-w-0 px-2 text-sm tabular-nums [color-scheme:light] [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
 );
 const providerDetailSectionClassName =
-  "border-border/70 bg-card px-5 py-4 sm:px-6 sm:py-5";
+  "border-border/70 bg-card px-3 py-3 sm:px-4";
 const providerDetailPanelClassName = cn(
   "space-y-2.5 rounded-xl border",
   providerDetailSectionClassName,
@@ -5544,7 +5544,7 @@ function ProviderDoctorRelationshipFormSheet({
             <div className="space-y-3 rounded-xl p-4">
               {error ? <Banner tone="error">{error}</Banner> : null}
               <Section title={l("providers_doctor_relationships")}>
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-2">
                   <Field label={l("providers_relationship_source")} required>
                     <NativeComboboxSelect
                       value={form.sourceDoctorId}
@@ -5954,7 +5954,7 @@ function SpecializationManagerSheet({
                     : l("providers_specialization_create")
                 }
               >
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-2">
                   <Field label={l("providers_specialization_name_ru")} required={!draft.nameDe.trim()}>
                     <Input
                       value={draft.nameRu}
@@ -6234,7 +6234,7 @@ function StaffRoleManagerSheet({
                     : l("providers_staff_role_create")
                 }
               >
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-2">
                   <Field label={l("providers_staff_role_name_ru")} required>
                     <Input
                       value={draft.nameRu}
@@ -6431,12 +6431,12 @@ function ProviderOverviewSection({
   ];
 
   return (
-    <section className={cn(providerDetailPanelClassName, "space-y-5 bg-card/40")}>
+    <section className={cn(providerDetailPanelClassName, "space-y-3 bg-card")}>
       <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
         {titleWithDot(l("providers_provider_overview"))}
       </h3>
-      <div className="grid items-stretch gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-8">
-        <div className="space-y-4">
+      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-4">
+        <div className="space-y-2.5">
           {overviewRows.map((row) => (
             <div key={row.label} className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
               <span className="text-sm text-muted-foreground">{row.label}</span>
@@ -6445,10 +6445,10 @@ function ProviderOverviewSection({
             </div>
           ))}
         </div>
-        <div className="grid h-full gap-3 sm:grid-cols-2">
+        <div className="grid gap-2 sm:grid-cols-2">
           {onOpenFinancialStatement ? (
-            <div className="sm:col-span-2 rounded-xl border border-border/70 bg-muted/20 p-4">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="sm:col-span-2 rounded-xl border border-border/70 bg-muted/20 p-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">{financialText.title}</p>
                   {financialSummaryBusy ? (
@@ -6517,7 +6517,7 @@ function ProviderOverviewSection({
           ) : null}
           <button
             type="button"
-            className="group relative h-full min-h-0 overflow-hidden rounded-xl border border-border/70 bg-muted/20 p-4 pr-14 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:bg-orange-50/30"
+            className="group relative min-h-0 overflow-hidden rounded-xl border border-border/70 bg-card p-3 pr-10 text-left transition-colors hover:border-ring hover:bg-muted"
             onClick={onOpenPatients}
           >
             <span className="block text-sm font-semibold text-foreground">
@@ -6526,13 +6526,13 @@ function ProviderOverviewSection({
             <span className="mt-2 block text-xs leading-snug text-muted-foreground">
               {l("providers_open_patients_linked_to_this_provider")}
             </span>
-            <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center text-foreground">
+            <span className="absolute top-2 right-2 flex size-6 items-center justify-center text-foreground">
               <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
             </span>
           </button>
           <button
             type="button"
-            className="group relative h-full min-h-0 overflow-hidden rounded-xl border border-border/70 bg-muted/20 p-4 pr-14 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:bg-orange-50/30"
+            className="group relative min-h-0 overflow-hidden rounded-xl border border-border/70 bg-card p-3 pr-10 text-left transition-colors hover:border-ring hover:bg-muted"
             onClick={onOpenAppointments}
           >
             <span className="block text-sm font-semibold text-foreground">
@@ -6541,7 +6541,7 @@ function ProviderOverviewSection({
             <span className="mt-2 block text-xs leading-snug text-muted-foreground">
               {l("providers_open_appointments_for_this_provider")}
             </span>
-            <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center text-foreground">
+            <span className="absolute top-2 right-2 flex size-6 items-center justify-center text-foreground">
               <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
             </span>
           </button>
@@ -8554,7 +8554,7 @@ function ProviderProfileFields({
 
   return (
     <>
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2">
         <Field label={l("patients_display_name")} required>
           <Input
             value={form.name}
@@ -8578,7 +8578,7 @@ function ProviderProfileFields({
 
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2">
         <Field label={t.providers_type}>
           <NativeComboboxSelect
             value={providerType}
@@ -8619,7 +8619,7 @@ function ProviderProfileFields({
         </Field>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2">
         <Field label={lang === "ru" ? "Внутренний рейтинг" : "Interne Bewertung"}>
           <Input
             type="number"
@@ -8643,7 +8643,7 @@ function ProviderProfileFields({
       </div>
 
       {formAttributeKeys.length > 0 ? (
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-3">
           {formAttributeKeys.map((key) => (
             <Field key={key} label={taxonomyAttributeLabel(key, lang)}>
               <Input
@@ -8666,7 +8666,7 @@ function ProviderProfileFields({
         </div>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2">
         <Field label={l("providers_tax_id")}>
           <Input
             value={form.taxId}
@@ -8696,7 +8696,7 @@ function ProviderProfileFields({
         />
       </FieldGroup>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2">
         <Field label={l("providers_organization_level")}>
           <NativeComboboxSelect
             value={form.organizationLevel}
@@ -8734,7 +8734,7 @@ function ProviderProfileFields({
       </div>
 
       {isMedicalProvider ? (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-3 md:grid-cols-2">
           <Field label={t.providers_fachbereich}>
             <SpecializationMultiSelect
               value={form.specializations}
@@ -8797,7 +8797,7 @@ function ProviderAddressFields({
         />
       </Field>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-3">
         <Field label={t.providers_city}>
           <Input
             value={form.addressCity}
@@ -9145,7 +9145,7 @@ function ContactPersonProfileFields({
 
   return (
     <AdminFormSection title={t.providers_contact_profile}>
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2">
         <Field label={t.patients_first_name}>
           <Input
             value={form.firstName}
@@ -9240,7 +9240,7 @@ function DoctorProfileFields({
 
   return (
     <AdminFormSection title={l("providers_doctor_profile")}>
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2">
         <Field label={t.patients_first_name}>
           <Input
             value={form.firstName}
@@ -9554,7 +9554,7 @@ function DoctorLicenseFields({
 
   return (
     <AdminFormSection title={l("providers_license")}>
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-3">
         <Field label={l("providers_license_number")}>
           <Input
             value={form.licenseNumber}
@@ -9652,7 +9652,7 @@ function StaffFormFields({
   return (
     <div className="space-y-3">
       <AdminFormSection title={l("providers_staff_profile")}>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-3 md:grid-cols-2">
           <Field label={t.patients_first_name}>
             <Input
               value={form.firstName}
@@ -9783,7 +9783,7 @@ function ServiceFormFields({
   return (
     <div className="space-y-3">
       <AdminFormSection title={l("providers_service")}>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-3 md:grid-cols-2">
           <Field label={t.providers_service_name} required>
             <Input
               value={form.serviceName}
@@ -9817,7 +9817,7 @@ function ServiceFormFields({
           </Field>
         </div>
         {formAttributeKeys.length > 0 ? (
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
             {formAttributeKeys.map((key) => (
               <Field key={key} label={taxonomyAttributeLabel(key, lang)}>
                 <Input
@@ -9841,7 +9841,7 @@ function ServiceFormFields({
       </AdminFormSection>
 
       <AdminFormSection title={l("providers_cost")}>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-3 md:grid-cols-2">
           <Field label={l("providers_price_type")}>
             <NativeComboboxSelect
               value={priceType}
@@ -9926,7 +9926,7 @@ function ServiceFormFields({
       </AdminFormSection>
 
       <AdminFormSection title={l("providers_validity")}>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-3 md:grid-cols-2">
           <Field label={t.providers_service_valid_from}>
             <Input
               type="date"

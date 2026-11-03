@@ -462,7 +462,7 @@ function usePatientDashboardPageContent() {
           </div>
         ) : (
           <Banner tone="warning" withIcon>
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <p className={tokens.text.eyebrow}>
                   {t.portal_dashboard_required_documents}
@@ -525,7 +525,7 @@ function usePatientDashboardPageContent() {
         )
       ) : null}
 
-      <section className={cn("grid items-start gap-4", recentRecommendations.length > 0 && "lg:grid-cols-2")}>
+      <section className={cn("grid items-start gap-3", recentRecommendations.length > 0 && "lg:grid-cols-2")}>
         <Section
           className="portal-next-actions"
           showMarker={false}
@@ -620,7 +620,7 @@ function usePatientDashboardPageContent() {
         ) : null}
       </section>
 
-      <section className="grid items-start gap-4 lg:grid-cols-2">
+      <section className="grid items-start gap-3 lg:grid-cols-2">
         {recentAppointments.length > 0 ? (
         <Section
           title={t.portal_dashboard_upcoming_visits}

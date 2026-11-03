@@ -399,7 +399,7 @@ function SessionsSection() {
             const DeviceIcon = /iOS|Android/.test(device) ? Smartphone : Monitor;
             return (
               <li key={session.family_id} className="grid min-w-0 gap-3 rounded-xl border border-border bg-muted/20 p-3 sm:grid-cols-[2rem_minmax(0,1fr)_auto] sm:items-center">
-                <div className="hidden size-8 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground sm:flex">
+                <div className="hidden size-8 items-center justify-center text-foreground sm:flex">
                   <DeviceIcon className="size-4" aria-hidden="true" />
                 </div>
                 <div className="min-w-0 space-y-2">

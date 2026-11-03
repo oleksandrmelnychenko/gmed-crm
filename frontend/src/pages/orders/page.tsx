@@ -3628,7 +3628,7 @@ function useOrdersPageContent() {
           pagination={{pageSize: ORDER_PAGE_SIZE, resetKey: orderPaginationResetKey}}
           columns={orderTableColumns}
           rowId={(row) => row.id}
-          defaultDensity="comfortable"
+          defaultDensity="compact"
           defaultFrozenColumns={ORDER_DEFAULT_FROZEN_COLUMNS}
           dictionary={tx}
           groupLabels={orderColumnGroupLabels}

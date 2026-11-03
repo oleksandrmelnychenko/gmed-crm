@@ -33,7 +33,7 @@ export function RepresentativeQuestionsBlock(props: Props) {
     props.onSaveState(combinedSaveState(people.map((person) => states.current[person.id] ?? "idle")));
   }, [people, props.onSaveState]);
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* An adult's representatives are no parents: the intro names no child (lead QA 2026-10-10). */}
       <p className="text-sm leading-relaxed text-muted-foreground">
         {!props.request.minor ? props.text.representativeQuestionsIntroAdult : props.text.representativeQuestionsIntro}

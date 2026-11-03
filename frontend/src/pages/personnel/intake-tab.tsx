@@ -214,7 +214,7 @@ export function IntakeTab({
             rows={items}
             columns={columns}
             rowId={(item) => item.id}
-            defaultDensity="comfortable"
+            defaultDensity="compact"
             defaultSort={[{ field: "received_at", dir: "desc" }]}
             dictionary={tr}
             storageKey="personnel-intake"

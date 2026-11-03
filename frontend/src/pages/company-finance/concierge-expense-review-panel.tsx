@@ -965,7 +965,7 @@ export function ConciergeExpenseReviewPanel({
                 </div>
               </DialogHeader>
 
-              <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+              <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
                 <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(20rem,.95fr)]">
                   <div className="min-w-0 space-y-4">
                     <section className="min-w-0 rounded-lg border border-border/70 bg-muted/20 p-3">

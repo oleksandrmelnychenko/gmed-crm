@@ -602,8 +602,8 @@ function usePatientDocumentsPageContent() {
         </div>
       </div> : null}
 
-      <section className="space-y-4">
-        <section className="space-y-4">
+      <section className="space-y-3">
+        <section className="space-y-3">
           <Section
             title={t.portal_documents_released_to_me}
             className="p-3 sm:p-3"
@@ -710,7 +710,7 @@ function usePatientDocumentsPageContent() {
           </Section>
         </section>
 
-        <section className="space-y-4">
+        <section className="space-y-3">
           <Dialog open={uploadOpen} onOpenChange={(open) => {
             if (uploadBusy) return;
             dispatchDocumentsState(open ? { uploadOpen: true } : {

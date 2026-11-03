@@ -65,7 +65,7 @@ export function BreakfastEditor({ stay, lang, editable, onSaved, onDirty }: { st
           <DialogTitle className="flex items-center gap-2"><span className="size-2 shrink-0 rounded-full bg-orange-500" />{labels.edit}</DialogTitle>
           <DialogDescription>{[stay.patient_name || stay.patient_number, [stay.check_in, stay.check_out].filter(Boolean).map(date => date!.split("-").reverse().join(".")).join(" — ")].filter(Boolean).join(" · ")}</DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 space-y-4 overflow-y-auto p-5">
+        <div className="min-h-0 space-y-3 overflow-y-auto p-3">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={labels.edit}><NativeComboboxSelect aria-label={labels.edit} value={draft.mode} disabled={!editable || busy} onChange={event => changeMode(event.target.value as BreakfastMode)}>{breakfastModes.map(mode => <option key={mode} value={mode}>{labels[mode]}</option>)}</NativeComboboxSelect></Field>
             {draft.mode !== "unknown" && draft.mode !== "none" ? <Field label={labels.count}><Input aria-label={labels.count} type="number" min={1} max={100000} value={draft.count} disabled={!editable || busy} onChange={event => setDraft(current => ({ ...current, count: event.target.value }))} /><p className="text-xs leading-5 text-muted-foreground">{labels.countHint}</p></Field> : null}

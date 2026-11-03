@@ -2480,7 +2480,7 @@ function useStaffInvoicesPageContent() {
             rows={invoices}
             columns={invoiceTableColumns}
             rowId={(row) => row.id}
-            defaultDensity="comfortable"
+            defaultDensity="compact"
             defaultFrozenColumns={INVOICE_DEFAULT_FROZEN_COLUMNS}
             dictionary={t as unknown as Record<string, string>}
             groupLabels={invoiceColumnGroups}
@@ -2735,7 +2735,7 @@ function useStaffInvoicesPageContent() {
                   columns={accountingTableColumns}
                   rowId={(row) => row.id}
                   onRowClick={openAccountingEntry}
-                  defaultDensity="comfortable"
+                  defaultDensity="compact"
                   defaultFrozenColumns={ACCOUNTING_DEFAULT_FROZEN_COLUMNS}
                   dictionary={t as unknown as Record<string, string>}
                   groupLabels={accountingColumnGroups}
@@ -2831,7 +2831,7 @@ function useStaffInvoicesPageContent() {
                     rows={accountingMonthlyPagination.pagedRows}
                     columns={accountingMonthlyTableColumns}
                     rowId={(row) => row.period}
-                    defaultDensity="comfortable"
+                    defaultDensity="compact"
                     defaultFrozenColumns={["period"]}
                     dictionary={t as unknown as Record<string, string>}
                     groupLabels={accountingColumnGroups}

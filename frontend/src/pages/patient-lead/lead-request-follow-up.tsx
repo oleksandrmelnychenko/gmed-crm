@@ -290,7 +290,7 @@ export function FollowUpStep({
         return <BirthBlock form={identification} text={text} lang={lang} guardian={guardian} />;
       case "L":
         return (
-          <div className="space-y-5">
+          <div className="space-y-3">
             <LegalQuestionsSection form={identification} text={text} guardian={guardian} minor={request.minor} bare />
             {/* The paying parent's own questions live in the payer questionnaire, not in the child's block L. */}
             {request.payer && !request.minor ? (
@@ -312,7 +312,7 @@ export function FollowUpStep({
 
   return (
     <IdentificationSubjectContext.Provider value={subjectName}>
-    <section className="flex flex-col gap-4" data-testid="lead-request-follow-up">
+    <section className="flex flex-col gap-3" data-testid="lead-request-follow-up">
       {/* GMED asked once more after an answer: check and send again (no reason named). */}
       {requestedAgainAt ? (
         <p role="status" className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm leading-relaxed text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200" data-testid="lead-request-follow-up-requested-again">
@@ -562,7 +562,7 @@ function FundsBlock({
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {!request.payer && !request.payer_questionnaire ? (
         <p role="note" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200" data-testid="lead-request-follow-up-choose-payer">
           {text.extraChoosePayer(text.steps.billing)}
@@ -639,7 +639,7 @@ function RelationshipBlock({
     && (missing.includes(key) || Boolean(request.identification?.[key]));
   if (request.payer?.payer_kind !== "third_party") return <p className="text-sm text-muted-foreground">{text.followUpNothingNeeded}</p>;
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         {asks("payment_background") ? <IdentificationFormField form={form} field="payment_background" text={text} required={missing.includes("payment_background")} className={FULL_ROW}>
           <IdentificationTextArea form={form} field="payment_background" />

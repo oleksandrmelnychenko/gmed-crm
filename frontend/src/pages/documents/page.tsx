@@ -6403,7 +6403,7 @@ function StaffDocumentsPage({
               <div className={cn("space-y-4", !embedDetailOnly && "pt-5")}>
                 <section className="space-y-4 rounded-xl bg-card/40">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-                    <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] text-primary-foreground">
+                    <div className="flex size-7 shrink-0 items-center justify-center text-foreground">
                       <FileText className="size-5" />
                     </div>
                     <div className="min-w-0 flex-1">
@@ -8325,7 +8325,7 @@ function DocumentIntakeQueueTable({
       columns={columns}
       rowId={(item) => item.id}
       activeRowId={selectedId || null}
-      defaultDensity="comfortable"
+      defaultDensity="compact"
       dictionary={t as unknown as Record<string, string>}
       loading={loading}
       loadingState={<TabLoader />}
@@ -8595,7 +8595,7 @@ function DocumentTranslationRequestsTable({
       rows={translationRequestsPagination.pagedRows}
       columns={columns}
       rowId={(request) => request.id}
-      defaultDensity="comfortable"
+      defaultDensity="compact"
       dictionary={t as unknown as Record<string, string>}
       loading={loading}
       loadingState={<TabLoader />}

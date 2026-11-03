@@ -204,7 +204,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   // After the send: the decision read-only; changes and withdrawals via GMED (owner 2026-10-26).
   const lockedAllow = draft.allowDisclosure === true;
 
-  if (locked) return <section className="flex flex-col gap-4" data-testid="lead-request-disclosure-step">
+  if (locked) return <section className="flex flex-col gap-3" data-testid="lead-request-disclosure-step">
     <StatusChip tone="success" role="note" className="items-start gap-2 px-3 py-1.5" data-testid="disclosure-locked-hint">
       <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
       <span>{common.sentLockedHint}</span>
@@ -232,9 +232,9 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     </StepFooter>
   </section>;
 
-  return <section className="flex flex-col gap-4" data-testid="lead-request-disclosure-step">
+  return <section className="flex flex-col gap-3" data-testid="lead-request-disclosure-step">
     <CabinetSection title={text.title} accessory={state}>
-      <div className="space-y-4" data-testid="trusted-persons-form">
+      <div className="space-y-3" data-testid="trusted-persons-form">
         {/* A child's parents read "your child … to you as parents" in the introduction already (B10). */}
         {actsAsGuardian(request) && !choosesForChild(request) ? <div className="flex items-start gap-2.5 rounded-lg border border-border/60 bg-muted/40 p-3 text-sm leading-6">
           <ShieldCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
