@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  addAppearanceTheme, appearanceStorageKey, BUILTIN_THEMES, contrastRatio, DEFAULT_THEME, DEFAULT_THEME_COLORS,
+  addAppearanceTheme, appearanceStorageKey, BUILTIN_THEMES, contrastRatio, DEFAULT_THEME, DEFAULT_THEME_COLORS, withContrast,
   EMPTY_APPEARANCE, MAX_CUSTOM_THEMES, MAX_THEME_JSON_LENGTH, parseAppearancePreferences,
   parseAppearanceTheme, themeCssVariables,
 } from "./appearance-theme";
@@ -84,5 +84,27 @@ describe("appearance preferences", () => {
     const full = { selectedId: themes[0].id, themes };
     expect(() => addAppearanceTheme(full, { ...DEFAULT_THEME, id: "extra" })).toThrow("theme-limit");
     expect(addAppearanceTheme(full, themes[0]).themes).toHaveLength(MAX_CUSTOM_THEMES);
+  });
+});
+
+describe("contrast levels apart from the theme", () => {
+  it.each(BUILTIN_THEMES)("raise $name step by step and stay a valid palette", (theme) => {
+    const more = withContrast(theme, "more"), high = withContrast(theme, "high");
+    expect(withContrast(theme, "standard")).toBe(theme);
+    for (const variant of [more, high]) expect(parseAppearanceTheme(JSON.stringify(variant))).toEqual(variant);
+    for (const key of ["textMuted", "inputBorder", "border", "focus"] as const) {
+      const ratios = [theme, more, high].map((item) => contrastRatio(item.colors[key], item.colors.surface));
+      expect(ratios[1]).toBeGreaterThan(ratios[0]);
+      expect(ratios[2]).toBeGreaterThan(ratios[1]);
+    }
+    expect(contrastRatio(high.colors.inputBorder, high.colors.field)).toBeGreaterThanOrEqual(4.5);
+    expect(high.colors.primary).toBe(theme.colors.primary);
+  });
+
+  it("stores the level with the theme choice and ignores unknown levels", () => {
+    expect(parseAppearancePreferences(JSON.stringify({ selectedId: DEFAULT_THEME.id, themes: [], contrast: "high" })).contrast).toBe("high");
+    expect(parseAppearancePreferences(JSON.stringify({ selectedId: DEFAULT_THEME.id, themes: [], contrast: "max" }))).toEqual(EMPTY_APPEARANCE);
+    const theme = parseAppearanceTheme(JSON.stringify(custom));
+    expect(addAppearanceTheme({ ...EMPTY_APPEARANCE, contrast: "more" }, theme).contrast).toBe("more");
   });
 });

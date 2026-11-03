@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { Check, Contrast, Download, Palette, Upload } from "lucide-react";
+import { CONTRAST_LEVEL_TEXT } from "@/components/appearance-menu";
 import { openContrastMeter } from "@/components/contrast-meter";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import {
-  addAppearanceTheme, BUILTIN_THEMES, DEFAULT_THEME, MAX_THEME_JSON_LENGTH,
+  addAppearanceTheme, BUILTIN_THEMES, CONTRAST_LEVELS, DEFAULT_THEME, MAX_THEME_JSON_LENGTH,
   parseAppearanceTheme, ThemeValidationError, type AppearanceTheme, type ThemeErrorCode,
 } from "@/lib/appearance-theme";
 import { useAppearanceTheme } from "@/lib/use-appearance-theme";
@@ -66,7 +67,8 @@ export function AppearanceSettings() {
   const { user } = useAuth();
   const { lang } = useLang();
   const text = TEXT[lang as keyof typeof TEXT] ?? TEXT.en;
-  const { theme, themes, preferences, save } = useAppearanceTheme(user?.id ?? null);
+  const contrastText = CONTRAST_LEVEL_TEXT[lang as keyof typeof CONTRAST_LEVEL_TEXT] ?? CONTRAST_LEVEL_TEXT.en;
+  const { theme, themes, preferences, contrast, save } = useAppearanceTheme(user?.id ?? null);
   const [draft, setDraft] = useState(() => portableTheme(theme, themes.map((item) => item.id)));
   const [notice, setNotice] = useState<{ error: boolean; message: string } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -105,12 +107,23 @@ export function AppearanceSettings() {
             </button>
           ))}
         </div>
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label={contrastText.title}>
+          <span className="text-xs font-medium text-muted-foreground">{contrastText.title}</span>
+          {CONTRAST_LEVELS.map((level) => (
+            <button key={level} type="button" aria-pressed={contrast === level} onClick={() => {
+              try { save({ ...preferences, contrast: level }); setNotice({ error: false, message: text.saved }); } catch (cause) { fail(cause); }
+            }}
+              className={cn("rounded-lg border px-3 py-1.5 text-sm focus-visible:outline-2 focus-visible:outline-ring", contrast === level ? "border-ring bg-accent font-medium" : "border-border bg-card hover:bg-muted")}>
+              {contrastText.levels[level]}
+            </button>
+          ))}
+        </div>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={exportTheme}><Download />{text.export}</Button>
           <Button size="sm" variant="outline" onClick={openContrastMeter}><Contrast />{text.contrast}</Button>
           <Button size="sm" variant="ghost" onClick={() => select(DEFAULT_THEME.id)}>{text.reset}</Button>
           {!BUILTIN_THEMES.some((item) => item.id === theme.id) ? <Button size="sm" variant="ghost" onClick={() => {
-            try { save({ selectedId: DEFAULT_THEME.id, themes: preferences.themes.filter((item) => item.id !== theme.id) }); setNotice(null); } catch (cause) { fail(cause); }
+            try { save({ ...preferences, selectedId: DEFAULT_THEME.id, themes: preferences.themes.filter((item) => item.id !== theme.id) }); setNotice(null); } catch (cause) { fail(cause); }
           }}>{text.remove}</Button> : null}
         </div>
         <details className="max-w-3xl rounded-lg border border-border p-3">

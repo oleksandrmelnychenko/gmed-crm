@@ -27,5 +27,6 @@ export function useAppearanceTheme(userId: string | null) {
     window.localStorage.setItem(key, JSON.stringify(next));
     window.dispatchEvent(new Event(CHANGE_EVENT));
   }, [key]);
-  return { theme, themes, preferences, save };
+  const contrast = preferences.contrast ?? "standard";
+  return { theme, themes, preferences, contrast, save };
 }

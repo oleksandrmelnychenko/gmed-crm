@@ -129,7 +129,42 @@ export function themeCssVariables(theme: AppearanceTheme): Record<string, string
   };
 }
 
-export type AppearancePreferences = { selectedId: string; themes: AppearanceTheme[] };
+/** Contrast is chosen apart from the theme and applies on top of any palette. */
+export const CONTRAST_LEVELS = ["standard", "more", "high"] as const;
+export type ContrastLevel = (typeof CONTRAST_LEVELS)[number];
+const isContrastLevel = (value: unknown): value is ContrastLevel => CONTRAST_LEVELS.includes(value as ContrastLevel);
+
+function mixHex(first: string, second: string, weight: number): string {
+  return `#${[1, 3, 5].map((offset) => Math.round(
+    parseInt(first.slice(offset, offset + 2), 16) * weight + parseInt(second.slice(offset, offset + 2), 16) * (1 - weight),
+  ).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Pulls secondary text, borders, focus and row states towards the text colour; surfaces stay light. */
+export function withContrast(theme: AppearanceTheme, level: ContrastLevel): AppearanceTheme {
+  if (level === "standard") return theme;
+  const c = theme.colors;
+  const high = level === "high";
+  const text = high ? mixHex(c.text, "#000000", 0.5) : c.text;
+  const inputBorder = mixHex(text, c.inputBorder, high ? 0.55 : 0.3);
+  return {
+    ...theme,
+    colors: {
+      ...c,
+      text,
+      textMuted: mixHex(text, c.textMuted, high ? 0.75 : 0.45),
+      border: mixHex(inputBorder, c.border, high ? 0.6 : 0.35),
+      inputBorder,
+      focus: mixHex(text, c.focus, high ? 0.5 : 0.3),
+      accent: mixHex(inputBorder, c.accent, high ? 0.1 : 0.05),
+      rowHover: mixHex(inputBorder, c.rowHover, high ? 0.2 : 0.1),
+      rowActive: mixHex(inputBorder, c.rowActive, high ? 0.25 : 0.12),
+      rowSelected: mixHex(inputBorder, c.rowSelected, high ? 0.35 : 0.18),
+    },
+  };
+}
+
+export type AppearancePreferences = { selectedId: string; themes: AppearanceTheme[]; contrast?: ContrastLevel };
 export const EMPTY_APPEARANCE: AppearancePreferences = { selectedId: DEFAULT_THEME.id, themes: [] };
 export const appearanceStorageKey = (userId: string) => `gmed.appearance.v1.${encodeURIComponent(userId)}`;
 
@@ -146,7 +181,8 @@ export function parseAppearancePreferences(raw: string | null): AppearancePrefer
       } catch { /* Ignore a damaged palette without losing other saved themes. */ }
     }
     const selectedId = [...BUILTIN_THEMES, ...themes].some((item) => item.id === stored.selectedId) ? String(stored.selectedId) : DEFAULT_THEME.id;
-    return { selectedId, themes };
+    const contrast = isContrastLevel(stored.contrast) && stored.contrast !== "standard" ? { contrast: stored.contrast } : {};
+    return { selectedId, themes, ...contrast };
   } catch { return EMPTY_APPEARANCE; }
 }
 
@@ -154,5 +190,5 @@ export function addAppearanceTheme(preferences: AppearancePreferences, theme: Ap
   if (BUILTIN_THEMES.some((item) => item.id === theme.id)) throw new ThemeValidationError("reserved-id");
   const others = preferences.themes.filter((item) => item.id !== theme.id);
   if (others.length >= MAX_CUSTOM_THEMES) throw new ThemeValidationError("theme-limit");
-  return { selectedId: theme.id, themes: [...others, theme] };
+  return { ...preferences, selectedId: theme.id, themes: [...others, theme] };
 }
