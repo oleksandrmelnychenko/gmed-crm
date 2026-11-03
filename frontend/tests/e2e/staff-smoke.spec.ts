@@ -3644,13 +3644,13 @@ test.describe("lead onboarding wizard", () => {
     ).toHaveCount(0);
     await expect(wizard.getByText("Unbekannter Wert", { exact: true })).toHaveCount(0);
     for (const serviceLabel of [
-      "Limousinenservice und privater Fahrer",
-      "Concierge-Services",
-      "Bodengebundener medizinischer Transport",
+      "Fahrdienst und Transfer",
+      "Concierge-Service",
+      "Bodengebundener Krankentransport",
       "Ambulanzflug",
-      "Business Jet / Privatflugzeug",
-      "Keinen der genannten Services",
-      "Ich bin mir noch nicht sicher",
+      "Organisation von Charterflügen",
+      "Keine der genannten Leistungen",
+      "Ich weiß es noch nicht",
     ]) {
       await expect(wizard.getByRole("checkbox", { name: serviceLabel, exact: true })).toBeVisible();
     }
@@ -3665,10 +3665,10 @@ test.describe("lead onboarding wizard", () => {
       return payload.wizard_state?.service_comments?.driver === "Abholung am Flughafen BER um 14:30";
     });
     await wizard
-      .getByRole("checkbox", { name: "Limousinenservice und privater Fahrer", exact: true })
+      .getByRole("checkbox", { name: "Fahrdienst und Transfer", exact: true })
       .check();
     const driverComment = wizard.getByRole("textbox", {
-      name: "Kommentar zur Leistung: Limousinenservice und privater Fahrer",
+      name: "Kommentar zur Leistung: Fahrdienst und Transfer",
     });
     // White card background; the design tokens now resolve to oklch.
     await expect(driverComment).toHaveCSS("background-color", /^(?:rgb\(255, 255, 255\)|oklch\(1 0 0\))$/);
@@ -3683,7 +3683,7 @@ test.describe("lead onboarding wizard", () => {
     });
     // The client sees these comments in the cabinet; the internal one stays with staff (owner 2026-11-02).
     await expect(driverComment.locator("..").getByTestId("client-visible-note")).toHaveText("Für den Kunden im Portal sichtbar");
-    await expect(wizard.getByRole("textbox", { name: "Allgemeiner Kommentar", exact: true })).toBeVisible();
+    await expect(wizard.getByRole("textbox", { name: "Individuelle Wünsche", exact: true })).toBeVisible();
     const internalNoteRequest = page.waitForRequest((request) => {
       if (request.method() !== "POST" || !request.url().endsWith(`/leads/${readyLeadId}/update`)) return false;
       return (request.postDataJSON() as { services_internal_note?: string }).services_internal_note === "Rückruf am Dienstag";
@@ -3815,7 +3815,7 @@ test.describe("lead onboarding wizard", () => {
     await navigation.getByRole("tab", { name: /Servicehistorie/i }).click();
 
     const interpreter = wizard.getByRole("checkbox", {
-      name: "Dolmetscherbegleitung",
+      name: "Begleitung durch einen Dolmetscher",
       exact: true,
     });
     await expect(interpreter).toBeVisible();
@@ -3842,7 +3842,7 @@ test.describe("lead onboarding wizard", () => {
     await expect(interpreter).not.toBeChecked();
 
     const noServices = wizard.getByRole("checkbox", {
-      name: "Keinen der genannten Services",
+      name: "Keine der genannten Leistungen",
       exact: true,
     });
     const noneRequest = page.waitForRequest((request) => {
@@ -4520,11 +4520,11 @@ test.describe("responsive staff workspace", () => {
       return payload.wizard_state?.service_comments?.driver === "Abholung am BER, Terminal 1";
     });
     await wizard
-      .getByRole("checkbox", { name: "Limousinenservice und privater Fahrer", exact: true })
+      .getByRole("checkbox", { name: "Fahrdienst und Transfer", exact: true })
       .check();
     await wizard
       .getByRole("textbox", {
-        name: "Kommentar zur Leistung: Limousinenservice und privater Fahrer",
+        name: "Kommentar zur Leistung: Fahrdienst und Transfer",
       })
       .fill("Abholung am BER, Terminal 1");
     expect((await serviceCommentRequest).postDataJSON()).toMatchObject({

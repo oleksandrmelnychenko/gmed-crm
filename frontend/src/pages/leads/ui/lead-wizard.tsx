@@ -1,4 +1,6 @@
 import { existingParentPatientFromError, fillMissingParentProfile } from "../model/parent-profile-reuse";
+import { ServiceInfo } from "@/pages/patient-lead/lead-request-services-step";
+import { servicesText } from "@/pages/patient-lead/lead-request-services-text";
 import "./lead-wizard-layout.css";
 import {
   fillMissingFromSeed,
@@ -3623,6 +3625,8 @@ export function LeadWizard({
   } = useLeadLabels();
   const { lang, t } = useLang();
   const tx: Tx = useCallback((ru, de) => (lang === "de" ? de : ru), [lang]);
+  // The client's wording of the services step (cabinet), in the wizard's two languages.
+  const serviceWording = servicesText(lang === "de" ? "de" : "ru");
   // Fields whose text the client sees in the lead cabinet carry this marker (owner 2026-11-02).
   const clientVisibleNote = <ClientVisibleNote tx={tx} />;
   const [createdLeadId, setCreatedLeadId] = useState<string | null>(null);
@@ -10154,8 +10158,9 @@ ${serviceCommentLines.join("\n")}`
                 title={tx("Период программы", "Programmzeitraum")}
               >
                 <div className="wizard-short-grid grid gap-x-3 gap-y-2 sm:grid-cols-2">
+                  {/* The client's wished start (owner TASK-46F1, also in the wizard 2026-11-03); staff may enter a past one. */}
                   <Field
-                    label={tx("Начало программы", "Programmbeginn")}
+                    label={serviceWording.period}
                     required={Boolean(draft.programDateTo)}
                     error={orderFieldError("program-date-from")}
                     errorId={`${ORDER_DATE_FROM_ID}-error`}
@@ -10211,7 +10216,7 @@ ${serviceCommentLines.join("\n")}`
                 </Section>
               ) : null}
               <Section
-                title={tx("Запрошенные услуги", "Gewünschte Leistungen")}
+                title={serviceWording.services}
                 accessory={(
                   <div className="flex items-center gap-2">
                     {/* The client's own questionnaire of services (programme start, wishes): its step of the client's form. */}
@@ -10227,7 +10232,9 @@ ${serviceCommentLines.join("\n")}`
                     ...draft.serviceNeeds,
                   ])).map((value, index) => {
                     const checked = draft.serviceNeeds.includes(value);
-                    const label = knownLeadProgramServiceLabel(value, t) ?? serviceNeedLabel(value, tx);
+                    const known = (serviceWording.options as Record<string, string>)[value];
+                    const label = known ?? knownLeadProgramServiceLabel(value, t) ?? serviceNeedLabel(value, tx);
+                    const description = (serviceWording.descriptions as Record<string, string>)[value];
                     const fieldKey = `${index}-${value.replace(/[^a-z0-9_-]/gi, "-")}`;
                     const checkboxId = `lead-service-${fieldKey}`;
                     const commentId = `lead-service-comment-${fieldKey}`;
@@ -10240,19 +10247,25 @@ ${serviceCommentLines.join("\n")}`
                           checked ? "border-primary/40" : "border-border/50",
                         )}
                       >
-                        <label
-                          htmlFor={checkboxId}
-                          className="flex min-h-10 cursor-pointer items-center gap-2 px-2.5 py-1.5"
-                        >
-                          <input
-                            id={checkboxId}
-                            type="checkbox"
-                            className={checkboxClass}
-                            checked={checked}
-                            onChange={(event) => toggleServiceNeed(value, event.target.checked)}
-                          />
-                          <span className="min-w-0 break-words text-sm text-foreground">{label}</span>
-                        </label>
+                        <div className="flex items-start gap-1 pr-1">
+                          <label
+                            htmlFor={checkboxId}
+                            className="flex min-h-10 min-w-0 flex-1 cursor-pointer items-center gap-2 px-2.5 py-1.5"
+                          >
+                            <input
+                              id={checkboxId}
+                              type="checkbox"
+                              className={checkboxClass}
+                              checked={checked}
+                              onChange={(event) => toggleServiceNeed(value, event.target.checked)}
+                            />
+                            <span className="min-w-0 break-words text-sm text-foreground">{label}</span>
+                          </label>
+                          {/* The same «Подробнее» text the client reads in the cabinet (TASK-CD80). */}
+                          {description ? (
+                            <ServiceInfo title={label} text={description} more={serviceWording.more} close={serviceWording.close} />
+                          ) : null}
+                        </div>
                         {checked ? (
                           <div className="space-y-1 border-t border-border px-2.5 py-2">
                             <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -10283,7 +10296,7 @@ ${serviceCommentLines.join("\n")}`
                   })}
                 </div>
                 <div className="wizard-form-grid grid items-start gap-3 lg:grid-cols-2">
-                  <Field label={tx("Общий комментарий", "Allgemeiner Kommentar")} note={clientVisibleNote} htmlFor={SERVICE_NOTES_ID}>
+                  <Field label={serviceWording.notes} note={clientVisibleNote} htmlFor={SERVICE_NOTES_ID}>
                     <textarea
                       id={SERVICE_NOTES_ID}
                       rows={3}

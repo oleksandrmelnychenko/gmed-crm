@@ -42,7 +42,7 @@ function difference(before: LeadServicePreferences, after: LeadServicePreference
 }
 
 /** The (i) next to a service: the website's «Подробнее» text in a popover (owner 2026-10-29). */
-function ServiceInfo({ title, text, more, close }: { title: string; text: string; more: string; close: string }) {
+export function ServiceInfo({ title, text, more, close }: { title: string; text: string; more: string; close: string }) {
   return (
     <Popover.Root>
       <Popover.Trigger
