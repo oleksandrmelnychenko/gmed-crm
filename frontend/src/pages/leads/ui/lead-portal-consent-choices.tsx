@@ -32,12 +32,12 @@ function RecipientScopeChips({ person, tx }: { person: LeadPortalConsentRecipien
 function ConsentDetails({ title, children, testId }: { title: string; children: ReactNode; testId?: string }) {
   return (
     <details className="group border-t border-border/60" data-testid={testId}>
-      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-b-xl px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-muted/40 hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-b-xl px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted/40 hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
         <History aria-hidden="true" className="size-3.5 shrink-0" />
         <span className="min-w-0 flex-1">{title}</span>
         <ChevronDown aria-hidden="true" className="size-4 shrink-0 transition-transform group-open:rotate-180" />
       </summary>
-      <div className="space-y-2 px-4 pb-4 text-sm leading-5 text-foreground [overflow-wrap:anywhere]">{children}</div>
+      <div className="space-y-2 px-3 pb-3 text-sm leading-5 text-foreground [overflow-wrap:anywhere]">{children}</div>
     </details>
   );
 }
@@ -62,9 +62,9 @@ function RecipientCards({ persons, relationLabels, tx, testId }: {
   testId?: string;
 }) {
   return (
-    <ul className="grid gap-3 @2xl:grid-cols-2" data-testid={testId}>
+    <ul className="grid gap-2 @2xl:grid-cols-2" data-testid={testId}>
       {persons.map((person, index) => (
-        <li key={index} className="min-w-0 space-y-3 rounded-lg border border-border/60 bg-card p-3.5 [overflow-wrap:anywhere]">
+        <li key={index} className="min-w-0 space-y-2 rounded-lg border border-border/60 bg-card p-2.5 [overflow-wrap:anywhere]">
           <div className="flex items-start gap-2.5">
             <UsersRound aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-foreground" />
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
@@ -77,7 +77,7 @@ function RecipientCards({ persons, relationLabels, tx, testId }: {
           {recipientFacts(person, tx) ? <div className="space-y-1 text-sm leading-5" data-testid="portal-trusted-person-facts">
             <p className="text-foreground">{recipientFacts(person, tx).replace(/^ · /, "")}</p>
           </div> : null}
-          <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-2.5 text-sm leading-5 text-foreground">
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-2 text-sm leading-5 text-foreground">
             <span>{tx("Объём информации:", "Auskunftsumfang:")}</span>
             <RecipientScopeChips person={person} tx={tx} />
           </div>
@@ -133,19 +133,19 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
     );
   };
   return (
-    <div className="@container/consents rounded-xl bg-muted/30 p-2 sm:p-3">
-    <div className="grid items-start gap-4 @5xl/consents:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+    <div className="@container/consents min-w-0">
+    <div className={form ? "grid items-start gap-2 @5xl/consents:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]" : "grid items-start gap-2"}>
     <section className="@container min-w-0 rounded-xl border border-border/60 bg-card" data-testid="portal-disclosure" aria-label={tx("Информация третьим лицам", "Auskunft an Dritte")}>
-      <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3.5">
+      <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
         <AdminSectionTitle className="text-sm">{tx("Информация третьим лицам", "Auskunft an Dritte")}</AdminSectionTitle>
         <ClientFormEditButton section="disclosure" className="ml-auto" />
       </div>
-      <div className="space-y-4 p-4">
+      <div className="space-y-2.5 p-3">
       {/* Optional (owner 2026-10-19): an explicit "No" is the person's own valid
           answer, shown neutrally and never as a missing consent; the separate
           disclosure consent exists only after a "Yes". */}
-      <dl className="grid gap-3 @md:grid-cols-2">
-        <div className="flex min-w-0 flex-col items-start gap-2 rounded-lg bg-muted/35 p-3 text-sm leading-5">
+      <dl className="grid gap-2 @md:grid-cols-2">
+        <div className="flex min-w-0 flex-col items-start gap-1.5 border-b border-border/60 pb-2 text-sm leading-5">
           <dt className="font-medium">{tx("Предоставлять информацию третьим лицам", "Auskunft an Dritte")}</dt>
           <dd><StatusChip tone={disclosureAllowed ? "success" : disclosureDenied ? "neutral" : "warning"} data-testid="portal-disclosure-decision">
             {disclosure?.allow_disclosure === true ? tx("Да", "Ja")
@@ -153,7 +153,7 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
               : disclosureDenied ? tx("Нет — не разрешено", "Nein – nicht erlaubt") : tx("Не отвечено", "Nicht beantwortet")}
           </StatusChip></dd>
         </div>
-        {disclosureDenied ? null : <div className="flex min-w-0 flex-col items-start gap-2 rounded-lg bg-muted/35 p-3 text-sm leading-5">
+        {disclosureDenied ? null : <div className="flex min-w-0 flex-col items-start gap-1.5 border-b border-border/60 pb-2 text-sm leading-5">
           <dt className="font-medium">{tx("Согласие на передачу данных получателям информации", "Einwilligung zur Weitergabe an Auskunftsberechtigte")}</dt>
           <dd><StatusChip tone={disclosureAllowed ? "success" : "warning"} data-testid="portal-disclosure-consent">
             {disclosure?.consent_given === true ? tx("Дано", "Erteilt") : disclosure?.consent_given === false ? tx("Не дано", "Nicht erteilt") : tx("Не зафиксировано", "Nicht dokumentiert")}
@@ -171,14 +171,14 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
         </span>
       </p> : null}
       {/* The persons themselves are listed once, in «Лица и учреждения» (owner 2026-10-26). */}
-      {persons.length > 0 ? <StatusChip tone="warning" className="items-start rounded-lg px-3 py-2 whitespace-normal" data-testid="portal-trusted-persons-pointer">
+      {persons.length > 0 ? <StatusChip tone="neutral" className="items-start whitespace-normal" data-testid="portal-trusted-persons-pointer">
         <Info aria-hidden="true" className="mt-0.5" />
         <span>{tx("Получатели информации", "Auskunftsberechtigte")} · {persons.length} — {tx("в списке «Лица и учреждения» ниже", "in der Liste „Personen und Einrichtungen“ unten")}</span>
       </StatusChip> : null}
       </div>
       {disclosure ? <ConsentDetails title={tx("Кто подтвердил · версия и текст согласия", "Bestätigung · Version und Einwilligungstext")} testId="portal-disclosure-receipt">
         <div className="flex flex-wrap items-center gap-1.5" data-testid="portal-disclosure-audit">
-          <StatusChip tone="warning" className="whitespace-normal">
+          <StatusChip tone="neutral" className="whitespace-normal">
             <UserRound aria-hidden="true" />
             <span>{disclosureWho}{disclosure.chosen_by_name && disclosureRole ? ` (${disclosureRole})` : ""}</span>
           </StatusChip>
@@ -215,18 +215,18 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
           </summary>
           <p className="whitespace-pre-wrap break-words border-t border-border/50 bg-card px-3 py-2.5 text-[13px] leading-relaxed text-foreground">{disclosure.consent_text}</p>
         </details> : null}
-      </ConsentDetails> : <p className="border-t border-border/60 px-4 py-3 text-sm leading-5 text-foreground">{tx("Отдельное решение и согласие на предоставление информации ещё не зафиксированы.", "Eine gesonderte Entscheidung und Einwilligung zur Auskunft sind noch nicht dokumentiert.")}</p>}
+      </ConsentDetails> : <p className="border-t border-border/60 px-3 py-2 text-sm leading-5 text-foreground">{tx("Отдельное решение и согласие на предоставление информации ещё не зафиксированы.", "Eine gesonderte Entscheidung und Einwilligung zur Auskunft sind noch nicht dokumentiert.")}</p>}
     </section>
     {form ? <section className="@container min-w-0 rounded-xl border border-border/60 bg-card" data-testid="portal-consent-choices" aria-label={tx("Передача данных · Anlage 1", "Datenübermittlung · Anlage 1")}>
-      <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3.5">
+      <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
         <AdminSectionTitle className="text-sm">{tx("Передача данных · Anlage 1", "Datenübermittlung · Anlage 1")}</AdminSectionTitle>
         <ClientFormEditButton section="consents" className="ml-auto" />
       </div>
-      <div className="space-y-5 p-4">
+      <div className="space-y-2.5 p-3">
       {!form.choices ? <p className="rounded-lg bg-muted/35 p-3 text-sm text-foreground">{tx("Выбор ещё не сохранён в кабинете", "Noch keine Auswahl im Kundenkabinett gespeichert")}</p> : null}
       <dl className="divide-y divide-border/60">
         {PORTAL_CONSENT_OPTIONS.map((key) => (
-          <div key={key} className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-2 py-3 first:pt-0 last:pb-0">
+          <div key={key} className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 py-2 first:pt-0 last:pb-0">
             <dt className="flex min-w-0 max-w-full items-start gap-2 text-sm leading-5">
               <FileText aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-foreground" />
               <span>{labels[key]}</span>
@@ -239,14 +239,14 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
                     <ChevronDown aria-hidden="true" className="size-3.5 shrink-0 transition-transform group-open/recipients:rotate-180" />
                     <span>{tx("Получатели в этой версии формы", "Empfänger in dieser Formularversion")} · {form.recipients.length}</span>
                   </summary>
-                  <div className="pt-3"><RecipientCards persons={form.recipients} relationLabels={relationLabels} tx={tx} testId="portal-consent-recipients" /></div>
+                  <div className="pt-2"><RecipientCards persons={form.recipients} relationLabels={relationLabels} tx={tx} testId="portal-consent-recipients" /></div>
                 </details>
               ) : null}
             </dd>
           </div>
         ))}
       </dl>
-      <div className="space-y-3 border-t border-border/60 pt-4">
+      <div className="space-y-2 border-t border-border/60 pt-2">
         <h4 className="text-sm font-semibold">{tx("Каналы передачи данных", "Kommunikationswege zur Datenübermittlung")}</h4>
         <dl className="grid gap-2 @sm:grid-cols-2 @3xl:grid-cols-4">
           {PORTAL_CONSENT_CHANNELS.filter((key) => key !== "channel_threema").map((key) => (
@@ -261,7 +261,7 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
       {form.choices ? (
         <div className="flex flex-wrap items-center gap-2 text-sm leading-5 text-foreground" data-testid="portal-consent-chooser">
           <span>{tx("Последнее изменение:", "Zuletzt geändert:")}</span>
-          <StatusChip tone="warning" className="whitespace-normal">
+          <StatusChip tone="neutral" className="whitespace-normal">
             <UserRound aria-hidden="true" />
             <span>{who}{form.chosen_by_role ? ` (${form.chosen_by_role})` : ""}</span>
           </StatusChip>

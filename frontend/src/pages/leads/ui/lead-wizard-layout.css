@@ -76,6 +76,12 @@
   background: var(--heading-marker);
 }
 
+/* Nested groups carry the accent; their enclosing heading stays quiet. */
+#lead-wizard-step-panel [data-slot="record-section"]:has(> div:last-child :is(h3, [data-wizard-subsection-marker]))
+  > div:first-child h3::before {
+  display: none;
+}
+
 #lead-wizard-step-panel > fieldset {
   max-width: 1440px;
   margin-inline: auto;
@@ -132,7 +138,19 @@
 }
 
 #lead-wizard-step-panel .wizard-review-list {
+  display: grid;
   max-width: 64rem;
+  gap: 0 16px;
+}
+
+#lead-wizard-step-panel .wizard-work-types {
+  max-width: 64rem;
+}
+
+@media (min-width: 1024px) {
+  #lead-wizard-step-panel .wizard-review-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 639px) {

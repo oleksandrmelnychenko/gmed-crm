@@ -8860,7 +8860,7 @@ function ProviderContactFields({
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-2">
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/25 text-muted-foreground">
+                <span className="flex size-5 shrink-0 items-center justify-center text-foreground">
                   {contact.contactKind === "email" ? (
                     <Mail className="size-4" />
                   ) : (
@@ -9408,7 +9408,7 @@ function PersonContactFields({
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-2">
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/25 text-muted-foreground">
+                <span className="flex size-5 shrink-0 items-center justify-center text-foreground">
                   {contact.contactKind === "email" ? (
                     <Mail className="size-4" />
                   ) : (

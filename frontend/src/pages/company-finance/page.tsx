@@ -158,8 +158,6 @@ const textByLanguage = {
     calculated: "Расчетное",
     confirmed: "Подтверждено",
     shown: (shown: number, total: number) => `Показано ${shown} из ${total}`,
-    receivablesDefinition:
-      "Долг пациентов: открытые выпущенные счета (кроме авансовых) после кредит-нот, оплат и зачтённых авансов, плюс не выставленные расходы GMED и корректировки, минус незачтённые оплаченные авансы и переплаты. Та же сумма — на дашбордах CEO и Billing.",
     openAdvanceRequests: (amount: string) =>
       `Запрошенные авансы (не оплачены, в долг не входят): ${amount}.`,
     nonCashOffsets: (amount: string) =>
@@ -256,8 +254,6 @@ const textByLanguage = {
     calculated: "Berechnet",
     confirmed: "Bestätigt",
     shown: (shown: number, total: number) => `${shown} von ${total} angezeigt`,
-    receivablesDefinition:
-      "Patientenforderungen: offene ausgestellte Rechnungen (ohne Anzahlungsrechnungen) nach Gutschriften, Zahlungen und angerechneten Anzahlungen, zuzüglich noch nicht berechneter GMED-Auslagen und Korrekturen, abzüglich nicht angerechneter bezahlter Anzahlungen und Überzahlungen. Derselbe Betrag steht auf den Dashboards von CEO und Billing.",
     openAdvanceRequests: (amount: string) =>
       `Angeforderte Anzahlungen (unbezahlt, nicht in den Forderungen): ${amount}.`,
     nonCashOffsets: (amount: string) =>
@@ -292,20 +288,11 @@ function SummaryCard({
   tone?: "default" | "positive" | "negative" | "warning" | "info";
 }) {
   return (
-    <div
-      className={cn(
-        "min-w-0 rounded-lg border border-border/70 border-l-[3px] bg-card px-2.5 py-2 shadow-xs sm:px-3 sm:py-2.5",
-        tone === "default" && "border-l-slate-300",
-        tone === "positive" && "border-l-emerald-400",
-        tone === "negative" && "border-l-rose-400",
-        tone === "warning" && "border-l-amber-400",
-        tone === "info" && "border-l-sky-400",
-      )}
-    >
-      <p className="line-clamp-2 min-h-7 text-[10px] font-medium leading-3.5 text-muted-foreground sm:min-h-0 sm:truncate sm:text-[11px]" title={label}>{label}</p>
+    <div className="min-w-0">
+      <p className="text-xs leading-4 text-muted-foreground" title={label}>{label}</p>
       <p
         className={cn(
-          "mt-0.5 truncate text-sm font-semibold tracking-tight tabular-nums sm:mt-1 sm:text-base",
+          "mt-0.5 break-words font-mono text-sm font-semibold tabular-nums",
           tone === "positive" && "text-emerald-700 dark:text-emerald-400",
           tone === "negative" && "text-rose-700 dark:text-rose-400",
           tone === "warning" && "text-amber-700 dark:text-amber-400",
@@ -849,7 +836,7 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
 
       {summary ? (
         <>
-          <section className="grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-5">
+          <section className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-card px-3 py-2.5 lg:grid-cols-3 xl:grid-cols-5">
             <SummaryCard label={text.patientReceivables} value={money(summary.patient_receivables_calculated)} tone={parseAmount(summary.patient_receivables_calculated) > 0 ? "negative" : "default"} />
             <SummaryCard label={text.patientCredits} value={money(summary.patient_credits)} tone={parseAmount(summary.patient_credits) > 0 ? "info" : "default"} />
             <SummaryCard label={text.providerPayables} value={money(summary.provider_payables)} tone={parseAmount(summary.provider_payables) > 0 ? "negative" : "default"} />
@@ -887,15 +874,16 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
             </ShellBanner>
           ) : null}
 
-          <div className="space-y-0.5 text-[11px] leading-4 text-muted-foreground" data-testid="company-finance-definitions">
-            <p>{text.receivablesDefinition}</p>
-            {parseAmount(summary.open_advance_requests) > 0 ? (
-              <p>{text.openAdvanceRequests(money(summary.open_advance_requests))}</p>
-            ) : null}
-            {parseAmount(summary.non_cash_offsets) !== 0 ? (
-              <p>{text.nonCashOffsets(money(summary.non_cash_offsets))}</p>
-            ) : null}
-          </div>
+          {parseAmount(summary.open_advance_requests) > 0 || parseAmount(summary.non_cash_offsets) !== 0 ? (
+            <div className="space-y-0.5 text-[11px] leading-4 text-muted-foreground" data-testid="company-finance-definitions">
+              {parseAmount(summary.open_advance_requests) > 0 ? (
+                <p>{text.openAdvanceRequests(money(summary.open_advance_requests))}</p>
+              ) : null}
+              {parseAmount(summary.non_cash_offsets) !== 0 ? (
+                <p>{text.nonCashOffsets(money(summary.non_cash_offsets))}</p>
+              ) : null}
+            </div>
+          ) : null}
         </>
       ) : loading ? (
         <div className="rounded-lg border border-border/70 bg-card px-4 py-12 text-center text-sm text-muted-foreground">

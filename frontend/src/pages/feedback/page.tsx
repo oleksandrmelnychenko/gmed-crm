@@ -226,7 +226,7 @@ const FEEDBACK_TREATMENT_SUCCESS_LABEL_KEYS = {
 function titleWithDot(title: ReactNode) {
   return (
     <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
+      <span aria-hidden className="size-1.5 rounded-full bg-[var(--heading-marker)]" />
       <span>{title}</span>
     </span>
   );
@@ -241,13 +241,6 @@ function feedbackStatusTone(status: string) {
   if (status === "submitted") return "warning";
   if (status === "archived") return "neutral";
   return toneForStatus(status);
-}
-
-function feedbackStatusAccentClass(status: string) {
-  if (status === "reviewed") return "bg-emerald-500";
-  if (status === "submitted") return "bg-amber-500";
-  if (status === "archived") return "bg-muted-foreground/45";
-  return "bg-sky-500";
 }
 
 function feedbackSourceDisplay(source: string | null | undefined, translations: Translations) {
@@ -340,13 +333,13 @@ function FeedbackTextSection({
   children: ReactNode;
 }) {
   return (
-    <section className="min-w-0 rounded-lg border border-border/70 bg-card p-3">
+    <section className="min-w-0 rounded-lg bg-card p-3">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
         </div>
       </div>
-      <div className="mt-5 text-sm text-foreground">{children}</div>
+      <div className="mt-3 text-sm text-foreground">{children}</div>
     </section>
   );
 }
@@ -371,31 +364,21 @@ function FeedbackReviewHeaderVariants({ item, t }: { item: PortalFeedbackItem; t
   );
 
   return (
-    <section className="rounded-lg border border-border/70 bg-card">
-      <div className="relative overflow-hidden p-4">
-        <span
-          className={cn(
-            "absolute left-0 top-4 h-12 w-1 rounded-r-full",
-            feedbackStatusAccentClass(item.status),
-          )}
-        />
-        <div className="grid gap-4 pl-3 md:grid-cols-[minmax(0,1fr)_120px]">
+    <section className="rounded-lg bg-card">
+      <div className="p-3">
+        <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="h-px w-8 bg-border" />
               <StatusBadge tone={feedbackStatusTone(item.status)}>
                 {feedbackReviewStatusLabel(item.status, t)}
               </StatusBadge>
             </div>
             <h3 className="mt-1.5 text-lg font-semibold leading-none text-foreground">{title}</h3>
             <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{context}</p>
-            <div className="mt-2.5 flex flex-wrap gap-2">{tags}</div>
+            <div className="mt-2 flex flex-wrap gap-1.5">{tags}</div>
           </div>
-          <div className="flex flex-col justify-between border-l border-dashed border-border pl-4">
-            <span className="text-[10px] text-muted-foreground">
-              {feedbackSourceDisplay(item.source, t)}
-            </span>
-            <span className="text-right text-xs font-medium leading-5 text-foreground">
+          <div className="flex items-start md:justify-end">
+            <span className="font-mono text-xs leading-5 text-muted-foreground">
               {submittedAt}
             </span>
           </div>
@@ -554,15 +537,10 @@ function PatientRatingScale({
 
   return (
     <div
-      className={cn(
-        "portal-rating-scale rounded-xl border p-3",
-        prominent
-          ? "border-border bg-muted/40"
-          : "border-border/70 bg-card",
-      )}
+      className="portal-rating-scale min-w-0 py-2"
     >
       <div className="mb-2 flex items-center justify-between gap-3">
-        <span className="text-sm font-medium text-foreground">{label}</span>
+        <span className={cn("text-sm text-foreground", prominent ? "font-semibold" : "font-medium")}>{label}</span>
         <span className="text-sm font-semibold tabular-nums text-foreground">
           {value}
         </span>
@@ -692,7 +670,7 @@ function PatientScoreGrid({
             </button>
           ))}
         </div>
-        <label className="mt-3 flex cursor-pointer items-center gap-3 rounded-lg border border-border/70 bg-muted/20 px-3 py-3">
+        <label className="mt-2 flex cursor-pointer items-center gap-2 py-1.5">
           <input
             type="checkbox"
             checked={form.complicationReported}
@@ -764,14 +742,14 @@ function feedbackCard(item: PortalFeedbackItem, t: Translations, withInternal = 
     <>
         <FeedbackReviewHeaderVariants item={item} t={t} />
 
-        <section className="rounded-lg border border-border/70 bg-card p-6">
+        <section className="rounded-lg bg-card p-3">
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.feedback_scores)}</h2>
             </div>
           </div>
-          <div className="mt-5 grid gap-2.5 xl:grid-cols-2">
-            <div className="grid gap-1.5 rounded-xl bg-card p-3">
+          <div className="mt-3 grid gap-2.5 xl:grid-cols-2">
+            <div className="grid gap-1">
               <FeedbackSummaryLine label={t.feedback_overall} value={String(item.overall_score)} />
               <FeedbackSummaryLine label={t.uiText.feedback_pm_label} value={item.patient_manager_score ? String(item.patient_manager_score) : notRated} />
               <FeedbackSummaryLine label={t.feedback_interpreter} value={item.interpreter_score ? String(item.interpreter_score) : notRated} />
@@ -779,7 +757,7 @@ function feedbackCard(item: PortalFeedbackItem, t: Translations, withInternal = 
               <FeedbackSummaryLine label={t.feedback_treatment} value={item.treatment_score ? String(item.treatment_score) : notRated} />
               <FeedbackSummaryLine label={t.feedback_doctor} value={item.doctor_score ? String(item.doctor_score) : notRated} />
             </div>
-            <div className="grid gap-1.5 rounded-xl bg-card p-3">
+            <div className="grid gap-1">
               <FeedbackSummaryLine label={t.feedback_organization} value={item.organization_score ? String(item.organization_score) : notRated} />
               <FeedbackSummaryLine label={t.feedback_service} value={item.service_score ? String(item.service_score) : notRated} />
               <FeedbackSummaryLine label={t.feedback_ambience} value={item.infrastructure_score ? String(item.infrastructure_score) : notRated} />
@@ -826,7 +804,7 @@ function RankingList({
   horizontal?: boolean;
 }) {
   return (
-    <section className="rounded-lg border border-border/70 bg-card p-6">
+    <section className="rounded-lg bg-card p-3">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
@@ -837,7 +815,7 @@ function RankingList({
           <p className="text-sm text-muted-foreground">{empty}</p>
         ) : (
           rows.map((row) => (
-            <div key={row.id} className={cn("flex items-center justify-between gap-3 rounded-lg px-3 py-2", tokens.surface.mutedCard)}>
+            <div key={row.id} className="flex items-center justify-between gap-3 border-b border-border/60 py-1.5 last:border-b-0">
               <div className="min-w-0">
                 <p className="break-words text-sm font-medium text-foreground">{row.name}</p>
                 <p className="break-words text-xs text-muted-foreground">{row.subtitle}</p>
@@ -1911,7 +1889,7 @@ function useStaffFeedbackWorkspaceContent() {
     captureOpen && error === feedbackSelectPatientError ? error : "";
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <PageHeader
         title={t.feedback_staff_page_title}
         description={t.feedback_staff_page_description}
@@ -1986,10 +1964,10 @@ function useStaffFeedbackWorkspaceContent() {
         />
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-3">
         {summary ? (
           <div className="grid items-start gap-3 md:grid-cols-2 2xl:grid-cols-4">
-              <section className="min-w-0 rounded-lg border border-border/70 bg-card p-3 md:col-span-2">
+              <section className="min-w-0 rounded-lg bg-card p-3 md:col-span-2">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2 className={tokens.text.sectionTitle}>
@@ -2202,11 +2180,11 @@ function useStaffFeedbackWorkspaceContent() {
                   />
                 }
               >
-                <div className="space-y-4 rounded-xl">
+                <div className="space-y-3 rounded-xl">
                   {feedbackCard(activeReview, t, true)}
 
                   {canReview ? (
-                  <section className="rounded-lg border border-border/70 bg-card p-6">
+                  <section className="rounded-lg bg-card p-3">
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
@@ -2214,7 +2192,7 @@ function useStaffFeedbackWorkspaceContent() {
                         </h2>
                       </div>
                     </div>
-                    <div className="mt-5 space-y-3">
+                    <div className="mt-3 space-y-3">
                       <Field label={t.feedback_review_status}>
                         <NativeComboboxSelect
                           value={reviewStatus}

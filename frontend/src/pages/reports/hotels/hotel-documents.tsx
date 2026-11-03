@@ -48,13 +48,13 @@ export function HotelDocuments({ providerId, role, lang, onDirty }: { providerId
     try { await downloadApiFile(`/documents/${document.id}/download`, document.original_filename || document.auto_name); }
     catch { setError(labels.downloadFailed); }
   }
-  return <section className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm" data-testid="hotel-documents">
-    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-muted/15 px-4 py-3"><h3 className="flex items-center gap-2 text-sm font-semibold"><span className="size-2 shrink-0 rounded-full bg-orange-500" />{labels.title}{canRead && !loading ? <span className="rounded-full border border-border/70 bg-card px-2 py-0.5 font-mono text-xs font-normal text-muted-foreground">{documents.length}</span> : null}</h3>{providerId && canUpload && !adding ? <Button size="sm" onClick={() => { setAdding(true); setSaved(false); }}><Plus className="size-3.5" />{labels.add}</Button> : null}</header>
-    <div className="space-y-3 p-4">
+  return <section className="overflow-hidden rounded-lg bg-card" data-testid="hotel-documents">
+    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-card px-3 py-2"><h3 className="flex items-center gap-2 text-sm font-semibold"><span className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />{labels.title}{canRead && !loading ? <span className="rounded-full border border-border/70 bg-card px-2 py-0.5 font-mono text-xs font-normal text-muted-foreground">{documents.length}</span> : null}</h3>{providerId && canUpload && !adding ? <Button size="sm" onClick={() => { setAdding(true); setSaved(false); }}><Plus className="size-3.5" />{labels.add}</Button> : null}</header>
+    <div className="space-y-2 p-3">
     <p className="text-xs leading-5 text-muted-foreground">{!providerId ? labels.link : !canRead ? labels.permission : labels.hint}</p>
     {saved ? <p role="status" className="flex items-center gap-1.5 text-xs text-emerald-700"><Check className="size-3.5" />{labels.saved}</p> : null}
     {error ? <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error}<Button size="sm" variant="outline" onClick={() => void load()}>{labels.retry}</Button></div> : null}
-    {adding ? <form className="space-y-3 rounded-lg border border-border/70 bg-muted/20 p-4" onSubmit={event => { event.preventDefault(); void upload(); }}>
+    {adding ? <form className="space-y-2 border-t border-border/60 pt-2" onSubmit={event => { event.preventDefault(); void upload(); }}>
       <input ref={fileInput} type="file" aria-label={labels.choose} accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx" className="hidden" disabled={busy} onChange={event => { setFile(event.target.files?.[0] ?? null); setUploadError(""); }} />
       <Button type="button" variant="outline" disabled={busy} className="h-auto min-h-9 max-w-full whitespace-normal break-all text-left" onClick={() => fileInput.current?.click()}><Paperclip className="size-4 shrink-0" />{file?.name || labels.choose}</Button><p className="text-xs text-muted-foreground">{labels.formats}</p>
       <label className="block space-y-1.5 text-xs font-medium text-muted-foreground">{labels.name}<Input maxLength={255} value={title} placeholder={file?.name} disabled={busy} onChange={event => setTitle(event.target.value)} /></label>

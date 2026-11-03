@@ -3,7 +3,7 @@ import { Download, Eye, FileWarning, LoaderCircle, type LucideIcon } from "lucid
 
 import type { ColumnDef } from "@/components/data-table/types";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
-import { CountBadge, Field, textareaClass, tokens } from "@/components/ui-shell";
+import { CountBadge, Field, textareaClass } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -65,7 +65,7 @@ export function MutedNote({
     <div
       role="note"
       className={cn(
-        "flex items-start gap-2 rounded-lg border border-border/70 bg-muted/40 px-3 py-2 text-sm text-muted-foreground",
+        "flex max-w-4xl items-start gap-2 py-1 text-xs leading-5 text-muted-foreground",
         className,
       )}
     >
@@ -80,7 +80,7 @@ export function TableTitle({ children, count }: { children: ReactNode; count?: n
   return (
     <>
       <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
         {children}
         {count !== undefined ? <CountBadge>{count}</CountBadge> : null}
       </span>
@@ -237,8 +237,8 @@ export function FilePreviewDialog({
   return (
     <Dialog open={open} onOpenChange={(next) => (!next ? onClose() : undefined)} allowImplicitDismissal>
       <DialogContent className="flex h-[86vh] w-[94vw] max-w-none flex-col overflow-hidden rounded-xl p-0 duration-0 data-closed:animate-none data-open:animate-none sm:w-[78vw] sm:max-w-[1500px]">
-        <DialogHeader className="border-b border-border/70 px-5 py-4">
-          <div className="flex min-w-0 flex-wrap items-start justify-between gap-4 pr-10">
+        <DialogHeader className="border-b border-border/70 px-3 py-2">
+          <div className="flex min-w-0 flex-wrap items-start justify-between gap-2 pr-10">
             <div className="min-w-0">
               <DialogTitle className="truncate font-mono text-base" title={fileName}>
                 {fileName || t.personnel_preview}
@@ -399,10 +399,10 @@ export function ReasonDialog({
   );
 }
 
-/** A titled soft card grouping related fields, as in the other admin sheets. */
+/** Compact field group with a divider between adjacent sections. */
 export function FormSection({ title, hint, children }: { title: ReactNode; hint?: ReactNode; children: ReactNode }) {
   return (
-    <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+    <section className="space-y-2 border-b border-border/60 pb-3 last:border-b-0 last:pb-0">
       <div className="space-y-1">
         <AdminSectionTitle>{title}</AdminSectionTitle>
         {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}

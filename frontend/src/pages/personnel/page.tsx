@@ -104,7 +104,7 @@ export function PersonnelPage() {
 
   const headerActions =
     tab === "employees" && can.manage ? (
-      <Button type="button" className="h-9 gap-1.5 rounded-lg px-3.5" onClick={() => setCreating(true)}>
+      <Button type="button" className="h-8 gap-1.5 rounded-md px-3" onClick={() => setCreating(true)}>
         <Plus className="size-4" />
         {t.personnel_employee_new}
       </Button>
@@ -113,7 +113,7 @@ export function PersonnelPage() {
     ) : null;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <PageHeader title={t.nav_personnel} description={t.personnel_page_intro} actions={headerActions} />
       {categoriesError ? <Banner tone="error">{categoriesError}</Banner> : null}
 

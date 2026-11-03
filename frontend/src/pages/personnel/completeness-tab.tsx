@@ -129,7 +129,7 @@ export function CompletenessTab() {
       {loading && !data ? <TabLoader /> : null}
       {data && data.employees.length === 0 ? <EmptyCell>{t.personnel_employees_empty}</EmptyCell> : null}
       {data && data.employees.length > 0 ? (
-        <div className="overflow-x-auto rounded-lg border border-border/70 bg-card shadow-sm">
+        <div className="overflow-x-auto border border-border/70 bg-card">
           <table className="w-max min-w-full border-collapse text-xs">
             <thead>
               <tr className="border-b border-border/70 bg-muted/40 text-muted-foreground">

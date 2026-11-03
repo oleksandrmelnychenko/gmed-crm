@@ -337,7 +337,7 @@ export function ArchiveDialog({
                     />
                   </Field>
                 ) : (
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-x-3 gap-y-2 sm:grid-cols-2">
                     <Field label={t.personnel_category} required>
                       <SelectField
                         value={category}
@@ -388,7 +388,7 @@ export function ArchiveDialog({
                 <FormSection title={t.personnel_file} hint={t.personnel_file_hint}>
                   <label
                     className={cn(
-                      "flex cursor-pointer items-center gap-2 rounded-lg px-3 py-3 text-sm transition-colors hover:bg-muted/40",
+                      "flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted/40",
                       tokens.surface.dashed,
                     )}
                   >

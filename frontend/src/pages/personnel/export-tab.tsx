@@ -3,7 +3,7 @@ import { FileArchive, LoaderCircle } from "lucide-react";
 
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
-import { Banner, EmptyCell, Field, Section, StatusBadge, TabLoader, checkboxClass, tokens } from "@/components/ui-shell";
+import { Banner, EmptyCell, Field, Section, StatusBadge, TabLoader, checkboxClass } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select-field";
 import { toast } from "@/components/ui/toast";
@@ -126,7 +126,7 @@ export function ExportTab() {
   };
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
+    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
       <Section title={t.personnel_export_scope}>
         <div className="flex flex-wrap items-center gap-1" role="group" aria-label={t.personnel_export_scope}>
           {(
@@ -187,7 +187,7 @@ export function ExportTab() {
         <div>
           <Button
             type="button"
-            className="h-9 gap-1.5 rounded-lg px-3.5"
+            className="h-8 gap-1.5 rounded-md px-3"
             onClick={() => void runExport()}
             disabled={!canExport}
           >
@@ -196,7 +196,7 @@ export function ExportTab() {
           </Button>
         </div>
       </Section>
-      <aside className={cn("h-fit rounded-xl p-4", tokens.surface.mutedCard)}>
+      <aside className="h-fit">
         <Section title={t.personnel_export_contents_title}>
           <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
             <li>{t.personnel_export_contents_files}</li>

@@ -145,7 +145,7 @@ export function PersonnelEmployeePage() {
       {can.upload && isCurrent ? (
         <Button
           type="button"
-          variant="outline"
+          variant="default"
           size="sm"
           className="h-7 rounded-md px-2 text-xs"
           onClick={(event) => {
@@ -179,7 +179,7 @@ export function PersonnelEmployeePage() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <StaffLink
         to="/personnel"
         className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
@@ -193,7 +193,7 @@ export function PersonnelEmployeePage() {
           employee && can.upload ? (
             <Button
               type="button"
-              className="h-9 gap-1.5 rounded-lg px-3.5"
+              className="h-8 gap-1.5 rounded-md px-3"
               onClick={() => setArchiveMode({ kind: "upload", employeeId })}
             >
               <Upload className="size-4" />
@@ -207,15 +207,8 @@ export function PersonnelEmployeePage() {
 
       {employee ? (
         <>
-          <section className="relative overflow-hidden rounded-lg border border-border/70 bg-card px-7 py-4">
-            <span
-              aria-hidden
-              className={cn(
-                "absolute left-0 top-4 h-12 w-1 rounded-r-full",
-                employee.is_active ? "bg-emerald-500" : "bg-muted-foreground/30",
-              )}
-            />
-            <div className="space-y-4">
+          <section className="rounded-lg bg-card p-3">
+            <div className="space-y-2">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-2">
@@ -245,7 +238,7 @@ export function PersonnelEmployeePage() {
                   </Button>
                 ) : null}
               </div>
-              <div className="grid overflow-hidden rounded-lg border border-border/70 bg-card md:grid-cols-2">
+              <div className="grid gap-x-4 border-t border-border/60 pt-1 md:grid-cols-2">
                 <HeroInfoRow icon={Hash} label={t.personnel_number}>
                   <span className="font-mono">{employee.personnel_number || "—"}</span>
                 </HeroInfoRow>
@@ -284,7 +277,7 @@ export function PersonnelEmployeePage() {
                     </div>
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="default"
                       size="sm"
                       className="h-7 shrink-0 gap-1.5 rounded-md px-2 text-xs"
                       onClick={() => setArchiveMode({ kind: "profile", employeeId, document })}
@@ -394,7 +387,7 @@ function HeroInfoRow({
   className?: string;
 }) {
   return (
-    <div className={cn("grid min-w-0 content-start gap-4 px-3 py-2.5 sm:grid-cols-[10.25rem_minmax(0,1fr)]", className)}>
+    <div className={cn("grid min-w-0 content-start gap-x-3 gap-y-1 py-1.5 sm:grid-cols-[10.25rem_minmax(0,1fr)]", className)}>
       <div className="flex min-w-0 items-start gap-2 text-xs font-medium leading-5 text-foreground">
         <Icon className="mt-0.5 size-3.5 shrink-0 text-foreground/75" />
         <span className="min-w-0 break-words">{label}</span>

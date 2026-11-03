@@ -3418,10 +3418,10 @@ function WizardDocumentRows({
     const putAside = wizardDocumentIsArchived(document);
     const title = putAside ? wizardArchivedDocumentTitle(document) : wizardDocumentFilename(document);
     return (
-      <div key={document.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5" data-document-archived={putAside ? "true" : undefined}>
+      <div key={document.id} className="grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-x-2 gap-y-1 px-2.5 py-2 sm:grid-cols-[1rem_minmax(0,1fr)_auto]" data-document-archived={putAside ? "true" : undefined}>
         {archived
-          ? <History aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-          : <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />}
+          ? <History aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          : <FileText aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />}
         <div className="min-w-0 flex-1">
           <button
             type="button"
@@ -3432,7 +3432,7 @@ function WizardDocumentRows({
           >
             {title}
           </button>
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             <LeadWizardDocumentMetadata document={document} lang={lang} />
             {documentNote?.(document)}
             {/* The order changed after this PDF was made (`terms_current`, documents.rs):
@@ -3516,7 +3516,7 @@ function WizardDocumentRows({
           ) : null}
           {!archived ? <WizardDocumentRowError documentId={document.id} /> : null}
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="col-start-2 flex items-center gap-1 sm:col-start-3 sm:row-start-1">
           {!archived && canSignWizardDocument(document) && document.terms_current !== false ? (
             <DocumentSignatureAction
               documentId={document.id}
@@ -3555,7 +3555,7 @@ function WizardDocumentRows({
 
   return (
     <div className="space-y-2">
-      <div className={cn("divide-y divide-border/70 rounded-lg", tokens.surface.card)}>
+      <div className="divide-y divide-border/70 border-y border-border/70">
         {latestDocuments.map((document) => renderDocument(document, false))}
       </div>
       {archivedDocuments.length > 0 ? (
@@ -10191,7 +10191,7 @@ ${serviceCommentLines.join("\n")}`
                     />
                   </Field>
                 </div>
-                {periodWarningBanner ? <div className="mt-3">{periodWarningBanner}</div> : null}
+                {periodWarningBanner ? <div className="mt-2">{periodWarningBanner}</div> : null}
               </Section>
               {isQuestionnaireLead ? (
                 <Section title={tx("Данные опросника", "Fragebogendaten")}>
@@ -10237,7 +10237,7 @@ ${serviceCommentLines.join("\n")}`
                         key={value}
                         className={cn(
                           "overflow-hidden rounded-lg border bg-card",
-                          checked ? "border-[var(--brand)]" : "border-border/50",
+                          checked ? "border-primary/40" : "border-border/50",
                         )}
                       >
                         <label
@@ -10254,7 +10254,7 @@ ${serviceCommentLines.join("\n")}`
                           <span className="min-w-0 break-words text-sm text-foreground">{label}</span>
                         </label>
                         {checked ? (
-                          <div className="space-y-1.5 border-t border-border px-3 pb-3 pt-2.5">
+                          <div className="space-y-1 border-t border-border px-2.5 py-2">
                             <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                               <label
                                 htmlFor={commentId}
@@ -10270,7 +10270,8 @@ ${serviceCommentLines.join("\n")}`
                             <textarea
                               id={commentId}
                               aria-label={`${commentLabel}: ${label}`}
-                              className={cn(textareaClass, "min-h-20 resize-y bg-card")}
+                              rows={2}
+                              className={cn(textareaClass, "min-h-16 resize-y bg-card")}
                               value={draft.serviceComments[value] ?? ""}
                               onChange={(event) => patchServiceComment(value, event.target.value)}
                               placeholder={tx("Детали по этой услуге", "Details zu dieser Leistung")}
@@ -10281,16 +10282,26 @@ ${serviceCommentLines.join("\n")}`
                     );
                   })}
                 </div>
-                <Field label={tx("Общий комментарий", "Allgemeiner Kommentar")} note={clientVisibleNote} htmlFor={SERVICE_NOTES_ID}><textarea id={SERVICE_NOTES_ID} className={cn(textareaClass, "min-h-24 bg-card")} value={draft.serviceNotes} onChange={(event) => patch("serviceNotes", event.target.value)} /></Field>
-                {/* Staff only (owner 2026-11-02): `leads.services_internal_note`, never sent to the cabinet or the payer link. */}
-                <ServicesInternalNoteField
-                  id={SERVICES_INTERNAL_NOTE_ID}
-                  value={draft.servicesInternalNote}
-                  onChange={(value) => patch("servicesInternalNote", value)}
-                  tx={tx}
-                  labelClassName={cn(tokens.text.label, "font-mono")}
-                  textareaClassName={cn(textareaClass, "min-h-20 resize-y bg-card")}
-                />
+                <div className="wizard-form-grid grid items-start gap-3 lg:grid-cols-2">
+                  <Field label={tx("Общий комментарий", "Allgemeiner Kommentar")} note={clientVisibleNote} htmlFor={SERVICE_NOTES_ID}>
+                    <textarea
+                      id={SERVICE_NOTES_ID}
+                      rows={3}
+                      className={cn(textareaClass, "min-h-20 resize-y bg-card")}
+                      value={draft.serviceNotes}
+                      onChange={(event) => patch("serviceNotes", event.target.value)}
+                    />
+                  </Field>
+                  {/* Staff only (owner 2026-11-02): `leads.services_internal_note`, never sent to the cabinet or the payer link. */}
+                  <ServicesInternalNoteField
+                    id={SERVICES_INTERNAL_NOTE_ID}
+                    value={draft.servicesInternalNote}
+                    onChange={(value) => patch("servicesInternalNote", value)}
+                    tx={tx}
+                    labelClassName={cn(tokens.text.label, "font-mono")}
+                    textareaClassName={cn(textareaClass, "min-h-20 resize-y bg-card")}
+                  />
+                </div>
               </Section>
             </section>
           ) : null}
@@ -11026,11 +11037,11 @@ ${serviceCommentLines.join("\n")}`
                   ))}
                 </NativeComboboxSelect>
                 </Field>
-                <div className="border-y border-border/60 py-2.5">
-                  <p className="mb-2 text-xs font-semibold text-foreground">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-y border-border/60 py-2">
+                  <p className="font-mono text-xs font-medium text-muted-foreground">
                     {tx("Языки документа", "Dokumentsprachen")}
                   </p>
-                  <div className="flex flex-wrap gap-x-5 gap-y-2">
+                  <div className="flex flex-wrap gap-x-4 gap-y-2">
                     <label className="flex items-center gap-2 text-sm font-medium text-foreground">
                       <input
                         type="checkbox"
@@ -11073,16 +11084,16 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                 </div>
                 {selectedSpecializationItems.length > 0 ? (
-                  <div id={COST_ESTIMATE_WORK_TYPES_ID} tabIndex={-1} className="mt-3 border-t border-border/70 pt-3 focus:outline-none">
+                  <div id={COST_ESTIMATE_WORK_TYPES_ID} tabIndex={-1} className="wizard-work-types mt-2 pt-1 focus:outline-none">
                     <div className="mb-2 flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold text-foreground">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-mono text-xs font-semibold text-foreground">
                           {tx("Виды работ", "Leistungsarten")}
                         </p>
                         {selectedCostEstimateWorkTypes.length > 0 ? (
-                          <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                             <span>{tx("Выбрано:", "Ausgewählt:")}</span>
-                            <span className="inline-flex min-w-5 items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-1.5 py-0.5 font-semibold tabular-nums text-violet-700 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200">
+                            <span className="inline-flex min-w-5 items-center justify-center rounded-full border border-border bg-muted/40 px-1.5 font-mono tabular-nums text-foreground">
                               {selectedCostEstimateWorkTypes.length}
                             </span>
                           </p>
@@ -11130,7 +11141,7 @@ ${serviceCommentLines.join("\n")}`
                               <div className="flex items-center gap-1 bg-muted/35 px-1.5">
                                 <button
                                   type="button"
-                                  className="t-acc-head flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                  className="t-acc-head flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                   aria-expanded={isExpanded}
                                   onClick={() => {
                                     setCollapsedWorkTypeSpecializationIds((current) => {
@@ -11144,12 +11155,12 @@ ${serviceCommentLines.join("\n")}`
                                   <span className="t-acc-chevron flex size-5 shrink-0 items-center justify-center text-muted-foreground">
                                     <ChevronDown aria-hidden="true" className="size-4" />
                                   </span>
-                                  <span className="min-w-0 flex-1">
+                                  <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
                                     <span className="flex items-start gap-2 text-xs font-semibold text-foreground">
-                                      <span aria-hidden="true" className="mt-1 size-2 shrink-0 rounded-full bg-orange-500" />
+                                      <span data-wizard-subsection-marker aria-hidden="true" className="mt-1.5 size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
                                       <span className="min-w-0 break-words">{specialtyLabel(specializationValue(specialization))}</span>
                                     </span>
-                                    <span className="mt-0.5 block pl-4 text-[11px] text-muted-foreground">
+                                    <span className="text-xs text-muted-foreground">
                                       {selectedInSpecialization > 0
                                         ? tx(
                                             `${selectedInSpecialization} из ${specializationWorkTypes.length} выбрано`,
@@ -11190,7 +11201,7 @@ ${serviceCommentLines.join("\n")}`
                                         return (
                                           <label
                                             key={workType.id}
-                                            className="flex cursor-pointer items-start gap-3 px-3 py-2.5 transition-colors hover:bg-muted/45 motion-reduce:transition-none"
+                                            className="flex cursor-pointer items-start gap-2 px-3 py-2 transition-colors hover:bg-muted/45 motion-reduce:transition-none"
                                           >
                                             <input
                                               type="checkbox"
@@ -11204,9 +11215,9 @@ ${serviceCommentLines.join("\n")}`
                                               }
                                               className={cn(checkboxClass, "mt-0.5")}
                                             />
-                                            <span className="min-w-0 flex-1">
+                                            <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
                                               <span className={cn(
-                                                "block break-words text-sm leading-5",
+                                                "min-w-0 flex-1 basis-48 break-words text-sm leading-5",
                                                 selected ? "font-medium text-foreground" : "text-foreground/85",
                                               )}>
                                                 {lang === "de"
@@ -11221,11 +11232,11 @@ ${serviceCommentLines.join("\n")}`
                                                     workType.name_es ||
                                                     workType.code}
                                               </span>
-                                              <span className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
-                                                <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-medium text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                                              <span className="flex flex-wrap items-center gap-1.5 text-xs">
+                                                <span className="inline-flex items-center rounded-full border border-border bg-muted/40 px-2 py-0.5 font-mono text-muted-foreground">
                                                   {workTypeDurationLabel(durationHours, tx)}
                                                 </span>
-                                                <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-mono font-medium tabular-nums text-emerald-800 shadow-sm dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+                                                <span className="inline-flex items-center rounded-full border border-border bg-card px-2 py-0.5 font-mono font-medium tabular-nums text-foreground">
                                                   {formatMoneyRange(workType.min_price_eur, workType.max_price_eur)}
                                                 </span>
                                               </span>
@@ -11382,7 +11393,7 @@ ${serviceCommentLines.join("\n")}`
                   <div className="flex items-center gap-2">
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="ghost"
                       size="icon-sm"
                       className="size-7 rounded-lg"
                       disabled={orderPositionCount === 0}
@@ -11402,10 +11413,10 @@ ${serviceCommentLines.join("\n")}`
                       {
                         label: tx("Запрос клиента", "Kundenbedarf"),
                         value: (
-                          <span className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 font-normal text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+                          <span className="flex items-start gap-2 font-normal text-foreground">
                             <MessageSquareText
                               aria-hidden="true"
-                              className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400"
+                              className="mt-0.5 size-4 shrink-0 text-muted-foreground"
                             />
                             <span className="min-w-0 whitespace-pre-wrap break-words">
                               {draft.serviceNeeds
@@ -11431,7 +11442,7 @@ ${serviceCommentLines.join("\n")}`
                       onClick={() => setWorkTypesExpanded((current) => !current)}
                     >
                       <span className="flex min-w-0 items-center gap-2">
-                        <span aria-hidden="true" className="size-2 rounded-full bg-orange-500" />
+                        <span aria-hidden="true" data-wizard-subsection-marker className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
                         <span className="text-xs font-semibold text-foreground">
                           {tx("Виды работ и часы", "Leistungsarten und Stunden")}
                         </span>
@@ -11460,9 +11471,9 @@ ${serviceCommentLines.join("\n")}`
                 <div className="space-y-1.5">
                   <label
                     htmlFor={ORDER_SERVICE_SELECT_ID}
-                    className="flex items-center gap-2 text-xs font-semibold text-foreground"
+                    className="flex items-center gap-2 font-mono text-xs font-semibold text-foreground"
                   >
-                    <span aria-hidden="true" className="size-2 rounded-full bg-orange-500" />
+                    <span aria-hidden="true" data-wizard-subsection-marker className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
                     <span>{tx("Добавить услугу из каталога", "Leistung aus dem Katalog hinzufügen")}</span>
                   </label>
                   {draft.specialties.length === 0 ? (
@@ -11773,7 +11784,7 @@ ${serviceCommentLines.join("\n")}`
                   </Button>
                 )}
               >
-                <div className="rounded-xl border border-border/60 bg-card p-3">
+                <div className="max-w-5xl border-b border-border/60 pb-2">
                   {estimatedOutlaysLine ? (
                     <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
                       <Field
@@ -11819,7 +11830,7 @@ ${serviceCommentLines.join("\n")}`
                       >
                         <Trash2 aria-hidden="true" className="size-4" />
                       </Button>
-                      <StatusChip tone="warning" className="mb-0.5 rounded-lg px-2.5 py-1">
+                      <StatusChip tone="neutral" className="mb-0.5 max-w-full whitespace-normal">
                         <Info aria-hidden="true" />
                         <span>
                         {tx(
@@ -11843,12 +11854,12 @@ ${serviceCommentLines.join("\n")}`
                   )}
                 </div>
                 {quote ? (
-                  <dl className="flex flex-wrap gap-2">
-                    <div className="min-w-36 rounded-lg border border-border/60 bg-card px-3 py-2">
+                  <dl className="grid max-w-5xl grid-cols-2 gap-x-4 gap-y-2 border-b border-border/60 pb-2 lg:grid-cols-4">
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                       <dt className="font-mono text-xs font-medium text-muted-foreground">
                         {tx("Статус", "Status")}
                       </dt>
-                      <dd className="mt-1 text-xs font-medium text-foreground">
+                      <dd className="text-xs font-medium text-foreground">
                         <StatusChip tone={quote.status === "accepted" ? "success" : quote.status === "sent" ? "info" : quote.status === "rejected" ? "error" : quote.status === "draft" || quote.status === "expired" ? "warning" : "neutral"}>
                           {/* Same quote status labels as the contracts page. */}
                           {(
@@ -11864,34 +11875,34 @@ ${serviceCommentLines.join("\n")}`
                         </StatusChip>
                       </dd>
                     </div>
-                    <div className="min-w-36 rounded-lg border border-border/60 bg-card px-3 py-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                       <dt className="font-mono text-xs font-medium text-muted-foreground">
                         {tx("Сумма", "Betrag")}
                       </dt>
-                      <dd className="mt-1 whitespace-nowrap font-mono text-sm font-semibold tabular-nums text-orange-700 dark:text-orange-300">
+                      <dd className="whitespace-nowrap font-mono text-sm font-semibold tabular-nums text-foreground">
                         {formatMoneyLabel(quoteTotal)}
                       </dd>
                     </div>
-                    <div className="min-w-36 rounded-lg border border-border/60 bg-card px-3 py-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                       <dt className="font-mono text-xs font-medium text-muted-foreground">
                         {tx("Предоплата", "Vorauszahlung")}
                       </dt>
-                      <dd className="mt-1 whitespace-nowrap font-mono text-sm font-semibold tabular-nums text-sky-800 dark:text-sky-300">
+                      <dd className="whitespace-nowrap font-mono text-sm font-semibold tabular-nums text-foreground">
                         {formatMoneyLabel(persistedPrepayment)}
                       </dd>
                     </div>
-                    <div className="min-w-36 rounded-lg border border-border/60 bg-card px-3 py-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                       <dt className="font-mono text-xs font-medium text-muted-foreground">
                         {tx("Остаток", "Restbetrag")}
                       </dt>
-                      <dd className={cn("mt-1 whitespace-nowrap font-mono text-sm font-semibold tabular-nums", quoteTotal > persistedPrepayment ? "text-amber-900 dark:text-amber-200" : "text-emerald-800 dark:text-emerald-300")}>
+                      <dd className={cn("whitespace-nowrap font-mono text-sm font-semibold tabular-nums", quoteTotal > persistedPrepayment ? "text-amber-900 dark:text-amber-200" : "text-emerald-800 dark:text-emerald-300")}>
                         {formatMoneyLabel(Math.max(quoteTotal - persistedPrepayment, 0))}
                       </dd>
                     </div>
                   </dl>
                 ) : null}
 
-                <div className="space-y-3 rounded-xl border border-border/60 bg-card p-3">
+                <div className="max-w-5xl space-y-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <ToggleRow
                       checked={prepayment}
@@ -11927,7 +11938,7 @@ ${serviceCommentLines.join("\n")}`
                     ) : null}
                   </div>
 
-                  <div className="flex flex-wrap items-end gap-3">
+                  <div className="flex flex-wrap items-end gap-2">
                     {prepayment ? (
                       <Field className="w-full sm:w-56" label={tx("Необходимая предоплата", "Erforderliche Vorauszahlung")}>
                         <Input
@@ -11984,7 +11995,7 @@ ${serviceCommentLines.join("\n")}`
                         <Button
                           type="button"
                           size="sm"
-                          className="h-9 w-fit bg-[var(--brand)] text-primary-foreground hover:brightness-95"
+                          className="h-8 w-fit"
                           disabled={isBusy || !quote || !quoteIsCurrent || estimateDocumentOutdated}
                           aria-describedby={estimateDocumentOutdated ? "lead-wizard-estimate-outdated" : undefined}
                           onClick={() => void createOrAcceptQuote(true)}
@@ -12002,7 +12013,7 @@ ${serviceCommentLines.join("\n")}`
                     // prepayment and was made before its last change (DEV 2026-10-29).
                     <div id="lead-wizard-estimate-outdated" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm leading-6 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
                       <span className="flex min-w-0 flex-1 basis-80 items-start gap-2"><Info aria-hidden="true" className="mt-1 size-4 shrink-0" /><span>{tx("Документ сметы создан до последнего изменения сумм или предоплаты — создайте новую версию документа.", "Das Dokument des Kostenvoranschlags stammt von vor der letzten Änderung der Beträge oder der Vorauszahlung – erstellen Sie eine neue Version.")}</span></span>
-                      <Button type="button" variant="default" size="sm" className="h-8 shrink-0 bg-[var(--brand)] text-primary-foreground hover:brightness-95" disabled={isBusy || !lines.some(validLine)} data-testid="lead-wizard-estimate-new-version"
+                      <Button type="button" variant="default" size="sm" className="h-8 shrink-0" disabled={isBusy || !lines.some(validLine)} data-testid="lead-wizard-estimate-new-version"
                         onClick={() => void generateCommercialDocument("order_cost_estimate")}>
                         {busy === "generate-order_cost_estimate" ? <LoaderCircle className="size-3 animate-spin" /> : <FileText className="size-3" />}
                         {tx("Создать новую версию", "Neue Version erstellen")}
@@ -12165,7 +12176,7 @@ ${serviceCommentLines.join("\n")}`
               {patientDocumentReview}
               {patientContractReview}
               <Section title={isRepeatIntake ? tx("Завершение обращения", "Anfrage abschließen") : tx("Создание пациента", "Patient anlegen")}>
-                <p className="text-sm text-muted-foreground">
+                <p className="max-w-3xl text-sm text-muted-foreground">
                   {isRepeatIntake
                     ? tx("Проверьте все этапы. После подтверждения обращение и заказ будут связаны с существующей карточкой пациента.", "Prüfen Sie alle Schritte. Nach der Bestätigung werden Anfrage und Auftrag der bestehenden Patientenakte zugeordnet.")
                     : tx("Проверьте все этапы. После подтверждения система создаст карточку пациента и перенесёт в неё данные обращения.", "Prüfen Sie alle Schritte. Nach der Bestätigung wird die Patientenakte angelegt und die Angaben aus dem Lead werden übernommen.")}
@@ -12180,7 +12191,7 @@ ${serviceCommentLines.join("\n")}`
                       <button
                         key={item.key}
                         type="button"
-                        className="flex w-full items-center justify-between gap-2 rounded-md border-b border-border/70 px-2 py-2 text-left last:border-b-0 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                        className="flex w-full items-center justify-between gap-2 rounded-md border-b border-border/70 px-2 py-2 text-left hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
                         disabled={isBusy || !target || target.id === step}
                         onClick={() => target && navigateToStep(target.id)}
                       >
@@ -12252,7 +12263,7 @@ ${serviceCommentLines.join("\n")}`
                 </Banner>
               ) : null}
               {leadConverted ? null : (
-              <label className="flex items-start gap-3 rounded-lg border border-border bg-card px-4 py-3">
+              <label className="flex max-w-5xl items-start gap-2 rounded-lg border border-border bg-card px-3 py-2">
                 <input
                   type="checkbox"
                   className={cn(checkboxClass, "mt-0.5")}
@@ -13048,7 +13059,7 @@ ${serviceCommentLines.join("\n")}`
         onOpenChange={setServiceReportOpen}
       >
         <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
-          <DialogHeader className="border-b border-border/70 px-6 py-4 pr-14">
+          <DialogHeader className="border-b border-border/70 px-4 py-3 pr-14">
             <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 space-y-1">
                 <DialogTitle className="flex items-center gap-2">
@@ -13063,7 +13074,7 @@ ${serviceCommentLines.join("\n")}`
           </DialogHeader>
 
           {draft ? (
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-muted/15 px-6 py-5">
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-muted/15 p-3 sm:p-4">
               <Section
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Данные заказа", "Auftragsdaten")}
@@ -13091,9 +13102,9 @@ ${serviceCommentLines.join("\n")}`
                 ].map((item) => (
                   <div
                     key={item.label}
-                    className="min-w-0 border-b border-border px-4 py-3 last:border-b-0 sm:border-r sm:[&:nth-child(2n)]:border-r-0 lg:border-b-0 lg:[&:nth-child(2n)]:border-r lg:last:border-r-0"
+                    className="min-w-0 border-b border-border px-3 py-2 last:border-b-0 sm:border-r sm:[&:nth-child(2n)]:border-r-0 lg:border-b-0 lg:[&:nth-child(2n)]:border-r lg:last:border-r-0"
                   >
-                    <dt className="text-[10px] font-semibold text-muted-foreground">
+                    <dt className="font-mono text-xs text-muted-foreground">
                       {item.label}
                     </dt>
                     <dd className="mt-1 break-words text-sm font-medium text-foreground">{item.value}</dd>
@@ -13107,8 +13118,8 @@ ${serviceCommentLines.join("\n")}`
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Запрос клиента", "Kundenbedarf")}
                 >
-                  <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2.5 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-                    <MessageSquareText aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <div className="flex items-start gap-2 text-sm text-foreground">
+                    <MessageSquareText aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                     <p className="min-w-0 whitespace-pre-wrap break-words">
                       {draft.serviceNeeds
                         .map((value) =>
@@ -13133,7 +13144,7 @@ ${serviceCommentLines.join("\n")}`
                     onClick={() => setReportWorkTypesExpanded((current) => !current)}
                   >
                     <span className="flex min-w-0 items-center gap-2">
-                      <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-orange-500" />
+                      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
                       <span className="text-sm font-semibold text-foreground">
                         {tx("Виды работ и часы", "Leistungsarten und Stunden")}
                       </span>
@@ -13166,7 +13177,7 @@ ${serviceCommentLines.join("\n")}`
                 title={tx("Услуги и описания", "Leistungen und Beschreibungen")}
                 accessory={<CountBadge>{lines.length}</CountBadge>}
               >
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {lines.map((line) => {
                     const catalogService = line.agencyServiceId
                       ? agencyServiceById.get(line.agencyServiceId)
@@ -13182,17 +13193,17 @@ ${serviceCommentLines.join("\n")}`
                     return (
                       <article
                         key={line.id}
-                        className="overflow-hidden rounded-lg border border-border bg-card shadow-sm"
+                        className="overflow-hidden rounded-lg border border-border bg-card"
                       >
-                        <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border bg-muted/35 px-4 py-3">
+                        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
                           <div className="flex min-w-0 items-start gap-2.5">
-                            <div className="min-w-0">
+                            <div className="flex min-w-0 flex-wrap items-center gap-2">
                               <h4 className="break-words text-sm font-semibold leading-5 text-foreground">{agencyServiceLineDisplayName(line.description, catalogService, t, lang)}</h4>
                               {rawUnit ? (
                                 <Badge
                                   variant="outline"
                                   className={cn(
-                                    "mt-1 w-fit text-[10px] font-semibold",
+                                    "w-fit text-xs font-medium",
                                     serviceBillingUnitBadgeClass(rawUnit),
                                   )}
                                 >
@@ -13204,20 +13215,20 @@ ${serviceCommentLines.join("\n")}`
                           <Badge
                             variant="outline"
                             className={cn(
-                              "shrink-0 font-mono text-[10px] font-semibold",
+                              "shrink-0 font-mono text-xs font-medium",
                               serviceBillingUnitBadgeClass(rawUnit),
                             )}
                           >
                             {line.quantity || "0"} {unit}
                           </Badge>
                         </header>
-                        <div className="space-y-3 px-4 py-3">
-                          <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2.5">
-                            <p className="text-[10px] font-semibold text-muted-foreground">
+                        <div className="space-y-2 px-3 py-2">
+                          <div className="min-w-0">
+                            <p className="font-mono text-xs text-muted-foreground">
                               {tx("Полное описание", "Vollständige Beschreibung")}
                             </p>
                             {descriptionItems.length > 0 ? (
-                              <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm leading-5 text-foreground">
+                              <ol className="mt-1 list-decimal space-y-1 pl-5 text-sm leading-5 text-foreground">
                                 {descriptionItems.map((item) => (
                                   <li key={item.id} className="whitespace-pre-wrap break-words">{item.text}</li>
                                 ))}
@@ -13228,7 +13239,7 @@ ${serviceCommentLines.join("\n")}`
                               </p>
                             )}
                           </div>
-                          <dl className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-border pt-2 sm:grid-cols-3 lg:grid-cols-5">
                             {[
                               { label: tx("Объём", "Umfang"), value: `${line.quantity || "0"} ${unit}`, isTotal: false },
                               { label: tx("Ставка", "Satz"), value: `${formatMoneyLabel(money(line.price), line.currency)} / ${unit}`, isTotal: false },
@@ -13236,13 +13247,13 @@ ${serviceCommentLines.join("\n")}`
                               { label: tx("Нетто", "Netto"), value: formatMoneyLabel(net, line.currency), isTotal: false },
                               { label: tx("Итого", "Gesamt"), value: formatMoneyLabel(lineGross, line.currency), isTotal: true },
                             ].map((item) => (
-                              <div key={item.label} className="rounded-md border border-border/70 bg-muted/25 px-3 py-2">
-                                <dt className="text-[10px] font-medium text-muted-foreground">{item.label}</dt>
-                                <dd className="mt-0.5 whitespace-nowrap font-mono text-xs font-medium tabular-nums text-foreground">
+                              <div key={item.label} className="min-w-0">
+                                <dt className="font-mono text-xs text-muted-foreground">{item.label}</dt>
+                                <dd className="mt-0.5 break-words font-mono text-xs font-medium tabular-nums text-foreground">
                                   {item.isTotal ? (
                                     <Badge
                                       variant="outline"
-                                      className="border-emerald-200 bg-emerald-50 font-mono text-[10px] font-semibold tabular-nums text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                                      className="border-border bg-muted/40 font-mono text-xs font-semibold tabular-nums text-foreground"
                                     >
                                       {item.value}
                                     </Badge>
@@ -13268,13 +13279,13 @@ ${serviceCommentLines.join("\n")}`
                   { label: tx("НДС", "MwSt."), value: estimate.vat },
                   { label: tx("Итого", "Gesamt"), value: estimate.gross, strong: true },
                 ].map((item) => (
-                  <div key={item.label} className="border-b border-border px-4 py-3 text-right last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
-                    <dt className={item.strong ? "text-xs font-semibold text-foreground" : "text-[10px] font-medium text-muted-foreground"}>{item.label}</dt>
+                  <div key={item.label} className="border-b border-border px-3 py-2 text-right last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
+                    <dt className={item.strong ? "text-xs font-semibold text-foreground" : "font-mono text-xs text-muted-foreground"}>{item.label}</dt>
                     <dd className={cn("mt-0.5 whitespace-nowrap font-mono text-sm tabular-nums text-foreground", item.strong && "text-[15px] font-semibold")}>
                       {item.strong ? (
                         <Badge
                           variant="outline"
-                          className="border-emerald-200 bg-emerald-50 px-3 py-1 font-mono text-[15px] font-semibold tabular-nums text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                          className="border-border bg-card px-2 py-0.5 font-mono text-sm font-semibold tabular-nums text-foreground"
                         >
                           {formatMoneyLabel(item.value)}
                         </Badge>
@@ -13287,7 +13298,7 @@ ${serviceCommentLines.join("\n")}`
             </div>
           ) : null}
 
-          <DialogFooter className="mx-0 mb-0 border-t border-border bg-card px-6 py-4">
+          <DialogFooter className="mx-0 mb-0 border-t border-border bg-card px-4 py-2">
             <Button type="button" onClick={() => setServiceReportOpen(false)}>
               {tx("Закрыть", "Schließen")}
             </Button>

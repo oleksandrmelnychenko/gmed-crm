@@ -62,16 +62,16 @@ export function LeadSigningPackagePanel({
 
   return (
     <section
-      className="flex min-w-0 flex-wrap items-start justify-between gap-3 rounded-xl border border-border/50 bg-card p-3.5"
+      className="grid min-w-0 gap-2 rounded-xl border border-border/50 bg-card p-3 sm:grid-cols-[minmax(0,1fr)_auto]"
       data-testid="lead-signing-package"
     >
-      <div className="w-full min-w-0 space-y-1 sm:w-auto sm:flex-1">
+      <div className="min-w-0 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <AdminSectionTitle>
             {tx("Электронная подпись пакета", "Elektronische Unterschrift des Pakets")}
           </AdminSectionTitle>
         </div>
-        <div className="flex flex-wrap gap-2" data-signing-document-statuses>
+        <div className="flex flex-wrap gap-1.5" data-signing-document-statuses>
           {contractApplies ? (
             <StatusChip tone="success">{contractDocument?.ursprung === "paper_signature" && contractDocument.signed_at
               ? tx("Рамочный договор: подписан на бумаге", "Rahmenvertrag: auf Papier unterzeichnet")
@@ -93,7 +93,7 @@ export function LeadSigningPackagePanel({
                 : tx("Заказ: не подписан", "Auftrag: nicht unterzeichnet")}</StatusChip>
           ) : null}
         </div>
-        {summary && summary.document_id === source?.id && source.terms_current !== false ? <div className="space-y-1.5" data-current-package-status>
+        {summary && summary.document_id === source?.id && source.terms_current !== false ? <div className="flex flex-wrap items-center gap-1.5" data-current-package-status>
           <StatusChip tone={summary.status === "completed" ? "success" : ["declined", "error", "needs_review"].includes(summary.status) ? "error" : "warning"}>
             {summary.test_mode ? "DEMO · " : ""}{summary.status === "pending"
               ? tx("Запрос принят Skribble", "Anfrage von Skribble angenommen")
@@ -102,9 +102,9 @@ export function LeadSigningPackagePanel({
           {summary.status === "pending" && summary.progress && summary.progress.total > 0
             ? <SignatureProgressChips progress={summary.progress} testMode={summary.test_mode} lang={lang} /> : null}
         </div> : null}
-        {description ? <p className="text-xs leading-5 text-muted-foreground">{description}</p> : null}
+        {description ? <p className="max-w-2xl text-xs leading-5 text-muted-foreground">{description}</p> : null}
       </div>
-      <div className="shrink-0">
+      <div className="min-w-0 justify-self-start sm:justify-self-end">
         <OutdatedSignatureDocuments.Provider value={outdatedDocumentIds}>
           {source ? (
             <DocumentSignatureAction

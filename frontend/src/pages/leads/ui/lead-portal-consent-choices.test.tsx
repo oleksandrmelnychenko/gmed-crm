@@ -196,12 +196,11 @@ describe("portal consent facts in the staff wizard", () => {
     // Who chose is a chip of the receipt since 2026-10-26 (owner).
     expect(html.slice(html.indexOf("portal-disclosure-audit"))).toMatch(chip("user-round", "<span>Пациент"));
     expect(html).not.toMatch(/data-testid="portal-disclosure-decision" class="[^"]*border-amber-200/);
-    // The decision area has no amber status; the only amber chip is the chooser of the receipt (style, owner 2026-10-26).
+    // A valid No and its recorded author are informational, not warnings.
     const receiptAt = html.indexOf('data-testid="portal-disclosure-receipt"');
     expect(receiptAt).toBeGreaterThan(0);
     expect(html.slice(0, receiptAt)).not.toContain("border-amber-200");
-    expect(html.match(/border-amber-200/g)).toHaveLength(1);
-    expect(html.slice(html.indexOf("portal-disclosure-audit"))).toMatch(/^portal-disclosure-audit"><span class="[^"]*border-amber-200/);
+    expect(html).not.toContain("border-amber-200");
     expect(html).not.toContain("portal-trusted-persons");
     expect(html).not.toContain("portal-consent-choices");
     expect(renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={de} />)).toContain(">Nein – nicht erlaubt</span>");

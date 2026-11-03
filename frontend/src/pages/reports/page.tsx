@@ -472,7 +472,7 @@ function card(extra?: string) {
 function titleWithDot(title: string) {
   return (
     <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
+      <span aria-hidden className="size-1.5 rounded-full bg-[var(--heading-marker)]" />
       <span>{title}</span>
     </span>
   );
@@ -480,7 +480,7 @@ function titleWithDot(title: string) {
 
 function tableEmpty(message: string) {
   return (
-    <div className="rounded-xl border border-dashed border-border bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground">
+    <div className="px-3 py-4 text-center text-sm text-muted-foreground">
       {message}
     </div>
   );
@@ -587,7 +587,7 @@ function lineMetric(label: string, value: string | number) {
 function capsuleMetric(label: string, value: string | number) {
   return (
     <div
-      className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-2xl border border-border bg-muted/20 px-4 py-2 sm:min-w-[210px]"
+      className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-3 gap-y-1 px-2 py-1.5 sm:min-w-[210px]"
       data-testid="report-capsule-metric"
     >
       <span className="min-w-0 max-w-full break-words text-xs font-medium text-muted-foreground">
@@ -1656,7 +1656,7 @@ function useReportsPageContent() {
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="flex items-center gap-3 rounded-full border border-border bg-card px-5 py-3 text-sm text-muted-foreground shadow-sm">
+        <div className="flex items-center gap-3 px-3 py-2 text-sm text-muted-foreground">
           <LoaderCircle className="size-4 animate-spin" />
           {text.loadingWorkspace}
         </div>
@@ -1669,7 +1669,7 @@ function useReportsPageContent() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title={titleWithDot(text.workspaceTitle)}
+        title={text.workspaceTitle}
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2">
             <ProviderTaxonomyCascadeSelect
@@ -1709,7 +1709,7 @@ function useReportsPageContent() {
       {data ? (
         <>
           {allowedSections.has("billing_kpis") && data.billing_kpis ? (
-            <section className={card("p-6")}>
+            <section className={card("rounded-lg bg-card p-3")}>
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.billing.title)}</h2>
@@ -1718,7 +1718,7 @@ function useReportsPageContent() {
                   {text.billing.trackedInvoices(data.billing_kpis.tracked_invoice_count)}
                 </Badge>
               </div>
-              <div className="mt-5 grid gap-2.5 xl:grid-cols-3">
+              <div className="mt-3 grid gap-2.5 xl:grid-cols-3">
                 <div className="grid gap-1.5 rounded-xl bg-card p-3">
                   {metricCard(text.billing.invoices30d, data.billing_kpis.invoices_30d, Wallet, {
                     borderless: true,
@@ -1783,7 +1783,7 @@ function useReportsPageContent() {
           ) : null}
 
           {allowedSections.has("sales_kpis") && data.sales_kpis ? (
-            <section className={card("p-6")}>
+            <section className={card("rounded-lg bg-card p-3")}>
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.sales.title)}</h2>
@@ -1792,7 +1792,7 @@ function useReportsPageContent() {
                   {text.sales.leadCountries(data.sales_kpis.active_lead_country_count)}
                 </Badge>
               </div>
-              <div className="mt-5 grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(280px,0.65fr)]">
+              <div className="mt-3 grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(280px,0.65fr)]">
                 <div className="grid gap-1 rounded-xl bg-card p-2.5">
                   {metricCard(text.sales.newLeads30d, data.sales_kpis.new_leads_30d, Activity, {
                     borderless: true,
@@ -1823,7 +1823,6 @@ function useReportsPageContent() {
                   )}
                 </div>
                 <article className="relative overflow-hidden rounded-xl px-4 py-2.5">
-                  <span className="pointer-events-none absolute right-3 top-3 size-20 rounded-full bg-[var(--brand)]/10 blur-2xl" />
                   <div className="relative flex items-center justify-between gap-3">
                     <p className="min-w-0 max-w-full break-words text-sm font-semibold text-foreground">
                       {text.sales.topLeadCountries90d}
@@ -1879,9 +1878,9 @@ function useReportsPageContent() {
 
           {forecasting ? (
             <>
-              <section className="space-y-6">
+              <section className="space-y-3">
                 {forecastSections.has("quote_pipeline") && forecasting.quote_pipeline ? (
-                  <section className={card("p-6")}>
+                  <section className={card("rounded-lg bg-card p-3")}>
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.forecast.pipelineTitle)}</h2>
@@ -1890,7 +1889,7 @@ function useReportsPageContent() {
                         {text.forecast.quotes(forecasting.quote_pipeline.open_quotes)}
                       </Badge>
                     </div>
-                    <div className="mt-5 grid gap-1.5 md:grid-cols-3">
+                    <div className="mt-3 grid gap-1.5 md:grid-cols-3">
                       {capsuleMetric(text.forecast.expiring14d, forecasting.quote_pipeline.expiring_next_14d)}
                       {capsuleMetric(
                         text.forecast.grossPipeline,
@@ -1904,7 +1903,7 @@ function useReportsPageContent() {
                         {capsuleMetric(text.forecast.readModel, text.forecast.readModelLegend)}
                       </div>
                     </div>
-                    <div className="mt-5">
+                    <div className="mt-3">
                       <DataTable
                         rows={forecasting.quote_pipeline.by_status}
                         columns={forecastQuotePipelineColumns}
@@ -1915,14 +1914,14 @@ function useReportsPageContent() {
                   </section>
                 ) : null}
 
-                <div className={cn("grid gap-6 p-6 xl:grid-cols-2", card())}>
+                <div className={cn("grid gap-3 rounded-lg bg-card p-3 xl:grid-cols-2", card())}>
                   {forecastSections.has("collections") && forecasting.collections ? (
                     <section>
                       <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.forecast.collectionsTitle)}</h2>
                       <p className={cn("mt-1", tokens.text.muted)}>
                         {text.forecast.collectionsDescription}
                       </p>
-                      <div className="mt-5 grid gap-1.5 rounded-xl bg-card p-3">
+                      <div className="mt-3 grid gap-1.5 rounded-xl bg-card p-3">
                         {lineMetric(
                           text.forecast.due14d,
                           `${forecasting.collections.due_next_14d_count} / ${forecasting.collections.due_next_14d_total ? formatMoney(forecasting.collections.due_next_14d_total, locale) : text.countsOnly}`,
@@ -1949,7 +1948,7 @@ function useReportsPageContent() {
                       <p className={cn("mt-1", tokens.text.muted)}>
                         {text.forecast.followupDescription}
                       </p>
-                      <div className="mt-5 grid gap-1.5 rounded-xl bg-card p-3">
+                      <div className="mt-3 grid gap-1.5 rounded-xl bg-card p-3">
                         {lineMetric(text.forecast.activeFollowupOrders, forecasting.followup.active_orders)}
                         {lineMetric(text.forecast.milestones30d, forecasting.followup.milestones_due_next_30d)}
                         {lineMetric(
@@ -1967,7 +1966,7 @@ function useReportsPageContent() {
               </section>
 
               {forecastSections.has("clinic_capacity") && forecasting.clinic_capacity ? (
-                <section className={card("p-6")}>
+                <section className={card("rounded-lg bg-card p-3")}>
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.forecast.clinicCapacityTitle)}</h2>
@@ -1979,7 +1978,7 @@ function useReportsPageContent() {
                       {text.forecast.clinicCapacityBadge(forecasting.clinic_capacity.active_clinics, forecasting.clinic_capacity.appointments_next_30d_total)}
                     </Badge>
                   </div>
-                  <div className="mt-5">
+                  <div className="mt-3">
                     <DataTable
                       rows={forecasting.clinic_capacity.clinics}
                       columns={forecastClinicCapacityColumns}
@@ -1992,7 +1991,7 @@ function useReportsPageContent() {
             </>
           ) : null}
 
-                    <section className="space-y-6">
+                    <section className="space-y-3">
             {allowedSections.has("clinics") ? (
               <AdminTableCard
                 title={titleWithDot(text.clinicReport.title)}

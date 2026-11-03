@@ -122,7 +122,7 @@ export function EmployeeDialog({
               }
             >
               <FormSection title={t.personnel_section_person} hint={t.personnel_employee_dialog_hint}>
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-x-3 gap-y-2 sm:grid-cols-2">
                   <Field label={t.personnel_salutation}>
                     <SelectField
                       value={form.salutation}
@@ -156,7 +156,7 @@ export function EmployeeDialog({
                 <p className="text-xs text-muted-foreground">{t.personnel_name_file_hint}</p>
               </FormSection>
               <FormSection title={t.personnel_section_employment}>
-                <div className="grid gap-4 sm:grid-cols-3">
+                <div className="grid gap-x-3 gap-y-2 sm:grid-cols-3">
                   <Field label={t.personnel_number} htmlFor="personnel-number">
                     <Input
                       id="personnel-number"

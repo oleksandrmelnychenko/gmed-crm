@@ -178,11 +178,13 @@ function getPickerControlStyle(className: string | undefined) {
   const controlHeight = isTall ? "2.5rem" : isShellHeight ? "2.25rem" : "2rem"
   const controlRadius = isRoundedXl ? "0.75rem" : "0.5rem"
   const controlBorderColor = hasThemeBorder ? "var(--border)" : "var(--input)"
-  const controlBackground = hasMutedBackground
-    ? "var(--muted)"
-    : hasCardBackground
-      ? "var(--card)"
-      : "var(--field)"
+  const controlBackground = hasClassToken(className, "bg-transparent")
+    ? "transparent"
+    : hasMutedBackground
+      ? "var(--muted)"
+      : hasCardBackground
+        ? "var(--card)"
+        : "var(--field)"
 
   return {
     controlHeight,

@@ -64,12 +64,13 @@ export function ServicesInternalNoteField({
   disabled?: boolean;
 }) {
   return (
-    <div className="space-y-1.5 rounded-lg border border-dashed border-border bg-muted/40 p-3" data-testid="lead-services-internal-note">
+    <div className="min-w-0 space-y-1.5 border-l-2 border-border pl-3" data-testid="lead-services-internal-note">
       <label htmlFor={id} className={cn("block", labelClassName)}>
         <StaffOnlyLabel tx={tx} />
       </label>
       <textarea
         id={id}
+        rows={3}
         className={textareaClassName}
         maxLength={SERVICES_INTERNAL_NOTE_MAX_LENGTH}
         value={value}

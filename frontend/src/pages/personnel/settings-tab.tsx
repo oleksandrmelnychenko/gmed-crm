@@ -271,7 +271,7 @@ export function SettingsTab({
   if (!settings && !error) return <TabLoader />;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       {error ? <Banner tone="error">{error}</Banner> : null}
 
       {settings ? (
@@ -316,7 +316,7 @@ export function SettingsTab({
           <div>
             <Button
               type="button"
-              className="h-9 gap-1.5 rounded-lg px-3.5"
+              className="h-8 gap-1.5 rounded-md px-3"
               onClick={() => void saveSettings()}
               disabled={!settingsChanged || !lateDaysValid || saving !== null}
             >

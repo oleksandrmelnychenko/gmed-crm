@@ -29,6 +29,7 @@ import {
   LoaderCircle,
   MoreHorizontal,
   RefreshCw,
+  RotateCcw,
   Search,
   Share2,
   SlidersHorizontal,
@@ -261,6 +262,8 @@ const ACTIVE_PORTAL_RELEASE_WORDS: PluralWords = {
   de: ["aktive Portalfreigabe", "aktive Portalfreigaben"],
 };
 const selectClassName = shellSelectClassName;
+const documentFilterControlClassName =
+  "h-10 rounded-lg border-border bg-transparent text-[13px] shadow-none md:h-8";
 const textareaClassName = shellTextareaClass;
 const DEFAULT_GENERATE_TEMPLATE_ID = "patient_sticker_compact";
 const documentSectionClassName = "border-0 bg-transparent p-0 shadow-none";
@@ -3497,7 +3500,7 @@ function StaffDocumentsPage({
                     search: event.target.value,
                   }))
                 }
-                className="h-10 rounded-lg bg-field pl-8 text-[13px] md:h-8"
+                className={cn(documentFilterControlClassName, "pl-8")}
                 placeholder={t.common_search}
               />
             </div>
@@ -3512,7 +3515,7 @@ function StaffDocumentsPage({
                   appointmentId: "",
                 }))
               }
-              className={cn(selectClassName, "col-span-2 h-10 bg-background text-[13px] md:col-span-1 md:h-8")}
+              className={cn(selectClassName, documentFilterControlClassName, "col-span-2 md:col-span-1")}
             >
               <option value="">{text.allPatients}</option>
               {patients.map((patient) => (
@@ -3530,7 +3533,7 @@ function StaffDocumentsPage({
                   status: event.target.value,
                 }))
               }
-              className={cn(selectClassName, "h-10 bg-background text-[13px] md:h-8")}
+              className={cn(selectClassName, documentFilterControlClassName)}
             >
               <option value="">{text.allStatuses}</option>
               {STATUS_OPTIONS.map((status) => (
@@ -3548,7 +3551,7 @@ function StaffDocumentsPage({
                   visibility: event.target.value,
                 }))
               }
-              className={cn(selectClassName, "h-10 bg-background text-[13px] md:h-8")}
+              className={cn(selectClassName, documentFilterControlClassName)}
             >
               <option value="">{text.allVisibility}</option>
               {VISIBILITY_OPTIONS.map((value) => (
@@ -3564,14 +3567,14 @@ function StaffDocumentsPage({
                 setFilters((current) => ({ ...current, art: event.target.value }))
               }
               list="documents-art-options"
-              className="col-span-2 h-10 rounded-lg bg-field text-[13px] md:col-span-1 md:h-8"
+              className={cn(documentFilterControlClassName, "col-span-2 md:col-span-1")}
               placeholder={t.operations_document_type}
             />
           </div>
           <Button
             type="button"
-            variant={mobileDocumentFiltersOpen ? "secondary" : "outline"}
-            className="h-10 w-full md:hidden"
+            variant="ghost"
+            className="h-10 w-fit aria-expanded:bg-transparent md:hidden"
             aria-expanded={mobileDocumentFiltersOpen}
             onClick={() => setMobileDocumentFiltersOpen((current) => !current)}
           >
@@ -3589,7 +3592,7 @@ function StaffDocumentsPage({
                   orderId: event.target.value,
                 }))
               }
-              className="h-10 rounded-lg bg-field text-[13px] md:h-8"
+              className={documentFilterControlClassName}
               placeholder={t.orders_title}
             />
             <Input
@@ -3601,7 +3604,7 @@ function StaffDocumentsPage({
                   appointmentId: event.target.value,
                 }))
               }
-              className="h-10 rounded-lg bg-field text-[13px] md:h-8"
+              className={documentFilterControlClassName}
               placeholder={t.appointments_title}
             />
             <Input
@@ -3615,7 +3618,7 @@ function StaffDocumentsPage({
                 }))
               }
               aria-label={t.documents_date_from}
-              className="h-10 rounded-lg bg-field text-[13px] md:h-8"
+              className={documentFilterControlClassName}
             />
             <Input
               type="date"
@@ -3628,7 +3631,7 @@ function StaffDocumentsPage({
                 }))
               }
               aria-label={t.documents_date_to}
-              className="h-10 rounded-lg bg-field text-[13px] md:h-8"
+              className={documentFilterControlClassName}
             />
           </div>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-2 md:gap-1.5 xl:grid-cols-4">
@@ -3641,7 +3644,7 @@ function StaffDocumentsPage({
                   category: event.target.value,
                 }))
               }
-              className={cn(selectClassName, "h-10 bg-background text-[13px] md:h-8")}
+              className={cn(selectClassName, documentFilterControlClassName)}
             >
               <option value="">{text.allCategories}</option>
               {categories.map((category) => (
@@ -3659,7 +3662,7 @@ function StaffDocumentsPage({
                   klinik: event.target.value,
                 }))
               }
-              className="h-10 rounded-lg bg-field text-[13px] md:h-8"
+              className={documentFilterControlClassName}
               placeholder={t.documents_clinic}
             />
             <Input
@@ -3671,7 +3674,7 @@ function StaffDocumentsPage({
                   ursprung: event.target.value,
                 }))
               }
-              className="h-10 rounded-lg bg-field text-[13px] md:h-8"
+              className={documentFilterControlClassName}
               placeholder={t.documents_source}
             />
             <NativeComboboxSelect
@@ -3683,7 +3686,7 @@ function StaffDocumentsPage({
                   documentDirection: event.target.value,
                 }))
               }
-              className={cn(selectClassName, "h-10 bg-background text-[13px] md:h-8")}
+              className={cn(selectClassName, documentFilterControlClassName)}
             >
               <option value="">{metaText.allDirections}</option>
               {DOCUMENT_DIRECTION_OPTIONS.map((option) => (
@@ -3701,7 +3704,7 @@ function StaffDocumentsPage({
                   documentVariant: event.target.value,
                 }))
               }
-              className={cn(selectClassName, "h-10 bg-background text-[13px] md:h-8")}
+              className={cn(selectClassName, documentFilterControlClassName)}
             >
               <option value="">{metaText.allVariants}</option>
               {DOCUMENT_VARIANT_OPTIONS.map((option) => (
@@ -3719,7 +3722,7 @@ function StaffDocumentsPage({
                   accessCategory: event.target.value,
                 }))
               }
-              className={cn(selectClassName, "h-10 bg-background text-[13px] md:h-8")}
+              className={cn(selectClassName, documentFilterControlClassName)}
             >
               <option value="">{metaText.allAccessCategories}</option>
               {DOCUMENT_ACCESS_CATEGORY_OPTIONS.map((option) => (
@@ -3737,7 +3740,7 @@ function StaffDocumentsPage({
                   financialStatus: event.target.value,
                 }))
               }
-              className={cn(selectClassName, "h-10 bg-background text-[13px] md:h-8")}
+              className={cn(selectClassName, documentFilterControlClassName)}
             >
               <option value="">{metaText.allFinancialStatuses}</option>
               {DOCUMENT_FINANCIAL_STATUS_OPTIONS.map((option) => (
@@ -3747,9 +3750,9 @@ function StaffDocumentsPage({
               ))}
             </NativeComboboxSelect>
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              className="col-span-2 h-10 rounded-lg px-3 text-[13px] md:col-span-1 md:h-8"
+              className="col-span-2 h-10 w-fit justify-self-end px-2 text-[13px] md:col-span-1 md:h-8"
               onClick={() =>
                 setFilters({
                   search: "",
@@ -3771,6 +3774,7 @@ function StaffDocumentsPage({
                 })
               }
             >
+              <RotateCcw className="size-3.5" />
               {text.resetFilters}
             </Button>
           </div>
@@ -6400,15 +6404,15 @@ function StaffDocumentsPage({
               loadingLabel={t.documents_loading_document}
             >
               {detail ? (
-              <div className={cn("space-y-4", !embedDetailOnly && "pt-5")}>
-                <section className="space-y-4 rounded-xl bg-card/40">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-                    <div className="flex size-7 shrink-0 items-center justify-center text-foreground">
+              <div className={cn("space-y-3", !embedDetailOnly && "pt-3")}>
+                <section className="py-1">
+                  <div className="grid grid-cols-[20px_minmax(0,1fr)] items-start gap-x-2 gap-y-2">
+                    <div className="flex size-5 items-center justify-center text-foreground">
                       <FileText className="size-5" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="min-w-0 break-words text-xl font-semibold tracking-tight text-foreground">
+                        <h2 className="min-w-0 break-words text-lg font-semibold leading-6 tracking-tight text-foreground">
                           {localizeDocumentCode(detail.auto_name, l)}
                         </h2>
                         <StatusBadge tone={documentStatusTone(detail.status)}>
@@ -6425,7 +6429,8 @@ function StaffDocumentsPage({
                           {formatSensitivityLabel(detail.data_sensitivity, lang)}
                         </StatusBadge>
                       </div>
-                      <p className="mt-0.5 break-words text-sm text-muted-foreground">
+                      <div className="mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                      <p className="min-w-0 break-words text-xs leading-5 text-muted-foreground">
                         {[
                           detail.original_filename,
                           detail.mime_type,
@@ -6434,7 +6439,7 @@ function StaffDocumentsPage({
                           .filter(Boolean)
                           .join(" · ")}
                       </p>
-                      <p className="mt-1 text-[11px] font-mono tabular-nums text-muted-foreground/80">
+                      <p className="text-[11px] font-mono tabular-nums text-muted-foreground">
                         {detail.document_number
                           ? `${formatBusinessDocumentNumber(detail.document_number)} · `
                           : ""}
@@ -6443,14 +6448,15 @@ function StaffDocumentsPage({
                           ? ` · ${text.current}`
                           : ` · ${text.historical}`}
                       </p>
+                      </div>
                     </div>
-                    <div className="flex shrink-0 flex-wrap gap-2 sm:max-w-[44%] sm:justify-end">
+                    <div className="col-span-2 flex min-w-0 flex-wrap items-center gap-1.5 sm:col-start-2 sm:col-span-1">
                       {canUpdateTranslation && detail.translation_source_document_id ? (
                         <Button
                           type="button"
-                          variant="outline"
+                          variant="default"
                           size="sm"
-                          className="h-8 shrink-0 gap-1.5 rounded-lg"
+                          className="shrink-0"
                           onClick={() =>
                             setTranslationDialog({
                               id: detail.translation_source_document_id as string,
@@ -6473,9 +6479,9 @@ function StaffDocumentsPage({
                       {canUpdateTranslation && detail.has_stored_file ? (
                         <Button
                           type="button"
-                          variant="outline"
+                          variant="default"
                           size="sm"
-                          className="h-8 shrink-0 gap-1.5 rounded-lg"
+                          className="shrink-0"
                           onClick={() =>
                             setTranslationDialog({
                               id: detail.id,
@@ -6499,8 +6505,8 @@ function StaffDocumentsPage({
                       detail.status !== "archived" ? (
                         <Button
                           type="button"
-                          variant="outline"
-                          className="h-9 gap-1.5 rounded-lg px-3.5"
+                          variant="default"
+                          size="sm"
                           onClick={() => void openReplacementTemplate(detail)}
                         >
                           <FileText className="size-3.5" />
@@ -6512,8 +6518,8 @@ function StaffDocumentsPage({
                         detail.mime_type?.startsWith("application/pdf")) ? (
                         <Button
                           type="button"
-                          variant="outline"
-                          className="h-9 gap-1.5 rounded-lg px-3.5"
+                          variant="default"
+                          size="sm"
                           disabled={documentPreviewBusy}
                           onClick={() => void handleOpenPreview()}
                         >
@@ -6527,9 +6533,8 @@ function StaffDocumentsPage({
                       ) : null}
                       <Button
                         type="button"
-                        variant="outline"
-                        size="icon-lg"
-                        className="rounded-lg"
+                        variant="ghost"
+                        size="icon-sm"
                         aria-label={t.documents_download}
                         title={t.documents_download}
                         disabled={!detail.has_stored_file}
@@ -6545,9 +6550,9 @@ function StaffDocumentsPage({
                       {canManage && detail.has_stored_file && !detail.deletion_protected ? (
                         <Button
                           type="button"
-                          variant="outline"
-                          size="icon-lg"
-                          className="rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="text-destructive hover:text-destructive"
                           aria-label={t.documents_delete_file}
                           title={t.documents_delete_file}
                           onClick={() => requestDocumentDeletion(detail)}
@@ -6558,7 +6563,7 @@ function StaffDocumentsPage({
                       {canManage && editForm ? (
                         <Button
                           type="button"
-                          className="h-9 gap-1.5 rounded-lg bg-[var(--brand)] px-3.5 text-primary-foreground shadow-sm hover:bg-[var(--brand)]/90 focus-visible:ring-[var(--brand)]/30"
+                          size="sm"
                           onClick={() => {
                             setSaveError("");
                             setMetadataEditOpen(true);
@@ -6601,7 +6606,7 @@ function StaffDocumentsPage({
                   <Banner tone="error">{documentPreviewError}</Banner>
                 ) : null}
 
-                <section className="overflow-hidden rounded-2xl bg-card shadow-[0_10px_24px_rgba(15,23,42,0.035)] ring-1 ring-border/60">
+                <section className="overflow-hidden rounded-xl bg-card">
                   <div className="grid xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_310px]">
                     <DocumentMetaPanel
                       className="border-b border-border/70 xl:border-b-0 xl:border-r"
@@ -6620,7 +6625,7 @@ function StaffDocumentsPage({
                           ) : null
                         }
                       >
-                        <div className="mt-4 space-y-2.5">
+                        <div className="mt-2 space-y-1.5">
                           <DocumentMetaFact
                             label={t.orders_title}
                             value={detail.order_number || t.common_not_set}
@@ -6641,7 +6646,7 @@ function StaffDocumentsPage({
                         label={l("documents_document_type")}
                         value={detail.art ? localizeDocumentCode(detail.art, l) : t.common_not_set}
                       >
-                        <div className="mt-4 space-y-2.5">
+                        <div className="mt-2 space-y-1.5">
                           <DocumentMetaFact
                             label={t.documents_category}
                             value={documentCategoryValueLabel(detail.category, categories, lang, l)}
@@ -6737,14 +6742,14 @@ function StaffDocumentsPage({
                       </DocumentMetaHighlight>
                     </DocumentMetaPanel>
 
-                    <aside className="px-5 py-4">
-                      <div className="mb-5 flex items-end justify-between gap-3">
+                    <aside className="p-3">
+                      <div className="mb-3 flex items-end justify-between gap-3">
                         <div className="min-w-0">
                           <span className="text-[11px] font-medium leading-4 text-muted-foreground">
                             {t.documents_version_chain}
                           </span>
                           <p className="mt-1 flex min-w-0 items-baseline gap-1.5">
-                            <span className="text-2xl font-semibold leading-7 tracking-tight text-foreground">
+                            <span className="text-lg font-semibold leading-6 tracking-tight text-foreground">
                               {l("common_version_prefix")}{detail.version_number}
                             </span>
                             <span className="text-xs font-medium text-muted-foreground">
@@ -6752,12 +6757,8 @@ function StaffDocumentsPage({
                             </span>
                           </p>
                         </div>
-                        <span
-                          aria-hidden
-                          className="mb-1 h-1.5 w-11 shrink-0 rounded-full bg-[var(--brand)] opacity-30"
-                        />
                       </div>
-                      <div className="space-y-2.5">
+                      <div className="space-y-1.5">
                         <DetailField
                           label={t.documents_uploaded_by}
                           value={detail.uploaded_by_name || t.documents_unknown_uploader}
@@ -6775,9 +6776,9 @@ function StaffDocumentsPage({
                   </div>
 
                   {detail.notes ? (
-                    <div className="border-t border-border/70 px-5 py-4">
+                    <div className="border-t border-border/70 p-3">
                       <div className="flex w-full flex-col gap-2">
-                        <div className="w-full rounded-xl border border-border/70 bg-muted px-4 py-3">
+                        <div className="w-full">
                           <div className="mb-2 flex items-center gap-2.5">
                             <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
                             <span className="min-w-0 break-words text-[13px] font-semibold text-foreground">
@@ -9050,8 +9051,8 @@ function DocumentMetaPanel({
   children: ReactNode;
 }) {
   return (
-    <div className={cn("px-5 py-4", compact && "px-0 py-0", className)}>
-      <div className={cn("flex items-center gap-2.5", compact ? "mb-2.5" : "mb-3.5")}>
+    <div className={cn("p-3", compact && "p-0", className)}>
+      <div className={cn("flex items-center gap-2", compact ? "mb-1.5" : "mb-2")}>
         <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
         <p className="min-w-0 break-words text-[13px] font-semibold text-foreground">
           {title}
