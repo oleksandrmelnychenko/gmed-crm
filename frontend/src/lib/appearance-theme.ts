@@ -34,30 +34,30 @@ export const DEFAULT_THEME: AppearanceTheme = {
 };
 
 export const BUILTIN_THEMES: readonly AppearanceTheme[] = [DEFAULT_THEME, {
-  // Graphite's calm neutral surfaces with GMED orange actions (owner 2026-11-03: two light
-  // themes, no tinted floods). #c2410c keeps white button text at 5.2:1; #f97316 would be 2.8:1.
+  // Soft light palettes (owner 2026-11-03: "дуже контрасні кольори для програми це не ок"): each
+  // colour is the lightest that still keeps text ~11:1, secondary text and button labels 4.5:1,
+  // field borders and focus 3:1.
   version: 1, id: "gmed-orange", name: "GMED Orange", colors: {
-    ...DEFAULT_THEME_COLORS,
-    // Lighter than Graphite's surfaces (owner 2026-11-03: "трошки освітлити").
-    background: "#f3f4f8", muted: "#f5f6f9", accent: "#eceef4", border: "#e6e8ee", sidebar: "#fafbfc",
-    rowAlternate: "#f9fafb", rowHover: "#f1f2f6", rowActive: "#eceef3", rowSelected: "#e5e8ef",
-    primary: "#c2410c", primaryText: "#ffffff", focus: "#ea580c", headingMarker: "#ea580c",
+    background: "#f6f7fa", surface: "#ffffff", text: "#2f2f36", textMuted: "#646977",
+    primary: "#c64e1d", primaryText: "#ffffff", muted: "#f7f8fa", accent: "#eff1f5",
+    border: "#e9ebf0", inputBorder: "#8e93a4", field: "#ffffff", focus: "#eb641d", sidebar: "#fbfcfd",
+    headingMarker: "#ed6e2c", rowAlternate: "#fafbfc", rowHover: "#f3f4f7", rowActive: "#eff1f5", rowSelected: "#e9ebf1",
   },
 }, {
   // Warm ivory surfaces with clay actions (owner 2026-11-03: a calm developer-tool look).
   version: 1, id: "gmed-clay", name: "GMED Clay", colors: {
-    background: "#f6f4ee", surface: "#fdfcf9", text: "#1f1e1d", textMuted: "#5c5a53",
-    primary: "#b4532f", primaryText: "#ffffff", muted: "#f6f4ee", accent: "#f0ece2",
-    border: "#ebe7dc", inputBorder: "#918c7c", field: "#ffffff", focus: "#b4532f", sidebar: "#faf9f5",
-    headingMarker: "#c15f3c", rowAlternate: "#fbfaf6", rowHover: "#f4f1e9", rowActive: "#f0ece2", rowSelected: "#ebe5d7",
+    background: "#f8f7f2", surface: "#fefdfb", text: "#302f2e", textMuted: "#6a6862",
+    primary: "#b75a37", primaryText: "#ffffff", muted: "#f8f7f2", accent: "#f3f0e8",
+    border: "#eeebe2", inputBorder: "#979283", field: "#ffffff", focus: "#c67b60", sidebar: "#fcfbf8",
+    headingMarker: "#cd7e62", rowAlternate: "#fcfbf8", rowHover: "#f6f4ee", rowActive: "#f3f0e8", rowSelected: "#eeeadf",
   },
 }, {
-  // Pure neutral greys, black actions and a single blue for focus and heading dots.
+  // Neutral greys, soft graphite actions and one blue for focus and heading dots.
   version: 1, id: "gmed-ink", name: "GMED Ink", colors: {
-    background: "#f7f7f7", surface: "#ffffff", text: "#0d0d0d", textMuted: "#5d5d5d",
-    primary: "#0d0d0d", primaryText: "#ffffff", muted: "#f7f7f7", accent: "#f0f0f0",
-    border: "#ebebeb", inputBorder: "#8f8f8f", field: "#ffffff", focus: "#2563eb", sidebar: "#fcfcfc",
-    headingMarker: "#2563eb", rowAlternate: "#fcfcfc", rowHover: "#f5f5f5", rowActive: "#f0f0f0", rowSelected: "#ebebeb",
+    background: "#f9f9f9", surface: "#ffffff", text: "#313131", textMuted: "#6a6a6a",
+    primary: "#484848", primaryText: "#ffffff", muted: "#f9f9f9", accent: "#f2f2f2",
+    border: "#eeeeee", inputBorder: "#939393", field: "#ffffff", focus: "#5f8cf0", sidebar: "#fdfdfd",
+    headingMarker: "#6591f1", rowAlternate: "#fcfcfc", rowHover: "#f6f6f6", rowActive: "#f2f2f2", rowSelected: "#ededed",
   },
 }];
 
