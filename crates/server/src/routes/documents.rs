@@ -10936,10 +10936,27 @@ fn build_framework_contract_pdf(
 
     // --- § 1 Vertragsgegenstand ----------------------------------------------
     fc_paragraph_heading(&mut layout, "§ 1 Vertragsgegenstand");
-    fc_body(
-        &mut layout,
-        "Der Auftraggeber beabsichtigt sich in Deutschland einer medizinischen Untersuchung und Behandlung zu unterziehen.",
-    );
+    // The parents contract in their own name for the child (§ 328 BGB): the
+    // child is examined and treated, not the Auftraggeber (owner 2026-11-03).
+    let purpose = if context.contracting.parents_contract() {
+        let child = context.patient_name.trim();
+        let born = context
+            .birth_date
+            .map(|date| format!(", geb. am {},", date.format("%d.%m.%Y")))
+            .unwrap_or_else(|| ",".to_string());
+        if context.contracting.representatives.len() > 1 {
+            format!(
+                "Die Auftraggeber beabsichtigen, ihr Kind {child}{born} in Deutschland medizinisch untersuchen und behandeln zu lassen."
+            )
+        } else {
+            format!(
+                "Der Auftraggeber beabsichtigt, das Kind {child}{born} in Deutschland medizinisch untersuchen und behandeln zu lassen."
+            )
+        }
+    } else {
+        "Der Auftraggeber beabsichtigt, sich in Deutschland einer medizinischen Untersuchung und Behandlung zu unterziehen.".to_string()
+    };
+    fc_body(&mut layout, &purpose);
     fc_body(
         &mut layout,
         "Zu diesem Zweck schließen die Vertragsparteien diesen Vertrag. Dieser Vertrag gilt als Rahmendienstleistungsvertrag für alle künftigen Einzelaufträge.",

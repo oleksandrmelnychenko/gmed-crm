@@ -12654,6 +12654,11 @@ async fn minor_lead_contract_names_only_the_parent_who_receives_and_pays_the_inv
         text.contains("Mehrere Auftraggeber haften als Gesamtschuldner"),
         "{text}"
     );
+    // § 1: the child is treated, not the parents (owner 2026-11-03).
+    assert!(
+        text.contains("Die Auftraggeber beabsichtigen, ihr Kind"),
+        "{text}"
+    );
     assert_eq!(roles, vec!["guardian_1", "agency", "guardian_2"]);
 }
 
@@ -12937,6 +12942,11 @@ async fn converted_minor_contract_names_only_the_parent_who_receives_and_pays_th
     assert!(text.contains("Boris Vater"), "{text}");
     assert!(
         text.contains("Mehrere Auftraggeber haften als Gesamtschuldner"),
+        "{text}"
+    );
+    // § 1: the child is treated, not the parents (owner 2026-11-03).
+    assert!(
+        text.contains("Die Auftraggeber beabsichtigen, ihr Kind"),
         "{text}"
     );
     assert_eq!(roles, vec!["guardian_1", "agency", "guardian_2"]);

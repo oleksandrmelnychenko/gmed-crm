@@ -762,14 +762,8 @@ async fn fill_joint_custody_request(app: &Scn) -> MinorRequest {
         )
         .await;
     assert_eq!(body["payer"]["payer_kind"], "representative", "{body}");
-    app.ok(
-        StatusCode::OK,
-        "POST",
-        &format!("{base}/billing"),
-        anna,
-        Some(json!({ "invoice_recipient_is_payer": false })),
-    )
-    .await;
+    // The invoice follows the paying father (owner 2026-11-03): no answer
+    // about the recipient is needed any more.
     let body = app
         .ok(
             StatusCode::OK,
@@ -811,6 +805,19 @@ async fn enter_identity_data(app: &Scn, lead: Uuid, representative: Uuid, number
         })),
     )
     .await;
+    // The person's own PEP and sanctions answers, as the cabinet gives them
+    // (owner 2026-11-03: every legal representative answers them).
+    sqlx::query(
+        r#"UPDATE lead_representatives
+           SET country_questions = '{"pep_self": false, "pep_related": false, "sanctions_links": false}'::jsonb
+               || jsonb_strip_nulls(country_questions)
+           WHERE lead_id = $1 AND contact_id = $2"#,
+    )
+    .bind(lead)
+    .bind(representative)
+    .execute(app.pool())
+    .await
+    .unwrap();
 }
 
 async fn gwg_sheet(app: &Scn, lead: Uuid, subject: &str) -> (StatusCode, Value) {
@@ -1965,9 +1972,11 @@ async fn scenario_joint_then_sole_custody_does_not_keep_the_other_parent_as_paye
     assert_eq!(representative(&view, mother)["slot"], "rep1", "{view}");
     assert!(representative(&view, father)["slot"].is_null(), "{view}");
     // The mother's cabinet asks who pays again (live check 2026-10-24: step
-    // 3 was "complete" with an empty payer).
+    // 3 was "complete" with an empty payer). The invoice had followed the
+    // paying father (owner 2026-11-03), so the recipient is asked first.
     assert!(
-        missing(&view).contains(&"payer_kind".to_string()),
+        missing(&view).contains(&"payer_kind".to_string())
+            || missing(&view).contains(&"recipient_representative_id".to_string()),
         "{}",
         view["progress"]
     );

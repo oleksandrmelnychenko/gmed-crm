@@ -428,29 +428,14 @@ async fn an_invoice_names_the_chosen_parent_and_never_another_childs_contact() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    // The mother pays as representative (2026-10-19) and is the Auftraggeber:
+    // the invoice follows her, never stays with the father (owner 2026-11-03).
     assert_eq!(body["billing"]["invoice_to"], "other");
-    assert_eq!(body["billing"]["invoice_name"], "Ben Muster");
-    assert_eq!(body["billing"]["invoice_street"], "Vaterweg 2");
-    assert_eq!(body["billing"]["invoice_email"], json!(father_email));
-    // The mother pays as representative (2026-10-19): the father chosen as
-    // recipient who pays must be confirmed, never silently taken over.
-    assert!(
-        missing(&body).contains(&"payer_kind".into())
-            || missing(&body).contains(&"invoice_recipient_is_payer".into()),
-        "Choosing the father cannot silently leave the mother as payer: {body}"
-    );
-    let (status, separate) = json_request(
-        router,
-        "POST",
-        &format!("{base}/billing"),
-        &login,
-        Some(json!({"invoice_recipient_is_payer":false})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{separate}");
-    assert!(
-        !missing(&separate).contains(&"payer_kind".into()),
-        "The mother may pay while the father receives the invoice: {separate}"
+    assert_eq!(body["billing"]["invoice_name"], "Anna Muster");
+    assert_eq!(
+        body["billing"]["recipient"]["representative_id"],
+        json!(mother),
+        "{body}"
     );
     let (status, _) = json_request(
         router,
@@ -3305,10 +3290,14 @@ async fn a_parents_billing_role_names_recipient_and_payer_and_drives_screening()
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["error"], "payer_still_this_parent");
 
-    // The father pays: the mother still receives the invoice, without paying.
+    // The paying parent is the Auftraggeber and receives the invoice; the
+    // other parent never does (owner 2026-11-03).
     let (status, body) = role(father, false, true).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "recipient_not_contracting");
+    let (status, body) = role(father, true, true).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body, json!({ "receives_invoice": false, "pays": true }));
+    assert_eq!(body, json!({ "receives_invoice": true, "pays": true }));
     let stored: (Option<Uuid>, bool) = sqlx::query_as(
         "SELECT representative_contact_id, recipient_is_payer
          FROM lead_invoice_recipients WHERE lead_id = $1",
@@ -3317,15 +3306,18 @@ async fn a_parents_billing_role_names_recipient_and_payer_and_drives_screening()
     .fetch_one(&app.suite.pool)
     .await
     .unwrap();
-    assert_eq!(stored, (Some(mother), false));
+    assert_eq!(stored, (Some(father), true));
     assert_eq!(
         screened().await,
-        notes("mother; invoice_recipient", "father; payer")
+        notes("mother", "father; invoice_recipient; payer")
     );
+    let (status, body) = role(mother, true, false).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "recipient_not_contracting");
 
-    // The mother no longer receives it: the answer is cleared, the cabinet
-    // asks again; both stay screened.
-    let (status, body) = role(mother, false, false).await;
+    // The paying father no longer receives it: the answer is cleared, the
+    // cabinet asks again; both stay screened.
+    let (status, body) = role(father, false, true).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let recipients: i64 =
         sqlx::query_scalar("SELECT count(*) FROM lead_invoice_recipients WHERE lead_id = $1")

@@ -43,6 +43,7 @@ import type { StepId } from "./lead-request-steps";
 import { actsAsGuardian } from "./lead-request-access";
 import {
   authorityProofOf,
+  isRepresentativePepPart,
   representativeSubmitPart,
   type AuthorityProof,
   type RepresentativeField,
@@ -272,6 +273,8 @@ export type LeadRequestText = {
    * side or a third party (a person or an organisation) with its data —,
    * whether that recipient pays, and only then who pays.
    */
+  /** Heading of a representative's own PEP and sanctions questions (owner 2026-11-03). */
+  representativePepLegend: string;
   recipient: {
     section: string;
     /** Another tab, staff or the other parent changed who receives the invoice (QA 2026-11-03, F2). */
@@ -1055,7 +1058,13 @@ export function submitFieldLabel(
         ? representativeUploadLabel(text, person.slot, "identity")
         : person.part === "authority_upload"
           ? representativeUploadLabel(text, person.slot, "authority")
-          : person.part === "name_latin" ? text.namePassportCorrection : representativeFieldLabel(text, person.part);
+          : person.part === "name_latin"
+            ? text.namePassportCorrection
+            : isRepresentativePepPart(person.part)
+              ? person.part === "pep_self" || person.part === "pep_related" || person.part === "sanctions_links"
+                ? text.payerLegalFields[person.part]
+                : followUpFieldLabel(text, person.part)
+              : representativeFieldLabel(text, person.part);
     // A parent's login: "You: …" and "Other parent: …" instead of the place numbers (QA 2026-10-22).
     const parents = ["rep1", "rep2"];
     const capital = (value: string) => value.charAt(0).toLocaleUpperCase() + value.slice(1);
@@ -1075,6 +1084,7 @@ export function submitFieldLabel(
 }
 
 const de: LeadRequestText = {
+  representativePepLegend: "Politisch exponierte Person und Sanktionen",
   title: "Ihre Anfrage",
   titleGuardian: "Anfrage für Ihr Kind",
   titleVormund: "Anfrage für das von Ihnen vertretene Kind",
@@ -1703,6 +1713,7 @@ const de: LeadRequestText = {
 };
 
 const ru: LeadRequestText = {
+  representativePepLegend: "Политически значимые лица и санкции",
   title: "Ваша заявка",
   titleGuardian: "Заявка для вашего ребёнка",
   titleVormund: "Заявка для ребёнка, которого вы представляете",
@@ -2324,6 +2335,7 @@ const ru: LeadRequestText = {
 };
 
 const uk: LeadRequestText = {
+  representativePepLegend: "Політично значущі особи та санкції",
   title: "Ваша заявка",
   titleGuardian: "Заявка для вашої дитини",
   titleVormund: "Заявка для дитини, яку ви представляєте",
@@ -2945,6 +2957,7 @@ const uk: LeadRequestText = {
 };
 
 const en: LeadRequestText = {
+  representativePepLegend: "Politically exposed persons and sanctions",
   title: "Your request",
   titleGuardian: "Request for your child",
   titleVormund: "Request for the child you represent",

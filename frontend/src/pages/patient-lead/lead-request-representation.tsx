@@ -93,6 +93,7 @@ import {
   type RepresentativeDraft,
   type RepresentativeField,
 } from "./lead-request-representation-model";
+import { RepresentativePepQuestions } from "./lead-request-representative-questions";
 import {
   asLeadCabinetLang,
   representativeFieldLabel,
@@ -660,6 +661,12 @@ function RepresentativeBlock({
     },
     [onPartState, slot],
   );
+  const onPepState = useCallback(
+    (state: SaveState) => {
+      if (mounted.current) onPartState(`${slot}_pep`, state);
+    },
+    [onPartState, slot],
+  );
 
   const form = useRepresentativeForm({ request, slot, person, text, lang, enqueue, onChange, onSaveState, isShown });
   const [removing, setRemoving] = useState(false);
@@ -888,6 +895,18 @@ function RepresentativeBlock({
         {asked("phone") ? <LabeledField {...labeled("phone")}>{textInput("phone", 50, "tel")}</LabeledField> : null}
       </div>
 
+      {/* Every legal representative answers PEP and sanctions for themselves (owner 2026-11-03). */}
+      {person ? (
+        <RepresentativePepQuestions
+          request={request}
+          person={person}
+          text={text}
+          lang={lang}
+          enqueue={enqueue}
+          onChange={onChange}
+          onSaveState={onPepState}
+        />
+      ) : null}
       {/* The identity document: a copy only; GMED enters its data. */}
       {identityUpload ? (
         <RepresentativeUpload

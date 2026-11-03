@@ -587,20 +587,13 @@ async fn fill_joint_custody_request(app: &Scn, father_citizenship: &str) -> Mino
             })
             .collect()
     };
+    // The invoice follows the paying father, the Auftraggeber (owner
+    // 2026-11-03): nothing is asked about the recipient any more.
     assert_eq!(
-        base_missing(&body),
-        vec!["invoice_recipient_is_payer".to_string()],
+        body["billing"]["recipient"]["representative_id"],
+        json!(father),
         "{body}"
     );
-    let body = app
-        .ok(
-            StatusCode::OK,
-            "POST",
-            &format!("{base}/billing"),
-            anna,
-            Some(json!({ "invoice_recipient_is_payer": false })),
-        )
-        .await;
     // The father has no login: the mother answers how he pays (section 8).
     // The account holder offered is the paying father — a minor holds no
     // account (before: the child's name).
@@ -681,6 +674,19 @@ async fn enter_identity_data(app: &Scn, lead: Uuid, representative: Uuid, number
         )
         .await;
     assert_eq!(stored["id_issuing_country"], "DE", "{stored}");
+    // The person's own PEP and sanctions answers, as the cabinet gives them
+    // (owner 2026-11-03: every legal representative answers them).
+    sqlx::query(
+        r#"UPDATE lead_representatives
+           SET country_questions = '{"pep_self": false, "pep_related": false, "sanctions_links": false}'::jsonb
+               || jsonb_strip_nulls(country_questions)
+           WHERE lead_id = $1 AND contact_id = $2"#,
+    )
+    .bind(lead)
+    .bind(representative)
+    .execute(app.pool())
+    .await
+    .unwrap();
 }
 
 /// Generates the GwG identification sheet of a subject; returns the body.
@@ -846,8 +852,9 @@ async fn scenario_joint_custody_minor_from_cabinet_to_conversion() {
     assert_eq!(ben_birth, chrono::NaiveDate::from_ymd_opt(1983, 4, 6));
     assert_eq!(anna_street.as_deref(), Some("Mutterweg 1"));
     assert_eq!(ben_street.as_deref(), Some("Vaterweg 2"));
-    // The parent who receives the invoice is the default payer.
-    assert!(anna_default && !ben_default, "{relations:?}");
+    // The parent who receives the invoice is the default payer: the paying
+    // father, whom the invoice follows (owner 2026-11-03).
+    assert!(ben_default && !anna_default, "{relations:?}");
     let mut expected = vec![anna_relation, ben_relation];
     expected.sort();
     let mut contracting = contracting;
@@ -1684,7 +1691,7 @@ async fn scenario_enhanced_check_by_a_parents_citizenship() {
         text[start..].chars().take(120).collect::<String>()
     };
     assert!(
-        pep_line(&texts[0]).starts_with("Angabe der Person keine Angabe"),
+        pep_line(&texts[0]).starts_with("Angabe der Person nein"),
         "{}",
         pep_line(&texts[0])
     );
@@ -2056,6 +2063,19 @@ async fn scenario_adult_with_a_legal_guardian() {
         )
         .await;
     assert_eq!(stored["id_issuing_country"], "DE");
+    // The person's own PEP and sanctions answers, as the cabinet gives them
+    // (owner 2026-11-03: every legal representative answers them).
+    sqlx::query(
+        r#"UPDATE lead_representatives
+           SET country_questions = '{"pep_self": false, "pep_related": false, "sanctions_links": false}'::jsonb
+               || jsonb_strip_nulls(country_questions)
+           WHERE lead_id = $1 AND contact_id = $2"#,
+    )
+    .bind(lead)
+    .bind(betreuer)
+    .execute(app.pool())
+    .await
+    .unwrap();
     let status = app
         .ok(
             StatusCode::OK,

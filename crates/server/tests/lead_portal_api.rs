@@ -4669,14 +4669,13 @@ async fn a_paying_parent_states_the_payment_route_and_the_other_parent_does_not(
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["billing"]["payment_route_by"], "guardian", "{body}");
-    // Anna remains the parent who receives the invoice (section 7 names her
-    // address). Naming Ben as the paying representative must not silently
-    // transfer her recipient identity; the recipient/payer choice needs review.
+    // Ben pays and is the Auftraggeber: the invoice follows him (owner
+    // 2026-11-03), Anna no longer receives it.
     assert_eq!(body["payer"]["payer_kind"], "representative", "{body}");
     assert_eq!(body["billing"]["invoice_to"], "other", "{body}");
-    assert_eq!(body["billing"]["recipient"]["first_name"], "Anna", "{body}");
+    assert_eq!(body["billing"]["recipient"]["first_name"], "Ben", "{body}");
     assert!(
-        missing_for_the_billing(&body).contains(&"invoice_recipient_is_payer"),
+        !missing_for_the_billing(&body).contains(&"invoice_recipient_is_payer"),
         "{body}"
     );
     assert!(body["billing"]["payment_method"].is_null(), "{body}");

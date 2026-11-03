@@ -391,7 +391,22 @@ export function authorityProofOf(
 }
 
 /** What `progress.missing_for_submit` names about a person: a field or one of the two uploads. */
-export type RepresentativeSubmitPart = RepresentativeField | "id_upload" | "authority_upload" | "name_latin";
+/**
+ * The PEP and sanctions answers every legal representative gives for themselves (owner 2026-11-03),
+ * with what a "yes" asks further.
+ */
+export const REPRESENTATIVE_PEP_PARTS = [
+  "pep_self", "pep_related", "sanctions_links",
+  "pep_office", "pep_country", "pep_period", "pep_relationship", "pep_wealth_origin",
+  "sanctions_link_name", "sanctions_link_kind", "sanctions_link_since_extent",
+] as const;
+export type RepresentativePepPart = (typeof REPRESENTATIVE_PEP_PARTS)[number];
+
+export function isRepresentativePepPart(part: string): part is RepresentativePepPart {
+  return (REPRESENTATIVE_PEP_PARTS as readonly string[]).includes(part);
+}
+
+export type RepresentativeSubmitPart = RepresentativeField | RepresentativePepPart | "id_upload" | "authority_upload" | "name_latin";
 
 /** Keys of the block in `progress.missing_for_submit`: the answers, and `<slot>_<part>` per person. */
 export type RepresentationSubmitField =
@@ -431,7 +446,7 @@ export function representativeSubmitPart(
   for (const slot of REPRESENTATIVE_SLOTS) {
     if (!field.startsWith(`${slot}_`)) continue;
     const part = field.slice(slot.length + 1);
-    if (part === "id_upload" || part === "authority_upload" || part === "name_latin" || REPRESENTATIVE_FIELDS.includes(part as RepresentativeField)) {
+    if (part === "id_upload" || part === "authority_upload" || part === "name_latin" || isRepresentativePepPart(part) || REPRESENTATIVE_FIELDS.includes(part as RepresentativeField)) {
       return { slot, part: part as RepresentativeSubmitPart };
     }
   }

@@ -237,6 +237,28 @@ async fn set_billing_role(
             "This parent pays: name the other parent or a third party as payer first",
         );
     }
+    // The parent who pays is the Auftraggeber and receives the invoice; the
+    // other parent never does (owner 2026-11-03).
+    let other_parent_pays =
+        lead_representatives::payer_same_person(&representation, payer.as_ref())
+            .is_some_and(|paying| paying != representative_id);
+    let other_parent_receives = stored.as_ref().is_some_and(|stored| {
+        let mut resolved = stored.clone();
+        let _ = lead_invoice_recipient::resolve_parent(&mut resolved, &representation);
+        !resolved.is_third_party()
+            && resolved
+                .representative_contact_id
+                .is_some_and(|named| named != representative_id)
+    });
+    if (wanted.receives_invoice && !wanted.pays && other_parent_pays)
+        || (wanted.pays && !wanted.receives_invoice && other_parent_receives)
+    {
+        return error(
+            StatusCode::CONFLICT,
+            lead_invoice_recipient::RECIPIENT_NOT_CONTRACTING,
+            "The parent who pays is the contract partner and receives the invoice",
+        );
+    }
 
     // The payer first: the cabinet's own save of "the recipient pays" names
     // this parent (`payer_kind = 'representative'`, with its audit event).

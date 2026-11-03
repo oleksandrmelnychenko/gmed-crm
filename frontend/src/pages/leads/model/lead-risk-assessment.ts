@@ -900,6 +900,18 @@ const REPRESENTATIVE_FIELD_LABELS: Record<string, [string, string]> = {
   id_issuing_country_invalid: ["страна выдачи не из списка", "Ausstellungsland nicht aus der Liste"],
   id_dates_invalid: ["даты документа не сходятся", "Ausweisdaten passen nicht zusammen"],
   authority_upload: ["подтверждение полномочий", "Vollmachtsnachweis"],
+  // Every legal representative answers PEP and sanctions for themselves (owner 2026-11-03).
+  pep_self: ["ответ: является ли PEP", "Angabe: selbst PEP"],
+  pep_related: ["ответ: родственник / близкое лицо PEP", "Angabe: Angehörige/r einer PEP"],
+  sanctions_links: ["ответ о связях с санкционными лицами", "Angabe zu Sanktionsverbindungen"],
+  pep_office: ["PEP: должность", "PEP: Amt"],
+  pep_country: ["PEP: страна", "PEP: Land"],
+  pep_period: ["PEP: период", "PEP: Zeitraum"],
+  pep_relationship: ["PEP: отношение к лицу", "PEP: Beziehung"],
+  pep_wealth_origin: ["PEP: происхождение средств", "PEP: Herkunft des Vermögens"],
+  sanctions_link_name: ["санкции: имя лица", "Sanktionen: Name"],
+  sanctions_link_kind: ["санкции: вид связи", "Sanktionen: Art der Verbindung"],
+  sanctions_link_since_extent: ["санкции: с какого времени и в каком объёме", "Sanktionen: seit wann und in welchem Umfang"],
 };
 
 /**

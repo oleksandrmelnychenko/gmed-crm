@@ -4006,6 +4006,12 @@ async fn update_my_payer(
         }
         Err(PortalPayerError::Database(error)) => return internal(error, "save payer"),
     };
+    if saved.is_some()
+        && let Err(error) =
+            lead_invoice_recipient::follow_paying_parent(&mut tx, lead_id, auth.user_id).await
+    {
+        return internal(error, "invoice follows the paying parent");
+    }
     if let Err(error) = lead_payer::outdate_framework_for_contracting_parents(
         &mut tx,
         lead_id,
@@ -4507,6 +4513,24 @@ async fn update_my_billing(
             lead_invoice_recipient::resolve_parent(&mut next, &representation.representation)
         {
             return error.into_response();
+        }
+        // The other parent pays: the invoice goes to that parent, the
+        // Auftraggeber (owner 2026-11-03), as after a change of the payer.
+        if lead_invoice_recipient::names_the_non_paying_parent(
+            &next,
+            &representation.representation,
+            payer.as_ref(),
+        ) && let Some(paying) =
+            lead_representatives::payer_same_person(&representation.representation, payer.as_ref())
+        {
+            next = lead_invoice_recipient::Recipient {
+                recipient: Some(lead_invoice_recipient::RECIPIENT_SELF.into()),
+                is_payer: Some(true),
+                representative_contact_id: Some(paying),
+                ..lead_invoice_recipient::Recipient::default()
+            };
+            let _ =
+                lead_invoice_recipient::resolve_parent(&mut next, &representation.representation);
         }
         let changed = lead_invoice_recipient::changed_keys(&current, &next);
         if !changed.is_empty() || stored.is_none() {

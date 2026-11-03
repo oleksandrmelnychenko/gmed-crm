@@ -5,7 +5,7 @@ import { inputClass, selectClass, textareaClass } from "@/components/record-work
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 
-import { saveRepresentativeCountryQuestions, type LeadRequest, type RepresentativeCountryQuestions } from "./lead-request-api";
+import { saveRepresentativeCountryQuestions, type LeadRequest, type LeadRequestRepresentative, type RepresentativeCountryQuestions } from "./lead-request-api";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import { combinedSaveState, SANCTIONS_LINK_KINDS, STAY_REASONS, type SaveState } from "./lead-request-model";
 import { LabeledField, YesNoSelect, errorBody, runDraftSave, useAutosave, type RequestQueue } from "./lead-request-parts";
@@ -43,13 +43,27 @@ export function RepresentativeQuestionsBlock(props: Props) {
   );
 }
 
-function RepresentativeQuestionsForm({ request, person, text, lang, enqueue, onChange, onState }: Props & {
+/**
+ * The PEP and sanctions questions of one legal representative in the person's own block (owner
+ * 2026-11-03: parents and the Betreuer answer them for themselves, not only when block R asks).
+ * The answers are the same as block R's.
+ */
+export function RepresentativePepQuestions({ person, ...props }: Props & { person: LeadRequestRepresentative }) {
+  const name = [person.first_name, person.last_name].filter(Boolean).join(" ");
+  const asked: RepresentativeCountryQuestions = { id: person.id, name, fields: person.country_questions ?? {}, country_questions: false, missing: [] };
+  const onState = useCallback((_id: string, state: SaveState) => props.onSaveState(state), [props.onSaveState]);
+  return <RepresentativeQuestionsForm {...props} person={asked} onState={onState} pepOnly />;
+}
+
+function RepresentativeQuestionsForm({ request, person, text, lang, enqueue, onChange, onState, pepOnly = false }: Props & {
   person: RepresentativeCountryQuestions;
   onState: (id: string, state: SaveState) => void;
+  /** Only the PEP and sanctions questions, in the person's own block of the form. */
+  pepOnly?: boolean;
 }) {
   // Name and birth data GMED entered for this person (staff wizard) fill an empty answer (QA 2026-10-25, R-2).
   const known = request.representation?.representatives.find((value) => value.id === person.id);
-  const [draft, setDraft] = useState(() => withKnownBirth(representativeCountryDraft(person.fields), known));
+  const [draft, setDraft] = useState(() => pepOnly ? representativeCountryDraft(person.fields) : withKnownBirth(representativeCountryDraft(person.fields), known));
   const savedRef = useRef(representativeCountryDraft(person.fields));
   const queuedRef = useRef(savedRef.current);
   const rejectedRef = useRef<Partial<RepresentativeCountryDraft>>({});
@@ -79,10 +93,12 @@ function RepresentativeQuestionsForm({ request, person, text, lang, enqueue, onC
         try {
           const baseline = savedRef.current;
           const next = await saveRepresentativeCountryQuestions(request.lead_id, person.id, patch);
-          const freshPerson = next.follow_up?.representatives?.find((value) => value.id === person.id);
+          const freshFields = pepOnly
+            ? next.representation?.representatives.find((value) => value.id === person.id)?.country_questions
+            : next.follow_up?.representatives?.find((value) => value.id === person.id)?.fields;
           // A successful answer may close this block. Its acknowledged fields
           // are still saved; unmounting must not resend the older baseline.
-          const fresh = freshPerson ? representativeCountryDraft(freshPerson.fields) : { ...baseline, ...Object.fromEntries(Object.keys(patch).map((field) => [field, snapshot[field as RepresentativeCountryField]])) };
+          const fresh = freshFields ? representativeCountryDraft(freshFields) : { ...baseline, ...Object.fromEntries(Object.keys(patch).map((field) => [field, snapshot[field as RepresentativeCountryField]])) };
           savedRef.current = fresh;
           queuedRef.current = mergeSavedDraft(queuedRef.current, snapshot, fresh, baseline, Object.keys(patch), fields);
           setDraft((current) => mergeSavedDraft(current, snapshot, fresh, baseline, Object.keys(patch), fields));
@@ -104,7 +120,7 @@ function RepresentativeQuestionsForm({ request, person, text, lang, enqueue, onC
       else if (saved || previousFailure) onState(person.id, "saved");
       return !failedRef.current;
     });
-  }, [enqueue, onChange, onState, person.id, person.fields, request.lead_id]);
+  }, [enqueue, onChange, onState, person.id, person.fields, pepOnly, request.lead_id]);
   useAutosave(draft, save);
   const update = (field: RepresentativeCountryField, value: string) => setDraft((current) => updateRepresentativeCountryDraft(current, field, value));
   const id = (field: RepresentativeCountryField) => `representative-${person.id}-${field}`;
@@ -126,14 +142,16 @@ function RepresentativeQuestionsForm({ request, person, text, lang, enqueue, onC
   ));
   const pep = draft.pep_self === "yes" || draft.pep_related === "yes";
   return (
-    <fieldset className="min-w-0 rounded-xl border border-border bg-card p-3" data-testid={`lead-request-representative-questions-${person.id}`}>
-      <legend className="max-w-full break-words px-2 text-sm font-semibold">{person.name}</legend>
+    <fieldset className="min-w-0 rounded-xl border border-border bg-card p-3" data-testid={`lead-request-representative-${pepOnly ? "pep" : "questions"}-${person.id}`}>
+      <legend className="max-w-full break-words px-2 text-sm font-semibold">{pepOnly ? text.representativePepLegend : person.name}</legend>
       <div className="grid min-w-0 gap-x-3 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
-        {input("birth_place", 200)}
-        {field("birth_country", <CountrySelect value={draft.birth_country || null} lang={lang} className={selectClass} aria-label={`${person.name}: ${label("birth_country")}`} onChange={(value) => update("birth_country", value ?? "")} />)}
-        {input("residence_since", 60)}
-        {choice("stay_reason", text.stayReasonOptions, STAY_REASONS)}
-        {draft.stay_reason === "other" ? textarea("stay_reason_details") : null}
+        {pepOnly ? null : <>
+          {input("birth_place", 200)}
+          {field("birth_country", <CountrySelect value={draft.birth_country || null} lang={lang} className={selectClass} aria-label={`${person.name}: ${label("birth_country")}`} onChange={(value) => update("birth_country", value ?? "")} />)}
+          {input("residence_since", 60)}
+          {choice("stay_reason", text.stayReasonOptions, STAY_REASONS)}
+          {draft.stay_reason === "other" ? textarea("stay_reason_details") : null}
+        </>}
         {REPRESENTATIVE_QUESTIONS.map((key) => field(key, <YesNoSelect id={id(key)} value={draft[key]} text={text} invalid={Boolean(error(key))} onChange={(value) => update(key, value)} />, true))}
         {pep ? <>
           {input("pep_office")}

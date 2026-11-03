@@ -1307,6 +1307,9 @@ pub(crate) fn missing_for_representative(
         place_missing(loaded, today, slot, &ADULT_REQUIRED)
     };
     add_identity_problems(&mut missing, slot, person, today);
+    // The person's own GwG sheet asks PEP and sanctions of that person (QA
+    // 2026-11-03, D-B6: the sheet counted as complete with them empty).
+    missing.extend(pep_missing(slot, person));
     missing
 }
 
@@ -3905,6 +3908,31 @@ pub(crate) fn country_question_missing(fields: &Value) -> Vec<String> {
     missing
 }
 
+/// The PEP and sanctions answers every legal representative gives for
+/// themselves (owner 2026-11-03: parents and the Betreuer answer them too, not
+/// only when block R asks), as keys `<slot>_<field>`: the three questions and
+/// what a "yes" asks further.
+fn pep_missing(slot: &str, person: &Representative) -> Vec<String> {
+    const KEYS: [&str; 11] = [
+        "pep_self",
+        "pep_related",
+        "sanctions_links",
+        "pep_office",
+        "pep_country",
+        "pep_period",
+        "pep_relationship",
+        "pep_wealth_origin",
+        "sanctions_link_name",
+        "sanctions_link_kind",
+        "sanctions_link_since_extent",
+    ];
+    country_question_missing(&representative_question_fields(&person.extras))
+        .into_iter()
+        .filter(|key| KEYS.contains(&key.as_str()))
+        .map(|key| format!("{slot}_{key}"))
+        .collect()
+}
+
 fn apply_country_questions(current: &Value, body: &Value) -> Result<Value, FieldError> {
     let object = body
         .as_object()
@@ -5294,6 +5322,10 @@ mod tests {
                 id_issuing_authority: Some("Stadt Berlin".into()),
                 id_issuing_country: Some("DE".into()),
                 id_valid_until: NaiveDate::from_ymd_opt(2031, 2, 1),
+                // The person's own PEP and sanctions answers (owner 2026-11-03).
+                country_questions: json!({
+                    "pep_self": false, "pep_related": false, "sanctions_links": false
+                }),
                 ..Default::default()
             },
         }

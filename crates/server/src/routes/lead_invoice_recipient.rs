@@ -110,6 +110,27 @@ pub(crate) fn recipient_changed_since(
         && resolved.representative_contact_id != Some(parent)
 }
 
+/// A minor's parent named to receive the invoice without paying while the
+/// other parent pays: the paying parent is the Auftraggeber and receives the
+/// invoice, never the other one (owner 2026-11-03), refused as
+/// [`RECIPIENT_NOT_CONTRACTING`].
+pub(crate) fn names_the_non_paying_parent(
+    next: &Recipient,
+    representation: &super::lead_representatives::Representation,
+    payer: Option<&Declaration>,
+) -> bool {
+    if !representation.minor || next.is_third_party() || next.is_payer == Some(true) {
+        return false;
+    }
+    let Some(named) = next.representative_contact_id else {
+        return false;
+    };
+    super::lead_representatives::payer_same_person(representation, payer)
+        .is_some_and(|paying| paying != named)
+}
+
+pub(crate) const RECIPIENT_NOT_CONTRACTING: &str = "recipient_not_contracting";
+
 /// The answers of step 3 about the invoice recipient.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Recipient {
@@ -892,22 +913,10 @@ pub(crate) fn following_payer(
     declaration: &Declaration,
     paying_parent: Option<Uuid>,
 ) -> Option<Recipient> {
-    if recipient.is_payer != Some(true) {
-        // The parent who receives the invoices now pays as well: "the
-        // recipient is the payer" says so, or the Patientenformular names the
-        // same parent as payer and says «nein» (QA 2026-11-03, F1).
-        let names_the_payer = paying_parent.is_some()
-            && !recipient.is_third_party()
-            && recipient.representative_contact_id == paying_parent;
-        return names_the_payer.then(|| Recipient {
-            is_payer: Some(true),
-            ..recipient.clone()
-        });
-    }
-    let mut next = recipient.clone();
-    // The other parent pays now: "the recipient is the payer" names that
-    // parent, the invoice follows (QA 2026-11-01, W2 N1). A parent who was
-    // answered to receive the invoice without paying is not this case.
+    // A parent pays: that parent is the Auftraggeber and the invoice goes to
+    // that parent, never to the other one (owner 2026-11-03). A parent who
+    // received the invoice follows the payer, also one who was answered to
+    // receive it without paying (QA 2026-11-01, W2 N1).
     if let (Some(parent), false, Some(current)) = (
         paying_parent,
         recipient.is_third_party(),
@@ -921,6 +930,19 @@ pub(crate) fn following_payer(
             ..Recipient::default()
         });
     }
+    if recipient.is_payer != Some(true) {
+        // The parent who receives the invoices now pays as well: "the
+        // recipient is the payer" says so, or the Patientenformular names the
+        // same parent as payer and says «nein» (QA 2026-11-03, F1).
+        let names_the_payer = paying_parent.is_some()
+            && !recipient.is_third_party()
+            && recipient.representative_contact_id == paying_parent;
+        return names_the_payer.then(|| Recipient {
+            is_payer: Some(true),
+            ..recipient.clone()
+        });
+    }
+    let mut next = recipient.clone();
     let paying_parent = paying_parent.is_some();
     match (recipient.is_third_party(), declaration.is_third_party()) {
         (true, true) => {
@@ -1000,6 +1022,63 @@ pub(crate) async fn follow_staff_payer(
                 "lead_id": lead_id,
                 "fields": changed_keys(&stored, &next),
                 "reason": "payer_changed_by_staff",
+            }),
+        ),
+    )
+    .await
+}
+
+/// The cabinet named a parent as payer while the other parent receives the
+/// invoices: the invoice follows the paying parent, the Auftraggeber (owner
+/// 2026-11-03). Nothing else of the recipient changes here; staff's change of
+/// the payer follows with [`follow_staff_payer`].
+pub(crate) async fn follow_paying_parent(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    actor: Uuid,
+) -> Result<(), sqlx::Error> {
+    let Some(stored) = load(&mut *conn, lead_id).await? else {
+        return Ok(());
+    };
+    let representation = super::lead_representatives::load(&mut *conn, lead_id)
+        .await?
+        .unwrap_or_default()
+        .representation;
+    let declaration = lead_payer::load_declaration(&mut *conn, lead_id).await?;
+    let Some(paying) =
+        super::lead_representatives::payer_same_person(&representation, declaration.as_ref())
+    else {
+        return Ok(());
+    };
+    let mut resolved = stored.clone();
+    let _ = resolve_parent(&mut resolved, &representation);
+    if resolved.is_third_party()
+        || resolved.recipient.as_deref() != Some(RECIPIENT_SELF)
+        || resolved
+            .representative_contact_id
+            .is_none_or(|named| named == paying)
+    {
+        return Ok(());
+    }
+    let mut next = Recipient {
+        recipient: Some(RECIPIENT_SELF.into()),
+        is_payer: Some(true),
+        representative_contact_id: Some(paying),
+        ..Recipient::default()
+    };
+    let _ = resolve_parent(&mut next, &representation);
+    store(&mut *conn, lead_id, &next, actor).await?;
+    crate::audit::write_in_transaction(
+        conn,
+        &crate::audit::domain_event(
+            "update_lead_invoice_recipient",
+            Some(actor),
+            "lead",
+            Some(lead_id),
+            json!({
+                "lead_id": lead_id,
+                "fields": changed_keys(&resolved, &next),
+                "reason": "paying_parent_receives_the_invoice",
             }),
         ),
     )
@@ -1520,7 +1599,11 @@ mod tests {
             is_payer: Some(false),
             ..recipient
         };
-        assert_eq!(following_payer(&apart, &declaration, Some(father)), None);
+        // A parent answered to receive it without paying follows the paying
+        // parent too: the invoice goes to the Auftraggeber (owner 2026-11-03).
+        let followed = following_payer(&apart, &declaration, Some(father)).unwrap();
+        assert_eq!(followed.representative_contact_id, Some(father));
+        assert_eq!(followed.is_payer, Some(true));
 
         // The parent who only received the invoice now pays (QA 2026-11-03, F1).
         let next = following_payer(&apart, &same, Some(mother)).unwrap();

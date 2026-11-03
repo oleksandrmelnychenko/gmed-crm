@@ -437,6 +437,8 @@ export type LeadRequestRepresentative = {
   identity_documents: LeadRequestDocument[];
   /** Proof that this person may act: power of attorney, appointment, sole custody. */
   authority_documents: LeadRequestDocument[];
+  /** The person's own answers about countries, PEP and sanctions (absent on an older server). */
+  country_questions?: Partial<RepresentativeCountryAnswers>;
 };
 
 /**

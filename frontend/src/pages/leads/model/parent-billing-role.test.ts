@@ -71,6 +71,7 @@ describe("parent billing role", () => {
     const refusal = (error: string) => new ApiRequestError("refused", { status: 409, body: { error } });
     expect(parentBillingRoleErrorText(refusal("payer_not_changed"), tx)).toContain("по своей ссылке");
     expect(parentBillingRoleErrorText(refusal("payer_still_this_parent"), tx)).toContain("сейчас плательщик");
+    expect(parentBillingRoleErrorText(refusal("recipient_not_contracting"), tx)).toContain("сторона договора");
     expect(parentBillingRoleErrorText(refusal("lead_converted"), tx)).toBeNull();
     expect(parentBillingRoleErrorText(new Error("x"), tx)).toBeNull();
   });

@@ -124,6 +124,12 @@ export function parentBillingRoleErrorText(error: unknown, tx: Tx): string | nul
       "Der Zahler hat bereits über seinen eigenen Link geantwortet. Der Zahler lässt sich nur im Zahlerschritt ändern.",
     );
   }
+  if (code === "recipient_not_contracting") {
+    return tx(
+      "Счёт получает родитель, который платит: он сторона договора. Выберите «Получает счёт и платит» для платящего родителя.",
+      "Die Rechnung erhält der zahlende Elternteil als Vertragspartner. Wählen Sie für ihn „Erhält die Rechnung und zahlt“.",
+    );
+  }
   if (code === "payer_still_this_parent") {
     return tx(
       "Этот родитель сейчас плательщик. Сначала назначьте плательщиком другого родителя или третье лицо.",
