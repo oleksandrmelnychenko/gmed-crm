@@ -375,7 +375,7 @@ function RequestSummary({ groups }: { groups: SummaryGroup[] }) {
       {groups.map((group) => (
         <section key={group.id} className="rounded-lg border border-border/60 bg-card p-3" data-testid={`lead-request-summary-${group.id}`}>
           <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+            <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
             {group.title}
           </h4>
           {group.rows.length === 0 && !group.parts?.length ? (

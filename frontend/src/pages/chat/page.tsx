@@ -1262,8 +1262,8 @@ function useChatPageContent() {
         )}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b">
-          <h2 className="flex items-center gap-2 text-base font-semibold">{user?.role === "patient" ? <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" aria-hidden="true" /> : null}{t.chat_title}</h2>
+        <div className="flex items-center justify-between border-b px-3 py-2">
+          <h2 className="flex items-center gap-2 text-base font-semibold">{user?.role === "patient" ? <span className="size-2 shrink-0 rounded-full bg-[var(--heading-marker)]" aria-hidden="true" /> : null}{t.chat_title}</h2>
           <button
             onClick={() => {
               setShowNewChat(!showNewChat);
@@ -1272,7 +1272,7 @@ function useChatPageContent() {
             aria-expanded={showNewChat}
             aria-controls="chat-new-peer-picker"
             title={t.chat_new}
-            className={cn("flex size-9 items-center justify-center rounded-lg transition-colors", user?.role === "patient" ? "bg-[var(--brand)] text-primary-foreground hover:brightness-95" : "text-muted-foreground hover:bg-muted hover:text-foreground")}
+            className="flex size-11 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:size-9"
           >
             <MessageSquarePlus className="size-[18px]" />
           </button>
@@ -1446,7 +1446,7 @@ function useChatPageContent() {
         ) : (
           <>
             {/* Chat header */}
-            <div className="flex items-center justify-between gap-3 border-b px-3 py-3 sm:px-5 sm:py-3.5">
+            <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
               <div className="flex items-center gap-3 min-w-0">
                 <button
                   type="button"
@@ -1713,7 +1713,7 @@ function useChatPageContent() {
             <form onSubmit={handleSend} onPaste={(event) => {
               const files = Array.from(event.clipboardData.files);
               if (files.length) { event.preventDefault(); addPendingFiles(files); }
-            }} className="flex flex-wrap items-center gap-1.5 border-t px-2 py-2.5 sm:gap-2 sm:px-4 sm:py-3">
+            }} className="flex flex-wrap items-center gap-1.5 border-t px-2 py-2 sm:gap-2 sm:px-3">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1738,13 +1738,13 @@ function useChatPageContent() {
               <label
                 className={cn(
                   "relative flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-                  messageTimerSeconds > 0 && "bg-amber-50 text-amber-700",
+                  messageTimerSeconds > 0 && "text-foreground",
                 )}
                 title={`${t.chat_message_timer}: ${messageTimerLabel}`}
               >
                 <Clock3 className="size-[18px]" />
                 {messageTimerSeconds > 0 ? (
-                  <span className="absolute right-1 top-1 size-1.5 rounded-full bg-amber-500" />
+                  <span className="absolute right-1 top-1 size-1.5 rounded-full bg-[var(--heading-marker)]" />
                 ) : null}
                 <select
                   value={messageTimerSeconds}
@@ -1796,7 +1796,7 @@ function useChatPageContent() {
                 disabled={sending || (!input.trim() && !pendingFiles.length)}
                 aria-label={t.chat_send}
                 title={t.chat_send}
-                className={cn("flex size-10 shrink-0 items-center justify-center rounded-lg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50", user?.role === "patient" ? "bg-[var(--brand)] text-primary-foreground" : "bg-foreground text-background")}
+                className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:size-10"
               >
                 {sending ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
               </button>

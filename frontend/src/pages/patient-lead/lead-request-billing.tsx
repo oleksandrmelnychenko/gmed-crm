@@ -395,7 +395,7 @@ export function BillingSections({
                     key={target}
                     className={cn(
                       "flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5 text-sm leading-5 transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
-                      checked ? "border-[var(--brand)] bg-[var(--brand)] text-white" : "border-border bg-card hover:bg-muted/40",
+                      checked ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card hover:bg-muted/40",
                     )}
                   >
                     {/* Named by the visible answer, never by the raw value. */}

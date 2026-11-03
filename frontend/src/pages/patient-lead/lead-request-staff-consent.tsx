@@ -70,7 +70,7 @@ export function StaffConsentRecordFields({
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          className="h-8 rounded-lg bg-[var(--brand)] px-3 text-xs font-medium text-white disabled:opacity-50"
+          className="min-h-8 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
           disabled={busy || actionDisabled || !how}
           onClick={() => { if (how) onRecord({ how, note }); }}
           data-testid={`${testId}-record-save`}

@@ -277,13 +277,13 @@ function SubscriptionCard({ subscription }: { subscription: PortalSubscriptionIt
 
   return (
     <article className={cn("portal-subscription-card min-w-0 space-y-3 rounded-xl p-3 shadow-none [overflow-wrap:anywhere]", tokens.surface.card)}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <h2 className="text-base font-semibold text-foreground">
             {subscription.package_name}
           </h2>
           {subscription.description ? (
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            <p className="mt-1 text-sm leading-5 text-muted-foreground">
               {subscription.description}
             </p>
           ) : null}
@@ -327,23 +327,19 @@ function SubscriptionCard({ subscription }: { subscription: PortalSubscriptionIt
         />
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <ReceiptText className="size-3.5" />
-        {replaceCount(
-          t.portal_subscriptions_invoice_count,
-          subscription.financial.visible_invoice_count,
-        )}
-      </div>
-
-      <div className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
             <PackageCheck className="size-4 text-primary" />
             {t.portal_subscriptions_usage}
           </h3>
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            <ReceiptText aria-hidden="true" className="size-4 shrink-0" />
+            {replaceCount(t.portal_subscriptions_invoice_count, subscription.financial.visible_invoice_count)}
+          </span>
         </div>
         {subscription.services.length === 0 ? (
-          <p className="text-sm leading-6 text-muted-foreground">
+          <p className="text-sm leading-5 text-muted-foreground">
             {t.portal_subscriptions_no_services}
           </p>
         ) : (
@@ -365,8 +361,8 @@ function ServiceUsage({ service }: { service: PortalSubscriptionService }) {
     subscriptionUnitLabel(service.unit_label, t, lang, Number(count));
 
   return (
-    <div className="rounded-lg border border-border/70 bg-background/60 p-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="border-t border-border/60 pt-2">
+      <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-foreground">{service.name}</div>
           {service.description && service.description !== service.name ? (
@@ -379,13 +375,13 @@ function ServiceUsage({ service }: { service: PortalSubscriptionService }) {
           {quantity(service.used_quantity)} / {quantity(service.included_quantity)} {unit(service.included_quantity)}
         </div>
       </div>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
         <div
           className="h-full rounded-full bg-primary transition-[width]"
           style={{ width: `${progress}%` }}
         />
       </div>
-      <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+      <div className="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
         <UsageMetric
           label={t.portal_subscriptions_included}
           value={`${quantity(service.included_quantity)} ${unit(service.included_quantity)}`}
@@ -402,7 +398,7 @@ function ServiceUsage({ service }: { service: PortalSubscriptionService }) {
       {Number(service.overage_quantity) > 0 ||
       Number(service.pending_overage_quantity) > 0 ||
       Number(service.declined_overage_quantity ?? 0) > 0 ? (
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-2 flex flex-wrap gap-1.5">
           {Number(service.overage_quantity) > 0 ? (
             <StatusBadge tone="warning">
               {t.portal_subscriptions_overage}: {quantity(service.overage_quantity)} {unit(service.overage_quantity)}
@@ -426,9 +422,9 @@ function ServiceUsage({ service }: { service: PortalSubscriptionService }) {
 
 function UsageMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md bg-muted/50 px-2 py-1.5">
+    <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
       <div className="text-muted-foreground">{label}</div>
-      <div className="mt-0.5 font-mono font-semibold tabular-nums text-foreground">{value}</div>
+      <div className="font-mono font-semibold tabular-nums text-foreground">{value}</div>
     </div>
   );
 }

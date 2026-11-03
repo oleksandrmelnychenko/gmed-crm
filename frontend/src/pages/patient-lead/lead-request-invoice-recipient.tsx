@@ -374,7 +374,7 @@ export function InvoiceRecipientSection({
                     <span className={cn(
                       "flex min-h-7 items-center rounded-md border px-2.5 py-1 text-xs leading-4 transition-colors peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-ring/30",
                       checked
-                        ? "border-[var(--brand)] bg-[var(--brand)] font-semibold text-white shadow-sm"
+                        ? "border-primary bg-primary font-semibold text-primary-foreground"
                         : "border-transparent bg-card text-muted-foreground peer-enabled:hover:border-border peer-enabled:hover:bg-muted/70 peer-enabled:hover:text-foreground",
                     )}>
                       {options[answer]}

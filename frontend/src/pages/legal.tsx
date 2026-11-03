@@ -27,11 +27,11 @@ type LegalNotice = Partial<Record<
   string
 >>;
 
-const cardClass = "space-y-4 rounded-xl border border-border/50 bg-card p-4 sm:p-5";
+const cardClass = "space-y-3 rounded-xl border border-border/50 bg-card p-3 sm:p-4";
 const headingClass = "flex items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground";
 
 function SectionMarker() {
-  return <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />;
+  return <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />;
 }
 
 /**
@@ -148,8 +148,8 @@ export function LegalNoticePage() {
   }
   return (
     <main className="h-dvh overflow-x-hidden overflow-y-auto overscroll-y-contain outline-none" tabIndex={0} data-testid="legal-public-scroll">
-      <div className="mx-auto w-full max-w-4xl space-y-4 px-4 py-6 text-[13px] text-foreground sm:px-6" data-testid="legal-notice">
-      <header className="space-y-5 pb-1">
+      <div className="mx-auto w-full max-w-4xl space-y-3 px-4 py-4 text-[13px] text-foreground sm:px-6" data-testid="legal-notice">
+      <header className="space-y-3 pb-1">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <img src="/gmed-logo.png" alt="GMED" className="h-8 w-auto object-contain" />
           <a href="/login" className={`${buttonVariants({ variant: "outline", size: "sm" })} h-8 rounded-lg bg-field text-xs`}>

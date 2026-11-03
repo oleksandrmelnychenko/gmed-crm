@@ -168,28 +168,54 @@ function PatientServicesRequestSection({
   onSubmit,
 }: PatientServicesRequestSectionProps) {
   return (
-    <AdminDialogScaffold title={t.services_request_title} description={t.services_request_description}>
-      <form className="space-y-3" onSubmit={(event) => void onSubmit(event)}>
-        <Field label={t.services_form_service_type}>
-          <NativeComboboxSelect
-            value={form.serviceKind}
-            onChange={(event) =>
-              onFormChange((current) => ({
-                ...current,
-                serviceKind: event.target.value ?? "hotel",
-              }))
-            }
-            className={selectClass}
-          >
-            <option value="hotel">{t.services_type_hotel}</option>
-            <option value="transfer">{t.services_type_transfer}</option>
-            <option value="vip_terminal">{t.services_type_vip_terminal}</option>
-            <option value="flight">{t.services_type_flight}</option>
-            <option value="chauffeur">{t.services_type_chauffeur}</option>
-            <option value="translation_support">{t.services_type_translation_support}</option>
-            <option value="other">{t.services_type_other}</option>
-          </NativeComboboxSelect>
-        </Field>
+    <AdminDialogScaffold
+      title={t.services_request_title}
+      description={t.services_request_description}
+      bodyClassName="bg-card [&_label]:font-mono [&_label]:text-xs"
+      onSubmit={(event) => void onSubmit(event)}
+      footer={
+        <div className="flex justify-end px-4 py-3">
+          <Button type="submit" className="h-auto min-h-9 max-w-full whitespace-normal" disabled={requestBusy}>
+            {requestBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
+            {t.services_submit}
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label={t.services_form_service_type}>
+            <NativeComboboxSelect
+              value={form.serviceKind}
+              onChange={(event) =>
+                onFormChange((current) => ({
+                  ...current,
+                  serviceKind: event.target.value ?? "hotel",
+                }))
+              }
+              className={selectClass}
+            >
+              <option value="hotel">{t.services_type_hotel}</option>
+              <option value="transfer">{t.services_type_transfer}</option>
+              <option value="vip_terminal">{t.services_type_vip_terminal}</option>
+              <option value="flight">{t.services_type_flight}</option>
+              <option value="chauffeur">{t.services_type_chauffeur}</option>
+              <option value="translation_support">{t.services_type_translation_support}</option>
+              <option value="other">{t.services_type_other}</option>
+            </NativeComboboxSelect>
+          </Field>
+
+          <Field label={t.services_form_title} htmlFor="portal-service-title">
+            <Input
+              id="portal-service-title"
+              value={form.title}
+              onChange={(event) => onFormChange((current) => ({ ...current, title: event.target.value }))}
+              placeholder={t.services_form_title_placeholder}
+              className={inputClass}
+              required
+            />
+          </Field>
+        </div>
 
         <Field label={t.services_category}>
           <ProviderTaxonomyCascadeSelect
@@ -206,17 +232,6 @@ function PatientServicesRequestSection({
                 taxonomyNodeId,
               }))
             }
-          />
-        </Field>
-
-        <Field label={t.services_form_title} htmlFor="portal-service-title">
-          <Input
-            id="portal-service-title"
-            value={form.title}
-            onChange={(event) => onFormChange((current) => ({ ...current, title: event.target.value }))}
-            placeholder={t.services_form_title_placeholder}
-            className={inputClass}
-            required
           />
         </Field>
 
@@ -266,7 +281,7 @@ function PatientServicesRequestSection({
           </Field>
         </div>
 
-        <Field label={t.services_form_budget} htmlFor="portal-service-budget">
+        <Field label={t.services_form_budget} htmlFor="portal-service-budget" className="max-w-xs">
           <Input
             id="portal-service-budget"
             type="number"
@@ -285,17 +300,13 @@ function PatientServicesRequestSection({
             value={form.serviceNotes}
             onChange={(event) => onFormChange((current) => ({ ...current, serviceNotes: event.target.value }))}
             placeholder={t.services_form_notes_placeholder}
-            className={cn(textareaClass, "min-h-[132px]")}
+            className={cn(textareaClass, "min-h-24")}
           />
         </Field>
 
         {requestError ? <Banner tone="error">{requestError}</Banner> : null}
 
-        <Button type="submit" className={cn("w-full", tokens.control.primaryButton)} disabled={requestBusy}>
-          {requestBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
-          {t.services_submit}
-        </Button>
-      </form>
+      </div>
     </AdminDialogScaffold>
   );
 }

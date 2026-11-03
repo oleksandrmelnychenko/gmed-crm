@@ -246,7 +246,7 @@ export function PatientPrivacyPage() {
             {t.portal_privacy_manager_review_hint}
           </p>
 
-          <form onSubmit={handleSubmit} className="space-y-3">
+          <form onSubmit={handleSubmit} className="space-y-3 [&_label]:font-mono [&_label]:text-xs">
             <Field label={t.portal_privacy_request_type} htmlFor="privacy-type">
               <NativeComboboxSelect
                 id="privacy-type"
@@ -272,12 +272,12 @@ export function PatientPrivacyPage() {
                 value={reason}
                 onChange={(event) => dispatchPrivacyState({ reason: event.target.value })}
                 placeholder={t.portal_privacy_reason_placeholder}
-                className={cn(textareaClass, "min-h-[120px]")}
+                className={cn(textareaClass, "min-h-24")}
               />
             </Field>
             <Button
               type="submit"
-              className={tokens.control.primaryButton}
+              className="h-auto min-h-9 max-w-full whitespace-normal"
               disabled={submitting || !requestType}
             >
               {submitting ? <LoaderCircle className="size-4 animate-spin" /> : null}
@@ -295,10 +295,10 @@ export function PatientPrivacyPage() {
               {t.portal_privacy_empty}
             </EmptyCell>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {requests.map((item) => (
-                <ListItem key={item.id} className="space-y-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
+                <ListItem key={item.id} className="space-y-2">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                       <p className="text-sm font-semibold text-foreground">
                         {privacyRequestLabel(item.request_type)}
@@ -317,7 +317,7 @@ export function PatientPrivacyPage() {
                     </p>
                   ) : null}
 
-                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  <div className="grid gap-2 md:grid-cols-2">
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_due} value={<PortalDateChip>{formatPortalDate(item.due_at)}</PortalDateChip>} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_reviewed} value={<PortalDateChip>{formatPortalDateTime(item.reviewed_at)}</PortalDateChip>} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_executed} value={<PortalDateChip>{formatPortalDateTime(item.executed_at)}</PortalDateChip>} />

@@ -3,9 +3,10 @@ import { startTransition, useEffect, useMemo, useReducer, useState, type FormEve
 import { Download, LoaderCircle, RefreshCw, Upload } from "lucide-react";
 
 import { AdminSheetScaffold } from "@/components/admin-page-patterns";
+import { AdminDialogScaffold } from "@/components/admin-dialog-scaffold";
 import { Button } from "@/components/ui/button";
 import { FilePicker } from "@/components/ui/file-picker";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
   Banner,
@@ -820,7 +821,7 @@ function usePatientInvoicesPageContent() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                        <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
+                        <span aria-hidden className="size-1.5 rounded-full bg-[var(--heading-marker)]" />
                         <span>{t.portal_invoices_invoice_overview}</span>
                       </h2>
                       <p className={cn("mt-1", tokens.text.muted)}>{t.portal_invoices_amounts_due_date_and_linked_quote_order_context}</p>
@@ -861,7 +862,7 @@ function usePatientInvoicesPageContent() {
                       {detail.status === "cancelled" && detail.has_storno_document !== false && invoicePdfVisible(detail) ? (
                         <Button
                           type="button"
-                          variant="outline"
+                          variant="default"
                           className={tokens.control.primaryButton}
                           data-testid="portal-storno-download"
                           onClick={() =>
@@ -901,7 +902,7 @@ function usePatientInvoicesPageContent() {
                     ) : null}
                   </div>
                   {detail.notes ? (
-                    <div className={cn("mt-4 rounded-xl px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
+                    <div className={cn("mt-3 rounded-lg px-3 py-2 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
                       {detail.notes}
                     </div>
                   ) : null}
@@ -910,7 +911,7 @@ function usePatientInvoicesPageContent() {
                 {detailCreditNotes.length > 0 ? (
                   <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
+                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--heading-marker)]" />
                       <span>{t.finance_credit_note_portal_title}</span>
                     </h2>
                     <p className={cn("mt-1", tokens.text.muted)}>
@@ -960,7 +961,7 @@ function usePatientInvoicesPageContent() {
                 {invoiceAmountsVisible(detail) ? (
                   <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
+                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--heading-marker)]" />
                       <span>{t.portal_invoices_payment_history}</span>
                     </h2>
                     <p className={cn("mt-1", tokens.text.muted)}>
@@ -1024,7 +1025,7 @@ function usePatientInvoicesPageContent() {
                 {invoiceAmountsVisible(detail) && detailRefunds.length > 0 ? (
                   <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
+                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--heading-marker)]" />
                       <span>{lang === "de" ? "Rückzahlungen" : "Возвраты"}</span>
                     </h2>
                     <p className={cn("mt-1", tokens.text.muted)}>
@@ -1086,7 +1087,7 @@ function usePatientInvoicesPageContent() {
                     data-testid="portal-dunning-letters"
                   >
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
+                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--heading-marker)]" />
                       <span>{lang === "de" ? "Zahlungserinnerungen und Mahnungen" : "Напоминания и требования об оплате"}</span>
                     </h2>
                     <p className={cn("mt-1", tokens.text.muted)}>
@@ -1112,7 +1113,7 @@ function usePatientInvoicesPageContent() {
                           </div>
                           <Button
                             type="button"
-                            variant="outline"
+                            variant="default"
                             size="sm"
                             className="h-8 gap-1.5 rounded-lg"
                             onClick={() => {
@@ -1137,7 +1138,7 @@ function usePatientInvoicesPageContent() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                        <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
+                        <span aria-hidden className="size-1.5 rounded-full bg-[var(--heading-marker)]" />
                         <span>{t.portal_invoices_payment_proof}</span>
                       </h2>
                       <p className={cn("mt-1", tokens.text.muted)}>
@@ -1156,7 +1157,7 @@ function usePatientInvoicesPageContent() {
                       {t.portal_invoices_upload_payment_proof}
                     </Button>
                   </div>
-                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_uploaded_proofs} value={String(detail.payment_proof_count ?? 0)} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
                       label={t.portal_invoices_latest_upload}
@@ -1167,11 +1168,11 @@ function usePatientInvoicesPageContent() {
 
                 <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                   <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                    <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
+                    <span aria-hidden className="size-1.5 rounded-full bg-[var(--heading-marker)]" />
                     <span>{t.portal_invoices_line_items}</span>
                   </h2>
                   <p className={cn("mt-1", tokens.text.muted)}>{t.portal_invoices_materialized_billing_lines_for_the_current_invoice_snapshot}</p>
-                  <div className="mt-5 space-y-3">
+                  <div className="mt-3 space-y-2">
                     {!detail.line_items || detail.line_items.length === 0 ? (
                       <div className={cn("rounded-xl px-3 py-3 text-sm text-muted-foreground", tokens.surface.dashed)}>
                         {t.portal_invoices_no_line_items_available}
@@ -1210,14 +1211,24 @@ function usePatientInvoicesPageContent() {
           });
         }}
       >
-        <DialogContent className="flex min-h-[min(560px,calc(100dvh-1rem))] flex-col bg-card sm:min-h-0 sm:max-w-xl [&_label]:font-mono [&_label]:text-xs">
-          <DialogHeader>
-            <DialogTitle>{t.portal_invoices_upload_payment_proof}</DialogTitle>
-            <DialogDescription>
-              {t.portal_invoices_this_file_is_attached_internally_for_billing_follow_up_and_is_no}
-            </DialogDescription>
-          </DialogHeader>
-          <form className="flex min-h-0 flex-1 flex-col gap-4" onSubmit={(event) => void handlePaymentProofUpload(event)}>
+        <AdminDialogScaffold
+          title={t.portal_invoices_upload_payment_proof}
+          description={t.portal_invoices_this_file_is_attached_internally_for_billing_follow_up_and_is_no}
+          maxWidthClassName="sm:max-w-xl"
+          bodyClassName="bg-card [&_label]:font-mono [&_label]:text-xs"
+          onSubmit={(event) => void handlePaymentProofUpload(event)}
+          footer={
+            <div className="flex flex-wrap justify-end gap-2 px-4 py-3">
+              <Button type="button" variant="outline" className="h-auto min-h-9 max-w-full whitespace-normal" onClick={() => dispatchInvoicesState({ uploadOpen: false })}>
+                {t.portal_invoices_cancel}
+              </Button>
+              <Button type="submit" className="h-auto min-h-9 max-w-full whitespace-normal" disabled={uploadBusy}>
+                {uploadBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Upload className="size-4" />}
+                {t.portal_invoices_send_proof}
+              </Button>
+            </div>
+          }
+        >
             <Field label={t.portal_invoices_file} htmlFor="invoice-payment-proof">
               <FilePicker
                 id="invoice-payment-proof"
@@ -1228,24 +1239,14 @@ function usePatientInvoicesPageContent() {
             <Field label={t.portal_invoices_note} htmlFor="invoice-payment-proof-note">
               <textarea
                 id="invoice-payment-proof-note"
-                className={cn(textareaClass, "min-h-[110px]")}
+                className={cn(textareaClass, "min-h-24")}
                 placeholder={t.portal_invoices_optional_transfer_reference_payment_date_or_clarification}
                 value={uploadNote}
                 onChange={(event) => dispatchInvoicesState({ uploadNote: event.target.value })}
               />
             </Field>
             {uploadError ? <Banner tone="error">{uploadError}</Banner> : null}
-            <DialogFooter className="mt-auto">
-              <Button type="button" variant="outline" className={tokens.control.primaryButton} onClick={() => dispatchInvoicesState({ uploadOpen: false })}>
-                {t.portal_invoices_cancel}
-              </Button>
-              <Button type="submit" className={tokens.control.primaryButton} disabled={uploadBusy}>
-                {uploadBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Upload className="size-4" />}
-                {t.portal_invoices_send_proof}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
+        </AdminDialogScaffold>
       </Dialog>
     </div>
   );

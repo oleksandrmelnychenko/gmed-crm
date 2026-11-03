@@ -184,13 +184,13 @@ export function PatientPortalMobileAccess() {
   }
 
   return (
-    <details className="group rounded-lg border border-border/60 bg-card px-4 py-3">
+    <details className="group rounded-lg border border-border/60 bg-card px-3 py-2.5">
       <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium [&::-webkit-details-marker]:hidden">
         <Smartphone aria-hidden="true" className="size-4 text-muted-foreground" />{copy.title}
         <ChevronDown aria-hidden="true" className="ml-auto size-4 text-muted-foreground transition group-open:rotate-180" />
       </summary>
-      <div className="mt-4 space-y-3">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="mt-3 space-y-2">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
           <p className="text-sm leading-6 text-muted-foreground">{copy.description}</p>
           {!installed && !installPrompt ? (
@@ -201,7 +201,7 @@ export function PatientPortalMobileAccess() {
           {installed ? (
             <CountBadge>{copy.installed}</CountBadge>
           ) : installPrompt ? (
-            <Button type="button" variant="outline" onClick={() => void handleInstall()}>
+            <Button type="button" size="sm" className="h-auto min-h-8 max-w-full whitespace-normal" onClick={() => void handleInstall()}>
               <Download className="size-4" />
               {copy.install}
             </Button>
@@ -210,13 +210,13 @@ export function PatientPortalMobileAccess() {
           {notificationsEnabled ? (
             <>
               <CountBadge>{copy.enabled}</CountBadge>
-              <Button type="button" variant="outline" onClick={handleDisableNotifications}>
+              <Button type="button" size="sm" className="h-auto min-h-8 max-w-full whitespace-normal" onClick={handleDisableNotifications}>
                 <BellRing className="size-4" />
                 {copy.disable}
               </Button>
             </>
           ) : notificationSupported && notificationPermission !== "denied" ? (
-            <Button type="button" variant="outline" onClick={() => void handleEnableNotifications()}>
+            <Button type="button" size="sm" className="h-auto min-h-8 max-w-full whitespace-normal" onClick={() => void handleEnableNotifications()}>
               <BellRing className="size-4" />
               {copy.enable}
             </Button>

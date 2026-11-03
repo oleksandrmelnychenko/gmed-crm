@@ -515,7 +515,7 @@ function usePatientDashboardPageContent() {
                   {documentAlerts.configured_rule_count}
                 </CountBadge>
                 <a href="/documents">
-                  <Button variant="outline" className={tokens.control.accessoryButton}>
+                  <Button variant="default" className={tokens.control.primaryButton}>
                     {t.portal_dashboard_open_documents}
                   </Button>
                 </a>
@@ -528,7 +528,6 @@ function usePatientDashboardPageContent() {
       <section className={cn("grid items-start gap-3", recentRecommendations.length > 0 && "lg:grid-cols-2")}>
         <Section
           className="portal-next-actions"
-          showMarker={false}
           title={t.portal_dashboard_next_actions}
           accessory={
             <div className="flex flex-wrap items-center gap-2">
@@ -539,7 +538,7 @@ function usePatientDashboardPageContent() {
             </div>
           }
         >
-          <div className="portal-action-list space-y-3">
+          <div className="portal-action-list">
             {topNextActions.length === 0 ? (
               <div className="py-3"><PortalComplete>{t.portal_dashboard_no_open_portal_actions_right_now}</PortalComplete></div>
             ) : (

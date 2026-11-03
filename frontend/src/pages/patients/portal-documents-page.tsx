@@ -7,14 +7,7 @@ import { PortalSection as Section, PortalComplete } from "./ui/portal-page-layou
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
 import { FilePicker } from "@/components/ui/file-picker";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 import {
   Banner,
   CountBadge,
@@ -501,7 +494,7 @@ function usePatientDocumentsPageContent() {
       {error ? <Banner tone="error">{error}</Banner> : null}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="flex items-center gap-2 text-base font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />{t.portal_documents_my_documents}</h2>
+        <h2 className="flex items-center gap-2 text-base font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--heading-marker)]" />{t.portal_documents_my_documents}</h2>
         <Button onClick={() => dispatchDocumentsState({ uploadOpen: true })}><Upload className="size-4" />{t.portal_documents_upload_documents}</Button>
       </div>
 
@@ -567,7 +560,7 @@ function usePatientDocumentsPageContent() {
       ) : null}
 
       {documents.length > 0 ? <div className="rounded-xl border border-border/60 bg-card p-1.5">
-        <div className="flex flex-wrap justify-center gap-1">
+        <div className="flex flex-wrap gap-1">
           {PORTAL_DOCUMENT_CATEGORY_TABS.map((tab) => {
             const count = categoryCounts.get(tab.key) ?? 0;
             const label = l(tab.labelKey);
@@ -587,9 +580,9 @@ function usePatientDocumentsPageContent() {
                 aria-pressed={activeCategory === tab.key}
                 onClick={() => dispatchDocumentsState({ activeCategory: tab.key })}
                 className={cn(
-                  "inline-flex min-h-8 items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]",
+                  "inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                   activeCategory === tab.key
-                    ? "bg-[var(--brand)] font-semibold text-primary-foreground"
+                    ? "bg-primary font-semibold text-primary-foreground"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
               >
@@ -628,10 +621,10 @@ function usePatientDocumentsPageContent() {
                   );
 
                   return (
-                    <ListItem key={item.id} className="min-w-0 space-y-2 rounded-xl p-3">
-                      <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start">
+                    <ListItem key={item.id} className="min-w-0 space-y-2 rounded-none border-0 border-b border-border/60 bg-transparent px-0 py-2 shadow-none last:border-b-0">
+                      <div className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-start">
                         <FileText aria-hidden="true" className="hidden size-5 shrink-0 text-muted-foreground lg:mt-0.5 lg:block" />
-                        <div className="min-w-0 flex-1 space-y-2">
+                        <div className="min-w-0 flex-1 space-y-1.5">
                           <h3 className="text-sm font-semibold leading-5 text-foreground [overflow-wrap:anywhere]">{item.auto_name}</h3>
                           <div className="flex flex-wrap items-center gap-1.5">
                             <StatusBadge className={documentTone(item)}>
@@ -645,14 +638,14 @@ function usePatientDocumentsPageContent() {
                             <span>{portalDocumentTypeLabels(item.art, item.category).join(" · ")}</span>
                             <span><span className="font-mono">{t.portal_documents_source}: </span>{portalDocumentSourceLabel(item.ursprung, item.klinik)}</span>
                           </div>
-                          <StatusChip title={t.portal_documents_filename} className="items-start border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-200">
+                          <StatusChip title={t.portal_documents_filename} tone="neutral" className="max-w-full items-start">
                             <FileText aria-hidden="true" className="mt-0.5" />
                             <span className="min-w-0 [overflow-wrap:anywhere]">{item.original_filename || item.auto_name}</span>
                           </StatusChip>
                         </div>
                       <div className="flex shrink-0 flex-wrap gap-1.5 lg:max-w-64 lg:justify-end">
                         <Button
-                          className="h-8 rounded-lg text-xs"
+                          className="h-auto min-h-8 max-w-full whitespace-normal rounded-lg py-1 text-xs"
                           disabled={busy}
                           onClick={() => void handleDownload(item)}
                         >
@@ -661,7 +654,7 @@ function usePatientDocumentsPageContent() {
                         </Button>
                         {item.requires_confirmation && !item.confirmed ? (
                           <Button
-                            className="h-8 rounded-lg text-xs"
+                            className="h-auto min-h-8 max-w-full whitespace-normal rounded-lg py-1 text-xs"
                             disabled={busy}
                             onClick={() => void handleConfirm(item.id)}
                           >
@@ -670,7 +663,7 @@ function usePatientDocumentsPageContent() {
                           </Button>
                         ) : null}
                         <Button
-                          className="h-8 rounded-lg text-xs"
+                          className="h-auto min-h-8 max-w-full whitespace-normal rounded-lg py-1 text-xs"
                           disabled={busy}
                           onClick={() => openTranslationDialog(item)}
                         >
@@ -717,8 +710,21 @@ function usePatientDocumentsPageContent() {
               uploadOpen: false, uploadError: "", uploadFile: null, uploadName: "", uploadNotes: "", uploadKind: "general",
             });
           }}>
-            <AdminDialogScaffold title={t.portal_documents_upload_documents} description={t.portal_documents_send_files_to_the_care_team_payment_proofs_stay_internal_and_can}>
-            <form className="space-y-3 rounded-xl border border-border/60 bg-card p-3 [&_label]:font-mono [&_label]:text-xs" onSubmit={(event) => void handleUpload(event)}>
+            <AdminDialogScaffold
+              title={t.portal_documents_upload_documents}
+              description={t.portal_documents_send_files_to_the_care_team_payment_proofs_stay_internal_and_can}
+              bodyClassName="bg-card [&_label]:font-mono [&_label]:text-xs"
+              onSubmit={(event) => void handleUpload(event)}
+              footer={
+                <div className="flex justify-end px-4 py-3">
+                  <Button type="submit" className="h-auto min-h-9 max-w-full whitespace-normal" disabled={uploadBusy}>
+                    {uploadBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Upload className="size-4" />}
+                    {t.portal_documents_send_upload}
+                  </Button>
+                </div>
+              }
+            >
+            <div className="grid gap-3 sm:grid-cols-2">
               <Field label={t.portal_documents_category} htmlFor="portal-document-upload-kind">
                 <NativeComboboxSelect
                   id="portal-document-upload-kind"
@@ -745,6 +751,7 @@ function usePatientDocumentsPageContent() {
                   className={cn(inputClass, "w-full border border-input px-3 text-sm")}
                 />
               </Field>
+            </div>
               <Field label={t.portal_documents_file} htmlFor="portal-document-upload-file">
                 <FilePicker
                   ref={uploadFileInputRef}
@@ -759,19 +766,10 @@ function usePatientDocumentsPageContent() {
                   value={uploadNotes}
                   onChange={(event) => dispatchDocumentsState({ uploadNotes: event.target.value })}
                   placeholder={t.portal_documents_optional_context_for_the_care_team}
-                  className={cn(textareaClass, "min-h-[110px]")}
+                  className={cn(textareaClass, "min-h-24")}
                 />
               </Field>
               {uploadError ? <Banner tone="error">{uploadError}</Banner> : null}
-              <Button
-                type="submit"
-                className="h-9 w-full rounded-lg"
-                disabled={uploadBusy}
-              >
-                {uploadBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Upload className="size-4" />}
-                {t.portal_documents_send_upload}
-              </Button>
-            </form>
             </AdminDialogScaffold>
           </Dialog>
 
@@ -791,10 +789,10 @@ function usePatientDocumentsPageContent() {
                   const busy = busyId === item.id;
 
                   return (
-                    <ListItem key={item.id} className="min-w-0 space-y-2 rounded-xl p-3">
-                      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start">
+                    <ListItem key={item.id} className="min-w-0 space-y-2 rounded-none border-0 border-b border-border/60 bg-transparent px-0 py-2 shadow-none last:border-b-0">
+                      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start">
                         <FileText aria-hidden="true" className="hidden size-5 shrink-0 text-muted-foreground sm:mt-0.5 sm:block" />
-                        <div className="min-w-0 flex-1 space-y-2">
+                        <div className="min-w-0 flex-1 space-y-1.5">
                           <h3 className="text-sm font-semibold leading-5 text-foreground [overflow-wrap:anywhere]">{item.auto_name}</h3>
                           <div className="flex flex-wrap items-center gap-1.5">
                             <StatusBadge className={uploadedDocumentTone(item)}>
@@ -811,7 +809,7 @@ function usePatientDocumentsPageContent() {
                               item.appointment_title,
                             ].filter(Boolean).join(" / ")}
                           </p>
-                          <StatusChip title={t.portal_documents_filename} className="items-start border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-200">
+                          <StatusChip title={t.portal_documents_filename} tone="neutral" className="max-w-full items-start">
                             <FileText aria-hidden="true" className="mt-0.5" />
                             <span className="min-w-0 [overflow-wrap:anywhere]">{item.original_filename || item.auto_name}</span>
                           </StatusChip>
@@ -843,17 +841,23 @@ function usePatientDocumentsPageContent() {
           }
         }}
       >
-        <DialogContent className="sm:max-w-lg [&_label]:font-mono [&_label]:text-xs">
-          <DialogHeader>
-            <DialogTitle>
-              {t.portal_documents_request_translation}
-            </DialogTitle>
-            <DialogDescription>
-              {translationDocument?.auto_name ??
-                t.portal_documents_select_document}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-3">
+        <AdminDialogScaffold
+          title={t.portal_documents_request_translation}
+          description={<span className="[overflow-wrap:anywhere]">{translationDocument?.auto_name ?? t.portal_documents_select_document}</span>}
+          maxWidthClassName="sm:max-w-lg"
+          bodyClassName="bg-card [&_label]:font-mono [&_label]:text-xs"
+          footer={
+            <div className="flex flex-wrap justify-end gap-2 px-4 py-3">
+              <Button type="button" variant="outline" className="h-auto min-h-9 max-w-full whitespace-normal" disabled={translationBusy} onClick={() => dispatchDocumentsState({ translationDocument: null })}>
+                {t.portal_documents_cancel}
+              </Button>
+              <Button type="button" className="h-auto min-h-9 max-w-full whitespace-normal" disabled={translationBusy} onClick={() => void handleRequestTranslation()}>
+                {translationBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                {t.portal_documents_send_request}
+              </Button>
+            </div>
+          }
+        >
             <Field label={t.portal_documents_target_language} htmlFor="portal-translation-language">
               <NativeComboboxSelect
                 id="portal-translation-language"
@@ -870,32 +874,11 @@ function usePatientDocumentsPageContent() {
                 value={translationNote}
                 onChange={(event) => dispatchDocumentsState({ translationNote: event.target.value })}
                 placeholder={t.portal_documents_optional_context_for_the_care_team}
-                className={cn(textareaClass, "min-h-[110px]")}
+                className={cn(textareaClass, "min-h-24")}
               />
             </Field>
             {translationError ? <Banner tone="error">{translationError}</Banner> : null}
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              className="h-9 rounded-lg"
-              disabled={translationBusy}
-              onClick={() => dispatchDocumentsState({ translationDocument: null })}
-            >
-              {t.portal_documents_cancel}
-            </Button>
-            <Button
-              type="button"
-              className="h-9 rounded-lg"
-              disabled={translationBusy}
-              onClick={() => void handleRequestTranslation()}
-            >
-              {translationBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              {t.portal_documents_send_request}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+        </AdminDialogScaffold>
       </Dialog>
     </TabShell>
   );

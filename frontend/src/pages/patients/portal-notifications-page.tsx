@@ -296,7 +296,7 @@ export function PatientNotificationsPage() {
                       <Button
                         type="button"
                         size="sm"
-                        variant="outline"
+                        variant="default"
                         disabled={busyId === item.id}
                         onClick={() => void openNotification(item)}
                       >

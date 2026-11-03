@@ -243,10 +243,10 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
         <p className="text-sm leading-6 text-foreground/85">{wording.introduction}</p>
         <fieldset className="space-y-3" disabled={busy}>
           <legend className="mb-3 text-sm font-semibold">{text.question}</legend>
-          <div className="grid gap-2.5 xl:grid-cols-2">
+          <div className="grid gap-2 xl:grid-cols-2">
             {[false, true].map((allow) => <label key={String(allow)} className={cn(
               "flex min-w-0 cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 text-sm leading-6 transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
-              draft.allowDisclosure === allow ? "border-[var(--brand)] bg-[var(--brand)] font-medium text-white" : "border-border bg-card hover:border-[var(--brand)] hover:bg-muted/40",
+              draft.allowDisclosure === allow ? "border-primary bg-primary font-medium text-primary-foreground" : "border-border bg-card hover:border-primary hover:bg-muted/40",
               busy && "cursor-wait",
             )}>
               <input type="radio" name={`disclosure-${request.lead_id}`} aria-label={allow ? text.yes : wording.no} className="mt-1 size-4 shrink-0 accent-current" checked={draft.allowDisclosure === allow} data-testid={allow ? "disclosure-yes" : "disclosure-no"} onChange={() => { setConsentReset(false); update({ allowDisclosure: allow, consentGiven: false, answered: true }); }}

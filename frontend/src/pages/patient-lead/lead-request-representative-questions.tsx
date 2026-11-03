@@ -126,9 +126,9 @@ function RepresentativeQuestionsForm({ request, person, text, lang, enqueue, onC
   ));
   const pep = draft.pep_self === "yes" || draft.pep_related === "yes";
   return (
-    <fieldset className="min-w-0 rounded-xl border border-border bg-card p-4" data-testid={`lead-request-representative-questions-${person.id}`}>
+    <fieldset className="min-w-0 rounded-xl border border-border bg-card p-3" data-testid={`lead-request-representative-questions-${person.id}`}>
       <legend className="max-w-full break-words px-2 text-sm font-semibold">{person.name}</legend>
-      <div className="grid min-w-0 gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid min-w-0 gap-x-3 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         {input("birth_place", 200)}
         {field("birth_country", <CountrySelect value={draft.birth_country || null} lang={lang} className={selectClass} aria-label={`${person.name}: ${label("birth_country")}`} onChange={(value) => update("birth_country", value ?? "")} />)}
         {input("residence_since", 60)}

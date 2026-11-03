@@ -511,8 +511,8 @@ function usePatientAppointmentsPageContent() {
                   ];
 
                   return (
-                    <ListItem key={item.order_id} className="space-y-3">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
+                    <ListItem key={item.order_id} className="space-y-2">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-foreground">
                             {item.order_number} / {portalOrderPhaseLabel(item.phase)}
@@ -526,24 +526,23 @@ function usePatientAppointmentsPageContent() {
                         </StatusBadge>
                       </div>
 
-                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                         {milestoneRows.map((milestone) => (
-                          <div key={milestone.label} className={cn("rounded-lg p-3", tokens.surface.mutedCard)}>
                             <InfoRow
+                              key={milestone.label}
                               label={milestone.label}
                               value={
-                                <span className="flex flex-col items-start gap-2">
+                                <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                                   <StatusBadge className={milestone.tone}>{milestone.value}</StatusBadge>
                                   {milestone.hint ? <span className="text-xs text-muted-foreground">{milestone.hint}</span> : null}
                                 </span>
                               }
                             />
-                          </div>
                         ))}
                       </div>
 
                       {item.followup_summary ? (
-                        <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
+                        <div className={cn("rounded-lg px-3 py-2 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
                           {item.followup_summary}
                         </div>
                       ) : null}
@@ -573,18 +572,16 @@ function usePatientAppointmentsPageContent() {
                     item.preferred_date_to,
                   );
                   return (
-                    <ListItem key={item.id} className="space-y-3">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
+                    <ListItem key={item.id} className="space-y-2">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-foreground">
                             {appointmentTypeLabel(item.appointment_type)} {t.portal_appointments_request}
                           </p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {appointmentCarePathKindLabel(item.care_path_kind)}
-                          </p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {t.portal_appointments_requested} {formatPortalDateTime(item.requested_at)}
-                          </p>
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                            <span>{appointmentCarePathKindLabel(item.care_path_kind)}</span>
+                            <span>{t.portal_appointments_requested} {formatPortalDateTime(item.requested_at)}</span>
+                          </div>
                         </div>
                         <StatusBadge status={item.status} className={appointmentRequestStatusTone(item.status)}>
                           {portalStatusLabel(item.status)}
@@ -610,12 +607,12 @@ function usePatientAppointmentsPageContent() {
                       </div>
                       {item.reason ? <p className="text-sm text-muted-foreground">{item.reason}</p> : null}
                       {item.review_note ? (
-                        <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
+                        <div className={cn("rounded-lg px-3 py-2 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
                           {t.portal_appointments_review_note}: {item.review_note}
                         </div>
                       ) : null}
                       {item.status === "cancelled" && item.cancellation_reason ? (
-                        <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
+                        <div className={cn("rounded-lg px-3 py-2 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
                           {uiText("portal_request_cancelled_reason", lang)}: {item.cancellation_reason}
                         </div>
                       ) : null}
@@ -662,7 +659,7 @@ function usePatientAppointmentsPageContent() {
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-8 rounded-lg"
+                className="h-auto min-h-9 max-w-full whitespace-normal rounded-lg"
                 onClick={() => setRequestSheetOpen(false)}
               >
                 {t.common_cancel}
@@ -670,7 +667,7 @@ function usePatientAppointmentsPageContent() {
               <Button
                 type="submit"
                 size="sm"
-                className="h-8 rounded-lg gap-1.5"
+                className="h-auto min-h-9 max-w-full whitespace-normal rounded-lg gap-1.5"
                 disabled={requestBusy}
               >
                 {requestBusy ? (
@@ -725,7 +722,7 @@ function usePatientAppointmentsPageContent() {
             </div>
           </Section>
           <Section title={t.portal_appointments_group_schedule_preferences}>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-3">
               <Field label={t.portal_appointments_preferred_from} htmlFor="portal-appointment-preferred-from">
                 <Input
                   id="portal-appointment-preferred-from"
@@ -744,21 +741,21 @@ function usePatientAppointmentsPageContent() {
                   className={inputClass}
                 />
               </Field>
+              <Field label={t.portal_appointments_time_window} htmlFor="portal-appointment-time-window">
+                <NativeComboboxSelect
+                  id="portal-appointment-time-window"
+                  value={requestForm.preferredTimeOfDay}
+                  onChange={(event) => setRequestForm((current) => ({ ...current, preferredTimeOfDay: event.target.value }))}
+                  className={selectClass}
+                >
+                  <option value="flexible">{t.portal_appointments_flexible}</option>
+                  <option value="morning">{t.portal_appointments_morning}</option>
+                  <option value="midday">{t.portal_appointments_midday}</option>
+                  <option value="afternoon">{t.portal_appointments_afternoon}</option>
+                  <option value="evening">{t.portal_appointments_evening}</option>
+                </NativeComboboxSelect>
+              </Field>
             </div>
-            <Field label={t.portal_appointments_time_window} htmlFor="portal-appointment-time-window">
-              <NativeComboboxSelect
-                id="portal-appointment-time-window"
-                value={requestForm.preferredTimeOfDay}
-                onChange={(event) => setRequestForm((current) => ({ ...current, preferredTimeOfDay: event.target.value }))}
-                className={selectClass}
-              >
-                <option value="flexible">{t.portal_appointments_flexible}</option>
-                <option value="morning">{t.portal_appointments_morning}</option>
-                <option value="midday">{t.portal_appointments_midday}</option>
-                <option value="afternoon">{t.portal_appointments_afternoon}</option>
-                <option value="evening">{t.portal_appointments_evening}</option>
-              </NativeComboboxSelect>
-            </Field>
           </Section>
           <Section title={t.portal_appointments_group_visit_context}>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -781,24 +778,26 @@ function usePatientAppointmentsPageContent() {
                 />
               </Field>
             </div>
-            <Field label={t.portal_appointments_reason} htmlFor="portal-appointment-reason">
-              <textarea
-                id="portal-appointment-reason"
-                value={requestForm.reason}
-                onChange={(event) => setRequestForm((current) => ({ ...current, reason: event.target.value }))}
-                placeholder={t.portal_appointments_what_do_you_need_and_what_should_the_team_consider}
-                className={cn(textareaClass, "min-h-[80px]")}
-              />
-            </Field>
-            <Field label={t.portal_appointments_additional_note} htmlFor="portal-appointment-notes">
-              <textarea
-                id="portal-appointment-notes"
-                value={requestForm.notes}
-                onChange={(event) => setRequestForm((current) => ({ ...current, notes: event.target.value }))}
-                placeholder={t.portal_appointments_optional_logistical_or_clinical_context}
-                className={cn(textareaClass, "min-h-[64px]")}
-              />
-            </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label={t.portal_appointments_reason} htmlFor="portal-appointment-reason">
+                <textarea
+                  id="portal-appointment-reason"
+                  value={requestForm.reason}
+                  onChange={(event) => setRequestForm((current) => ({ ...current, reason: event.target.value }))}
+                  placeholder={t.portal_appointments_what_do_you_need_and_what_should_the_team_consider}
+                  className={cn(textareaClass, "min-h-[80px]")}
+                />
+              </Field>
+              <Field label={t.portal_appointments_additional_note} htmlFor="portal-appointment-notes">
+                <textarea
+                  id="portal-appointment-notes"
+                  value={requestForm.notes}
+                  onChange={(event) => setRequestForm((current) => ({ ...current, notes: event.target.value }))}
+                  placeholder={t.portal_appointments_optional_logistical_or_clinical_context}
+                  className={cn(textareaClass, "min-h-[80px]")}
+                />
+              </Field>
+            </div>
           </Section>
             {requestError ? <Banner tone="error">{requestError}</Banner> : null}
         </PatientSheetScaffold>

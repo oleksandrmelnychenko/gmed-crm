@@ -236,14 +236,14 @@ export function PatientRecommendationsPage() {
       {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
 
       {recommendations.length === 0 ? (
-        <EmptyCell>
-          <p className="text-base font-semibold text-foreground">
+        <PortalListItem className="space-y-1">
+          <p className="text-sm font-semibold text-foreground">
             {t.portal_recommendations_empty_title}
           </p>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             {t.portal_recommendations_empty_description}
           </p>
-        </EmptyCell>
+        </PortalListItem>
       ) : (
         <section className="grid items-start gap-3 xl:grid-cols-2">
           {recommendations.map((item) => {
@@ -252,10 +252,10 @@ export function PatientRecommendationsPage() {
             const isClosed = ["completed", "declined", "cancelled", "superseded"].includes(item.status);
 
             return (
-              <PortalListItem key={recommendationId} className="space-y-3">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="flex flex-wrap gap-2">
+              <PortalListItem key={recommendationId} className="space-y-2">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1 basis-56">
+                    <div className="flex flex-wrap gap-1.5">
                       <StatusBadge status={item.status} className={recommendationStatusTone(item.status)}>
                         {portalStatusLabel(item.status)}
                       </StatusBadge>
@@ -264,7 +264,7 @@ export function PatientRecommendationsPage() {
                       </CountBadge>
                     </div>
                     <h2 className="mt-2 text-base font-semibold text-foreground">{item.title}</h2>
-                    <p className="mt-2 text-sm text-muted-foreground">
+                    <p className="mt-1 text-sm text-muted-foreground">
                       {[item.source_doctor_name, item.source_appointment_title, item.source_document_name, item.source_order_number]
                         .filter(Boolean)
                         .join(" / ") || t.portal_recommendations_care_team}
@@ -276,7 +276,7 @@ export function PatientRecommendationsPage() {
                 </div>
 
                 {item.description ? (
-                  <div className={cn("rounded-lg px-3 py-2 text-sm leading-6 text-foreground", tokens.surface.mutedCard)}>
+                  <div className="border-l-2 border-border pl-3 text-sm leading-5 text-foreground whitespace-pre-wrap">
                     {item.description}
                   </div>
                 ) : null}
@@ -289,7 +289,7 @@ export function PatientRecommendationsPage() {
                 ) : null}
 
                 {!isClosed ? (
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-1.5 border-t border-border/60 pt-2">
                     <ActionButton
                       busy={busyId === `${recommendationId}:schedule`}
                       disabled={disabled || appointmentRequestStands(item)}
@@ -1134,7 +1134,7 @@ function ActionButton({
     <Button
       type="button"
       variant="default"
-      className={tokens.control.primaryButton}
+      className={cn(tokens.control.primaryButton, "h-auto min-h-8 max-w-full whitespace-normal py-1.5 text-left")}
       disabled={disabled}
       onClick={onClick}
     >
