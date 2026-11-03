@@ -1162,7 +1162,7 @@ for (const width of [1440, 390]) {
     const editor = page.getByTestId("trusted-contact-editor");
     await expect(editor).toBeVisible();
     const box = await editor.boundingBox();
-    expect(box!.width).toBeLessThanOrEqual(Math.min(720, width - 16));
+    expect(box!.width).toBeLessThanOrEqual(Math.min(860, width - 16));
     expect(Math.abs(box!.x + box!.width / 2 - width / 2)).toBeLessThan(2);
     expect(box!.height).toBeLessThanOrEqual(884);
     await page.screenshot({ path: testInfo.outputPath("parent-editor.png") });

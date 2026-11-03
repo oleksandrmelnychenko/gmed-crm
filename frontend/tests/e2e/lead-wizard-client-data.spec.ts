@@ -224,7 +224,11 @@ async function wizardShot(page: Page, name: string) {
   await page.setViewportSize({ width, height: viewHeight });
 }
 
-const top = (locator: Locator) => locator.evaluate((node) => Math.round(node.getBoundingClientRect().top));
+// Compact controls of one row differ by a few pixels (input vs. combobox): one row = the vertical centres lie within half a control.
+const expectSameRow = async (a: Locator, b: Locator) => {
+  const [boxA, boxB] = [await a.boundingBox(), await b.boundingBox()];
+  expect(Math.abs(boxA!.y + boxA!.height / 2 - (boxB!.y + boxB!.height / 2))).toBeLessThan(Math.min(boxA!.height, boxB!.height) / 2);
+};
 
 const minorWithParents = () => ({
   lead: minorLead([
@@ -246,10 +250,10 @@ test("an adult's personal data pair up by meaning and DD.MM.YYYY dates", async (
   await expect(page.locator("#lead-wizard-first-name")).toHaveValue("Olga");
   await expect(page.locator("#lead-wizard-birth-date")).toHaveValue("03.02.1980");
   // First and last name on one row, street with the postal code (the discovery source has its own row).
-  expect(await top(page.locator("#lead-wizard-first-name"))).toBe(await top(page.locator("#lead-wizard-last-name")));
-  expect(await top(page.locator("#lead-wizard-middle-name"))).toBe(await top(page.locator("#lead-wizard-name-suffix")));
-  expect(await top(page.locator("#lead-wizard-street"))).toBe(await top(page.locator("#lead-wizard-zip")));
-  expect(await top(page.locator("#lead-wizard-city"))).toBe(await top(page.locator("#lead-wizard-region")));
+  await expectSameRow(page.locator("#lead-wizard-first-name"), page.locator("#lead-wizard-last-name"));
+  await expectSameRow(page.locator("#lead-wizard-middle-name"), page.locator("#lead-wizard-name-suffix"));
+  await expectSameRow(page.locator("#lead-wizard-street"), page.locator("#lead-wizard-zip"));
+  await expectSameRow(page.locator("#lead-wizard-city"), page.locator("#lead-wizard-region"));
   // An adult gets a login: the e-mail is required, the phone is not.
   await expect(page.locator("label[for='lead-wizard-email']")).toContainText("*");
   await expect(page.locator("label[for='lead-wizard-phone']")).not.toContainText("*");
@@ -403,7 +407,12 @@ test("adding a parent: a father is not offered as a guardian by mistake", async 
   const { calls } = await mount(page, { lang: "ru", ...minorWithParents() });
   await page.getByRole("button", { name: "Добавить", exact: true }).click();
   const editor = page.getByTestId("trusted-contact-editor");
-  await expect(editor.getByTestId("trusted-contact-relation-hint")).toContainText("«Опекун» — только человек, назначенный судом");
+  // The role hint sits behind the info button next to the relation field.
+  const relationHint = editor.getByRole("button", { name: "Как выбрать роль представителя" });
+  await relationHint.click();
+  await expect(page.getByTestId("trusted-contact-relation-hint")).toContainText("«Опекун» — только человек, назначенный судом");
+  await relationHint.click();
+  await expect(page.getByTestId("trusted-contact-relation-hint")).toHaveCount(0);
   await editor.getByLabel("Имя и фамилия").fill("Linda Vater");
   const relation = editor.getByRole("combobox").nth(1);
   await relation.click();
