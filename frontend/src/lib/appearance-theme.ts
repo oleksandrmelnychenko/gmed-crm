@@ -9,7 +9,7 @@ export const DEFAULT_THEME_COLORS = {
   muted: "#f0f1f6",
   accent: "#e6e8f0",
   border: "#dfe2eb",
-  inputBorder: "#d6dae5",
+  inputBorder: "#868c9e",
   field: "#ffffff",
   focus: "#777f9e",
   sidebar: "#f7f8fb",
@@ -38,7 +38,7 @@ export const BUILTIN_THEMES: readonly AppearanceTheme[] = [DEFAULT_THEME, {
   // themes, no tinted floods). #c2410c keeps white button text at 5.2:1; #f97316 would be 2.8:1.
   version: 1, id: "gmed-orange", name: "GMED Orange", colors: {
     ...DEFAULT_THEME_COLORS,
-    primary: "#c2410c", primaryText: "#ffffff", focus: "#ea580c", headingMarker: "#ea580c", inputBorder: "#868c9e",
+    primary: "#c2410c", primaryText: "#ffffff", focus: "#ea580c", headingMarker: "#ea580c",
   },
 }];
 
