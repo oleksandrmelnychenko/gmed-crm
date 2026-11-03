@@ -40,6 +40,22 @@ export const BUILTIN_THEMES: readonly AppearanceTheme[] = [DEFAULT_THEME, {
     ...DEFAULT_THEME_COLORS,
     primary: "#c2410c", primaryText: "#ffffff", focus: "#ea580c", headingMarker: "#ea580c",
   },
+}, {
+  // Warm ivory surfaces with clay actions (owner 2026-11-03: a calm developer-tool look).
+  version: 1, id: "gmed-clay", name: "GMED Clay", colors: {
+    background: "#f0eee6", surface: "#fbfaf6", text: "#1f1e1d", textMuted: "#5c5a53",
+    primary: "#b4532f", primaryText: "#ffffff", muted: "#f2f0e9", accent: "#ebe6da",
+    border: "#e3dfd3", inputBorder: "#918c7c", field: "#ffffff", focus: "#b4532f", sidebar: "#f6f4ee",
+    headingMarker: "#c15f3c", rowAlternate: "#f8f6f0", rowHover: "#f0ece2", rowActive: "#ebe6d9", rowSelected: "#e4ddcd",
+  },
+}, {
+  // Pure neutral greys, black actions and a single blue for focus and heading dots.
+  version: 1, id: "gmed-ink", name: "GMED Ink", colors: {
+    background: "#f3f3f3", surface: "#ffffff", text: "#0d0d0d", textMuted: "#5d5d5d",
+    primary: "#0d0d0d", primaryText: "#ffffff", muted: "#f4f4f4", accent: "#ececec",
+    border: "#e3e3e3", inputBorder: "#8f8f8f", field: "#ffffff", focus: "#2563eb", sidebar: "#f9f9f9",
+    headingMarker: "#2563eb", rowAlternate: "#fafafa", rowHover: "#f2f2f2", rowActive: "#ececec", rowSelected: "#e3e3e3",
+  },
 }];
 
 export const MAX_THEME_JSON_LENGTH = 16_384;
