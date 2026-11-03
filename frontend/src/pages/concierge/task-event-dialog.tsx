@@ -231,7 +231,7 @@ export function isConciergeServiceSelectableForTask(
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-field px-3 py-1 text-sm text-foreground shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
 const textAreaClass =
-  "flex min-h-32 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm text-foreground shadow-xs outline-none placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
+  "flex min-h-32 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm text-foreground shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
 
 export type SaveConciergeOperationalItemInput = {
   kind: "task" | "event";
@@ -831,7 +831,7 @@ export function ConciergeTaskEventDialog({
                       )}
                       <div className="space-y-2 border-t border-border/70 p-3">
                         <textarea
-                          className="min-h-20 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
+                          className="min-h-20 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
                           value={comment}
                           maxLength={4000}
                           placeholder={labels.commentPlaceholder}

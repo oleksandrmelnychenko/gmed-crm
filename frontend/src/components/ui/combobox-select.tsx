@@ -387,7 +387,7 @@ function ComboboxSelect({
               <ComboboxPrimitive.Input data-overlay-dirty-ignore=""
                 autoComplete={autoComplete}
                 placeholder={resolvedSearchPlaceholder}
-                className="h-7 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/45"
+                className="h-7 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               />
             </div>
             <ComboboxPrimitive.List className="max-h-[min(18rem,var(--available-height))] overflow-y-auto p-1">

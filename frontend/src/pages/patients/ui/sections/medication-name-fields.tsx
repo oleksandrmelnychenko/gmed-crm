@@ -191,7 +191,7 @@ export function MedicationNameFields({ value, onChange, lang, inputClassName }: 
                 ref={(node) => { inputs.current[field] = node; }}
                 required={field === "wirkstoff"}
                 className={cn(
-                  "w-full min-w-0 border border-input px-2.5 py-1 text-base outline-none placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25 aria-invalid:border-destructive md:text-sm",
+                  "w-full min-w-0 border border-input px-2.5 py-1 text-base outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25 aria-invalid:border-destructive md:text-sm",
                   inputClassName,
                 )}
                 autoComplete="off"

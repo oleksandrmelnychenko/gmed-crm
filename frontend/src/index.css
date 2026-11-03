@@ -445,7 +445,8 @@ html[data-native-platform] {
     }
   input::placeholder,
   textarea::placeholder {
-    color: color-mix(in oklch, var(--muted-foreground) 45%, transparent);
+    /* WCAG 1.4.3: hints stay at muted-text contrast (owner 2026-11-03). */
+    color: var(--muted-foreground);
     opacity: 1;
     }
   html {
