@@ -80,7 +80,7 @@ export function TableTitle({ children, count }: { children: ReactNode; count?: n
   return (
     <>
       <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
         {children}
         {count !== undefined ? <CountBadge>{count}</CountBadge> : null}
       </span>

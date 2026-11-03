@@ -72,7 +72,7 @@ const STATEMENT_SECTION = "space-y-2.5 border-t border-border/50 pt-3";
 function StatementHeading({ children, edit }: { children: ReactNode; edit?: ClientFormSection }) {
   const heading = (
     <h4 className="flex min-w-0 items-center gap-2 text-[13px] font-semibold leading-5 text-foreground">
-      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
       <span className="min-w-0 break-words">{children}</span>
     </h4>
   );

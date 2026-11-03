@@ -2688,7 +2688,7 @@ function useFinanceCatalogPageContent() {
         toolbarStart={
           <>
             <span className="flex h-8 shrink-0 items-center gap-2 self-end text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
               {t.finance_catalog_tax_profiles}
             </span>
             <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
@@ -2749,7 +2749,7 @@ function useFinanceCatalogPageContent() {
         toolbarStart={
           <>
             <span className="flex h-8 shrink-0 items-center gap-2 self-end text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
               {t.revenue_agency_service_catalog_items}
             </span>
             <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
@@ -2846,7 +2846,7 @@ function useFinanceCatalogPageContent() {
         toolbarStart={
           <>
             <span className="flex h-8 shrink-0 items-center gap-2 self-end text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
               {t.finance_catalog_service_package_catalog}
             </span>
             <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
@@ -2907,7 +2907,7 @@ function useFinanceCatalogPageContent() {
         toolbarStart={
           <>
             <span className="flex h-8 shrink-0 items-center gap-2 self-end text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
               {t.finance_catalog_agency_service_vat_mapping}
             </span>
             <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />

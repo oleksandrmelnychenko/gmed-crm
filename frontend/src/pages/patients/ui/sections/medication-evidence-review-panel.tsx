@@ -438,7 +438,7 @@ function DraftGroup({
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
   const header = (
     <div className="flex items-center gap-2 bg-muted/15 px-3 py-2.5">
-        {ai ? <AiMark className="size-3.5 text-orange-500" /> : <span className="size-1.5 rounded-full bg-orange-500" />}
+        {ai ? <AiMark className="size-3.5 text-orange-500" /> : <span className="size-1.5 rounded-full bg-[var(--dot,var(--color-orange-500))]" />}
         <h3 className="text-xs font-semibold text-foreground">{title}</h3>
         <span className="ml-auto font-mono text-[10px] text-muted-foreground">{items.length}</span>
         {collapsible ? <ChevronDown className="size-3.5 text-muted-foreground transition-transform group-open/draft:rotate-180" /> : null}
@@ -486,7 +486,7 @@ function EvidenceSnapshot({ review, lang, tx }: { review: MedicationEvidenceRevi
   return (
     <details className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <summary className="flex cursor-pointer list-none items-center gap-2 bg-muted/15 px-3 py-2.5 marker:hidden">
-        <span className="size-1.5 rounded-full bg-orange-500" />
+        <span className="size-1.5 rounded-full bg-[var(--dot,var(--color-orange-500))]" />
         <span className="text-xs font-semibold text-foreground">{tx("Снимок доказательств", "Evidenz-Snapshot")}</span>
         <span className="ml-auto font-mono text-[10px] text-muted-foreground">
           {review.bundle.findings.length + review.bundle.missing_data.length + review.bundle.benefit_assessments.length}
@@ -559,7 +559,7 @@ function ProvenanceDetails({ review, lang, tx }: { review: MedicationEvidenceRev
   return (
     <details className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <summary className="flex cursor-pointer list-none items-center gap-2 bg-muted/15 px-3 py-2.5 marker:hidden">
-        <span className="size-1.5 rounded-full bg-orange-500" />
+        <span className="size-1.5 rounded-full bg-[var(--dot,var(--color-orange-500))]" />
         <span className="text-xs font-semibold text-foreground">{tx("Цитаты и источники", "Zitate und Quellen")}</span>
         <span className="ml-auto font-mono text-[10px] text-muted-foreground">{review.bundle.citations.length}</span>
       </summary>

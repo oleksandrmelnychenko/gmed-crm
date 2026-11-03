@@ -256,7 +256,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                 {prepaymentSplit ? (
                   <section aria-label={de ? "Anzahlung" : "Предоплата"} className="min-w-0 overflow-hidden rounded-xl border border-border bg-card" data-testid="invoice-prepayment-advance">
                     <div className="border-b border-border px-3 py-2.5">
-                      <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><span aria-hidden className="size-2 shrink-0 rounded-full bg-primary" />{de ? "Anzahlung" : "Предоплата"}</h3>
+                      <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />{de ? "Anzahlung" : "Предоплата"}</h3>
                       <p className="mt-1 text-xs leading-5 text-muted-foreground">
                         {de
                           ? `Anzahlung gemäß Angebot ${selectedQuote?.quote_number ?? ""}. Die Umsatzsteuer wird wie im Angebot anteilig aufgeteilt.`
@@ -282,7 +282,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                 {prepaymentSplit ? null : (
                 <section aria-label={de ? "Rechnungspositionen" : "Позиции счёта"} className="min-w-0 overflow-hidden rounded-xl border border-border bg-card">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2.5">
-                    <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><span aria-hidden className="size-2 shrink-0 rounded-full bg-primary" />{de ? "Rechnungspositionen" : "Позиции счёта"}
+                    <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />{de ? "Rechnungspositionen" : "Позиции счёта"}
                       {selectedQuote ? <CountBadge>{form.selectedLineIndexes.length} / {availableCount}</CountBadge> : null}
                     </h3>
                     {selectedQuote && !final && availableCount > 0 ? (
@@ -392,7 +392,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
 
               <aside className="min-w-0">
                 <div className="space-y-4 rounded-xl border border-border/50 bg-card p-3.5 lg:sticky lg:top-0">
-                  <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><span aria-hidden className="size-2 shrink-0 rounded-full bg-primary" />{de ? "Rechnungsübersicht" : "Итог счёта"}</h3>
+                  <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />{de ? "Rechnungsübersicht" : "Итог счёта"}</h3>
                   {selectedQuote ? (
                     <dl className="space-y-3 text-sm">
                       <SummaryField label={t.invoices_patient} value={selectedQuote.patient_name} />

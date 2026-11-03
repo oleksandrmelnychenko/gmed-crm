@@ -250,7 +250,7 @@ export function PatientTimelineTab({
               {groupedTimeline.map((group) => (
                 <section key={group.key} className="space-y-2" aria-label={group.label}>
                   <div className="flex items-center gap-2 px-1">
-                    <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-primary" />
+                    <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />
                     <h3 className="text-xs font-medium text-muted-foreground">
                       {group.label}
                     </h3>

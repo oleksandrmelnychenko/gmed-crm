@@ -21,14 +21,17 @@ export const DEFAULT_THEME_COLORS = {
 } as const;
 
 export type ThemeColor = keyof typeof DEFAULT_THEME_COLORS;
-/** Optional control colours; when a palette omits them they follow textMuted, surface and accent. */
-export const CONTROL_ONLY_COLORS = ["placeholder", "dropdown", "dropdownHighlight"] as const;
-export type ControlOnlyColor = (typeof CONTROL_ONLY_COLORS)[number];
-/** Colours a person can set for controls apart from the theme (owner 2026-11-03). */
-export const CONTROL_COLORS = ["inputBorder", "field", "placeholder", "focus", "dropdown", "dropdownHighlight"] as const;
-export type ControlColor = (typeof CONTROL_COLORS)[number];
+/**
+ * Optional colours. When a palette omits them, controls follow textMuted, surface and accent,
+ * and section dots and count badges keep the colours each screen already gives them.
+ */
+export const OPTIONAL_COLORS = ["placeholder", "dropdown", "dropdownHighlight", "dot", "badge", "badgeText"] as const;
+export type OptionalColor = (typeof OPTIONAL_COLORS)[number];
+export type ThemeColors = Record<ThemeColor, string> & Partial<Record<OptionalColor, string>>;
+/** Every colour a person can set apart from the theme (owner 2026-11-03: "кастомізацію на максимум"). */
+export type ControlColor = ThemeColor | OptionalColor;
+export const CONTROL_COLORS = [...Object.keys(DEFAULT_THEME_COLORS) as ThemeColor[], ...OPTIONAL_COLORS] as readonly ControlColor[];
 export type ControlColors = Partial<Record<ControlColor, string>>;
-export type ThemeColors = Record<ThemeColor, string> & Partial<Record<ControlOnlyColor, string>>;
 const HEX_COLOR = /^#[\da-f]{6}$/i;
 export type AppearanceTheme = {
   version: 1;
@@ -114,7 +117,7 @@ export function parseAppearanceTheme(json: string): AppearanceTheme {
   }
   const colors: ThemeColors = { ...DEFAULT_THEME_COLORS };
   for (const [key, color] of Object.entries(value.colors)) {
-    const known = Object.hasOwn(DEFAULT_THEME_COLORS, key) || (CONTROL_ONLY_COLORS as readonly string[]).includes(key);
+    const known = Object.hasOwn(DEFAULT_THEME_COLORS, key) || (OPTIONAL_COLORS as readonly string[]).includes(key);
     if (!known || typeof color !== "string" || !HEX_COLOR.test(color)) {
       throw new ThemeValidationError("invalid-color", key);
     }
@@ -160,6 +163,10 @@ export function themeCssVariables(theme: AppearanceTheme): Record<string, string
     "--control-placeholder": c.placeholder ?? c.textMuted,
     "--control-popover": c.dropdown ?? c.surface,
     "--control-highlight": c.dropdownHighlight ?? c.accent,
+    // Unset dots and badges fall back to each screen's own colour in CSS.
+    ...(c.dot ? { "--dot": c.dot } : {}),
+    ...(c.badge ? { "--badge": c.badge } : {}),
+    ...(c.badgeText ? { "--badge-foreground": c.badgeText } : {}),
   };
 }
 

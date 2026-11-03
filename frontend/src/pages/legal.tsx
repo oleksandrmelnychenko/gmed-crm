@@ -31,7 +31,7 @@ const cardClass = "space-y-3 rounded-xl border border-border/50 bg-card p-3 sm:p
 const headingClass = "flex items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground";
 
 function SectionMarker() {
-  return <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />;
+  return <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />;
 }
 
 /**

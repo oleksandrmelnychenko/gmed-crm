@@ -203,7 +203,7 @@ export function ProviderDocumentsSection({
     <section className="space-y-0 overflow-hidden rounded-lg bg-card">
       <div className="relative z-30 flex flex-wrap items-center gap-2 border-b border-border/70 bg-card p-2.5 sm:flex-nowrap sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">
         <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
           {labels.title}
         </span>
         {canManage ? <Button type="button" size="sm" className="h-8 shrink-0 self-center rounded-lg" onClick={openUpload}><Plus className="size-3.5" />{labels.upload}</Button> : null}

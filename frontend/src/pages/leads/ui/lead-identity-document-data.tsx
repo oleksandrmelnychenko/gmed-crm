@@ -734,7 +734,7 @@ export function LeadIdentityDocumentData({
       {representatives.length > 0 ? (
         <div className="space-y-2" data-testid="lead-representatives-id-data">
           <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+            <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
             {tx("Документы представителей", "Ausweise der Vertreter")}
           </h4>
           {representatives.map((person) => (

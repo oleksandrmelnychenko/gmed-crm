@@ -496,9 +496,9 @@ function NavGroup({
                 )}
                 {count > 0 ? (
                   collapsed ? (
-                    <span className="absolute right-1 top-1 size-2 rounded-full bg-[var(--brand)]" />
+                    <span className="absolute right-1 top-1 size-2 rounded-full bg-[var(--badge,var(--brand))]" />
                   ) : (
-                    <span className="ml-auto shrink-0 rounded-full bg-[var(--brand)]/12 px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums text-[color-mix(in_srgb,var(--brand)_70%,var(--foreground))]">
+                    <span className="ml-auto shrink-0 rounded-full bg-[var(--badge,var(--brand))]/12 px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums text-[color-mix(in_srgb,var(--badge,var(--brand))_70%,var(--foreground))]">
                       {count > 99 ? "99+" : count}
                     </span>
                   )
@@ -571,7 +571,7 @@ function UserCard({
     return (
       <div
         title={hideRole ? name : `${name} - ${roleText}`}
-        className="flex items-center justify-center size-10 mx-auto rounded-full bg-[var(--brand)] text-[12px] font-semibold text-white"
+        className="flex items-center justify-center size-10 mx-auto rounded-full bg-[var(--badge,var(--brand))] text-[12px] font-semibold text-[var(--badge-foreground,#fff)]"
       >
         {userInitials(name)}
       </div>
@@ -579,7 +579,7 @@ function UserCard({
   }
   return (
     <div className="navigation-user-card flex items-center gap-2.5 rounded-lg border border-border bg-card px-2.5 py-2 shadow-sm">
-      <div className="flex items-center justify-center size-9 shrink-0 rounded-full bg-[var(--brand)] text-[12px] font-semibold text-white">
+      <div className="flex items-center justify-center size-9 shrink-0 rounded-full bg-[var(--badge,var(--brand))] text-[12px] font-semibold text-[var(--badge-foreground,#fff)]">
         {userInitials(name)}
       </div>
       <div className="min-w-0 flex-1">

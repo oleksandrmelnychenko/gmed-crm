@@ -170,7 +170,7 @@ export function SendStep({
                 <li key={item} className="flex min-h-6 items-start gap-2.5">
                   <span
                     aria-hidden="true"
-                    className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] font-mono text-[11px] font-semibold text-white"
+                    className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--badge,var(--brand))] font-mono text-[11px] font-semibold text-[var(--badge-foreground,#fff)]"
                   >
                     {index + 1}
                   </span>
@@ -374,7 +374,7 @@ function RequestSummary({ groups }: { groups: SummaryGroup[] }) {
       {groups.map((group) => (
         <section key={group.id} className="min-w-0 py-2.5 first:pt-0 last:pb-0" data-testid={`lead-request-summary-${group.id}`}>
           <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <span aria-hidden="true" data-section-heading-marker className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+            <span aria-hidden="true" data-section-heading-marker className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
             {group.title}
           </h4>
           {group.rows.length === 0 && !group.parts?.length ? (

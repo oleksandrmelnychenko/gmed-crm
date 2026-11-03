@@ -23,7 +23,7 @@ export function Section({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           {showMarker ? (
-            <div data-slot="section-marker" aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+            <div data-slot="section-marker" aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
           ) : null}
           <h3 className={cn(tokens.text.sectionTitle, "min-w-0 max-w-full break-words")}>{title}</h3>
         </div>

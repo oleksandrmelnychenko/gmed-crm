@@ -708,7 +708,7 @@ function LeadRequestView({
         {/* The title and the deadline share one line (wrapping on a phone). */}
         <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border/60 px-4 py-3 sm:px-5">
           <h1 className="flex items-center gap-2.5 text-base font-semibold leading-tight">
-            <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+            <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
             {/* "Request for your child" only for a parent of a minor, "the child you represent" for its
                 guardian (Vormund); an adult's representative reads "Request for <name>". */}
             {guardian ? guardianCabinetTitle(text, request, patientName) : text.title}

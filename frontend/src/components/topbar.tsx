@@ -459,7 +459,7 @@ export function Topbar() {
                   <UserRoundPlus aria-hidden="true" className="size-[17px]" />
                 )}
                 {newLeads > 0 ? (
-                  <span className="absolute right-0.5 top-0.5 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-[var(--brand)] px-1 text-[10px] font-semibold text-white">
+                  <span className="absolute right-0.5 top-0.5 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-[var(--badge,var(--brand))] px-1 text-[10px] font-semibold text-[var(--badge-foreground,#fff)]">
                     {newLeads > 99 ? "99+" : newLeads}
                   </span>
                 ) : null}
@@ -584,7 +584,7 @@ export function Topbar() {
           >
             <Bell aria-hidden="true" className="size-[17px]" />
             {unread > 0 && (
-              <span className="absolute top-0.5 right-0.5 flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-[var(--brand)] text-[10px] font-semibold text-white px-1">
+              <span className="absolute top-0.5 right-0.5 flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-[var(--badge,var(--brand))] text-[10px] font-semibold text-[var(--badge-foreground,#fff)] px-1">
                 {unread}
               </span>
             )}

@@ -981,7 +981,7 @@ function ClinicalSection<T extends { id?: string | null }>({
     <section className={cn("rounded-xl border", toneClasses.section, sectionClassName)}>
       <header className={cn("flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3", toneClasses.header)}>
         <div className="flex items-center gap-2">
-          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
           <h3 className="text-sm font-semibold text-foreground">{title}</h3>
           {count ?? <Badge variant="outline" className="rounded-full text-[11px]">{list.length}</Badge>}
         </div>
@@ -1518,7 +1518,7 @@ export function PatientRecommendationsSection({
     <section className="rounded-xl border border-border/70 bg-card">
       <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
         <div className="flex items-center gap-2">
-          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
           <h3 className="text-sm font-semibold text-foreground">{tx("Рекомендации", "Empfehlungen")}</h3>
           <Badge variant="outline" className="rounded-full text-[11px]">{recommendations.length}</Badge>
         </div>
@@ -2368,7 +2368,7 @@ function MedicationHistoryTree({
       <header className="flex flex-wrap items-start justify-between gap-2 border-b border-border/60 px-4 py-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
             <h3 className="text-sm font-semibold text-foreground">
               {tx("История медикаментов", "Medikationsverlauf")}
             </h3>
@@ -3881,7 +3881,7 @@ export function PatientClinicalTab({
       <section className="rounded-xl border border-border/70 bg-card">
         <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
           <div className="flex items-center gap-2">
-            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
             <h3 className="text-sm font-semibold text-foreground">
               {tx("Статус вакцинации", "Impfstatus")}
             </h3>
@@ -3943,7 +3943,7 @@ export function PatientClinicalTab({
       <section className="rounded-xl border border-border/70 bg-card">
         <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
           <div className="flex items-center gap-2">
-            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
             <h3 className="text-sm font-semibold text-foreground">{tx("История показателей", "Vitalwerte-Verlauf")}</h3>
             <Badge variant="outline" className="rounded-full border-border/60 bg-muted/25 text-foreground">
               {formatCount(lang, vitalsHistory.length, VITALS_ENTRY_WORDS)}
@@ -3995,7 +3995,7 @@ export function PatientClinicalTab({
         <section className="rounded-xl border border-border/70 bg-card">
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
             <div className="flex items-center gap-2">
-              <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+              <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
               <h3 className="text-sm font-semibold text-foreground">{tx("История анализов", "Laborverlauf")}</h3>
               <CountBadge>{formatCount(uiLang(tx), labResultGroups.length, PARAMETER_WORDS)}</CountBadge>
             </div>
@@ -4134,7 +4134,7 @@ export function PatientClinicalTab({
       <section className="rounded-xl border border-border/70 bg-card">
         <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
           <div className="flex items-center gap-2">
-            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
             <h3 className="text-sm font-semibold text-foreground">{tx("Риск-скоры", "Risikoscores")}</h3>
             <CountBadge>
               {formatCount(uiLang(tx), riskScores.length, SCORE_WORDS)}

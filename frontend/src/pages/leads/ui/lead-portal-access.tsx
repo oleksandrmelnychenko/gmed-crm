@@ -724,7 +724,7 @@ function PortalCredentialsContent({
       <div className="min-w-0 space-y-3 rounded-xl border border-border/60 bg-card p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="flex min-w-0 items-center gap-2 text-sm font-semibold sm:flex-1">
-            <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+            <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
             {parent
               ? de
                 ? "Nachricht an den Elternteil / die gesetzliche Vertretung"

@@ -847,7 +847,7 @@ function AdminActivityDetailSheet({
               >
                 <span
                   aria-hidden
-                  className="size-1.5 rounded-full bg-[var(--brand)]"
+                  className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]"
                 />
                 <span>{t.activity_details}</span>
               </h3>
@@ -908,7 +908,7 @@ function AdminActivityDetailSheet({
               >
                 <span
                   aria-hidden
-                  className="size-1.5 rounded-full bg-[var(--brand)]"
+                  className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]"
                 />
                 <span>{t.activity_details}</span>
               </h3>
@@ -1575,7 +1575,7 @@ export function AdminActivityPage() {
               <div className="flex items-center gap-2 text-[13px] font-semibold">
                 <span
                   aria-hidden
-                  className="size-1.5 rounded-full bg-primary"
+                  className="size-1.5 rounded-full bg-[var(--dot,var(--primary))]"
                 />
                 {t.activity_title}
                 <StatusChip className="font-mono">{countLabel}</StatusChip>

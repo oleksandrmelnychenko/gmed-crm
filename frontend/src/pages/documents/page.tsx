@@ -6780,7 +6780,7 @@ function StaffDocumentsPage({
                       <div className="flex w-full flex-col gap-2">
                         <div className="w-full">
                           <div className="mb-2 flex items-center gap-2.5">
-                            <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+                            <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
                             <span className="min-w-0 break-words text-[13px] font-semibold text-foreground">
                               {t.patients_notes}
                             </span>
@@ -6796,7 +6796,7 @@ function StaffDocumentsPage({
 
                 {detailVersions.length > 0 ? (
                   <SectionCard
-                    icon={<span aria-hidden className="size-2 rounded-full bg-[var(--brand)]" />}
+                    icon={<span aria-hidden className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />}
                     iconChrome="plain"
                     neutralSurface
                     title={t.documents_version_history}
@@ -6884,7 +6884,7 @@ function StaffDocumentsPage({
                 ) : null}
 
                 <SectionCard
-                  icon={<span aria-hidden className="size-2 rounded-full bg-[var(--brand)]" />}
+                  icon={<span aria-hidden className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />}
                   iconChrome="plain"
                   neutralSurface
                   title={t.documents_text_extraction}
@@ -7011,7 +7011,7 @@ function StaffDocumentsPage({
 
                 {detail.patient_id ? (
                   <SectionCard
-                    icon={<span aria-hidden className="size-2 rounded-full bg-[var(--brand)]" />}
+                    icon={<span aria-hidden className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />}
                     iconChrome="plain"
                     neutralSurface
                     title={t.documents_translation_requests}
@@ -7562,7 +7562,7 @@ function StaffDocumentsPage({
 
                 {canReviewSelectedDocument && editForm ? (
                   <SectionCard
-                    icon={<span aria-hidden className="size-2 rounded-full bg-[var(--brand)]" />}
+                    icon={<span aria-hidden className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />}
                     iconChrome="plain"
                     neutralSurface
                     title={t.documents_interpreter_review}
@@ -7686,7 +7686,7 @@ function StaffDocumentsPage({
                 ) : null}
 
                 <SectionCard
-                  icon={<span aria-hidden className="size-2 rounded-full bg-[var(--brand)]" />}
+                  icon={<span aria-hidden className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />}
                   iconChrome="plain"
                   neutralSurface
                   title={t.documents_patient_portal}
@@ -7854,7 +7854,7 @@ function StaffDocumentsPage({
 
                 {canViewShares ? (
                   <SectionCard
-                    icon={<span aria-hidden className="size-2 rounded-full bg-[var(--brand)]" />}
+                    icon={<span aria-hidden className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />}
                     iconChrome="plain"
                     neutralSurface
                     title={t.documents_share}
@@ -8941,7 +8941,7 @@ function DocumentProviderCombobox({
 function titleWithDot(title: ReactNode) {
   return (
     <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
+      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />
       <span>{title}</span>
     </span>
   );
@@ -9053,7 +9053,7 @@ function DocumentMetaPanel({
   return (
     <div className={cn("p-3", compact && "p-0", className)}>
       <div className={cn("flex items-center gap-2", compact ? "mb-1.5" : "mb-2")}>
-        <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+        <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
         <p className="min-w-0 break-words text-[13px] font-semibold text-foreground">
           {title}
         </p>

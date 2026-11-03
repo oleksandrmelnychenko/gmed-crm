@@ -187,7 +187,7 @@ export function CabinetPersonActions({ target, tx }: { target: CabinetPersonEdit
         <DialogContent className="gap-4 sm:max-w-2xl" data-testid="person-cabinet-correction">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2.5">
-              <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+              <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
               {mode === "delete"
                 ? tx(`Удалить «${stored.name}»?`, `«${stored.name}» entfernen?`)
                 : tx("Исправить данные", "Daten korrigieren")}

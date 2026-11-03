@@ -126,11 +126,20 @@ describe("own control colours", () => {
   });
 
   it("stores valid control colours, drops broken ones and lets them win over the theme", () => {
-    const stored = { selectedId: DEFAULT_THEME.id, themes: [], controls: { inputBorder: "#112233", placeholder: "url(x)", text: "#000000" } };
+    const stored = { selectedId: DEFAULT_THEME.id, themes: [], controls: { inputBorder: "#112233", placeholder: "url(x)", text: "#000000", css: "#ffffff" } };
     const preferences = parseAppearancePreferences(JSON.stringify(stored));
-    expect(preferences.controls).toEqual({ inputBorder: "#112233" });
+    expect(preferences.controls).toEqual({ inputBorder: "#112233", text: "#000000" });
     expect(withControls(DEFAULT_THEME, preferences.controls).colors.inputBorder).toBe("#112233");
     expect(withControls(DEFAULT_THEME, undefined)).toBe(DEFAULT_THEME);
     expect(parseAppearancePreferences(JSON.stringify({ ...stored, controls: { focus: "nope" } }))).toEqual(EMPTY_APPEARANCE);
+  });
+
+  it("sets section dots and counters only when a colour is given", () => {
+    expect(themeCssVariables(DEFAULT_THEME)).not.toHaveProperty("--dot");
+    const css = themeCssVariables(withControls(DEFAULT_THEME, { dot: "#16a34a", badge: "#dc2626", badgeText: "#ffffff" }));
+    expect(css["--dot"]).toBe("#16a34a");
+    expect(css["--badge"]).toBe("#dc2626");
+    expect(css["--badge-foreground"]).toBe("#ffffff");
+    expect(parseAppearanceTheme(JSON.stringify({ ...custom, colors: { dot: "#16A34A", badge: "#DC2626" } })).colors.dot).toBe("#16a34a");
   });
 });

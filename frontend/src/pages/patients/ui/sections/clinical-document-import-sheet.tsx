@@ -2437,7 +2437,7 @@ export function ClinicalDocumentImportSheet({
       maxWidthClassName="overflow-hidden sm:!top-1 sm:!bottom-1 sm:!right-1 sm:!w-[calc(100vw-8px)] sm:!max-w-[calc(100vw-8px)] sm:!rounded-2xl"
       title={(
         <span className="flex min-w-0 items-center gap-2">
-          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
           <span className="min-w-0 break-words">
             {tx("Конструктор импорта медицинского документа", "Assistent für den Import medizinischer Dokumente")}
           </span>
@@ -2647,7 +2647,7 @@ export function ClinicalDocumentImportSheet({
               <div className="mx-auto w-full max-w-3xl space-y-4">
                 <section className="space-y-3">
                   <div className="flex items-center gap-2">
-                    <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+                    <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
                     <h3 className="text-sm font-semibold text-foreground">
                       {tx("Добавить данные из документа", "Daten aus Dokument übernehmen")}
                     </h3>

@@ -136,7 +136,7 @@ export function HistorySection() {
       toolbarStart={
         <>
           <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
             {t.cases_workspace_history_title}
           </span>
           <span className="shrink-0 self-center">

@@ -120,7 +120,7 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
         {booleanFlags.length > 0 ? (
           <div>
             <p className="mb-2 inline-flex items-center gap-1.5 text-[11.5px] font-medium text-muted-foreground">
-              <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
+              <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />
               {t.cases_workspace_specialty_key_signs}
             </p>
             <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">

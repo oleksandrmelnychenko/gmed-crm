@@ -585,7 +585,7 @@ function SourcesSection({
     <details className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 border-b border-border/60 bg-muted/20 px-3.5 py-2.5 marker:hidden">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="size-2 shrink-0 rounded-full bg-orange-500" />
+          <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--color-orange-500))]" />
           <span className="text-[13px] font-semibold text-foreground">
             {tx("Официальные открытые источники", "Offizielle offene Quellen")}
           </span>
@@ -737,7 +737,7 @@ function SectionCard({
     <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/60 bg-muted/20 px-3.5 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="size-2 shrink-0 rounded-full bg-orange-500" />
+          <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--color-orange-500))]" />
           <h3 className="min-w-0 break-words text-[13px] font-semibold text-foreground">{title}</h3>
         </div>
         {typeof count === "number" ? (

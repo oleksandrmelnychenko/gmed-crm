@@ -378,7 +378,7 @@ export function ProviderSettlementDialog({
     <Dialog open={Boolean(liability)} dirty={paymentDirty || reversalDirty || correctionDirty} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-h-[92dvh] sm:max-w-2xl sm:pb-0">
         <DialogHeader className="shrink-0 gap-1.5 border-b border-border/70 bg-muted/20 px-4 py-3.5 pr-12 sm:px-5 sm:pr-14">
-          <DialogTitle className="flex min-w-0 items-start gap-2 text-base"><span aria-hidden className="mt-2 size-2 shrink-0 rounded-full bg-primary" /><span className="min-w-0 break-words">{text.title}</span></DialogTitle>
+          <DialogTitle className="flex min-w-0 items-start gap-2 text-base"><span aria-hidden className="mt-2 size-2 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" /><span className="min-w-0 break-words">{text.title}</span></DialogTitle>
           <DialogDescription className="break-words text-xs leading-5">
             <span className="font-mono text-foreground">{settlement?.external_invoice_number ?? liability?.external_invoice_number}</span> · {text.description}
           </DialogDescription>

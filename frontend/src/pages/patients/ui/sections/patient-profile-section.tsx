@@ -267,7 +267,7 @@ function ProfileSummaryCard({
     <section className={cn("overflow-hidden rounded-lg border border-border/70 bg-card", className)}>
       <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-3.5 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
           <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">
             {title}
           </h3>

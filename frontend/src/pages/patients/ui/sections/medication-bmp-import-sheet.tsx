@@ -371,7 +371,7 @@ export function MedicationBmpImportPreviewContent({
       <section className="overflow-hidden rounded-xl border bg-muted/50">
         <header className="flex flex-wrap items-center justify-between gap-2 border-b bg-card px-3 py-2.5">
           <div className="flex items-center gap-2">
-            <span aria-hidden className="size-2 rounded-full bg-[var(--brand)]" />
+            <span aria-hidden className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />
             <h3 className="text-sm font-semibold text-foreground">{tx("Медикаменты в BMP", "Medikamente im BMP")}</h3>
           </div>
           <div className="flex flex-wrap gap-1.5">

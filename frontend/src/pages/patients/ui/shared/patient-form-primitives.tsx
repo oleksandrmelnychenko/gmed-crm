@@ -31,7 +31,7 @@ export function PatientFormSection({ title, accessory, children, className }: Co
     <section data-slot="patient-form-section" className={cn("min-w-0 rounded-xl border border-border bg-card", className)}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-4 py-3">
         <h3 className="flex min-w-0 items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
-          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
           {title}
         </h3>
         {accessory}

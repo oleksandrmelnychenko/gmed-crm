@@ -770,7 +770,7 @@ function RepresentativeBlock({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h4 id={`lead-request-representative-${slot}-title`} className="flex min-w-0 items-center gap-2 break-words text-sm font-semibold">
-          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
           {heading}
         </h4>
         {person?.can_remove ? (

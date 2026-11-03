@@ -1360,7 +1360,7 @@ function Panel({ title, description, action, children, className }: PanelProps) 
           <div className="flex items-center gap-2">
             <span
               aria-hidden
-              className="size-2 shrink-0 rounded-full bg-[var(--brand)]"
+              className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]"
             />
             <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
               {title}

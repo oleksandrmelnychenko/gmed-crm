@@ -223,7 +223,7 @@ function CaseWorkspaceContent() {
             <div className="flex flex-wrap items-center gap-2.5">
               <span
                 aria-hidden
-                className="size-2 shrink-0 rounded-full bg-[var(--brand)]"
+                className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]"
               />
               <h1 className="text-base font-semibold text-foreground">
                 {detail?.case_id ?? caseId}

@@ -399,7 +399,7 @@ export function AnamneseSection({
     <section className={cn("rounded-xl border border-border/70 bg-card", className)}>
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
         <div className="flex items-center gap-2">
-          <span aria-hidden data-slot="heading-marker" className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <span aria-hidden data-slot="heading-marker" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
           <h3 className="text-sm font-semibold text-foreground">{tx("Анамнез", "Anamnese")}</h3>
         </div>
         <div className="flex flex-wrap items-center gap-2">

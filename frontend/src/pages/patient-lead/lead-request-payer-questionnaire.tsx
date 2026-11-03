@@ -437,7 +437,7 @@ function PayerQuestionnaireForm({
   return (
     <div className="space-y-3">
       <div className="space-y-3 rounded-xl border border-border/60 bg-card p-3" data-testid="lead-request-payer-notice">
-        <h4 className="flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--heading-marker)]" />{text.payerNoticeTitle}</h4>
+        <h4 className="flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />{text.payerNoticeTitle}</h4>
         <CabinetHint><p className="whitespace-pre-line">{text.payerNotice}</p></CabinetHint>
         <a href={`/legal?notice=form&lang=${lang}#privacy`} target="_blank" rel="noreferrer" className="text-xs text-[var(--brand)] underline">
           {text.privacyLink}

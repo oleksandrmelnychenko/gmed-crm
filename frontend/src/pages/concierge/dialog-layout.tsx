@@ -92,7 +92,7 @@ export function ConciergeDialogSection({
     <section className={cn("overflow-hidden rounded-lg border border-border/70 bg-card", className)}>
       <div className="border-b border-border/70 bg-muted/20 px-3.5 py-2.5 sm:px-4">
         <h3 className="flex items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
-          {dot ? <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" /> : Icon ? <Icon className="size-3.5 text-primary" /> : null}
+          {dot ? <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" /> : Icon ? <Icon className="size-3.5 text-primary" /> : null}
           {title}
         </h3>
       </div>

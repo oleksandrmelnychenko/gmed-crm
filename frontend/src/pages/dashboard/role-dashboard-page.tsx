@@ -345,7 +345,7 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="mb-2 flex items-center gap-2 text-[11px] font-medium text-muted-foreground">
-            <span className="size-1.5 rounded-full bg-[var(--brand)]" />
+            <span className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />
             {definition.eyebrow}
           </div>
           <h1 className="text-[22px] font-semibold leading-tight tracking-tight text-foreground">

@@ -313,7 +313,7 @@ export function CabinetSection({
     <section data-cabinet-section className={cn("min-w-0 overflow-hidden rounded-xl border border-border/60 bg-card", className)}>
       <div data-cabinet-section-header className={cn("flex flex-wrap items-center justify-between gap-2", compact ? "px-3 pt-3" : "px-4 pt-4")}>
         <div className="flex min-w-0 items-center gap-2">
-          <div aria-hidden data-section-heading-marker className="size-2 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+          <div aria-hidden data-section-heading-marker className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
           <h3 className="min-w-0 max-w-full break-words text-sm font-semibold text-foreground">{title}</h3>
         </div>
         {accessory ? <div className="min-w-0 max-w-full">{accessory}</div> : null}

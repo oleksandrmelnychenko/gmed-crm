@@ -290,7 +290,7 @@ describe("MedicationEvidenceReviewContent", () => {
     expect(german).toContain("Aktuell");
     expect(german).not.toContain("Зафиксирован проверяемый сигнал");
     expect(russian).not.toMatch(/confidence|дозировк.*измен|Одобрить|Freigeben/);
-    expect(russian).toContain("bg-orange-500");
+    expect(russian).toContain("bg-[var(--dot,var(--color-orange-500))]");
     expect(russian).toContain("bg-sky-50");
     expect(russian).toContain("bg-emerald-50");
     expect(russian).toContain("bg-amber-50");

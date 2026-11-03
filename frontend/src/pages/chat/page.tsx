@@ -1263,7 +1263,7 @@ function useChatPageContent() {
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b px-3 py-2">
-          <h2 className="flex items-center gap-2 text-base font-semibold">{user?.role === "patient" ? <span className="size-2 shrink-0 rounded-full bg-[var(--heading-marker)]" aria-hidden="true" /> : null}{t.chat_title}</h2>
+          <h2 className="flex items-center gap-2 text-base font-semibold">{user?.role === "patient" ? <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" aria-hidden="true" /> : null}{t.chat_title}</h2>
           <button
             onClick={() => {
               setShowNewChat(!showNewChat);
@@ -1744,7 +1744,7 @@ function useChatPageContent() {
               >
                 <Clock3 className="size-[18px]" />
                 {messageTimerSeconds > 0 ? (
-                  <span className="absolute right-1 top-1 size-1.5 rounded-full bg-[var(--heading-marker)]" />
+                  <span className="absolute right-1 top-1 size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />
                 ) : null}
                 <select
                   value={messageTimerSeconds}

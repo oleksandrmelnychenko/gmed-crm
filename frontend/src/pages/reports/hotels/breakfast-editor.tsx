@@ -62,7 +62,7 @@ export function BreakfastEditor({ stay, lang, editable, onSaved, onDirty }: { st
     <Dialog open={open} dirty={changed || busy} onOpenChange={next => { if (busy) return; setOpen(next); if (!next) { setDraft(persistedDraft); setError(""); } }}>
       <DialogContent data-testid={`breakfast-editor-${stay.id}`} className="left-1/2 right-auto top-1/2 bottom-auto flex max-h-[calc(100dvh-16px)] w-[calc(100vw-16px)] -translate-x-1/2 -translate-y-1/2 flex-col gap-0 overflow-hidden rounded-xl border-border/70 bg-card p-0 pb-0 shadow-2xl sm:w-[calc(100vw-2rem)] sm:max-w-2xl sm:pb-0">
         <DialogHeader className="shrink-0 gap-1.5 border-b border-border/70 bg-muted/20 px-5 py-4 pr-14">
-          <DialogTitle className="flex items-center gap-2"><span className="size-2 shrink-0 rounded-full bg-orange-500" />{labels.edit}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2"><span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--color-orange-500))]" />{labels.edit}</DialogTitle>
           <DialogDescription>{[stay.patient_name || stay.patient_number, [stay.check_in, stay.check_out].filter(Boolean).map(date => date!.split("-").reverse().join(".")).join(" — ")].filter(Boolean).join(" · ")}</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 space-y-3 overflow-y-auto p-3">

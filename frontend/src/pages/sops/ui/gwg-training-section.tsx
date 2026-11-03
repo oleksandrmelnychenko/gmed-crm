@@ -546,7 +546,7 @@ function SectionHeader({ title, intro, accessory }: { title: string; intro: stri
       <div className="min-w-0 space-y-1">
         <h2 className={tokens.text.sectionTitle}>
           <span className="inline-flex items-center gap-2">
-            <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
+            <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />
             <span>{title}</span>
           </span>
         </h2>

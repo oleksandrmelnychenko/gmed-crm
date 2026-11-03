@@ -408,7 +408,7 @@ function TaskChildrenTable({ rows, parentId, lang, disabled, onOpen, actions }: 
       mobilePrimaryColumnId="title"
       mobileDetailColumnIds={["code", "kind", "assignee", "start", "end", "status"]}
       toolbarStart={<>
-        <h3 className="flex shrink-0 items-center gap-2 self-center text-sm font-semibold"><span className="size-1.5 rounded-full bg-primary" />{labels.children}</h3>
+        <h3 className="flex shrink-0 items-center gap-2 self-center text-sm font-semibold"><span className="size-1.5 rounded-full bg-[var(--dot,var(--primary))]" />{labels.children}</h3>
         {progress.total > 0 ? <Badge variant="outline" data-testid="task-children-progress" className={cn("shrink-0 self-center rounded-full text-[10px]", progress.done === progress.total ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "bg-muted/20 text-muted-foreground")}>{labels.childrenDone}: <span className="ml-1 font-semibold tabular-nums">{progress.done}/{progress.total}</span></Badge> : null}
         {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
       </>}
@@ -434,7 +434,7 @@ function TaskDetailSection({
     <section className={cn("overflow-hidden rounded-lg border border-border/70 bg-card", className)}>
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/70 bg-muted/20 px-3.5 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
           <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
           {count !== undefined ? <Badge variant="secondary" className="tabular-nums">{count}</Badge> : null}
         </div>
@@ -1329,7 +1329,7 @@ export function ConciergeTaskDetailDialog({
             <details className="group overflow-hidden rounded-lg border border-border/70 bg-card">
               <summary className="flex min-w-0 cursor-pointer list-none items-center justify-between gap-3 bg-muted/20 px-3.5 py-2.5 transition-colors hover:bg-muted/35 [&::-webkit-details-marker]:hidden">
                 <span className="flex min-w-0 items-center gap-2">
-                  <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+                  <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
                   <span className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">{labels.history}</span>
                   <Badge variant="secondary" className="rounded-full">{detail.history.length}</Badge>
                 </span>

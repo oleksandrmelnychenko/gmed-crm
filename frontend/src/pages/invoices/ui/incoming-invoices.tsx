@@ -205,7 +205,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
       <DialogContent className="gap-0 overflow-hidden rounded-xl p-0 sm:max-w-xl sm:pb-0">
         <DialogHeader className="shrink-0 gap-1.5 border-b border-border/70 bg-muted/20 px-4 py-3.5 pr-12 sm:px-5 sm:pr-14">
           <DialogTitle className="flex min-w-0 items-center gap-2 text-base">
-            <span aria-hidden className="size-2 shrink-0 rounded-full bg-primary" />
+            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />
             <span className="min-w-0 break-words">{tx("Оплата входящего счёта", "Zahlung der Eingangsrechnung")}</span>
           </DialogTitle>
           <DialogDescription className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs leading-5">

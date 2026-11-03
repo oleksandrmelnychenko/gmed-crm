@@ -47,7 +47,7 @@ export function OrderEconomicsTable({ economics, lang, formatMoney }: {
     <DataTableSurface key={`${economics.order_id}:${economics.margin_visible}`} rows={economics.services} columns={columns} rowId={service => service.order_leistung_id}
       storageKey="orders:service-economics" defaultDensity="compact" rowHeightOverrides={{ compact: 44 }}
       pagination={{ pageSize: 10, resetKey: economics.order_id }} mobilePrimaryColumnId="name"
-      toolbarStart={<h3 className="flex shrink-0 items-center gap-2 self-center text-sm font-semibold"><span className="size-1.5 rounded-full bg-primary" />{de ? "Leistungsübersicht" : "Экономика услуг"}</h3>}
+      toolbarStart={<h3 className="flex shrink-0 items-center gap-2 self-center text-sm font-semibold"><span className="size-1.5 rounded-full bg-[var(--dot,var(--primary))]" />{de ? "Leistungsübersicht" : "Экономика услуг"}</h3>}
       emptyState={<p className="px-4 py-6 text-center text-xs text-muted-foreground">{economics.services.length ? de ? "Keine Leistungen entsprechen den Filtern." : "Нет услуг, соответствующих фильтрам." : de ? "Noch keine Leistungen hinzugefügt" : "Услуги ещё не добавлены"}</p>}
     />
   </section>;

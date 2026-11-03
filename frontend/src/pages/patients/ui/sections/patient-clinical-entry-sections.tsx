@@ -387,7 +387,7 @@ function ClinicalListSection<T extends { id?: string | null }>({
     <section className={cn("overflow-hidden rounded-lg border", toneClasses.section)}>
       <header className={cn("flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2", toneClasses.header)}>
         <div className="flex min-w-0 items-center gap-2">
-          <span aria-hidden data-slot="heading-marker" className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <span aria-hidden data-slot="heading-marker" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
           <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
           <Badge variant="outline" className="h-5 rounded-full bg-background px-2 text-[10px] font-medium tabular-nums">
             {list.length}

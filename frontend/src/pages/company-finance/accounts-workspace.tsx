@@ -710,9 +710,9 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
         })}
       </div>
 
-      <DataTableSurface toolbarStart={<span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />{text.internalTransfers}</span>} rows={transferRows} columns={transferColumns} rowId={(row) => row.id} storageKey="company-finance-transfers" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} emptyState={text.noTransfers} pagination={{ pageSize: 25 }} />
+      <DataTableSurface toolbarStart={<span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />{text.internalTransfers}</span>} rows={transferRows} columns={transferColumns} rowId={(row) => row.id} storageKey="company-finance-transfers" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} emptyState={text.noTransfers} pagination={{ pageSize: 25 }} />
 
-      <DataTableSurface toolbarStart={<span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />{text.history}</span>} rows={payload.adjustments} columns={adjustmentColumns} rowId={(row) => row.id} storageKey="company-finance-adjustments" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} emptyState={text.noAdjustments} pagination={{ pageSize: 25 }} />
+      <DataTableSurface toolbarStart={<span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />{text.history}</span>} rows={payload.adjustments} columns={adjustmentColumns} rowId={(row) => row.id} storageKey="company-finance-adjustments" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} emptyState={text.noAdjustments} pagination={{ pageSize: 25 }} />
 
       <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
         <DialogContent className="sm:max-w-lg">

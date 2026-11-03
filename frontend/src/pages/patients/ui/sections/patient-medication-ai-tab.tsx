@@ -121,7 +121,7 @@ export function PatientMedicationAiTab({ patientId }: PatientMedicationAiTabProp
               {copy.steps.map((step, index) => (
                 <li key={step.title} className="rounded-lg border border-border/70 bg-muted/10 p-3">
                   <div className="flex items-center gap-2">
-                    <span className="size-1.5 rounded-full bg-orange-500" />
+                    <span className="size-1.5 rounded-full bg-[var(--dot,var(--color-orange-500))]" />
                     <span className="text-xs font-semibold text-foreground">{index + 1}. {step.title}</span>
                   </div>
                   <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{step.text}</p>

@@ -494,7 +494,7 @@ function usePatientDocumentsPageContent() {
       {error ? <Banner tone="error">{error}</Banner> : null}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="flex items-center gap-2 text-base font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--heading-marker)]" />{t.portal_documents_my_documents}</h2>
+        <h2 className="flex items-center gap-2 text-base font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />{t.portal_documents_my_documents}</h2>
         <Button onClick={() => dispatchDocumentsState({ uploadOpen: true })}><Upload className="size-4" />{t.portal_documents_upload_documents}</Button>
       </div>
 

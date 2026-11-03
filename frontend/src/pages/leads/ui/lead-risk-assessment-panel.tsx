@@ -622,7 +622,7 @@ export function LeadRiskAssessmentPanel({
           <fieldset className="min-w-0 rounded-xl border border-border/50 bg-card p-3.5" data-testid="lead-risk-block-chooser">
             <legend className="sr-only">{tx("Какие сведения запросить", "Welche Angaben anfordern")}</legend>
             <div className="mb-3 flex items-center justify-between gap-3" aria-hidden="true">
-              <span className="flex items-center gap-2 text-sm font-semibold"><span className="size-1.5 shrink-0 rounded-full bg-primary" />{tx("Какие сведения запросить", "Welche Angaben anfordern")}</span>
+              <span className="flex items-center gap-2 text-sm font-semibold"><span className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />{tx("Какие сведения запросить", "Welche Angaben anfordern")}</span>
               <StatusChip tone="info" className="font-mono">{blocks.length} / {RISK_BLOCK_KEYS.length}</StatusChip>
             </div>
             <div className="grid gap-1.5 sm:grid-cols-2">

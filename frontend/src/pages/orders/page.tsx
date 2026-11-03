@@ -542,7 +542,7 @@ function EmptyState({ title, description, action }: EmptyStateProps) {
 function titleWithDot(title: ReactNode) {
   return (
     <span className="inline-flex min-w-0 items-center gap-2">
-      <span aria-hidden className="size-2 shrink-0 rounded-full bg-primary" />
+      <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />
       <span className="min-w-0 break-words">{title}</span>
     </span>
   );

@@ -227,7 +227,7 @@ export function ConciergeTaskAttachments({
     <section className="overflow-hidden rounded-lg border border-border/70 bg-card" data-testid="concierge-task-attachments">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-3.5 py-2.5">
         <div>
-          <div className="flex items-center gap-2"><span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" /><h3 className="text-[13px] font-semibold tracking-tight">{labels.title}</h3></div>
+          <div className="flex items-center gap-2"><span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" /><h3 className="text-[13px] font-semibold tracking-tight">{labels.title}</h3></div>
           <p className="mt-0.5 text-xs text-muted-foreground">{labels.allowed}</p>
         </div>
         {mayUpload ? (
@@ -299,7 +299,7 @@ export function ConciergeTaskStagedAttachments({
     <section className="overflow-hidden rounded-lg border border-border/70 bg-card" data-testid="concierge-task-staged-attachments">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-3.5 py-2.5">
         <div>
-          <div className="flex items-center gap-2"><span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" /><h3 className="text-[13px] font-semibold tracking-tight">{labels.title}</h3></div>
+          <div className="flex items-center gap-2"><span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" /><h3 className="text-[13px] font-semibold tracking-tight">{labels.title}</h3></div>
           <p className="mt-0.5 text-xs text-muted-foreground">{labels.allowed}</p>
         </div>
         <input

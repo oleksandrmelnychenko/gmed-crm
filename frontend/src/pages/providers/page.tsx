@@ -1275,7 +1275,7 @@ function WeeklyAvailabilityEditor({
 function titleWithDot(title: ReactNode) {
   return (
     <span className="inline-flex min-w-0 items-center gap-2">
-      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
       <span className="min-w-0 truncate">{title}</span>
     </span>
   );
@@ -5098,7 +5098,7 @@ function PaginatedLinkedPatientsGrid({
           toolbarTitle ? (
             <>
               <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
                 {toolbarTitle}
               </span>
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
@@ -5149,7 +5149,7 @@ function CollapsibleLinkedPatientsPanel({
       >
         <span className="flex min-w-0 items-center gap-2">
           {showMarker ? (
-            <span className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+            <span className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
           ) : null}
           <span className="truncate text-[13px] font-semibold tracking-tight text-foreground">
             {l("providers_linked_patients")}
@@ -7202,7 +7202,7 @@ function ProviderDoctorsTable({
         title ? (
           <>
             <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
               {title}
             </span>
             {createLabel && onNew ? (
@@ -7468,7 +7468,7 @@ function ContactPersonsTable({
       toolbarStart={
         <>
           <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
             {title}
           </span>
           {canManage ? (
@@ -7659,7 +7659,7 @@ function StaffSection({
         toolbarStart={
           <>
             <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
               {l("providers_staff")}
             </span>
             {canManage ? (
@@ -7933,7 +7933,7 @@ function ProviderWorkTypesCatalog({ detail }: { detail: ProviderDetail }) {
           toolbarStart={
             <>
               <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
                 {lang === "de" ? "Leistungsarten" : "Виды работ"}
               </span>
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
@@ -8062,7 +8062,7 @@ function ServiceSection({
           toolbarStart={
             <>
               <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
                 {l("providers_service_catalog")}
               </span>
               {canManage ? (
@@ -8360,7 +8360,7 @@ function InteractionHistorySection({
       toolbarStart={
         <>
           <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
             {l("providers_interaction_history")}
           </span>
           <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />

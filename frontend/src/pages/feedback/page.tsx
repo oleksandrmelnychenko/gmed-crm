@@ -226,7 +226,7 @@ const FEEDBACK_TREATMENT_SUCCESS_LABEL_KEYS = {
 function titleWithDot(title: ReactNode) {
   return (
     <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-[var(--heading-marker)]" />
+      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />
       <span>{title}</span>
     </span>
   );

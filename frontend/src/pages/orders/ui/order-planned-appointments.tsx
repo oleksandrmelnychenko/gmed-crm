@@ -200,7 +200,7 @@ export function OrderPlannedAppointments({
     <div data-testid="order-planned-appointments" className="rounded-lg border border-border bg-card p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
-          <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-primary" />
+          <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />
           {tx("Приёмы заказа", "Termine des Auftrags")}
         </div>
         <div className="flex flex-wrap items-center gap-2">

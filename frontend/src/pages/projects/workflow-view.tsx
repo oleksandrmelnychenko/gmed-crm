@@ -300,7 +300,7 @@ function WorkflowTaskCard({
           <span className="flex min-w-0 items-center gap-1.5"><UserRound className="size-3.5 shrink-0" /><span className="truncate">{task.assigned_to_name}</span></span>
           <span className="flex items-center justify-between gap-2">
             <span className="flex min-w-0 items-center gap-1.5"><CalendarDays className="size-3.5 shrink-0" /><span className="truncate">{formatDate(task.due_at) ?? labels.noDeadline}</span></span>
-            {unresolvedCount ? <span className="flex shrink-0 items-center gap-1 font-medium text-orange-700"><span className="size-1.5 rounded-full bg-orange-500" />{unresolvedCount}</span> : null}
+            {unresolvedCount ? <span className="flex shrink-0 items-center gap-1 font-medium text-orange-700"><span className="size-1.5 rounded-full bg-[var(--dot,var(--color-orange-500))]" />{unresolvedCount}</span> : null}
           </span>
         </span>
       </span>
@@ -355,14 +355,14 @@ function WorkflowCanvas({
       <div className="flex flex-wrap gap-3 border-b bg-card px-4 py-2 text-[11px] text-muted-foreground">
           <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-slate-300" />{labels.start}</span>
           <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-emerald-500" />{labels.dependencyResolved}</span>
-          <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-orange-500" />{labels.dependencyBlocking}</span>
+          <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[var(--dot,var(--color-orange-500))]" />{labels.dependencyBlocking}</span>
       </div>
 
       <div className="hidden overflow-auto md:block" data-testid="project-workflow-canvas">
         <div className="relative" style={{ width: graph.width * zoom, height: graph.height * zoom }}>
           <div className="absolute left-0 top-0" style={{ width: graph.width, height: graph.height, transform: `scale(${zoom})`, transformOrigin: "top left" }}>
           <div className="absolute left-7 top-[88px] z-20 h-[150px] w-[232px] rounded-xl border border-orange-200 bg-orange-50/80 p-4 shadow-sm">
-            <div className="flex items-center gap-2 text-xs font-semibold text-orange-700"><span className="size-2 rounded-full bg-orange-500" />{labels.start}</div>
+            <div className="flex items-center gap-2 text-xs font-semibold text-orange-700"><span className="size-2 rounded-full bg-[var(--dot,var(--color-orange-500))]" />{labels.start}</div>
             <p className="mt-3 line-clamp-2 text-sm font-semibold text-foreground">{project.name}</p>
             <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{project.description || labels.startHint}</p>
             <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground"><FolderKanban className="size-3.5" />{graph.nodes.length} {labels.tasks.toLocaleLowerCase()}</div>
@@ -503,7 +503,7 @@ function DependencyDialog({
     <Dialog open={open} onOpenChange={changeOpen}>
       <DialogContent className="sm:max-w-xl" showCloseButton={!saving}>
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><span className="size-2 rounded-full bg-orange-500" />{labels.addDependency}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2"><span className="size-2 rounded-full bg-[var(--dot,var(--color-orange-500))]" />{labels.addDependency}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4">
           {error || unavailableError ? <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{unavailableError || error}</div> : null}
@@ -753,7 +753,7 @@ export function ProjectWorkflowView({
                   <div className="mt-2 grid gap-1.5">
                     {outgoing.length ? outgoing.map((dependency) => {
                       const task = tasksById.get(dependency.task_id);
-                      return task ? <button key={dependency.id} type="button" className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs hover:border-orange-300" onClick={() => selectRelatedTask(task.id)}><span className="size-1.5 shrink-0 rounded-full bg-orange-500" /><span className="min-w-0 flex-1 truncate">{localizeTaskTitle(task.title, lang)}</span><ArrowRight className="size-3.5 shrink-0 text-muted-foreground" /></button> : null;
+                      return task ? <button key={dependency.id} type="button" className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs hover:border-orange-300" onClick={() => selectRelatedTask(task.id)}><span className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--color-orange-500))]" /><span className="min-w-0 flex-1 truncate">{localizeTaskTitle(task.title, lang)}</span><ArrowRight className="size-3.5 shrink-0 text-muted-foreground" /></button> : null;
                     }) : <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">{labels.noFollowing}</p>}
                   </div>
                   <Button className="mt-4 w-full" variant="outline" onClick={() => onOpenTask(selectedTask.id)}><ExternalLink />{labels.openTask}</Button>

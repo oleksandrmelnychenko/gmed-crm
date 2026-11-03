@@ -158,7 +158,7 @@ export function MedicationsPage() {
     <section aria-label={tx("Справочник медикаментов", "Medikamentenverzeichnis")} className="min-w-0 overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
       <div className="flex flex-wrap items-end gap-2 border-b border-border/70 p-2.5 sm:px-3 sm:py-2">
         <h2 className="flex h-8 shrink-0 items-center gap-2 text-[13px] font-semibold tracking-tight">
-          <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
+          <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />
           {tx("Справочник", "Verzeichnis")}
         </h2>
         <span aria-hidden className="mx-1 mb-2 hidden h-4 w-px shrink-0 bg-border sm:block" />

@@ -11157,7 +11157,7 @@ ${serviceCommentLines.join("\n")}`
                                   </span>
                                   <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
                                     <span className="flex items-start gap-2 text-xs font-semibold text-foreground">
-                                      <span data-wizard-subsection-marker aria-hidden="true" className="mt-1.5 size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+                                      <span data-wizard-subsection-marker aria-hidden="true" className="mt-1.5 size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
                                       <span className="min-w-0 break-words">{specialtyLabel(specializationValue(specialization))}</span>
                                     </span>
                                     <span className="text-xs text-muted-foreground">
@@ -11442,7 +11442,7 @@ ${serviceCommentLines.join("\n")}`
                       onClick={() => setWorkTypesExpanded((current) => !current)}
                     >
                       <span className="flex min-w-0 items-center gap-2">
-                        <span aria-hidden="true" data-wizard-subsection-marker className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+                        <span aria-hidden="true" data-wizard-subsection-marker className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
                         <span className="text-xs font-semibold text-foreground">
                           {tx("Виды работ и часы", "Leistungsarten und Stunden")}
                         </span>
@@ -11473,7 +11473,7 @@ ${serviceCommentLines.join("\n")}`
                     htmlFor={ORDER_SERVICE_SELECT_ID}
                     className="flex items-center gap-2 font-mono text-xs font-semibold text-foreground"
                   >
-                    <span aria-hidden="true" data-wizard-subsection-marker className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+                    <span aria-hidden="true" data-wizard-subsection-marker className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
                     <span>{tx("Добавить услугу из каталога", "Leistung aus dem Katalog hinzufügen")}</span>
                   </label>
                   {draft.specialties.length === 0 ? (
@@ -13144,7 +13144,7 @@ ${serviceCommentLines.join("\n")}`
                     onClick={() => setReportWorkTypesExpanded((current) => !current)}
                   >
                     <span className="flex min-w-0 items-center gap-2">
-                      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+                      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
                       <span className="text-sm font-semibold text-foreground">
                         {tx("Виды работ и часы", "Leistungsarten und Stunden")}
                       </span>

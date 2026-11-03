@@ -821,7 +821,7 @@ function usePatientInvoicesPageContent() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                        <span aria-hidden className="size-1.5 rounded-full bg-[var(--heading-marker)]" />
+                        <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />
                         <span>{t.portal_invoices_invoice_overview}</span>
                       </h2>
                       <p className={cn("mt-1", tokens.text.muted)}>{t.portal_invoices_amounts_due_date_and_linked_quote_order_context}</p>
@@ -911,7 +911,7 @@ function usePatientInvoicesPageContent() {
                 {detailCreditNotes.length > 0 ? (
                   <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--heading-marker)]" />
+                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />
                       <span>{t.finance_credit_note_portal_title}</span>
                     </h2>
                     <p className={cn("mt-1", tokens.text.muted)}>
@@ -961,7 +961,7 @@ function usePatientInvoicesPageContent() {
                 {invoiceAmountsVisible(detail) ? (
                   <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--heading-marker)]" />
+                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />
                       <span>{t.portal_invoices_payment_history}</span>
                     </h2>
                     <p className={cn("mt-1", tokens.text.muted)}>
@@ -1025,7 +1025,7 @@ function usePatientInvoicesPageContent() {
                 {invoiceAmountsVisible(detail) && detailRefunds.length > 0 ? (
                   <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--heading-marker)]" />
+                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />
                       <span>{lang === "de" ? "Rückzahlungen" : "Возвраты"}</span>
                     </h2>
                     <p className={cn("mt-1", tokens.text.muted)}>
@@ -1087,7 +1087,7 @@ function usePatientInvoicesPageContent() {
                     data-testid="portal-dunning-letters"
                   >
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--heading-marker)]" />
+                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />
                       <span>{lang === "de" ? "Zahlungserinnerungen und Mahnungen" : "Напоминания и требования об оплате"}</span>
                     </h2>
                     <p className={cn("mt-1", tokens.text.muted)}>
@@ -1138,7 +1138,7 @@ function usePatientInvoicesPageContent() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                        <span aria-hidden className="size-1.5 rounded-full bg-[var(--heading-marker)]" />
+                        <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />
                         <span>{t.portal_invoices_payment_proof}</span>
                       </h2>
                       <p className={cn("mt-1", tokens.text.muted)}>
@@ -1168,7 +1168,7 @@ function usePatientInvoicesPageContent() {
 
                 <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                   <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                    <span aria-hidden className="size-1.5 rounded-full bg-[var(--heading-marker)]" />
+                    <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />
                     <span>{t.portal_invoices_line_items}</span>
                   </h2>
                   <p className={cn("mt-1", tokens.text.muted)}>{t.portal_invoices_materialized_billing_lines_for_the_current_invoice_snapshot}</p>

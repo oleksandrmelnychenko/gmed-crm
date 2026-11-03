@@ -2631,7 +2631,7 @@ function usePatientInvoicesTabContent({
             toolbarStart={
               <>
                 <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-                  <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+                  <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
                   {lang === "de" ? "Kontobewegungen" : "Движения взаиморасчётов"}
                 </span>
                 <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
@@ -2694,7 +2694,7 @@ function usePatientInvoicesTabContent({
             toolbarStart={
               <>
                 <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-                  <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+                  <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
                   {lang === "de" ? "Belege und Leistungen" : "Документы и услуги"}
                 </span>
                 <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
@@ -3572,7 +3572,7 @@ function usePatientInvoicesTabContent({
           toolbarStart={
             <>
               <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
                 {t.patient_invoices_service_packages}
               </span>
               {canManagePackages ? (
@@ -3664,7 +3664,7 @@ function usePatientInvoicesTabContent({
           toolbarStart={
             <>
               <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
                 {t.patient_invoices_accounting_ledger}
               </span>
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
@@ -3689,7 +3689,7 @@ function usePatientInvoicesTabContent({
           toolbarStart={
             <>
               <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
                 {t.patient_invoices_payment_followup}
               </span>
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />

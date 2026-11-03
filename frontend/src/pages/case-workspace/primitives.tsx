@@ -34,7 +34,7 @@ export function Panel({
             {accent ? (
               <span
                 aria-hidden
-                className="size-2 shrink-0 rounded-full bg-[var(--brand)]"
+                className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]"
               />
             ) : null}
             <h3 className={cn(tokens.text.sectionTitle, "min-w-0 max-w-full break-words")}>
