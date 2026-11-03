@@ -18,11 +18,10 @@ const GROUPS: readonly { id: Group; keys: readonly ControlColor[] }[] = [
 
 type Labels = Record<ControlColor, string>;
 const TEXT: Record<"ru" | "de" | "en" | "uk", {
-  title: string; hint: string; reset: string; resetAll: string; need: string; groups: Record<Group, string>; labels: Labels;
+  title: string; reset: string; resetAll: string; need: string; groups: Record<Group, string>; labels: Labels;
 }> = {
   ru: {
     title: "Свои цвета", reset: "Сбросить", resetAll: "Сбросить все", need: "нужно",
-    hint: "Любой цвет интерфейса, вплоть до точек у заголовков и счётчиков. Действует поверх темы и контраста и попадает в JSON при экспорте.",
     groups: { base: "Основа", actions: "Кнопки и фокус", fields: "Поля и списки", tables: "Таблицы", dots: "Точки и счётчики" },
     labels: {
       background: "Фон страницы", surface: "Карточки и панели", sidebar: "Боковое меню", muted: "Приглушённый фон", accent: "Активный пункт меню",
@@ -34,7 +33,6 @@ const TEXT: Record<"ru" | "de" | "en" | "uk", {
   },
   de: {
     title: "Eigene Farben", reset: "Zurücksetzen", resetAll: "Alle zurücksetzen", need: "nötig",
-    hint: "Jede Farbe der Oberfläche, bis zu den Punkten an Überschriften und Zählern. Sie gilt über Theme und Kontrast und wird beim Export ins JSON übernommen.",
     groups: { base: "Grundlage", actions: "Schaltflächen und Fokus", fields: "Felder und Listen", tables: "Tabellen", dots: "Punkte und Zähler" },
     labels: {
       background: "Seitenhintergrund", surface: "Karten und Panels", sidebar: "Seitenmenü", muted: "Gedämpfter Hintergrund", accent: "Aktiver Menüpunkt",
@@ -46,7 +44,6 @@ const TEXT: Record<"ru" | "de" | "en" | "uk", {
   },
   en: {
     title: "Own colours", reset: "Reset", resetAll: "Reset all", need: "needs",
-    hint: "Any colour of the interface, down to the dots at headings and the counters. It applies on top of the theme and contrast and goes into the JSON on export.",
     groups: { base: "Base", actions: "Buttons and focus", fields: "Fields and lists", tables: "Tables", dots: "Dots and counters" },
     labels: {
       background: "Page background", surface: "Cards and panels", sidebar: "Side menu", muted: "Muted background", accent: "Active menu item",
@@ -58,7 +55,6 @@ const TEXT: Record<"ru" | "de" | "en" | "uk", {
   },
   uk: {
     title: "Власні кольори", reset: "Скинути", resetAll: "Скинути все", need: "потрібно",
-    hint: "Будь-який колір інтерфейсу, аж до пімпочок біля заголовків і лічильників. Діє поверх теми й контрасту та потрапляє в JSON під час експорту.",
     groups: { base: "Основа", actions: "Кнопки й фокус", fields: "Поля та списки", tables: "Таблиці", dots: "Пімпочки та лічильники" },
     labels: {
       background: "Фон сторінки", surface: "Картки й панелі", sidebar: "Бічне меню", muted: "Приглушений фон", accent: "Активний пункт меню",
@@ -118,14 +114,13 @@ export function AppearanceControlColors({ onError }: { onError: (cause: unknown)
     update(next);
   };
   return (
-    <fieldset className="max-w-3xl rounded-lg border border-border p-3" data-testid="appearance-control-colors">
-      <legend className="px-1 text-sm font-medium">{text.title}</legend>
-      <p className="mb-3 text-xs text-muted-foreground">{text.hint}</p>
-      <div className="space-y-3">
+    <fieldset className="min-w-0 max-w-6xl border-0 p-0" data-testid="appearance-control-colors">
+      <legend className="mb-2 p-0 text-sm font-semibold">{text.title}</legend>
+      <div className="columns-1 gap-6 md:columns-2 xl:columns-3">
         {GROUPS.map((group) => (
-          <section key={group.id} aria-labelledby={`control-colors-${group.id}`}>
-            <h3 id={`control-colors-${group.id}`} className="mb-1.5 text-xs font-medium text-muted-foreground">{text.groups[group.id]}</h3>
-            <div className="grid gap-2 sm:grid-cols-2">
+          <section key={group.id} className="mb-4 break-inside-avoid" aria-labelledby={`control-colors-${group.id}`}>
+            <h3 id={`control-colors-${group.id}`} className="mb-1 flex items-center gap-2 font-mono text-xs font-medium text-foreground"><span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />{text.groups[group.id]}</h3>
+            <div className="space-y-0.5">
               {group.keys.map((key) => {
                 const value = effectiveColor(colors, key);
                 const { ratio, required } = check(colors, key);
@@ -133,12 +128,12 @@ export function AppearanceControlColors({ onError }: { onError: (cause: unknown)
                 const own = controls?.[key] !== undefined;
                 const id = `control-color-${key}`;
                 return (
-                  <div key={key} className="flex min-w-0 items-center gap-2 rounded-md border border-border px-2 py-1.5">
+                  <div key={key} className="flex min-w-0 items-center gap-2 py-1">
                     <input id={id} type="color" value={value} onChange={(event) => update({ ...controls, [key]: event.target.value.toLowerCase() })}
-                      className="size-8 shrink-0 cursor-pointer rounded border border-input bg-field p-0.5" />
+                      className="size-7 shrink-0 cursor-pointer rounded border border-input bg-field p-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" />
                     <label htmlFor={id} className="min-w-0 flex-1">
-                      <span className={cn("block truncate text-sm", own && "font-medium")}>{text.labels[key]}</span>
-                      <span className={cn("block font-mono text-xs", low ? "text-destructive" : "text-muted-foreground")}>
+                      <span className={cn("block break-words text-xs leading-4", own && "font-medium")}>{text.labels[key]}</span>
+                      <span className={cn("block break-words font-mono text-[11px] leading-4", low ? "text-destructive" : "text-muted-foreground")}>
                         {value} · {ratio.toFixed(2)}:1{low ? ` · ${text.need} ${required}:1` : ""}
                       </span>
                     </label>
@@ -154,7 +149,7 @@ export function AppearanceControlColors({ onError }: { onError: (cause: unknown)
           </section>
         ))}
       </div>
-      {controls ? <Button size="sm" variant="ghost" className="mt-3" onClick={() => update({})}>{text.resetAll}</Button> : null}
+      {controls ? <Button size="sm" variant="ghost" className="mt-1" onClick={() => update({})}>{text.resetAll}</Button> : null}
     </fieldset>
   );
 }

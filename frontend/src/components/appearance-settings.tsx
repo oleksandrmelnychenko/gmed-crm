@@ -92,17 +92,17 @@ export function AppearanceSettings() {
     setTimeout(() => URL.revokeObjectURL(url), 0);
   };
   return (
-    <section ref={sectionRef} id="appearance" tabIndex={-1} className="scroll-mt-3 rounded-xl border border-border bg-card focus:outline-none" aria-labelledby="appearance-title" data-testid="appearance-settings">
-      <header className="flex items-center gap-2 border-b border-border px-4 py-3">
+    <section ref={sectionRef} id="appearance" tabIndex={-1} className="scroll-mt-3 rounded-lg bg-card focus:outline-none" aria-labelledby="appearance-title" data-testid="appearance-settings">
+      <header className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
         <Palette className="size-4" aria-hidden="true" />
         <h2 id="appearance-title" className="text-sm font-semibold">{text.title}</h2>
       </header>
-      <div className="space-y-3 p-4">
+      <div className="space-y-3 p-3">
         <p className="text-xs text-muted-foreground">{text.hint}</p>
         <div className="flex flex-wrap gap-2" role="group" aria-label={text.title}>
           {themes.map((item) => (
             <button key={item.id} type="button" onClick={() => select(item.id)} aria-pressed={theme.id === item.id}
-              className={cn("inline-flex max-w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-ring", theme.id === item.id ? "border-ring bg-accent" : "border-border bg-card hover:bg-muted")}>
+              className={cn("inline-flex min-h-8 max-w-full items-center gap-2 rounded-md border px-2.5 py-1 text-xs focus-visible:outline-2 focus-visible:outline-ring", theme.id === item.id ? "border-ring bg-accent" : "border-border bg-card hover:bg-muted")}>
               <span className="flex shrink-0 overflow-hidden rounded-sm border border-border" aria-hidden="true">
                 {[item.colors.background, item.colors.primary, item.colors.headingMarker].map((color, index) => <span key={index} className="size-3" style={{ backgroundColor: color }} />)}
               </span>
@@ -116,7 +116,7 @@ export function AppearanceSettings() {
             <button key={level} type="button" aria-pressed={contrast === level} onClick={() => {
               try { save({ ...preferences, contrast: level }); setNotice({ error: false, message: text.saved }); } catch (cause) { fail(cause); }
             }}
-              className={cn("rounded-lg border px-3 py-1.5 text-sm focus-visible:outline-2 focus-visible:outline-ring", contrast === level ? "border-ring bg-accent font-medium" : "border-border bg-card hover:bg-muted")}>
+              className={cn("min-h-8 rounded-md border px-2.5 py-1 text-xs focus-visible:outline-2 focus-visible:outline-ring", contrast === level ? "border-ring bg-accent font-medium" : "border-border bg-card hover:bg-muted")}>
               {contrastText.levels[level]}
             </button>
           ))}
@@ -130,9 +130,9 @@ export function AppearanceSettings() {
           }}>{text.remove}</Button> : null}
         </div>
         <AppearanceControlColors onError={fail} />
-        <details className="max-w-3xl rounded-lg border border-border p-3">
+        <details className="max-w-6xl border-t border-border/60 pt-2">
           <summary className="cursor-pointer text-sm font-medium">{text.custom}</summary>
-          <div className="mt-3 space-y-3">
+          <div className="mt-2 space-y-2">
             <div className="flex flex-wrap gap-2">
               <Button size="sm" onClick={() => fileInput.current?.click()}><Upload />{text.import}</Button>
               <Button size="sm" variant="ghost" onClick={() => { setDraft(portableTheme(theme, themes.map((item) => item.id))); setNotice(null); }}>{text.template}</Button>
@@ -147,8 +147,8 @@ export function AppearanceSettings() {
             </div>
             <label htmlFor="appearance-json" className="block font-mono text-xs text-muted-foreground">{text.editor}</label>
             <textarea id="appearance-json" value={draft} onChange={(event) => { setDraft(event.target.value); setNotice(null); }} maxLength={MAX_THEME_JSON_LENGTH}
-              spellCheck={false} rows={9} className="block w-full rounded-lg border border-input bg-field p-3 font-mono text-xs text-foreground focus-visible:outline-2 focus-visible:outline-ring" />
-            {preview ? <div className="space-y-2 rounded-lg border p-3" style={{ backgroundColor: preview.colors.background, borderColor: preview.colors.border, color: preview.colors.text }} aria-label={text.preview}>
+              spellCheck={false} rows={7} className="block w-full rounded-lg border border-input bg-field p-3 font-mono text-xs text-foreground focus-visible:outline-2 focus-visible:outline-ring" />
+            {preview ? <div className="space-y-2 rounded-lg p-3" style={{ backgroundColor: preview.colors.background, borderColor: preview.colors.border, color: preview.colors.text }} aria-label={text.preview}>
               <div className="flex items-center gap-2 text-sm font-semibold"><span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: preview.colors.headingMarker }} /><span className="min-w-0 break-words">{text.preview} · {preview.name}</span></div>
               <div className="flex flex-wrap items-center gap-3 rounded-md p-3" style={{ backgroundColor: preview.colors.surface }}>
                 <span className="font-mono text-xs" style={{ color: preview.colors.textMuted }}>{text.secondary}</span>

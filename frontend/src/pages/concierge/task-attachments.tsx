@@ -224,10 +224,10 @@ export function ConciergeTaskAttachments({
   }
 
   return (
-    <section className="overflow-hidden rounded-lg border border-border/70 bg-card" data-testid="concierge-task-attachments">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-3.5 py-2.5">
+    <section className="overflow-hidden rounded-lg bg-card" data-testid="concierge-task-attachments">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
         <div>
-          <div className="flex items-center gap-2"><span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" /><h3 className="text-[13px] font-semibold tracking-tight">{labels.title}</h3></div>
+          <div className="flex items-center gap-2"><span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" /><h3 className="text-[13px] font-semibold tracking-tight">{labels.title}</h3></div>
           <p className="mt-0.5 text-xs text-muted-foreground">{labels.allowed}</p>
         </div>
         {mayUpload ? (
@@ -240,7 +240,7 @@ export function ConciergeTaskAttachments({
               accept={TASK_ATTACHMENT_ACCEPT}
               onChange={(event) => void uploadFiles(Array.from(event.target.files ?? []))}
             />
-            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => inputRef.current?.click()}>
+            <Button type="button" size="sm" disabled={busy} onClick={() => inputRef.current?.click()}>
               {busy ? <LoaderCircle className="animate-spin" /> : <Paperclip />}{labels.add}
             </Button>
           </>
@@ -248,14 +248,14 @@ export function ConciergeTaskAttachments({
       </div>
       {error ? <p role="alert" className="mx-3 mt-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error}</p> : null}
       <div className="divide-y divide-border/60">
-        {loading ? <p className="flex items-center justify-center p-5 text-xs text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" />{labels.title}</p> : null}
-        {!loading && attachments.length === 0 ? <p className="p-5 text-center text-xs text-muted-foreground">{labels.empty}</p> : null}
+        {loading ? <p className="flex items-center justify-center px-3 py-3 text-xs text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" />{labels.title}</p> : null}
+        {!loading && attachments.length === 0 ? <p className="px-3 py-3 text-center text-xs text-muted-foreground">{labels.empty}</p> : null}
         {attachments.map((attachment) => (
-          <div key={attachment.id} className="flex items-center gap-3 px-3 py-2.5">
-            {attachment.mime_type.startsWith("image/") ? <FileImage className="size-5 shrink-0 text-violet-600" /> : <FileText className="size-5 shrink-0 text-sky-600" />}
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{attachment.file_name}</p>
-              <p className="text-xs text-muted-foreground">{formatTaskAttachmentSize(attachment.file_size)} · {attachment.uploaded_by_name}</p>
+          <div key={attachment.id} className="flex items-center gap-2 px-3 py-2">
+            {attachment.mime_type.startsWith("image/") ? <FileImage className="size-4 shrink-0 text-muted-foreground" /> : <FileText className="size-4 shrink-0 text-muted-foreground" />}
+            <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <p className="min-w-0 max-w-full truncate text-sm font-medium">{attachment.file_name}</p>
+              <p className="min-w-0 break-words text-xs text-muted-foreground">{formatTaskAttachmentSize(attachment.file_size)} · {attachment.uploaded_by_name}</p>
             </div>
             <Button type="button" size="icon-sm" variant="ghost" title={attachment.file_name} disabled={busy} onClick={() => void downloadAttachment(attachment)}><Download /></Button>
             {mayRemove(attachment) ? <Button type="button" size="icon-sm" variant="ghost" className="text-destructive hover:text-destructive" title={labels.remove} disabled={busy} onClick={() => void removeAttachment(attachment)}><Trash2 /></Button> : null}
@@ -296,10 +296,10 @@ export function ConciergeTaskStagedAttachments({
   }
 
   return (
-    <section className="overflow-hidden rounded-lg border border-border/70 bg-card" data-testid="concierge-task-staged-attachments">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-3.5 py-2.5">
+    <section className="overflow-hidden rounded-lg bg-card" data-testid="concierge-task-staged-attachments">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
         <div>
-          <div className="flex items-center gap-2"><span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" /><h3 className="text-[13px] font-semibold tracking-tight">{labels.title}</h3></div>
+          <div className="flex items-center gap-2"><span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" /><h3 className="text-[13px] font-semibold tracking-tight">{labels.title}</h3></div>
           <p className="mt-0.5 text-xs text-muted-foreground">{labels.allowed}</p>
         </div>
         <input
@@ -310,15 +310,15 @@ export function ConciergeTaskStagedAttachments({
           accept={TASK_ATTACHMENT_ACCEPT}
           onChange={(event) => addFiles(Array.from(event.target.files ?? []))}
         />
-        <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => inputRef.current?.click()}>{disabled ? <LoaderCircle className="animate-spin" /> : <Paperclip />}{labels.add}</Button>
+        <Button type="button" size="sm" disabled={disabled} onClick={() => inputRef.current?.click()}>{disabled ? <LoaderCircle className="animate-spin" /> : <Paperclip />}{labels.add}</Button>
       </div>
       {error || externalError ? <p role="alert" className="mx-3 mt-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error || externalError}</p> : null}
       <div className="divide-y divide-border/60">
-        {files.length === 0 ? <p className="p-5 text-center text-xs text-muted-foreground">{labels.empty}</p> : null}
+        {files.length === 0 ? <p className="px-3 py-3 text-center text-xs text-muted-foreground">{labels.empty}</p> : null}
         {files.map((file) => (
-          <div key={taskAttachmentFileKey(file)} className="flex items-center gap-3 px-3 py-2.5">
-            {file.type.startsWith("image/") ? <FileImage className="size-5 shrink-0 text-violet-600" /> : <FileText className="size-5 shrink-0 text-sky-600" />}
-            <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{file.name}</p><p className="text-xs text-muted-foreground">{formatTaskAttachmentSize(file.size)}</p></div>
+          <div key={taskAttachmentFileKey(file)} className="flex items-center gap-2 px-3 py-2">
+            {file.type.startsWith("image/") ? <FileImage className="size-4 shrink-0 text-muted-foreground" /> : <FileText className="size-4 shrink-0 text-muted-foreground" />}
+            <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5"><p className="min-w-0 max-w-full truncate text-sm font-medium">{file.name}</p><p className="min-w-0 break-words text-xs text-muted-foreground">{formatTaskAttachmentSize(file.size)}</p></div>
             <Button type="button" size="icon-sm" variant="ghost" className="text-destructive hover:text-destructive" title={labels.remove} disabled={disabled} onClick={() => onChange(files.filter((item) => taskAttachmentFileKey(item) !== taskAttachmentFileKey(file)))}><Trash2 /></Button>
           </div>
         ))}

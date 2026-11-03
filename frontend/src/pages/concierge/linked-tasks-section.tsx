@@ -277,12 +277,12 @@ export function LinkedTasksSection({
   const openCount = linkedTaskOpenCount(tasks);
   return (
     <section
-      className={cn("overflow-hidden rounded-lg border border-border/70 bg-card", className)}
+      className={cn("overflow-hidden rounded-lg bg-card", className)}
       data-testid="linked-tasks-section"
     >
       <div className="flex flex-col gap-2 border-b border-border/70 bg-card px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-2">
-          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
             <h3 className="text-sm font-semibold tracking-tight text-foreground">{labels.title}</h3>
             <p className="rounded-full border border-border bg-muted/25 px-2 py-0.5 text-xs text-muted-foreground">
@@ -311,7 +311,7 @@ export function LinkedTasksSection({
       </div>
 
       {error ? (
-        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 px-4 py-4 text-sm text-destructive">
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 px-3 py-3 text-sm text-destructive">
           <span>{error}</span>
           <Button type="button" size="sm" variant="outline" className="h-8" onClick={refresh}>
             <RefreshCw className="size-3.5" />
@@ -319,15 +319,15 @@ export function LinkedTasksSection({
           </Button>
         </div>
       ) : loading ? (
-        <div className="flex min-h-24 items-center justify-center text-sm text-muted-foreground">
+        <div className="flex min-h-16 items-center justify-center text-sm text-muted-foreground">
           <LoaderCircle className="mr-2 size-4 animate-spin" />
           {labels.title}
         </div>
       ) : rows.length === 0 ? (
-        <p className="px-4 py-5 text-sm text-muted-foreground">{labels.empty}</p>
+        <p className="px-3 py-3 text-sm text-muted-foreground">{labels.empty}</p>
       ) : (
         <div role="list" aria-label={labels.title}>
-          <div className="hidden grid-cols-[minmax(0,1fr)_8rem_minmax(8rem,0.42fr)_10rem_2rem] gap-3 border-b border-border/60 px-4 py-2 text-[11px] font-medium text-muted-foreground md:grid">
+          <div className="hidden grid-cols-[minmax(0,1fr)_8rem_minmax(8rem,0.42fr)_10rem_2rem] gap-3 border-b border-border/60 px-3 py-1.5 text-[11px] font-medium text-muted-foreground md:grid">
             <span>{labels.task}</span>
             <span>{labels.status}</span>
             <span>{labels.assignee}</span>
@@ -340,17 +340,15 @@ export function LinkedTasksSection({
               type="button"
               role="listitem"
               aria-label={`${labels.openTask}: ${localizeTaskTitle(task.title, lang)}`}
-              className="group grid w-full min-w-0 gap-2 border-b border-border/60 px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-orange-50/30 md:grid-cols-[minmax(0,1fr)_8rem_minmax(8rem,0.42fr)_10rem_2rem] md:items-center md:gap-3"
+              className="group grid w-full min-w-0 gap-2 border-b border-border/60 px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-muted/40 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring md:grid-cols-[minmax(0,1fr)_8rem_minmax(8rem,0.42fr)_10rem_2rem] md:items-center md:gap-3"
               onClick={() => setSelectedTaskId(task.id)}
             >
               <div className="min-w-0">
-                <div className="flex min-w-0 items-center gap-2">
+                <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 md:flex-nowrap">
                   <span className="shrink-0 font-mono text-[10px] font-medium text-muted-foreground">{conciergeTaskCode(task)}</span>
-                  <p className="truncate text-sm font-semibold text-foreground">{localizeTaskTitle(task.title, lang)}</p>
+                  <p className="min-w-0 max-w-full truncate text-sm font-semibold text-foreground md:flex-1" title={localizeTaskTitle(task.title, lang)}>{localizeTaskTitle(task.title, lang)}</p>
+                  <span className="text-xs text-muted-foreground">{task.kind === "event" ? labels.event_kind : labels.task_kind}</span>
                 </div>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {task.kind === "event" ? labels.event_kind : labels.task_kind}
-                </p>
               </div>
               <div>
                 <Badge variant="outline" className={cn("rounded-full text-[10px]", statusTone(task.status))}>
@@ -376,7 +374,7 @@ export function LinkedTasksSection({
                   {taskDateLabel(task, labels.noDate)}
                 </span>
               )}
-              <Eye className="hidden size-4 text-muted-foreground group-hover:text-orange-700 md:block" />
+              <Eye className="hidden size-4 text-muted-foreground group-hover:text-foreground md:block" />
             </button>
           ))}
         </div>
