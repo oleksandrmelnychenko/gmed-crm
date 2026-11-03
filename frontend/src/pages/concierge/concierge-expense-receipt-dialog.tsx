@@ -403,7 +403,7 @@ export function ConciergeExpenseReceiptDialog({
     }}>
       <DialogContent className={conciergeDialogContentClassName}>
         <ConciergeDialogHeader
-          tone="dot"
+          tone="plain"
           title={labels.title}
           meta={<Badge variant="outline" className="rounded-full font-mono text-[10px]">{service.patient_pid}</Badge>}
         />
@@ -411,7 +411,7 @@ export function ConciergeExpenseReceiptDialog({
         <form className="flex min-h-0 flex-col" onSubmit={(event) => void submit(event)}>
           <ConciergeDialogBody>
             {loading ? (
-              <div className="flex min-h-56 items-center justify-center gap-2 text-sm text-muted-foreground">
+              <div className="flex min-h-16 items-center justify-center gap-2 text-sm text-muted-foreground">
                 <LoaderCircle className="size-4 animate-spin" />{labels.loading}
               </div>
             ) : (
@@ -439,7 +439,7 @@ export function ConciergeExpenseReceiptDialog({
                       <Button type="button" size="sm" variant="outline" className="h-8 rounded-md" disabled={documentMissing} onClick={() => fileInputRef.current?.click()}><Upload />{labels.chooseFile}</Button>
                     </div>
                     <p className="mt-2 text-[11px] text-muted-foreground">{labels.fileHint}</p>
-                    <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-lg border border-border/70 bg-muted/20 px-3 py-2.5 text-sm">
+                    <label className="mt-2 flex cursor-pointer items-start gap-2 py-1 text-sm">
                       <input
                         type="checkbox"
                         className="mt-0.5 size-4 rounded border-input accent-primary"
@@ -461,11 +461,11 @@ export function ConciergeExpenseReceiptDialog({
                       </span>
                     </label>
                     {file && previewUrl ? (
-                      <div className="mt-3 overflow-hidden rounded-lg border border-border/70 bg-muted/20">
+                      <div className="mt-2 overflow-hidden rounded-lg bg-muted/20">
                         {file.type.startsWith("image/") ? (
                           <img src={previewUrl} alt={file.name} className="max-h-60 w-full object-contain" />
                         ) : (
-                          <div className="flex min-h-28 items-center justify-center"><FileText className="size-10 text-rose-500" /></div>
+                          <div className="flex min-h-16 items-center justify-center"><FileText className="size-6 text-foreground" /></div>
                         )}
                         <div className="flex items-center justify-between gap-3 border-t border-border/70 bg-card px-3 py-2">
                           <span className="min-w-0 truncate text-xs font-medium">{file.name}</span>
@@ -485,10 +485,10 @@ export function ConciergeExpenseReceiptDialog({
                   </ConciergeProfileDialogSection>
 
                   <ConciergeProfileDialogSection title={labels.history}>
-                    {expenses.length === 0 ? <p className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">{labels.historyEmpty}</p> : (
-                      <ol className="space-y-2">
+                    {expenses.length === 0 ? <p className="px-3 py-3 text-center text-xs text-muted-foreground">{labels.historyEmpty}</p> : (
+                      <ol className="divide-y divide-border/60">
                         {expenses.map((item) => (
-                          <li key={item.id} className="rounded-lg border border-border/70 bg-muted/15 p-3">
+                          <li key={item.id} className="py-2 first:pt-0 last:pb-0">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="flex items-center gap-2"><Badge variant="outline" className={cn("rounded-full text-[10px]", statusTone(item.status))}>{labels[item.status]}</Badge><span className="text-xs font-medium">{item.vendor}</span></div>
                               <span className="font-mono text-xs font-semibold">{formatMoney(item.amount_gross, item.currency)}</span>
@@ -586,13 +586,13 @@ export function ConciergeExpenseReceiptDialog({
 
                   <ConciergeProfileDialogSection title={labels.consequence}>
                     <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">{labels.pendingWarning}</p>
-                    <dl className="mt-3 divide-y divide-border/60 overflow-hidden rounded-lg border border-border/60">
+                    <dl className="mt-2 divide-y divide-border/60">
                       {([
                         [labels.patientReceivable, consequence.patientReceivableGross],
                         [labels.providerLiability, consequence.providerLiabilityGross],
                         [labels.companyPaid, consequence.companyPaidGross],
                       ] as const).map(([label, value]) => (
-                        <div key={label} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                        <div key={label} className="flex items-center justify-between gap-3 py-2">
                           <dt className="text-xs text-muted-foreground">
                             {label}
                             {label === labels.patientReceivable && consequence.patientReceivableAfterDelivery
@@ -612,7 +612,7 @@ export function ConciergeExpenseReceiptDialog({
               </div>
             )}
           </ConciergeDialogBody>
-          <div className="flex flex-col-reverse gap-2 border-t border-border/70 bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-end sm:px-5">
+          <div className="flex flex-col-reverse gap-2 border-t border-border/70 bg-card px-3 py-2.5 sm:flex-row sm:items-center sm:justify-end">
             <Button type="button" variant="outline" disabled={submitting} onClick={() => onOpenChange(false)}>{labels.cancel}</Button>
             <Button type="submit" disabled={submitting || loading || !context}>{submitting ? <LoaderCircle className="animate-spin" /> : <Upload />}{submitting ? labels.submitting : labels.submit}</Button>
           </div>

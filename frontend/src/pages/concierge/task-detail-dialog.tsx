@@ -431,10 +431,10 @@ function TaskDetailSection({
   children: ReactNode;
 }) {
   return (
-    <section className={cn("overflow-hidden rounded-lg border border-border/70 bg-card", className)}>
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/70 bg-muted/20 px-3.5 py-2.5">
+    <section className={cn("overflow-hidden rounded-lg bg-card", className)}>
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border/60 px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
+          <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
           <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
           {count !== undefined ? <Badge variant="secondary" className="tabular-nums">{count}</Badge> : null}
         </div>
@@ -447,7 +447,7 @@ function TaskDetailSection({
 
 function TaskDetailRow({ label, value }: { label: ReactNode; value: ReactNode }) {
   return (
-    <div className="grid min-w-0 gap-1.5 px-3.5 py-2.5 sm:grid-cols-[minmax(10rem,0.4fr)_minmax(0,1fr)] sm:items-center sm:gap-3">
+    <div className="grid min-w-0 gap-1 px-3 py-2 sm:grid-cols-[minmax(10rem,0.4fr)_minmax(0,1fr)] sm:items-center sm:gap-3">
       <span className="min-w-0 break-words text-xs font-medium text-muted-foreground sm:text-[13px]">{label}</span>
       <div className="min-w-0 break-words text-sm font-medium leading-snug text-foreground">{value}</div>
     </div>
@@ -1046,13 +1046,13 @@ export function ConciergeTaskDetailDialog({
       <DialogContent className={cn(conciergeDialogContentClassName, (canDelete || canMarkNotRequired || statusDirty) && "grid-rows-[auto_minmax(0,1fr)_auto]")} style={{ maxWidth: "64rem" }}>
         <ConciergeDialogHeader
           icon={ListChecks}
-          tone="dot"
+          tone="plain"
           title={detail ? localizeTaskTitle(detail.item.title, lang) : labels.loading}
           meta={detail ? <><Badge variant="outline" className="rounded-full font-mono text-muted-foreground">{conciergeTaskCode(detail.item)}</Badge><Badge variant="outline" className={detail.item.archived_at ? "bg-muted text-muted-foreground" : taskStatusClassName(detail.item.status)}>{detail.item.archived_at ? labels.archivedStatus : labels[detail.item.status]}</Badge><Badge variant="secondary" className="rounded-full" data-testid="task-detail-checklist-progress" title={`${labels.checklist}: ${detail.item.checklist_completed}/${detail.item.checklist_total}`}>{labels.checklist}: {detail.item.checklist_completed}/{detail.item.checklist_total}</Badge></> : undefined}
         />
         <ConciergeDialogBody>
           {error ? <p role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
-          {loading && !detail ? <div className="flex items-center justify-center py-20 text-sm text-muted-foreground"><LoaderCircle className="mr-2 animate-spin" />{labels.loading}</div> : null}
+          {loading && !detail ? <div className="flex items-center justify-center py-8 text-sm text-muted-foreground"><LoaderCircle className="mr-2 animate-spin" />{labels.loading}</div> : null}
           {detail ? (
             <div className="space-y-3">
               {onOpenRelated && parentTask ? (
@@ -1133,27 +1133,27 @@ export function ConciergeTaskDetailDialog({
                   <div className="divide-y divide-border/60">
                     {/* Generated order work (checklist, appointment concierge tasks) links back to its order. */}
                     {detail.item.order_id && canOpenOrders ? (
-                      <StaffLink to={`/orders?order=${detail.item.order_id}`} data-testid="task-detail-order-link" className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/20">
+                      <StaffLink to={`/orders?order=${detail.item.order_id}`} data-testid="task-detail-order-link" className="group flex items-center gap-2 px-3 py-2 transition-colors hover:bg-muted/20">
                         <span className="flex shrink-0 items-center justify-center text-foreground"><ClipboardList className="size-5" /></span>
                         <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.order}</span><strong className="block truncate text-sm">{detail.item.order_number || "—"}</strong></span>
                         <ExternalLink className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-[var(--brand)]" />
                       </StaffLink>
                     ) : null}
                     {detail.item.patient_id && detail.item.patient_name ? (
-                      <StaffLink to={`/patients/${detail.item.patient_id}`} className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/20">
+                      <StaffLink to={`/patients/${detail.item.patient_id}`} className="group flex items-center gap-2 px-3 py-2 transition-colors hover:bg-muted/20">
                         <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.patient}</span><strong className="block truncate text-sm">{detail.item.patient_name}</strong><span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"><Cake className="size-3" />{labels.birthDate}: {dateOnly(detail.item.patient_birth_date)}</span></span>
                         <ExternalLink className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-[var(--brand)]" />
                       </StaffLink>
                     ) : null}
                     {detail.item.provider_id && detail.item.provider_name ? (
-                      <StaffLink to={`/providers/${detail.item.provider_id}`} className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/20">
+                      <StaffLink to={`/providers/${detail.item.provider_id}`} className="group flex items-center gap-2 px-3 py-2 transition-colors hover:bg-muted/20">
                         <span className="flex shrink-0 items-center justify-center text-foreground"><Building2 className="size-5" /></span>
                         <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.provider}</span><strong className="block truncate text-sm">{detail.item.provider_name}</strong><span className="block truncate text-xs text-muted-foreground">{[detail.item.provider_phone, detail.item.provider_email].filter(Boolean).join(" · ") || "—"}</span></span>
                         <ExternalLink className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-[var(--brand)]" />
                       </StaffLink>
                     ) : null}
                     {detail.item.project_id && detail.item.project_name ? (
-                      <StaffLink to={`/projects?project=${detail.item.project_id}`} className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/20">
+                      <StaffLink to={`/projects?project=${detail.item.project_id}`} className="group flex items-center gap-2 px-3 py-2 transition-colors hover:bg-muted/20">
                         <span className="flex shrink-0 items-center justify-center text-foreground"><FolderKanban className="size-5" /></span>
                         <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.project}</span><strong className="block truncate text-sm">{detail.item.project_name}</strong></span>
                         <ExternalLink className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-[var(--brand)]" />
@@ -1191,7 +1191,7 @@ export function ConciergeTaskDetailDialog({
                       {labels.loading}
                     </div>
                   ) : expenseItems.length === 0 ? (
-                    <p className="px-3.5 py-5 text-center text-xs text-muted-foreground">{labels.emptyExpenses}</p>
+                    <p className="px-3 py-3 text-center text-xs text-muted-foreground">{labels.emptyExpenses}</p>
                   ) : (
                     <div className="divide-y divide-border/60">
                       {expenseItems.map((item) => (
@@ -1239,7 +1239,7 @@ export function ConciergeTaskDetailDialog({
             <div className="grid items-start gap-3 lg:grid-cols-2">
               <TaskDetailSection title={labels.checklist} action={<Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge>}>
                 <div className="divide-y divide-border/60">
-                  {detail.checklist.length === 0 ? <p className="px-3.5 py-5 text-center text-xs text-muted-foreground">{labels.emptyChecklist}</p> : detail.checklist.map((item) => (
+                  {detail.checklist.length === 0 ? <p className="px-3 py-3 text-center text-xs text-muted-foreground">{labels.emptyChecklist}</p> : detail.checklist.map((item) => (
                     <div key={item.id} className="flex items-start gap-1.5 px-3 py-2 text-sm">
                       <Button
                         type="button"
@@ -1296,7 +1296,7 @@ export function ConciergeTaskDetailDialog({
 
               <TaskDetailSection title={labels.comments} action={<Badge variant="secondary" className="rounded-full">{detail.comments.length}</Badge>}>
                 <div className="divide-y divide-border/60">
-                  {detail.comments.length === 0 ? <p className="px-3.5 py-5 text-center text-xs text-muted-foreground">{labels.emptyComments}</p> : detail.comments.map((item) => (
+                  {detail.comments.length === 0 ? <p className="px-3 py-3 text-center text-xs text-muted-foreground">{labels.emptyComments}</p> : detail.comments.map((item) => (
                     <article key={item.id} className="px-3 py-2">
                       <div className="flex items-start justify-between gap-2 text-[10px] text-muted-foreground">
                         <div className="min-w-0"><strong className="text-foreground">{item.created_by_name}</strong>{item.edited_at ? <span className="ml-1.5">· {labels.edited}</span> : null}</div>
@@ -1326,17 +1326,17 @@ export function ConciergeTaskDetailDialog({
               </TaskDetailSection>
             </div>
 
-            <details className="group overflow-hidden rounded-lg border border-border/70 bg-card">
-              <summary className="flex min-w-0 cursor-pointer list-none items-center justify-between gap-3 bg-muted/20 px-3.5 py-2.5 transition-colors hover:bg-muted/35 [&::-webkit-details-marker]:hidden">
+            <details className="group overflow-hidden rounded-lg bg-card">
+              <summary className="flex min-w-0 cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 transition-colors hover:bg-muted/35 [&::-webkit-details-marker]:hidden">
                 <span className="flex min-w-0 items-center gap-2">
-                  <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
+                  <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
                   <span className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">{labels.history}</span>
                   <Badge variant="secondary" className="rounded-full">{detail.history.length}</Badge>
                 </span>
                 <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
               </summary>
               <div className="divide-y divide-border/60 border-t border-border/70">
-                {detail.history.length === 0 ? <p className="p-6 text-center text-xs text-muted-foreground">{labels.emptyHistory}</p> : detail.history.map((event) => <div key={event.id} className="flex items-start justify-between gap-3 px-3 py-2.5 text-xs"><div><p className="font-medium">{labels[event.event_type as keyof typeof labels] ?? event.event_type}</p><p className="mt-0.5 text-muted-foreground">{event.actor_name ?? "System"}</p></div><time className="shrink-0 text-muted-foreground">{dateTime(event.created_at)}</time></div>)}
+                {detail.history.length === 0 ? <p className="px-3 py-3 text-center text-xs text-muted-foreground">{labels.emptyHistory}</p> : detail.history.map((event) => <div key={event.id} className="flex items-start justify-between gap-3 px-3 py-2.5 text-xs"><div><p className="font-medium">{labels[event.event_type as keyof typeof labels] ?? event.event_type}</p><p className="mt-0.5 text-muted-foreground">{event.actor_name ?? "System"}</p></div><time className="shrink-0 text-muted-foreground">{dateTime(event.created_at)}</time></div>)}
               </div>
             </details>
             </div>

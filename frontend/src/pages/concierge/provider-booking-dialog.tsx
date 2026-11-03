@@ -398,7 +398,7 @@ export function ConciergeProviderBookingDialog<TService extends BookableConcierg
         />
         {!service ? (
           <ConciergeDialogBody>
-            <p className="rounded-lg border border-dashed border-border px-4 py-14 text-center text-sm text-muted-foreground">
+            <p className="px-3 py-6 text-center text-sm text-muted-foreground">
               {loadError || labels.loading}
             </p>
           </ConciergeDialogBody>

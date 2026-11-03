@@ -151,13 +151,13 @@ function formatDate(value: string) {
   return formatAppDate(value) || value;
 }
 
-const paymentFieldClassName = "grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground";
+const paymentFieldClassName = "grid min-w-0 gap-1 text-xs font-medium text-muted-foreground [&>span:first-child]:font-mono";
 const paymentInputClassName = "h-9 min-w-0 bg-field font-normal text-foreground";
 
 function SettlementSection({ title, action, children }: { title: ReactNode; action?: ReactNode; children: ReactNode }) {
   return (
-    <section className="min-w-0 overflow-hidden rounded-lg border border-border/70 bg-card">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-muted/20 px-3.5 py-2.5">
+    <section className="min-w-0 overflow-hidden rounded-lg bg-card">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
         <AdminSectionTitle>{title}</AdminSectionTitle>
         {action}
       </div>
@@ -378,7 +378,7 @@ export function ProviderSettlementDialog({
     <Dialog open={Boolean(liability)} dirty={paymentDirty || reversalDirty || correctionDirty} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-h-[92dvh] sm:max-w-2xl sm:pb-0">
         <DialogHeader className="shrink-0 gap-1.5 border-b border-border/70 bg-muted/20 px-4 py-3.5 pr-12 sm:px-5 sm:pr-14">
-          <DialogTitle className="flex min-w-0 items-start gap-2 text-base"><span aria-hidden className="mt-2 size-2 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" /><span className="min-w-0 break-words">{text.title}</span></DialogTitle>
+          <DialogTitle className="flex min-w-0 items-start gap-2 text-base"><span className="min-w-0 break-words">{text.title}</span></DialogTitle>
           <DialogDescription className="break-words text-xs leading-5">
             <span className="font-mono text-foreground">{settlement?.external_invoice_number ?? liability?.external_invoice_number}</span> · {text.description}
           </DialogDescription>
@@ -390,18 +390,13 @@ export function ProviderSettlementDialog({
           <div className="flex justify-center py-10"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
         ) : settlement ? (
           <div className="min-w-0 space-y-3">
-            <dl className="grid gap-2 sm:grid-cols-3">
+            <dl className="grid gap-x-4 gap-y-2 px-1 py-2 sm:grid-cols-3">
               {([
                 [text.invoiceAmount, settlement.amount_gross, "default"],
                 [text.paid, settlement.company_paid_gross, "positive"],
                 [text.remaining, settlement.remaining_provider_liability_gross, remaining > 0 ? "negative" : "positive"],
               ] as const).map(([label, value, tone]) => (
-                <div key={label} className={cn(
-                  "flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border/70 border-l-[3px] bg-card px-3 py-2.5 sm:flex-col sm:items-start sm:justify-between sm:gap-1.5",
-                  tone === "default" && "border-l-slate-300 dark:border-l-slate-600",
-                  tone === "positive" && "border-l-emerald-400 dark:border-l-emerald-500",
-                  tone === "negative" && "border-l-rose-400 dark:border-l-rose-500",
-                )}>
+                <div key={label} className="flex min-w-0 items-center justify-between gap-3 sm:flex-col sm:items-start sm:gap-1">
                   <dt className="min-w-0 break-words text-xs leading-5 text-muted-foreground">{label}</dt>
                   <dd className={cn(
                     "shrink-0 whitespace-nowrap font-mono text-sm font-semibold tabular-nums sm:text-base",
@@ -415,7 +410,7 @@ export function ProviderSettlementDialog({
             {canPay ? (
               <SettlementSection title={text.payment}>
               <form onSubmit={handlePayment} onChangeCapture={() => setPaymentDirty(true)}>
-                <div className="space-y-3 p-3.5">
+                <div className="space-y-2.5 p-3">
                 {paymentError ? <ShellBanner tone="error">{paymentError}</ShellBanner> : null}
                 {activeAccounts.length === 0 ? <ShellBanner tone="warning">{text.noAccount}</ShellBanner> : null}
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -528,7 +523,7 @@ export function ProviderSettlementDialog({
             {reversal ? (
               <SettlementSection title={text.reverse} action={<Badge variant="outline" className="text-rose-700 dark:text-rose-400">{formatMoney(reversal.amount_gross, reversal.currency, locale)}</Badge>}>
               <form onSubmit={handleReversal} onChangeCapture={() => setReversalDirty(true)}>
-                <div className="space-y-3 p-3.5">
+                <div className="space-y-2.5 p-3">
                 {reversalError ? <ShellBanner tone="error">{reversalError}</ShellBanner> : null}
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className={paymentFieldClassName}><span>{text.date}</span><Input className={paymentInputClassName} required type="date" min={reversal.paid_on} max={todayIso()} value={reversalForm.paidOn} onChange={(event) => setReversalForm((current) => ({ ...current, paidOn: event.target.value }))} /></label>

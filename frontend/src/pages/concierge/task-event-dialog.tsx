@@ -229,9 +229,9 @@ export function isConciergeServiceSelectableForTask(
 }
 
 const selectClass =
-  "flex h-9 w-full rounded-md border border-input bg-field px-3 py-1 text-sm text-foreground shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
+  "flex h-9 w-full rounded-md border border-input bg-field px-3 py-1 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
 const textAreaClass =
-  "flex min-h-32 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm text-foreground shadow-xs outline-none placeholder:text-[var(--control-placeholder,var(--muted-foreground))] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
+  "flex min-h-24 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm text-foreground outline-none placeholder:text-[var(--control-placeholder,var(--muted-foreground))] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
 
 export type SaveConciergeOperationalItemInput = {
   kind: "task" | "event";
@@ -666,18 +666,18 @@ export function ConciergeTaskEventDialog({
   return (
     <Dialog requireChanges={Boolean(item)} open={open} onOpenChange={onOpenChange}>
       <DialogContent className={conciergeDialogContentClassName}>
-        <ConciergeDialogHeader tone="dot" title={item ? labels.editTitle : labels.createTitle} />
+        <ConciergeDialogHeader tone="plain" title={item ? labels.editTitle : labels.createTitle} />
 
         <form className="flex min-h-0 flex-col" onSubmit={(event) => void submit(event)}>
           <ConciergeDialogBody>
             {error ? <p role="alert" className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p> : null}
             {scheduleError ? <p role="alert" className="mb-4 text-sm text-destructive">{scheduleError}</p> : null}
-            <div className="space-y-4">
-              <div className="grid items-start gap-4 lg:grid-cols-[minmax(18rem,0.9fr)_minmax(0,1.1fr)]">
-                <div className="space-y-4">
+            <div className="space-y-3">
+              <div className="grid items-start gap-3 lg:grid-cols-[minmax(18rem,0.9fr)_minmax(0,1.1fr)]">
+                <div className="space-y-3">
                   <ConciergeDialogSection title={labels.detailsSection} dot>
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-2 gap-1 rounded-lg border border-border/70 bg-muted/40 p-1">
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-1 rounded-md bg-muted/30 p-0.5">
                         {(["task", "event"] as const).map((value) => (
                           <Button key={value} type="button" size="sm" className="h-8 rounded-md text-xs" variant={kind === value ? "default" : "ghost"} aria-pressed={kind === value} disabled={value === "event" && (item?.child_count ?? 0) > 0} onClick={() => setKind(value)}>
                             {labels[value]}
@@ -717,9 +717,9 @@ export function ConciergeTaskEventDialog({
                   ) : null}
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-3">
                 <ConciergeDialogSection title={labels.audience} dot>
-                  <div className="grid grid-cols-2 gap-1 rounded-lg border border-border/70 bg-muted/40 p-1">
+                  <div className="grid grid-cols-2 gap-1 rounded-md bg-muted/30 p-0.5">
                     {(["internal", "external"] as const).map((value) => (
                       <Button key={value} type="button" size="sm" className="h-8 rounded-md text-xs" variant={audience === value ? "default" : "ghost"} onClick={() => setAudience(value)}>
                         {labels[value]}
@@ -811,11 +811,11 @@ export function ConciergeTaskEventDialog({
                 <div>
                   <ConciergeDialogSection title={labels.comments} dot>
                     {commentError ? <p role="alert" className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{commentError}</p> : null}
-                    <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
+                    <div className="overflow-hidden bg-card">
                       {commentsLoading ? (
-                        <div className="flex items-center justify-center px-3 py-6 text-xs text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" />{labels.commentsLoading}</div>
+                        <div className="flex items-center justify-center px-3 py-3 text-xs text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" />{labels.commentsLoading}</div>
                       ) : comments.length === 0 ? (
-                        <p className="px-3 py-6 text-center text-xs text-muted-foreground">{labels.noComments}</p>
+                        <p className="px-3 py-3 text-center text-xs text-muted-foreground">{labels.noComments}</p>
                       ) : (
                         <div className="divide-y divide-border/60">
                           {comments.map((entry) => (

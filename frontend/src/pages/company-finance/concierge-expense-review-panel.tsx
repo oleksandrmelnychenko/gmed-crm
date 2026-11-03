@@ -883,7 +883,7 @@ export function ConciergeExpenseReviewPanel({
       </div>
 
       {loading && !queue ? (
-        <div className="rounded-lg border border-border/70 bg-card px-4 py-12 text-center text-sm text-muted-foreground">
+        <div className="rounded-lg bg-card px-4 py-6 text-center text-sm text-muted-foreground">
           <Loader2 className="mx-auto mb-2 size-5 animate-spin" />
           {text.loading}
         </div>

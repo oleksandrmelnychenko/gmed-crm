@@ -165,10 +165,10 @@ export function ProviderStatementDialog({
 
         {error ? <ShellBanner tone="error">{error}</ShellBanner> : null}
         {loading && !statement ? (
-          <div className="flex justify-center py-16"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
+          <div className="flex justify-center py-8"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
         ) : statement ? (
-          <div className="space-y-4">
-            <dl className="grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="space-y-3">
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-3 py-1 lg:grid-cols-3 xl:grid-cols-6">
               {([
                 [text.opening, statement.summary.opening_balance, "default"],
                 [text.charged, statement.summary.charged_gross, "negative"],
@@ -177,10 +177,10 @@ export function ProviderStatementDialog({
                 [text.expected, statement.summary.expected_gross, "warning"],
                 [text.closing, statement.summary.closing_balance, closingBalance > 0 ? "negative" : "positive"],
               ] as const).map(([label, value, tone]) => (
-                <div key={label} className="min-w-0 rounded-lg border border-border/70 bg-muted/20 p-2.5 sm:p-3">
-                  <dt className="line-clamp-2 min-h-7 text-[10px] leading-3.5 text-muted-foreground sm:min-h-0 sm:truncate sm:text-[11px]">{label}</dt>
+                <div key={label} className="min-w-0">
+                  <dt className="break-words text-xs leading-4 text-muted-foreground">{label}</dt>
                   <dd className={cn(
-                    "mt-1 truncate text-sm font-semibold tabular-nums sm:text-base",
+                    "mt-1 break-words font-mono text-sm font-semibold tabular-nums sm:text-base",
                     tone === "positive" && "text-emerald-700 dark:text-emerald-400",
                     tone === "negative" && "text-rose-700 dark:text-rose-400",
                     tone === "warning" && "text-amber-700 dark:text-amber-400",
@@ -189,9 +189,9 @@ export function ProviderStatementDialog({
               ))}
             </dl>
 
-            <div className="space-y-2 sm:hidden">
+            <div className="divide-y divide-border/60 sm:hidden">
               {statement.movements.map((movement) => (
-                <article key={`${movement.movement_type}:${movement.id}`} className="rounded-lg border border-border/70 bg-card p-3 shadow-xs">
+                <article key={`${movement.movement_type}:${movement.id}`} className="bg-card py-3">
                   <div className="min-w-0">
                     <div className="min-w-0">
                       <Badge variant={movement.movement_type === "payment" ? "secondary" : "outline"}>
@@ -199,12 +199,12 @@ export function ProviderStatementDialog({
                       </Badge>
                       <p className="mt-1.5 text-xs text-muted-foreground">{formatDate(movement.movement_date)}</p>
                     </div>
-                    <p className="mt-2 flex items-baseline justify-between gap-3 rounded-md bg-muted/35 px-2.5 py-2 text-sm font-semibold tabular-nums">
+                    <p className="mt-2 flex flex-wrap items-baseline justify-between gap-2 text-sm font-semibold tabular-nums">
                       <span className="text-[10px] font-normal text-muted-foreground">{text.balance}</span>
                       {formatMoney(movement.running_balance, currency, locale)}
                     </p>
                   </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2 border-t border-border/60 pt-3 text-xs">
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                     <div className="min-w-0">
                       <p className="text-[10px] text-muted-foreground">{text.document}</p>
                       <Button type="button" variant="link" className="h-auto max-w-full justify-start truncate p-0 text-xs" onClick={() => onOpenInvoice(movement.external_invoice_id)}>
@@ -218,7 +218,7 @@ export function ProviderStatementDialog({
                       <p className="truncate text-[10px] text-muted-foreground">{movement.patient_pid}</p>
                     </div>
                   </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2 rounded-md bg-muted/35 p-2.5 text-xs">
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                     <div>
                       <p className="text-[10px] text-muted-foreground">{text.chargedColumn}</p>
                       <p className="mt-0.5 font-semibold tabular-nums text-rose-700 dark:text-rose-400">
@@ -236,11 +236,11 @@ export function ProviderStatementDialog({
                 </article>
               ))}
               {statement.movements.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-border px-3 py-10 text-center text-sm text-muted-foreground">{text.noMovements}</p>
+                <p className="px-3 py-5 text-center text-sm text-muted-foreground">{text.noMovements}</p>
               ) : null}
             </div>
 
-            <div className="hidden overflow-x-auto rounded-lg border border-border/70 sm:block">
+            <div className="hidden overflow-x-auto sm:block">
               <table className="w-full min-w-[1040px] text-sm">
                 <thead className="bg-muted/40 text-left text-[11px] text-muted-foreground">
                   <tr>

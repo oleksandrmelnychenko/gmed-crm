@@ -652,7 +652,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
         {payload.items.map((account) => {
           const Icon = accountIcon(account.account_type);
           return (
-            <article key={account.id} className={cn("rounded-lg border border-border/70 bg-card p-3 shadow-sm", !account.is_active && "opacity-60")}>
+            <article key={account.id} className={cn("rounded-lg bg-card p-3", !account.is_active && "opacity-60")}>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-start gap-3">
                   <span className="flex size-6 shrink-0 items-center justify-center text-foreground">
@@ -670,9 +670,9 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
                 </div>
                 <span className="text-xs font-medium text-muted-foreground">{account.currency}</span>
               </div>
-              <p className="mt-3 text-xs text-muted-foreground">{text.currentBalance}</p>
-              <p className={cn("mt-1 text-xl font-semibold tracking-tight tabular-nums", Number(account.current_balance) < 0 && "text-rose-700 dark:text-rose-400")}>{money(account.current_balance)}</p>
-              <dl className="mt-3 grid grid-cols-2 gap-2 border-t border-border/70 pt-3 text-xs sm:grid-cols-4">
+              <p className="mt-2 text-xs text-muted-foreground">{text.currentBalance}</p>
+              <p className={cn("mt-0.5 break-words font-mono text-lg font-semibold tabular-nums", Number(account.current_balance) < 0 && "text-rose-700 dark:text-rose-400")}>{money(account.current_balance)}</p>
+              <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-xs sm:grid-cols-4">
                 <div><dt className="text-muted-foreground">{text.opening}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.opening_balance)}</dd></div>
                 <div><dt className="text-muted-foreground">{text.movements}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.movement_balance)}</dd></div>
                 <div><dt className="text-muted-foreground">{text.transferBalance}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.transfer_balance ?? "0")}</dd></div>
@@ -682,7 +682,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
                 {formatDate(account.opening_balance_on)} · {account.movement_count + (account.transfer_count ?? 0)} {text.movementCount}
               </p>
               {readOnly ? null : (
-                <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/70 pt-3">
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 pt-1">
                   <Button type="button" size="xs" variant="outline" data-action="write" disabled={!account.is_active} onClick={() => {
                     setAdjustError(null);
                     setAdjustAccount(account);
@@ -710,9 +710,9 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
         })}
       </div>
 
-      <DataTableSurface toolbarStart={<span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />{text.internalTransfers}</span>} rows={transferRows} columns={transferColumns} rowId={(row) => row.id} storageKey="company-finance-transfers" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} emptyState={text.noTransfers} pagination={{ pageSize: 25 }} />
+      <DataTableSurface toolbarStart={<span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />{text.internalTransfers}</span>} rows={transferRows} columns={transferColumns} rowId={(row) => row.id} storageKey="company-finance-transfers" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} emptyState={text.noTransfers} pagination={{ pageSize: 25 }} />
 
-      <DataTableSurface toolbarStart={<span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />{text.history}</span>} rows={payload.adjustments} columns={adjustmentColumns} rowId={(row) => row.id} storageKey="company-finance-adjustments" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} emptyState={text.noAdjustments} pagination={{ pageSize: 25 }} />
+      <DataTableSurface toolbarStart={<span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />{text.history}</span>} rows={payload.adjustments} columns={adjustmentColumns} rowId={(row) => row.id} storageKey="company-finance-adjustments" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} emptyState={text.noAdjustments} pagination={{ pageSize: 25 }} />
 
       <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
         <DialogContent className="sm:max-w-lg">

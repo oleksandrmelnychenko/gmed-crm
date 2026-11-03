@@ -91,8 +91,8 @@ export function TaskWorkflowDialog({ rootId, tasks, lang, busy, availableStatuse
           <Badge variant="outline" className={cn("ml-auto h-6 gap-1.5 text-[10px]", progress.done > 0 ? statusTone.completed : "bg-background text-muted-foreground")}><Check />{labels.completedCount}: <span className="font-semibold tabular-nums">{progress.done}/{progress.total}</span></Badge>
         </div>
       ) : null}
-      <div className="min-h-0 overflow-y-auto overscroll-contain bg-muted/10 p-4 sm:p-5">
-        <div role="list" aria-label={labels.title} className="space-y-3">
+      <div className="min-h-0 overflow-y-auto overscroll-contain p-3">
+        <div role="list" aria-label={labels.title} className="space-y-2">
           {rows.map(({ task, depth }) => {
             const interval = conciergeTaskInterval(task);
             const active = task.status === "in_progress";
@@ -104,8 +104,8 @@ export function TaskWorkflowDialog({ rootId, tasks, lang, busy, availableStatuse
             const Icon = task.status === "completed" ? Check : task.kind === "event" ? CalendarDays : ListChecks;
             return <div key={task.id} role="listitem" data-testid={`workflow-item-${task.id}`} className={cn("relative min-w-0", depth > 0 && "border-l-2 border-primary/15 pl-3")} style={depth ? { marginLeft: Math.min(depth, 3) * 8 } : undefined}>
               {depth > 0 ? <span aria-hidden className="absolute left-0 top-6 w-3 border-t-2 border-primary/15" /> : null}
-              <div className={cn("min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm", depth === 0 && "border-l-[3px] border-l-primary")}>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-border/60 bg-muted/20 px-3 py-2.5">
+              <div className="min-w-0 overflow-hidden rounded-lg bg-card">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border/60 px-2 py-2">
                   <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium">
                     <Icon className={cn("size-3.5 shrink-0", task.status === "completed" ? "text-emerald-600" : "text-primary")} />
                     {depth === 0 ? task.kind === "event" ? labels.mainEvent : labels.main : task.kind === "event" ? labels.event : labels.task}
@@ -113,14 +113,14 @@ export function TaskWorkflowDialog({ rootId, tasks, lang, busy, availableStatuse
                   <Badge variant="outline" className="bg-background text-[10px] text-muted-foreground">{conciergeTaskCode(task)}</Badge>
                   <Badge variant="outline" className={cn("ml-auto text-[10px]", task.archived_at ? "bg-muted text-muted-foreground" : statusTone[task.status])}>{task.archived_at ? labels.archived : labels[task.status]}</Badge>
                 </div>
-                <div className="space-y-3 p-3">
+                <div className="space-y-2 p-2">
                   <button type="button" className="block w-full min-w-0 break-words text-left text-sm font-semibold leading-snug hover:text-primary focus-visible:outline-2 focus-visible:outline-primary [overflow-wrap:anywhere]" title={labels.details} onClick={() => { onClose(); onOpen(task); }}>{title}</button>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     {task.assigned_to_name ? (
                       <Badge variant="outline" className="h-6 min-w-0 max-w-full gap-1.5 bg-muted/20 text-[10px] font-normal text-muted-foreground" title={task.assigned_to_name}><UserRound /><span className="truncate">{task.assigned_to_name}</span></Badge>
                     ) : null}
                     <div className="ml-auto flex shrink-0 items-center gap-1.5">
-                      <Button type="button" size="icon-sm" variant="outline" title={labels.board} aria-label={`${labels.board}: ${title}`} disabled={locked} onClick={() => onShowOnBoard(task)}><FolderKanban /></Button>
+                      <Button type="button" size="icon-sm" variant="ghost" title={labels.board} aria-label={`${labels.board}: ${title}`} disabled={locked} onClick={() => onShowOnBoard(task)}><FolderKanban /></Button>
                       {controllable ? (
                         <Button type="button" size="icon-sm" variant="default" aria-label={`${action}: ${title}`} title={allowed ? active ? labels.stopHint : action : labels.noPermission} disabled={locked || !allowed} onClick={() => void changeStatus(task, target)}>
                           {pendingId === task.id ? <LoaderCircle className="animate-spin motion-reduce:animate-none" /> : active ? <Square /> : <Play />}
@@ -129,7 +129,7 @@ export function TaskWorkflowDialog({ rootId, tasks, lang, busy, availableStatuse
                     </div>
                   </div>
                   {interval.start || interval.end ? (
-                    <div className="space-y-1.5 rounded-lg border border-border/50 bg-muted/20 px-2.5 py-2 text-[10px] text-muted-foreground">
+                    <div className="space-y-1 text-xs text-muted-foreground">
                       {([[labels.startDate, interval.start], [labels.endDate, interval.end]] as const).map(([label, date]) => date ? (
                         <div key={label} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
                           <span className="flex items-center gap-1.5"><Clock3 className="size-3 shrink-0" />{label}</span>
@@ -143,7 +143,7 @@ export function TaskWorkflowDialog({ rootId, tasks, lang, busy, availableStatuse
             </div>;
           })}
         </div>
-        {!root ? <p role="status" className="rounded-xl border border-dashed border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">{labels.unavailable}</p> : !children.length && !incompleteVisibility ? <p className="mt-3 rounded-xl border border-dashed border-border bg-card px-4 py-5 text-center text-xs text-muted-foreground">{labels.empty}</p> : null}
+        {!root ? <p role="status" className="px-3 py-4 text-center text-sm text-muted-foreground">{labels.unavailable}</p> : !children.length && !incompleteVisibility ? <p className="mt-2 px-3 py-3 text-center text-xs text-muted-foreground">{labels.empty}</p> : null}
         {incompleteVisibility ? <p className="pt-3 text-xs text-muted-foreground">{labels.restricted}</p> : null}
       </div>
       <footer className="shrink-0 space-y-3 border-t border-border/70 bg-muted/25 px-4 py-3 sm:px-5">

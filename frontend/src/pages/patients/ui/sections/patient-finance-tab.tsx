@@ -130,15 +130,15 @@ export function PatientFinanceTab({ patientId, onOpenInvoices }: { patientId: st
   ];
 
   return (
-    <div className="mt-4 min-w-0 space-y-4" data-testid="patient-finance">
-      <section className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
+    <div className="mt-3 min-w-0 space-y-3" data-testid="patient-finance">
+      <section className="overflow-hidden rounded-lg bg-card">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
-          <h2 className="flex items-center gap-2 text-sm font-semibold"><span role="status" className="flex size-3 shrink-0 items-center justify-center">{busy ? <><LoaderCircle className="size-3 animate-spin text-muted-foreground" /><span className="sr-only">{data ? l.updating : l.loading}</span></> : <span className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />}</span>{l.title}</h2>
+          <h2 className="flex items-center gap-2 text-sm font-semibold"><span role="status" className="flex size-3 shrink-0 items-center justify-center">{busy ? <><LoaderCircle className="size-3 animate-spin text-muted-foreground" /><span className="sr-only">{data ? l.updating : l.loading}</span></> : <span className="size-2 rounded-full bg-[var(--dot,var(--heading-marker))]" />}</span>{l.title}</h2>
           <Button type="button" size="sm" variant="outline" onClick={onOpenInvoices}>{l.invoicesLink}<ArrowRight /></Button>
         </div>
         {/* The period and the currency are reading: usable on a read-only patient. */}
         <WritableScope>
-        <div className="space-y-3 p-4">
+        <div className="space-y-2 p-3">
           <div className="flex flex-wrap gap-1.5">
             {(["month", "previous_month", "quarter", "year", "all", "custom"] as const).map(value => <Button key={value} type="button" size="sm" variant={preset === value ? "default" : "ghost"} aria-pressed={preset === value} onClick={() => changePreset(value)}>{l[value]}</Button>)}
           </div>
@@ -155,24 +155,24 @@ export function PatientFinanceTab({ patientId, onOpenInvoices }: { patientId: st
       {data && !report.invalid && periods.length > 0 ? (
         <>
           {data.summary.reconciliation_required || data.summary.closing_balance == null ? <Banner tone="warning">{l.reconciliation}</Banner> : null}
-          <div className="grid min-w-0 grid-cols-2 gap-3 xl:grid-cols-3">
+          <div className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3 rounded-lg bg-card p-3 sm:grid-cols-3 xl:grid-cols-6">
             {([
               ["opening", periods[0].opening], ["invoices", totals.invoices], ["payments", totals.payments], ["refunds", totals.refunds], ["adjustments", totals.adjustments], ["closing", periods[periods.length - 1].closing],
             ] as const).map(([key, value]) => {
               const isBalance = key === "opening" || key === "closing";
               const provisional = key === "closing" && data.summary.closing_balance == null;
-              return <div key={key} data-testid={`finance-${key}`} className={cn("min-w-0 rounded-xl border border-border/70 border-l-[3px] bg-card px-4 py-3 shadow-sm", provisional ? "border-l-amber-400" : isBalance && value > 0n ? "border-l-rose-400" : isBalance && value < 0n ? "border-l-sky-400" : "border-l-border")}>
+              return <div key={key} data-testid={`finance-${key}`} className="min-w-0">
                 <p className="text-xs text-muted-foreground">{l[key]}</p>
-                <p className={cn("mt-1 break-words font-mono text-lg font-semibold tabular-nums", provisional ? "text-amber-700" : isBalance ? balanceTone(value) : key === "payments" && value > 0n ? "text-emerald-700" : "text-foreground")}>{amount(isBalance && value < 0n ? -value : value)}</p>
+                <p className={cn("mt-1 break-words font-mono text-base font-semibold tabular-nums", provisional ? "text-amber-700" : isBalance ? balanceTone(value) : key === "payments" && value > 0n ? "text-emerald-700" : "text-foreground")}>{amount(isBalance && value < 0n ? -value : value)}</p>
                 {isBalance ? <p className="mt-1 text-xs text-muted-foreground">{provisional ? l.closingColumn : balanceLabel(value)}</p> : null}
               </div>;
             })}
           </div>
-          {!data.movements.length ? <p className="rounded-xl border border-border/70 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">{l.empty}</p> : null}
-          <DataTableSurface rows={periods} columns={periodColumns} rowId={row => row.month} dictionary={t as unknown as Record<string, string>} defaultFrozenColumns={["month"]} mobilePrimaryColumnId="month" mobileDetailColumnIds={["opening", "invoices", "payments", "refunds", "adjustments", "closing"]} rowHeightOverrides={{ comfortable: 44, compact: 40, condensed: 36 }} pagination={{ pageSize: 12, resetKey: requestPath }} toolbarStart={<h3 className="flex items-center gap-2 text-sm font-semibold"><span className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />{l.monthly}</h3>} />
+          {!data.movements.length ? <p className="px-3 py-2 text-sm text-muted-foreground">{l.empty}</p> : null}
+          <DataTableSurface rows={periods} columns={periodColumns} rowId={row => row.month} dictionary={t as unknown as Record<string, string>} defaultFrozenColumns={["month"]} mobilePrimaryColumnId="month" mobileDetailColumnIds={["opening", "invoices", "payments", "refunds", "adjustments", "closing"]} rowHeightOverrides={{ comfortable: 44, compact: 40, condensed: 36 }} pagination={{ pageSize: 12, resetKey: requestPath }} toolbarStart={<h3 className="flex items-center gap-2 text-sm font-semibold"><span className="size-2 rounded-full bg-[var(--dot,var(--heading-marker))]" />{l.monthly}</h3>} />
           <p className="text-xs leading-relaxed text-muted-foreground">{l.explanation}</p>
           <div ref={movementSection} className="scroll-mt-4">
-          <DataTableSurface rows={movements} columns={movementColumns} rowId={row => row.id} dictionary={t as unknown as Record<string, string>} mobilePrimaryColumnId="kind" mobileDetailColumnIds={["date", "document", "debit", "credit", "balance_after"]} rowHeightOverrides={{ comfortable: 44, compact: 40, condensed: 36 }} pagination={{ pageSize: 20, resetKey: `${requestPath}:${selectedMonth}` }} emptyState={<p className="px-4 py-8 text-center text-sm text-muted-foreground">{l.noMovements}</p>} toolbarStart={<div className="flex flex-wrap items-center gap-3"><h3 className="flex items-center gap-2 text-sm font-semibold"><span className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />{selectedPeriod ? monthLabel(selectedMonth) : l.movements}</h3>{selectedPeriod ? <Button type="button" size="sm" variant="outline" onClick={() => setSelectedMonth("")}><ArrowLeft />{l.back}</Button> : null}</div>} />
+          <DataTableSurface rows={movements} columns={movementColumns} rowId={row => row.id} dictionary={t as unknown as Record<string, string>} mobilePrimaryColumnId="kind" mobileDetailColumnIds={["date", "document", "debit", "credit", "balance_after"]} rowHeightOverrides={{ comfortable: 44, compact: 40, condensed: 36 }} pagination={{ pageSize: 20, resetKey: `${requestPath}:${selectedMonth}` }} emptyState={<p className="px-4 py-8 text-center text-sm text-muted-foreground">{l.noMovements}</p>} toolbarStart={<div className="flex flex-wrap items-center gap-3"><h3 className="flex items-center gap-2 text-sm font-semibold"><span className="size-2 rounded-full bg-[var(--dot,var(--heading-marker))]" />{selectedPeriod ? monthLabel(selectedMonth) : l.movements}</h3>{selectedPeriod ? <Button type="button" size="sm" variant="outline" onClick={() => setSelectedMonth("")}><ArrowLeft />{l.back}</Button> : null}</div>} />
           </div>
         </>
       ) : null}

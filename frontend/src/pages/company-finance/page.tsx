@@ -787,7 +787,7 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
 
       <IssuerTaxRegistrationBanner refreshKey={reloadToken} />
 
-      <section className="relative z-30 grid grid-cols-2 items-end gap-2 rounded-lg border border-border/70 bg-card p-2.5 shadow-sm sm:flex sm:flex-nowrap sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">
+      <section className="relative z-30 grid grid-cols-2 items-end gap-2 rounded-lg bg-card p-2.5 sm:flex sm:flex-nowrap sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">
         <ToolbarField label={text.from} className="w-full sm:w-[150px]">
           <Input
             type="date"
@@ -886,7 +886,7 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
           ) : null}
         </>
       ) : loading ? (
-        <div className="rounded-lg border border-border/70 bg-card px-4 py-12 text-center text-sm text-muted-foreground">
+        <div className="rounded-lg bg-card px-4 py-6 text-center text-sm text-muted-foreground">
           {text.loading}
         </div>
       ) : null}

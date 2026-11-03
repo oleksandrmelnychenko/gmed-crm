@@ -11,11 +11,11 @@ export const conciergeDialogContentClassName =
 type DialogTone = "amber" | "dot" | "indigo" | "plain" | "slate";
 
 const iconToneClass: Record<DialogTone, string> = {
-  amber: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
-  dot: "bg-[var(--brand)]",
-  indigo: "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300",
+  amber: "text-amber-700 dark:text-amber-300",
+  dot: "bg-[var(--dot,var(--heading-marker))]",
+  indigo: "text-indigo-700 dark:text-indigo-300",
   plain: "text-foreground",
-  slate: "bg-muted text-muted-foreground",
+  slate: "text-muted-foreground",
 };
 
 export function ConciergeDialogHeader({
@@ -32,18 +32,18 @@ export function ConciergeDialogHeader({
   meta?: ReactNode;
 }) {
   return (
-    <DialogHeader className="border-b border-border/70 px-4 py-3.5 pr-12 sm:px-6 sm:py-5 sm:pr-14">
-      <div className="flex min-w-0 items-start gap-3">
-        <span className={cn("flex shrink-0 items-center justify-center", tone === "dot" ? "mt-2 size-2 rounded-full" : tone === "plain" ? "mt-0.5 size-5" : "size-9 rounded-lg sm:size-10", iconToneClass[tone])}>
+    <DialogHeader className="border-b border-border/70 px-4 py-3 pr-12 sm:pr-14">
+      <div className="flex min-w-0 items-start gap-2">
+        {Icon || tone === "dot" ? <span className={cn("flex shrink-0 items-center justify-center", tone === "dot" ? "mt-2 size-2 rounded-full" : "mt-0.5 size-5", iconToneClass[tone])}>
           {Icon && tone !== "dot" ? <Icon className="size-4.5" /> : null}
-        </span>
+        </span> : null}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <DialogTitle className="text-base leading-tight sm:text-lg">{title}</DialogTitle>
+            <DialogTitle className="text-base leading-tight">{title}</DialogTitle>
             {meta}
           </div>
           {description ? (
-            <DialogDescription className="mt-1 max-w-3xl text-xs leading-5 sm:text-sm">
+            <DialogDescription className="mt-1 max-w-3xl text-xs leading-5">
               {description}
             </DialogDescription>
           ) : null}
@@ -61,7 +61,7 @@ export function ConciergeDialogBody({
   children: ReactNode;
 }) {
   return (
-    <div className={cn("min-h-0 overflow-y-auto p-4 sm:p-5", className)}>
+    <div className={cn("min-h-0 overflow-y-auto p-3", className)}>
       {children}
     </div>
   );
@@ -69,7 +69,7 @@ export function ConciergeDialogBody({
 
 export function ConciergeDialogFooter({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-col-reverse gap-2 border-t border-border/70 bg-muted/25 px-4 py-3 sm:flex-row sm:items-center sm:justify-end sm:px-5">
+    <div className="flex flex-col-reverse gap-2 border-t border-border/70 bg-card px-3 py-2.5 sm:flex-row sm:items-center sm:justify-end">
       {children}
     </div>
   );
@@ -89,14 +89,14 @@ export function ConciergeDialogSection({
   children: ReactNode;
 }) {
   return (
-    <section className={cn("overflow-hidden rounded-lg border border-border/70 bg-card", className)}>
-      <div className="border-b border-border/70 bg-muted/20 px-3.5 py-2.5 sm:px-4">
+    <section className={cn("overflow-hidden rounded-lg bg-card", className)}>
+      <div className="border-b border-border/60 px-3 py-2">
         <h3 className="flex items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
-          {dot ? <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" /> : Icon ? <Icon className="size-3.5 text-primary" /> : null}
+          {dot ? <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" /> : Icon ? <Icon className="size-3.5 text-primary" /> : null}
           {title}
         </h3>
       </div>
-      <div className="p-3 sm:p-4">{children}</div>
+      <div className="p-3">{children}</div>
     </section>
   );
 }
@@ -114,9 +114,9 @@ export function ConciergeProfileDialogSection({
     <Section
       title={title}
       className={cn(
-        "!space-y-0 overflow-hidden rounded-xl border border-border/70 bg-card",
-        "[&>div:first-child]:border-b [&>div:first-child]:border-border/60 [&>div:first-child]:px-4 [&>div:first-child]:py-3",
-        "[&>div:last-child]:space-y-2.5 [&>div:last-child]:p-4",
+        "!space-y-0 overflow-hidden rounded-lg bg-card [&_[data-slot=section-marker]]:bg-[var(--dot,var(--heading-marker))]",
+        "[&>div:first-child]:border-b [&>div:first-child]:border-border/60 [&>div:first-child]:px-3 [&>div:first-child]:py-2",
+        "[&>div:last-child]:space-y-2 [&>div:last-child]:p-3",
         className,
       )}
     >
@@ -135,8 +135,8 @@ export function ConciergeField({
   children: ReactNode;
 }) {
   return (
-    <label className={cn("grid min-w-0 gap-1.5 text-xs font-normal text-muted-foreground", className)}>
-      <span className="font-medium">{label}</span>
+    <label className={cn("grid min-w-0 gap-1 text-xs font-normal text-muted-foreground", className)}>
+      <span className="font-mono font-medium">{label}</span>
       {children}
     </label>
   );

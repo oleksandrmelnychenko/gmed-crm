@@ -252,13 +252,6 @@ function CalendarTaskButton({ task, lang, onOpen }: { task: ConciergeTask; lang:
   </button>;
 }
 
-function taskAccent(priority: string) {
-  if (priority === "urgent") return "border-l-rose-400";
-  if (priority === "high") return "border-l-orange-400";
-  if (priority === "low") return "border-l-slate-300";
-  return "border-l-sky-400";
-}
-
 function assigneeRoleTone(role?: string) {
   if (role === "ceo") return "border-rose-200 bg-rose-50 text-rose-700";
   if (role === "ceo_assistant") return "border-amber-200 bg-amber-50 text-amber-700";
@@ -330,19 +323,19 @@ function TaskCard({
   const doneLabel = lang === "ru" ? "Выполнено" : "Erledigt";
   const parentLabel = lang === "ru" ? "В составе" : "Gehört zu";
   return (
-    <article tabIndex={-1} data-task-card-id={task.id} data-testid={`task-card-${task.id}`} className={cn("relative min-w-0 max-w-full overflow-hidden rounded-lg border border-l-[3px] border-border/70 bg-card p-3 shadow-sm transition-[border-color,box-shadow] hover:shadow-md focus:outline-2 focus:outline-primary focus:outline-offset-2", taskAccent(task.priority), compact && "grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center")}>
+    <article tabIndex={-1} data-task-card-id={task.id} data-testid={`task-card-${task.id}`} className={cn("relative min-w-0 max-w-full overflow-hidden rounded-lg bg-card p-2.5 transition-colors hover:bg-muted/30 focus:outline-2 focus:outline-primary focus:outline-offset-2", compact && "grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center")}>
       <div className={cn("min-w-0", compact && "col-span-2 sm:col-span-1")}>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-1.5">
         <button type="button" title={conciergeTaskCode(task)} onClick={() => onOpen(task)}><Badge variant="outline" className="rounded-full font-mono text-[10px] text-muted-foreground">{conciergeTaskCode(task)}</Badge></button>
       <div className="ml-auto flex shrink-0 items-center gap-1">
         {archived ? (
-          <Button type="button" size="sm" variant="outline" className="h-8 rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.restore : labels.noPermission} onClick={() => onRestore(task)}><ArchiveRestore /><span className={cn(!compact && "sr-only")}>{labels.restore}</span></Button>
+          <Button type="button" size="sm" variant="ghost" className="rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.restore : labels.noPermission} onClick={() => onRestore(task)}><ArchiveRestore /><span className={cn(!compact && "sr-only")}>{labels.restore}</span></Button>
         ) : terminal ? (
-          <Button type="button" size="sm" variant="outline" className="h-8 rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.archive : labels.noPermission} onClick={() => onArchive(task)}><Archive /><span className={cn(!compact && "sr-only")}>{labels.archive}</span></Button>
+          <Button type="button" size="sm" variant="ghost" className="rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.archive : labels.noPermission} onClick={() => onArchive(task)}><Archive /><span className={cn(!compact && "sr-only")}>{labels.archive}</span></Button>
         ) : null}
         <Button type="button" size="sm" variant="ghost" className="h-8 gap-1.5 rounded-md px-1.5 text-primary hover:text-primary" data-workflow-task-id={task.id} title={`${countLabel}: ${subCount?.total ?? 0}${subCount?.total ? ` · ${doneLabel}: ${subCount.done}/${subCount.active}` : ""}${subCount?.paused ? ` · ${labels.on_hold}: ${subCount.paused}` : ""}`} aria-label={`${workflowLabel} · ${countLabel}: ${subCount?.total ?? 0}${subCount?.total ? ` · ${doneLabel}: ${subCount.done}/${subCount.active}` : ""}`} onClick={() => onWorkflow(task)}><Workflow /><span data-testid={`task-sub-count-${task.id}`} className={cn("min-w-4 rounded-full px-1 font-mono text-[10px] leading-4", subCount?.active && subCount.done === subCount.active ? "bg-emerald-100 text-emerald-700" : "bg-primary/10")}>{subCount?.total ? `${subCount.done}/${subCount.active}` : 0}</span></Button>
-        {!archived ? <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md" disabled={!canModify || updating || deleting || archiving} title={canModify ? labels.edit : labels.noPermission} aria-label={labels.edit} onClick={() => onEdit(task)}><Pencil /></Button> : null}
-        {!archived && canDelete ? <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md text-destructive hover:text-destructive" disabled={updating || deleting || archiving} title={labels.delete} aria-label={labels.delete} onClick={() => onDelete(task)}><Trash2 /></Button> : null}
+        {!archived ? <Button type="button" size="icon-sm" variant="ghost" className="rounded-md" disabled={!canModify || updating || deleting || archiving} title={canModify ? labels.edit : labels.noPermission} aria-label={labels.edit} onClick={() => onEdit(task)}><Pencil /></Button> : null}
+        {!archived && canDelete ? <Button type="button" size="icon-sm" variant="ghost" className="rounded-md text-destructive hover:text-destructive" disabled={updating || deleting || archiving} title={labels.delete} aria-label={labels.delete} onClick={() => onDelete(task)}><Trash2 /></Button> : null}
       </div>
       </div>
       <button type="button" className="min-w-0 w-full max-w-full overflow-hidden text-left" onClick={() => onOpen(task)}>
@@ -395,7 +388,7 @@ function TaskCard({
           {archived ? <Badge variant="outline" className="rounded-full border-slate-300 bg-slate-100 text-[10px] text-slate-700">{labels.archived}</Badge> : null}
         </div>
         <h3 className="mt-2 min-w-0 max-w-full whitespace-normal break-words text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]">{localizeTaskTitle(task.title, lang)}</h3>
-        <div className="mt-2 space-y-1.5 rounded-md bg-muted/35 p-2.5 text-xs text-muted-foreground">
+        <div className="mt-2 space-y-1 text-xs text-muted-foreground">
           <div className="flex items-start gap-1.5">
             <Clock3 className="mt-1 size-3.5 shrink-0" />
             <div className="@container/task-times min-w-0 flex-1 space-y-1.5">
@@ -431,13 +424,13 @@ function TaskCard({
           </div>
           {task.task_audience === "external" && task.external_assignee_name ? <p className="truncate font-medium text-foreground">{task.external_assignee_name}</p> : null}
         </div>
-        <div className="mt-2 flex flex-wrap gap-2 border-t border-border/60 pt-2 text-[10px] text-muted-foreground">
+        <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
           <span><ListChecks className="mr-1 inline size-3" />{labels.checklist}: {task.checklist_completed ?? 0}/{task.checklist_total ?? 0}</span>
           <span><MessageSquareText className="mr-1 inline size-3" />{labels.comments}: {task.comment_count ?? 0}</span>
           {task.reminder_at ? <span><CircleAlert className="mr-1 inline size-3" />{labels.reminder}</span> : null}
         </div>
       </button>
-      {parentTask ? <button type="button" className="mt-2 flex w-full min-w-0 items-center gap-1.5 rounded-md border border-primary/15 bg-primary/5 px-2 py-1.5 text-left text-[10px] text-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-primary" title={`${parentLabel}: ${localizeTaskTitle(parentTask.title, lang)}`} onClick={() => onWorkflow(parentTask)}><Workflow className="size-3 shrink-0" /><span className="truncate">{parentLabel}: {localizeTaskTitle(parentTask.title, lang)}</span><ArrowUpRight className="ml-auto size-3 shrink-0" /></button> : null}
+      {parentTask ? <button type="button" className="mt-2 flex w-full min-w-0 items-center gap-1.5 rounded-md py-1 text-left text-[10px] text-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-primary" title={`${parentLabel}: ${localizeTaskTitle(parentTask.title, lang)}`} onClick={() => onWorkflow(parentTask)}><Workflow className="size-3 shrink-0" /><span className="truncate">{parentLabel}: {localizeTaskTitle(parentTask.title, lang)}</span><ArrowUpRight className="ml-auto size-3 shrink-0" /></button> : null}
       </div>
       <div className={cn("space-y-1.5", compact && "col-span-2 sm:col-span-1")}>
         {!archived && ["open", "in_progress", "on_hold"].includes(task.status) ? (
@@ -729,7 +722,7 @@ export function ConciergeTaskManager({
         {([ ["board", ListChecks, labels.board], ["list", List, labels.list], ["calendar", CalendarDays, labels.calendar], ["timeline", ChartNoAxesGantt, labels.timeline] ] as const).map(([value, Icon, label]) => <Button key={value} type="button" size="sm" variant={view === value ? "default" : "ghost"} aria-pressed={view === value} className="h-9 min-w-0 rounded-md px-2 text-xs sm:h-8 sm:px-3" onClick={() => setView(value)}><Icon />{label}</Button>)}
       </div>
 
-      {filtered.length === 0 && view !== "calendar" ? <div className="rounded-lg border border-dashed bg-card px-6 py-16 text-center text-sm text-muted-foreground">{hasCustomFilters ? labels.noTasks : labels.noActiveTasks}</div> : null}
+      {filtered.length === 0 && view !== "calendar" ? <div className="rounded-lg bg-card px-4 py-8 text-center text-sm text-muted-foreground">{hasCustomFilters ? labels.noTasks : labels.noActiveTasks}</div> : null}
 
       {filtered.length > 0 && view === "board" ? (
         <div className={cn("grid items-start gap-3 md:grid-cols-2", visibleStatuses.length > 2 && "xl:grid-cols-3 2xl:grid-cols-6")}>
@@ -745,7 +738,7 @@ export function ConciergeTaskManager({
       {view === "timeline" ? <TaskTimeline tasks={filtered} lang={lang} now={effectiveNow} onOpen={onOpen} onStatusChange={onStatusChange} availableStatusesForTask={availableStatusesForTask} updatingTaskId={updatingTaskId} /> : null}
 
       {view === "calendar" ? (
-        <div className="rounded-lg border border-border/70 bg-card shadow-sm">
+        <div className="rounded-lg bg-card">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3">
             <div className="flex items-center gap-1"><Button type="button" size="icon-sm" variant="ghost" onClick={() => shiftCalendar(-1)}><ChevronLeft /></Button><Button type="button" size="sm" variant="ghost" onClick={() => setFocusDate(new Date())}>{labels.today}</Button><Button type="button" size="icon-sm" variant="ghost" onClick={() => shiftCalendar(1)}><ChevronRight /></Button></div>
             <div className="flex items-center gap-2">
