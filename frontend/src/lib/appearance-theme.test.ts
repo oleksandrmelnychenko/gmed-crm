@@ -142,4 +142,16 @@ describe("own control colours", () => {
     expect(css["--badge-foreground"]).toBe("#ffffff");
     expect(parseAppearanceTheme(JSON.stringify({ ...custom, colors: { dot: "#16A34A", badge: "#DC2626" } })).colors.dot).toBe("#16a34a");
   });
+
+  it("carries errors, charts, backdrop and shadow colours only when they are set", () => {
+    const base = themeCssVariables(DEFAULT_THEME);
+    for (const key of ["--destructive", "--theme-chart-1", "--overlay", "--shadow"]) expect(base).not.toHaveProperty(key);
+    const css = themeCssVariables(withControls(DEFAULT_THEME, { danger: "#b91c1c", chart1: "#2563eb", chart5: "#93c5fd", overlay: "#111827", shadow: "#1e293b" }));
+    expect(css["--destructive"]).toBe("#b91c1c");
+    expect(css["--theme-chart-1"]).toBe("#2563eb");
+    expect(css["--theme-chart-5"]).toBe("#93c5fd");
+    expect(css).not.toHaveProperty("--theme-chart-2");
+    expect(css["--overlay"]).toBe("#111827");
+    expect(css["--shadow"]).toBe("#1e293b");
+  });
 });

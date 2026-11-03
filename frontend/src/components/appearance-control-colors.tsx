@@ -7,13 +7,14 @@ import { contrastRatio, withContrast, type ControlColor, type ControlColors, typ
 import { useAppearanceTheme } from "@/lib/use-appearance-theme";
 import { cn } from "@/lib/utils";
 
-type Group = "base" | "actions" | "fields" | "tables" | "dots";
+type Group = "base" | "actions" | "fields" | "tables" | "dots" | "states";
 const GROUPS: readonly { id: Group; keys: readonly ControlColor[] }[] = [
   { id: "base", keys: ["background", "surface", "sidebar", "muted", "accent", "border", "text", "textMuted"] },
   { id: "actions", keys: ["primary", "primaryText", "focus"] },
   { id: "fields", keys: ["inputBorder", "field", "placeholder", "dropdown", "dropdownHighlight"] },
   { id: "tables", keys: ["rowAlternate", "rowHover", "rowActive", "rowSelected"] },
   { id: "dots", keys: ["headingMarker", "dot", "badge", "badgeText"] },
+  { id: "states", keys: ["danger", "chart1", "chart2", "chart3", "chart4", "chart5", "overlay", "shadow"] },
 ];
 
 type Labels = Record<ControlColor, string>;
@@ -22,46 +23,46 @@ const TEXT: Record<"ru" | "de" | "en" | "uk", {
 }> = {
   ru: {
     title: "Свои цвета", reset: "Сбросить", resetAll: "Сбросить все", need: "нужно",
-    groups: { base: "Основа", actions: "Кнопки и фокус", fields: "Поля и списки", tables: "Таблицы", dots: "Точки и счётчики" },
+    groups: { base: "Основа", actions: "Кнопки и фокус", fields: "Поля и списки", tables: "Таблицы", dots: "Точки и счётчики", states: "Ошибки, графики, затемнение" },
     labels: {
       background: "Фон страницы", surface: "Карточки и панели", sidebar: "Боковое меню", muted: "Приглушённый фон", accent: "Активный пункт меню",
       border: "Границы блоков", text: "Текст", textMuted: "Второстепенный текст", primary: "Основная кнопка", primaryText: "Текст на кнопке",
       focus: "Рамка фокуса", inputBorder: "Граница поля", field: "Фон поля", placeholder: "Подсказка в поле", dropdown: "Фон выпадающего списка",
       dropdownHighlight: "Подсветка пункта списка", rowAlternate: "Чередование строк", rowHover: "Строка под курсором", rowActive: "Нажатая строка",
-      rowSelected: "Выбранная строка", headingMarker: "Маркер заголовка", dot: "Точки у разделов", badge: "Счётчик", badgeText: "Цифры счётчика",
+      rowSelected: "Выбранная строка", headingMarker: "Маркер заголовка", dot: "Точки у разделов", badge: "Счётчик", badgeText: "Цифры счётчика", danger: "Ошибки", chart1: "График 1", chart2: "График 2", chart3: "График 3", chart4: "График 4", chart5: "График 5", overlay: "Затемнение под окнами", shadow: "Тени",
     },
   },
   de: {
     title: "Eigene Farben", reset: "Zurücksetzen", resetAll: "Alle zurücksetzen", need: "nötig",
-    groups: { base: "Grundlage", actions: "Schaltflächen und Fokus", fields: "Felder und Listen", tables: "Tabellen", dots: "Punkte und Zähler" },
+    groups: { base: "Grundlage", actions: "Schaltflächen und Fokus", fields: "Felder und Listen", tables: "Tabellen", dots: "Punkte und Zähler", states: "Fehler, Diagramme, Abdunklung" },
     labels: {
       background: "Seitenhintergrund", surface: "Karten und Panels", sidebar: "Seitenmenü", muted: "Gedämpfter Hintergrund", accent: "Aktiver Menüpunkt",
       border: "Rahmen von Blöcken", text: "Text", textMuted: "Sekundärer Text", primary: "Primäre Schaltfläche", primaryText: "Text auf Schaltfläche",
       focus: "Fokusrahmen", inputBorder: "Feldrahmen", field: "Feldhintergrund", placeholder: "Platzhalter", dropdown: "Hintergrund der Auswahlliste",
       dropdownHighlight: "Hervorhebung in der Liste", rowAlternate: "Zeilenwechsel", rowHover: "Zeile unter dem Zeiger", rowActive: "Gedrückte Zeile",
-      rowSelected: "Ausgewählte Zeile", headingMarker: "Überschriftenmarker", dot: "Punkte an Abschnitten", badge: "Zähler", badgeText: "Ziffern im Zähler",
+      rowSelected: "Ausgewählte Zeile", headingMarker: "Überschriftenmarker", dot: "Punkte an Abschnitten", badge: "Zähler", badgeText: "Ziffern im Zähler", danger: "Fehler", chart1: "Diagramm 1", chart2: "Diagramm 2", chart3: "Diagramm 3", chart4: "Diagramm 4", chart5: "Diagramm 5", overlay: "Abdunklung hinter Fenstern", shadow: "Schatten",
     },
   },
   en: {
     title: "Own colours", reset: "Reset", resetAll: "Reset all", need: "needs",
-    groups: { base: "Base", actions: "Buttons and focus", fields: "Fields and lists", tables: "Tables", dots: "Dots and counters" },
+    groups: { base: "Base", actions: "Buttons and focus", fields: "Fields and lists", tables: "Tables", dots: "Dots and counters", states: "Errors, charts, backdrop" },
     labels: {
       background: "Page background", surface: "Cards and panels", sidebar: "Side menu", muted: "Muted background", accent: "Active menu item",
       border: "Block borders", text: "Text", textMuted: "Secondary text", primary: "Primary button", primaryText: "Button text",
       focus: "Focus ring", inputBorder: "Field border", field: "Field background", placeholder: "Placeholder", dropdown: "Dropdown background",
       dropdownHighlight: "Dropdown highlight", rowAlternate: "Alternate rows", rowHover: "Row under the pointer", rowActive: "Pressed row",
-      rowSelected: "Selected row", headingMarker: "Heading marker", dot: "Section dots", badge: "Counter", badgeText: "Counter digits",
+      rowSelected: "Selected row", headingMarker: "Heading marker", dot: "Section dots", badge: "Counter", badgeText: "Counter digits", danger: "Errors", chart1: "Chart 1", chart2: "Chart 2", chart3: "Chart 3", chart4: "Chart 4", chart5: "Chart 5", overlay: "Backdrop behind windows", shadow: "Shadows",
     },
   },
   uk: {
     title: "Власні кольори", reset: "Скинути", resetAll: "Скинути все", need: "потрібно",
-    groups: { base: "Основа", actions: "Кнопки й фокус", fields: "Поля та списки", tables: "Таблиці", dots: "Пімпочки та лічильники" },
+    groups: { base: "Основа", actions: "Кнопки й фокус", fields: "Поля та списки", tables: "Таблиці", dots: "Пімпочки та лічильники", states: "Помилки, графіки, затемнення" },
     labels: {
       background: "Фон сторінки", surface: "Картки й панелі", sidebar: "Бічне меню", muted: "Приглушений фон", accent: "Активний пункт меню",
       border: "Межі блоків", text: "Текст", textMuted: "Другорядний текст", primary: "Основна кнопка", primaryText: "Текст на кнопці",
       focus: "Рамка фокуса", inputBorder: "Межа поля", field: "Фон поля", placeholder: "Підказка в полі", dropdown: "Фон випадного списку",
       dropdownHighlight: "Підсвітка пункту списку", rowAlternate: "Чергування рядків", rowHover: "Рядок під курсором", rowActive: "Натиснутий рядок",
-      rowSelected: "Вибраний рядок", headingMarker: "Маркер заголовка", dot: "Пімпочки біля розділів", badge: "Лічильник", badgeText: "Цифри лічильника",
+      rowSelected: "Вибраний рядок", headingMarker: "Маркер заголовка", dot: "Пімпочки біля розділів", badge: "Лічильник", badgeText: "Цифри лічильника", danger: "Помилки", chart1: "Графік 1", chart2: "Графік 2", chart3: "Графік 3", chart4: "Графік 4", chart5: "Графік 5", overlay: "Затемнення під вікнами", shadow: "Тіні",
     },
   },
 };
@@ -75,6 +76,14 @@ function effectiveColor(colors: ThemeColors, key: ControlColor): string {
     case "dot": return colors.dot ?? colors.primary;
     case "badge": return colors.badge ?? colors.primary;
     case "badgeText": return colors.badgeText ?? "#ffffff";
+    case "danger": return colors.danger ?? "#dc2626";
+    case "chart1": return colors.chart1 ?? "#f97316";
+    case "chart2": return colors.chart2 ?? "#fb923c";
+    case "chart3": return colors.chart3 ?? "#fdba74";
+    case "chart4": return colors.chart4 ?? "#fed7aa";
+    case "chart5": return colors.chart5 ?? "#fff4ed";
+    case "overlay": return colors.overlay ?? "#000000";
+    case "shadow": return colors.shadow ?? "#000000";
     default: return colors[key];
   }
 }
@@ -94,6 +103,9 @@ function check(colors: ThemeColors, key: ControlColor): { ratio: number; require
     case "headingMarker": return pair(colors.headingMarker, colors.surface, 3);
     case "dot": return pair(value("dot"), colors.surface, 3);
     case "badge": case "badgeText": return pair(value("badgeText"), value("badge"), 4.5);
+    case "danger": return pair(value("danger"), colors.surface, 4.5);
+    case "chart1": case "chart2": case "chart3": case "chart4": case "chart5": return pair(value(key), colors.surface, null);
+    case "overlay": case "shadow": return pair(value(key), colors.surface, null);
     default: return pair(colors.text, value(key), 4.5);
   }
 }

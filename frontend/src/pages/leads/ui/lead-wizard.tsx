@@ -8955,7 +8955,7 @@ ${serviceCommentLines.join("\n")}`
         }}
       >
       <DialogContent
-        overlayClassName="bg-black/40"
+        overlayClassName="bg-[color-mix(in_srgb,var(--overlay,#000)_40%,transparent)]"
         showOverlay={!documentPreview}
         showCloseButton={!saveInProgress}
         className="flex h-[94vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-clip rounded-lg p-0 [&_dt]:font-mono [&_[data-wizard-field-label]]:font-mono sm:h-[min(96vh,68rem)] sm:w-[91vw] sm:max-w-[91vw] sm:pb-0"

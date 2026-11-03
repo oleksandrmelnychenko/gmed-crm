@@ -25,7 +25,10 @@ export type ThemeColor = keyof typeof DEFAULT_THEME_COLORS;
  * Optional colours. When a palette omits them, controls follow textMuted, surface and accent,
  * and section dots and count badges keep the colours each screen already gives them.
  */
-export const OPTIONAL_COLORS = ["placeholder", "dropdown", "dropdownHighlight", "dot", "badge", "badgeText"] as const;
+export const OPTIONAL_COLORS = [
+  "placeholder", "dropdown", "dropdownHighlight", "dot", "badge", "badgeText",
+  "danger", "chart1", "chart2", "chart3", "chart4", "chart5", "overlay", "shadow",
+] as const;
 export type OptionalColor = (typeof OPTIONAL_COLORS)[number];
 export type ThemeColors = Record<ThemeColor, string> & Partial<Record<OptionalColor, string>>;
 /** Every colour a person can set apart from the theme (owner 2026-11-03: "кастомізацію на максимум"). */
@@ -167,6 +170,14 @@ export function themeCssVariables(theme: AppearanceTheme): Record<string, string
     ...(c.dot ? { "--dot": c.dot } : {}),
     ...(c.badge ? { "--badge": c.badge } : {}),
     ...(c.badgeText ? { "--badge-foreground": c.badgeText } : {}),
+    // Errors, charts, backdrops and shadows keep the stylesheet's colours until a theme sets them.
+    ...(c.danger ? { "--destructive": c.danger } : {}),
+    ...Object.fromEntries(([1, 2, 3, 4, 5] as const).flatMap((index) => {
+      const color = c[`chart${index}`];
+      return color ? [[`--theme-chart-${index}`, color]] : [];
+    })),
+    ...(c.overlay ? { "--overlay": c.overlay } : {}),
+    ...(c.shadow ? { "--shadow": c.shadow } : {}),
   };
 }
 

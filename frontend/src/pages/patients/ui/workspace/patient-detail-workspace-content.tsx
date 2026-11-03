@@ -1174,7 +1174,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
       {repeatIntakeOpen ? (
         <Suspense
           fallback={(
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-2">
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_srgb,var(--overlay,#000)_35%,transparent)] p-2">
               <div className="flex h-[90vh] w-full items-center justify-center rounded-lg border border-border bg-background shadow-xl sm:h-[min(88vh,52rem)] sm:w-[min(96vw,84rem)]">
                 <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
                   <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />

@@ -20,7 +20,8 @@ import {
   type DashboardTranslations,
 } from "./staff-dashboard-surface-primitives";
 
-const PALETTE = ["#f97316", "#fb923c", "#fdba74", "#fed7aa", "#fff4ed", "#a3a3a3"];
+// Chart colours follow the theme when it sets them (owner 2026-11-03); the orange ramp is the default.
+const PALETTE = ["var(--theme-chart-1, #f97316)", "var(--theme-chart-2, #fb923c)", "var(--theme-chart-3, #fdba74)", "var(--theme-chart-4, #fed7aa)", "var(--theme-chart-5, #fff4ed)", "#a3a3a3"];
 
 const HorizontalBarsChart = lazy(async () => {
   const {
@@ -76,7 +77,7 @@ const HorizontalBarsChart = lazy(async () => {
               }}
               cursor={{ fill: "var(--muted)" }}
             />
-            <Bar dataKey="value" fill="#f97316" radius={[0, 4, 4, 0]} barSize={12} />
+            <Bar dataKey="value" fill="var(--theme-chart-1, #f97316)" radius={[0, 4, 4, 0]} barSize={12} />
           </BarChart>
         </ResponsiveContainer>
       );
@@ -317,7 +318,7 @@ export function OrdersValuedBars({
                   className="h-full rounded-md transition-all"
                   style={{
                     width: `${percent}%`,
-                    background: "linear-gradient(90deg,#f97316,#fb923c)",
+                    background: "linear-gradient(90deg,var(--theme-chart-1, #f97316),var(--theme-chart-2, #fb923c))",
                   }}
                 />
               </div>

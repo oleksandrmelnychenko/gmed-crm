@@ -591,7 +591,7 @@ export function Topbar() {
           </TopbarIconButton>
           )}
 
-          {user && !leadCabinet ? (
+          {user ? (
             <AppearanceMenu onOpen={() => {
               setNotifOpen(false);
               setUsersOpen(false);

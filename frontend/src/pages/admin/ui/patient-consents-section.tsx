@@ -124,7 +124,7 @@ function ConsentRevokeDialog({
   const valid = channel !== "" && reason.trim().length >= 10;
   return (
     <Dialog open={consentType !== null} onOpenChange={(next) => (!next ? onClose() : undefined)} dirty={Boolean(reason || channel)}>
-      <DialogContent overlayClassName="bg-black/40" className="sm:max-w-[560px]" data-testid="consent-revoke-dialog">
+      <DialogContent overlayClassName="bg-[color-mix(in_srgb,var(--overlay,#000)_40%,transparent)]" className="sm:max-w-[560px]" data-testid="consent-revoke-dialog">
         <DialogHeader>
           <DialogTitle>
             {l("consents_revoke_title")}: {consentType ? typeLabel(consentType) : ""}

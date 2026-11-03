@@ -1344,7 +1344,7 @@ function useAdminCompliancePageContent() {
               if (!open) setPrivacySheetPatient(null);
             }}
           >
-            <DialogContent overlayClassName="bg-black/40" className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden p-0 sm:max-w-[720px]">
+            <DialogContent overlayClassName="bg-[color-mix(in_srgb,var(--overlay,#000)_40%,transparent)]" className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden p-0 sm:max-w-[720px]">
               <AdminSheetScaffold
                 headerClassName="border-b border-border bg-card py-3"
                 bodyClassName="bg-muted/35 p-4"
@@ -1420,7 +1420,7 @@ function useAdminCompliancePageContent() {
             open={Boolean(reviewSheetRecord)}
             onOpenChange={(open) => !open && setReviewSheetRecord(null)}
           >
-            <DialogContent overlayClassName="bg-black/40" className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden p-0 sm:max-w-[720px]">
+            <DialogContent overlayClassName="bg-[color-mix(in_srgb,var(--overlay,#000)_40%,transparent)]" className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden p-0 sm:max-w-[720px]">
               {reviewSheetRecord ? (
                 <AdminSheetScaffold
                 headerClassName="border-b border-border bg-card py-3"

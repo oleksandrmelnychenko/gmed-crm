@@ -96,7 +96,7 @@ export function DirtyDismissConfirmDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/25 px-4 py-6"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-[color-mix(in_srgb,var(--overlay,#000)_25%,transparent)] px-4 py-6"
       onPointerDown={(event) => {
         event.preventDefault()
         event.stopPropagation()

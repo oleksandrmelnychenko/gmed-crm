@@ -143,7 +143,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
     <Dialog dirty={dirty} open={open} onOpenChange={(nextOpen) => { if (!formBusy) onOpenChange(nextOpen); }}>
       <DialogContent
         showCloseButton={!formBusy}
-        overlayClassName="bg-black/40"
+        overlayClassName="bg-[color-mix(in_srgb,var(--overlay,#000)_40%,transparent)]"
         className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden rounded-xl p-0 sm:w-[calc(100vw-3rem)] sm:max-w-5xl sm:pb-0"
       >
         <DialogHeader className="shrink-0 border-b border-border/50 bg-card px-4 py-3 pr-14 text-left">

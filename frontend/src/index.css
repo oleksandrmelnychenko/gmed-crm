@@ -273,7 +273,7 @@
 .lead-wizard-step-tab[aria-selected="true"] {
   background: var(--brand);
   color: var(--primary-foreground);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow, #000000) 8%, transparent);
 }
 
 /* Once a sliding pill is placed it alone marks the active tab: with the tab's
@@ -287,7 +287,7 @@
   top: 0;
   height: 2.5rem;
   border-radius: 0.5rem;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow, #000000) 8%, transparent);
 }
 
 .lead-wizard-step-tab:disabled {
@@ -744,7 +744,7 @@ html[data-native-platform] {
 .appointments-calendar-shell .fc .fc-timegrid-axis {
   width: 4.5rem;
   min-width: 4.5rem;
-  background: #ffffff;
+  background: var(--card);
 }
 
 .appointments-calendar-shell .fc .fc-timegrid-slot-label,
@@ -776,14 +776,14 @@ html[data-native-platform] {
 .appointments-calendar-shell .fc .fc-daygrid-day-frame {
   min-height: 9rem;
   border-radius: 6px;
-  background: #ffffff;
+  background: var(--card);
   padding: 0.35rem 0;
   position: relative;
 }
 
 .appointments-calendar-shell .fc .fc-scrollgrid-sync-inner {
   border-radius: 6px;
-  background: #ffffff;
+  background: var(--card);
 }
 
 .appointments-calendar-shell .fc .fc-daygrid-day-top {
@@ -809,7 +809,7 @@ html[data-native-platform] {
 }
 .appointments-calendar-shell .fc .fc-day-today .fc-daygrid-day-number {
   background: var(--brand);
-  color: #ffffff;
+  color: var(--primary-foreground);
   border-radius: 999px;
   width: 1.5rem;
   height: 1.5rem;
@@ -871,7 +871,7 @@ html[data-native-platform] {
 .appointments-calendar-shell .fc .fc-col-header,
 .appointments-calendar-shell .fc .fc-col-header-cell,
 .appointments-calendar-shell .fc .fc-col-header-cell .fc-scrollgrid-sync-inner {
-  background: color-mix(in oklch, var(--color-muted) 85%, white) !important;
+  background: color-mix(in oklch, var(--color-muted) 85%, var(--card)) !important;
 }
 .appointments-calendar-shell .fc .fc-col-header-cell-cushion {
   padding-block: 0.5rem;
@@ -956,8 +956,8 @@ html[data-native-platform] {
   font-size: 0.58rem;
   font-weight: 600;
   color: var(--apt-event-accent);
-  background: color-mix(in oklch, var(--apt-event-accent) 10%, white);
-  border-color: color-mix(in oklch, var(--apt-event-accent) 28%, white);
+  background: color-mix(in oklch, var(--apt-event-accent) 10%, var(--card));
+  border-color: color-mix(in oklch, var(--apt-event-accent) 28%, var(--card));
 }
 
 /* colored pill badge per type/status — the only spot of color */
@@ -976,8 +976,8 @@ html[data-native-platform] {
   cursor: pointer;
 }
 .appointments-calendar-shell .fc .fc-event:hover {
-  background: color-mix(in oklch, var(--apt-event-surface) 86%, white);
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+  background: color-mix(in oklch, var(--apt-event-surface) 86%, var(--card));
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--shadow, #0f172a) 8%, transparent);
 }
 
 .appointments-calendar-shell .fc .fc-event-main {
@@ -1027,8 +1027,8 @@ html[data-native-platform] {
   max-width: 100%;
   height: 1.25rem;
   border-radius: 9999px;
-  border: 1px solid color-mix(in oklch, var(--apt-event-accent) 26%, white);
-  background: color-mix(in oklch, var(--apt-event-accent) 12%, white);
+  border: 1px solid color-mix(in oklch, var(--apt-event-accent) 26%, var(--card));
+  background: color-mix(in oklch, var(--apt-event-accent) 12%, var(--card));
   color: color-mix(in oklch, var(--apt-event-accent) 82%, black);
   padding: 0 0.5rem;
   font-size: 10px;
@@ -1191,9 +1191,9 @@ html[data-native-platform] {
   pointer-events: none;
   background: linear-gradient(
     to bottom,
-    rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.72) 58%,
-    rgba(255, 255, 255, 0.95) 100%
+    color-mix(in srgb, var(--card) 0%, transparent) 0%,
+    color-mix(in srgb, var(--card) 72%, transparent) 58%,
+    color-mix(in srgb, var(--card) 95%, transparent) 100%
   );
 }
 
@@ -1278,8 +1278,8 @@ html[data-native-platform] {
   text-overflow: ellipsis;
   white-space: nowrap;
   border-radius: 999px;
-  border: 1px solid color-mix(in oklch, var(--apt-event-accent) 26%, white);
-  background: color-mix(in oklch, var(--apt-event-accent) 12%, white);
+  border: 1px solid color-mix(in oklch, var(--apt-event-accent) 26%, var(--card));
+  background: color-mix(in oklch, var(--apt-event-accent) 12%, var(--card));
   color: color-mix(in oklch, var(--apt-event-accent) 82%, black);
   padding: 0 0.5rem;
   font-size: 10px;
@@ -1374,18 +1374,18 @@ html[data-native-platform] {
   width: fit-content;
   align-items: center;
   gap: 0.25rem;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 0.35rem;
-  background: #f7f8fa;
+  background: var(--muted);
   padding: 0.15rem 0.35rem;
   font-size: 0.62rem;
   font-weight: 600;
-  color: #64748b;
+  color: var(--muted-foreground);
 }
 
 .appointments-calendar-shell .fc-apt-event-divider {
   margin-top: 0.2rem;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--border);
 }
 
 .appointments-calendar-shell .fc-apt-event-footer {
@@ -1408,12 +1408,12 @@ html[data-native-platform] {
   width: 1.1rem;
   align-items: center;
   justify-content: center;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--border);
   border-radius: 999px;
-  background: #ffffff;
+  background: var(--card);
   font-size: 0.56rem;
   font-weight: 700;
-  color: #334155;
+  color: var(--foreground);
 }
 
 .appointments-calendar-shell .fc-apt-event-metrics {
@@ -1428,7 +1428,7 @@ html[data-native-platform] {
   gap: 0.18rem;
   font-size: 0.6rem;
   font-weight: 600;
-  color: #64748b;
+  color: var(--muted-foreground);
 }
 
 
@@ -1437,8 +1437,8 @@ html[data-native-platform] {
 }
 
 .appointments-calendar-shell .fc .fc-timegrid-now-indicator-arrow {
-  border-color: #f97316;
-  color: #f97316;
+  border-color: var(--heading-marker);
+  color: var(--heading-marker);
 }
 
 /* --- Calendar polish pass: aligns FullCalendar with the app design system --- */

@@ -438,7 +438,7 @@ function ClinicalListSection<T extends { id?: string | null }>({
             if (!nextOpen) setEditing(null);
           }}
         >
-          <DialogContent overlayClassName="bg-black/40" className={cn("flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[680px] sm:pb-0", editorClassName)} data-testid="clinical-entry-editor-dialog">
+          <DialogContent overlayClassName="bg-[color-mix(in_srgb,var(--overlay,#000)_40%,transparent)]" className={cn("flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[680px] sm:pb-0", editorClassName)} data-testid="clinical-entry-editor-dialog">
             <DialogHeader className="shrink-0 border-b border-border/50 bg-card px-4 py-3 pr-14 text-left">
               <DialogTitle className="text-[15px] font-semibold">
                 {editing?.index === null

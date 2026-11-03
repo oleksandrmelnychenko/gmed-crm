@@ -68,9 +68,10 @@ export function AccountPage() {
             </AccountSection>
           )}
         </div>
+        {/* Leads pick their theme and colours too (owner 2026-11-03). */}
+        <AppearanceSettings />
         {leadCabinet ? null : (
           <>
-            <AppearanceSettings />
             <AccountSection title={l("twofactor_title")}>
               <TwoFactorSection embedded />
             </AccountSection>

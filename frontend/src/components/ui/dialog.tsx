@@ -245,7 +245,7 @@ function DialogOverlay({
         // No backdrop-filter on the animated overlay: animating opacity over a
         // full-viewport blur layer flashes the whole page in Chrome on macOS
         // (compositor promote/demote glitch at animation start and end).
-        "fixed inset-0 isolate z-50 bg-black/20 duration-100 motion-reduce:animate-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        "fixed inset-0 isolate z-50 bg-[color-mix(in_srgb,var(--overlay,#000)_20%,transparent)] duration-100 motion-reduce:animate-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
         className
       )}
       {...props}

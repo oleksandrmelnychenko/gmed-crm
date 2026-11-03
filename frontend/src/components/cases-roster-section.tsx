@@ -118,7 +118,7 @@ export function CasesRosterSection({
         <div className={cn("mt-5 grid gap-4 xl:grid-cols-2", listClassName)}>
           {items.map((item) => {
             const cardClassName = cn(
-              "rounded-[1.6rem] border border-slate-200 bg-white p-5 text-left",
+              "rounded-[1.6rem] border border-border bg-card p-5 text-left",
               itemClassName,
               onCaseClick
                 ? cn(

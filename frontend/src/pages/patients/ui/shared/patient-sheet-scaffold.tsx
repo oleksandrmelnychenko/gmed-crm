@@ -76,7 +76,7 @@ export function PatientSheetScaffold({
     return (
       <Dialog open={open} onOpenChange={onOpenChange} dirty={dirty} requireChanges={requireChanges}>
         <DialogContent
-          overlayClassName="bg-black/40"
+          overlayClassName="bg-[color-mix(in_srgb,var(--overlay,#000)_40%,transparent)]"
           className={cn(
             "flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col gap-0 overflow-hidden rounded-xl p-0 sm:w-[calc(100vw-2rem)] sm:pb-0",
             maxWidthClassName ?? SHEET_WIDTH_BY_PRESET[width],

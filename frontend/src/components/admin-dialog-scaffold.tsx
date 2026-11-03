@@ -41,7 +41,7 @@ export function AdminDialogScaffold({
 
   return (
     <DialogContent
-      overlayClassName="bg-black/40"
+      overlayClassName="bg-[color-mix(in_srgb,var(--overlay,#000)_40%,transparent)]"
       className={cn("flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col gap-0 overflow-hidden rounded-xl p-0 sm:pb-0", maxWidthClassName)}
       data-testid={testId}
     >

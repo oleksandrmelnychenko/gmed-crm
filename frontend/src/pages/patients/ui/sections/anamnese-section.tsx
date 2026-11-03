@@ -695,7 +695,7 @@ export function AnamneseSection({
       <Dialog open={Boolean(editing)} onOpenChange={(open) => {
         if (!open) setEditing(null);
       }}>
-        <DialogContent overlayClassName="bg-black/40" className="flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[860px] sm:pb-0" data-testid="anamnesis-editor-dialog">
+        <DialogContent overlayClassName="bg-[color-mix(in_srgb,var(--overlay,#000)_40%,transparent)]" className="flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[860px] sm:pb-0" data-testid="anamnesis-editor-dialog">
           <DialogHeader className="shrink-0 border-b border-border/50 bg-card px-4 py-3 pr-14 text-left">
             <DialogTitle className="text-[15px] font-semibold">
               {editingMode === "edit"
