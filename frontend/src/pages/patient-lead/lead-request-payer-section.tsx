@@ -450,12 +450,12 @@ export function PayerSection({
       <Section title={text.recipient.payerSection}>
         <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
           <LabeledField
-            {...field("payer_kind", true, "sm:col-span-2 lg:col-span-3")}
+            {...field("payer_kind", true, "w-full max-w-xl sm:col-span-2 lg:col-span-3")}
             label={question ?? payerFieldLabel(text, "payer_kind", guardian, payerType)}
           >
             <NativeComboboxSelect
               {...fieldProps("payer_kind")}
-              className={cn(selectClass, "sm:max-w-[calc(50%-0.5rem)]")}
+              className={selectClass}
               value={choice}
               onChange={(event) => choose(event.target.value)}
             >
@@ -477,7 +477,7 @@ export function PayerSection({
       {thirdParty ? (
         <>
           <Section title={text.payerBlockPerson}>
-            <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className={cn("grid gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3", !organisation && "2xl:grid-cols-4")}>
               {organisation ? (
                 // The organisation mask: an organisation has a name, a legal form, a register number
                 // and a contact person; no date of birth and no citizenship.
@@ -577,7 +577,7 @@ export function PayerSection({
                     />
                   </LabeledField>
                   {!typed ? (
-                    <LabeledField {...field("payer_relationship", false, "sm:col-span-2 lg:col-span-3")}>
+                    <LabeledField {...field("payer_relationship", false, "sm:col-span-2 lg:col-span-3 2xl:col-span-4")}>
                       <Input
                         {...fieldProps("payer_relationship")}
                         className={inputClass}

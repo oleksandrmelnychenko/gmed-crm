@@ -516,13 +516,13 @@ export function LegalQuestionsSection({
   bare?: boolean;
 }) {
   const questions = (
-      <div className="space-y-3" data-testid="lead-request-legal">
+      <div className="grid gap-3 lg:grid-cols-2" data-testid="lead-request-legal">
         {LEGAL_QUESTIONS.filter((question) => !(minor && question === "pep_self")).map((question) => (
-          <div key={question} className="space-y-3" data-testid={`lead-request-legal-${question}`}>
+          <div key={question} className="min-w-0" data-testid={`lead-request-legal-${question}`}>
             <IdentificationFormField form={form} field={question} text={text} guardian={guardian} required question>
               <YesNoSelect
                 id={`lead-request-${question}`}
-                className="sm:max-w-[calc(50%-0.5rem)]"
+                className="max-w-sm"
                 value={form.draft[question]}
                 text={text}
                 invalid={Boolean(form.errorFor(question))}

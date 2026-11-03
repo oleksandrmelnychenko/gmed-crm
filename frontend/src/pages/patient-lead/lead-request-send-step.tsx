@@ -236,9 +236,8 @@ export function SendStep({
             </div> : null}
             <Button
               type="button"
-              variant="outline"
               size="sm"
-              className="gap-1.5 border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+              className="h-auto min-h-9 max-w-full gap-1.5 whitespace-normal py-1.5 text-left"
               // To the first field that is still missing, in whichever step it is.
               onClick={() => {
                 if (!inquiryConsent) onEdit("person", { field: "inquiry_consent" });
@@ -255,7 +254,7 @@ export function SendStep({
       </Section>
       {needsDeclaration && (sendable || declaredAt) ? (
         <Section title={text.declarationTitle}>
-          <div className="rounded-lg border border-border bg-muted/10 px-3 py-3" data-testid="lead-request-declaration">
+          <div className="rounded-lg border border-border bg-muted/10 px-3 py-2" data-testid="lead-request-declaration">
             <label className="flex items-start gap-3 text-sm">
               {/* Sent and unchanged: the confirmation given with that sending is shown, not asked again. */}
               <input
@@ -371,11 +370,11 @@ export function SendStep({
 /** The statements of the request, read-only and grouped like the form. */
 function RequestSummary({ groups }: { groups: SummaryGroup[] }) {
   return (
-    <div className="space-y-3" data-testid="lead-request-summary">
+    <div className="divide-y divide-border/60" data-testid="lead-request-summary">
       {groups.map((group) => (
-        <section key={group.id} className="rounded-lg border border-border/60 bg-card p-3" data-testid={`lead-request-summary-${group.id}`}>
+        <section key={group.id} className="min-w-0 py-2.5 first:pt-0 last:pb-0" data-testid={`lead-request-summary-${group.id}`}>
           <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+            <span aria-hidden="true" data-section-heading-marker className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
             {group.title}
           </h4>
           {group.rows.length === 0 && !group.parts?.length ? (
@@ -425,13 +424,13 @@ export function SummaryRows({ rows }: { rows: SummaryRow[] }) {
     );
   }
   return (
-    <dl className="mt-3 space-y-2 text-sm">
+    <dl className="mt-2 space-y-1.5 text-sm">
       {rows.map((row, index) => (
         // Stacked on a phone, label beside value from the tablet width on. A label
         // can repeat (several trusted persons), so the position keys the row.
-        <div key={`${row.label}-${index}`} className="sm:grid sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:gap-4">
+        <div key={`${row.label}-${index}`} className="sm:grid sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:gap-3">
           <dt className="font-mono text-xs leading-5 text-foreground/75">{row.label}</dt>
-          <dd className="min-w-0 whitespace-pre-line break-words">{row.value}</dd>
+          <dd className="min-w-0 whitespace-pre-line [overflow-wrap:anywhere]">{row.value}</dd>
         </div>
       ))}
     </dl>

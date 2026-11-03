@@ -4,14 +4,14 @@ import { Info, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusChip } from "@/components/ui/status-chip";
-import { checkboxClass } from "@/components/record-workspace/primitives/design-tokens";
+import { checkboxClass, inputClass, textareaClass } from "@/components/record-workspace/primitives/design-tokens";
 import { cn } from "@/lib/utils";
 import { appDateKey } from "@/lib/app-time-zone";
 import { LEAD_WIZARD_SERVICE_OPTIONS, updateLeadServiceSelection } from "@/pages/leads/model/leads-model";
 import { saveLeadServices, type LeadServicePreferences } from "./lead-request-api";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import type { SaveState } from "./lead-request-model";
-import { CabinetHint, CabinetSection, LabeledField, errorMessage, runDraftSave, useAutosave } from "./lead-request-parts";
+import { CabinetSection, LabeledField, errorMessage, runDraftSave, useAutosave } from "./lead-request-parts";
 import { useServerDraftSync } from "./lead-request-server-sync";
 import { StepFrame, type StepProps } from "./lead-request-step-forms";
 import { servicesText } from "./lead-request-services-text";
@@ -48,13 +48,13 @@ function ServiceInfo({ title, text, more, close }: { title: string; text: string
       <Popover.Trigger
         aria-label={`${more}: ${title}`}
         title={more}
-        className="mt-2 inline-flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        className="mt-1 inline-flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring sm:size-7"
       >
         <Info className="size-4" />
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner side="bottom" align="end" sideOffset={6} collisionPadding={12} className="z-50">
-          <Popover.Popup className="w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-border bg-popover p-4 text-popover-foreground shadow-lg outline-none">
+          <Popover.Popup className="w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-lg outline-none">
             <div className="flex items-start justify-between gap-3">
               <Popover.Title className="text-sm font-semibold leading-5">{title}</Popover.Title>
               <Popover.Close aria-label={close} className="-m-1 inline-flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground">
@@ -141,7 +141,7 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
     ) };
   });
   const fieldStyle = "[&>label]:font-mono [&>label]:text-xs [&>label]:font-medium [&>label]:text-foreground/80";
-  const textareaStyle = "w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default";
+  const textareaStyle = cn(textareaClass, "min-h-16 resize-y disabled:cursor-default");
 
   // The browser's `min` only marks the field: the date was dropped with no word (QA 2026-10-31).
   // The picker does not pass a date before `min` on, so the draft alone never shows it
@@ -155,10 +155,10 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
         <span>{error}</span>
         <Button type="button" size="sm" onClick={() => void save(draft)}>{text.retry}</Button>
       </div> : null}
-      <CabinetSection title={wording.period} accessory={<CabinetHint className="py-1">{wording.optional}</CabinetHint>}>
+      <CabinetSection title={wording.period} accessory={<span className="font-mono text-xs text-muted-foreground">{wording.optional}</span>}>
         <LabeledField id="lead-request-service-program_date_from" label={wording.from} className={cn(fieldStyle, "max-w-sm")}>
           {/* A wished start lies ahead: no date in the past (owner 2026-10-29); staff may enter one (QA 2026-10-31). */}
-          <Input key={`program_date_from-${lang}`} id="lead-request-service-program_date_from" type="date" className="h-10 bg-background"
+          <Input key={`program_date_from-${lang}`} id="lead-request-service-program_date_from" type="date" className={inputClass}
             pickerLang={asLeadCabinetLang(lang) ?? undefined}
             min={staffMode ? undefined : appDateKey()} value={draft.program_date_from} onPickerValidation={setPickerRefused}
             aria-invalid={pastStart || undefined} aria-describedby={pastStart ? "lead-request-service-program_date_from-error" : undefined}
@@ -167,12 +167,12 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
         </LabeledField>
       </CabinetSection>
       <CabinetSection title={wording.services} accessory={<StatusChip tone={draft.services.length ? "info" : "neutral"}>{draft.services.length}</StatusChip>}>
-        <div id="lead-request-service-services" className="grid items-start gap-2 sm:grid-cols-2">
+        <div id="lead-request-service-services" className="grid items-start gap-2 sm:grid-cols-2 2xl:grid-cols-3">
           {LEAD_WIZARD_SERVICE_OPTIONS.map((value) => {
             const checked = draft.services.includes(value);
-            return <div key={value} className={cn("min-w-0 rounded-xl border bg-background transition-colors", checked ? "border-[var(--brand)]" : "border-border")}>
+            return <div key={value} className={cn("min-w-0 rounded-lg border bg-card transition-colors", checked ? "border-primary/40 bg-primary/5" : "border-border")}>
               <div className="flex items-start gap-1 pr-1.5">
-                <label className={cn("flex min-h-10 min-w-0 flex-1 items-center gap-2.5 rounded-xl px-3 py-2 text-sm leading-5", locked ? "cursor-default" : "cursor-pointer hover:bg-muted/40", checked && "font-medium")}>
+                <label className={cn("flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-2 text-sm leading-5 sm:min-h-9 sm:py-1.5", locked ? "cursor-default" : "cursor-pointer hover:bg-muted/40", checked && "font-medium")}>
                   <input type="checkbox" checked={checked} onChange={(event) => toggle(value, event.target.checked)}
                     className={cn(checkboxClass, "shrink-0")} />
                   <span className="min-w-0">{wording.options[value]}</span>
@@ -180,7 +180,7 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
                 {wording.descriptions[value] ? <ServiceInfo title={wording.options[value]} text={wording.descriptions[value]}
                   more={wording.more} close={wording.close} /> : null}
               </div>
-              {checked && value !== "none" && value !== "not-sure" ? <div className="px-3 pb-3">
+              {checked && value !== "none" && value !== "not-sure" ? <div className="px-2.5 pb-2.5">
                 <LabeledField id={`lead-request-service-comment-${value}`} label={wording.comment} className={fieldStyle}>
                   <textarea id={`lead-request-service-comment-${value}`} rows={2} maxLength={4000} className={textareaStyle}
                     value={draft.service_comments[value] ?? ""} onChange={(event) => setDraft((current) => ({ ...current,
@@ -191,7 +191,7 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
             </div>;
           })}
         </div>
-        <LabeledField id="lead-request-service-notes" label={wording.notes} className={cn(fieldStyle, "pt-2")}>
+        <LabeledField id="lead-request-service-notes" label={wording.notes} className={cn(fieldStyle, "max-w-3xl")}>
           <textarea id="lead-request-service-notes" rows={3} maxLength={4000} className={textareaStyle}
             value={draft.notes} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} />
         </LabeledField>

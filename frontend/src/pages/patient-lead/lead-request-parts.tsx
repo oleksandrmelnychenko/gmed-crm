@@ -310,15 +310,15 @@ export function CabinetSection({
   compact?: boolean;
 }) {
   return (
-    <section className={cn("min-w-0 overflow-hidden rounded-xl border border-border/60 bg-card", className)}>
-      <div className={cn("flex flex-wrap items-center justify-between gap-2", compact ? "px-3 pt-3" : "px-4 pt-4")}>
+    <section data-cabinet-section className={cn("min-w-0 overflow-hidden rounded-xl border border-border/60 bg-card", className)}>
+      <div data-cabinet-section-header className={cn("flex flex-wrap items-center justify-between gap-2", compact ? "px-3 pt-3" : "px-4 pt-4")}>
         <div className="flex min-w-0 items-center gap-2">
-          <div aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--heading-marker)]" />
+          <div aria-hidden data-section-heading-marker className="size-2 shrink-0 rounded-full bg-[var(--heading-marker)]" />
           <h3 className="min-w-0 max-w-full break-words text-sm font-semibold text-foreground">{title}</h3>
         </div>
         {accessory ? <div className="min-w-0 max-w-full">{accessory}</div> : null}
       </div>
-      <div className={cn("space-y-3", compact ? "p-3" : "p-4")}>{children}</div>
+      <div data-cabinet-section-body className={cn("space-y-3", compact ? "p-3" : "p-4")}>{children}</div>
     </section>
   );
 }

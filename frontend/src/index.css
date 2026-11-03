@@ -308,6 +308,12 @@
   flex-direction: column;
 }
 
+/* Nested sections carry the markers; their enclosing title stays unmarked. */
+[data-cabinet-section]:has(> [data-cabinet-section-body] [data-section-heading-marker])
+  > [data-cabinet-section-header] [data-section-heading-marker] {
+  display: none;
+}
+
 /* Sent forms stay read-only, but their values must remain readable. */
 .patient-request-wizard {
   --cabinet-disabled-text: color-mix(in oklch, var(--foreground) 80%, var(--card));

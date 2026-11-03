@@ -341,8 +341,8 @@ export function InvoiceRecipientSection({
   return (
     <>
       <Section title={text.recipient.section}>
-        <div className="space-y-3" data-testid="lead-request-invoice-recipient">
-          <div role="radiogroup" aria-labelledby="lead-request-invoice_recipient-label" className="space-y-1.5">
+        <div className="grid gap-x-4 gap-y-2.5 sm:grid-cols-2" data-testid="lead-request-invoice-recipient">
+          <div role="radiogroup" aria-labelledby="lead-request-invoice_recipient-label" className="space-y-1.5 sm:col-span-2">
             <p id="lead-request-invoice_recipient-label" className={cn(tokens.text.label, "block")}>
               {text.recipient.question}
               <RequiredMark />
@@ -391,7 +391,7 @@ export function InvoiceRecipientSection({
           </div>
 
           {parentChoiceShown ? (
-            <LabeledField {...labeled("representative_id", parents.length > 1 || parentChoiceNeeded)}>
+            <LabeledField {...labeled("representative_id", parents.length > 1 || parentChoiceNeeded, "w-full max-w-xl")}>
               <NativeComboboxSelect
                 {...control("representative_id")}
                 className={selectClass}
@@ -407,8 +407,8 @@ export function InvoiceRecipientSection({
           ) : null}
 
           {third ? (
-            <div className="space-y-3" data-testid="lead-request-recipient-party">
-              <LabeledField {...labeled("type", true, "sm:max-w-[calc(50%-0.5rem)]")}>
+            <div className="space-y-2.5 sm:col-span-2" data-testid="lead-request-recipient-party">
+              <LabeledField {...labeled("type", true, "w-full max-w-xl")}>
                 <NativeComboboxSelect
                   {...control("type")}
                   className={selectClass}
@@ -428,7 +428,7 @@ export function InvoiceRecipientSection({
                 </NativeComboboxSelect>
               </LabeledField>
               {draft.type ? (
-                <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3">
                   {organisation ? (
                     <>
                       <LabeledField {...labeled("organisation_name", true, "sm:col-span-2")}>
@@ -516,7 +516,7 @@ export function InvoiceRecipientSection({
               id="lead-request-recipient_email"
               label={text.billingFields.invoice_email}
               error={errorFor("email")}
-              className="sm:max-w-[calc(50%-0.5rem)]"
+              className="w-full max-w-xl"
             >
               {textInput("email", 254, "email")}
               {errorFor("email") ? null : <EmailDomainWarning email={draft.email} lang={lang} />}
@@ -525,7 +525,7 @@ export function InvoiceRecipientSection({
           ) : null}
 
           {flow.recipient ? (
-            <div className="space-y-1.5" data-testid="lead-request-recipient-is-payer">
+            <div className="space-y-1.5 sm:col-span-2" data-testid="lead-request-recipient-is-payer">
               {/* A box, ticked as soon as a recipient is chosen (owner 2026-10-11). */}
               <label
                 className={cn(
@@ -558,7 +558,7 @@ export function InvoiceRecipientSection({
             <div
               role="radiogroup"
               aria-label={text.recipient.payerQuestion}
-              className="flex flex-col gap-2"
+              className="flex max-w-3xl flex-wrap gap-2 sm:col-span-2"
               data-testid="lead-request-payer-party"
             >
               {PAYER_PARTIES.map((value) => {
@@ -567,8 +567,8 @@ export function InvoiceRecipientSection({
                   <label
                     key={value}
                     className={cn(
-                      "flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 text-sm leading-snug",
-                      checked ? "border-[var(--brand)] bg-muted/40" : "border-border",
+                      "flex min-h-9 min-w-0 max-w-full cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 text-sm leading-snug",
+                      checked ? "border-primary/40 bg-primary/5" : "border-border",
                     )}
                   >
                     <input
@@ -594,7 +594,7 @@ export function InvoiceRecipientSection({
           ) : null}
           {/* The patient side as recipient: only another person or organisation can pay instead. */}
           {!answered && flow.recipient === "self" && flow.isPayer === "no" ? (
-            <p className="text-sm leading-snug" data-testid="lead-request-payer-party-other">
+            <p className="text-xs leading-5 text-muted-foreground sm:col-span-2" data-testid="lead-request-payer-party-other">
               {text.recipient.payerParty.other}
             </p>
           ) : null}
@@ -800,7 +800,7 @@ function ParentPayer({
           id="lead-request-payer_kind"
           label={text.recipient.parentPayerQuestion}
           required
-          className="sm:max-w-[calc(50%-0.5rem)]"
+          className="w-full max-w-xl"
         >
           <NativeComboboxSelect
             id="lead-request-payer_kind"

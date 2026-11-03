@@ -27,14 +27,14 @@ export function TrustedPersonsList({ persons, lang, onRemove, disabled = false }
 }) {
   const text = consentFormText(lang);
   const fields = trustedPersonsText(lang);
-  return <ul className="space-y-2 text-sm" data-testid="trusted-persons-list">
+  return <ul className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border/60 bg-card text-sm empty:hidden" data-testid="trusted-persons-list">
     {persons.map((person, index) => {
       const born = formatBirthDate(person.birth_date);
       const scopes = normalizeScopeCodes(person.scope_codes);
       const scopeLabels = scopes.length ? scopes.map((code) => cabinetScopeSummary([code], lang)) : [personScope(person, lang)].filter(Boolean);
       const contacts = [...new Set([person.phone?.trim(), person.contact?.trim()].filter((value): value is string => Boolean(value)))];
-      return <li key={index} className="flex items-start justify-between gap-3 break-words rounded-lg border border-border/60 bg-card px-3 py-2">
-        <div className="min-w-0 flex-1 space-y-2">
+      return <li key={index} className="flex items-start justify-between gap-2 break-words px-3 py-2">
+        <div className="min-w-0 flex-1 space-y-1.5">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <UserRound aria-hidden="true" className="size-3.5 shrink-0" />
             <span className="font-semibold text-foreground [overflow-wrap:anywhere]">{person.name}</span>
@@ -43,12 +43,12 @@ export function TrustedPersonsList({ persons, lang, onRemove, disabled = false }
             {personCitizenships(person.citizenships).length
               ? <StatusChip tone="info" data-testid="trusted-person-citizenships"><Flag aria-hidden="true" />{personCitizenships(person.citizenships).map((code) => countryLabel(code, lang)).join(", ")}</StatusChip>
               : null}
-            {contacts.map((contact) => <StatusChip key={contact} tone="warning">
+            {contacts.map((contact) => <StatusChip key={contact} tone="neutral" className="text-foreground">
               {contact.includes("@") ? <Mail aria-hidden="true" /> : <Phone aria-hidden="true" />}
               <span className="min-w-0 [overflow-wrap:anywhere]">{contact}</span>
             </StatusChip>)}
           </div>
-          {scopeLabels.length ? <div className="flex flex-wrap items-center gap-2">
+          {scopeLabels.length ? <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="font-mono text-xs font-medium text-foreground/80">{fields.scope}:</span>
             {scopeLabels.map((scope) => <StatusChip key={scope} tone="info">{scope}</StatusChip>)}
           </div> : null}
@@ -114,8 +114,8 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
     onChange(persons.filter((_, at) => at !== index));
     setLeftPhone((current) => new Set([...current].filter((at) => at !== index).map((at) => (at > index ? at - 1 : at))));
   };
-  return <div className="space-y-3" data-testid="trusted-persons-editor">
-    {persons.length === 0 ? <div className="flex items-center gap-2.5 rounded-lg border border-dashed border-border bg-muted/25 px-3 py-4 text-sm text-muted-foreground"><UserRound aria-hidden="true" className="size-4 shrink-0" /><p>{fields.empty}</p></div> : null}
+  return <div className="space-y-2" data-testid="trusted-persons-editor">
+    {persons.length === 0 ? <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground"><UserRound aria-hidden="true" className="size-4 shrink-0" /><p>{fields.empty}</p></div> : null}
     {persons.map((person, index) => {
       const problems = problemsOf(person, index);
       const describedBy = (field: RecipientField) => (problems.has(field) ? `trusted-person-${field}-${index}-error` : undefined);
@@ -127,7 +127,7 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
         <span className="flex min-w-0 items-center gap-2 text-xs font-medium"><span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-border/70 bg-card font-mono text-[11px] text-muted-foreground">{String(index + 1).padStart(2, "0")}</span><span className="truncate">{person.name || fields.name}</span></span>
         <Button type="button" variant="ghost" size="sm" className="size-7 shrink-0 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" disabled={disabled} aria-label={text.removeRecipient} title={text.removeRecipient} onClick={() => removeAt(index)}><Trash2 aria-hidden="true" className="size-3.5" /></Button>
       </div>
-      <div className="grid gap-x-4 gap-y-3 p-3 sm:grid-cols-2">
+      <div className="grid gap-x-3 gap-y-2.5 p-3 sm:grid-cols-2">
       <label className="min-w-0 space-y-1.5 text-xs"><span className="font-mono font-medium leading-5 text-foreground/75">{fields.name}</span>
         <Input className={inputClass} value={person.name} maxLength={120} disabled={disabled} autoComplete="off" aria-invalid={problems.has("name") || undefined} aria-describedby={describedBy("name")} onChange={(event) => update(index, { name: event.target.value })} />
         {message("name", problems, index)}
@@ -170,8 +170,8 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
         <legend className="mb-1.5 font-mono font-medium leading-5 text-foreground/75">{fields.scope}</legend>
         <div className="grid gap-1.5 sm:grid-cols-2">
           {CONSENT_RECIPIENT_SCOPES.map((code) => <label key={code} className={cn(
-            "flex min-w-0 cursor-pointer items-start gap-2.5 rounded-lg border px-2.5 py-2 text-sm leading-5",
-            checked.includes(code) ? "border-[var(--brand)] bg-[var(--brand-soft)]" : "border-border/70 bg-card",
+            "flex min-h-11 min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 text-sm leading-5 sm:min-h-9 sm:py-1.5",
+            checked.includes(code) ? "border-primary/40 bg-primary/5" : "border-border/70 bg-card",
             disabled && "cursor-not-allowed",
           )}>
             <input type="checkbox" className={cn(checkboxClass, "mt-0.5 shrink-0")} checked={checked.includes(code)} disabled={disabled}

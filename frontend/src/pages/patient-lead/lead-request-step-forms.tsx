@@ -998,13 +998,13 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
       open={request.submitted_at && (request.payer_questionnaire || ownRouteAfterSend) ? <>{ownRouteAfterSend ? paymentRoute : null}{request.payer_questionnaire ? payerQuestionnaire : null}</> : undefined}
     >
       <Section title={childSectionTitle(text, "insurance", request.minor)}>
-        <div className={GRID} data-testid="lead-request-insurance">
+        <div className="grid gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3" data-testid="lead-request-insurance">
           <LabeledField
             id="lead-request-has_insurance"
             label={hasInsuranceLabel(text, request)}
             error={errorFor("has_insurance")}
             question
-            className="w-full max-w-xl sm:col-span-2 lg:col-span-3"
+            className="w-full max-w-xl"
           >
             <NativeComboboxSelect
               {...fieldProps("has_insurance")}
@@ -1224,7 +1224,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
   const sent = Boolean(request.submitted_at);
   const consentSection = (
     <Section title={text.healthConsentTitle}>
-      <p className="whitespace-pre-line rounded-lg border border-border/60 bg-muted/20 px-3 py-3 text-sm leading-6 text-foreground/85">
+      <p className="whitespace-pre-line border-l-2 border-border pl-3 text-sm leading-6 text-foreground">
         <HealthConsentText text={consentText(request, HEALTH_CONSENT, lang)} lang={lang} />
       </p>
       <AgencyContactLine contact={agencyContact} label={text.healthConsentContact} />
@@ -1244,9 +1244,9 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
   );
   const reasonSection = asksReason ? (
     <Section title={childSectionTitle(text, "request", request.minor)}>
-      <div data-testid="lead-request-reason">
+      <div className="max-w-3xl" data-testid="lead-request-reason">
         <IdentificationFormField form={identification} field="request_reason" text={text}>
-          <IdentificationTextArea form={identification} field="request_reason" maxLength={4000} rows={5} disabled={!consentReady} />
+          <IdentificationTextArea form={identification} field="request_reason" maxLength={4000} rows={3} disabled={!consentReady} />
         </IdentificationFormField>
       </div>
     </Section>
@@ -1268,11 +1268,11 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
             void uploadFiles(files);
           }}
         />
-        <div className="flex flex-wrap items-center gap-2">
-          <StatusChip tone="warning">{text.documentsIntro}</StatusChip>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <p className="min-w-0 flex-1 basis-64 text-xs leading-5 text-muted-foreground">{text.documentsIntro}</p>
           <Button
             type="button"
-            className="cabinet-upload-action w-full gap-2 sm:w-auto"
+            className="cabinet-upload-action h-auto min-h-9 max-w-full gap-1.5 whitespace-normal py-1.5 text-left"
             disabled={!consentReady || uploading || full}
             onClick={() => fileInput.current?.click()}
             data-testid={sent ? "lead-request-add-documents" : undefined}
