@@ -223,15 +223,16 @@ test("the expanded lead row shows the patient portal at a glance", async ({ page
   await expect(fresh.getByRole("button", { name: "Новый пароль" })).toBeVisible();
   const action = fresh.getByTestId("lead-portal-send-email");
   await expect(action).toBeVisible();
-  const colours = await action.evaluate((button) => {
+  // The appearance themes paint primary buttons with --primary and fade colours in, so wait for the final colour.
+  const colours = () => action.evaluate((button) => {
     const probe = document.createElement("span");
-    probe.style.color = "var(--brand)";
+    probe.style.color = "var(--primary)";
     document.body.append(probe);
-    const brand = getComputedStyle(probe).color;
+    const primary = getComputedStyle(probe).color;
     probe.remove();
-    return { background: getComputedStyle(button).backgroundColor, brand };
+    return getComputedStyle(button).backgroundColor === primary;
   });
-  expect(colours.background).toBe(colours.brand);
+  await expect.poll(colours).toBe(true);
   await page.screenshot({ path: "test-results/lead-portal-row.png" });
 });
 
