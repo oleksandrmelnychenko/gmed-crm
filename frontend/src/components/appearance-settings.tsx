@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { Check, Download, Palette, Upload } from "lucide-react";
+import { Check, Contrast, Download, Palette, Upload } from "lucide-react";
+import { openContrastMeter } from "@/components/contrast-meter";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
@@ -15,7 +16,7 @@ const TEXT = {
   ru: {
     title: "Оформление", hint: "Светлые темы сохраняются для вашего аккаунта в этом браузере.",
     custom: "Своя тема · JSON", template: "Шаблон", apply: "Сохранить и применить", export: "Экспорт темы", import: "Импорт файла",
-    reset: "Вернуть GMED", remove: "Удалить тему", preview: "Предпросмотр", action: "Основная кнопка", secondary: "Подпись поля",
+    reset: "Вернуть GMED", contrast: "Проверить контраст", remove: "Удалить тему", preview: "Предпросмотр", action: "Основная кнопка", secondary: "Подпись поля",
     editor: "JSON темы", saved: "Тема сохранена", storage: "Не удалось сохранить тему в браузере.",
     scope: "Цвета предупреждений, ошибок и статусов сохраняют своё значение. Тема меняет палитру, а не размеры элементов.",
     errors: { "invalid-json": "Проверьте синтаксис JSON.", "invalid-theme": "Нужна светлая тема версии 1: id, name и colors. Максимум 16 КБ.", "invalid-color": "Неизвестный цвет или неверный формат. Используйте #RRGGBB.", "low-contrast": "Недостаточный контраст: текст ≥4,5:1, фокус ≥3:1.", "reserved-id": "Измените id: это имя встроенной темы.", "theme-limit": "Можно сохранить до 30 своих тем." },
@@ -23,7 +24,7 @@ const TEXT = {
   de: {
     title: "Darstellung", hint: "Helle Themes werden für Ihr Konto in diesem Browser gespeichert.",
     custom: "Eigenes Theme · JSON", template: "Vorlage", apply: "Speichern und anwenden", export: "Theme exportieren", import: "Datei importieren",
-    reset: "GMED wiederherstellen", remove: "Theme löschen", preview: "Vorschau", action: "Primäre Schaltfläche", secondary: "Feldbeschriftung",
+    reset: "GMED wiederherstellen", contrast: "Kontrast prüfen", remove: "Theme löschen", preview: "Vorschau", action: "Primäre Schaltfläche", secondary: "Feldbeschriftung",
     editor: "Theme-JSON", saved: "Theme gespeichert", storage: "Das Theme konnte nicht im Browser gespeichert werden.",
     scope: "Warnungen, Fehler und Statusfarben behalten ihre Bedeutung. Das Theme ändert die Farbpalette, nicht die Größe der Elemente.",
     errors: { "invalid-json": "Bitte JSON-Syntax prüfen.", "invalid-theme": "Helles Theme Version 1 mit id, name und colors erforderlich. Maximal 16 KB.", "invalid-color": "Unbekannte Farbe oder ungültiges Format. #RRGGBB verwenden.", "low-contrast": "Kontrast zu gering: Text ≥4,5:1, Fokus ≥3:1.", "reserved-id": "Bitte id ändern: Diese ID gehört zu einem integrierten Theme.", "theme-limit": "Maximal 30 eigene Themes möglich." },
@@ -31,7 +32,7 @@ const TEXT = {
   en: {
     title: "Appearance", hint: "Light themes are saved for your account in this browser.",
     custom: "Custom theme · JSON", template: "Template", apply: "Save and apply", export: "Export theme", import: "Import file",
-    reset: "Restore GMED", remove: "Delete theme", preview: "Preview", action: "Primary button", secondary: "Field label",
+    reset: "Restore GMED", contrast: "Check contrast", remove: "Delete theme", preview: "Preview", action: "Primary button", secondary: "Field label",
     editor: "Theme JSON", saved: "Theme saved", storage: "Could not save the theme in this browser.",
     scope: "Warning, error and status colours keep their meaning. Themes change the palette, not element sizes.",
     errors: { "invalid-json": "Check the JSON syntax.", "invalid-theme": "Use a light version 1 theme with id, name and colors. Maximum 16 KB.", "invalid-color": "Unknown colour or invalid format. Use #RRGGBB.", "low-contrast": "Contrast is too low: text ≥4.5:1, focus ≥3:1.", "reserved-id": "Change id: this ID belongs to a built-in theme.", "theme-limit": "You can save up to 30 custom themes." },
@@ -39,7 +40,7 @@ const TEXT = {
   uk: {
     title: "Оформлення", hint: "Світлі теми зберігаються для вашого акаунта в цьому браузері.",
     custom: "Власна тема · JSON", template: "Шаблон", apply: "Зберегти й застосувати", export: "Експорт теми", import: "Імпорт файлу",
-    reset: "Повернути GMED", remove: "Видалити тему", preview: "Попередній перегляд", action: "Основна кнопка", secondary: "Підпис поля",
+    reset: "Повернути GMED", contrast: "Перевірити контраст", remove: "Видалити тему", preview: "Попередній перегляд", action: "Основна кнопка", secondary: "Підпис поля",
     editor: "JSON теми", saved: "Тему збережено", storage: "Не вдалося зберегти тему в браузері.",
     scope: "Кольори попереджень, помилок і статусів зберігають своє значення. Тема змінює палітру, а не розміри елементів.",
     errors: { "invalid-json": "Перевірте синтаксис JSON.", "invalid-theme": "Потрібна світла тема версії 1: id, name та colors. Максимум 16 КБ.", "invalid-color": "Невідомий колір або хибний формат. Використовуйте #RRGGBB.", "low-contrast": "Недостатній контраст: текст ≥4,5:1, фокус ≥3:1.", "reserved-id": "Змініть id: це назва вбудованої теми.", "theme-limit": "Можна зберегти до 30 власних тем." },
@@ -106,6 +107,7 @@ export function AppearanceSettings() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={exportTheme}><Download />{text.export}</Button>
+          <Button size="sm" variant="outline" onClick={openContrastMeter}><Contrast />{text.contrast}</Button>
           <Button size="sm" variant="ghost" onClick={() => select(DEFAULT_THEME.id)}>{text.reset}</Button>
           {!BUILTIN_THEMES.some((item) => item.id === theme.id) ? <Button size="sm" variant="ghost" onClick={() => {
             try { save({ selectedId: DEFAULT_THEME.id, themes: preferences.themes.filter((item) => item.id !== theme.id) }); setNotice(null); } catch (cause) { fail(cause); }

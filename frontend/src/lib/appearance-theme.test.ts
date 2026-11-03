@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  addAppearanceTheme, appearanceStorageKey, BUILTIN_THEMES, DEFAULT_THEME, DEFAULT_THEME_COLORS,
+  addAppearanceTheme, appearanceStorageKey, BUILTIN_THEMES, contrastRatio, DEFAULT_THEME, DEFAULT_THEME_COLORS,
   EMPTY_APPEARANCE, MAX_CUSTOM_THEMES, MAX_THEME_JSON_LENGTH, parseAppearancePreferences,
   parseAppearanceTheme, themeCssVariables,
 } from "./appearance-theme";
@@ -10,6 +10,14 @@ const custom = { version: 1, id: "my-blue", name: "My Blue", colors: { headingMa
 describe("portable appearance themes", () => {
   it.each(BUILTIN_THEMES)("validates the built-in $name palette", (theme) => {
     expect(parseAppearanceTheme(JSON.stringify(theme))).toEqual(theme);
+  });
+
+  it.each(BUILTIN_THEMES.filter((theme) => theme.id !== DEFAULT_THEME.id))("gives $name readable field borders and its own colours", (theme) => {
+    const c = theme.colors;
+    expect(contrastRatio(c.inputBorder, c.field)).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(c.headingMarker, c.surface)).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(c.primary, c.background)).toBeGreaterThanOrEqual(3);
+    expect(BUILTIN_THEMES.filter((other) => other.colors.primary === c.primary)).toHaveLength(1);
   });
 
   it("fills omitted tokens from Graphite and keeps heading dots independent from dark buttons", () => {
