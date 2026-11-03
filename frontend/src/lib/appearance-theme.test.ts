@@ -88,23 +88,24 @@ describe("appearance preferences", () => {
 });
 
 describe("contrast levels apart from the theme", () => {
-  it.each(BUILTIN_THEMES)("raise $name step by step and stay a valid palette", (theme) => {
-    const more = withContrast(theme, "more"), high = withContrast(theme, "high");
+  it.each(BUILTIN_THEMES)("soften $name step by step and keep text readable", (theme) => {
+    const soft = withContrast(theme, "soft"), softer = withContrast(theme, "softer");
     expect(withContrast(theme, "standard")).toBe(theme);
-    for (const variant of [more, high]) expect(parseAppearanceTheme(JSON.stringify(variant))).toEqual(variant);
-    for (const key of ["textMuted", "inputBorder", "border", "focus"] as const) {
-      const ratios = [theme, more, high].map((item) => contrastRatio(item.colors[key], item.colors.surface));
-      expect(ratios[1]).toBeGreaterThan(ratios[0]);
-      expect(ratios[2]).toBeGreaterThan(ratios[1]);
+    // The validator keeps text and secondary text at 4.5:1 and focus at 3:1.
+    for (const variant of [soft, softer]) expect(parseAppearanceTheme(JSON.stringify(variant))).toEqual(variant);
+    for (const key of ["inputBorder", "border"] as const) {
+      const ratios = [theme, soft, softer].map((item) => contrastRatio(item.colors[key], item.colors.surface));
+      expect(ratios[1]).toBeLessThan(ratios[0]);
+      expect(ratios[2]).toBeLessThan(ratios[1]);
     }
-    expect(contrastRatio(high.colors.inputBorder, high.colors.field)).toBeGreaterThanOrEqual(4.5);
-    expect(high.colors.primary).toBe(theme.colors.primary);
+    expect(contrastRatio(softer.colors.text, softer.colors.surface)).toBeLessThanOrEqual(contrastRatio(theme.colors.text, theme.colors.surface));
+    expect(softer.colors.primary).toBe(theme.colors.primary);
   });
 
   it("stores the level with the theme choice and ignores unknown levels", () => {
-    expect(parseAppearancePreferences(JSON.stringify({ selectedId: DEFAULT_THEME.id, themes: [], contrast: "high" })).contrast).toBe("high");
-    expect(parseAppearancePreferences(JSON.stringify({ selectedId: DEFAULT_THEME.id, themes: [], contrast: "max" }))).toEqual(EMPTY_APPEARANCE);
+    expect(parseAppearancePreferences(JSON.stringify({ selectedId: DEFAULT_THEME.id, themes: [], contrast: "softer" })).contrast).toBe("softer");
+    expect(parseAppearancePreferences(JSON.stringify({ selectedId: DEFAULT_THEME.id, themes: [], contrast: "high" }))).toEqual(EMPTY_APPEARANCE);
     const theme = parseAppearanceTheme(JSON.stringify(custom));
-    expect(addAppearanceTheme({ ...EMPTY_APPEARANCE, contrast: "more" }, theme).contrast).toBe("more");
+    expect(addAppearanceTheme({ ...EMPTY_APPEARANCE, contrast: "soft" }, theme).contrast).toBe("soft");
   });
 });

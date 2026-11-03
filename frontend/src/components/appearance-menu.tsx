@@ -18,10 +18,10 @@ const TEXT = {
 
 /** Contrast levels are picked apart from the theme (owner 2026-11-03). */
 export const CONTRAST_LEVEL_TEXT = {
-  ru: { title: "Контраст", levels: { standard: "Стандартный", more: "Повышенный", high: "Высокий" } },
-  de: { title: "Kontrast", levels: { standard: "Standard", more: "Erhöht", high: "Hoch" } },
-  en: { title: "Contrast", levels: { standard: "Standard", more: "Increased", high: "High" } },
-  uk: { title: "Контраст", levels: { standard: "Стандартний", more: "Підвищений", high: "Високий" } },
+  ru: { title: "Контраст", levels: { standard: "Стандартный", soft: "Мягкий", softer: "Очень мягкий" } },
+  de: { title: "Kontrast", levels: { standard: "Standard", soft: "Weich", softer: "Sehr weich" } },
+  en: { title: "Contrast", levels: { standard: "Standard", soft: "Soft", softer: "Softer" } },
+  uk: { title: "Контраст", levels: { standard: "Стандартний", soft: "Мʼякий", softer: "Дуже мʼякий" } },
 } as const;
 
 const ITEM_CLASS = "flex min-h-8 w-full cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground";

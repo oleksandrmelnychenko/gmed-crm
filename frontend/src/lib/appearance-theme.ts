@@ -38,23 +38,26 @@ export const BUILTIN_THEMES: readonly AppearanceTheme[] = [DEFAULT_THEME, {
   // themes, no tinted floods). #c2410c keeps white button text at 5.2:1; #f97316 would be 2.8:1.
   version: 1, id: "gmed-orange", name: "GMED Orange", colors: {
     ...DEFAULT_THEME_COLORS,
+    // Lighter than Graphite's surfaces (owner 2026-11-03: "трошки освітлити").
+    background: "#f3f4f8", muted: "#f5f6f9", accent: "#eceef4", border: "#e6e8ee", sidebar: "#fafbfc",
+    rowAlternate: "#f9fafb", rowHover: "#f1f2f6", rowActive: "#eceef3", rowSelected: "#e5e8ef",
     primary: "#c2410c", primaryText: "#ffffff", focus: "#ea580c", headingMarker: "#ea580c",
   },
 }, {
   // Warm ivory surfaces with clay actions (owner 2026-11-03: a calm developer-tool look).
   version: 1, id: "gmed-clay", name: "GMED Clay", colors: {
-    background: "#f0eee6", surface: "#fbfaf6", text: "#1f1e1d", textMuted: "#5c5a53",
-    primary: "#b4532f", primaryText: "#ffffff", muted: "#f2f0e9", accent: "#ebe6da",
-    border: "#e3dfd3", inputBorder: "#918c7c", field: "#ffffff", focus: "#b4532f", sidebar: "#f6f4ee",
-    headingMarker: "#c15f3c", rowAlternate: "#f8f6f0", rowHover: "#f0ece2", rowActive: "#ebe6d9", rowSelected: "#e4ddcd",
+    background: "#f6f4ee", surface: "#fdfcf9", text: "#1f1e1d", textMuted: "#5c5a53",
+    primary: "#b4532f", primaryText: "#ffffff", muted: "#f6f4ee", accent: "#f0ece2",
+    border: "#ebe7dc", inputBorder: "#918c7c", field: "#ffffff", focus: "#b4532f", sidebar: "#faf9f5",
+    headingMarker: "#c15f3c", rowAlternate: "#fbfaf6", rowHover: "#f4f1e9", rowActive: "#f0ece2", rowSelected: "#ebe5d7",
   },
 }, {
   // Pure neutral greys, black actions and a single blue for focus and heading dots.
   version: 1, id: "gmed-ink", name: "GMED Ink", colors: {
-    background: "#f3f3f3", surface: "#ffffff", text: "#0d0d0d", textMuted: "#5d5d5d",
-    primary: "#0d0d0d", primaryText: "#ffffff", muted: "#f4f4f4", accent: "#ececec",
-    border: "#e3e3e3", inputBorder: "#8f8f8f", field: "#ffffff", focus: "#2563eb", sidebar: "#f9f9f9",
-    headingMarker: "#2563eb", rowAlternate: "#fafafa", rowHover: "#f2f2f2", rowActive: "#ececec", rowSelected: "#e3e3e3",
+    background: "#f7f7f7", surface: "#ffffff", text: "#0d0d0d", textMuted: "#5d5d5d",
+    primary: "#0d0d0d", primaryText: "#ffffff", muted: "#f7f7f7", accent: "#f0f0f0",
+    border: "#ebebeb", inputBorder: "#8f8f8f", field: "#ffffff", focus: "#2563eb", sidebar: "#fcfcfc",
+    headingMarker: "#2563eb", rowAlternate: "#fcfcfc", rowHover: "#f5f5f5", rowActive: "#f0f0f0", rowSelected: "#ebebeb",
   },
 }];
 
@@ -88,6 +91,9 @@ export function contrastRatio(a: string, b: string): number {
   return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
 }
 
+/** Backgrounds on which normal and secondary UI text appears. */
+const TEXT_BACKGROUNDS = ["background", "surface", "muted", "accent", "field", "sidebar", "rowAlternate", "rowHover", "rowActive", "rowSelected"] as const;
+
 export function parseAppearanceTheme(json: string): AppearanceTheme {
   if (json.length > MAX_THEME_JSON_LENGTH) throw new ThemeValidationError("invalid-theme");
   let value: unknown;
@@ -108,7 +114,7 @@ export function parseAppearanceTheme(json: string): AppearanceTheme {
   // The palette is currently light-only. Semantic status chips keep their own colours.
   // Validate the backgrounds on which normal/secondary UI text actually appears.
   for (const foreground of ["text", "textMuted"] as const) {
-    for (const background of ["background", "surface", "muted", "accent", "field", "sidebar", "rowAlternate", "rowHover", "rowActive", "rowSelected"] as const) {
+    for (const background of TEXT_BACKGROUNDS) {
       if (contrastRatio(colors[foreground], colors[background]) < 4.5) {
         throw new ThemeValidationError("low-contrast", `${foreground} / ${background}`);
       }
@@ -146,7 +152,7 @@ export function themeCssVariables(theme: AppearanceTheme): Record<string, string
 }
 
 /** Contrast is chosen apart from the theme and applies on top of any palette. */
-export const CONTRAST_LEVELS = ["standard", "more", "high"] as const;
+export const CONTRAST_LEVELS = ["standard", "soft", "softer"] as const;
 export type ContrastLevel = (typeof CONTRAST_LEVELS)[number];
 const isContrastLevel = (value: unknown): value is ContrastLevel => CONTRAST_LEVELS.includes(value as ContrastLevel);
 
@@ -156,26 +162,39 @@ function mixHex(first: string, second: string, weight: number): string {
   ).toString(16).padStart(2, "0")).join("")}`;
 }
 
-/** Pulls secondary text, borders, focus and row states towards the text colour; surfaces stay light. */
+/** Moves `color` towards `toward` by up to `amount`, stopping where it would drop below `floor` on any background. */
+function soften(color: string, toward: string, amount: number, floor: number, backgrounds: readonly string[]): string {
+  for (let step = amount; step > 0; step -= 0.01) {
+    const candidate = mixHex(toward, color, step);
+    if (backgrounds.every((background) => contrastRatio(candidate, background) >= floor)) return candidate;
+  }
+  return color;
+}
+
+/**
+ * Softer levels lower contrast for eyes that find the standard palette harsh (owner 2026-11-03):
+ * text, borders, focus and row states move towards the surface. Text never drops below
+ * WCAG AA (4.5:1) and focus below 3:1; borders and row tints may go lighter.
+ */
 export function withContrast(theme: AppearanceTheme, level: ContrastLevel): AppearanceTheme {
   if (level === "standard") return theme;
   const c = theme.colors;
-  const high = level === "high";
-  const text = high ? mixHex(c.text, "#000000", 0.5) : c.text;
-  const inputBorder = mixHex(text, c.inputBorder, high ? 0.55 : 0.3);
+  const softer = level === "softer";
+  const backgrounds = TEXT_BACKGROUNDS.map((key) => c[key]);
+  const towardSurface = (color: string, amount: number) => mixHex(c.surface, color, amount);
   return {
     ...theme,
     colors: {
       ...c,
-      text,
-      textMuted: mixHex(text, c.textMuted, high ? 0.75 : 0.45),
-      border: mixHex(inputBorder, c.border, high ? 0.6 : 0.35),
-      inputBorder,
-      focus: mixHex(text, c.focus, high ? 0.5 : 0.3),
-      accent: mixHex(inputBorder, c.accent, high ? 0.1 : 0.05),
-      rowHover: mixHex(inputBorder, c.rowHover, high ? 0.2 : 0.1),
-      rowActive: mixHex(inputBorder, c.rowActive, high ? 0.25 : 0.12),
-      rowSelected: mixHex(inputBorder, c.rowSelected, high ? 0.35 : 0.18),
+      text: soften(c.text, c.surface, softer ? 0.3 : 0.15, 7, backgrounds),
+      textMuted: soften(c.textMuted, c.surface, softer ? 0.3 : 0.15, 4.5, backgrounds),
+      border: towardSurface(c.border, softer ? 0.6 : 0.35),
+      inputBorder: towardSurface(c.inputBorder, softer ? 0.45 : 0.25),
+      focus: soften(c.focus, c.surface, softer ? 0.3 : 0.15, 3, [c.background, c.surface, c.field, c.sidebar]),
+      accent: towardSurface(c.accent, softer ? 0.5 : 0.25),
+      rowHover: towardSurface(c.rowHover, softer ? 0.5 : 0.25),
+      rowActive: towardSurface(c.rowActive, softer ? 0.5 : 0.25),
+      rowSelected: towardSurface(c.rowSelected, softer ? 0.45 : 0.2),
     },
   };
 }
