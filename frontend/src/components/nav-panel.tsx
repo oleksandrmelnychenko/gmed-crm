@@ -498,7 +498,7 @@ function NavGroup({
                   collapsed ? (
                     <span className="absolute right-1 top-1 size-2 rounded-full bg-[var(--brand)]" />
                   ) : (
-                    <span className="ml-auto shrink-0 rounded-full bg-[var(--brand)]/12 px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums text-[var(--brand)]">
+                    <span className="ml-auto shrink-0 rounded-full bg-[var(--brand)]/12 px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums text-[color-mix(in_srgb,var(--brand)_70%,var(--foreground))]">
                       {count > 99 ? "99+" : count}
                     </span>
                   )
