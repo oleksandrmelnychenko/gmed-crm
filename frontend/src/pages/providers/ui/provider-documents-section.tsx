@@ -200,7 +200,7 @@ export function ProviderDocumentsSection({
   }
 
   return (
-    <section className="space-y-0 overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
+    <section className="space-y-0 overflow-hidden rounded-lg bg-card">
       <div className="relative z-30 flex flex-wrap items-center gap-2 border-b border-border/70 bg-card p-2.5 sm:flex-nowrap sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">
         <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
           <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -229,8 +229,8 @@ export function ProviderDocumentsSection({
                 <td className="px-1 py-2.5"><div className="flex items-center justify-end gap-1"><DocumentSignatureAction documentId={document.id} title={document.original_filename || document.auto_name} iconOnly onDone={() => void loadDocuments()} /><Button type="button" size="icon-sm" variant="ghost" title={document.original_filename || document.auto_name} onClick={() => void downloadApiFile(`/documents/${document.id}/download`, document.original_filename || document.auto_name)}><Download /></Button></div></td>
               </tr>
             ))}
-            {!loading && documents.length === 0 ? <tr><td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">{labels.empty}</td></tr> : null}
-            {loading ? <tr><td colSpan={5} className="px-4 py-12 text-center"><LoaderCircle className="mx-auto size-5 animate-spin text-muted-foreground" /></td></tr> : null}
+            {!loading && documents.length === 0 ? <tr><td colSpan={5} className="px-3 py-5 text-center text-muted-foreground">{labels.empty}</td></tr> : null}
+            {loading ? <tr><td colSpan={5} className="px-3 py-5 text-center"><LoaderCircle className="mx-auto size-5 animate-spin text-muted-foreground" /></td></tr> : null}
           </tbody>
         </table>
       </div>
@@ -255,7 +255,7 @@ export function ProviderDocumentsSection({
             </AdminFormSection>
             <AdminFormSection title={labels.linkPatient}>
               <Field label={labels.patient} htmlFor="provider-document-patient"><select id="provider-document-patient" className={selectClass} value={patientId} required={isMedical} onChange={(event) => setPatientId(event.target.value)}><option value="">{labels.noPatient}</option>{patientOptions.map((patient) => <option key={patient.id} value={patient.id}>{patient.name} · {patient.patientNumber}</option>)}</select></Field>
-              <label className="flex items-start gap-2 rounded-lg border border-border/50 bg-muted/40 p-3 text-xs"><input type="checkbox" className={checkboxClass} checked={isMedical} onChange={(event) => setIsMedical(event.target.checked)} /><span><span className="font-medium">{labels.medicalToggle}</span><span className="mt-0.5 block leading-5 text-muted-foreground">{labels.medicalHint}</span></span></label>
+              <label className="flex items-start gap-2 py-1 text-xs"><input type="checkbox" className={checkboxClass} checked={isMedical} onChange={(event) => setIsMedical(event.target.checked)} /><span><span className="font-medium">{labels.medicalToggle}</span><span className="mt-0.5 block leading-5 text-muted-foreground">{labels.medicalHint}</span></span></label>
             </AdminFormSection>
             <AdminFormSection title={labels.notes}>
               <textarea aria-label={labels.notes} className={textareaClass} value={notes} maxLength={4000} onChange={(event) => setNotes(event.target.value)} />

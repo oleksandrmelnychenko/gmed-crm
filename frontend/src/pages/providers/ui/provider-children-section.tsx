@@ -42,10 +42,10 @@ export function ProviderChildrenSection({
   const openLabel = t.uiText.providers_open_provider ?? localizedFallback(lang, "Provider öffnen", "Открыть провайдера");
 
   return (
-    <section className={cn("space-y-2.5 rounded-xl border border-border/70 bg-card p-3.5", className)}>
+    <section className={cn("space-y-2 rounded-xl bg-card p-3", className)}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <div className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
           <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
           <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
             {providerChildren.length}
@@ -54,9 +54,9 @@ export function ProviderChildrenSection({
       </div>
 
       {providerChildren.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border bg-muted/30 px-3 py-3">
+        <div className="py-2">
           <p className="text-sm font-medium text-foreground">{emptyTitle}</p>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">{emptyText}</p>
+          <p className="mt-1 text-sm leading-5 text-muted-foreground">{emptyText}</p>
         </div>
       ) : (
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -71,11 +71,11 @@ export function ProviderChildrenSection({
                 key={child.id}
                 type="button"
                 aria-label={`${openLabel}: ${child.name}`}
-                className="group flex min-h-32 flex-col justify-between rounded-lg border border-border bg-background p-3 text-left shadow-sm transition-colors hover:border-primary/35 hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                className="group flex flex-col justify-between gap-2 rounded-lg p-2 text-left transition-colors hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                 onClick={() => onOpenProvider(child.id)}
               >
                 <span className="flex min-w-0 items-start gap-3">
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/30 text-muted-foreground">
+                  <span className="flex size-5 shrink-0 items-center justify-center text-foreground">
                     <Building2 className="size-4" />
                   </span>
                   <span className="min-w-0 flex-1">
@@ -104,7 +104,7 @@ export function ProviderChildrenSection({
                     </span>
                   </span>
                 </span>
-                <span className="mt-4 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                <span className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span className="flex min-w-0 items-center gap-1.5">
                     <MapPin className="size-3.5 shrink-0" />
                     <span className="min-w-0 max-w-full break-words">{location || t.common_not_set}</span>

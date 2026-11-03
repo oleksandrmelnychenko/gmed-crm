@@ -223,13 +223,13 @@ const availabilityTimeInputClassName = cn(
   "h-9 min-w-0 px-2 text-sm tabular-nums [color-scheme:light] [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
 );
 const providerDetailSectionClassName =
-  "border-border/70 bg-card px-3 py-3 sm:px-4";
+  "bg-card p-3";
 const providerDetailPanelClassName = cn(
-  "space-y-2.5 rounded-xl border",
+  "space-y-2 rounded-xl",
   providerDetailSectionClassName,
 );
 const providerPrimaryActionButtonClassName =
-  "h-8 rounded-lg border-[var(--brand)] bg-[var(--brand)] px-3 text-primary-foreground shadow-sm hover:bg-[var(--brand)]/90 hover:text-primary-foreground focus-visible:ring-[var(--brand)]/30";
+  "h-7 rounded-lg bg-primary px-2.5 text-primary-foreground hover:bg-primary/90 focus-visible:ring-ring/30";
 const LINKED_PATIENTS_PAGE_SIZE = 10;
 const contactAddButtonClassName =
   providerPrimaryActionButtonClassName;
@@ -310,7 +310,7 @@ function applyContactPatch<T extends ContactWithPrimary>(
 
 function cardClass(extra?: string) {
   return cn(
-    "rounded-[1.75rem] border border-border/70 bg-card",
+    "rounded-xl bg-card",
     extra
   );
 }
@@ -1129,7 +1129,7 @@ function WeeklyAvailabilityEditor({
   };
 
   return (
-    <div className="space-y-2 rounded-lg border border-border/70 bg-card/50 p-2">
+    <div className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-1.5 border-b border-border/60 pb-2">
         {quickPresets.map((preset) => (
           <Button
@@ -1148,7 +1148,7 @@ function WeeklyAvailabilityEditor({
       {draftSchedule.map((row) => (
         <div
           key={row.day}
-          className="grid gap-2 rounded-md border border-border/60 bg-background/70 p-2 sm:grid-cols-[6.5rem_minmax(0,1fr)]"
+          className="grid gap-2 border-b border-border/60 py-1.5 last:border-b-0 sm:grid-cols-[6.5rem_minmax(0,1fr)]"
         >
           <div className="flex h-9 items-center justify-between gap-2">
             <label className="flex min-w-0 items-center gap-2">
@@ -1275,7 +1275,7 @@ function WeeklyAvailabilityEditor({
 function titleWithDot(title: ReactNode) {
   return (
     <span className="inline-flex min-w-0 items-center gap-2">
-      <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
       <span className="min-w-0 truncate">{title}</span>
     </span>
   );
@@ -1304,9 +1304,9 @@ function EmptyPanel({
   text: string;
 }) {
   return (
-    <div className="rounded-[1.5rem] border border-dashed border-border bg-muted/90 px-5 py-6">
+    <div className="py-3">
       <p className="text-sm font-medium text-foreground">{title}</p>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">{text}</p>
+      <p className="mt-1 text-sm leading-5 text-muted-foreground">{text}</p>
     </div>
   );
 }
@@ -3803,7 +3803,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
         {catalogMode === "providers" ? (
           <>
-        <div className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
+        <div className="overflow-hidden rounded-lg bg-card">
         <div className="relative z-30 grid grid-cols-2 items-end gap-2 border-b border-border/70 bg-card p-2.5 sm:flex sm:flex-nowrap sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">
             <ToolbarField label={t.common_search} className="col-span-2 w-full sm:col-auto sm:w-[220px]">
             <div className="relative">
@@ -5098,7 +5098,7 @@ function PaginatedLinkedPatientsGrid({
           toolbarTitle ? (
             <>
               <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
                 {toolbarTitle}
               </span>
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
@@ -5149,7 +5149,7 @@ function CollapsibleLinkedPatientsPanel({
       >
         <span className="flex min-w-0 items-center gap-2">
           {showMarker ? (
-            <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+            <span className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
           ) : null}
           <span className="truncate text-[13px] font-semibold tracking-tight text-foreground">
             {l("providers_linked_patients")}
@@ -5184,7 +5184,7 @@ function CollapsibleLinkedPatientsPanel({
 
 function DoctorLinkedPatientsSection({ patients }: { patients: LinkedPatient[] }) {
   return (
-    <div className="rounded-xl border border-border/70 bg-card/50 p-3.5">
+    <div className="rounded-xl bg-card p-3">
       <CollapsibleLinkedPatientsPanel patients={patients} />
     </div>
   );
@@ -6564,7 +6564,7 @@ function HeroInfoTableRow({
 }) {
   return (
     <div className={cn(
-      "grid min-w-0 content-start gap-4 px-3 py-2.5 sm:grid-cols-[10.25rem_minmax(0,1fr)]",
+      "grid min-w-0 content-start gap-x-3 gap-y-1 py-1.5 sm:grid-cols-[10.25rem_minmax(0,1fr)]",
       className,
     )}>
       <div className="flex min-w-0 items-start gap-2 text-xs font-medium leading-5 text-foreground">
@@ -6648,14 +6648,8 @@ function ProviderSheetHero({
   const internalRatingLabel = formatProviderRating(detail.internal_rating, t.common_not_set);
 
   return (
-    <section className="relative overflow-hidden rounded-lg border border-border/70 bg-card px-7 py-4">
-      <span
-        className={cn(
-          "absolute left-0 top-4 h-12 w-1 rounded-r-full",
-          detail.is_active ? "bg-emerald-500" : "bg-slate-300",
-        )}
-      />
-      <div className="space-y-4">
+    <section className="rounded-xl bg-card p-3">
+      <div className="space-y-2">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
@@ -6680,7 +6674,7 @@ function ProviderSheetHero({
           <p className="mt-1.5 break-words text-sm text-muted-foreground">
             {metaLine || t.common_not_set}
           </p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <Badge
               variant="outline"
               className={cn(
@@ -6722,17 +6716,17 @@ function ProviderSheetHero({
             </Badge>
           </div>
           </div>
-          <div className="flex shrink-0 border-t border-dashed border-border/70 pt-3 text-left xl:w-[190px] xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0">
+          <div className="flex shrink-0 text-left">
             {(Boolean(onEdit) && permissions.canEditProvider) || permissions.canManageRegistry ? (
               // Phone width (QA 2026-10-11): two full-width buttons pushed
               // "Delete" out of the clipped card. They share the row and wrap.
-              <div className="flex w-full flex-wrap gap-2 xl:flex-col xl:flex-nowrap">
+              <div className="flex w-full flex-wrap items-center gap-1.5">
               {onEdit ? (
                 <Button
                   type="button"
                   variant="default"
                   size="sm"
-                  className={cn(providerPrimaryActionButtonClassName, "flex-1 justify-center gap-1.5 xl:w-full xl:flex-none")}
+                  className={cn(providerPrimaryActionButtonClassName, "justify-center gap-1.5")}
                   onClick={onEdit}
                 >
                   <Pencil className="size-3.5" />
@@ -6742,9 +6736,9 @@ function ProviderSheetHero({
               {permissions.canManageRegistry ? (
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
-                  className="h-8 flex-1 justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50 xl:w-full xl:flex-none"
+                  className="h-7 justify-center gap-1.5 text-destructive hover:text-destructive"
                   disabled={providerActionBusy === "delete"}
                   onClick={onDelete}
                 >
@@ -6760,7 +6754,7 @@ function ProviderSheetHero({
             ) : null}
           </div>
         </div>
-        <div className="grid overflow-hidden rounded-lg border border-border/70 bg-card md:grid-cols-2">
+        <div className="grid gap-x-6 border-t border-border/60 pt-2 md:grid-cols-2">
           <HeroInfoTableRow icon={MapPin} label={l("patients_address")}>
             {addressLine || localizedProviderMeta(detail, lang) || t.common_not_set}
           </HeroInfoTableRow>
@@ -7208,7 +7202,7 @@ function ProviderDoctorsTable({
         title ? (
           <>
             <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
               {title}
             </span>
             {createLabel && onNew ? (
@@ -7474,7 +7468,7 @@ function ContactPersonsTable({
       toolbarStart={
         <>
           <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
             {title}
           </span>
           {canManage ? (
@@ -7665,7 +7659,7 @@ function StaffSection({
         toolbarStart={
           <>
             <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
               {l("providers_staff")}
             </span>
             {canManage ? (
@@ -7939,7 +7933,7 @@ function ProviderWorkTypesCatalog({ detail }: { detail: ProviderDetail }) {
           toolbarStart={
             <>
               <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
                 {lang === "de" ? "Leistungsarten" : "Виды работ"}
               </span>
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
@@ -8068,7 +8062,7 @@ function ServiceSection({
           toolbarStart={
             <>
               <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
                 {l("providers_service_catalog")}
               </span>
               {canManage ? (
@@ -8366,7 +8360,7 @@ function InteractionHistorySection({
       toolbarStart={
         <>
           <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--heading-marker)]" />
             {l("providers_interaction_history")}
           </span>
           <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />

@@ -180,7 +180,7 @@ function ProviderIdentityCell({
       ) : (
         <span className="size-6 shrink-0" aria-hidden="true" />
       )}
-      <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-foreground">
+      <div className="flex size-6 shrink-0 items-center justify-center text-[11px] font-medium text-foreground">
         {provider.name
           .split(/\s+/)
           .slice(0, 2)

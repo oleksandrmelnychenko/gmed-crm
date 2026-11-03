@@ -1447,7 +1447,7 @@ function MobilePeopleCards({
 
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-border bg-muted/30 px-5 py-6 text-sm text-muted-foreground md:hidden">
+      <div className="py-3 text-sm text-muted-foreground md:hidden">
         {labels.common_no_results ?? localizedFallback(lang, "Keine Ergebnisse", "Нет результатов")}
       </div>
     );
@@ -1458,10 +1458,10 @@ function MobilePeopleCards({
       {rows.map((row) => (
         <article
           key={`${row.person_type}:${row.shared_identity_id ?? row.person_id}`}
-          className="rounded-lg border border-border bg-card p-3 shadow-sm"
+          className="rounded-lg bg-card p-3"
         >
           <div className="flex items-start gap-2.5">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/30 text-muted-foreground">
+            <div className="flex size-5 shrink-0 items-center justify-center text-foreground">
               {row.person_type === "doctor" &&
               !isContactPersonType(row.person_type, row.provider_type, forceNonMedical) ? (
                 <Stethoscope className="size-4" />
@@ -1691,7 +1691,7 @@ export function ProviderPeopleCatalog({
       {error && !loading ? <ErrorBanner error={error} lang={lang} labels={labels} onRetry={onRetry} /> : null}
 
       {groupedRows.length > PROVIDER_PEOPLE_PAGE_SIZE ? (
-        <div className="overflow-hidden rounded-lg border border-border/70 shadow-sm md:hidden">
+        <div className="overflow-hidden rounded-lg md:hidden">
           <PeoplePager
             pageIndex={safePageIndex}
             totalPages={totalPages}
@@ -1702,7 +1702,7 @@ export function ProviderPeopleCatalog({
         </div>
       ) : null}
 
-      <div className="hidden overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm md:block">
+      <div className="hidden overflow-hidden rounded-lg bg-card md:block">
         <DataTableSurface
           rows={pagedRows}
           columns={columns}
