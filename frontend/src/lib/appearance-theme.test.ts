@@ -12,7 +12,7 @@ describe("portable appearance themes", () => {
     expect(parseAppearanceTheme(JSON.stringify(theme))).toEqual(theme);
   });
 
-  it.each(BUILTIN_THEMES.filter((theme) => theme.id !== DEFAULT_THEME.id))("gives $name readable field borders and its own colours", (theme) => {
+  it.each(BUILTIN_THEMES.filter((theme) => theme.id !== DEFAULT_THEME.id))("gives $name readable field borders and its own action colour", (theme) => {
     const c = theme.colors;
     expect(contrastRatio(c.inputBorder, c.field)).toBeGreaterThanOrEqual(3);
     expect(contrastRatio(c.headingMarker, c.surface)).toBeGreaterThanOrEqual(3);

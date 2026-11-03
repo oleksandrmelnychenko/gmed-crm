@@ -34,54 +34,11 @@ export const DEFAULT_THEME: AppearanceTheme = {
 };
 
 export const BUILTIN_THEMES: readonly AppearanceTheme[] = [DEFAULT_THEME, {
-  // Each palette owns its action colour, accent and heading marker; field borders
-  // keep at least 3:1 against white (WCAG 1.4.11).
-  version: 1, id: "gmed-sage", name: "GMED Sage", colors: {
+  // Graphite's calm neutral surfaces with GMED orange actions (owner 2026-11-03: two light
+  // themes, no tinted floods). #c2410c keeps white button text at 5.2:1; #f97316 would be 2.8:1.
+  version: 1, id: "gmed-orange", name: "GMED Orange", colors: {
     ...DEFAULT_THEME_COLORS,
-    background: "#e6eee8", primary: "#275e40", primaryText: "#ffffff",
-    text: "#1b2a22", textMuted: "#45574c", muted: "#eff5f0", accent: "#d2e6d8",
-    border: "#cddbd1", inputBorder: "#7c9584", focus: "#3a7a55", sidebar: "#f0f6f1", headingMarker: "#a16207",
-    rowAlternate: "#f4f8f5", rowHover: "#e7f0ea", rowActive: "#dceadf", rowSelected: "#cde2d4",
-  },
-}, {
-  version: 1, id: "gmed-ocean", name: "GMED Ocean", colors: {
-    ...DEFAULT_THEME_COLORS,
-    background: "#e4edf7", primary: "#1b5488", primaryText: "#ffffff",
-    text: "#14283b", textMuted: "#40556a", muted: "#eef4fb", accent: "#d1e2f4",
-    border: "#c9d8e8", inputBorder: "#7a91aa", focus: "#2b6cb0", sidebar: "#eff5fc", headingMarker: "#c2410c",
-    rowAlternate: "#f3f7fc", rowHover: "#e5eef8", rowActive: "#d9e7f5", rowSelected: "#c9ddf2",
-  },
-}, {
-  version: 1, id: "gmed-lagoon", name: "GMED Lagoon", colors: {
-    ...DEFAULT_THEME_COLORS,
-    background: "#e1f0ee", primary: "#0c605c", primaryText: "#ffffff",
-    text: "#12302d", textMuted: "#3c5b57", muted: "#edf7f5", accent: "#cbe7e2",
-    border: "#c2dbd7", inputBorder: "#759893", focus: "#147d76", sidebar: "#eef8f6", headingMarker: "#c2410c",
-    rowAlternate: "#f2f9f8", rowHover: "#e3f1ee", rowActive: "#d6ebe7", rowSelected: "#c6e3de",
-  },
-}, {
-  version: 1, id: "gmed-iris", name: "GMED Iris", colors: {
-    ...DEFAULT_THEME_COLORS,
-    background: "#ece8f8", primary: "#5b3fa0", primaryText: "#ffffff",
-    text: "#2a2140", textMuted: "#564a6f", muted: "#f4f1fc", accent: "#e0d7f5",
-    border: "#d9d0ee", inputBorder: "#8f82ad", focus: "#6a4cbd", sidebar: "#f6f3fd", headingMarker: "#be185d",
-    rowAlternate: "#f8f6fd", rowHover: "#efeafa", rowActive: "#e6dff7", rowSelected: "#dcd2f3",
-  },
-}, {
-  version: 1, id: "gmed-dune", name: "GMED Dune", colors: {
-    ...DEFAULT_THEME_COLORS,
-    background: "#f2eadf", primary: "#843c1b", primaryText: "#ffffff",
-    text: "#2f261d", textMuted: "#5f503d", muted: "#f8f3ec", accent: "#efdcc8",
-    border: "#e3d4c1", inputBorder: "#a28a72", focus: "#a9542a", sidebar: "#faf5ee", headingMarker: "#b45309",
-    rowAlternate: "#fbf8f3", rowHover: "#f4ebe0", rowActive: "#eee1d1", rowSelected: "#e8d6c1",
-  },
-}, {
-  version: 1, id: "gmed-rose", name: "GMED Rose", colors: {
-    ...DEFAULT_THEME_COLORS,
-    background: "#f6e8ee", primary: "#962d58", primaryText: "#ffffff",
-    text: "#33202a", textMuted: "#664856", muted: "#fcf3f6", accent: "#f3d5e1",
-    border: "#e9d1db", inputBorder: "#ab8798", focus: "#ab3766", sidebar: "#fdf3f7", headingMarker: "#c2410c",
-    rowAlternate: "#fdf6f9", rowHover: "#f7e9ef", rowActive: "#f2dce6", rowSelected: "#eccfdc",
+    primary: "#c2410c", primaryText: "#ffffff", focus: "#ea580c", headingMarker: "#ea580c", inputBorder: "#868c9e",
   },
 }];
 
