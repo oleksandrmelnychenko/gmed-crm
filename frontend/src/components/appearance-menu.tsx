@@ -1,7 +1,6 @@
 import { Menu } from "@base-ui/react/menu";
-import { Check, Contrast, Palette, Settings2 } from "lucide-react";
+import { Check, Palette, Settings2 } from "lucide-react";
 
-import { openContrastMeter } from "@/components/contrast-meter";
 import { toast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
@@ -10,10 +9,10 @@ import { useAppearanceTheme } from "@/lib/use-appearance-theme";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 
 const TEXT = {
-  ru: { title: "Темы", settings: "Настройки оформления", contrast: "Проверить контраст", error: "Не удалось сохранить тему в браузере." },
-  de: { title: "Themes", settings: "Darstellung anpassen", contrast: "Kontrast prüfen", error: "Das Theme konnte nicht im Browser gespeichert werden." },
-  en: { title: "Themes", settings: "Appearance settings", contrast: "Check contrast", error: "Could not save the theme in this browser." },
-  uk: { title: "Теми", settings: "Налаштування оформлення", contrast: "Перевірити контраст", error: "Не вдалося зберегти тему в браузері." },
+  ru: { title: "Темы", settings: "Настройки оформления", error: "Не удалось сохранить тему в браузере." },
+  de: { title: "Themes", settings: "Darstellung anpassen", error: "Das Theme konnte nicht im Browser gespeichert werden." },
+  en: { title: "Themes", settings: "Appearance settings", error: "Could not save the theme in this browser." },
+  uk: { title: "Теми", settings: "Налаштування оформлення", error: "Не вдалося зберегти тему в браузері." },
 } as const;
 
 /** Contrast levels are picked apart from the theme (owner 2026-11-03). */
@@ -87,10 +86,6 @@ export function AppearanceMenu({ onOpen }: { onOpen?: () => void }) {
               </Menu.RadioGroup>
             </Menu.Group>
             <Menu.Separator className="my-1 h-px bg-border" />
-            <Menu.Item className={ITEM_CLASS} onClick={openContrastMeter}>
-              <Contrast aria-hidden="true" className="size-4 shrink-0" />
-              {text.contrast}
-            </Menu.Item>
             <Menu.Item className={ITEM_CLASS} onClick={() => staffGo("/account?section=appearance")}>
               <Settings2 aria-hidden="true" className="size-4 shrink-0" />
               {text.settings}
