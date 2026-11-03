@@ -147,15 +147,16 @@ async fn lock_identity_lead(conn: &mut PgConnection, lead_id: Uuid) -> Result<bo
 // The assessment
 // ----------------------------------------------------------------------------
 
-/// `representatives`: the lead's current representatives, to name the one a
-/// representative trigger concerns (QA 2026-10-24, B-6) even when it has no
-/// country questions and so is not under `representatives` of the assessment.
-fn trigger_json(trigger: &Sticky, representatives: &[risk::RepresentativeInputs]) -> Value {
+/// `representatives`: every current representative of the lead, to name the
+/// one a representative trigger concerns (QA 2026-10-24, B-6) even when it
+/// has no country questions, or no longer counts (a minor's parent who lost
+/// its billing role, QA 2026-11-03, B-5).
+fn trigger_json(trigger: &Sticky, representatives: &[(Uuid, String)]) -> Value {
     let representative_name = trigger.representative_id.and_then(|id| {
         representatives
             .iter()
-            .find(|person| person.id == id)
-            .map(|person| person.name.clone())
+            .find(|(person, _)| *person == id)
+            .map(|(_, name)| name.clone())
     });
     let blocks: Vec<&str> = if trigger.subject == risk::SUBJECT_REPRESENTATIVE {
         vec!["R"]
@@ -295,6 +296,14 @@ async fn assessment_json(
     let stored = store::load(conn, lead_id).await?;
     let started = stored.as_ref().is_some_and(Assessment::started);
     let inputs = risk::inputs::load(conn, lead_id).await?.unwrap_or_default();
+    let names: Vec<(Uuid, String)> = super::lead_representatives::load(conn, lead_id)
+        .await?
+        .unwrap_or_default()
+        .representation
+        .representatives
+        .iter()
+        .map(|person| (person.id, person.name()))
+        .collect();
     let preview = if started {
         Value::Null
     } else {
@@ -307,7 +316,7 @@ async fn assessment_json(
             "patient_points": score.patient_points,
             "payer_points": score.payer_points,
             "knockout": score.knockout,
-            "triggers": triggers.iter().map(|trigger| trigger_json(trigger, &inputs.representatives)).collect::<Vec<_>>(),
+            "triggers": triggers.iter().map(|trigger| trigger_json(trigger, &names)).collect::<Vec<_>>(),
         })
     };
     let answers = store::load_block_answers(conn, lead_id, &inputs, None).await?;
@@ -387,7 +396,7 @@ async fn assessment_json(
         "patient_points": started.then_some(score.patient_points),
         "payer_points": started.then_some(score.payer_points),
         "knockout": started && score.knockout,
-        "triggers": triggers.iter().map(|trigger| trigger_json(trigger, &inputs.representatives)).collect::<Vec<_>>(),
+        "triggers": triggers.iter().map(|trigger| trigger_json(trigger, &names)).collect::<Vec<_>>(),
         "blocks": blocks,
         "before_submit": before_submit,
         "representatives": answers.representatives.iter().filter(|person| person.country_questions).collect::<Vec<_>>(),

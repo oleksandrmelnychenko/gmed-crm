@@ -855,7 +855,16 @@ pub(crate) fn following_payer(
     paying_parent: Option<Uuid>,
 ) -> Option<Recipient> {
     if recipient.is_payer != Some(true) {
-        return None;
+        // The parent who receives the invoices now pays as well: "the
+        // recipient is the payer" says so, or the Patientenformular names the
+        // same parent as payer and says «nein» (QA 2026-11-03, F1).
+        let names_the_payer = paying_parent.is_some()
+            && !recipient.is_third_party()
+            && recipient.representative_contact_id == paying_parent;
+        return names_the_payer.then(|| Recipient {
+            is_payer: Some(true),
+            ..recipient.clone()
+        });
     }
     let mut next = recipient.clone();
     // The other parent pays now: "the recipient is the payer" names that
@@ -1474,6 +1483,11 @@ mod tests {
             ..recipient
         };
         assert_eq!(following_payer(&apart, &declaration, Some(father)), None);
+
+        // The parent who only received the invoice now pays (QA 2026-11-03, F1).
+        let next = following_payer(&apart, &same, Some(mother)).unwrap();
+        assert_eq!(next.representative_contact_id, Some(mother));
+        assert_eq!(next.is_payer, Some(true));
     }
 
     fn third_party_payer(first: &str, last: &str) -> Declaration {

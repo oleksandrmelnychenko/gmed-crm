@@ -3531,3 +3531,67 @@ async fn a_parent_without_a_billing_role_is_screened_but_raises_no_trigger() {
     assert_eq!(code, StatusCode::OK, "{body}");
     assert_eq!(t16_subjects(&app, minor).await, ["payer"]);
 }
+
+/// QA 2026-11-03, B-1: a hit screened while the parent received the invoices
+/// keeps that role in its decided snapshot; once the other parent receives
+/// them, the hit no longer counts for the triggers.
+#[tokio::test]
+async fn a_parents_hit_counts_by_the_role_it_has_now() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    load_synthetic_list(&app).await;
+    let father = Uuid::new_v4();
+    let mother = Uuid::new_v4();
+    let minor = insert_lead(
+        &app,
+        "Mila",
+        "Beispiel",
+        Some("2016-04-04"),
+        &[],
+        json!([
+            { "id": father, "name": "Testomir Korneev", "relation": "father", "birth_date": "1961-03-14" },
+            { "id": mother, "name": "Anna Beispiel", "relation": "mother" }
+        ]),
+    )
+    .await;
+    let set_role = |person: Uuid| {
+        let app = &app;
+        async move {
+            let (code, body) = request(
+                app,
+                "PUT",
+                &format!("/leads/{minor}/representatives/{person}/billing-role"),
+                &app.pm(),
+                Some(json!({ "receives_invoice": true, "pays": false })),
+            )
+            .await;
+            assert_eq!(code, StatusCode::OK, "{body}");
+        }
+    };
+    set_role(father).await;
+    let status = lead_status(&app, minor).await;
+    assert_eq!(status["screening"], "review_pending", "{status}");
+    let hits = open_hits(&app).await;
+    let hit = hits
+        .iter()
+        .find(|hit| hit["subject_kind"] == "lead_guardian")
+        .unwrap_or_else(|| panic!("the father is screened: {hits:?}"));
+    assert!(
+        hit["subject_snapshot"]["relation"]
+            .as_str()
+            .is_none_or(|relation| relation.contains("invoice_recipient")),
+        "{hit}"
+    );
+    decide(
+        &app,
+        hit["id"].as_str().unwrap(),
+        "confirmed",
+        "Synthetic list entry, same person",
+    )
+    .await;
+    assert_eq!(t16_subjects(&app, minor).await, ["payer"]);
+
+    set_role(mother).await;
+    assert!(t16_subjects(&app, minor).await.is_empty());
+}

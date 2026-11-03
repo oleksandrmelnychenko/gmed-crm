@@ -50,33 +50,35 @@ const ORDER_PAYER_SQL: &str = r#"COALESCE(
     'name:' || lower(NULLIF(btrim(o.payer_contact_name), ''))
 )"#;
 
-/// A hit on a minor's parent who pays: the role noted when it was screened,
-/// or the lead's payer naming the parent now (a role given after the CEO's
-/// decision, which keeps the snapshot as it was).
+/// A hit on a minor's parent who pays now: the parameter (`$n`, a `uuid[]`)
+/// holds the paying parents of [`current_roles`]. Never the role noted in the
+/// hit's snapshot: a decided hit keeps the snapshot it was screened with, and
+/// a parent who stopped paying no longer counts (QA 2026-11-03, B-1).
+///
+/// [`current_roles`]: crate::routes::lead_parent_billing_role::current_roles
 macro_rules! guardian_pays_sql {
-    () => {
-        "(h.subject_kind = 'lead_guardian' \
-         AND (COALESCE(h.subject_snapshot->>'relation', '') = 'payer' \
-              OR COALESCE(h.subject_snapshot->>'relation', '') LIKE '%; payer' \
-              OR EXISTS (SELECT 1 FROM lead_payer_declarations pd \
-                         WHERE pd.lead_id = h.lead_id \
-                           AND pd.payer_kind = 'representative' \
-                           AND pd.payer_representative_id::text = lower(h.subject_ref))))"
+    ($param:literal) => {
+        concat!(
+            "(h.subject_kind = 'lead_guardian' AND lower(h.subject_ref) = ANY(",
+            $param,
+            "::uuid[]::text[]))"
+        )
     };
 }
+pub(crate) use guardian_pays_sql;
 
-/// A hit on a minor's parent who receives the invoices (owner 2026-11-02):
-/// noted when it was screened, or named as recipient now.
+/// A hit on a minor's parent who receives the invoices now (owner
+/// 2026-11-02); the parameter holds the receiving parents.
 macro_rules! guardian_receives_sql {
-    () => {
-        "(h.subject_kind = 'lead_guardian' \
-         AND (COALESCE(h.subject_snapshot->>'relation', '') LIKE '%invoice_recipient%' \
-              OR EXISTS (SELECT 1 FROM lead_invoice_recipients ir \
-                         WHERE ir.lead_id = h.lead_id \
-                           AND ir.recipient = 'self' \
-                           AND ir.representative_contact_id::text = lower(h.subject_ref))))"
+    ($param:literal) => {
+        concat!(
+            "(h.subject_kind = 'lead_guardian' AND lower(h.subject_ref) = ANY(",
+            $param,
+            "::uuid[]::text[]))"
+        )
     };
 }
+pub(crate) use guardian_receives_sql;
 
 /// A sanctions hit (`h`) on the payer's side: the third-party payer and the
 /// people behind it, the bank the payer pays through, the third-party
@@ -98,17 +100,19 @@ macro_rules! guardian_receives_sql {
 /// [`crate::sanctions::gate`] only — it never raises the risk level, so it
 /// never opens a follow-up block, the enhanced check or the payer's proof of
 /// funds, and nothing the lead, the payer or the recipient sees changes.
-pub(crate) const PAYER_SIDE_HIT_SQL: &str = concat!(
+///
+/// Binds the paying parents as `$2` and the receiving ones as `$3`.
+const PAYER_SIDE_HIT_SQL: &str = concat!(
     "(h.subject_kind IN ('lead_payer', 'lead_recipient', 'payer_contact') \
      OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank') OR ",
-    guardian_pays_sql!(),
+    guardian_pays_sql!("$2"),
     " OR ",
-    guardian_receives_sql!(),
+    guardian_receives_sql!("$3"),
     ")"
 );
 
-pub(crate) const GUARDIAN_PAYS_SQL: &str = guardian_pays_sql!();
-pub(crate) const GUARDIAN_RECEIVES_SQL: &str = guardian_receives_sql!();
+const GUARDIAN_PAYS_SQL: &str = guardian_pays_sql!("$2");
+const GUARDIAN_RECEIVES_SQL: &str = guardian_receives_sql!("$3");
 
 /// A hit on a minor's parent or guardian (not an adult's representative or
 /// Betreuer, whose `relation` is the cabinet role).
@@ -147,6 +151,16 @@ async fn load_inner(
     let Some(subjects) = subjects else {
         return Ok(None);
     };
+    // A minor's parent or guardian counts for the risk triggers (countries,
+    // PEP and sanctions answers, block R, a confirmed sanctions hit) only
+    // while it receives the invoices or pays (owner 2026-11-02); every one
+    // stays screened against the sanctions lists. An adult's representative
+    // and Betreuer count as before (`None`).
+    let roles = crate::routes::lead_parent_billing_role::current_roles(conn, lead_id).await?;
+    let (paying, receiving) = roles
+        .as_ref()
+        .map(|roles| (roles.paying.clone(), roles.receiving.clone()))
+        .unwrap_or_default();
     let row = sqlx::query(&format!(
         r#"SELECT l.date_of_birth,
                   g.former_citizenships, g.has_representative, g.under_guardianship,
@@ -227,6 +241,8 @@ async fn load_inner(
            WHERE l.id = $1"#
     ))
     .bind(lead_id)
+    .bind(&paying)
+    .bind(&receiving)
     .fetch_optional(&mut *conn)
     .await?;
     let Some(row) = row else {
@@ -261,36 +277,14 @@ async fn load_inner(
                 .filter(|payer| payer.is_representative()),
         )
     };
-    // A minor's parent or guardian counts for the risk triggers (countries,
-    // PEP and sanctions answers, block R) only while it receives the invoices
-    // or pays (owner 2026-11-02); every one stays screened against the
-    // sanctions lists. An adult's representative and Betreuer count as before.
-    let role_holders: Option<Vec<Uuid>> = if active.representation.minor {
-        let recipient = crate::routes::lead_invoice_recipient::load(conn, lead_id).await?;
-        let payer = crate::routes::lead_payer::load_declaration(conn, lead_id).await?;
-        Some(
-            active
-                .representation
-                .representatives
-                .iter()
-                .filter(|person| {
-                    let roles = crate::routes::lead_parent_billing_role::roles_of(
-                        person.id,
-                        recipient.as_ref(),
-                        payer.as_ref(),
-                        &active.representation,
-                    );
-                    roles.receives_invoice || roles.pays
-                })
-                .map(|person| person.id)
-                .collect(),
-        )
-    } else {
-        None
-    };
+    // A minor's parent counts by its role, also a second parent without a
+    // place in the form under sole custody who still pays or receives the
+    // invoices (QA 2026-11-03, B-2).
     let representatives = active.representation.representatives.iter()
-        .filter(|person| person.slot.is_some())
-        .filter(|person| role_holders.as_ref().is_none_or(|ids| ids.contains(&person.id)))
+        .filter(|person| match &roles {
+            Some(roles) => roles.holds_a_role(person.id),
+            None => person.slot.is_some(),
+        })
         .map(|person| {
             use sha2::{Digest, Sha256};
             let identity = canonical.iter().find(|identity| identity.contact_id == Some(person.id));

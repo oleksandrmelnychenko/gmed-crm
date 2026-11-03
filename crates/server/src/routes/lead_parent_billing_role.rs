@@ -10,7 +10,7 @@
 //! in the same transaction. Every parent is screened against the sanctions
 //! lists; the roles decide whether a confirmed hit also counts for the risk
 //! triggers, on the payer's or the recipient's side (owner 2026-11-02,
-//! `risk::inputs::PAYER_SIDE_HIT_SQL`).
+//! `risk::inputs`).
 //!
 //! * receives: the patient side is the recipient with this parent named;
 //!   "the recipient is the payer" follows `pays`. Dropping the role of the
@@ -93,6 +93,54 @@ pub(crate) fn roles_of(
         receives_invoice,
         pays,
     }
+}
+
+/// A minor's parents and guardians by their current roles: who pays, who
+/// receives the invoices. `None` for an adult's lead. The risk triggers read
+/// the roles from here, never from a sanctions hit's snapshot, which keeps
+/// the role a decided hit was screened with (QA 2026-11-03, B-1).
+pub(crate) struct CurrentRoles {
+    pub(crate) paying: Vec<Uuid>,
+    pub(crate) receiving: Vec<Uuid>,
+}
+
+impl CurrentRoles {
+    pub(crate) fn holds_a_role(&self, person: Uuid) -> bool {
+        self.paying.contains(&person) || self.receiving.contains(&person)
+    }
+}
+
+pub(crate) async fn current_roles(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+) -> Result<Option<CurrentRoles>, sqlx::Error> {
+    let active = lead_representatives::load(conn, lead_id)
+        .await?
+        .unwrap_or_default();
+    if !active.representation.minor {
+        return Ok(None);
+    }
+    let recipient = lead_invoice_recipient::load(conn, lead_id).await?;
+    let payer = lead_payer::load_declaration(conn, lead_id).await?;
+    let mut roles = CurrentRoles {
+        paying: Vec::new(),
+        receiving: Vec::new(),
+    };
+    for person in &active.representation.representatives {
+        let held = roles_of(
+            person.id,
+            recipient.as_ref(),
+            payer.as_ref(),
+            &active.representation,
+        );
+        if held.pays {
+            roles.paying.push(person.id);
+        }
+        if held.receives_invoice {
+            roles.receiving.push(person.id);
+        }
+    }
+    Ok(Some(roles))
 }
 
 async fn set_billing_role(
@@ -257,7 +305,16 @@ async fn set_billing_role(
     match change {
         None => {}
         Some(Some(next)) => {
-            let changed = lead_invoice_recipient::changed_keys(&current, &next);
+            // This parent's row is written resolved: compared with the stored
+            // row as resolved, the audit lists what changed, not the parent's
+            // address read in (QA 2026-11-03, F5). Another recipient keeps its
+            // row as stored.
+            let base = if wanted.receives_invoice {
+                &resolved_current
+            } else {
+                &current
+            };
+            let changed = lead_invoice_recipient::changed_keys(base, &next);
             if let Err(error) =
                 lead_invoice_recipient::store(&mut tx, lead_id, &next, auth.user_id).await
             {

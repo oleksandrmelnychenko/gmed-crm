@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import { ApiRequestError } from "@/lib/api";
+
 import type { LeadPortalBilling } from "../data/lead-portal-intake-api";
 import {
   PARENT_BILLING_ROLES,
   parentBillingRole,
   parentBillingRoleBody,
   parentBillingRoleChip,
+  parentBillingRoleErrorText,
   parentBillingRoleOf,
 } from "./parent-billing-role";
 
@@ -46,6 +49,9 @@ describe("parent billing role", () => {
   it("is unknown while the lead's data are not loaded", () => {
     expect(parentBillingRole(MOTHER, undefined, null)).toBeNull();
     expect(parentBillingRole(MOTHER, null, undefined)).toBeNull();
+    // Nobody answered yet: not "no role" (QA 2026-11-03, F6).
+    expect(parentBillingRole(MOTHER, billing(null), null)).toBeNull();
+    expect(parentBillingRole(MOTHER, null, null)).toBeNull();
   });
 
   it("round-trips through the request body", () => {
@@ -59,5 +65,13 @@ describe("parent billing role", () => {
     expect(parentBillingRoleChip("recipient_and_payer", tx)).toBe("Получает счёт и платит");
     expect(parentBillingRoleChip("none", tx)).toBeNull();
     expect(parentBillingRoleChip(null, tx)).toBeNull();
+  });
+
+  it("names why the server refused a role", () => {
+    const refusal = (error: string) => new ApiRequestError("refused", { status: 409, body: { error } });
+    expect(parentBillingRoleErrorText(refusal("payer_not_changed"), tx)).toContain("по своей ссылке");
+    expect(parentBillingRoleErrorText(refusal("payer_still_this_parent"), tx)).toContain("сейчас плательщик");
+    expect(parentBillingRoleErrorText(refusal("lead_converted"), tx)).toBeNull();
+    expect(parentBillingRoleErrorText(new Error("x"), tx)).toBeNull();
   });
 });

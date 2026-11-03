@@ -319,7 +319,13 @@ async fn load_subjects_inner(
     lead_id: Uuid,
     payer_draft: bool,
 ) -> Result<Option<Subjects>, sqlx::Error> {
-    use crate::risk::inputs::{GUARDIAN_PAYS_SQL, GUARDIAN_RECEIVES_SQL};
+    // The paying parents ($3) and the receiving ones ($4) as they are now.
+    let roles = crate::routes::lead_parent_billing_role::current_roles(conn, lead_id).await?;
+    let (paying, receiving) = roles
+        .map(|roles| (roles.paying, roles.receiving))
+        .unwrap_or_default();
+    let guardian_pays = crate::risk::inputs::guardian_pays_sql!("$3");
+    let guardian_receives = crate::risk::inputs::guardian_receives_sql!("$4");
     let Some(row) = sqlx::query(&format!(
         r#"SELECT l.country,
                   l.citizenships,
@@ -373,23 +379,23 @@ async fn load_subjects_inner(
                       COUNT(*) FILTER (
                           WHERE (h.subject_kind IN ('lead_payer', 'payer_contact')
                                  OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank')
-                                 OR {GUARDIAN_PAYS_SQL})
+                                 OR {guardian_pays})
                             AND h.status = 'confirmed'
                       ) AS payer_confirmed,
                       COUNT(*) FILTER (
                           WHERE (h.subject_kind IN ('lead_payer', 'payer_contact')
                                  OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank')
-                                 OR {GUARDIAN_PAYS_SQL})
+                                 OR {guardian_pays})
                             AND h.status = 'open'
                       ) AS payer_open,
                       COUNT(*) FILTER (
                           WHERE (h.subject_kind = 'lead_recipient'
-                                 OR ({GUARDIAN_RECEIVES_SQL} AND NOT {GUARDIAN_PAYS_SQL}))
+                                 OR ({guardian_receives} AND NOT {guardian_pays}))
                             AND h.status = 'confirmed'
                       ) AS recipient_confirmed,
                       COUNT(*) FILTER (
                           WHERE (h.subject_kind = 'lead_recipient'
-                                 OR ({GUARDIAN_RECEIVES_SQL} AND NOT {GUARDIAN_PAYS_SQL}))
+                                 OR ({guardian_receives} AND NOT {guardian_pays}))
                             AND h.status = 'open'
                       ) AS recipient_open
                FROM sanctions_hits h
@@ -404,8 +410,8 @@ async fn load_subjects_inner(
                WHERE (h.lead_id = l.id
                       AND (h.subject_kind IN ('lead_patient', 'lead_payer', 'lead_bank',
                                               'lead_recipient', 'payer_contact')
-                           OR {GUARDIAN_PAYS_SQL}
-                           OR {GUARDIAN_RECEIVES_SQL}))
+                           OR {guardian_pays}
+                           OR {guardian_receives}))
                   -- The patient record of a repeat intake or of the converted lead.
                   OR (h.subject_kind = 'patient'
                       AND h.patient_id IN (l.prospect_patient_id, l.converted_patient_id))
@@ -414,6 +420,8 @@ async fn load_subjects_inner(
     ))
     .bind(lead_id)
     .bind(payer_draft)
+    .bind(&paying)
+    .bind(&receiving)
     .fetch_optional(&mut *conn)
     .await?
     else {

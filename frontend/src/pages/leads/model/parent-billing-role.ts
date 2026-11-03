@@ -1,3 +1,5 @@
+import { ApiRequestError } from "@/lib/api";
+
 import type { LeadPortalBilling, LeadRepresentative } from "../data/lead-portal-intake-api";
 import type { PayerDeclaration } from "./lead-payer";
 
@@ -46,7 +48,11 @@ function payerIsParent(contactId: string, payer: PayerParty | null, person: Pare
     && payer.date_of_birth === person.date_of_birth;
 }
 
-/** The role of the parent `contactId` as stored; null while the lead's data are not loaded. */
+/**
+ * The role of the parent `contactId` as stored; null while the lead's data are
+ * not loaded, or while nobody answered who receives the invoice or pays (the
+ * dialog says «Не указано», QA 2026-11-03, F6).
+ */
 export function parentBillingRole(
   contactId: string,
   billing: LeadPortalBilling | null | undefined,
@@ -54,6 +60,7 @@ export function parentBillingRole(
   person?: ParentPerson | null,
 ): ParentBillingRole | null {
   if (billing === undefined || payer === undefined) return null;
+  if (!billing?.invoice_recipient && !payer) return null;
   const receives = billing?.invoice_recipient === "self" && billing.recipient?.representative_id === contactId;
   return parentBillingRoleOf({ receives_invoice: receives, pays: payerIsParent(contactId, payer, person) });
 }
@@ -101,4 +108,27 @@ export function parentBillingRoleChip(role: ParentBillingRole | null, tx: Tx): s
     default:
       return null;
   }
+}
+
+/**
+ * Why the server refused a parent's role, as one localized sentence; `null`
+ * for other errors (QA 2026-11-03, F3: the payer's own answers showed the
+ * generic "data changed" text).
+ */
+export function parentBillingRoleErrorText(error: unknown, tx: Tx): string | null {
+  if (!(error instanceof ApiRequestError)) return null;
+  const code = error.body?.error ?? error.body?.code ?? error.code;
+  if (code === "payer_not_changed") {
+    return tx(
+      "Плательщик уже ответил по своей ссылке. Изменить плательщика можно только на шаге плательщика.",
+      "Der Zahler hat bereits über seinen eigenen Link geantwortet. Der Zahler lässt sich nur im Zahlerschritt ändern.",
+    );
+  }
+  if (code === "payer_still_this_parent") {
+    return tx(
+      "Этот родитель сейчас плательщик. Сначала назначьте плательщиком другого родителя или третье лицо.",
+      "Dieser Elternteil ist derzeit Zahler. Bitte zuerst den anderen Elternteil oder eine dritte Person als Zahler festlegen.",
+    );
+  }
+  return null;
 }

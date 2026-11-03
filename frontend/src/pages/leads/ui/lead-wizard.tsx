@@ -191,6 +191,7 @@ import {
   parentBillingRole,
   parentBillingRoleBody,
   parentBillingRoleChip,
+  parentBillingRoleErrorText,
   parentBillingRoleLabel,
   type ParentBillingRole,
 } from "../model/parent-billing-role";
@@ -4803,7 +4804,7 @@ export function LeadWizard({
         void reloadStep1PortalState();
       },
       (cause: unknown) => {
-        setServerContactError({ contactId, message: errorText(cause, tx) });
+        setServerContactError({ contactId, message: parentBillingRoleErrorText(cause, tx) ?? errorText(cause, tx) });
         void reloadPayer();
         void reloadStep1PortalState();
       },
@@ -9830,7 +9831,7 @@ ${serviceCommentLines.join("\n")}`
                                   </p>
                                 ) : null}
                               </div>
-                              <Button type="button" variant="ghost" size="icon-sm" onClick={() => openTrustedContact(contact, true)} aria-label={tx("Редактировать представителя", "Vertreter bearbeiten")}>
+                              <Button type="button" variant="ghost" size="icon-sm" onClick={() => openTrustedContact(contact, true)} aria-label={`${tx("Редактировать представителя", "Vertreter bearbeiten")}: ${contact.name}`}>
                                 <Pencil aria-hidden="true" className="size-3.5" />
                               </Button>
                               <Button
