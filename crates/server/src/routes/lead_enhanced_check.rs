@@ -487,7 +487,17 @@ async fn load_subjects_inner(
                 list("statement_citizenships"),
             );
         }
-    } else if text("payer_kind").as_deref() == Some(lead_payer::PAYER_KIND_REPRESENTATIVE) {
+    } else if text("payer_kind").as_deref() == Some(lead_payer::PAYER_KIND_REPRESENTATIVE)
+        // Only a parent who represents the child pays as such: one left
+        // without a place in the form after a switch to sole custody is no
+        // longer the payer the rule names (QA 2026-11-03, R-F1, as
+        // `risk::inputs`).
+        && row
+            .try_get::<Option<Uuid>, _>("payer_representative_id")
+            .ok()
+            .flatten()
+            .is_some_and(|id| paying.contains(&id))
+    {
         // The parent who pays is the payer of the rule (owner 2026-10-07):
         // a black-list residence or citizenship of that parent requires the
         // check as it did while a paying parent was stored as a third party

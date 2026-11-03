@@ -155,9 +155,14 @@ export function FollowUpStep({
     : null;
   const blocks = openFollowUpBlocks(request);
   // Block B without a third-party payer asks nothing: no heading with "nothing needed here".
-  const shownBlocks = blocks.filter(
-    (block) => block !== "B" || request.payer?.payer_kind === "third_party" || followUpMissing(request, "B").length > 0,
-  );
+  // Nor block A when this login is asked nothing in it (a paying parent answers in the payer
+  // section), nor block R without a parent to ask about (QA 2026-11-03, R-F5).
+  const shownBlocks = blocks.filter((block) => {
+    if (block === "B") return request.payer?.payer_kind === "third_party" || followUpMissing(request, "B").length > 0;
+    if (block === "A") return Object.values(blockAAsks(request)).some(Boolean) || followUpMissing(request, "A").length > 0;
+    if (block === "R") return (request.follow_up?.representatives?.length ?? 0) > 0 || followUpMissing(request, "R").length > 0;
+    return true;
+  });
   const [states, setStates] = useState<Record<Part, SaveState>>({
     identification: "idle",
     funds: "idle",

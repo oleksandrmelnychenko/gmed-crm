@@ -1169,6 +1169,68 @@ fn declaration_from_input(
     Ok(declaration)
 }
 
+/// A parent named as payer with a date of birth that parent has not given
+/// yet: the payer's answer fills it, the contract and the parent's GwG sheet
+/// ask for it (QA 2026-11-03, D-B4: the father's date entered on the payer
+/// step was dropped, and his cabinet was closed once the request was sent).
+/// A date the parent gave stays.
+async fn fill_paying_parent_birth_date(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    representation: &lead_representatives::Representation,
+    declaration: &Declaration,
+    given: Option<NaiveDate>,
+    actor: Uuid,
+) -> Result<(), sqlx::Error> {
+    let (Some(given), Some(parent)) = (given, declaration.payer_representative_id) else {
+        return Ok(());
+    };
+    if !declaration.is_representative()
+        || representation
+            .find(parent)
+            .is_none_or(|person| person.date_of_birth.is_some())
+    {
+        return Ok(());
+    }
+    let filled = sqlx::query(
+        r#"UPDATE leads
+           SET trusted_contacts = (
+                   SELECT jsonb_agg(
+                              CASE WHEN entry->>'id' = $2::text
+                                        AND COALESCE(entry->>'birth_date', '') = ''
+                                   THEN entry || jsonb_build_object('birth_date', $3::date::text)
+                                   ELSE entry END
+                              ORDER BY position)
+                   FROM jsonb_array_elements(trusted_contacts) WITH ORDINALITY AS t(entry, position)),
+               trusted_contact_birth_date = CASE
+                   WHEN trusted_contacts->0->>'id' = $2::text
+                   THEN COALESCE(trusted_contact_birth_date, $3::date)
+                   ELSE trusted_contact_birth_date END,
+               updated_at = now()
+           WHERE id = $1 AND jsonb_typeof(trusted_contacts) = 'array'"#,
+    )
+    .bind(lead_id)
+    .bind(parent)
+    .bind(given)
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    if filled > 0 {
+        audit::write_in_transaction(
+            &mut *conn,
+            &audit::domain_event(
+                "update_lead_trusted_contact",
+                Some(actor),
+                "lead",
+                Some(lead_id),
+                json!({ "contact_id": parent, "fields": ["birth_date"], "source": "payer_declaration" }),
+            ),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 /// Who may pay for whom (owner decision 2026-10-19), applied to a validated
 /// declaration before it is stored:
 /// - a minor does not pay himself (`payer_self_minor`): one of the minor's
@@ -2780,6 +2842,7 @@ async fn save_payer_declaration(
         Ok(loaded) => loaded.unwrap_or_default().representation,
         Err(error) => return database_error(error, "load payer representatives"),
     };
+    let given_birth_date = declaration.date_of_birth;
     if let Err(code) = fit_to_representation(&mut declaration, &representation, previous.as_ref()) {
         let message = match code {
             "payer_self_minor" => {
@@ -2791,6 +2854,18 @@ async fn save_payer_declaration(
             _ => "Choose a current parent or legal representative of the minor",
         };
         return error(StatusCode::UNPROCESSABLE_ENTITY, code, message);
+    }
+    if let Err(error) = fill_paying_parent_birth_date(
+        &mut tx,
+        lead_id,
+        &representation,
+        &declaration,
+        given_birth_date,
+        auth.user_id,
+    )
+    .await
+    {
+        return database_error(error, "fill the paying parent's birth date");
     }
     // The staff form states the own-account answer once someone chose it; a
     // left-out key keeps what is stored (an unanswered question included).
@@ -4148,12 +4223,22 @@ pub(crate) async fn save_from_portal(
         .await?
         .unwrap_or_default()
         .representation;
+    let given_birth_date = declaration.date_of_birth;
     fit_to_representation(&mut declaration, &representation, previous.as_ref()).map_err(
         |code| PortalPayerError::Invalid {
             code,
             field: portal_field_of(code),
         },
     )?;
+    fill_paying_parent_birth_date(
+        conn,
+        lead_id,
+        &representation,
+        &declaration,
+        given_birth_date,
+        actor,
+    )
+    .await?;
     if previous.as_ref() == Some(&declaration) {
         return Ok(None);
     }

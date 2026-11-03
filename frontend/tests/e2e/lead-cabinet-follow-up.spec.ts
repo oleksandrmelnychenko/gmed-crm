@@ -873,8 +873,10 @@ test.describe("lead cabinet stepper and follow-up", () => {
       Object.assign(request.follow_up, { funds_asked: true });
     });
     await page.goto("/");
+    // Nothing to answer here: no empty section (QA 2026-11-03, R-F5).
     const blockA = page.getByTestId("lead-request-follow-up-A");
-    await expect(blockA).toBeVisible();
+    await expect(page.getByTestId("lead-request-follow-up-submit")).toBeVisible();
+    await expect(blockA).toHaveCount(0);
     await expect(page.locator("#lead-request-funds_source")).toHaveCount(0);
     await expect(page.locator("#lead-request-funds-proof-files")).toHaveCount(0);
     await expect(page.locator("#lead-request-occupation")).toHaveCount(0);

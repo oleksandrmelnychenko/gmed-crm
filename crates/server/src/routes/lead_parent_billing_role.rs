@@ -215,6 +215,13 @@ async fn set_billing_role(
         payer.as_ref(),
         &representation,
     );
+    // Who contracts follows who pays: documents naming the previous
+    // Auftraggeber are signed again (QA 2026-11-03, D-B2).
+    let contracting_before =
+        match super::documents::contracting_parents_of_lead(&mut tx, lead_id).await {
+            Ok(parents) => parents,
+            Err(error) => return database_error(error, "load contracting parents"),
+        };
     let wanted = Roles {
         receives_invoice: body.receives_invoice,
         pays: body.pays,
@@ -407,6 +414,16 @@ async fn set_billing_role(
         .await
     {
         return database_error(error, "reassess risk");
+    }
+    if let Err(error) = lead_payer::outdate_framework_for_contracting_parents(
+        &mut tx,
+        lead_id,
+        &contracting_before,
+        Some(auth.user_id),
+    )
+    .await
+    {
+        return database_error(error, "outdate framework contract");
     }
     if let Err(error) = tx.commit().await {
         return database_error(error, "commit");

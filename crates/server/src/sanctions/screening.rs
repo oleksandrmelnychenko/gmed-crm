@@ -660,11 +660,23 @@ fn lead_subjects_from_row(
         screened_payers = payers;
     } else {
         // An adult's contacts are not screened — but for the representative
-        // and the legal guardian (Betreuer) the lead named in the cabinet.
+        // and the legal guardian (Betreuer), named in the cabinet or entered
+        // by staff in the wizard as «Уполномоченный по доверенности» /
+        // «Опекун / Betreuer» (QA 2026-11-03, S-F-1: only the cabinet's role
+        // was screened).
         for identity in representatives {
             let contact = &identity.contact;
-            let role = &identity.role;
-            if role == "authorised_representative" || role == "legal_guardian" {
+            let role = match (
+                identity.role.as_str(),
+                json_text(contact, "relation").as_str(),
+            ) {
+                (role @ ("authorised_representative" | "legal_guardian"), _) => role.to_string(),
+                (_, "representative") => "authorised_representative".to_string(),
+                (_, "guardian") => "legal_guardian".to_string(),
+                _ => continue,
+            };
+            let role = &role;
+            {
                 subjects.push(guardian_subject(
                     lead_id,
                     identity.position,
@@ -1841,10 +1853,15 @@ pub struct LeadHit {
 ///   invoice recipient or payer contact with the same data is covered by the
 ///   lead's hit: a false positive as long as the data are the same, an open
 ///   or confirmed hit because it holds the patient through the gate already
-///   (`gate::Scope::expand`) — the CEO reviews one person once.
+///   (`gate::Scope::expand`) — the CEO reviews one person once;
+/// * a minor's parent keeps the CEO's false-positive decision with the same
+///   data across the lead, the converted patient's relation and a repeat
+///   intake (`lead_guardian` ↔ `patient_relation`, QA 2026-11-03, S-F-2: the
+///   CEO decided the same unchanged mother three times); so does the patient
+///   of a repeat intake (`lead_patient` ↔ `patient`).
 ///
-/// The lead's decisions are never about a relation that happens to carry the
-/// same data.
+/// The lead's decisions about the patient are never about a relation that
+/// happens to carry the same data.
 pub fn covered_by_lead_hit(
     kind: SubjectKind,
     logical_id: &str,
@@ -1854,7 +1871,10 @@ pub fn covered_by_lead_hit(
 ) -> bool {
     let kinds: &[&str] = match kind {
         SubjectKind::Patient => &["lead_patient"],
+        SubjectKind::LeadPatient => &["patient", "lead_patient"],
         SubjectKind::PayerContact => &["lead_payer", "lead_recipient", "payer_contact"],
+        SubjectKind::PatientRelation => &["lead_guardian"],
+        SubjectKind::LeadGuardian => &["lead_guardian", "patient_relation"],
         _ => return false,
     };
     lead_hits.iter().any(|hit| {
@@ -1933,7 +1953,38 @@ async fn screen_owner(
             )
             .collect()
         }
-        Owner::Lead(_) => Vec::new(),
+        // A repeat intake (or a lead of a known patient): the decisions about
+        // the same people on the patient and on its other leads.
+        Owner::Lead(lead_id) => sqlx::query_as::<_, (String, String, String, String, String)>(
+            r#"WITH owner AS (
+                   SELECT COALESCE(prospect_patient_id, repeat_patient_id, converted_patient_id) AS patient_id
+                   FROM leads WHERE id = $1
+               )
+               SELECT h.subject_kind, h.list_logical_id, h.subject_fingerprint,
+                      h.entry_fingerprint, h.status
+               FROM sanctions_hits h, owner o
+               WHERE o.patient_id IS NOT NULL
+                 AND (h.patient_id = o.patient_id
+                      OR h.lead_id IN (SELECT l.id FROM leads l
+                                       WHERE l.id <> $1
+                                         AND o.patient_id IN (l.prospect_patient_id,
+                                                              l.repeat_patient_id,
+                                                              l.converted_patient_id)))"#,
+        )
+        .bind(lead_id)
+        .fetch_all(&mut *tx)
+        .await?
+        .into_iter()
+        .map(
+            |(kind, logical_id, subject_fingerprint, entry_fingerprint, status)| LeadHit {
+                kind,
+                logical_id,
+                subject_fingerprint,
+                entry_fingerprint,
+                status,
+            },
+        )
+        .collect(),
     };
 
     let mut seen: HashSet<(String, String, String)> = HashSet::new();
@@ -3711,6 +3762,37 @@ mod tests {
             "fp",
             "entry",
             &[hit("lead_patient", "false_positive", "fp")],
+        ));
+        // A parent's false positive follows the same, unchanged parent to the
+        // converted patient and into a repeat intake (QA 2026-11-03, S-F-2);
+        // an open or confirmed hit of the parent does not.
+        assert!(covered_by_lead_hit(
+            SubjectKind::PatientRelation,
+            "900101",
+            "fp",
+            "entry",
+            &[hit("lead_guardian", "false_positive", "fp")],
+        ));
+        assert!(covered_by_lead_hit(
+            SubjectKind::LeadGuardian,
+            "900101",
+            "fp",
+            "entry",
+            &[hit("patient_relation", "false_positive", "fp")],
+        ));
+        assert!(!covered_by_lead_hit(
+            SubjectKind::LeadGuardian,
+            "900101",
+            "fp",
+            "entry",
+            &[hit("lead_guardian", "confirmed", "fp")],
+        ));
+        assert!(!covered_by_lead_hit(
+            SubjectKind::PatientRelation,
+            "900101",
+            "other",
+            "entry",
+            &[hit("lead_guardian", "false_positive", "fp")],
         ));
     }
 }

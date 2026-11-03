@@ -1028,6 +1028,16 @@ impl DocPartyBlock {
         }
     }
 
+    /// "Herrn Max Musterman" — the salutation declined after "zwischen" and
+    /// in "zugunsten des Patienten" (dative and genitive of "Herr" are
+    /// "Herrn"; QA 2026-11-03, D-B10).
+    fn name_with_salutation_declined(&self) -> String {
+        match self.clean_salutation() {
+            Some("Herr") => format!("Herrn {}", self.name).trim().to_string(),
+            _ => self.name_with_salutation(),
+        }
+    }
+
     /// "Musterman, Max" — surname first, comma, given name. Falls back to the
     /// combined name (splitting on the last space) when first/last are not set.
     fn name_last_comma_first(&self) -> String {
@@ -10769,7 +10779,7 @@ fn build_framework_contract_pdf(
                 fc_body_tight(&mut layout, "und");
             }
             layout.text_block(
-                &representative.name_with_salutation(),
+                &representative.name_with_salutation_declined(),
                 11.0,
                 true,
                 0.0,
@@ -16887,7 +16897,50 @@ async fn generate_document(
             "This template is only available after patient conversion",
         );
     }
-    if matches!(template.id, "framework_contract" | "single_order") {
+    // The payer receives the cost estimate only with the patient's consent
+    // (owner decision 2026-10-06): not only its signature, also its making
+    // and the Kostenübernahmeerklärung that carries it as annex (QA
+    // 2026-11-03, D-B1).
+    if matches!(
+        template.id,
+        "payer_cost_estimate" | "cost_coverage_declaration"
+    ) {
+        let missing = match state.db.acquire().await {
+            Ok(mut conn) => {
+                super::lead_payer_package::cost_estimate_consent_missing(
+                    &mut conn, lead_id, order_id,
+                )
+                .await
+            }
+            Err(error) => Err(error),
+        };
+        match missing {
+            Ok(false) => {}
+            Ok(true) => {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(json!({
+                        "error": "cost_estimate_consent_missing",
+                        "message": "The patient has not agreed that the cost estimate is passed on to the payer",
+                    })),
+                )
+                    .into_response();
+            }
+            Err(error) => {
+                tracing::error!(error = %error, "check the cost estimate consent");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to check the cost estimate consent",
+                );
+            }
+        }
+    }
+    // The client's cost estimate names the Auftraggeber like the contract:
+    // it is not printed with blanks the contract refuses (QA 2026-11-03, D-B5).
+    if matches!(
+        template.id,
+        "framework_contract" | "single_order" | "order_cost_estimate"
+    ) {
         let mut conn = match state.db.acquire().await {
             Ok(conn) => conn,
             Err(error) => {
@@ -21185,7 +21238,7 @@ impl ContractingDoc {
         };
         let mut lines = vec![format!(
             "im eigenen Namen zugunsten {beneficiary} {}{} (Vertrag zugunsten Dritter, § 328 BGB)",
-            patient.name_with_salutation(),
+            patient.name_with_salutation_declined(),
             patient
                 .birth_date
                 .map(|date| format!(", geb. am {}", date.format("%d.%m.%Y")))
@@ -21874,7 +21927,7 @@ fn legal_party_block(layout: &mut TreatmentPlanPdfLayout, lines: &[String], role
 /// address on separate lines (street, PLZ Ort, country), e-mail and phone
 /// (owner decision 2026-10-19).
 fn contracting_representative_lines(person: &DocPartyBlock) -> Vec<String> {
-    let mut lines = vec![person.name_with_salutation()];
+    let mut lines = vec![person.name_with_salutation_declined()];
     if let Some(birth) = person.birth_date {
         lines.push(format!("geb. am {}", birth.format("%d.%m.%Y")));
     }
@@ -21888,7 +21941,7 @@ fn contracting_representative_lines(person: &DocPartyBlock) -> Vec<String> {
 }
 
 fn single_order_party_lines(party: &DocPartyBlock) -> Vec<String> {
-    let mut lines = vec![party.name_with_salutation()];
+    let mut lines = vec![party.name_with_salutation_declined()];
     if let Some(address) = party.address_line() {
         lines.push(address);
     }
@@ -23535,7 +23588,7 @@ fn cost_estimate_settlement_parties(
     if let Some(represented_by) = contracting.represented_by_line() {
         return format!(
             "zwischen der jeweiligen Einrichtung und {}, {represented_by}",
-            patient.name_with_salutation()
+            patient.name_with_salutation_declined()
         );
     }
     "zwischen dem Patienten und der jeweiligen Einrichtung".to_string()
@@ -28847,6 +28900,10 @@ fn build_lead_self_disclosure_pdf(
                             format!("Die gesetzlichen Vertreter {}", patient_noun.genitive())
                         }
                     }
+                } else if betreuer.is_some() {
+                    // The Betreuer signs this form: "Ich" would be the
+                    // Betreuer (label decision 2026-10-22, QA 2026-11-03 D-B8).
+                    format!("{} (über mich als Vertretung)", patient_noun.nominative())
                 } else {
                     "Ich selbst".to_string()
                 }
@@ -28892,6 +28949,11 @@ fn build_lead_self_disclosure_pdf(
                 "Wer zahlt?",
                 Some(if minor {
                     format!("{} zahlt selbst.", patient_noun.nominative())
+                } else if betreuer.is_some() {
+                    format!(
+                        "{} zahlt selbst (über mich als Vertretung).",
+                        patient_noun.nominative()
+                    )
                 } else {
                     "Ich zahle selbst.".to_string()
                 }),
@@ -30127,7 +30189,7 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
     // ---- Revocation + retention ----
     admin_block(
         &mut layout,
-        "Die Einwilligung ist freiwillig und kann jederzeit ohne Angaben von Gründen schriftlich widerrufen werden, was keine Auswirkungen auf die Rechtmäßigkeit der bisherigen Verarbeitung hat. Die Verarbeitung von Personenbezogenen- und Gesundheitsdaten bleibt bis zum Zeitpunkt des Wiederrufs oder solange gesetzliche Aufbewahrungsfristen bestehen rechtmäßig.",
+        "Die Einwilligung ist freiwillig und kann jederzeit ohne Angabe von Gründen schriftlich widerrufen werden, was keine Auswirkungen auf die Rechtmäßigkeit der bisherigen Verarbeitung hat. Die Verarbeitung von personenbezogenen und Gesundheitsdaten bleibt bis zum Zeitpunkt des Widerrufs oder solange gesetzliche Aufbewahrungsfristen bestehen rechtmäßig.",
         0.0,
         1.5,
     );

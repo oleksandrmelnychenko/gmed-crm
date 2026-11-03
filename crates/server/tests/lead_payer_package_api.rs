@@ -1895,6 +1895,32 @@ async fn a_withdrawn_cost_estimate_consent_stops_the_invitation() {
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
     assert_eq!(refused["error"], "cost_estimate_consent_missing");
+    // Nor is the payer's copy, or the declaration that carries it as annex,
+    // made without the consent (QA 2026-11-03, D-B1).
+    let order_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM orders WHERE source_lead_id = $1 LIMIT 1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    for template in ["payer_cost_estimate", "cost_coverage_declaration"] {
+        let (status, refused) = with_login(
+            &app,
+            "POST",
+            "/api/v1/documents/generate",
+            &app.ceo(),
+            Some(json!({
+                "template_id": template, "lead_id": lead_id,
+                "order_id": order_id, "language": "de"
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{template}: {refused}");
+        assert_eq!(
+            refused["error"], "cost_estimate_consent_missing",
+            "{template}"
+        );
+    }
 
     // Given anew, the copy can go out.
     cost_estimate_consent(&app, lead_id, &ready.patient, true).await;

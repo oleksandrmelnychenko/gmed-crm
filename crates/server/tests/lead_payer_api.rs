@@ -381,6 +381,14 @@ async fn third_party_payer_pays_the_order_and_gmed_signs_last() {
     );
 
     // The Kostenübernahmeerklärung of the lead names the order and the payer.
+    // The payer receives the cost estimate only with the patient's consent.
+    sqlx::query(
+        "UPDATE lead_payer_declarations SET cost_estimate_consent_at = now() WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
     let (status, generated) = json_request(
         &app,
         "POST",
@@ -1080,6 +1088,14 @@ async fn an_organisation_pays_under_its_name_and_staff_keep_what_their_form_leav
     );
 
     // The Kostenübernahmeerklärung names it without a date of birth.
+    // The payer receives the cost estimate only with the patient's consent.
+    sqlx::query(
+        "UPDATE lead_payer_declarations SET cost_estimate_consent_at = now() WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
     let (status, generated) = json_request(
         &app,
         "POST",

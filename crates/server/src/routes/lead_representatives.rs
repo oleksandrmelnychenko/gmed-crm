@@ -4301,6 +4301,18 @@ pub(crate) async fn set_lead_custody(
         Ok(None) => return intake::err(StatusCode::NOT_FOUND, "Lead not found"),
         Err(error) => return intake::internal(error, "reload representation"),
     };
+    // Custody decides which parents count for the risk triggers: the
+    // assessment follows at once, by the staff member (QA 2026-11-03, R-F2).
+    if let Err(error) = crate::risk::store::reassess(
+        &mut tx,
+        lead_id,
+        crate::risk::store::Cause::Staff,
+        Some(auth.user_id),
+    )
+    .await
+    {
+        return intake::internal(error, "reassess risk after custody");
+    }
     if let Err(error) = tx.commit().await {
         return intake::internal(error, "commit custody");
     }

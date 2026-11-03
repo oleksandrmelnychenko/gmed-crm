@@ -535,19 +535,22 @@ const ANSWER_TRIGGERS: readonly string[] = ["T14", "T15"];
  * answer was changed to "no" (owner 2026-10-11: T14 stays, QA A-51).
  */
 export function riskTriggerStateLabel(
-  trigger: Pick<RiskTrigger, "key" | "active" | "inactive_since">,
+  trigger: Pick<RiskTrigger, "key" | "active" | "inactive_since"> & Partial<Pick<RiskTrigger, "subject">>,
   tx: Tx,
   formatDate: (value: string) => string,
 ): string {
   if (trigger.active) return tx("действует", "aktiv");
   const date = trigger.inactive_since ? formatDate(trigger.inactive_since) : "";
-  if (ANSWER_TRIGGERS.includes(trigger.key)) {
+  // A representative’s answer also stops counting when the parent loses its billing role or is
+  // removed, not only after a “No” (QA 2026-11-03, R-F4).
+  if (ANSWER_TRIGGERS.includes(trigger.key) && trigger.subject !== "representative") {
     const changed = tx("ответ изменён на «Нет»", "Antwort auf „Nein“ geändert");
     const kept = tx("триггер сохраняется", "Auslöser bleibt bestehen");
     return date ? `${changed} ${date} · ${kept}` : `${changed} · ${kept}`;
   }
   const fixed = tx("зафиксирован (данные изменились)", "festgehalten (Daten geändert)");
-  return date ? `${fixed} ${date}` : fixed;
+  const label = date ? `${fixed} ${date}` : fixed;
+  return ANSWER_TRIGGERS.includes(trigger.key) ? `${label} · ${tx("триггер сохраняется", "Auslöser bleibt bestehen")}` : label;
 }
 
 /**

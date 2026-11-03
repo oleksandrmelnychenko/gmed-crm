@@ -277,14 +277,14 @@ async fn load_inner(
                 .filter(|payer| payer.is_representative()),
         )
     };
-    // A minor's parent counts by its role, also a second parent without a
-    // place in the form under sole custody who still pays or receives the
-    // invoices (QA 2026-11-03, B-2).
+    // A minor's parent counts by its role and only while it represents the
+    // child: after a switch to sole custody the other parent is on file
+    // without a place in the form and no longer the paying representative
+    // (`payer_same_person`), nor its countries the payer's (the enhanced
+    // check reads the same roles, QA 2026-11-03, R-F1).
     let representatives = active.representation.representatives.iter()
-        .filter(|person| match &roles {
-            Some(roles) => roles.holds_a_role(person.id),
-            None => person.slot.is_some(),
-        })
+        .filter(|person| person.slot.is_some())
+        .filter(|person| roles.as_ref().is_none_or(|roles| roles.holds_a_role(person.id)))
         .map(|person| {
             use sha2::{Digest, Sha256};
             let identity = canonical.iter().find(|identity| identity.contact_id == Some(person.id));

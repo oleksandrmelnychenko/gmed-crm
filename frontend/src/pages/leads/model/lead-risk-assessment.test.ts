@@ -190,6 +190,8 @@ describe("the risk assessment of a lead (staff)", () => {
     expect(riskTriggerStateLabel(pep, de, date)).toBe("Antwort auf „Nein“ geändert 11.10.2026 · Auslöser bleibt bestehen");
     expect(riskTriggerStateLabel({ ...pep, inactive_since: null }, ru, date)).toBe("ответ изменён на «Нет» · триггер сохраняется");
     expect(riskTriggerStateLabel(residence, ru, date)).toBe("зафиксирован (данные изменились) 09.10.2026");
+    // A parent’s PEP answer: the role or the person changed, not necessarily the answer (QA 2026-11-03, R-F4).
+    expect(riskTriggerStateLabel({ ...pep, subject: "representative" }, ru, date)).toBe("зафиксирован (данные изменились) 11.10.2026 · триггер сохраняется");
     // An active trigger has no "since": the date is ignored.
     expect(cash.inactive_since).toBeNull();
     expect(riskTriggerStateLabel(cash, ru, date)).toBe("действует");
