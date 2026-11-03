@@ -226,7 +226,7 @@ test("a refused signature confirmation of the GwG sheet is said under its row", 
     documents: [sheet],
     markSigned: { status: 409, body: { error: "risk_review_required", code: "risk_review_required", message: "Risk review required" } },
   });
-  const row = wizard.getByRole("button", { name: "Dokumentationsbogen natürliche Personen – Anna Muster.pdf" }).locator("xpath=ancestor::div[contains(@class,'px-3')][1]");
+  const row = wizard.getByRole("button", { name: "Dokumentationsbogen natürliche Personen – Anna Muster.pdf" }).locator("xpath=ancestor::div[@data-document-row][1]");
   await row.scrollIntoViewIfNeeded();
   await row.getByRole("button", { name: "Подтвердить подпись" }).click();
   const refusal = wizard.locator('[data-document-row-error="gwg-sheet-1"]');

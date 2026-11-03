@@ -3418,7 +3418,7 @@ function WizardDocumentRows({
     const putAside = wizardDocumentIsArchived(document);
     const title = putAside ? wizardArchivedDocumentTitle(document) : wizardDocumentFilename(document);
     return (
-      <div key={document.id} className="grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-x-2 gap-y-1 px-2.5 py-2 sm:grid-cols-[1rem_minmax(0,1fr)_auto]" data-document-archived={putAside ? "true" : undefined}>
+      <div key={document.id} className="grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-x-2 gap-y-1 px-2.5 py-2 sm:grid-cols-[1rem_minmax(0,1fr)_auto]" data-document-row={document.id} data-document-archived={putAside ? "true" : undefined}>
         {archived
           ? <History aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           : <FileText aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />}

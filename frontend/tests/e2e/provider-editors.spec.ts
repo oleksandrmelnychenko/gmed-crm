@@ -41,7 +41,7 @@ test("existing provider records use the same editors and preserve unsaved-change
     await row.getByRole("button", { name: "Редактировать", exact: true }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toHaveCount(1);
-    await expect(page.locator('[data-slot="dialog-overlay"]')).toHaveClass(/bg-black\/40/);
+    await expect(page.locator('[data-slot="dialog-overlay"]')).toHaveClass(/bg-black\/40|var\(--overlay,#000\)_40%/);
     await expect(dialog.getByRole("button", { name: "Сохранить", exact: true })).toBeDisabled();
     if (name === "Example service") {
       const serviceName = dialog.getByLabel("Название услуги", { exact: false });
@@ -79,7 +79,7 @@ for (const width of [1440, 390]) {
       await expect(dialog.locator("form")).toHaveCount(1);
       expect(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
       const overlay = page.locator('[data-slot="dialog-overlay"]').last();
-      await expect(overlay).toHaveClass(/bg-black\/40/);
+      await expect(overlay).toHaveClass(/bg-black\/40|var\(--overlay,#000\)_40%/);
       expect(await overlay.boundingBox()).toEqual({ x: 0, y: 0, width, height: width === 390 ? 844 : 1000 });
       const cancel = dialog.getByRole("button", { name: "Отмена", exact: true });
       await expect(cancel).toBeInViewport();

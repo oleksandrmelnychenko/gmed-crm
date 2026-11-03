@@ -226,7 +226,7 @@ test("a refused confirmation names the organisation's missing data and leads to 
 
   // The company has a sheet: the button updates it.
   await expect(sheetActions.getByRole("button", { name: "Обновить для организации-плательщика", exact: true })).toBeVisible();
-  const row = wizard.getByRole("button", { name: `${sheetName}.pdf` }).locator("xpath=ancestor::div[contains(@class,'px-3')][1]");
+  const row = wizard.getByRole("button", { name: `${sheetName}.pdf` }).locator("xpath=ancestor::div[@data-document-row][1]");
   await row.scrollIntoViewIfNeeded();
   await row.getByRole("button", { name: "Подтвердить подпись" }).click();
   const refusal = wizard.locator('[data-document-row-error="gwg-org-1"]');

@@ -61,7 +61,7 @@ test("relationship modal fits a narrow viewport with full backdrop and reachable
   const overlay = page.locator('[data-slot="dialog-overlay"]').last();
   const bounds = await overlay.boundingBox();
   expect(bounds).toEqual({ x: 0, y: 0, width: 390, height: 844 });
-  await expect(overlay).toHaveClass(/bg-black\/40/);
+  await expect(overlay).toHaveClass(/bg-black\/40|var\(--overlay,#000\)_40%/);
   const notes = dialog.locator("#relation-notes");
   await notes.scrollIntoViewIfNeeded();
   await expect(notes).toBeVisible();

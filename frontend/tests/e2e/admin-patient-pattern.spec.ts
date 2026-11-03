@@ -651,7 +651,7 @@ for (const width of [1440, 390]) {
       const bounds = await dialog.boundingBox();
       expect(bounds?.width).toBeLessThanOrEqual(width - 16);
       expect(bounds?.x).toBeGreaterThanOrEqual(0);
-      await expect(page.locator('[data-slot="dialog-overlay"]')).toHaveCSS("background-color", /^(rgba\(0, 0, 0, 0\.4\)|oklab\(0 0 0 \/ 0\.4\))$/);
+      await expect(page.locator('[data-slot="dialog-overlay"], [data-slot="sheet-overlay"]').first()).toHaveCSS("background-color", /^(rgba\(0, 0, 0, 0\.4\)|oklab\(0 0 0 \/ 0\.4\)|color\(srgb 0 0 0 \/ 0\.4\))$/);
     };
 
     await page.goto("/admin/settings");
@@ -662,7 +662,8 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("heading", { name: /Sanktionsliste/ })).toHaveCount(0);
     await assertNoPageOverflow();
     await page.screenshot({ path: `../.tmp/release-audit/admin-settings-${width}.png`, fullPage: true });
-    await page.getByRole("button", { name: /Token-Konfiguration/ }).first().click();
+    // The card's heading button only explains it; "Bearbeiten" opens the editor.
+    await page.getByRole("button", { name: "Bearbeiten: Token-Konfiguration", exact: true }).click();
     await assertModal();
     await expect(page.locator("#setting-access_token_minutes")).toHaveValue("15");
     await expect(page.getByRole("dialog").getByRole("button", { name: "Speichern", exact: true })).toBeDisabled();

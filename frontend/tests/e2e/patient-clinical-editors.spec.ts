@@ -58,7 +58,7 @@ test("pain and vitals use bounded mobile modals with a full backdrop and reachab
   const backdrop = page.locator('[data-slot="dialog-overlay"]');
   const box = await backdrop.boundingBox();
   expect(box).toMatchObject({ x: 0, y: 0, width: 390, height: 720 });
-  await expect(backdrop).toHaveCSS("background-color", /rgba\(0, 0, 0, 0\.4\)|oklab\(0 0 0 \/ 0\.4\)/);
+  await expect(backdrop).toHaveCSS("background-color", /rgba\(0, 0, 0, 0\.4\)|oklab\(0 0 0 \/ 0\.4\)|color\(srgb 0 0 0 \/ 0\.4\)/);
   const bounds = await dialog.boundingBox();
   expect(bounds!.x).toBeGreaterThanOrEqual(0);
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);

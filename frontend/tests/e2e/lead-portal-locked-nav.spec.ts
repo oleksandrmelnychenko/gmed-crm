@@ -166,7 +166,7 @@ test.describe("Lead portal locked menu and package interest", () => {
       const overlay = page.locator('[data-slot="dialog-overlay"]').last();
       await expect(overlay).toBeVisible();
       expect(await overlay.evaluate((element) => getComputedStyle(element).backgroundColor))
-        .toMatch(/^(?:rgba\(0, 0, 0, 0\.4\)|oklab\(0 0 0 \/ 0\.4\))$/);
+        .toMatch(/^(?:rgba\(0, 0, 0, 0\.4\)|oklab\(0 0 0 \/ 0\.4\)|color\(srgb 0 0 0 \/ 0\.4\))$/);
       if (lang === "ru") await page.screenshot({ path: "../.tmp/parent-completion-20261014/locked-plan-1440.png", animations: "disabled" });
       await expect(page).toHaveURL(/\/legal$/);
       expect(posts).toEqual([]);

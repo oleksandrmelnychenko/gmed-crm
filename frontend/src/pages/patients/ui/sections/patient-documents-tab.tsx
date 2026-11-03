@@ -565,7 +565,8 @@ export function PatientDocumentsTab({
           label: statusLabel(status),
         })),
         sortable: true,
-        width: 180,
+        // Status and the DEMO signature side by side, never clipped.
+        width: 240,
         render: (doc) => (
           <DocumentStatusBadges
             documentId={doc.id}

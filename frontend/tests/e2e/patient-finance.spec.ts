@@ -72,7 +72,7 @@ test("patient finance carries earlier balances, drills into months and links to 
   await expect(page.getByTestId("finance-refunds")).toContainText("50,00");
   await expect(page.getByTestId("finance-closing")).toContainText("650,00");
   await expect(page.getByTestId("finance-closing").locator("p").nth(1)).toHaveClass(/text-rose-600/);
-  await page.getByRole("button", { name: "август 2026 г.", exact: true }).click();
+  await page.getByRole("button", { name: "Август 2026 г.", exact: true }).click();
   await expect(page.getByTestId("patient-finance").getByText("DOC-payment", { exact: true }).filter({ visible: true })).toBeVisible();
   await expect(page.getByTestId("patient-finance").getByText("DOC-invoice", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Все месяцы", exact: true }).click();
