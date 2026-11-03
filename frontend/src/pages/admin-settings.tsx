@@ -54,6 +54,7 @@ import {
   textareaClass,
 } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
+import { InfoHint } from "@/components/ui/info-hint";
 import { issuerTaxRegistrationText } from "@/components/issuer-tax-registration-banner";
 import { clearApiCache } from "@/lib/api";
 import { isValidEmailAddress } from "@/lib/contact-validation";
@@ -931,7 +932,7 @@ function useAdminSettingsPageContent() {
 
   return (
     <>
-      <div className="space-y-4 rounded-xl bg-muted/50 p-3 sm:p-4">
+      <div className="min-w-0 space-y-3" data-testid="admin-settings-page">
         {issuerTaxRegistrationMissing ? (
           <Banner tone="warning" withIcon>
             <p className="font-medium">{issuerTaxText.title}</p>
@@ -947,8 +948,8 @@ function useAdminSettingsPageContent() {
               <AdminGuideButton title={t.settings_title} description={t.settings_subtitle} />
               <Button
                 type="button"
-                variant="outline"
-                className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
+                size="sm"
+                className="h-8 gap-1.5 rounded-lg px-3"
                 disabled={loading}
                 onClick={() => void load()}
               >
@@ -972,36 +973,35 @@ function useAdminSettingsPageContent() {
         {!loading && !error ? (
           <>
             <Tabs value={workspaceTab} onValueChange={(value) => setWorkspaceTab(String(value))}>
-              <TabsList className="group-data-horizontal/tabs:h-auto max-w-full flex-wrap justify-start gap-1 rounded-xl border border-border/70 bg-card p-1">
-                <TabsTrigger value="configuration" className="h-8 gap-2 rounded-lg px-3 data-active:bg-primary data-active:text-primary-foreground"><ScrollText className="size-3.5" />{t.common_configuration}</TabsTrigger>
-                <TabsTrigger value="sessions" className="h-8 gap-2 rounded-lg px-3 data-active:bg-primary data-active:text-primary-foreground"><KeyRound className="size-3.5" />{t.settings_active_sessions}<span className="font-mono text-xs">{sessions.length}</span></TabsTrigger>
-                <TabsTrigger value="pending" className="h-8 gap-2 rounded-lg px-3 data-active:bg-primary data-active:text-primary-foreground"><UserRoundCheck className="size-3.5" />{t.mfa_pending_logins}<span className="font-mono text-xs">{pending.length}</span></TabsTrigger>
+              <TabsList className="group-data-horizontal/tabs:h-auto max-w-full flex-wrap justify-start gap-0.5 rounded-lg border border-border bg-card p-0.5">
+                <TabsTrigger value="configuration" className="h-8 gap-2 rounded-lg px-3 data-active:bg-primary data-active:text-primary-foreground data-active:hover:text-primary-foreground"><ScrollText className="size-3.5" />{t.common_configuration}</TabsTrigger>
+                <TabsTrigger value="sessions" className="h-8 gap-2 rounded-lg px-3 data-active:bg-primary data-active:text-primary-foreground data-active:hover:text-primary-foreground"><KeyRound className="size-3.5" />{t.settings_active_sessions}<span className="font-mono text-xs">{sessions.length}</span></TabsTrigger>
+                <TabsTrigger value="pending" className="h-8 gap-2 rounded-lg px-3 data-active:bg-primary data-active:text-primary-foreground data-active:hover:text-primary-foreground"><UserRoundCheck className="size-3.5" />{t.mfa_pending_logins}<span className="font-mono text-xs">{pending.length}</span></TabsTrigger>
               </TabsList>
-              <TabsContent value="configuration" className="mt-2">
-                <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <TabsContent value="configuration" className="mt-0">
+                <div className="grid items-stretch gap-2.5 md:grid-cols-2 2xl:grid-cols-3">
                   {SETTINGS_GROUPS.map((group) => {
                     const GroupIcon = group.icon;
                     return (
-                      <section key={group.id} className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card shadow-xs">
-                        <button type="button" onClick={() => openGroupSheet(group.id)} className="flex w-full min-w-0 items-center gap-3 border-b border-border/50 px-4 py-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40">
-                          <GroupIcon className="size-4 shrink-0 text-muted-foreground" />
-                          <span className="min-w-0 flex-1 text-[13px] font-semibold">{tr[group.titleKey] ?? group.id}</span>
-                          <Pencil className="size-3.5 shrink-0 text-primary" />
-                        </button>
-                        <div className="space-y-3 p-4">
-                          <p className="min-h-8 text-xs leading-5 text-muted-foreground">{tr[group.descriptionKey]}</p>
-                          <dl className="divide-y divide-border/50">
+                      <section key={group.id} aria-labelledby={`settings-group-${group.id}`} className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-card">
+                        <header className="flex min-w-0 items-center gap-2 border-b border-border px-3 py-2">
+                          <GroupIcon aria-hidden="true" className="size-[18px] shrink-0 text-foreground" />
+                          <h2 id={`settings-group-${group.id}`} className="min-w-0 flex-1 text-sm font-semibold leading-5">{tr[group.titleKey] ?? group.id}</h2>
+                          <InfoHint label={tr[group.titleKey] ?? group.id}>{tr[group.descriptionKey]}</InfoHint>
+                        </header>
+                        <div className="flex flex-1 flex-col px-3 py-2">
+                          <dl className="flex-1 divide-y divide-border/60">
                             {group.fields.slice(0, 3).map((field) => {
                               const value = summarizeAdminSettingValue(field.key, settingsMap[field.key]?.value ?? "");
-                              return <div key={field.key} className="flex min-w-0 items-start justify-between gap-4 py-2 first:pt-0">
+                              return <div key={field.key} className="flex min-w-0 items-baseline justify-between gap-3 py-1.5">
                                 <dt className="min-w-0 flex-1 text-xs leading-5 text-muted-foreground">{tr[field.labelKey] ?? field.key}</dt>
-                                <dd className="max-w-[50%] truncate font-mono text-xs leading-5 text-foreground" title={value || undefined}>{value || "—"}</dd>
+                                <dd className="max-w-[55%] break-words text-right text-xs font-medium leading-5 text-foreground tabular-nums" title={value || undefined}>{value || "—"}</dd>
                               </div>;
                             })}
                           </dl>
-                          <div className="flex items-center justify-between gap-2 border-t border-border/50 pt-3">
-                            <StatusChip>{t.admin_system_fields}: {group.fields.length}</StatusChip>
-                            <Button type="button" variant="outline" size="sm" className="h-7 gap-1.5 rounded-lg text-xs" onClick={() => openGroupSheet(group.id)}><Pencil className="size-3" />{t.common_edit}</Button>
+                          <div className="mt-1.5 flex items-center justify-between gap-2 border-t border-border pt-2">
+                            <span className="font-mono text-[11px] text-muted-foreground">{t.admin_system_fields}: {group.fields.length}</span>
+                            <Button type="button" size="sm" className="h-7 gap-1.5 rounded-lg px-2.5 text-xs" aria-label={`${t.common_edit}: ${tr[group.titleKey] ?? group.id}`} onClick={() => openGroupSheet(group.id)}><Pencil aria-hidden="true" className="size-3.5" />{t.common_edit}</Button>
                           </div>
                         </div>
                       </section>
@@ -1009,11 +1009,11 @@ function useAdminSettingsPageContent() {
                   })}
                 </div>
               </TabsContent>
-              <TabsContent value="pending" className="mt-2">
+              <TabsContent value="pending" className="mt-0">
             <DataTableSurface
               rows={pending}
               columns={pendingColumns}
-              defaultDensity="comfortable"
+              defaultDensity="compact"
               defaultSort={[{ field: "created_at", dir: "desc" }]}
               dictionary={t as unknown as Record<string, string>}
               rowId={(entry) => entry.id}
@@ -1030,11 +1030,11 @@ function useAdminSettingsPageContent() {
             />
 
               </TabsContent>
-              <TabsContent value="sessions" className="mt-2">
+              <TabsContent value="sessions" className="mt-0">
             <DataTableSurface
               rows={sessionsPagination.pagedRows}
               columns={sessionColumns}
-              defaultDensity="comfortable"
+              defaultDensity="compact"
               defaultSort={[{ field: "last_activity_at", dir: "desc" }]}
               dictionary={t as unknown as Record<string, string>}
               rowId={(session) => session.family_id}
@@ -1084,7 +1084,8 @@ function useAdminSettingsPageContent() {
         onOpenChange={handleGroupSheetOpenChange}
         dirty={groupHasChanges}
       >
-        <AdminDialogScaffold maxWidthClassName="sm:max-w-[860px]"
+        <AdminDialogScaffold maxWidthClassName={selectedGroup && selectedGroup.fields.length > 3 ? "sm:max-w-[760px]" : "sm:max-w-[560px]"}
+            bodyClassName="space-y-2 [&_label]:font-mono [&_label]:text-xs"
             title={selectedGroup ? tr[selectedGroup.titleKey] : t.settings_title}
             description={selectedGroup ? tr[selectedGroup.descriptionKey] : t.settings_subtitle}
             footer={(
@@ -1092,14 +1093,16 @@ function useAdminSettingsPageContent() {
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-9 rounded-lg"
+                  size="sm"
+                  className="h-8 rounded-lg"
                   onClick={() => handleGroupSheetOpenChange(false)}
                 >
                   {t.common_cancel}
                 </Button>
                 <Button
                   type="button"
-                  className="h-9 rounded-lg"
+                  size="sm"
+                  className="h-8 rounded-lg"
                   disabled={!selectedGroup || sheetState.saving || !groupHasChanges}
                   onClick={() => void saveSelectedGroup()}
                 >
@@ -1119,22 +1122,23 @@ function useAdminSettingsPageContent() {
               <>
                 {changedFieldLabels.length > 0 ? <StatusChip tone="warning">{t.common_edit}: {changedFieldLabels.join(" · ")}</StatusChip> : null}
 
-                <AdminFormSection title={t.admin_system_fields}>
-                  <div className="grid gap-3 md:grid-cols-2">
+                <AdminFormSection title={t.admin_system_fields} className="space-y-2 p-3">
+                  <div className={cn("grid gap-x-3 gap-y-2.5", selectedGroup.fields.length > 3 && "sm:grid-cols-2")}>
                     {selectedGroup.fields.map((field) => {
                       const changed = hasFieldChanged(field.key);
                       const inputClassName = cn(
                         field.inputType === "textarea"
                           ? textareaClass
-                          : "h-9 rounded-lg bg-field",
-                        changed && "border-[var(--brand)] ring-2 ring-[var(--brand)]/10",
+                          : "h-8 rounded-lg bg-field text-sm",
+                        field.inputType === "textarea" && "bg-field font-mono text-xs",
+                        changed && "border-ring ring-1 ring-ring/25",
                       );
                       return (
                         <Field
                           key={field.key}
                           label={tr[field.labelKey] ?? field.key}
                           htmlFor={`setting-${field.key}`}
-                          className={field.inputType === "textarea" ? "md:col-span-2" : undefined}
+                          className={field.inputType === "textarea" && selectedGroup.fields.length > 3 ? "sm:col-span-2" : undefined}
                         >
                           <>
                             {field.inputType === "textarea" ? (

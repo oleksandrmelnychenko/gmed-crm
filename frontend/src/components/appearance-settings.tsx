@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { Check, Download, Palette, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
@@ -54,6 +55,13 @@ function portableTheme(theme: AppearanceTheme, existingIds: readonly string[] = 
 }
 
 export function AppearanceSettings() {
+  const { search, key } = useLocation();
+  const sectionRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (new URLSearchParams(search).get("section") !== "appearance") return;
+    sectionRef.current?.scrollIntoView({ block: "start" });
+    sectionRef.current?.focus({ preventScroll: true });
+  }, [search, key]);
   const { user } = useAuth();
   const { lang } = useLang();
   const text = TEXT[lang as keyof typeof TEXT] ?? TEXT.en;
@@ -78,7 +86,7 @@ export function AppearanceSettings() {
     setTimeout(() => URL.revokeObjectURL(url), 0);
   };
   return (
-    <section className="rounded-xl border border-border bg-card" aria-labelledby="appearance-title" data-testid="appearance-settings">
+    <section ref={sectionRef} id="appearance" tabIndex={-1} className="scroll-mt-3 rounded-xl border border-border bg-card focus:outline-none" aria-labelledby="appearance-title" data-testid="appearance-settings">
       <header className="flex items-center gap-2 border-b border-border px-4 py-3">
         <Palette className="size-4" aria-hidden="true" />
         <h2 id="appearance-title" className="text-sm font-semibold">{text.title}</h2>

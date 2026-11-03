@@ -53,6 +53,7 @@ import {
 } from "@/components/topbar-data";
 import { GmedWordmark } from "@/components/gmed-wordmark";
 import { BuildReleaseWidget } from "@/components/build-release-widget";
+import { AppearanceMenu } from "@/components/appearance-menu";
 import { AiMark } from "@/components/ui/ai-mark";
 import { OverflowMenu } from "@/components/ui/overflow-menu";
 import { countryNameForDisplay } from "@/components/ui/country-select";
@@ -589,6 +590,14 @@ export function Topbar() {
             )}
           </TopbarIconButton>
           )}
+
+          {user && !leadCabinet ? (
+            <AppearanceMenu onOpen={() => {
+              setNotifOpen(false);
+              setUsersOpen(false);
+              if (leadQueueMounted) closeLeadQueue();
+            }} />
+          ) : null}
 
           {/* Lang; staff below md reach it through the "more" menu. The lead cabinet has
               its own four-language switch: this DE/RU toggle would show "Русский" while
