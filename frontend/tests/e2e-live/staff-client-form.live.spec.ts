@@ -63,7 +63,7 @@ async function leadFilledInByStaff(request: APIRequestContext) {
   const refused = await asStaff("consent", { purpose: "lead_inquiry_processing", version: "2026-10-03", language: "de" }, 422);
   expect(refused.code).toBe("consent_recorded_how_required");
   await asStaff("consent", { purpose: "lead_inquiry_processing", version: "2026-10-03", language: "de", ...phone });
-  await asStaff("consent", { purpose: "health_data_processing", version: "2026-10-13", language: "de", ...phone });
+  await asStaff("consent", { purpose: "health_data_processing", version: "2026-11-02", language: "de", ...phone });
   await asStaff("personal-data", {
     date_of_birth: "1971-05-06", legal_sex: "female", citizenships: ["DE"],
     street_address: "Lindenstraße 4", zip_code: "10969", city: "Berlin", country: "DE",
