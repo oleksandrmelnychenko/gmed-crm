@@ -19,6 +19,7 @@ import {
   payerPartyOf,
   recipientFieldOf,
   recipientKey,
+  recipientExpected,
   recipientPatch,
   withOwnParent,
   withRecipientAnswer,
@@ -260,5 +261,13 @@ describe("step 3: the invoice recipient first (owner spec 2026-10-11)", () => {
       citizenships: [],
       relationship_kind: "",
     });
+  });
+});
+
+describe("recipientExpected", () => {
+  it("names the recipient the saved draft shows (QA 2026-11-03, F2)", () => {
+    const shown = { ...draftFromRecipient(null), recipient: "self", representative_id: "parent-mother" };
+    expect(recipientExpected(shown)).toEqual({ invoice_recipient: "self", representative_id: "parent-mother" });
+    expect(recipientExpected(draftFromRecipient(null))).toEqual({ invoice_recipient: null, representative_id: null });
   });
 });

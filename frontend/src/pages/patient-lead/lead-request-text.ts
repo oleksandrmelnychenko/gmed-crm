@@ -274,6 +274,8 @@ export type LeadRequestText = {
    */
   recipient: {
     section: string;
+    /** Another tab, staff or the other parent changed who receives the invoice (QA 2026-11-03, F2). */
+    changedMeanwhile: string;
     parentQuestion: string;
     /** A minor's guardian (Vormund) is no parent (QA 2026-10-31, B-4). */
     parentQuestionVormund: string;
@@ -1297,6 +1299,7 @@ const de: LeadRequestText = {
   hasInsuranceVormund: "Hat das Kind eine Krankenversicherung?",
   recipient: {
     section: "Rechnungsempfänger",
+    changedMeanwhile: "Der Rechnungsempfänger wurde inzwischen geändert. Wir haben die aktuellen Angaben geladen – bitte prüfen Sie sie und geben Sie Ihre Änderung erneut ein.",
     confirmPayerChange: "Diesen Rechnungsempfänger als Zahler bestätigen",
     replacePayerHint: "Ihre bisherigen Angaben zum Zahler werden ersetzt.",
     question: "Wer ist Rechnungsempfänger?",
@@ -1920,6 +1923,7 @@ const ru: LeadRequestText = {
   hasInsuranceVormund: "Есть ли у ребёнка медицинская страховка?",
   recipient: {
     section: "Получатель счёта",
+    changedMeanwhile: "Получатель счёта тем временем изменился. Мы загрузили актуальные данные — проверьте их и при необходимости введите изменение ещё раз.",
     confirmPayerChange: "Подтвердить этого получателя как плательщика",
     replacePayerHint: "Прежние данные о плательщике будут заменены.",
     question: "Кто является получателем счёта?",
@@ -2540,6 +2544,7 @@ const uk: LeadRequestText = {
   hasInsuranceVormund: "Чи є у дитини медичне страхування?",
   recipient: {
     section: "Отримувач рахунку",
+    changedMeanwhile: "Отримувача рахунку тим часом змінено. Ми завантажили актуальні дані — перевірте їх і за потреби введіть зміну ще раз.",
     confirmPayerChange: "Підтвердити цього отримувача як платника",
     replacePayerHint: "Попередні дані про платника буде замінено.",
     question: "Хто є отримувачем рахунку?",
@@ -3160,6 +3165,7 @@ const en: LeadRequestText = {
   hasInsuranceVormund: "Does the child have health insurance?",
   recipient: {
     section: "Invoice recipient",
+    changedMeanwhile: "The invoice recipient was changed in the meantime. We loaded the current details — please check them and enter your change again.",
     confirmPayerChange: "Confirm this recipient as the payer",
     replacePayerHint: "Your previous payer details will be replaced.",
     question: "Who is the invoice recipient?",

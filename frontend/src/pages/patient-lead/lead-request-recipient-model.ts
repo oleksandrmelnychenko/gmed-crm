@@ -138,6 +138,11 @@ export function recipientPatch(
   return patch;
 }
 
+/** The recipient a saved draft shows, sent with each save (QA 2026-11-03, F2). */
+export function recipientExpected(saved: RecipientDraft): { invoice_recipient: string | null; representative_id: string | null } {
+  return { invoice_recipient: saved.recipient || null, representative_id: saved.representative_id || null };
+}
+
 /** The key of the server for a field of the draft (the one a refusal names). */
 export function recipientKey(field: keyof RecipientDraft): string {
   if (field === "recipient") return "invoice_recipient";

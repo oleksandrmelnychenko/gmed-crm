@@ -3359,3 +3359,76 @@ async fn set_billing_role(
     )
     .await
 }
+
+/// QA 2026-11-03, F2: a parent's cabinet tab read while that parent received
+/// the invoices; staff then named the other parent. The tab's next save is
+/// refused, never written onto the other parent's recipient row.
+#[tokio::test]
+async fn a_stale_cabinet_tab_never_writes_onto_the_other_parents_recipient() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let staff = app.staff("patient_manager");
+    let mother = Uuid::new_v4();
+    let father = Uuid::new_v4();
+    let lead = minor_lead(
+        &app,
+        json!([
+            { "id": mother, "name": "Anna Muster", "relation": "mother",
+              "email": address("anna.stale-tab") },
+            { "id": father, "name": "Ben Muster", "relation": "father",
+              "email": address("ben.stale-tab") }
+        ]),
+    )
+    .await;
+    let (_, login) = guardian_login(&app, lead, mother).await;
+    give_inquiry_consent(router, lead, &login).await;
+    let (status, body) = set_billing_role(router, &staff, lead, mother, true, false).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let billing = format!("/api/v1/me/lead-requests/{lead}/billing");
+    let shows_mother = json!({ "invoice_recipient": "self", "representative_id": mother });
+
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &billing,
+        &login,
+        Some(json!({ "recipient_email": address("anna.rechnung"), "recipient_expected": shows_mother })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, body) = set_billing_role(router, &staff, lead, father, true, false).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &billing,
+        &login,
+        Some(
+            json!({ "recipient_email": address("anna.stale"), "recipient_expected": shows_mother }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "recipient_changed", "{body}");
+    let stored: (Option<Uuid>, Option<String>) = sqlx::query_as(
+        "SELECT representative_contact_id, email FROM lead_invoice_recipients WHERE lead_id = $1",
+    )
+    .bind(lead)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(stored.0, Some(father));
+    assert_ne!(stored.1, Some(address("anna.stale")));
+
+    // Naming the recipient anew is a choice, not a stale tab.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &billing,
+        &login,
+        Some(json!({ "recipient_representative_id": mother, "recipient_expected": shows_mother })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}

@@ -72,6 +72,44 @@ pub(crate) const RECIPIENT_KEYS: [&str; 18] = [
     "recipient_payment_reason",
 ];
 
+/// The recipient the cabinet shows while it saves (`{invoice_recipient,
+/// representative_id}`, QA 2026-11-03, F2): an older tab is refused with 409
+/// `recipient_changed` once staff or the other parent named another one.
+pub(crate) const RECIPIENT_EXPECTED_KEY: &str = "recipient_expected";
+
+/// Whether the recipient the cabinet showed (`expected`) is no longer the
+/// stored one. A patch that answers who receives the invoice is a new choice,
+/// never a stale one. The parent compares with the row as stored and as
+/// resolved (an only parent named by none).
+pub(crate) fn recipient_changed_since(
+    expected: &Value,
+    stored: Option<&Recipient>,
+    resolved: &Recipient,
+    patch: &Map<String, Value>,
+) -> bool {
+    if patch.contains_key("invoice_recipient") || patch.contains_key("recipient_representative_id")
+    {
+        return false;
+    }
+    let kind = expected
+        .get("invoice_recipient")
+        .and_then(Value::as_str)
+        .filter(|kind| !kind.is_empty());
+    if kind != stored.and_then(|stored| stored.recipient.as_deref()) {
+        return true;
+    }
+    let Some(parent) = expected
+        .get("representative_id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .and_then(|id| id.parse::<Uuid>().ok())
+    else {
+        return false;
+    };
+    stored.and_then(|stored| stored.representative_contact_id) != Some(parent)
+        && resolved.representative_contact_id != Some(parent)
+}
+
 /// The answers of step 3 about the invoice recipient.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Recipient {
@@ -1488,6 +1526,64 @@ mod tests {
         let next = following_payer(&apart, &same, Some(mother)).unwrap();
         assert_eq!(next.representative_contact_id, Some(mother));
         assert_eq!(next.is_payer, Some(true));
+    }
+
+    /// QA 2026-11-03, F2: a stale tab names the parent it showed.
+    #[test]
+    fn a_tab_that_shows_another_recipient_is_stale() {
+        let (mother, father) = (Uuid::from_u128(1), Uuid::from_u128(2));
+        let father_receives = Recipient {
+            recipient: Some(RECIPIENT_SELF.into()),
+            representative_contact_id: Some(father),
+            ..Recipient::default()
+        };
+        let email = json!({ "recipient_email": "a@gmx.de" });
+        let email = email.as_object().unwrap();
+        let shows = |kind: &str, parent: Option<Uuid>| json!({ "invoice_recipient": kind, "representative_id": parent });
+        let stored = Some(&father_receives);
+        assert!(!recipient_changed_since(
+            &shows("self", Some(father)),
+            stored,
+            &father_receives,
+            email
+        ));
+        assert!(recipient_changed_since(
+            &shows("self", Some(mother)),
+            stored,
+            &father_receives,
+            email
+        ));
+        assert!(recipient_changed_since(
+            &shows("third_party", None),
+            stored,
+            &father_receives,
+            email
+        ));
+        assert!(recipient_changed_since(
+            &shows("", None),
+            stored,
+            &father_receives,
+            email
+        ));
+        // Answering who receives it is a new choice.
+        let choice = json!({ "recipient_representative_id": mother });
+        assert!(!recipient_changed_since(
+            &shows("self", Some(mother)),
+            stored,
+            &father_receives,
+            choice.as_object().unwrap()
+        ));
+        // An only parent named by none: the row resolves to that parent.
+        let unnamed = Recipient {
+            representative_contact_id: None,
+            ..father_receives.clone()
+        };
+        assert!(!recipient_changed_since(
+            &shows("self", Some(father)),
+            Some(&unnamed),
+            &father_receives,
+            email
+        ));
     }
 
     fn third_party_payer(first: &str, last: &str) -> Declaration {

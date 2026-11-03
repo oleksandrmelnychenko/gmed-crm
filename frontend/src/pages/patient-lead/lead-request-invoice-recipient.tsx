@@ -21,7 +21,7 @@ import { isKnownNoMailEmail } from "@/lib/email-domain-check";
 import { cn } from "@/lib/utils";
 
 import { actsAsGuardian, staffForChild } from "./lead-request-access";
-import { saveLeadInvoiceRecipient, type LeadRequest } from "./lead-request-api";
+import { fetchMyLeadRequest, saveLeadInvoiceRecipient, type LeadRequest } from "./lead-request-api";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import type { IdentificationForm } from "./lead-request-identification";
 import {
@@ -70,6 +70,7 @@ import {
   payerFitsFlow,
   payerPartyOf,
   recipientFieldOf,
+  recipientExpected,
   recipientPatch,
   recipientPayerReady,
   recipientValue,
@@ -160,6 +161,8 @@ export function InvoiceRecipientSection({
   // The code of each refusal, for the message at the field ("" when the server named none).
   const refusedCodesRef = useRef<Refused>({});
   const [refusedCodes, setRefusedCodes] = useState<Refused>({});
+  // Someone changed the recipient after this tab read it (QA 2026-11-03, F2).
+  const [changedMeanwhile, setChangedMeanwhile] = useState(false);
 
   const save = useCallback(
     (snapshot: RecipientDraft) => {
@@ -189,17 +192,36 @@ export function InvoiceRecipientSection({
           onRecipientState("saving");
           try {
             const baseline = savedRef.current;
-            const next = await saveLeadInvoiceRecipient(request.lead_id, patch);
+            const next = await saveLeadInvoiceRecipient(request.lead_id, patch, recipientExpected(baseline));
             const fresh = draftFromRecipient(next.billing);
             const written = Object.keys(patch).map(recipientFieldOf).filter((field): field is keyof RecipientDraft => field !== null);
             savedRef.current = fresh;
             queuedDraftRef.current = mergeSavedDraft(queuedDraftRef.current, snapshot, fresh, baseline, written, edited);
             setDraft((current) => mergeSavedDraft(current, snapshot, fresh, baseline, written, edited));
             onChange(next);
+            setChangedMeanwhile(false);
             saved = true;
             break;
           } catch (cause) {
             const body = errorBody(cause);
+            // Another parent or staff named another recipient after this tab read it: nothing is
+            // written onto that person; the current answers are read again and shown.
+            if (cause instanceof ApiRequestError && cause.status === 409 && body?.code === "recipient_changed") {
+              try {
+                const current = await fetchMyLeadRequest(request.lead_id);
+                const fresh = draftFromRecipient(current.billing);
+                savedRef.current = fresh;
+                queuedDraftRef.current = fresh;
+                setDraft(fresh);
+                onChange(current);
+              } catch {
+                // The notice still asks to check the answers.
+              }
+              for (const field of Object.keys(rejected)) delete rejected[field as keyof RecipientDraft];
+              setChangedMeanwhile(true);
+              failed = true;
+              break;
+            }
             const key = body?.field;
             const field = typeof key === "string" ? recipientFieldOf(key) : null;
             if (cause instanceof ApiRequestError && cause.status === 422 && field && typeof key === "string" && key in patch && rejected[field] === undefined) {
@@ -342,6 +364,11 @@ export function InvoiceRecipientSection({
     <>
       <Section title={text.recipient.section}>
         <div className="grid gap-x-4 gap-y-2.5 sm:grid-cols-2" data-testid="lead-request-invoice-recipient">
+          {changedMeanwhile && (
+            <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-5 text-amber-900 sm:col-span-2 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200" data-testid="lead-request-recipient-changed">
+              {text.recipient.changedMeanwhile}
+            </p>
+          )}
           <div role="radiogroup" aria-labelledby="lead-request-invoice_recipient-label" className="space-y-1.5 sm:col-span-2">
             <p id="lead-request-invoice_recipient-label" className={cn(tokens.text.label, "block")}>
               {text.recipient.question}

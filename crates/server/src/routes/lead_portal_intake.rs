@@ -4340,6 +4340,12 @@ async fn update_my_billing(
     // Block C of the risk assessment (expected total, through whom another
     // person pays) is stored apart (trigger flow 2026-10-07).
     let block_c = crate::risk::cabinet::take_keys(&mut body, &crate::risk::cabinet::BLOCK_C_KEYS);
+    // The recipient the cabinet shows (QA 2026-11-03, F2): a tab opened
+    // before staff named another parent must not write its fields onto the
+    // row of that parent.
+    let recipient_expected = body
+        .as_object_mut()
+        .and_then(|object| object.remove(lead_invoice_recipient::RECIPIENT_EXPECTED_KEY));
     // The invoice recipient of step 3 (2026-10-11) is stored apart.
     let recipient_body =
         crate::risk::cabinet::take_keys(&mut body, &lead_invoice_recipient::RECIPIENT_KEYS);
@@ -4473,6 +4479,21 @@ async fn update_my_billing(
         let mut current = stored.clone().unwrap_or_default();
         let _ =
             lead_invoice_recipient::resolve_parent(&mut current, &representation.representation);
+        if let Some(expected) = &recipient_expected
+            && lead_invoice_recipient::recipient_changed_since(
+                expected,
+                stored.as_ref(),
+                &current,
+                &recipient_body,
+            )
+        {
+            return coded(
+                StatusCode::CONFLICT,
+                "recipient_changed",
+                "The invoice recipient changed meanwhile; reload the request",
+                json!({}),
+            );
+        }
         let mut next = match lead_invoice_recipient::apply(&current, &recipient_body) {
             Ok(next) => next,
             Err(error) => return error.into_response(),

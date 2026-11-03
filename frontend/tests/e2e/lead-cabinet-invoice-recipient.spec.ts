@@ -380,6 +380,8 @@ async function setup(page: Page, options: {
   options.prepare?.(request);
   const calls = {
     billing: [] as Record<string, unknown>[],
+    // The recipient the cabinet showed with each billing save (QA 2026-11-03, F2).
+    expected: [] as unknown[],
     payer: [] as Record<string, unknown>[],
     identification: [] as Record<string, unknown>[],
     costEstimate: [] as Record<string, unknown>[],
@@ -417,9 +419,19 @@ async function setup(page: Page, options: {
       });
     }
     if (path === "/me/lead-requests") return route.fulfill({ json: { requests: [answer()] } });
+    if (path === base && method === "GET") return route.fulfill({ json: answer() });
     if (path === `${base}/billing` && method === "POST") {
-      const patch = req.postDataJSON() as Record<string, unknown>;
+      const { recipient_expected: expected, ...patch } = req.postDataJSON() as Record<string, unknown>;
       calls.billing.push(patch);
+      calls.expected.push(expected);
+      // Like the server: a tab that shows another recipient than the stored one is refused.
+      if (expected && !("invoice_recipient" in patch) && !("recipient_representative_id" in patch)) {
+        const shown = expected as { invoice_recipient: string | null; representative_id: string | null };
+        if (shown.invoice_recipient !== request.billing.invoice_recipient
+          || (shown.representative_id && shown.representative_id !== request.billing.recipient.representative_id)) {
+          return route.fulfill({ status: 409, json: { code: "recipient_changed", message: "changed" } });
+        }
+      }
       const billing = request.billing;
       const party = billing.recipient;
       const before = billing.invoice_recipient;
@@ -597,6 +609,27 @@ test("'Ich' of a signed-in parent is that parent: no parent question, also with 
   await expect.poll(() => request.billing.payment_method).toBe("bank_transfer");
   await page.getByRole("button", { name: "Weiter", exact: true }).click();
   await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "disclosure");
+});
+
+test("a tab read before staff named the other parent writes nothing onto that parent (QA 2026-11-03, F2)", async ({ page }) => {
+  const { request, calls } = await setup(page, { minor: true, prepare: (request) => {
+    request.representation = twoParents(FATHER);
+    request.billing.invoice_recipient = "self";
+    request.billing.invoice_recipient_is_payer = false;
+    request.billing.recipient.representative_id = FATHER;
+  } });
+  await page.goto("/");
+  await step(page, "billing");
+  const email = page.locator("#lead-request-recipient_email");
+  await expect(email).toBeVisible();
+  // Staff name the mother meanwhile; this tab still shows the father.
+  request.billing.recipient.representative_id = MOTHER;
+  await email.fill("ben.rechnung@example.com");
+  await email.blur();
+  await expect(page.getByTestId("lead-request-recipient-changed")).toBeVisible();
+  expect(calls.expected[0]).toEqual({ invoice_recipient: "self", representative_id: FATHER });
+  expect(request.billing.recipient.email).not.toBe("ben.rechnung@example.com");
+  await expect(email).not.toHaveValue("ben.rechnung@example.com");
 });
 
 test("a stored 'Ich' without a named parent is asked again: opening the step names nobody (QA 2026-10-31)", async ({ page }) => {

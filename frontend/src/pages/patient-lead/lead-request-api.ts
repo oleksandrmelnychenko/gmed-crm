@@ -1234,10 +1234,18 @@ export function saveLeadBilling(leadId: string, patch: BillingPatch): Promise<Le
  * Step 3's invoice recipient on the billing route (owner spec 2026-10-11):
  * answered before anybody is named as payer, so no 409 `payer_not_declared`.
  */
-export function saveLeadInvoiceRecipient(leadId: string, patch: RecipientPatch): Promise<LeadRequest> {
+/** The recipient the cabinet shows while it saves (QA 2026-11-03, F2). */
+export type RecipientExpected = { invoice_recipient: string | null; representative_id: string | null };
+
+/**
+ * Saves the recipient; `expected` is the recipient the cabinet shows, so that
+ * a tab opened before another parent was named is refused (409
+ * `recipient_changed`) instead of writing onto that parent.
+ */
+export function saveLeadInvoiceRecipient(leadId: string, patch: RecipientPatch, expected?: RecipientExpected): Promise<LeadRequest> {
   return apiFetch<LeadRequest>(`${base(leadId)}/billing`, {
     method: "POST",
-    body: JSON.stringify(patch),
+    body: JSON.stringify(expected ? { ...patch, recipient_expected: expected } : patch),
   });
 }
 
