@@ -3259,6 +3259,7 @@ function Field({
   label,
   children,
   className,
+  keepMarkerInline = false,
   error,
   errorId,
   required = false,
@@ -3270,6 +3271,7 @@ function Field({
   children: ReactNode;
   /** A marker on the label's line, e.g. that the client sees the field in the cabinet. */
   note?: ReactNode;
+  keepMarkerInline?: boolean;
   className?: string;
   error?: string;
   errorId?: string;
@@ -3285,7 +3287,8 @@ function Field({
 }) {
   // In "the patient fills it in" mode the field is optional and says so —
   // unless the check still asks for it.
-  const { patientFills } = useStep1PortalField(errorId, portalField);
+  const { patientFills, marker } = useStep1PortalField(errorId, portalField);
+  const singleLine = keepMarkerInline && Boolean(marker);
   const caption = (
     <>
       {label}
@@ -3295,9 +3298,9 @@ function Field({
   // The patient's marker and hint sit on the label's line, at its right end (wrapping only when narrow).
   const content = (
     <>
-      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+      <span className={cn("min-w-0 items-center gap-x-2 gap-y-1", singleLine ? "grid grid-cols-[minmax(0,1fr)_auto]" : "flex flex-wrap")}>
         {htmlFor ? (
-          <label htmlFor={htmlFor} data-wizard-field-label className={cn(tokens.text.label, "block font-mono")}>{caption}</label>
+          <label htmlFor={htmlFor} data-wizard-field-label title={singleLine && typeof label === "string" ? label : undefined} className={cn(tokens.text.label, "block font-mono", singleLine && "truncate")}>{caption}</label>
         ) : (
           <span data-wizard-field-label className={cn(tokens.text.label, "block font-mono")}>{caption}</span>
         )}
@@ -9547,7 +9550,7 @@ ${serviceCommentLines.join("\n")}`
                   />
                 </Field>
                 <SanctionsLiveCheckNotice
-                  className="md:col-span-2 -mt-2"
+                  className="md:col-span-2"
                   input={liveCheckInput({
                     firstName: draft.firstName,
                     lastName: draft.lastName,
@@ -9768,7 +9771,7 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(value) => handleAmlCountryChange({ country: value })}
                   />
                 </Field>
-                <Field label={tx(CITIZENSHIP_FIELD_LABELS.ru, CITIZENSHIP_FIELD_LABELS.de)} portalField="citizenships" htmlFor={STEP1_CONTROL_IDS.citizenships}>
+                <Field label={tx(CITIZENSHIP_FIELD_LABELS.ru, CITIZENSHIP_FIELD_LABELS.de)} portalField="citizenships" htmlFor={STEP1_CONTROL_IDS.citizenships} keepMarkerInline>
                   <CitizenshipMultiSelect
                     id={STEP1_CONTROL_IDS.citizenships}
                     value={draft.citizenships}
