@@ -10533,3 +10533,75 @@ async fn renaming_a_parent_in_the_wizard_renames_the_parents_login_and_follows_t
         .unwrap();
     assert_eq!(anna_login, "Anna Mustermann");
 }
+
+/// Owner 2026-11-04 (QA D-5): the guardian of two siblings is picked on the
+/// second child's lead from the first child's lead, with the person data and
+/// the identity document that lead holds; a child on such a lead is not a
+/// candidate, and the same person on two leads comes once.
+#[tokio::test]
+async fn guardian_candidates_include_representatives_of_other_leads() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let tag = Uuid::new_v4().simple().to_string();
+    let mut leads = Vec::new();
+    for first in ["Emma", "Lotte"] {
+        let contact = Uuid::new_v4();
+        let contacts = json!([
+            { "id": contact, "name": format!("Karin {tag}"), "relation": "guardian",
+              "birth_date": "1970-05-05", "email": format!("karin-{tag}@example.test") },
+            { "id": Uuid::new_v4(), "name": format!("Kind {tag}"), "relation": "mother",
+              "birth_date": "2015-01-01" }
+        ]);
+        let lead: Uuid = sqlx::query_scalar("INSERT INTO leads(first_name,last_name,email,date_of_birth,qualification_status,trusted_contacts,created_by) VALUES($1,'Dornbusch',$2,'2017-10-10','new',$3,$4) RETURNING id")
+            .bind(first).bind(format!("{first}-{tag}@example.test")).bind(&contacts)
+            .bind(app.patient_manager_id).fetch_one(pool).await.unwrap();
+        sqlx::query("INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,citizenships,street,zip,city,country,id_document_type,id_document_number,id_issuing_authority,id_issuing_country,id_issued_on,id_valid_until) VALUES($1,$2,'legal_representative','staff','Karin',$3,'{DE}','Lindenweg 3','10115','Berlin','DE','id_card','L01X00T47','Stadt Berlin','DE','2021-03-04','2031-03-03')")
+            .bind(lead).bind(contact).bind(&tag).execute(pool).await.unwrap();
+        leads.push(lead);
+    }
+    let (status, found) = json_request(
+        &app,
+        "GET",
+        &format!(
+            "/api/v1/leads/guardian-candidates?search={tag}&exclude_lead_id={}",
+            Uuid::new_v4()
+        ),
+        &app.auth_header("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    let contacts: Vec<&Value> = found
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["source"] == "contact")
+        .collect();
+    assert_eq!(contacts.len(), 1, "one person, no child: {found}");
+    let karin = contacts[0];
+    assert_eq!(karin["first_name"], "Karin", "{karin}");
+    assert_eq!(karin["birth_date"], "1970-05-05", "{karin}");
+    assert_eq!(karin["street"], "Lindenweg 3", "{karin}");
+    assert_eq!(karin["citizenships"], json!(["DE"]), "{karin}");
+    assert_eq!(karin["id_document_number"], "L01X00T47", "{karin}");
+    assert_eq!(karin["id_issued_on"], "2021-03-04", "{karin}");
+    // The lead the dialog is open on does not offer its own guardian.
+    let (_, own) = json_request(
+        &app,
+        "GET",
+        &format!(
+            "/api/v1/leads/guardian-candidates?search={tag}&exclude_lead_id={}",
+            leads[1]
+        ),
+        &app.auth_header("patient_manager"),
+        None,
+    )
+    .await;
+    let others = own
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["source"] == "contact")
+        .count();
+    assert_eq!(others, 1, "the other lead's guardian stays: {own}");
+}

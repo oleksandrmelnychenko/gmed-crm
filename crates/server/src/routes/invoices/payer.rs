@@ -970,7 +970,18 @@ async fn hide_payer_invoice_from_minor_portal(
            WHERE invoice.id = $1
              AND patient.id = invoice.patient_id
              AND invoice.visibility_updated_at IS NULL
-             AND patient.birth_date > ($2::date - INTERVAL '18 years')"#,
+             AND patient.birth_date > ($2::date - INTERVAL '18 years')
+             -- A parent or guardian who pays is no third party: the invoice
+             -- addressed to them stays in the minor's portal, which they use
+             -- (owner 2026-11-04 «Показувати», QA A-6).
+             AND NOT EXISTS (
+                 SELECT 1 FROM patient_relations relation
+                 WHERE relation.patient_id = invoice.patient_id
+                   AND relation.relation_type IN ('mother', 'father', 'parent', 'guardian')
+                   AND (relation.id = invoice.payer_patient_relation_id
+                        OR (invoice.payer_patient_id IS NOT NULL
+                            AND relation.related_patient_id = invoice.payer_patient_id))
+             )"#,
     )
     .bind(invoice_id)
     .bind(crate::app_time::today())

@@ -1429,20 +1429,44 @@ async fn list_guardian_candidates(
         identity = crate::services::lead_guardian_identity::PATIENT_IDENTITY_JSON,
         gwg = crate::services::lead_guardian_identity::PATIENT_GWG_JOIN,
     );
+    let search = format!("%{}%", query.search.unwrap_or_default().trim());
+    let failed = |error: sqlx::Error| {
+        tracing::error!(%error, "list guardian candidates");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load guardian candidates",
+        )
+    };
     let rows = sqlx::query(&sql)
-        .bind(format!("%{}%", query.search.unwrap_or_default().trim()))
+        .bind(&search)
         .bind(crate::app_time::today())
         .bind(query.exclude_lead_id)
         .fetch_all(&state.db)
         .await
-        .map_err(|error| {
-            tracing::error!(%error, "list guardian candidates");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to load guardian candidates",
-            )
-        })?;
+        .map_err(failed)?;
+    let mut conn = state.db.acquire().await.map_err(failed)?;
+    let contacts = guardian_contact_candidates(&mut conn, &search, query.exclude_lead_id)
+        .await
+        .map_err(failed)?;
     let full_patient_contact = auth.can(Capability::PatientsView);
+    let known: std::collections::HashSet<(String, Option<NaiveDate>)> = rows
+        .iter()
+        .map(|row| {
+            (
+                person_key(
+                    &row.get::<String, _>("first_name"),
+                    &row.get::<String, _>("last_name"),
+                ),
+                row.get::<Option<NaiveDate>, _>("birth_date"),
+            )
+        })
+        .collect();
+    let contacts = contacts.into_iter().filter(|candidate| {
+        !known.contains(&(
+            person_key(&candidate.first_name, &candidate.last_name),
+            candidate.birth_date,
+        ))
+    });
     Ok(Json(Value::Array(
         rows.into_iter()
             .map(|row| {
@@ -1465,8 +1489,98 @@ async fn list_guardian_candidates(
                     full_patient_contact,
                 )
             })
+            .chain(contacts.map(|candidate| guardian_candidate_value(candidate, true)))
             .collect(),
     )))
+}
+
+fn person_key(first: &str, last: &str) -> String {
+    format!("{} {}", first.trim(), last.trim()).to_lowercase()
+}
+
+/// A parent, guardian or representative named on another lead (not linked to
+/// a patient record), for reuse on a sibling's lead (owner 2026-11-04, QA
+/// D-5: the aunt who is Vormund of two children had to be typed twice). The
+/// newest entry of the same person (name and date of birth) wins; adults
+/// only. The person data come as the other lead holds them, its identity
+/// document included ([`lead_guardian_identity::load_contact`]).
+async fn guardian_contact_candidates(
+    conn: &mut sqlx::PgConnection,
+    search: &str,
+    exclude_lead_id: Option<Uuid>,
+) -> Result<Vec<GuardianCandidate>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, (Uuid, Uuid)>(
+        r#"SELECT l.id, (c.value ->> 'id')::uuid
+           FROM leads l
+           CROSS JOIN LATERAL jsonb_array_elements(
+               CASE WHEN jsonb_typeof(l.trusted_contacts) = 'array'
+                    THEN l.trusted_contacts ELSE '[]'::jsonb END) c(value)
+           WHERE ($2::uuid IS NULL OR l.id <> $2)
+             AND l.qualification_status NOT IN ('deleted')
+             AND c.value ->> 'relation' IN ('mother', 'father', 'guardian', 'representative')
+             AND COALESCE(c.value ->> 'related_patient_id', '') = ''
+             AND COALESCE(c.value ->> 'id', '') ~* '^[0-9a-f-]{36}$'
+             AND ($1::text = '%%' OR de_normalize(concat_ws(' ', c.value ->> 'name', c.value ->> 'email', c.value ->> 'phone')) LIKE de_normalize($1))
+           ORDER BY l.created_at DESC
+           LIMIT 40"#,
+    )
+    .bind(search)
+    .bind(exclude_lead_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let today = crate::app_time::today();
+    let mut seen = std::collections::HashSet::new();
+    let mut candidates = Vec::new();
+    for (lead_id, contact_id) in rows {
+        let Some(identity) =
+            crate::services::lead_guardian_identity::load_contact(conn, lead_id, contact_id)
+                .await?
+        else {
+            continue;
+        };
+        let text = |value: &Value, key: &str| {
+            value
+                .get(key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+        };
+        let (first_name, last_name) = super::lead_representatives::name_parts(
+            &identity.name,
+            text(&identity.extras, "first_name").as_deref(),
+            text(&identity.extras, "last_name").as_deref(),
+        );
+        let birth_date = text(&identity.contact, "birth_date")
+            .or_else(|| text(&identity.contact, "date_of_birth"))
+            .and_then(|value| NaiveDate::parse_from_str(&value, "%Y-%m-%d").ok());
+        if birth_date.is_some_and(|born| is_minor_on(Some(born), today))
+            || !seen.insert((person_key(&first_name, &last_name), birth_date))
+        {
+            continue;
+        }
+        let mut details = identity.extras.clone();
+        if details.get("citizenships").is_none_or(Value::is_null) {
+            details["citizenships"] = json!(identity.citizenships);
+        }
+        candidates.push(GuardianCandidate {
+            id: contact_id,
+            source: "contact".to_string(),
+            patient_record_id: None,
+            display_id: None,
+            first_name,
+            last_name,
+            birth_date,
+            email: text(&identity.contact, "email"),
+            phone: text(&identity.contact, "phone"),
+            address: text(&identity.contact, "address").unwrap_or_default(),
+            details,
+        });
+        if candidates.len() >= 20 {
+            break;
+        }
+    }
+    Ok(candidates)
 }
 
 struct GuardianCandidate {
@@ -2382,6 +2496,69 @@ fn emergency_contact_for_patient(
         return (None, None, None);
     }
     legacy
+}
+
+/// The patient relation type of a payer's relationship to the patient
+/// ([`super::lead_payer::RELATIONSHIP_KINDS`]).
+fn payer_relation_type(kind: Option<&str>) -> &'static str {
+    match kind {
+        Some("parent") => "parent",
+        Some("spouse") => "spouse",
+        Some("child") => "child",
+        Some("sibling") => "sibling",
+        Some("grandparent" | "relative") => "relative",
+        Some("friend") => "friend",
+        _ => "other",
+    }
+}
+
+/// Adds an adult patient's third-party person payer as a relation, once: a
+/// relation of the same name stays as it is (a repeat conversion, or the
+/// person was a trusted contact already).
+async fn add_payer_relation_on_conversion(
+    conn: &mut sqlx::PgConnection,
+    patient_id: Uuid,
+    payer: &super::lead_payer::Declaration,
+) -> Result<(), sqlx::Error> {
+    let name = [payer.first_name.as_deref(), payer.last_name.as_deref()]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if name.is_empty() {
+        return Ok(());
+    }
+    sqlx::query(
+        r#"INSERT INTO patient_relations (
+                patient_id, related_name, relation_type, phone, email,
+                address_street, address_zip, address_city, address_country,
+                birth_date, citizenships, notes
+           )
+           SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+           WHERE NOT EXISTS (
+               SELECT 1 FROM patient_relations existing
+               WHERE existing.patient_id = $1
+                 AND lower(regexp_replace(btrim(existing.related_name), '\s+', ' ', 'g'))
+                     = lower($2)
+           )"#,
+    )
+    .bind(patient_id)
+    .bind(&name)
+    .bind(payer_relation_type(payer.relationship_kind.as_deref()))
+    .bind(payer.phone.as_deref())
+    .bind(payer.email.as_deref())
+    .bind(payer.street.as_deref())
+    .bind(payer.zip.as_deref())
+    .bind(payer.city.as_deref())
+    .bind(payer.country.as_deref())
+    .bind(payer.date_of_birth)
+    .bind(&payer.citizenships)
+    .bind("Плательщик")
+    .execute(conn)
+    .await
+    .map(|_| ())
 }
 
 pub(crate) fn is_parent_or_guardian_relation(value: Option<&str>) -> bool {
@@ -10018,6 +10195,20 @@ async fn convert_lead(
         }
     }
 
+    // An adult's third-party person payer (a parent paying for the grown-up
+    // child, an uncle, …) is a relation on the card too, so a sibling's card
+    // can suggest the same person (owner 2026-11-04, QA A-5/B/C BUG-4). Not
+    // the default payer: invoices keep following the declaration.
+    if minor_custody.is_none()
+        && let Some(payer) = payer_declaration
+            .as_ref()
+            .filter(|payer| payer.is_third_party() && !payer.is_organisation())
+        && let Err(error) = add_payer_relation_on_conversion(&mut tx, patient_id, payer).await
+    {
+        tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "add the payer as a relation on conversion");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
     // The minor's contracting party on the patient: the custody and the
     // relations of the representing parents, in the order of the lead's
     // representation (rep1 first). A repeat conversion states it anew.
@@ -15255,5 +15446,21 @@ mod repeat_conversion_relation_tests {
             matching_relation(&[first, second], &[], None, None, "Anna Muster", "mother"),
             None
         );
+    }
+}
+
+#[cfg(test)]
+mod payer_relation_tests {
+    use super::payer_relation_type;
+
+    /// Owner 2026-11-04: an adult's paying parent is a "parent" relation on
+    /// the card; other relationships map onto the card's relation types.
+    #[test]
+    fn a_payers_relationship_becomes_a_relation_type() {
+        assert_eq!(payer_relation_type(Some("parent")), "parent");
+        assert_eq!(payer_relation_type(Some("grandparent")), "relative");
+        assert_eq!(payer_relation_type(Some("sibling")), "sibling");
+        assert_eq!(payer_relation_type(Some("employer")), "other");
+        assert_eq!(payer_relation_type(None), "other");
     }
 }

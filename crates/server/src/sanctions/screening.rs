@@ -1779,8 +1779,9 @@ pub async fn screen_lead(state: &AppState, lead_id: Uuid) -> Result<ScreenReport
         .map(|lead| lead.subjects)
         .unwrap_or_default();
     let report = screen_owner(state, &index, Owner::Lead(lead_id), subjects).await?;
-    // The risk assessment follows the stored data; a new open hit is no
-    // trigger (only a confirmed one is T16), it holds through the gate.
+    // The risk assessment follows the stored data: a new open hit holds
+    // through the gate; only that of a parent who pays or receives the
+    // invoices is T16 at once (owner 2026-11-04), any other once confirmed.
     let mut tx = state.db.begin().await?;
     crate::risk::store::reassess(&mut tx, lead_id, crate::risk::store::Cause::Screening, None)
         .await?;

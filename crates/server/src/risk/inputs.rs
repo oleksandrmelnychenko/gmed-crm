@@ -95,8 +95,10 @@ pub(crate) use guardian_receives_sql;
 /// 2026-11-02: «скрінити як мінімум на санкції»).
 ///
 /// Only a CONFIRMED hit counts (owner decision 2026-10-07, QA 2026-10-11
-/// A-15/A-21/A-33): "under sanctions" means a match the CEO confirmed. An
-/// open, undecided hit is the internal hold `sanctions_review_pending` of
+/// A-15/A-21/A-33): "under sanctions" means a match the CEO confirmed —
+/// except a minor's parent who pays or receives the invoices, whose open hit
+/// counts at once (owner 2026-11-04: the full check starts, the CEO decides
+/// after it). Any other open, undecided hit is the internal hold `sanctions_review_pending` of
 /// [`crate::sanctions::gate`] only — it never raises the risk level, so it
 /// never opens a follow-up block, the enhanced check or the payer's proof of
 /// funds, and nothing the lead, the payer or the recipient sees changes.
@@ -211,6 +213,8 @@ async fn load_inner(
                   COALESCE(hits.patient_hit, false) AS patient_hit,
                   COALESCE(hits.payer_hit, false) AS payer_hit,
                   COALESCE(hits.recipient_hit, false) AS recipient_hit,
+                  COALESCE(hits.payer_hit_confirmed, false) AS payer_hit_confirmed,
+                  COALESCE(hits.recipient_hit_confirmed, false) AS recipient_hit_confirmed,
                   COALESCE(lead_orders.order_payers, 0) AS order_payers
            FROM leads l
            LEFT JOIN lead_gwg_declarations g ON g.lead_id = l.id
@@ -226,9 +230,21 @@ async fn load_inner(
                           AS payer_hit,
                       bool_or(h.subject_kind = 'lead_recipient'
                               OR ({GUARDIAN_RECEIVES_SQL} AND NOT {GUARDIAN_PAYS_SQL}))
-                          AS recipient_hit
+                          AS recipient_hit,
+                      bool_or(({PAYER_SIDE_HIT_SQL}
+                               AND h.subject_kind NOT IN ('lead_recipient', 'lead_guardian'))
+                              OR {GUARDIAN_PAYS_SQL})
+                          FILTER (WHERE h.status = 'confirmed') AS payer_hit_confirmed,
+                      bool_or(h.subject_kind = 'lead_recipient'
+                              OR ({GUARDIAN_RECEIVES_SQL} AND NOT {GUARDIAN_PAYS_SQL}))
+                          FILTER (WHERE h.status = 'confirmed') AS recipient_hit_confirmed
                FROM sanctions_hits h
-               WHERE h.status = 'confirmed'
+               -- An open hit of a parent who pays or receives the invoices
+               -- counts too (owner 2026-11-04): the full check of all the
+               -- parent's data starts at once, the CEO decides after it.
+               WHERE (h.status = 'confirmed'
+                      OR (h.status = 'open'
+                          AND ({GUARDIAN_PAYS_SQL} OR {GUARDIAN_RECEIVES_SQL})))
                  AND ((h.lead_id = l.id AND h.subject_kind <> 'patient')
                       OR (h.subject_kind = 'patient'
                           AND h.patient_id IN (l.prospect_patient_id, l.converted_patient_id)))
@@ -363,7 +379,7 @@ async fn load_inner(
         // A confirmation is final: its T16 stays even when the subject no
         // longer fires (e.g. the patient took over the payment).
         confirmed_hit_patient: flag("patient_hit"),
-        confirmed_hit_payer: flag("payer_hit") || flag("recipient_hit"),
+        confirmed_hit_payer: flag("payer_hit_confirmed") || flag("recipient_hit_confirmed"),
         today: Some(today),
         pending_unsent,
     };

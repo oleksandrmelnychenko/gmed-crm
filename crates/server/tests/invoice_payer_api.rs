@@ -531,12 +531,40 @@ async fn minor_patient_invoices_go_to_the_parents_by_default() {
     assert_eq!(draft["payer"]["role"], "contracting_party");
     assert_eq!(draft["recipient"]["name"], "Erika Muster");
     assert_eq!(draft["payer"]["order_contact_name"], Value::Null, "{draft}");
-    // Hidden from the child's portal by default.
-    assert_eq!(draft["portal_visible"], false);
-    assert_eq!(draft["pdf_visible_to_patient"], false);
+    // A paying parent is no third party: the invoice stays in the minor's
+    // portal, which the parents use (owner 2026-11-04, QA A-6).
+    assert_eq!(draft["portal_visible"], true, "{draft}");
     let invoice_id = draft["id"].as_str().unwrap().to_string();
     let (status, body) = release(&fx.app, &fx.billing, &invoice_id, json!({})).await;
     assert_eq!(status, StatusCode::OK, "{body}");
+
+    // A third party who pays: hidden from the child's portal by default
+    // (owner decision 2026-10-01).
+    let order = seed_order(&fx.pool, child, fx.admin_id, &format!("{}-3", fx.tag)).await;
+    let quote = create_quote(&fx.app, &fx.manager, order).await;
+    let draft = create_draft(&fx.app, &fx.billing, &quote, "final").await;
+    let third_id = draft["id"].as_str().unwrap().to_string();
+    let (status, body) = set_invoice_payer(
+        &fx.app,
+        &fx.billing,
+        &third_id,
+        json!({
+            "payer_contact_name": "Oma Muster",
+            "payer_role": "cost_bearer",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, third) = json_request(
+        &fx.app,
+        "GET",
+        &format!("/api/v1/invoices/{third_id}"),
+        &fx.billing,
+        None,
+    )
+    .await;
+    assert_eq!(third["portal_visible"], false, "{third}");
+    assert_eq!(third["pdf_visible_to_patient"], false, "{third}");
 
     // Without a payer the minor would receive the invoice: confirm first.
     let order = seed_order(&fx.pool, child, fx.admin_id, &format!("{}-2", fx.tag)).await;

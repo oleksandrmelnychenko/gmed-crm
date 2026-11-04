@@ -118,7 +118,7 @@ import { useLeadPayerDeclaration } from "../model/use-lead-payer-declaration";
 import { useLeadPayerLink } from "../model/use-lead-payer-link";
 import { amlPrefillFromLeadAnswers, applyAmlLeadPrefill } from "../model/enhanced-check-prefill";
 import { fetchLeadPortalIntake, LEAD_CUSTODY_VALUES, moveLeadPortalUpload, type LeadCustody, type LeadRepresentative } from "../data/lead-portal-intake-api";
-import type { RepresentativeUploadKind } from "../data/lead-risk-api";
+import { saveRepresentativeIdentityDocumentData, type IdentityDocumentDataInput, type RepresentativeUploadKind } from "../data/lead-risk-api";
 import { useLeadEnhancedCheck } from "../model/use-lead-enhanced-check";
 import { useRiskCountryLists } from "../model/use-risk-country-lists";
 import {
@@ -555,10 +555,21 @@ type GuardianCandidatePrefill = {
   /** Empty when the person brought no details: the previous pick's values then leave. */
   values: RepresentativeDetails;
   hasDetails: boolean;
-  source: "patient" | "lead";
+  source: "patient" | "lead" | "contact";
   displayId: string | null;
-  /** The patient card's identity document: a linked parent's GwG data take it after the save. */
-  document: { type: string | null; number: string | null; validUntil: string | null } | null;
+  /**
+   * The patient card's identity document (a linked parent's GwG data take it
+   * after the save), or the document another lead holds for the person
+   * (`contact`, owner 2026-11-04): written to the new parent after the save.
+   */
+  document: {
+    type: string | null;
+    number: string | null;
+    validUntil: string | null;
+    issuingAuthority?: string | null;
+    issuingCountry?: string | null;
+    issuedOn?: string | null;
+  } | null;
 };
 
 type AmlRiskTier = "high_risk" | "blacklist";
@@ -3870,6 +3881,8 @@ export function LeadWizard({
   // its values go with the dialog's own «Сохранить» (F-11).
   const trustedContactDetailsDraftRef = useRef<{ contactId: string; draft: RepresentativeDetails; loaded: RepresentativeDetails } | null>(null);
   const pendingRepresentativeDetailsRef = useRef(new Map<string, RepresentativeDetails>());
+  // The identity document a parent picked from another lead brings: written once the parent is on file.
+  const pendingRepresentativeDocumentsRef = useRef(new Map<string, IdentityDocumentDataInput>());
   // Whether a parent receives the invoice and/or pays (owner 2026-11-02): the
   // dialog's choice, and for a parent not on file yet the choice written once
   // the autosave has created the parent.
@@ -4814,6 +4827,20 @@ export function LeadWizard({
       },
     );
   }, [leadId, reloadPayer, reloadStep1PortalState, tx]);
+  // A new parent picked from another lead gets that lead's identity document once on file.
+  useEffect(() => {
+    const pending = pendingRepresentativeDocumentsRef.current;
+    if (!leadId || !pendingDetailsRepresentation || !autosaveSettled || pending.size === 0) return;
+    for (const person of pendingDetailsRepresentation.representatives) {
+      const document = pending.get(person.id);
+      if (!document) continue;
+      pending.delete(person.id);
+      void saveRepresentativeIdentityDocumentData(leadId, person.id, document).then(
+        () => void reloadStep1PortalState(),
+        (cause: unknown) => setServerContactError({ contactId: person.id, message: errorText(cause, tx) }),
+      );
+    }
+  }, [leadId, pendingDetailsRepresentation, autosaveSettled, pendingBillingRolesVersion, reloadStep1PortalState, tx]);
   // A new parent gets the chosen role once the autosave has created it.
   useEffect(() => {
     const pending = pendingBillingRolesRef.current;
@@ -6515,7 +6542,11 @@ export function LeadWizard({
   };
 
   const guardianCandidateLabel = (candidate: LeadGuardianCandidate) => [
-    candidate.source === "lead" ? tx("Лид", "Lead") : candidate.display_id,
+    candidate.source === "lead"
+      ? tx("Лид", "Lead")
+      : candidate.source === "contact"
+        ? tx("Представитель из другой заявки", "Vertreter aus einer anderen Anfrage")
+        : candidate.display_id,
     [candidate.first_name, candidate.last_name].filter(Boolean).join(" "),
     candidate.email,
   ].filter(Boolean).join(" · ");
@@ -6528,8 +6559,15 @@ export function LeadWizard({
     // empty and staff typed his address again). A field still holding the
     // previous pick's value follows the new pick.
     const details = selected ? guardianCandidateDetails(selected) : null;
-    const idDocument = selected?.source === "patient" && !selected.contact_hidden && (selected.id_document_number || selected.id_document_type)
-      ? { type: selected.id_document_type ?? null, number: selected.id_document_number ?? null, validUntil: selected.id_valid_until ?? null }
+    const idDocument = (selected?.source === "patient" || selected?.source === "contact") && !selected.contact_hidden && (selected.id_document_number || selected.id_document_type)
+      ? {
+          type: selected.id_document_type ?? null,
+          number: selected.id_document_number ?? null,
+          validUntil: selected.id_valid_until ?? null,
+          issuingAuthority: selected.id_issuing_authority ?? null,
+          issuingCountry: selected.id_issuing_country ?? null,
+          issuedOn: selected.id_issued_on ?? null,
+        }
       : null;
     const previous = trustedContactCandidatePrefill?.values ?? null;
     if (details || previous) {
@@ -6724,6 +6762,23 @@ export function LeadWizard({
         pendingRepresentativeDetailsRef.current.delete(normalizedContact.id);
       }
       setPendingRepresentativeDetailsVersion((version) => version + 1);
+    }
+    // A parent picked from another lead brings that lead's identity document
+    // (owner 2026-11-04): written to the new parent once it is on file.
+    const pickedDocument = trustedContactCandidatePrefill?.source === "contact"
+      ? trustedContactCandidatePrefill.document
+      : null;
+    if (trustedContactEditorGuardian && pickedDocument && !representativeOnFile(normalizedContact.id)) {
+      pendingRepresentativeDocumentsRef.current.set(normalizedContact.id, {
+        id_document_type: pickedDocument.type,
+        id_document_number: pickedDocument.number,
+        id_issuing_authority: pickedDocument.issuingAuthority ?? null,
+        id_issuing_country: pickedDocument.issuingCountry ?? null,
+        id_issued_on: pickedDocument.issuedOn ?? null,
+        id_valid_until: pickedDocument.validUntil,
+        id_document_unreadable: false,
+      });
+      setPendingBillingRolesVersion((version) => version + 1);
     }
     // The parent's role for the invoices (owner 2026-11-02): written to the
     // lead's recipient and payer at once, or after the autosave for a new parent.
@@ -12986,7 +13041,9 @@ ${serviceCommentLines.join("\n")}`
                       ) : null}
                       {prefillDocument ? (
                         <p data-testid="trusted-contact-candidate-document">
-                          {tx("Документ из карточки пациента", "Ausweis aus der Patientenakte")}
+                          {prefill?.source === "contact"
+                            ? tx("Документ из другой заявки", "Ausweis aus einer anderen Anfrage")
+                            : tx("Документ из карточки пациента", "Ausweis aus der Patientenakte")}
                           {": "}
                           {[
                             prefillDocument.type ? idDocumentTypeLabel(prefillDocument.type, tx) : null,

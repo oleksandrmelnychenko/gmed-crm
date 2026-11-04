@@ -61,7 +61,8 @@ export function fetchLeadReferrerPatients(search = "") {
 
 export type LeadGuardianCandidate = {
   id: string;
-  source: "patient" | "lead";
+  /** `contact`: a parent, guardian or representative named on another lead (owner 2026-11-04). */
+  source: "patient" | "lead" | "contact";
   patient_record_id: string | null;
   display_id: string | null;
   first_name: string;

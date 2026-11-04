@@ -3583,6 +3583,9 @@ async fn a_parents_hit_counts_by_the_role_it_has_now() {
             .is_none_or(|relation| relation.contains("invoice_recipient")),
         "{hit}"
     );
+    // Still open: the hit of the parent who receives the invoices already
+    // counts, so the full check starts (owner 2026-11-04).
+    assert_eq!(t16_subjects(&app, minor).await, ["payer"]);
     decide(
         &app,
         hit["id"].as_str().unwrap(),
