@@ -134,8 +134,9 @@ describe("own control colours", () => {
     expect(parseAppearancePreferences(JSON.stringify({ ...stored, controls: { focus: "nope" } }))).toEqual(EMPTY_APPEARANCE);
   });
 
-  it("sets section dots and counters only when a colour is given", () => {
-    expect(themeCssVariables(DEFAULT_THEME)).not.toHaveProperty("--dot");
+  it("uses the heading marker for section dots unless a personal dot colour is set", () => {
+    expect(themeCssVariables(DEFAULT_THEME)["--dot"]).toBe(DEFAULT_THEME.colors.headingMarker);
+    expect(themeCssVariables(parseAppearanceTheme(JSON.stringify(custom)))["--dot"]).toBe("#2563eb");
     const css = themeCssVariables(withControls(DEFAULT_THEME, { dot: "#16a34a", badge: "#dc2626", badgeText: "#ffffff" }));
     expect(css["--dot"]).toBe("#16a34a");
     expect(css["--badge"]).toBe("#dc2626");

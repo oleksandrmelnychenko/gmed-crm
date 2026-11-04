@@ -91,6 +91,7 @@
     --ring: oklch(0.70 0.18 45);
     --brand: #f97316;
     --heading-marker: #f97316;
+    --dot: var(--heading-marker);
     --brand-soft: #fff4ed;
     --brand-ring: #fb923c;
     --chart-1: oklch(0.70 0.18 45);
@@ -1649,7 +1650,7 @@ html[data-native-platform] {
   [class~="bg-orange-500"],
   [class~="bg-foreground/70"]
 ) {
-  background-color: var(--heading-marker);
+  background-color: var(--dot);
 }
 
 /* Icons are plain black outlines: muted and brand tints are dropped here, outside

@@ -55,7 +55,7 @@
 
 .patient-portal-theme .portal-section h3 { font-size: 15px; }
 .patient-portal-theme .portal-section > div:first-child { margin-bottom: 8px; }
-.patient-portal-theme .portal-section > div:first-child [aria-hidden].rounded-full { background: var(--heading-marker); }
+.patient-portal-theme .portal-section > div:first-child [aria-hidden].rounded-full { background: var(--dot); }
 
 .patient-portal-theme .portal-info-row {
   border: 0;
@@ -99,7 +99,7 @@
   column-gap: 16px;
 }
 .patient-portal-theme .portal-invoice-sheet h2 { font-size: 15px; }
-.patient-portal-theme .portal-invoice-sheet h2 > [aria-hidden] { background: var(--heading-marker); }
+.patient-portal-theme .portal-invoice-sheet h2 > [aria-hidden] { background: var(--dot); }
 
 .patient-portal-theme .portal-request-form .portal-section {
   background: transparent;

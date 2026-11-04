@@ -263,7 +263,7 @@ const ACTIVE_PORTAL_RELEASE_WORDS: PluralWords = {
 };
 const selectClassName = shellSelectClassName;
 const documentFilterControlClassName =
-  "h-10 rounded-lg border-border bg-transparent text-[13px] shadow-none md:h-8";
+  "h-10 rounded-lg border-input bg-field text-[13px] shadow-none md:h-8";
 const textareaClassName = shellTextareaClass;
 const DEFAULT_GENERATE_TEMPLATE_ID = "patient_sticker_compact";
 const documentSectionClassName = "border-0 bg-transparent p-0 shadow-none";
@@ -3449,7 +3449,7 @@ function StaffDocumentsPage({
       (isTranslationRequestsRoute || translationQueueBusy || translationQueueError || translationQueue.length > 0) ? (
         <DocumentSection className={documentSectionClassName}>
           {translationQueueError ? <Banner tone="error">{translationQueueError}</Banner> : null}
-          <div className="mb-2 flex items-center justify-end">
+          <div className="mb-2 flex items-center justify-end rounded-xl border border-border bg-card p-3">
             <NativeComboboxSelect
               aria-label={t.users_status}
               data-readonly="exempt"
@@ -3457,7 +3457,7 @@ function StaffDocumentsPage({
               onChange={(event) =>
                 setTranslationQueueStatus(event.target.value as TranslationQueueStatusFilter)
               }
-              className={cn(selectClassName, "h-8 w-auto bg-background text-[13px]")}
+              className={cn(selectClassName, "h-8 w-auto bg-field text-[13px]")}
             >
               <option value="open">{t.documents_translation_queue_open}</option>
               <option value="completed">{t.documents_translation_completed}</option>
@@ -3487,7 +3487,7 @@ function StaffDocumentsPage({
       <DocumentSection
         className={documentSectionClassName}
       >
-        <div className="relative z-30 space-y-1.5">
+        <div className="relative z-30 space-y-2 rounded-xl border border-border bg-card p-3">
           <div className="grid grid-cols-2 gap-2 md:gap-1.5 xl:grid-cols-6">
             <div className="relative col-span-2 xl:col-span-2">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />

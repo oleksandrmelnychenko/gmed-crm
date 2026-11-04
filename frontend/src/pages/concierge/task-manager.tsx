@@ -323,7 +323,7 @@ function TaskCard({
   const doneLabel = lang === "ru" ? "Выполнено" : "Erledigt";
   const parentLabel = lang === "ru" ? "В составе" : "Gehört zu";
   return (
-    <article tabIndex={-1} data-task-card-id={task.id} data-testid={`task-card-${task.id}`} className={cn("relative min-w-0 max-w-full overflow-hidden rounded-lg bg-card p-2.5 transition-colors duration-150 hover:bg-[color-mix(in_oklab,var(--card)_94%,var(--foreground))] focus:outline-2 focus:outline-primary focus:outline-offset-2", compact && "grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center")}>
+    <article tabIndex={-1} data-task-card-id={task.id} data-testid={`task-card-${task.id}`} className={cn("relative min-w-0 max-w-full overflow-hidden rounded-lg bg-card p-2.5 transition-shadow duration-150 hover:inset-ring hover:inset-ring-border focus:outline-2 focus:outline-primary focus:outline-offset-2", compact && "grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center")}>
       <div className={cn("min-w-0", compact && "col-span-2 sm:col-span-1")}>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-1.5">
         <button type="button" title={conciergeTaskCode(task)} onClick={() => onOpen(task)}><Badge variant="outline" className="rounded-full font-mono text-[10px] text-muted-foreground">{conciergeTaskCode(task)}</Badge></button>

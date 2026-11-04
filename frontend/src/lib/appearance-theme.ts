@@ -23,7 +23,7 @@ export const DEFAULT_THEME_COLORS = {
 export type ThemeColor = keyof typeof DEFAULT_THEME_COLORS;
 /**
  * Optional colours. When a palette omits them, controls follow textMuted, surface and accent,
- * and section dots and count badges keep the colours each screen already gives them.
+ * section dots follow the heading marker and count badges keep their local colours.
  */
 export const OPTIONAL_COLORS = [
   "placeholder", "dropdown", "dropdownHighlight", "dot", "badge", "badgeText",
@@ -63,15 +63,15 @@ export const BUILTIN_THEMES: readonly AppearanceTheme[] = [DEFAULT_THEME, {
     background: "#f8f7f2", surface: "#fefdfb", text: "#302f2e", textMuted: "#6a6862",
     primary: "#b75a37", primaryText: "#ffffff", muted: "#f8f7f2", accent: "#f3f0e8",
     border: "#eeebe2", inputBorder: "#979283", field: "#ffffff", focus: "#c67b60", sidebar: "#fcfbf8",
-    headingMarker: "#cd7e62", rowAlternate: "#fcfbf8", rowHover: "#f6f4ee", rowActive: "#f3f0e8", rowSelected: "#eeeadf",
+    headingMarker: "#ed6e2c", rowAlternate: "#fcfbf8", rowHover: "#f6f4ee", rowActive: "#f3f0e8", rowSelected: "#eeeadf",
   },
 }, {
-  // Neutral greys, soft graphite actions and one blue for focus and heading dots.
+  // Neutral greys, soft graphite actions and blue keyboard focus.
   version: 1, id: "gmed-ink", name: "GMED Ink", colors: {
     background: "#f9f9f9", surface: "#ffffff", text: "#313131", textMuted: "#6a6a6a",
     primary: "#484848", primaryText: "#ffffff", muted: "#f9f9f9", accent: "#f2f2f2",
     border: "#eeeeee", inputBorder: "#939393", field: "#ffffff", focus: "#5f8cf0", sidebar: "#fdfdfd",
-    headingMarker: "#6591f1", rowAlternate: "#fcfcfc", rowHover: "#f6f6f6", rowActive: "#f2f2f2", rowSelected: "#ededed",
+    headingMarker: "#ed6e2c", rowAlternate: "#fcfcfc", rowHover: "#f6f6f6", rowActive: "#f2f2f2", rowSelected: "#ededed",
   },
 }];
 
@@ -166,8 +166,7 @@ export function themeCssVariables(theme: AppearanceTheme): Record<string, string
     "--control-placeholder": c.placeholder ?? c.textMuted,
     "--control-popover": c.dropdown ?? c.surface,
     "--control-highlight": c.dropdownHighlight ?? c.accent,
-    // Unset dots and badges fall back to each screen's own colour in CSS.
-    ...(c.dot ? { "--dot": c.dot } : {}),
+    "--dot": c.dot ?? c.headingMarker,
     ...(c.badge ? { "--badge": c.badge } : {}),
     ...(c.badgeText ? { "--badge-foreground": c.badgeText } : {}),
     // Errors, charts, backdrops and shadows keep the stylesheet's colours until a theme sets them.

@@ -73,7 +73,7 @@ function effectiveColor(colors: ThemeColors, key: ControlColor): string {
     case "placeholder": return colors.placeholder ?? colors.textMuted;
     case "dropdown": return colors.dropdown ?? colors.surface;
     case "dropdownHighlight": return colors.dropdownHighlight ?? colors.accent;
-    case "dot": return colors.dot ?? colors.primary;
+    case "dot": return colors.dot ?? colors.headingMarker;
     case "badge": return colors.badge ?? colors.primary;
     case "badgeText": return colors.badgeText ?? "#ffffff";
     case "danger": return colors.danger ?? "#dc2626";
