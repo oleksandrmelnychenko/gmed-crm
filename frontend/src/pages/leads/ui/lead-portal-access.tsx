@@ -303,7 +303,7 @@ export function LeadPortalAccessDetail({
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <AdminSectionTitle>{de ? "Patientenportal" : "Портал пациента"}</AdminSectionTitle>
           <StatusChip tone={minor === true ? "neutral" : leadPortalStatusTone(status)}>
-            {minor === true ? <><UsersRound aria-hidden="true" />{de ? "Zugang über Eltern" : "Вход через родителей"}</> : leadPortalStatusLabel(status, lang)}
+            {minor === true ? <><UsersRound aria-hidden="true" />{de ? "Zugang über gesetzliche Vertreter" : "Вход через законных представителей"}</> : leadPortalStatusLabel(status, lang)}
           </StatusChip>
         </div>
         <div className="flex flex-wrap items-center gap-2 [&>button]:w-auto [&>button]:shadow-none" role="group" aria-label={de ? "Portalaktionen" : "Действия с порталом"}>

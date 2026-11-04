@@ -110,11 +110,14 @@ export function usePayerAutosave({
   onChange,
   onSaveState,
   enabled = true,
+  ownAccountOnly = false,
 }: {
   request: LeadRequest;
   draft: PayerDraft;
   editsRef: PayerEdits;
   enabled?: boolean;
+  /** Follow-up block L: the own economic interest is sent also after the payer answered. */
+  ownAccountOnly?: boolean;
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
@@ -152,7 +155,7 @@ export function usePayerAutosave({
       const fields = new Set(!edited() || (keyOf(snapshot) === keyOf(savedRef.current) && keyOf(snapshot) === keyOf(queuedDraftRef.current)) ? [] : ["payer"]);
       queuedDraftRef.current = snapshot;
       return runDraftSave(enqueue, fields, async () => {
-        if (!enabled || answeredRef.current || !edited()) return true;
+        if (!enabled || (answeredRef.current && !ownAccountOnly) || !edited()) return true;
         const edition = editsRef.current.made;
         // Without the box the consent is left out: the server keeps what it has.
         const withConsent = (!snapshot.guardian_pays && !parentPaying) || serverAsksConsent;
@@ -233,7 +236,7 @@ export function usePayerAutosave({
         }
       });
     },
-    [editsRef, enabled, enqueue, onChange, onSaveState, parentPaying, request.lead_id, serverAsksConsent, typed],
+    [editsRef, enabled, enqueue, onChange, onSaveState, ownAccountOnly, parentPaying, request.lead_id, serverAsksConsent, typed],
   );
 
   useAutosave(draft, save);
@@ -310,7 +313,7 @@ export function PayerSection({
     editsRef.current.made += 1;
     setDraftState(change);
   };
-  const { fieldError, fieldErrorCode, savedRef, queuedDraftRef } = usePayerAutosave({ request, draft, editsRef, enqueue, onChange, onSaveState });
+  const { fieldError, fieldErrorCode, savedRef, queuedDraftRef } = usePayerAutosave({ request, draft, editsRef, enqueue, onChange, onSaveState, ownAccountOnly });
   // The other parent saved the payer meanwhile (the request was re-read): the untouched fields
   // follow, a field being typed in keeps its value and says so. Not once the payer answered.
   useServerDraftSync({
@@ -336,8 +339,9 @@ export function PayerSection({
       && request.payer?.payer_kind !== "representative") || serverAsksConsent);
   const costConsent = { request, text, lang, enqueue, onChange, onSaveState };
 
-  if (answered && ownAccountOnly) return null;
-  if (answered) {
+  // Block L asks the own economic interest also after the payer answered
+  // through its own link; the server saves that answer alone (QA 2026-11-04 B S1).
+  if (answered && !ownAccountOnly) {
     // The paying parent answers as the payer: no consent to send oneself the cost estimate.
     const parentPays = payerAnswer(request.payer, template) === "guardian";
     return (

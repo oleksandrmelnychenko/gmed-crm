@@ -1019,10 +1019,23 @@ impl DocPartyBlock {
             .filter(|v| !v.is_empty())
     }
 
+    /// The salutation printed before the name: none for a child, who is not
+    /// addressed as "Frau"/"Herr" (QA 2026-11-04 D-10, «Frau Emma», 9 years).
+    /// `clean_salutation` still carries the gender for "der Patientin".
+    fn address_salutation(&self) -> Option<&str> {
+        if crate::services::contracting_party::is_minor_on(
+            self.birth_date,
+            crate::app_time::today(),
+        ) {
+            return None;
+        }
+        self.clean_salutation()
+    }
+
     /// "Herr Max Musterman" — gendered salutation prefixed to the plain name.
     /// Falls back to the bare name when no salutation is known.
     fn name_with_salutation(&self) -> String {
-        match self.clean_salutation() {
+        match self.address_salutation() {
             Some(salutation) => format!("{salutation} {}", self.name).trim().to_string(),
             None => self.name.clone(),
         }
@@ -1032,7 +1045,7 @@ impl DocPartyBlock {
     /// in "zugunsten des Patienten" (dative and genitive of "Herr" are
     /// "Herrn"; QA 2026-11-03, D-B10).
     fn name_with_salutation_declined(&self) -> String {
-        match self.clean_salutation() {
+        match self.address_salutation() {
             Some("Herr") => format!("Herrn {}", self.name).trim().to_string(),
             _ => self.name_with_salutation(),
         }
@@ -5697,6 +5710,37 @@ mod storage_filename_tests {
 #[cfg(test)]
 mod qa_2026_10_11_document_tests {
     use super::*;
+
+    /// QA 2026-11-04 D-10: a child is named without "Frau"/"Herr"; the
+    /// gender still picks "der Patientin"; an adult keeps the salutation.
+    #[test]
+    fn a_child_is_named_without_salutation() {
+        let today = crate::app_time::today();
+        let child = DocPartyBlock {
+            name: "Emma Dornbusch".into(),
+            salutation: Some("Frau".into()),
+            birth_date: today.checked_sub_months(chrono::Months::new(9 * 12)),
+            ..DocPartyBlock::default()
+        };
+        assert_eq!(child.name_with_salutation(), "Emma Dornbusch");
+        assert_eq!(child.name_with_salutation_declined(), "Emma Dornbusch");
+        assert_eq!(cost_coverage_party_accusative(&child), "Emma Dornbusch");
+        assert_eq!(appointment_patient_noun(&child).0, "die Patientin");
+        let adult = DocPartyBlock {
+            name: "Karin Weißdorn".into(),
+            salutation: Some("Frau".into()),
+            birth_date: NaiveDate::from_ymd_opt(1970, 5, 5),
+            ..DocPartyBlock::default()
+        };
+        assert_eq!(adult.name_with_salutation(), "Frau Karin Weißdorn");
+        let boy = DocPartyBlock {
+            name: "Felix Dornbusch".into(),
+            salutation: Some("Herr".into()),
+            birth_date: today.checked_sub_months(chrono::Months::new(17 * 12)),
+            ..DocPartyBlock::default()
+        };
+        assert_eq!(boy.name_with_salutation_declined(), "Felix Dornbusch");
+    }
 
     /// B-11: a category chosen by hand completes the classification of an
     /// upload that still has the generic upload type; a specific type stays.
@@ -10700,17 +10744,13 @@ fn fc_bullet(layout: &mut TreatmentPlanPdfLayout, text: &str) {
 
 /// Patient designation "Herr Max Mustermann" / "Frau …" / bare name.
 fn fc_patient_salutation_name(context: &GeneratedFrameworkContractContext) -> String {
-    match context
-        .patient_salutation
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        Some(salutation) => format!("{salutation} {}", context.patient_name)
-            .trim()
-            .to_string(),
-        None => context.patient_name.clone(),
+    DocPartyBlock {
+        name: context.patient_name.clone(),
+        salutation: context.patient_salutation.clone(),
+        birth_date: context.birth_date,
+        ..DocPartyBlock::default()
     }
+    .name_with_salutation()
 }
 
 /// The configured agency responsible person used in signatures and legal text.
@@ -22824,7 +22864,7 @@ fn cost_estimate_summary_lines(context: &GeneratedCostEstimateContext) -> Vec<St
 /// gendered salutation ("Herr" -> "Herrn", "Frau" -> "Frau") and prefixes it to
 /// the plain name. Falls back to the bare name when no salutation is known.
 fn cost_coverage_party_accusative(party: &DocPartyBlock) -> String {
-    match party.clean_salutation() {
+    match party.address_salutation() {
         Some(salutation) => {
             let declined = match salutation {
                 "Herr" => "Herrn",
@@ -23764,7 +23804,7 @@ fn build_cost_estimate_pdf(
 /// German dative salutation for the heading address ("Herr" → "Herrn", "Frau" → "Frau").
 /// Falls back to an empty string (so the bare name is used) when no salutation is known.
 fn appointment_dative_salutation(party: &DocPartyBlock) -> &'static str {
-    match party.clean_salutation() {
+    match party.address_salutation() {
         Some(value) if value.eq_ignore_ascii_case("herr") => "Herrn",
         Some(value) if value.eq_ignore_ascii_case("frau") => "Frau",
         _ => "",
@@ -23774,7 +23814,7 @@ fn appointment_dative_salutation(party: &DocPartyBlock) -> &'static str {
 /// German nominative salutation for the running body sentence ("Herr"/"Frau").
 /// Falls back to an empty string when no salutation is known.
 fn appointment_nominative_salutation(party: &DocPartyBlock) -> &'static str {
-    match party.clean_salutation() {
+    match party.address_salutation() {
         Some(value) if value.eq_ignore_ascii_case("herr") => "Herr",
         Some(value) if value.eq_ignore_ascii_case("frau") => "Frau",
         _ => "",
@@ -43911,14 +43951,15 @@ mod tests {
         let beneficiary = contracting.beneficiary_lines(&child);
         assert!(beneficiary[0].contains("zugunsten des Patienten Mia Muster, geb. am 04.03.2015"));
         assert!(beneficiary[0].contains("§ 328 BGB"));
-        // A girl is "der Patientin" (document review 2026-10-24).
+        // A girl is "der Patientin" (document review 2026-10-24), a child is
+        // named without "Frau" (QA 2026-11-04 D-10).
         let girl = DocPartyBlock {
             salutation: Some("Frau".to_string()),
             ..child.clone()
         };
         assert!(
             contracting.beneficiary_lines(&girl)[0]
-                .contains("zugunsten der Patientin Frau Mia Muster, geb. am 04.03.2015"),
+                .contains("zugunsten der Patientin Mia Muster, geb. am 04.03.2015"),
             "{:?}",
             contracting.beneficiary_lines(&girl)
         );

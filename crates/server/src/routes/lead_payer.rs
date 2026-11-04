@@ -4197,6 +4197,45 @@ fn staff_contact_consent_record(
 /// Saves the cabinet's answer in the caller's transaction, with its audit
 /// event and the payer of the lead's orders. Returns the declaration when
 /// something changed.
+impl PortalPayerInput {
+    /// The input answers the own economic interest question.
+    pub(crate) fn answers_own_account(&self) -> bool {
+        self.acts_on_own_account.is_some()
+    }
+}
+
+/// Only the lead's own economic interest (follow-up block L) on a payer that
+/// already answered through its own link: the payer's statement stays as it
+/// is. `None` when the input carries no such answer or no payer is stored
+/// (QA 2026-11-04 B S1: block L asked for it, the cabinet could not save it).
+pub(crate) async fn save_own_account_from_portal(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    actor: Uuid,
+    input: &PortalPayerInput,
+) -> Result<Option<Declaration>, PortalPayerError> {
+    let Some(acts) = input.acts_on_own_account else {
+        return Ok(None);
+    };
+    let Some(mut declaration) = load_declaration(conn, lead_id).await? else {
+        return Ok(None);
+    };
+    let owner =
+        text(&input.beneficial_owner, LONG_TEXT_MAX).map_err(|code| PortalPayerError::Invalid {
+            code,
+            field: "payer_beneficial_owner",
+        })?;
+    let owner = if acts { None } else { owner };
+    if declaration.beneficial_owner_name != owner {
+        declaration.beneficial_owner_note = None;
+    }
+    declaration.acts_on_own_account = acts;
+    declaration.own_account_answered = true;
+    declaration.beneficial_owner_name = owner;
+    store_declaration(conn, lead_id, &declaration, Some(actor), false).await?;
+    Ok(Some(declaration))
+}
+
 pub(crate) async fn save_from_portal(
     conn: &mut PgConnection,
     lead_id: Uuid,

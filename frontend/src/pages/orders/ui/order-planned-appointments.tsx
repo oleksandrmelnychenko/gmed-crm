@@ -216,8 +216,8 @@ export function OrderPlannedAppointments({
             open={confirmRelease && unreleased > 0}
             title={tx("Показать план пациенту?", "Plan dem Patienten zeigen?")}
             message={tx(
-              `Пациент увидит в портале приёмы плана (${unreleased}) и получит уведомление.`,
-              `Der Patient sieht die Termine des Plans (${unreleased}) im Portal und wird benachrichtigt.`,
+              `Пациент увидит в портале приёмы плана (${unreleased}) и получит уведомление. Раздел «Мои визиты» открыт в портале только при активном тарифе в заказе.`,
+              `Der Patient sieht die Termine des Plans (${unreleased}) im Portal und wird benachrichtigt. Der Bereich «Meine Termine» ist im Portal nur mit einem aktiven Tarif im Auftrag geöffnet.`,
             )}
             cancelLabel={tx("Отмена", "Abbrechen")}
             confirmLabel={tx("Показать", "Zeigen")}

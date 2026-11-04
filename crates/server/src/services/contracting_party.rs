@@ -203,23 +203,44 @@ impl ContractingParty {
     /// is the contracting party itself.
     pub fn is_recipient(&self, recipient: &Value) -> bool {
         let kind = recipient.get("kind").and_then(Value::as_str).unwrap_or("");
+        match self.kind {
+            PartyKind::Patient | PartyKind::PatientRepresented => kind == "patient",
+            PartyKind::LegalRepresentatives => {
+                let name = recipient_name(recipient);
+                self.representative_record_of(recipient)
+                    .is_some_and(|representative| {
+                        name.as_deref()
+                            .is_none_or(|name| names_same_person(name, &representative.name))
+                    })
+            }
+        }
+    }
+
+    /// The representative whose record (patient relation or own patient
+    /// file) the recipient points at, whatever name it carries.
+    fn representative_record_of(&self, recipient: &Value) -> Option<&Representative> {
         let uuid = |key: &str| {
             recipient
                 .get(key)
                 .and_then(Value::as_str)
                 .and_then(|value| Uuid::parse_str(value).ok())
         };
-        match self.kind {
-            PartyKind::Patient | PartyKind::PatientRepresented => kind == "patient",
-            PartyKind::LegalRepresentatives => {
-                let relation = uuid("payer_patient_relation_id");
-                let person = uuid("person_patient_id").or_else(|| uuid("payer_patient_id"));
-                self.representatives.iter().any(|representative| {
-                    relation == Some(representative.relation_id)
-                        || (person.is_some() && person == representative.related_patient_id)
-                })
-            }
-        }
+        let relation = uuid("payer_patient_relation_id");
+        let person = uuid("person_patient_id").or_else(|| uuid("payer_patient_id"));
+        self.representatives.iter().find(|representative| {
+            relation == Some(representative.relation_id)
+                || (person.is_some() && person == representative.related_patient_id)
+        })
+    }
+
+    /// A minor's invoice recorded under a contracting parent's record but
+    /// addressed to somebody else by name (billing's «Другой получатель
+    /// счёта» over the parent's payer): the invoice must go to the
+    /// contracting parent (owner 2026-11-03 Q4, QA 2026-11-04 C BUG-1).
+    pub fn recipient_renames_representative(&self, recipient: &Value) -> bool {
+        self.kind == PartyKind::LegalRepresentatives
+            && self.representative_record_of(recipient).is_some()
+            && !self.is_recipient(recipient)
     }
 
     /// The representative who receives invoices by default: the one marked as
@@ -566,6 +587,32 @@ pub async fn resolve(
     })
 }
 
+/// The recipient's printed name, compared without case and extra spaces.
+fn recipient_name(recipient: &Value) -> Option<String> {
+    recipient
+        .get("name")
+        .and_then(Value::as_str)
+        .map(comparable_name)
+        .filter(|name| !name.is_empty())
+}
+
+/// `recipient` (already comparable) names the representative: the same name,
+/// or it with an academic title in front ("Dr. Max Muster" — the invoice
+/// recipient prints the title, the representative's name does not).
+fn names_same_person(recipient: &str, representative: &str) -> bool {
+    let representative = comparable_name(representative);
+    representative.is_empty()
+        || recipient == representative
+        || recipient.ends_with(&format!(" {representative}"))
+}
+
+fn comparable_name(name: &str) -> String {
+    name.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -738,6 +785,26 @@ mod tests {
         })));
         assert!(!party.is_recipient(&json!({ "kind": "patient" })));
         assert!(!party.is_recipient(&json!({ "kind": "contact", "name": "Oma" })));
+        assert!(
+            !party.recipient_renames_representative(&json!({ "kind": "contact", "name": "Oma" }))
+        );
+
+        // QA 2026-11-04 C BUG-1: the father's record under the mother's
+        // name is not the contracting party, and is refused as such.
+        let renamed = json!({
+            "kind": "relation",
+            "name": "Anna  Korneeva",
+            "payer_patient_relation_id": father.relation_id,
+        });
+        assert!(!party.is_recipient(&renamed));
+        assert!(party.recipient_renames_representative(&renamed));
+        let same = json!({
+            "kind": "relation",
+            "name": " max  MUSTER ",
+            "payer_patient_relation_id": father.relation_id,
+        });
+        assert!(party.is_recipient(&same));
+        assert!(!party.recipient_renames_representative(&same));
 
         let adult = ContractingParty {
             kind: PartyKind::Patient,

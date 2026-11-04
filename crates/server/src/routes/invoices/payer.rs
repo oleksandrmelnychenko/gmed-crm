@@ -999,6 +999,12 @@ pub(crate) struct ReleaseConfirmations {
 pub(crate) enum ReleaseRecipientBlock {
     /// The recipient lacks name or postal address parts.
     Incomplete(Vec<&'static str>),
+    /// Refused outright; no confirmation releases it.
+    Refused {
+        code: &'static str,
+        message: &'static str,
+        details: Value,
+    },
     /// A warning billing must confirm with `field`.
     NeedsConfirmation {
         code: &'static str,
@@ -1024,6 +1030,11 @@ impl ReleaseRecipientBlock {
                 "The invoice recipient needs a full name and postal address with country before release",
                 json!({ "missing": missing }),
             ),
+            Self::Refused {
+                code,
+                message,
+                details,
+            } => coded_err(StatusCode::UNPROCESSABLE_ENTITY, code, message, details),
             Self::NeedsConfirmation {
                 code,
                 message,
@@ -1243,6 +1254,14 @@ pub(crate) async fn draft_release_checks(
             "missing": evaluation.missing,
         }));
     }
+    if evaluation
+        .party
+        .recipient_renames_representative(&evaluation.live)
+    {
+        warnings.push(
+            json!({ "code": crate::routes::lead_invoice_recipient::RECIPIENT_NOT_CONTRACTING }),
+        );
+    }
     if evaluation.minor_recipient {
         warnings.push(json!({ "code": "minor_patient_recipient" }));
     }
@@ -1289,6 +1308,19 @@ pub(crate) async fn release_recipient_snapshot(
     let evaluation = evaluate_recipient(conn, invoice_id).await?;
     if !evaluation.missing.is_empty() {
         return Err(ReleaseRecipientBlock::Incomplete(evaluation.missing));
+    }
+    if evaluation
+        .party
+        .recipient_renames_representative(&evaluation.live)
+    {
+        return Err(ReleaseRecipientBlock::Refused {
+            code: crate::routes::lead_invoice_recipient::RECIPIENT_NOT_CONTRACTING,
+            message: "A parent contracts for the minor patient and receives the invoice; address it to that parent or record another payer",
+            details: json!({
+                "recipient_name": evaluation.recipient.name,
+                "contracting_party": party_summary(&evaluation.party),
+            }),
+        });
     }
     let now = Utc::now().to_rfc3339();
     let mut confirmed = Map::new();

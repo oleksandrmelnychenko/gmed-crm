@@ -29,6 +29,7 @@ import {
   type SanctionsHit,
   type SubjectData,
 } from "./api";
+import { trustedContactRelationLabel } from "@/pages/leads/model/lead-trusted-contacts";
 import { SanctionsReasonDialog } from "./components";
 import { SanctionsListSettings } from "./list-settings";
 import { RiskSettingsTab } from "./risk-settings";
@@ -61,6 +62,23 @@ const HIDDEN_RELATIONS = new Set<string>([
   ...PATIENT_RELATION_ROLES,
   PAYER_CONTACT_RELATION,
 ]);
+/**
+ * The stored relation of a screened person ("mother", "father; payer",
+ * "guardian; invoice_recipient") in words, not as codes (QA 2026-11-04 A-4).
+ */
+function sanctionsRelationLabel(relation: string, lang: "ru" | "de"): string {
+  const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
+  return relation
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      if (part === "payer") return tx("плательщик", "Zahler");
+      if (part === "invoice_recipient") return tx("получатель счёта", "Rechnungsempfänger");
+      return trustedContactRelationLabel(part, tx);
+    })
+    .join(", ");
+}
 const TABS: Tab[] = ["open", "decided", "countries", "list", "risk"];
 
 function errorText(error: unknown, fallback: string): string {
@@ -116,7 +134,7 @@ function SubjectDetails({
       ) : null}
       {/* The kind label already says "payer" or "invoice recipient". */}
       {subject.relation && !HIDDEN_RELATIONS.has(subject.relation) && !bank ? (
-        <Row label={t.sanctions_field_relation}>{subject.relation}</Row>
+        <Row label={t.sanctions_field_relation}>{sanctionsRelationLabel(subject.relation, lang)}</Row>
       ) : null}
     </dl>
   );

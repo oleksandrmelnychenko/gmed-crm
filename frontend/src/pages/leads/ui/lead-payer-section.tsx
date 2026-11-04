@@ -216,10 +216,15 @@ export function PayerRepresentativeCard({ person, lang, tx }: { person: PayerRep
         ))}
       </dl>
       <p className="text-xs leading-5 text-muted-foreground">
-        {tx(
-          "Данные меняются в блоке законных представителей. Отдельное заявление о принятии расходов (Kostenübernahmeerklärung) не нужно: родитель подписывает договор сам.",
-          "Die Angaben werden im Block der gesetzlichen Vertreter geändert. Eine Kostenübernahmeerklärung ist nicht nötig: der Elternteil unterschreibt den Vertrag selbst.",
-        )}
+        {person.guardian
+          ? tx(
+              "Данные меняются в блоке законных представителей. Отдельное заявление о принятии расходов (Kostenübernahmeerklärung) не нужно: опекун подписывает договор за ребёнка.",
+              "Die Angaben werden im Block der gesetzlichen Vertreter geändert. Eine Kostenübernahmeerklärung ist nicht nötig: der Vormund unterschreibt den Vertrag für das Kind.",
+            )
+          : tx(
+              "Данные меняются в блоке законных представителей. Отдельное заявление о принятии расходов (Kostenübernahmeerklärung) не нужно: родитель подписывает договор сам.",
+              "Die Angaben werden im Block der gesetzlichen Vertreter geändert. Eine Kostenübernahmeerklärung ist nicht nötig: der Elternteil unterschreibt den Vertrag selbst.",
+            )}
       </p>
     </div>
   );

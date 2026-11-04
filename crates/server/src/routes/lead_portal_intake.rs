@@ -3956,10 +3956,17 @@ async fn update_my_payer(
         Ok(declared) => declared,
         Err(error) => return internal(error, "load payer"),
     };
-    match crate::routes::lead_payer_link::answered_by_payer(&mut tx, lead_id, declared.as_ref())
-        .await
+    // Follow-up block L still asks the lead's own economic interest after
+    // the payer answered (QA 2026-11-04 B S1): that answer alone is saved.
+    let own_account_after_payer = match crate::routes::lead_payer_link::answered_by_payer(
+        &mut tx,
+        lead_id,
+        declared.as_ref(),
+    )
+    .await
     {
-        Ok(false) => {}
+        Ok(false) => false,
+        Ok(true) if input.answers_own_account() => true,
         Ok(true) => {
             return coded(
                 StatusCode::CONFLICT,
@@ -3969,7 +3976,7 @@ async fn update_my_payer(
             );
         }
         Err(error) => return internal(error, "load payer"),
-    }
+    };
     // The client's side after the send: only the own economic interest of
     // follow-up block L and a withdrawn consent to contact the payer are still
     // open (owner 2026-10-26: every withdrawal). Everything else about the
@@ -3985,16 +3992,20 @@ async fn update_my_payer(
             Ok(parents) => parents,
             Err(error) => return internal(error, "load contracting parents"),
         };
-    let saved = match lead_payer::save_from_portal(
-        &mut tx,
-        lead_id,
-        auth.user_id,
-        kind.as_str(),
-        &input,
-        crate::app_time::today(),
-    )
-    .await
-    {
+    let saved = if own_account_after_payer {
+        lead_payer::save_own_account_from_portal(&mut tx, lead_id, auth.user_id, &input).await
+    } else {
+        lead_payer::save_from_portal(
+            &mut tx,
+            lead_id,
+            auth.user_id,
+            kind.as_str(),
+            &input,
+            crate::app_time::today(),
+        )
+        .await
+    };
+    let saved = match saved {
         Ok(saved) => saved,
         Err(PortalPayerError::Invalid { code, field }) => {
             return coded(
@@ -4031,12 +4042,16 @@ async fn update_my_payer(
     {
         return request_already_sent();
     }
-    let mask_changed =
+    // The payer's own statement keeps its organisation data.
+    let mask_changed = if own_account_after_payer {
+        Vec::new()
+    } else {
         match crate::risk::cabinet::save_organisation_mask(&mut tx, lead_id, &mask).await {
             Ok(Ok(changed)) => changed,
             Ok(Err(error)) => return error.into_response(),
             Err(error) => return internal(error, "save organisation"),
-        };
+        }
+    };
     if sent_by_client && !mask_changed.is_empty() {
         return request_already_sent();
     }

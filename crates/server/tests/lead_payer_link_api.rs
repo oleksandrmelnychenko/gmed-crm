@@ -1696,6 +1696,47 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     let (_, info) = with_login(&app, "GET", &path, &app.manager(), None).await;
     assert_eq!(info["link"]["status"], "submitted", "{info}");
 
+    // Follow-up block L still asks the patient's own economic interest: that
+    // answer alone is saved, the payer's statement stays (QA 2026-11-04 B S1).
+    let (status, own) = with_login(
+        &app,
+        "POST",
+        &format!("{request_path}/payer"),
+        &patient,
+        Some(json!({
+            "payer_kind": "third_party",
+            "payer_type": "person",
+            "first_name": "Mallory",
+            "street": "Fremdweg 1",
+            "acts_on_own_account": false,
+            "beneficial_owner": "Viktor Zahler, 01.05.1970"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{own}");
+    assert_eq!(own["payer"]["acts_on_own_account"], false, "{own}");
+    assert_eq!(own["payer"]["first_name"], "Viktor", "{own}");
+    let (_, declaration) = with_login(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/payer-declaration"),
+        &app.manager(),
+        None,
+    )
+    .await;
+    assert_eq!(
+        declaration["declaration"]["street"], "Ringstraße 9",
+        "{declaration}"
+    );
+    assert_eq!(
+        declaration["declaration"]["first_name"], "Viktor",
+        "{declaration}"
+    );
+    assert_eq!(
+        declaration["declaration"]["beneficial_owner_name"], "Viktor Zahler, 01.05.1970",
+        "{declaration}"
+    );
+
     // The public office was a draft «Ja» corrected before the submit: it left
     // nothing (owner decision 2026-10-25 «Рахувати лише відправлене»), so no
     // knock-out holds the link (the sent «Ja» is
