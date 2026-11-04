@@ -143,6 +143,13 @@ describe("localizeInvoiceError", () => {
     expect(
       invoiceReleaseWarningText({ code: "services_not_delivered" }, "de"),
     ).toContain("Leistung noch nicht erbracht");
+    // Owner 2026-11-04: a third party added on the patient side is identified first.
+    expect(
+      invoiceReleaseWarningText({ code: "payer_not_identified", missing: ["cost_coverage_signed"] }, "ru"),
+    ).toContain("Kostenübernahmeerklärung");
+    expect(
+      invoiceReleaseWarningText({ code: "recipient_not_contracting" }, "de"),
+    ).toContain("Elternteil");
     expect(
       localizeInvoiceError({ code: "payer_email_invalid", body: {} }, "de", "x"),
     ).toBe("Die E-Mail-Adresse des Zahlers ist ungültig.");

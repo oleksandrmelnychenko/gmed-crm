@@ -192,7 +192,14 @@ async fn create_draft(app: &axum::Router, auth: &str, quote_id: &str, invoice_ty
     body
 }
 
-async fn release(
+/// Releases a draft; the payer's identification papers are filed first, so
+/// the other release checks are what a test sees.
+async fn release(fx: &Fixture, auth: &str, invoice_id: &str, extra: Value) -> (StatusCode, Value) {
+    identify_invoice_payer(&fx.pool, invoice_id).await;
+    release_unidentified(&fx.app, auth, invoice_id, extra).await
+}
+
+async fn release_unidentified(
     app: &axum::Router,
     auth: &str,
     invoice_id: &str,
@@ -212,6 +219,41 @@ async fn release(
         Some(payload),
     )
     .await
+}
+
+/// The signed Kostenübernahmeerklärung of the invoice's order and the payer's
+/// identity document, as staff file them for a third party named on the
+/// patient's side (owner 2026-11-04: required before the release).
+async fn identify_invoice_payer(pool: &PgPool, invoice_id: &str) {
+    for (art, template, signed) in [
+        (
+            "cost_coverage_declaration",
+            Some("cost_coverage_declaration"),
+            true,
+        ),
+        ("payer_identity", None, false),
+    ] {
+        sqlx::query(
+            r#"INSERT INTO documents (
+                   id, patient_id, order_id, auto_name, original_filename, art, category,
+                   status, visibility, is_medical, mime_type, generated_template_id,
+                   signed_at, version_root_document_id, version_number, uploaded_by
+               )
+               SELECT doc_id, i.patient_id, i.order_id, $2, $2 || '.pdf', $2, 'finance',
+                      'active', 'internal', false, 'application/pdf', $3,
+                      CASE WHEN $4 THEN now() END, doc_id, 1,
+                      (SELECT id FROM users ORDER BY created_at LIMIT 1)
+               FROM invoices i, (SELECT gen_random_uuid() AS doc_id) fresh
+               WHERE i.id = $1::uuid"#,
+        )
+        .bind(invoice_id)
+        .bind(art)
+        .bind(template)
+        .bind(signed)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
 }
 
 async fn set_invoice_payer(
@@ -325,7 +367,7 @@ async fn released_recipient_is_frozen_and_survives_relation_changes() {
         format!("Kind {} Muster", fx.tag)
     );
 
-    let (status, released) = release(&fx.app, &fx.billing, &invoice_id, json!({})).await;
+    let (status, released) = release(&fx, &fx.billing, &invoice_id, json!({})).await;
     assert_eq!(status, StatusCode::OK, "{released}");
     let snapshot: Value =
         sqlx::query_scalar("SELECT recipient_snapshot FROM invoices WHERE id = $1::uuid")
@@ -458,7 +500,7 @@ async fn release_requires_a_full_recipient_address() {
         "recipient_address_incomplete"
     );
 
-    let (status, body) = release(&fx.app, &fx.billing, &invoice_id, json!({})).await;
+    let (status, body) = release(&fx, &fx.billing, &invoice_id, json!({})).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["error"], "recipient_address_incomplete");
     assert_eq!(body["missing"], json!(["street", "zip", "city", "country"]));
@@ -478,7 +520,7 @@ async fn release_requires_a_full_recipient_address() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let (status, body) = release(&fx.app, &fx.billing, &invoice_id, json!({})).await;
+    let (status, body) = release(&fx, &fx.billing, &invoice_id, json!({})).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["missing"], json!(["country"]));
 
@@ -535,7 +577,7 @@ async fn minor_patient_invoices_go_to_the_parents_by_default() {
     // portal, which the parents use (owner 2026-11-04, QA A-6).
     assert_eq!(draft["portal_visible"], true, "{draft}");
     let invoice_id = draft["id"].as_str().unwrap().to_string();
-    let (status, body) = release(&fx.app, &fx.billing, &invoice_id, json!({})).await;
+    let (status, body) = release(&fx, &fx.billing, &invoice_id, json!({})).await;
     assert_eq!(status, StatusCode::OK, "{body}");
 
     // A third party who pays: hidden from the child's portal by default
@@ -573,12 +615,12 @@ async fn minor_patient_invoices_go_to_the_parents_by_default() {
     let invoice_id = draft["id"].as_str().unwrap().to_string();
     let (status, _) = set_invoice_payer(&fx.app, &fx.billing, &invoice_id, json!({})).await;
     assert_eq!(status, StatusCode::OK);
-    let (status, body) = release(&fx.app, &fx.billing, &invoice_id, json!({})).await;
+    let (status, body) = release(&fx, &fx.billing, &invoice_id, json!({})).await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["error"], "minor_patient_recipient");
     assert_eq!(body["confirm_field"], "confirm_minor_recipient");
     let (status, body) = release(
-        &fx.app,
+        &fx,
         &fx.billing,
         &invoice_id,
         json!({ "confirm_minor_recipient": true }),
@@ -675,7 +717,7 @@ async fn the_declared_third_party_pays_the_invoice_after_the_default_payer_and_b
     let second = create_draft(&fx.app, &fx.billing, &quote, "final").await;
     let second_id = second["id"].as_str().unwrap().to_string();
     assert_eq!(second["payer"]["contact_name"], "Viktor Zahler", "{second}");
-    let (status, released) = release(&fx.app, &fx.billing, &second_id, json!({})).await;
+    let (status, released) = release(&fx, &fx.billing, &second_id, json!({})).await;
     assert_eq!(status, StatusCode::OK, "{released}");
     let snapshot: Value =
         sqlx::query_scalar("SELECT recipient_snapshot FROM invoices WHERE id = $1::uuid")
@@ -1014,7 +1056,7 @@ async fn the_lead_says_where_the_invoice_goes_and_the_order_keeps_its_cost_beare
         cost_bearer.record.payer_role.as_deref(),
         Some("cost_bearer")
     );
-    let (status, released) = release(&fx.app, &fx.billing, &invoice_id, json!({})).await;
+    let (status, released) = release(&fx, &fx.billing, &invoice_id, json!({})).await;
     assert_eq!(status, StatusCode::OK, "{released}");
     let snapshot: Value =
         sqlx::query_scalar("SELECT recipient_snapshot FROM invoices WHERE id = $1::uuid")
@@ -1044,7 +1086,7 @@ async fn the_lead_says_where_the_invoice_goes_and_the_order_keeps_its_cost_beare
         company["recipient"]["service_recipient_name"], patient_name,
         "{company}"
     );
-    let (status, released) = release(&fx.app, &fx.billing, &company_id, json!({})).await;
+    let (status, released) = release(&fx, &fx.billing, &company_id, json!({})).await;
     assert_eq!(status, StatusCode::OK, "{released}");
     let snapshot: Value =
         sqlx::query_scalar("SELECT recipient_snapshot FROM invoices WHERE id = $1::uuid")
@@ -1343,7 +1385,7 @@ async fn the_declared_invoice_email_and_tax_numbers_reach_the_invoice() {
     assert_eq!(status, StatusCode::OK, "{corrected}");
     assert_eq!(corrected["recipient"]["email"], "buchhaltung@example.com");
     assert_eq!(corrected["recipient"]["vat_id"], "DE 987 654 321");
-    let (status, released) = release(&fx.app, &fx.billing, &invoice_id, json!({})).await;
+    let (status, released) = release(&fx, &fx.billing, &invoice_id, json!({})).await;
     assert_eq!(status, StatusCode::OK, "{released}");
     let snapshot: Value =
         sqlx::query_scalar("SELECT recipient_snapshot FROM invoices WHERE id = $1::uuid")
@@ -1628,13 +1670,8 @@ async fn recipient_other_than_the_party_and_advance_mismatch_need_confirmation()
 
     // The advance goes to the patient.
     let advance = create_draft(&fx.app, &fx.billing, &quote, "advance").await;
-    let (status, body) = release(
-        &fx.app,
-        &fx.billing,
-        advance["id"].as_str().unwrap(),
-        json!({}),
-    )
-    .await;
+    let (status, body) =
+        release(&fx, &fx.billing, advance["id"].as_str().unwrap(), json!({})).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     // The database clock steps back before the final invoice is released
     // (seen once under CI load: the advance stayed unsettled). The release
@@ -1659,7 +1696,7 @@ async fn recipient_other_than_the_party_and_advance_mismatch_need_confirmation()
     });
     let (status, _) = set_invoice_payer(&fx.app, &fx.billing, &invoice_id, payer.clone()).await;
     assert_eq!(status, StatusCode::OK);
-    let (status, body) = release(&fx.app, &fx.billing, &invoice_id, json!({})).await;
+    let (status, body) = release(&fx, &fx.billing, &invoice_id, json!({})).await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["error"], "recipient_not_contracting_party");
 
@@ -1668,11 +1705,11 @@ async fn recipient_other_than_the_party_and_advance_mismatch_need_confirmation()
     cost_bearer["payer_role"] = json!("cost_bearer");
     let (status, _) = set_invoice_payer(&fx.app, &fx.billing, &invoice_id, cost_bearer).await;
     assert_eq!(status, StatusCode::OK);
-    let (status, body) = release(&fx.app, &fx.billing, &invoice_id, json!({})).await;
+    let (status, body) = release(&fx, &fx.billing, &invoice_id, json!({})).await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["error"], "advance_recipient_mismatch");
     let (status, body) = release(
-        &fx.app,
+        &fx,
         &fx.billing,
         &invoice_id,
         json!({ "confirm_advance_recipient_mismatch": true }),
@@ -1820,7 +1857,7 @@ async fn confirmed_advance_mismatch_covers_only_the_named_advances() {
     // The patient's advance, then the company's final invoice (confirmed).
     let patient_advance = create_draft(&fx.app, &fx.billing, &quote, "advance").await;
     let patient_advance_id = patient_advance["id"].as_str().unwrap().to_string();
-    let (status, body) = release(&fx.app, &fx.billing, &patient_advance_id, json!({})).await;
+    let (status, body) = release(&fx, &fx.billing, &patient_advance_id, json!({})).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let company_final = create_draft(&fx.app, &fx.billing, &quote, "final").await;
     let company_final_id = company_final["id"].as_str().unwrap().to_string();
@@ -1828,7 +1865,7 @@ async fn confirmed_advance_mismatch_covers_only_the_named_advances() {
         set_invoice_payer(&fx.app, &fx.billing, &company_final_id, company.clone()).await;
     assert_eq!(status, StatusCode::OK);
     let (status, body) = release(
-        &fx.app,
+        &fx,
         &fx.billing,
         &company_final_id,
         json!({ "confirm_advance_recipient_mismatch": true }),
@@ -1851,7 +1888,7 @@ async fn confirmed_advance_mismatch_covers_only_the_named_advances() {
     let mia_advance_id = mia_advance["id"].as_str().unwrap().to_string();
     let (status, _) = set_invoice_payer(&fx.app, &fx.billing, &mia_advance_id, mia.clone()).await;
     assert_eq!(status, StatusCode::OK);
-    let (status, body) = release(&fx.app, &fx.billing, &mia_advance_id, json!({})).await;
+    let (status, body) = release(&fx, &fx.billing, &mia_advance_id, json!({})).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["total_gross"], "119", "{body}");
     pay(&fx.app, &fx.billing, &mia_advance_id, "50").await;
@@ -1898,7 +1935,7 @@ async fn confirmed_advance_mismatch_covers_only_the_named_advances() {
     let (status, _) = set_invoice_payer(&fx.app, &fx.billing, &mia_final_id, mia).await;
     assert_eq!(status, StatusCode::OK);
     let (status, body) = release(
-        &fx.app,
+        &fx,
         &fx.billing,
         &mia_final_id,
         json!({ "confirm_advance_recipient_mismatch": true }),
@@ -1944,12 +1981,12 @@ async fn a_paid_advance_reaches_only_the_final_invoice_of_its_own_quote() {
     // Quote 1: advance (paid 50 of 119), then its final invoice (69 open).
     let first_advance = create_draft(&fx.app, &fx.billing, &first_quote, "advance").await;
     let first_advance_id = first_advance["id"].as_str().unwrap().to_string();
-    let (status, body) = release(&fx.app, &fx.billing, &first_advance_id, json!({})).await;
+    let (status, body) = release(&fx, &fx.billing, &first_advance_id, json!({})).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     pay(&fx.app, &fx.billing, &first_advance_id, "50").await;
     let first_final = create_draft(&fx.app, &fx.billing, &first_quote, "final").await;
     let first_final_id = first_final["id"].as_str().unwrap().to_string();
-    let (status, body) = release(&fx.app, &fx.billing, &first_final_id, json!({})).await;
+    let (status, body) = release(&fx, &fx.billing, &first_final_id, json!({})).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["prepayment_applied_amount"], "50", "{body}");
     assert_eq!(body["balance_due"], "69", "{body}");
@@ -1967,7 +2004,7 @@ async fn a_paid_advance_reaches_only_the_final_invoice_of_its_own_quote() {
     let second_quote = create_quote(&fx.app, &fx.manager, order).await;
     let second_advance = create_draft(&fx.app, &fx.billing, &second_quote, "advance").await;
     let second_advance_id = second_advance["id"].as_str().unwrap().to_string();
-    let (status, body) = release(&fx.app, &fx.billing, &second_advance_id, json!({})).await;
+    let (status, body) = release(&fx, &fx.billing, &second_advance_id, json!({})).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["total_gross"], "214.2", "{body}");
     let second_number = advance_number(&fx.pool, &second_advance_id).await;
@@ -2015,7 +2052,7 @@ async fn a_paid_advance_reaches_only_the_final_invoice_of_its_own_quote() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let (status, refused) = release(&fx.app, &fx.billing, &second_final_id, json!({})).await;
+    let (status, refused) = release(&fx, &fx.billing, &second_final_id, json!({})).await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
     assert_eq!(refused["error"], "advance_recipient_mismatch");
     assert_eq!(
@@ -2029,7 +2066,7 @@ async fn a_paid_advance_reaches_only_the_final_invoice_of_its_own_quote() {
     assert_eq!(named["open_gross"], "214.2", "{refused}");
     assert!(named["recipient_name"].is_string(), "{refused}");
     let (status, released) = release(
-        &fx.app,
+        &fx,
         &fx.billing,
         &second_final_id,
         json!({ "confirm_advance_recipient_mismatch": true }),
@@ -2146,4 +2183,62 @@ async fn payer_changes_are_audited_with_old_and_new_values_in_the_transaction() 
     .await
     .unwrap();
     assert_eq!(audited, 1);
+}
+
+/// Owner 2026-11-04 («да»): a third party named on the patient's side after
+/// the conversion — here a cost bearer on the invoice — is identified before
+/// an invoice is addressed to them: the signed Kostenübernahmeerklärung of
+/// the order and the payer's identity document, both after the payer was set.
+#[tokio::test]
+async fn a_third_party_added_after_the_conversion_is_identified_before_the_release() {
+    let Some(fx) = fixture("payer-later").await else {
+        return;
+    };
+    let patient = seed_patient(&fx.pool, fx.admin_id, &fx.tag, "1990-02-03", true).await;
+    let order = seed_order(&fx.pool, patient, fx.admin_id, &fx.tag).await;
+    let quote = create_quote(&fx.app, &fx.manager, order).await;
+    let draft = create_draft(&fx.app, &fx.billing, &quote, "final").await;
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    let (status, body) = set_invoice_payer(
+        &fx.app,
+        &fx.billing,
+        &invoice_id,
+        json!({
+            "payer_contact_name": "Heinz Dornbusch",
+            "payer_role": "cost_bearer",
+            "payer_address_street": "Am Hang 4",
+            "payer_address_zip": "10115",
+            "payer_address_city": "Berlin",
+            "payer_address_country": "DE",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, refused) =
+        release_unidentified(&fx.app, &fx.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["error"], "payer_not_identified", "{refused}");
+    assert_eq!(
+        refused["missing"],
+        json!(["cost_coverage_signed", "payer_identity_document"]),
+        "{refused}"
+    );
+    let (_, detail) = json_request(
+        &fx.app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}"),
+        &fx.billing,
+        None,
+    )
+    .await;
+    assert!(
+        detail["release_checks"]["warnings"]
+            .as_array()
+            .is_some_and(|warnings| warnings
+                .iter()
+                .any(|warning| warning["code"] == "payer_not_identified")),
+        "{detail}"
+    );
+    let (status, released) = release(&fx, &fx.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{released}");
 }

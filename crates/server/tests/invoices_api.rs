@@ -335,6 +335,7 @@ async fn create_sent_invoice(
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let invoice_id = body["id"].as_str().unwrap();
+    identify_invoice_payer(pool, invoice_id).await;
     let mut released = release_invoice(app, bearer, invoice_id).await;
     sqlx::query("UPDATE invoices SET due_date = $2::date WHERE id = $1::uuid")
         .bind(invoice_id)
@@ -344,6 +345,41 @@ async fn create_sent_invoice(
         .unwrap();
     released["due_date"] = json!(due_date);
     released
+}
+
+/// The signed Kostenübernahmeerklärung of the invoice's order and the payer's
+/// identity document, as staff file them for a third party named on the
+/// patient's side (owner 2026-11-04: required before the release).
+async fn identify_invoice_payer(pool: &PgPool, invoice_id: &str) {
+    for (art, template, signed) in [
+        (
+            "cost_coverage_declaration",
+            Some("cost_coverage_declaration"),
+            true,
+        ),
+        ("payer_identity", None, false),
+    ] {
+        sqlx::query(
+            r#"INSERT INTO documents (
+                   id, patient_id, order_id, auto_name, original_filename, art, category,
+                   status, visibility, is_medical, mime_type, generated_template_id,
+                   signed_at, version_root_document_id, version_number, uploaded_by
+               )
+               SELECT doc_id, i.patient_id, i.order_id, $2, $2 || '.pdf', $2, 'finance',
+                      'active', 'internal', false, 'application/pdf', $3,
+                      CASE WHEN $4 THEN now() END, doc_id, 1,
+                      (SELECT id FROM users ORDER BY created_at LIMIT 1)
+               FROM invoices i, (SELECT gen_random_uuid() AS doc_id) fresh
+               WHERE i.id = $1::uuid"#,
+        )
+        .bind(invoice_id)
+        .bind(art)
+        .bind(template)
+        .bind(signed)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
 }
 
 async fn release_invoice(app: &axum::Router, bearer: &str, invoice_id: &str) -> Value {
@@ -6297,6 +6333,7 @@ async fn invoice_recipient_is_the_payer_in_pdf_and_einvoice() {
         relation_id.to_string()
     );
 
+    identify_invoice_payer(&pool, &invoice_id).await;
     release_invoice(&app, &billing_bearer, &invoice_id).await;
 
     let (status, _, xml) = binary_request(

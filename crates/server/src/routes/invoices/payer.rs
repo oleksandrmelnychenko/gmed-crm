@@ -1245,6 +1245,126 @@ async fn evaluate_recipient(
     })
 }
 
+/// Refusal code of a release to a third party who was not identified.
+pub(crate) const PAYER_NOT_IDENTIFIED: &str = "payer_not_identified";
+
+/// What a third-party payer named on the patient's side — after the
+/// conversion, on an order or an invoice — still lacks before an invoice is
+/// addressed to them (owner 2026-11-04 «да»): the signed
+/// Kostenübernahmeerklärung of the order and the payer's identity document
+/// (an organisation's register extract counts, owner 2026-10-30), both made
+/// after the payer was last set. The payer the lead's declaration names was
+/// identified before the conversion; the patient, the contracting party and
+/// the party at another address are no third party. Empty when nothing is
+/// missing.
+async fn later_payer_missing(
+    conn: &mut PgConnection,
+    invoice_id: Uuid,
+    evaluation: &RecipientEvaluation,
+) -> Result<Vec<&'static str>, sqlx::Error> {
+    if evaluation.is_party
+        || evaluation.recipient.kind == "patient"
+        || matches!(
+            evaluation.payer_role.as_deref(),
+            Some(PAYER_ROLE_CONTRACTING_PARTY | PAYER_ROLE_INVOICE_ADDRESS)
+        )
+    {
+        return Ok(Vec::new());
+    }
+    let sql = format!(
+        r#"SELECT i.patient_id, i.order_id, {columns},
+                  GREATEST(i.payer_updated_at, o.payer_updated_at) AS payer_since
+           FROM invoices i LEFT JOIN orders o ON o.id = i.order_id
+           WHERE i.id = $1"#,
+        columns = payer_columns("i", ""),
+    );
+    let row = sqlx::query(&sql)
+        .bind(invoice_id)
+        .fetch_one(&mut *conn)
+        .await?;
+    let patient_id: Uuid = row.try_get("patient_id")?;
+    let order_id: Option<Uuid> = row.try_get("order_id")?;
+    let since: Option<chrono::DateTime<Utc>> = row.try_get("payer_since")?;
+    let mut record = PayerRecord::from_row(&row, "");
+    if !record.is_set() {
+        let inherited = inherited_invoice_payer(conn, order_id, patient_id).await?;
+        if inherited.source == "payer_declaration" || !inherited.record.is_set() {
+            return Ok(Vec::new());
+        }
+        record = inherited.record;
+    }
+    if matches!(
+        record.payer_role.as_deref(),
+        Some(PAYER_ROLE_CONTRACTING_PARTY | PAYER_ROLE_INVOICE_ADDRESS)
+    ) {
+        return Ok(Vec::new());
+    }
+    if let Some(declared) = lead_payer::patient_declaration(conn, patient_id).await?
+        && declared.declaration.is_third_party()
+    {
+        let legal_form = lead_payer::payer_legal_form(conn, declared.lead_id).await?;
+        let named = [legal_form.as_deref(), None].into_iter().any(|form| {
+            declared
+                .declaration
+                .order_payer_record(record.notes.clone(), form)
+                .is_some_and(|written| {
+                    PayerRecord {
+                        payer_role: record.payer_role.clone(),
+                        ..written
+                    }
+                    .same_apart_from_organisation_box(&record)
+                })
+        });
+        if named {
+            return Ok(Vec::new());
+        }
+    }
+    let (coverage, identity) = sqlx::query_as::<_, (bool, bool)>(
+        r#"SELECT
+              EXISTS (
+                  SELECT 1 FROM documents d
+                  WHERE d.patient_id = $1
+                    AND ($2::uuid IS NULL OR d.order_id = $2)
+                    AND (d.generated_template_id = 'cost_coverage_declaration'
+                         OR d.art = 'cost_coverage_declaration')
+                    AND d.signed_at IS NOT NULL
+                    AND d.status <> 'archived'
+                    AND d.file_deleted_at IS NULL
+                    AND COALESCE(
+                            (SELECT original.created_at FROM documents original
+                             WHERE original.id = d.replaces_document_id),
+                            d.created_at) >= COALESCE($3, '-infinity'::timestamptz)
+              ),
+              EXISTS (
+                  SELECT 1 FROM documents d
+                  WHERE d.patient_id = $1
+                    AND d.art = 'payer_identity'
+                    AND d.status <> 'archived'
+                    AND d.file_deleted_at IS NULL
+                    AND d.created_at >= COALESCE($3, '-infinity'::timestamptz)
+              ) OR EXISTS (
+                  -- A payer who is a patient was identified on the own record.
+                  SELECT 1 FROM patients payer
+                  WHERE payer.id = $4
+                    AND NULLIF(btrim(payer.passport_number), '') IS NOT NULL
+              )"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(since)
+    .bind(record.payer_patient_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    let mut missing = Vec::new();
+    if !coverage {
+        missing.push("cost_coverage_signed");
+    }
+    if !identity {
+        missing.push("payer_identity_document");
+    }
+    Ok(missing)
+}
+
 /// What the release of a draft will check, for the invoice detail: shown as
 /// warnings before billing presses "release".
 pub(crate) async fn draft_release_checks(
@@ -1272,6 +1392,10 @@ pub(crate) async fn draft_release_checks(
         warnings.push(
             json!({ "code": crate::routes::lead_invoice_recipient::RECIPIENT_NOT_CONTRACTING }),
         );
+    }
+    let payer_missing = later_payer_missing(conn, invoice_id, &evaluation).await?;
+    if !payer_missing.is_empty() {
+        warnings.push(json!({ "code": PAYER_NOT_IDENTIFIED, "missing": payer_missing }));
     }
     if evaluation.minor_recipient {
         warnings.push(json!({ "code": "minor_patient_recipient" }));
@@ -1331,6 +1455,14 @@ pub(crate) async fn release_recipient_snapshot(
                 "recipient_name": evaluation.recipient.name,
                 "contracting_party": party_summary(&evaluation.party),
             }),
+        });
+    }
+    let payer_missing = later_payer_missing(conn, invoice_id, &evaluation).await?;
+    if !payer_missing.is_empty() {
+        return Err(ReleaseRecipientBlock::Refused {
+            code: PAYER_NOT_IDENTIFIED,
+            message: "A third party pays: the signed cost coverage declaration and the payer's identity document are needed first",
+            details: json!({ "missing": payer_missing, "recipient_name": evaluation.recipient.name }),
         });
     }
     let now = Utc::now().to_rfc3339();

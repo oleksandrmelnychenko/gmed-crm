@@ -363,6 +363,10 @@ const CODES: Record<string, Pair> = {
     "Die Rechnung ist an einen minderjährigen Patienten adressiert. Bitte einen Zahler (z. B. einen Elternteil) hinterlegen oder die Ausstellung bestätigen.",
     "Счёт адресован несовершеннолетнему пациенту. Укажите плательщика (например, родителя) или подтвердите выпуск.",
   ],
+  payer_not_identified: [
+    "Ein Dritter zahlt: Vor der Ausstellung braucht es die unterschriebene Kostenübernahmeerklärung zum Auftrag und den Ausweis des Zahlers (bei einer Organisation den Registerauszug) in den Dokumenten des Patienten.",
+    "Платит третье лицо: для выпуска счёта нужны подписанная Kostenübernahmeerklärung к заказу и удостоверение личности плательщика (для организации — выписка из реестра) в документах пациента.",
+  ],
   recipient_not_contracting: [
     "Für das minderjährige Kind schließt ein Elternteil den Vertrag und erhält die Rechnung. Die Rechnung an diesen Elternteil adressieren oder einen anderen Zahler erfassen.",
     "Договор за несовершеннолетнего заключает родитель, и счёт получает он. Адресуйте счёт этому родителю или укажите другого плательщика.",

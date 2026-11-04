@@ -327,6 +327,7 @@ export type InvoiceReleaseWarning = {
     | "recipient_address_incomplete"
     | "minor_patient_recipient"
     | "recipient_not_contracting"
+    | "payer_not_identified"
     | "recipient_not_contracting_party"
     | "advance_recipient_mismatch"
     | "services_not_delivered"
