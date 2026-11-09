@@ -2616,6 +2616,50 @@ async fn a_paying_parent_snapshot_follows_representation_corrections_and_cannot_
     assert_eq!(body["payer"]["city"], "Wien", "{body}");
 }
 
+/// Owner 2026-11-09: after the conversion the lead's representation is
+/// frozen, so the patient's later documents are not held for data that can
+/// no longer be filled in (the conversion itself refuses incomplete data).
+#[tokio::test]
+async fn a_converted_lead_no_longer_holds_the_patients_documents() {
+    let Some(app) = test_app().await else { return };
+    let mother = Uuid::new_v4();
+    let lead_id = minor_lead(
+        &app,
+        json!([{ "id": mother, "name": "Anna Muster", "relation": "mother",
+                 "email": address("anna.converted") }]),
+    )
+    .await;
+    assert!(!contract_gate_missing(&app, lead_id).await.is_empty());
+
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
+           VALUES ($1, 'Mia', 'Muster', '2017-01-01', 'diverse', $2) RETURNING id"#,
+    )
+    .bind(format!(
+        "P-CONV-{}",
+        &Uuid::new_v4().simple().to_string()[..8]
+    ))
+    .bind(app.suite.admin_id)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE leads SET converted_patient_id = $2 WHERE id = $1")
+        .bind(lead_id)
+        .bind(patient_id)
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
+    let (_, body) = json_request(
+        &app.suite.app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &app.staff("patient_manager"),
+        Some(json!({ "patient_id": patient_id, "status": "draft" })),
+    )
+    .await;
+    assert_ne!(body["code"], "representative_details_incomplete", "{body}");
+}
+
 /// What the contract gate (creating a framework contract) still misses of
 /// the lead's representatives.
 async fn contract_gate_missing(app: &TestApp, lead_id: Uuid) -> Vec<String> {

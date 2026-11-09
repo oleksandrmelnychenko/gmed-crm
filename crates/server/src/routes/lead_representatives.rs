@@ -1050,7 +1050,7 @@ pub(crate) async fn contract_subject_details_missing(
     patient_id: Option<Uuid>,
     order_id: Option<Uuid>,
 ) -> Result<Vec<String>, sqlx::Error> {
-    for lead_id in subject_leads(conn, lead_id, patient_id, order_id).await? {
+    for lead_id in open_subject_leads(conn, lead_id, patient_id, order_id).await? {
         let missing = contract_details_missing(conn, lead_id).await?;
         if !missing.is_empty() {
             return Ok(missing);
@@ -1067,8 +1067,33 @@ async fn subject_leads(
     patient_id: Option<Uuid>,
     order_id: Option<Uuid>,
 ) -> Result<Vec<Uuid>, sqlx::Error> {
+    subject_leads_where(conn, lead_id, patient_id, order_id, false).await
+}
+
+/// [`subject_leads`] without converted leads. A converted lead's
+/// representation is frozen (409 `lead_converted`) and was complete at the
+/// conversion, which refuses incomplete data: asking it again at a later
+/// signature of the patient's documents blocked them with nowhere to fill
+/// the data in (owner 2026-11-09, a patient with a guardian).
+async fn open_subject_leads(
+    conn: &mut PgConnection,
+    lead_id: Option<Uuid>,
+    patient_id: Option<Uuid>,
+    order_id: Option<Uuid>,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    subject_leads_where(conn, lead_id, patient_id, order_id, true).await
+}
+
+async fn subject_leads_where(
+    conn: &mut PgConnection,
+    lead_id: Option<Uuid>,
+    patient_id: Option<Uuid>,
+    order_id: Option<Uuid>,
+    open_only: bool,
+) -> Result<Vec<Uuid>, sqlx::Error> {
     sqlx::query_scalar(
-        r#"SELECT l.id FROM leads l WHERE l.qualification_status <> 'deleted' AND (
+        r#"SELECT l.id FROM leads l WHERE l.qualification_status <> 'deleted'
+            AND (NOT $4 OR l.converted_patient_id IS NULL) AND (
             l.id=$1 OR l.prospect_patient_id=$2 OR l.converted_patient_id=$2 OR l.repeat_patient_id=$2
             OR EXISTS (SELECT 1 FROM orders o WHERE o.id=$3 AND (o.source_lead_id=l.id
                 OR o.patient_id=l.prospect_patient_id OR o.patient_id=l.converted_patient_id OR o.patient_id=l.repeat_patient_id))
@@ -1077,6 +1102,7 @@ async fn subject_leads(
     .bind(lead_id)
     .bind(patient_id)
     .bind(order_id)
+    .bind(open_only)
     .fetch_all(&mut *conn)
     .await
 }
@@ -1108,6 +1134,11 @@ impl SignatureDetails {
     /// Reads the document's template (or type) and, for a GwG sheet, its
     /// subject (`generated_bindings.gwg_identification.subject`).
     pub(crate) fn of_document(template: Option<&str>, art: &str, bindings: Option<&Value>) -> Self {
+        // The record of the enhanced due diligence is GMED's internal AML
+        // record, signed by staff only (owner 2026-11-09): no client data gate.
+        if template == Some("enhanced_due_diligence") || art == "enhanced_due_diligence" {
+            return Self::Nobody;
+        }
         let gwg_sheet = match template {
             Some(template) => template == "gwg_identification",
             None => art == "gwg_identification",
@@ -1174,7 +1205,7 @@ pub(crate) async fn signature_details_missing(
             Ok(Vec::new())
         }
         SignatureDetails::Representative(id) => {
-            for lead_id in subject_leads(conn, lead_id, patient_id, order_id).await? {
+            for lead_id in open_subject_leads(conn, lead_id, patient_id, order_id).await? {
                 let Some(loaded) = load(conn, lead_id).await? else {
                     continue;
                 };
@@ -5634,6 +5665,19 @@ mod tests {
                 )
             ),
             SignatureDetails::Patient
+        );
+        // The EDD record is signed by GMED staff only: no representative gate.
+        assert_eq!(
+            SignatureDetails::of_document(
+                Some("enhanced_due_diligence"),
+                "enhanced_due_diligence",
+                None
+            ),
+            SignatureDetails::Nobody
+        );
+        assert_eq!(
+            SignatureDetails::of_document(None, "enhanced_due_diligence", None),
+            SignatureDetails::Nobody
         );
         // A contract keeps the check of the contracting representatives.
         for template in ["framework_contract", "single_order", "cost_estimate"] {
