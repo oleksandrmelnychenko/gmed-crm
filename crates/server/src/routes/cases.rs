@@ -685,7 +685,7 @@ async fn create_case(
 
     match subject {
         access::RecordSubject::Patient(patient_id) => {
-            if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+            if let Err(resp) = ensure_patient_write_access(&state, &auth, patient_id).await {
                 return resp;
             }
         }
@@ -1269,7 +1269,7 @@ async fn update_anamnesis(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
-    match can_access_case(&state, &auth, case_uuid, None).await {
+    match can_write_case(&state, &auth, case_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -1339,7 +1339,7 @@ async fn update_intake_completion(
     if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return response;
     }
-    match can_access_case(&state, &auth, case_uuid, None).await {
+    match can_write_case(&state, &auth, case_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(response) => return response,
@@ -1441,7 +1441,7 @@ async fn update_case_status(
     if !is_valid_case_status(&body.status) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status");
     }
-    match can_access_case(&state, &auth, case_uuid, None).await {
+    match can_write_case(&state, &auth, case_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(response) => return response,
@@ -1574,6 +1574,17 @@ async fn require_patient_clinical_access(
     ensure_patient_access(state, auth, patient_id).await
 }
 
+/// Saving patient-owned clinical sections: the access above plus the patient
+/// edit rule with the Art. 18 / Art. 17 DSGVO lock (423).
+async fn require_patient_clinical_write_access(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    require_patient_clinical_access(state, auth, patient_id).await?;
+    ensure_patient_write_access(state, auth, patient_id).await
+}
+
 /// Reading the symptoms and pain records: the writers above plus the CEO
 /// assistant, who reads the whole patient card read-only without an
 /// assignment (owner decision 2026-10-11). Saving keeps
@@ -1698,7 +1709,7 @@ async fn save_patient_pain_records(
     Path(patient_id): Path<Uuid>,
     Json(body): Json<ItemsWrapper<PainItem>>,
 ) -> axum::response::Response {
-    if let Err(response) = require_patient_clinical_access(&state, &auth, patient_id).await {
+    if let Err(response) = require_patient_clinical_write_access(&state, &auth, patient_id).await {
         return response;
     }
     for item in &body.items {
@@ -1836,7 +1847,7 @@ async fn save_patient_symptoms(
     Path(patient_id): Path<Uuid>,
     Json(body): Json<ItemsWrapper<SymptomItem>>,
 ) -> axum::response::Response {
-    if let Err(response) = require_patient_clinical_access(&state, &auth, patient_id).await {
+    if let Err(response) = require_patient_clinical_write_access(&state, &auth, patient_id).await {
         return response;
     }
     let retention_years = load_case_retention_years(&state, 30).await;
@@ -1930,7 +1941,7 @@ async fn save_pain_records(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
-    match can_access_case(&state, &auth, case_uuid, None).await {
+    match can_write_case(&state, &auth, case_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -2028,7 +2039,7 @@ async fn save_symptome(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
-    match can_access_case(&state, &auth, case_uuid, None).await {
+    match can_write_case(&state, &auth, case_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -2102,7 +2113,7 @@ async fn save_cardiology(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
-    match can_access_case(&state, &auth, case_uuid, None).await {
+    match can_write_case(&state, &auth, case_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -2190,7 +2201,7 @@ async fn save_gastroenterology(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
-    match can_access_case(&state, &auth, case_uuid, None).await {
+    match can_write_case(&state, &auth, case_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -2292,7 +2303,7 @@ async fn save_orthopedics(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
-    match can_access_case(&state, &auth, case_uuid, None).await {
+    match can_write_case(&state, &auth, case_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -2376,7 +2387,7 @@ async fn save_neurology(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
-    match can_access_case(&state, &auth, case_uuid, None).await {
+    match can_write_case(&state, &auth, case_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -2462,7 +2473,7 @@ async fn save_pulmonology(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
-    match can_access_case(&state, &auth, case_uuid, None).await {
+    match can_write_case(&state, &auth, case_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -2548,7 +2559,7 @@ async fn save_urology(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
-    match can_access_case(&state, &auth, case_uuid, None).await {
+    match can_write_case(&state, &auth, case_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -3232,18 +3243,23 @@ async fn ensure_patient_access(
     auth: &AuthUser,
     patient_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    if auth.role.has_full_access() {
-        return Ok(());
+    // Canonical rule: assignment plus the explicit per-user allow/deny rules.
+    if crate::routes::patients::has_patient_access(state, auth, patient_id).await? {
+        Ok(())
+    } else {
+        Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
     }
+}
 
-    let assigned = access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, patient_id = %patient_id, "Failed to validate patient assignment");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate patient access")
-        })?;
-
-    if assigned {
+/// Writes need current access first, then the canonical edit rule, which
+/// refuses a restricted or anonymised record (Art. 18 / Art. 17 DSGVO, 423).
+async fn ensure_patient_write_access(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    ensure_patient_access(state, auth, patient_id).await?;
+    if crate::routes::patients::has_patient_edit_access(state, auth, patient_id).await? {
         Ok(())
     } else {
         Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
@@ -3257,6 +3273,38 @@ async fn can_access_case(
     patient_id: Option<Uuid>,
 ) -> Result<bool, axum::response::Response> {
     can_access_case_subject(state, auth, case_id, patient_id, None).await
+}
+
+/// Write access to a case: read access to it plus, for a patient-bound case,
+/// the patient edit rule with the Art. 18 / Art. 17 DSGVO lock (423). A
+/// lead-bound case has no patient record to lock.
+async fn can_write_case(
+    state: &AppState,
+    auth: &AuthUser,
+    case_id: Uuid,
+) -> Result<bool, axum::response::Response> {
+    if !can_access_case(state, auth, case_id, None).await? {
+        return Ok(false);
+    }
+    let patient_id =
+        sqlx::query_scalar::<_, Option<Uuid>>("SELECT patient_id FROM cases WHERE id = $1")
+            .bind(case_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, case_id = %case_id, "load case patient for write");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate case access",
+                )
+            })?
+            .flatten();
+    match patient_id {
+        Some(patient_id) => {
+            crate::routes::patients::has_patient_edit_access(state, auth, patient_id).await
+        }
+        None => Ok(true),
+    }
 }
 
 async fn can_access_case_subject(
@@ -3302,20 +3350,11 @@ async fn can_access_case_subject(
         (patient_id, lead_id, None)
     };
 
-    if manager_id == Some(auth.user_id) {
-        return Ok(true);
-    }
-
+    // A patient-bound case always needs current patient access (assignment and
+    // explicit per-user rules): being the case manager does not outlive a
+    // revoked assignment. The manager shortcut stays for lead-bound cases only.
     if let Some(patient_id) = patient_id {
-        return access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, patient_id = %patient_id, "Failed to validate case assignment");
-                err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to validate case access",
-                )
-            });
+        return crate::routes::patients::has_patient_access(state, auth, patient_id).await;
     }
 
     if lead_id.is_some() {

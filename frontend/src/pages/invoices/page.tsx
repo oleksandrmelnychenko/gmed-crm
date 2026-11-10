@@ -71,7 +71,7 @@ import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
 import { IssuerTaxRegistrationBanner } from "@/components/issuer-tax-registration-banner";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
-import { openDocumentPreview } from "@/pages/documents/data/document-api";
+import { openDocumentPreview, pdfPreviewBlob } from "@/pages/documents/data/document-api";
 import { describeCashMovement } from "@/pages/company-finance/table-model";
 import { seedTaxProfileNameByText, seedTaxProfileText } from "@/lib/tax-profile-labels";
 import { InvoiceImportSheet } from "./ui/invoice-import-sheet";
@@ -1226,7 +1226,9 @@ function useStaffInvoicesPageContent() {
     setInvoicePdfPreviewBusy(true);
     setDetailError(null);
     try {
-      const blob = await fetchInvoicePdfBlob(invoice.id);
+      // The preview frame is not sandboxed: it only receives a real PDF.
+      const blob = await pdfPreviewBlob(await fetchInvoicePdfBlob(invoice.id));
+      if (!blob) throw new Error(text.pdfOpenError);
       const url = URL.createObjectURL(blob);
       setInvoicePdfPreview({
         url,

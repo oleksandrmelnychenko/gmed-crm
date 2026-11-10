@@ -27,6 +27,7 @@ import {
 import { AppointmentPreviewSheet } from "@/pages/appointments/ui/shared/workspace-primitives";
 import {
   createDocumentPreviewObjectUrl,
+  documentPreviewSandbox,
   revokeDocumentPreviewObjectUrl,
 } from "@/pages/documents/data/document-api";
 
@@ -184,6 +185,7 @@ function LinkedDocumentsSheet({
               <iframe
                 title={preview.title || t.documents_preview}
                 src={preview.url}
+                sandbox={documentPreviewSandbox(preview.contentType)}
                 className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
               />
             ) : null}

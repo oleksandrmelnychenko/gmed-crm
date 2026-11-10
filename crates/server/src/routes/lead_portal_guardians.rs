@@ -123,8 +123,10 @@ pub(crate) fn compatible_person_name(left: &str, right: &str) -> bool {
 /// of the same person ([`compatible_person_name`]) gets the guardian access
 /// without staff issuing it, with no new password and no e-mail. Nothing
 /// happens for an adult, a converted or deleted lead, the lead's own login,
-/// another person's account, or a contact or login that had an access to
-/// this request before (staff revoked it: it does not come back by itself).
+/// another person's account, a contact whose e-mail a cabinet login wrote
+/// (also on the person's own sign-in: staff issue that access), or a contact
+/// or login that had an access to this request before (staff revoked it: it
+/// does not come back by itself).
 /// Returns the new accesses as `(access_id, user_id)`.
 pub(crate) async fn auto_link_parent_logins_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -179,14 +181,22 @@ pub(crate) async fn auto_link_parent_logins_in_tx(
         // would get the request while the patient's own record filled the
         // person's address and identity document into the parent's cabinet.
         // Staff issue such an access after checking the person.
+        // The same holds for a contact staff entered without an address
+        // whose address a cabinet login wrote (`cabinet_email` is that
+        // address): the link, and with it `related_patient_id`, never rests
+        // on an e-mail the cabinet chose. An address staff wrote since
+        // differs from `cabinet_email` and links as before.
         let entered_by_cabinet: bool = sqlx::query_scalar(
             r#"SELECT EXISTS (
                    SELECT 1 FROM lead_representatives
-                   WHERE lead_id = $1 AND contact_id = $2 AND contact_origin = 'portal'
+                   WHERE lead_id = $1 AND contact_id = $2
+                     AND (contact_origin = 'portal'
+                          OR lower(btrim(cabinet_email)) = lower(btrim($3)))
                )"#,
         )
         .bind(lead_id)
         .bind(contact_id)
+        .bind(&email)
         .fetch_one(&mut **tx)
         .await?;
         if entered_by_cabinet {

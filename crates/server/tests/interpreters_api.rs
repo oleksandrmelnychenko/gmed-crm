@@ -141,10 +141,10 @@ async fn manager_can_save_interpreter_profile_and_interpreter_can_view_self() {
     };
 
     let tag = unique_tag("interpreter-profile");
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "ceo").await;
     let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
     let other_interpreter_id = seed_user(&pool, &format!("{tag}-other"), "interpreter").await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let pm_bearer = auth_header_for(pm_id, "ceo");
     let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
     let other_bearer = auth_header_for(other_interpreter_id, "interpreter");
 
@@ -397,9 +397,9 @@ async fn interpreter_profile_rejects_invalid_structured_values() {
     };
 
     let tag = unique_tag("interpreter-profile-invalid");
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "ceo").await;
     let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let pm_bearer = auth_header_for(pm_id, "ceo");
 
     let (status, body) = json_request(
         &app,
@@ -479,9 +479,9 @@ async fn partial_interpreter_profile_update_preserves_omitted_structured_fields(
     };
 
     let tag = unique_tag("interpreter-profile-partial");
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "ceo").await;
     let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let pm_bearer = auth_header_for(pm_id, "ceo");
 
     let (status, body) = json_request(
         &app,

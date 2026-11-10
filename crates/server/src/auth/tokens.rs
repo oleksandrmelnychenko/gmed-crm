@@ -21,6 +21,28 @@ pub fn hash_token(raw: &str) -> String {
     hex::encode(Sha256::digest(raw.as_bytes()))
 }
 
+const PENDING_POLL_SECRET_BYTES: usize = 32;
+
+/// The secret a signing-in client redeems its admin-approved login with
+/// (`/auth/pending/{id}`): returns (raw for the client, SHA-256 to store).
+pub fn generate_pending_poll_secret() -> (String, String) {
+    let mut bytes = [0u8; PENDING_POLL_SECRET_BYTES];
+    rand::rng().fill(&mut bytes);
+    let raw = hex::encode(bytes);
+    let hash = hash_token(&raw);
+    (raw, hash)
+}
+
+/// Compares two hex digests without leaking where they differ.
+pub fn same_token_hash(left: &str, right: &str) -> bool {
+    left.len() == right.len()
+        && left
+            .bytes()
+            .zip(right.bytes())
+            .fold(0u8, |difference, (a, b)| difference | (a ^ b))
+            == 0
+}
+
 pub struct TokenPair {
     pub access_token: String,
     pub refresh_token: String,
@@ -703,23 +725,42 @@ pub async fn revoke_other_families(
     families.len() as u64
 }
 
-/// Revoke all sessions for ALL users (admin force-logout-all).
-pub async fn revoke_all_users(pool: &PgPool, admin_id: Uuid, reason: &str) {
-    let families: Vec<Uuid> =
-        sqlx::query_scalar::<_, Uuid>("SELECT id FROM token_families WHERE NOT is_revoked")
-            .fetch_all(pool)
-            .await
-            .unwrap_or_default();
+/// Revoke all sessions for ALL users (admin force-logout-all). With
+/// `include_ceo = false` (a caller without `users.manage_ceo`) the sessions
+/// of CEO accounts stay, like every other change to a CEO account.
+pub async fn revoke_all_users(pool: &PgPool, admin_id: Uuid, reason: &str, include_ceo: bool) {
+    let families: Vec<Uuid> = if include_ceo {
+        let families =
+            sqlx::query_scalar::<_, Uuid>("SELECT id FROM token_families WHERE NOT is_revoked")
+                .fetch_all(pool)
+                .await
+                .unwrap_or_default();
 
-    if let Err(e) = sqlx::query!(
-        "UPDATE token_families SET is_revoked = true, revoked_reason = $1 WHERE NOT is_revoked",
-        reason
-    )
-    .execute(pool)
-    .await
-    {
-        tracing::error!(error = %e, "Failed to revoke all user sessions");
-    }
+        if let Err(e) = sqlx::query!(
+            "UPDATE token_families SET is_revoked = true, revoked_reason = $1 WHERE NOT is_revoked",
+            reason
+        )
+        .execute(pool)
+        .await
+        {
+            tracing::error!(error = %e, "Failed to revoke all user sessions");
+        }
+        families
+    } else {
+        sqlx::query_scalar::<_, Uuid>(
+            "UPDATE token_families tf SET is_revoked = true, revoked_reason = $1
+             WHERE NOT tf.is_revoked
+               AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = tf.user_id AND u.role = 'ceo')
+             RETURNING tf.id",
+        )
+        .bind(reason)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::error!(error = %e, "Failed to revoke all non-CEO user sessions");
+            Vec::new()
+        })
+    };
 
     for family_id in families {
         if let Err(e) = blacklist::blacklist_family(pool, family_id, reason).await {
@@ -731,7 +772,7 @@ pub async fn revoke_all_users(pool: &PgPool, admin_id: Uuid, reason: &str) {
         "INSERT INTO audit_log (user_id, action, entity_type, context)
          VALUES ($1, 'revoke_all_users_sessions', 'token_family', $2)",
         admin_id,
-        serde_json::json!({ "reason": reason })
+        serde_json::json!({ "reason": reason, "ceo_sessions_included": include_ceo })
     )
     .execute(pool)
     .await

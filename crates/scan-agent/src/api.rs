@@ -22,6 +22,8 @@ pub const MAX_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
 /// Refresh the access token this long before it expires.
 const REFRESH_MARGIN_SECONDS: i64 = 60;
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+/// Slower than the refill of the server's sign-in request budget.
+const APPROVAL_POLL_INTERVAL: Duration = Duration::from_secs(7);
 const TOTP_ATTEMPTS: usize = 3;
 
 /// `https://gmed.example.de` (or `.../api/v1`) to the API root with a
@@ -141,6 +143,8 @@ struct TokenReply {
     status: Option<String>,
     challenge_id: Option<String>,
     pending_id: Option<String>,
+    /// Redeems the approved sign-in; sent back only as a bearer header.
+    poll_secret: Option<String>,
     access_token: Option<String>,
     refresh_token: Option<String>,
     expires_in: Option<i64>,
@@ -302,23 +306,24 @@ impl Gmed {
             .json()
             .context("unexpected sign-in answer")?;
 
-        match reply.status.as_deref() {
-            Some("totp_required") => {
-                let challenge_id = reply
-                    .challenge_id
-                    .clone()
-                    .ok_or_else(|| anyhow!("GMED asked for a code without a challenge"))?;
-                reply = self.complete_totp(&base, &challenge_id, prompt)?;
-            }
-            Some("mfa_pending") => {
-                let pending_id = reply
-                    .pending_id
-                    .clone()
-                    .ok_or_else(|| anyhow!("GMED asked for approval without a request id"))?;
-                prompt.waiting_for_approval();
-                reply = self.wait_for_approval(&base, &pending_id)?;
-            }
-            _ => {}
+        if reply.status.as_deref() == Some("totp_required") {
+            let challenge_id = reply
+                .challenge_id
+                .clone()
+                .ok_or_else(|| anyhow!("GMED asked for a code without a challenge"))?;
+            reply = self.complete_totp(&base, &challenge_id, prompt)?;
+        }
+        // An account with admin approval waits for it after the code as well.
+        if reply.status.as_deref() == Some("mfa_pending") {
+            let pending_id = reply
+                .pending_id
+                .clone()
+                .ok_or_else(|| anyhow!("GMED asked for approval without a request id"))?;
+            let poll_secret = reply.poll_secret.clone().ok_or_else(|| {
+                anyhow!("GMED asked for approval without a poll secret; update GMED or gmed-scan")
+            })?;
+            prompt.waiting_for_approval();
+            reply = self.wait_for_approval(&base, &pending_id, &poll_secret)?;
         }
 
         let password_change_required = reply.password_change_required;
@@ -365,26 +370,37 @@ impl Gmed {
         unreachable!("the last attempt returns")
     }
 
-    fn wait_for_approval(&self, base: &Url, pending_id: &str) -> Result<TokenReply> {
+    fn wait_for_approval(
+        &self,
+        base: &Url,
+        pending_id: &str,
+        poll_secret: &str,
+    ) -> Result<TokenReply> {
         let url = base.join(&format!("auth/pending/{pending_id}"))?;
         let deadline = Instant::now() + APPROVAL_TIMEOUT;
         loop {
-            let reply: TokenReply = check(
-                self.http
-                    .get(url.clone())
-                    .send()
-                    .context("cannot reach GMED")?,
-            )?
-            .json()
-            .context("unexpected approval answer")?;
-            match reply.status.as_deref() {
-                Some("approved") => return Ok(reply),
-                Some("rejected") => bail!("the sign-in was rejected or has expired"),
-                _ if Instant::now() >= deadline => {
-                    bail!("no administrator approved the sign-in in time")
+            let response = self
+                .http
+                .get(url.clone())
+                .bearer_auth(poll_secret)
+                .send()
+                .context("cannot reach GMED")?;
+            // The sign-in endpoints share a tight request budget: a refused
+            // poll is not an answer, the next one asks again.
+            if response.status() != StatusCode::TOO_MANY_REQUESTS {
+                let reply: TokenReply = check(response)?
+                    .json()
+                    .context("unexpected approval answer")?;
+                match reply.status.as_deref() {
+                    Some("approved") => return Ok(reply),
+                    Some("rejected") => bail!("the sign-in was rejected or has expired"),
+                    _ => {}
                 }
-                _ => sleep(Duration::from_secs(3)),
             }
+            if Instant::now() >= deadline {
+                bail!("no administrator approved the sign-in in time");
+            }
+            sleep(APPROVAL_POLL_INTERVAL);
         }
     }
 
@@ -652,8 +668,15 @@ mod tests {
     #[test]
     fn waits_for_an_administrator_to_approve_the_sign_in() {
         let server = MockServer::start(|request| match request.path.as_str() {
-            "/api/v1/auth/login" => {
-                MockReply::json(json!({ "status": "mfa_pending", "pending_id": "p-1" }))
+            "/api/v1/auth/login" => MockReply::json(json!({
+                "status": "mfa_pending",
+                "pending_id": "p-1",
+                "poll_secret": "poll-1",
+            })),
+            "/api/v1/auth/pending/p-1"
+                if request.header("authorization").as_deref() != Some("Bearer poll-1") =>
+            {
+                MockReply::status(401)
             }
             "/api/v1/auth/pending/p-1" if request.seen == 0 => {
                 MockReply::json(json!({ "status": "pending" }))

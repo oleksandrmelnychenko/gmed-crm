@@ -16,6 +16,7 @@ import {
 import { downloadBlob } from "@/lib/api";
 import { getLang, useLang, type Translations, useLanguageBound } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { pdfPreviewBlob } from "@/pages/documents/data/document-api";
 
 import { canPreviewInline } from "./model";
 import { localizePersonnelError } from "./server-errors";
@@ -211,13 +212,17 @@ export function FilePreviewDialog({
     setFile(null);
     setUrl(null);
     load()
-      .then((loaded) => {
+      .then(async (loaded) => {
         if (cancelled) return;
         setFile(loaded);
         if (canPreviewInline(mimeType)) {
-          objectUrl = URL.createObjectURL(
-            loaded.blob.type ? loaded.blob : new Blob([loaded.blob], { type: mimeType }),
-          );
+          // The blob type is forced to the stored type, never the response's;
+          // the unsandboxed PDF frame only receives a real PDF.
+          const typed = mimeType === "application/pdf"
+            ? await pdfPreviewBlob(loaded.blob)
+            : new Blob([loaded.blob], { type: mimeType });
+          if (cancelled || !typed) return;
+          objectUrl = URL.createObjectURL(typed);
           setUrl(objectUrl);
         }
       })

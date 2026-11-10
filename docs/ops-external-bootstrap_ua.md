@@ -19,7 +19,9 @@
    - копіює PROD або monitoring age key на сервер;
    - встановлює `/etc/gmed/age.key`;
    - клонує `/opt/gmed/repo`;
-   - запускає відповідний deploy script.
+   - запускає відповідний deploy script; на PROD-сервері, де деплой уже
+     був (`/etc/gmed/deploy.last`), сам додає `--upgrade-only`, тобто
+     резервну копію й репетицію міграцій замість першого встановлення.
 
 3. `scripts/deploy-prod.sh`
    - встановлює backup cron;
@@ -27,7 +29,12 @@
      `HEALTHCHECKS_PING_URL` є в `release.env`;
    - idempotently створює/оновлює `gmed_metrics` через
      `scripts/ensure-prod-metrics-user.sh`;
-   - рестартить postgres exporter після створення role.
+   - рестартить postgres exporter після створення role;
+   - очищення бази для першого встановлення (`scripts/sanitize-prod-db.sh`)
+     відмовляє, якщо базою вже користуються або її стан не вдалося
+     прочитати, і перед очищенням робить дамп у
+     `/var/backups/gmed/sanitize/`; подробиці й змінна підтвердження — у
+     [README PROD](../infra/terraform/environments/prod-hetzner/README.md).
 
 4. `scripts/resolve-ghcr-digests.sh <tag>`
    - дістає digest-pinned GHCR refs без Docker daemon;

@@ -293,6 +293,11 @@ async fn create_standalone_interpreter_profile(
         },
         None => normalize_standalone_profile_defaults(json!({})),
     };
+    // Pay data in a new profile is a finance write like any other.
+    let finance_fields = changed_finance_fields(&json!({}), &profile);
+    if let Err(resp) = ensure_finance_change_allowed(&auth, None, &finance_fields) {
+        return resp;
+    }
 
     match sqlx::query(
         r#"INSERT INTO interpreter_standalone_profiles (name, email, profile, updated_by)
@@ -308,7 +313,25 @@ async fn create_standalone_interpreter_profile(
     .fetch_one(&state.db)
     .await
     {
-        Ok(row) => Json(standalone_interpreter_profile_row_json(row)).into_response(),
+        Ok(row) => {
+            let payload = standalone_interpreter_profile_row_json(row);
+            let profile_id = payload
+                .get("id")
+                .and_then(Value::as_str)
+                .and_then(|value| Uuid::parse_str(value).ok());
+            // Field names only; the values of pay data never reach the audit.
+            state.audit_sender.try_send(audit::domain_event(
+                "create_interpreter_profile",
+                Some(auth.user_id),
+                "interpreter",
+                profile_id,
+                json!({
+                    "profile_kind": "external",
+                    "finance_fields_changed": finance_fields,
+                }),
+            ));
+            Json(payload).into_response()
+        }
         Err(error) => {
             tracing::error!(error = %error, "create standalone staff profile");
             err(
@@ -369,26 +392,11 @@ async fn update_interpreter_profile(
         .as_object()
         .map(|sections| sections.keys().cloned().collect())
         .unwrap_or_default();
-    let audit_profile_update = |profile: &Value| {
-        state.audit_sender.try_send(audit::domain_event(
-            "update_interpreter_profile",
-            Some(auth.user_id),
-            "interpreter",
-            Some(interpreter_id),
-            json!({
-                "changed_sections": changed_sections,
-                "status": profile.get("status").cloned(),
-            }),
-        ));
-    };
-    let mut profile = match load_interpreter_profile_payload(&state, interpreter_id).await {
-        Ok(Some(payload)) => merge_profile_payload(
-            payload
-                .get("profile")
-                .cloned()
-                .unwrap_or_else(|| serde_json::json!({})),
-            incoming_profile,
-        ),
+    let existing_profile = match load_interpreter_profile_payload(&state, interpreter_id).await {
+        Ok(Some(payload)) => payload
+            .get("profile")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({})),
         Ok(None) => return err(StatusCode::NOT_FOUND, "Interpreter not found"),
         Err(error) => {
             tracing::error!(error = %error, interpreter_id = %interpreter_id, "load interpreter profile before update");
@@ -397,6 +405,29 @@ async fn update_interpreter_profile(
                 "Failed to load interpreter profile",
             );
         }
+    };
+    let mut profile = merge_profile_payload(existing_profile.clone(), incoming_profile);
+    // The form always sends the finance block: an unchanged one is ignored, a
+    // changed one needs `interpreters.manage` and is never the caller's own.
+    let finance_fields_changed = changed_finance_fields(&existing_profile, &profile);
+    if let Err(resp) =
+        ensure_finance_change_allowed(&auth, Some(interpreter_id), &finance_fields_changed)
+    {
+        return resp;
+    }
+    let audit_profile_update = |profile: &Value| {
+        state.audit_sender.try_send(audit::domain_event(
+            "update_interpreter_profile",
+            Some(auth.user_id),
+            "interpreter",
+            Some(interpreter_id),
+            json!({
+                "changed_sections": changed_sections,
+                // Field names only; the values of pay data never reach the audit.
+                "finance_fields_changed": finance_fields_changed,
+                "status": profile.get("status").cloned(),
+            }),
+        ));
     };
 
     if profile_kind == InterpreterProfileKind::Standalone {
@@ -573,6 +604,14 @@ async fn upload_interpreter_profile_document(
     let Some(document_kind) = normalize_interpreter_profile_document_kind(&document_kind) else {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid document kind");
     };
+    // The contract / AVV is filed by the roles that manage interpreters
+    // (`interpreters.manage`) and the CEO; other kinds stay as before.
+    if document_kind == "avv" && !can_manage_interpreter_pay_data(&auth) {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Only the interpreter team lead or the CEO can upload a contract or AVV",
+        );
+    }
     let data = match file_data {
         Some(data) if !data.is_empty() => data,
         _ => return err(StatusCode::BAD_REQUEST, "No file uploaded"),
@@ -1472,6 +1511,107 @@ async fn ensure_interpreter_profile_access(
     }
 
     Err(err(StatusCode::NOT_FOUND, "Interpreter not found"))
+}
+
+/// The finance section of an interpreter profile (pay data). Each field is
+/// read from the top level of the profile or from its nested `finance` block.
+const FINANCE_PROFILE_FIELDS: [&str; 6] = [
+    "hourlyRate",
+    "salaryClass",
+    "bankDetails",
+    "taxNumber",
+    "ustIdnr",
+    "billingStatus",
+];
+
+/// Contract and pay data of interpreters belong to the roles holding
+/// `interpreters.manage` (interpreter team lead) and the CEO.
+fn can_manage_interpreter_pay_data(auth: &AuthUser) -> bool {
+    auth.role == Role::Ceo || auth.can(Capability::InterpretersManage)
+}
+
+fn normalized_finance_value(value: Option<&Value>, field: &str) -> Option<String> {
+    let text = match value? {
+        Value::Null => return None,
+        Value::String(raw) => raw.trim().to_string(),
+        other => other.to_string(),
+    };
+    if text.is_empty() {
+        return None;
+    }
+    // 45, 45.0 and "45.00" are the same rate.
+    if field == "hourlyRate"
+        && let Ok(amount) = Decimal::from_str(&text)
+    {
+        return Some(amount.normalize().to_string());
+    }
+    Some(text)
+}
+
+/// Names of the finance fields that differ between two profiles (top-level
+/// key or nested `finance` key; an unknown key inside `finance` counts too).
+/// Empty and missing values are the same, so a form that sends the block back
+/// untouched changes nothing.
+fn changed_finance_fields(before: &Value, after: &Value) -> Vec<String> {
+    let mut fields: Vec<String> = FINANCE_PROFILE_FIELDS
+        .iter()
+        .map(|field| (*field).to_string())
+        .collect();
+    for profile in [before, after] {
+        if let Some(finance) = profile.get("finance").and_then(Value::as_object) {
+            for key in finance.keys() {
+                if !fields.contains(key) {
+                    fields.push(key.clone());
+                }
+            }
+        }
+    }
+    let nested = |profile: &Value, field: &str| {
+        normalized_finance_value(
+            profile
+                .get("finance")
+                .and_then(|finance| finance.get(field)),
+            field,
+        )
+    };
+    fields
+        .into_iter()
+        .filter(|field| {
+            let field = field.as_str();
+            let top_level_changed = FINANCE_PROFILE_FIELDS.contains(&field)
+                && normalized_finance_value(before.get(field), field)
+                    != normalized_finance_value(after.get(field), field);
+            top_level_changed || nested(before, field) != nested(after, field)
+        })
+        .collect()
+}
+
+/// Pay data (rate, salary class, bank details, tax numbers, billing status)
+/// is written only with `interpreters.manage` or by the CEO, and nobody
+/// changes the pay data of their own profile. `interpreter_id` is `None` for
+/// a new profile without a user account.
+#[allow(clippy::result_large_err)]
+fn ensure_finance_change_allowed(
+    auth: &AuthUser,
+    interpreter_id: Option<Uuid>,
+    changed_fields: &[String],
+) -> Result<(), axum::response::Response> {
+    if changed_fields.is_empty() {
+        return Ok(());
+    }
+    if !can_manage_interpreter_pay_data(auth) {
+        return Err(err(
+            StatusCode::FORBIDDEN,
+            "Only the interpreter team lead or the CEO can change pay data",
+        ));
+    }
+    if interpreter_id == Some(auth.user_id) {
+        return Err(err(
+            StatusCode::FORBIDDEN,
+            "Pay data of your own profile is changed by another manager",
+        ));
+    }
+    Ok(())
 }
 
 fn interpreter_profile_row_json(row: sqlx::postgres::PgRow) -> Value {
@@ -2791,24 +2931,32 @@ async fn ensure_patient_scope(
     auth: &AuthUser,
     patient_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    if matches!(auth.role, Role::Ceo | Role::TeamleadInterpreter) {
+    if auth.role == Role::Ceo {
         return Ok(());
     }
 
-    let assigned = access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
-        .await
-        .map_err(|error| {
-            tracing::error!(error = %error, patient_id = %patient_id, "validate patient scope");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to validate access",
-            )
-        })?;
-    if assigned {
-        Ok(())
-    } else {
-        Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
+    // The team lead plans the team without a patient assignment.
+    if auth.role != Role::TeamleadInterpreter {
+        let assigned = access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, patient_id = %patient_id, "validate patient scope");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate access",
+                )
+            })?;
+        if !assigned {
+            return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+        }
     }
+
+    // An explicit per-user deny on the patient closes this path as well (the
+    // rule `patients::has_patient_access` honours); it never opens it.
+    if super::appointments::patient_denied_by_explicit_rule(state, auth, patient_id, false).await? {
+        return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+    }
+    Ok(())
 }
 
 fn normalize_language_code(value: &str) -> Option<String> {

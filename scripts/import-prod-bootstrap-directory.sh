@@ -101,7 +101,7 @@ SQL
   base64 -w 0 "$BUNDLE_PATH"
   printf '\n\\.\n'
   cat "$REPO_DIR/scripts/sql/import-prod-bootstrap-directory-v1.sql"
-} | docker exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" gmed-postgres \
+} | PGPASSWORD="$POSTGRES_PASSWORD" docker exec -i -e PGPASSWORD gmed-postgres \
   psql \
     --quiet \
     -v ON_ERROR_STOP=1 \

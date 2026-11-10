@@ -40,6 +40,7 @@ import { ApiRequestError, clearApiCache } from "@/lib/api";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import {
   createDocumentPreviewObjectUrl,
+  documentPreviewSandbox,
   revokeDocumentPreviewObjectUrl,
   uploadDocument,
 } from "@/pages/documents/data/document-api";
@@ -3535,6 +3536,7 @@ export function ClinicalDocumentImportSheet({
                   key={`${preview.url}-${activePage}`}
                   title={documentImport?.document_name ?? tx("Предпросмотр документа", "Dokumentvorschau")}
                   src={`${preview.url}#page=${activePage}&zoom=page-width`}
+                  sandbox={documentPreviewSandbox(preview.contentType)}
                   className="h-full w-full rounded-lg border border-border bg-white shadow-sm"
                 />
               )

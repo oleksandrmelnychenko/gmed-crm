@@ -153,6 +153,17 @@ a compose reconciliation. The one-time data sanitizer is marker-gated
 and will not run again unless both the marker and DB guard are
 deliberately bypassed.
 
+The sanitizer fails closed. If it cannot read its marker and the row counts
+from the database, it stops. It refuses to empty a database that is in use —
+somebody has signed in, or it holds patient/lead/case/order/invoice/document
+rows and its first migration is older than 24 hours — unless the command is
+run with `PROD_SANITIZE_CONFIRM_DELETE_ALL_BUSINESS_DATA=wipe-<database>-<UTC
+date>` (the exact value is printed in the refusal). Before it removes
+anything it writes a dump to `/var/backups/gmed/sanitize/<stamp>/`
+(root-only, encrypted for `BACKUP_AGE_RECIPIENTS` when they are set).
+`scripts/bootstrap-remote-host.sh` uses `--upgrade-only` by itself on a host
+that has already completed a deploy.
+
 ### 9. Healthchecks ping cron
 
 Create a Healthchecks.io check for the public app health probe and put
@@ -273,6 +284,20 @@ consistent `pg_dump` snapshot under `/var/backups/gmed/releases/`, and rehearses
 all pending migrations on a temporary database clone before changing services.
 Applied migration checksums must match; a failed rehearsal stops the deployment.
 The clone is removed afterward, while protected backups and diagnostics remain.
+
+Release backups are a short way back from a failed upgrade, not an archive.
+After the rehearsal has passed, the script keeps the newest 5 and none older
+than 14 days (`RELEASE_BACKUP_KEEP`, `RELEASE_BACKUP_MAX_AGE_DAYS`). After a
+successful deploy the dump and the files with secrets
+(`database-before-upgrade.dump`, `previous-release.env`, `release.env`,
+`postgres-container.json`) are encrypted for `BACKUP_AGE_RECIPIENTS` and the
+readable originals are removed; after a failed deploy they stay readable for
+root so the upgrade can be undone at once. To use an encrypted one later:
+
+```bash
+age -d -i /etc/gmed/backup-age.key \
+  /var/backups/gmed/releases/<stamp>/database-before-upgrade.dump.age > /var/tmp/restore.dump
+```
 
 **Step 1.** (If secrets changed) re-encrypt locally:
 
@@ -438,8 +463,13 @@ and signs each digest with [cosign keyless](https://docs.sigstore.dev/cosign/sig
 certificate identity).
 
 `scripts/deploy-prod.sh` cosign-verifies the certificate identity
-against THIS repository's `.github/workflows/release.yml@refs/...`
-before invoking compose. An attacker who pushes a malicious image —
+against THIS repository's `.github/workflows/release.yml`, started from a
+version tag (`@refs/tags/v…`) or by a manual dispatch on `main`
+(`@refs/heads/main`), before invoking compose. A run of the workflow from
+any other branch is not trusted. `release-images.pins` is read as data: only
+the four `GMED_*_IMAGE=ghcr.io/…@sha256:…` lines are accepted, and the
+`cosign` binary itself is checked against a pinned sha256 on every deploy.
+An attacker who pushes a malicious image —
 even into the same `ghcr.io/<repo>-server` namespace — cannot produce
 that certificate identity without compromising both Sigstore Fulcio
 AND GitHub's OIDC issuer.
@@ -634,6 +664,34 @@ Manual fallback:
 ssh gmed@console.gmed-health.com
 sudo /opt/gmed/repo/scripts/ensure-prod-metrics-user.sh
 ```
+
+### Bind the metrics ports to the tailnet
+
+By default the backend metrics port (9091), `postgres_exporter` (9187),
+`node_exporter` (9100) and cAdvisor (9080) listen on every interface and
+only the Hetzner firewall keeps them closed. To make the host itself refuse
+them from anywhere but the tailnet:
+
+1. Make Docker start after Tailscale, so the address exists when the
+   containers start after a reboot (the backend publishes its metrics port
+   on it and would otherwise not start):
+
+   ```bash
+   sudo install -d /etc/systemd/system/docker.service.d
+   printf '[Unit]\nAfter=tailscaled.service\nWants=tailscaled.service\n' \
+     | sudo tee /etc/systemd/system/docker.service.d/after-tailscale.conf
+   sudo systemctl daemon-reload
+   ```
+
+2. Add `GMED_METRICS_BIND_ADDR: "<tailscale ip -4>"` to the SOPS bundle,
+   commit, and run `deploy-prod.sh --upgrade-only`. The script stops before
+   Compose if the address is not on the host.
+3. From the monitoring host check that the four targets are still `up`
+   in Prometheus, then reboot the PROD host once in a maintenance window and
+   check `https://console.gmed-health.com/health`.
+
+The monitoring host has the same variable for Prometheus, Loki,
+Alertmanager and Grafana (see its `secrets.sops.yaml.example`).
 
 ## What this environment intentionally does NOT have yet
 

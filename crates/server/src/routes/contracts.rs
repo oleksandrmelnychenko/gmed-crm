@@ -305,6 +305,55 @@ fn contract_status_rollback_blocked(current: &str, next: &str, running_orders: i
     current == "signed" && matches!(next, "draft" | "sent") && running_orders > 0
 }
 
+/// The fields a signed framework contract was signed with.
+#[derive(Debug, Clone, PartialEq)]
+struct FrameworkContractTerms {
+    signed_at: Option<DateTime<Utc>>,
+    valid_from: Option<NaiveDate>,
+    valid_to: Option<NaiveDate>,
+    conditions: Option<Value>,
+}
+
+impl FrameworkContractTerms {
+    fn to_json(&self) -> Value {
+        json!({
+            "signed_at": self.signed_at.map(|value| value.to_rfc3339()),
+            "valid_from": self.valid_from.map(|value| value.to_string()),
+            "valid_to": self.valid_to.map(|value| value.to_string()),
+            "conditions": self.conditions,
+        })
+    }
+}
+
+/// A signed contract stays as it was signed: a `signed → signed` call must
+/// not rewrite the signing time, the dates or the conditions. Returns the
+/// requested fields that differ from the stored ones; a field the request
+/// leaves out is kept and never counts. The signing time is compared to the
+/// minute, the precision of the status form.
+fn changed_signed_contract_fields(
+    stored: &FrameworkContractTerms,
+    requested: &FrameworkContractTerms,
+) -> Vec<&'static str> {
+    let minute = |value: DateTime<Utc>| value.timestamp().div_euclid(60);
+    let mut changed = Vec::new();
+    if requested
+        .signed_at
+        .is_some_and(|value| stored.signed_at.map(minute) != Some(minute(value)))
+    {
+        changed.push("signed_at");
+    }
+    if requested.valid_from.is_some() && requested.valid_from != stored.valid_from {
+        changed.push("valid_from");
+    }
+    if requested.valid_to.is_some() && requested.valid_to != stored.valid_to {
+        changed.push("valid_to");
+    }
+    if requested.conditions.is_some() && requested.conditions != stored.conditions {
+        changed.push("conditions");
+    }
+    changed
+}
+
 fn patient_contract_status(framework_status: &str) -> &str {
     match framework_status {
         "draft" => "not_started",
@@ -3065,23 +3114,17 @@ async fn update_framework_contract_status(
         }
     }
 
-    let signed_at = match parse_optional_datetime(body.signed_at.as_deref()) {
+    let requested_signed_at = match parse_optional_datetime(body.signed_at.as_deref()) {
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
-    let valid_from = match parse_optional_date(body.valid_from.as_deref()) {
+    let requested_valid_from = match parse_optional_date(body.valid_from.as_deref()) {
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
-    let valid_to = match parse_optional_date(body.valid_to.as_deref()) {
+    let requested_valid_to = match parse_optional_date(body.valid_to.as_deref()) {
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
-    };
-
-    let signed_at = if body.status == "signed" && signed_at.is_none() {
-        Some(Utc::now())
-    } else {
-        signed_at
     };
 
     let mut tx = match state.db.begin().await {
@@ -3096,7 +3139,8 @@ async fn update_framework_contract_status(
     };
 
     let locked = match sqlx::query(
-        r#"SELECT contract.status,
+        r#"SELECT contract.status, contract.signed_at, contract.valid_from,
+                  contract.valid_to, contract.conditions,
                   (SELECT COUNT(*) FROM orders o
                     WHERE o.contract_id = contract.id
                       AND o.status IN ('active', 'paused')) AS running_orders
@@ -3120,6 +3164,66 @@ async fn update_framework_contract_status(
     };
     let previous_status: String = locked.try_get("status").unwrap_or_default();
     let running_orders: i64 = locked.try_get("running_orders").unwrap_or(0);
+    let stored_terms = FrameworkContractTerms {
+        signed_at: locked.try_get("signed_at").unwrap_or_default(),
+        valid_from: locked.try_get("valid_from").unwrap_or_default(),
+        valid_to: locked.try_get("valid_to").unwrap_or_default(),
+        conditions: locked.try_get("conditions").unwrap_or_default(),
+    };
+    let requested_terms = FrameworkContractTerms {
+        signed_at: requested_signed_at,
+        valid_from: requested_valid_from,
+        valid_to: requested_valid_to,
+        conditions: body.conditions,
+    };
+    // A signed contract keeps what it was signed with: no silent rewrite of
+    // the signing time, dates or conditions on a `signed → signed` call.
+    let already_signed = previous_status == "signed" && body.status == "signed";
+    if already_signed {
+        let changed = changed_signed_contract_fields(&stored_terms, &requested_terms);
+        if !changed.is_empty() {
+            return coded_err(
+                StatusCode::CONFLICT,
+                "framework_contract_signed_locked",
+                &format!(
+                    "A signed framework contract cannot be changed ({})",
+                    changed.join(", ")
+                ),
+            );
+        }
+    }
+    // What the update writes: nothing for an already signed contract, else
+    // the requested values (signing now when no time was given).
+    let written_terms = if already_signed {
+        FrameworkContractTerms {
+            signed_at: None,
+            valid_from: None,
+            valid_to: None,
+            conditions: None,
+        }
+    } else {
+        FrameworkContractTerms {
+            signed_at: requested_terms
+                .signed_at
+                .or_else(|| (body.status == "signed").then(Utc::now)),
+            ..requested_terms
+        }
+    };
+    let signed_at = if already_signed {
+        stored_terms.signed_at
+    } else {
+        written_terms.signed_at
+    };
+    // The update keeps a stored value where the request gives none.
+    let terms_after = FrameworkContractTerms {
+        signed_at: written_terms.signed_at.or(stored_terms.signed_at),
+        valid_from: written_terms.valid_from.or(stored_terms.valid_from),
+        valid_to: written_terms.valid_to.or(stored_terms.valid_to),
+        conditions: written_terms
+            .conditions
+            .clone()
+            .or_else(|| stored_terms.conditions.clone()),
+    };
     if contract_status_rollback_blocked(&previous_status, &body.status, running_orders) {
         return err(
             StatusCode::CONFLICT,
@@ -3170,10 +3274,10 @@ async fn update_framework_contract_status(
     )
     .bind(contract_id)
     .bind(body.status.clone())
-    .bind(signed_at)
-    .bind(valid_from)
-    .bind(valid_to)
-    .bind(body.conditions)
+    .bind(written_terms.signed_at)
+    .bind(written_terms.valid_from)
+    .bind(written_terms.valid_to)
+    .bind(written_terms.conditions)
     .execute(&mut *tx)
     .await
     {
@@ -3199,6 +3303,9 @@ async fn update_framework_contract_status(
             });
             let mut audit_context = realtime_payload.clone();
             audit_context["previous_status"] = serde_json::json!(previous_status);
+            // Old and new signing time, dates and conditions of the change.
+            audit_context["terms_before"] = stored_terms.to_json();
+            audit_context["terms_after"] = terms_after.to_json();
             if let Err(e) = audit::write_in_transaction(
                 &mut tx,
                 &audit::domain_event(
@@ -5226,6 +5333,54 @@ mod tests {
         let new_year =
             crate::app_time::date_of(Utc.with_ymd_and_hms(2026, 12, 31, 23, 30, 0).unwrap());
         assert_eq!(contract_number_on(new_year, 1), "FC-20270101-0001");
+    }
+
+    #[test]
+    fn a_signed_contract_keeps_its_signing_time_dates_and_conditions() {
+        use super::{FrameworkContractTerms, changed_signed_contract_fields};
+        use chrono::NaiveDate;
+        use serde_json::json;
+
+        let stored = FrameworkContractTerms {
+            signed_at: Some(Utc.with_ymd_and_hms(2026, 10, 11, 9, 30, 42).unwrap()),
+            valid_from: None,
+            valid_to: None,
+            conditions: Some(json!({ "discount": 5 })),
+        };
+        let nothing = FrameworkContractTerms {
+            signed_at: None,
+            valid_from: None,
+            valid_to: None,
+            conditions: None,
+        };
+        // A field the request leaves out is kept.
+        assert!(changed_signed_contract_fields(&stored, &nothing).is_empty());
+        // The same values (signing time to the minute) are no change.
+        let same = FrameworkContractTerms {
+            signed_at: Some(Utc.with_ymd_and_hms(2026, 10, 11, 9, 30, 0).unwrap()),
+            conditions: Some(json!({ "discount": 5 })),
+            ..nothing.clone()
+        };
+        assert!(changed_signed_contract_fields(&stored, &same).is_empty());
+        let rewritten = FrameworkContractTerms {
+            signed_at: Some(Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()),
+            valid_from: NaiveDate::from_ymd_opt(2026, 1, 1),
+            valid_to: NaiveDate::from_ymd_opt(2026, 12, 31),
+            conditions: Some(json!({ "discount": 50 })),
+        };
+        assert_eq!(
+            changed_signed_contract_fields(&stored, &rewritten),
+            vec!["signed_at", "valid_from", "valid_to", "conditions"]
+        );
+        // A contract signed without a stored time cannot get one afterwards.
+        let untimed = FrameworkContractTerms {
+            signed_at: None,
+            ..stored.clone()
+        };
+        assert_eq!(
+            changed_signed_contract_fields(&untimed, &same),
+            vec!["signed_at"]
+        );
     }
 
     #[test]

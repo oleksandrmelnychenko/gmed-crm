@@ -323,6 +323,7 @@ import {
 } from "@/pages/contracts/model/contracts-model";
 import {
   createDocumentPreviewObjectUrl,
+  documentPreviewSandbox,
   deleteStoredDocumentFile,
   downloadDocumentFile,
   fetchDocuments,
@@ -13753,6 +13754,7 @@ ${serviceCommentLines.join("\n")}`
               <iframe
                 title={documentPreview.title}
                 src={documentPreview.url}
+                sandbox={documentPreviewSandbox(documentPreview.contentType)}
                 className="m-3 min-h-0 flex-1 border border-border bg-white"
               />
             ) : null}

@@ -543,9 +543,15 @@ async fn can_access_patient_task_scope(
     if auth.role != Role::PatientManager {
         return false;
     }
-    access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
+    let assigned = access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
         .await
-        .unwrap_or(false)
+        .unwrap_or(false);
+    // Creating a task for the patient is a change: an explicit per-user deny
+    // (view or edit) on the patient refuses it despite the assignment.
+    assigned
+        && !super::appointments::patient_denied_by_explicit_rule(state, auth, patient_id, true)
+            .await
+            .unwrap_or(true)
 }
 
 async fn ensure_assignee_has_patient_scope(
@@ -601,9 +607,17 @@ async fn can_view_task(state: &AppState, auth: &AuthUser, row: &sqlx::postgres::
         }
         let patient_id: Option<Uuid> = row.try_get("patient_id").unwrap_or_default();
         if let Some(patient_id) = patient_id {
-            return access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
-                .await
-                .unwrap_or(false);
+            // Pool rule: tasks of the manager's own patients. The canonical
+            // patient check adds the explicit per-user deny; the assignment
+            // stays required, so an allow rule opens nothing here.
+            let assigned =
+                access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
+                    .await
+                    .unwrap_or(false);
+            return assigned
+                && super::patients::has_patient_access(state, auth, patient_id)
+                    .await
+                    .unwrap_or(false);
         }
     }
 

@@ -18,6 +18,9 @@ use crate::routes::me::resolve_self_patient_id;
 use crate::services::interpreter_booking_links as booking_links;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
+use gmed_domain::access::resource_access::{
+    AccessCapability, ResourceAccessDecision, ResourceAccessRequest, ResourceType,
+};
 use gmed_domain::role::Role;
 use sqlx::Row;
 
@@ -1150,7 +1153,7 @@ async fn review_appointment_request(
         .unwrap_or_else(|_| Uuid::nil());
     let current_status = row.try_get::<String, _>("status").unwrap_or_default();
 
-    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await
+    if let Err(resp) = ensure_patient_change_access(&state, &auth, patient_id).await
         && auth.role != Role::Ceo
     {
         return resp;
@@ -1543,7 +1546,7 @@ async fn convert_appointment_request(
         .try_get::<Option<Uuid>, _>("order_id")
         .unwrap_or_default();
 
-    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await
+    if let Err(resp) = ensure_patient_change_access(&state, &auth, patient_id).await
         && auth.role != Role::Ceo
     {
         return resp;
@@ -2785,7 +2788,7 @@ async fn release_order_appointments_to_portal(
     let Some(order_patient_id) = order_patient_id else {
         return Json(serde_json::json!({ "released": 0, "appointment_ids": [] })).into_response();
     };
-    if let Err(resp) = ensure_patient_access(&state, &auth, order_patient_id).await {
+    if let Err(resp) = ensure_patient_change_access(&state, &auth, order_patient_id).await {
         return resp;
     }
 
@@ -2972,7 +2975,7 @@ async fn create_appointment(
     ]) {
         return e;
     }
-    match ensure_patient_access(&state, &auth, body.patient_id).await {
+    match ensure_patient_change_access(&state, &auth, body.patient_id).await {
         Ok(()) => {}
         Err(resp) => return resp,
     }
@@ -13547,11 +13550,78 @@ async fn ensure_patient_access(
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate appointment access")
         })?;
 
-    if assigned {
+    // An explicit per-user deny on the patient closes the appointment module
+    // too: the assignment admits, the canonical patient check may still refuse.
+    if assigned && super::patients::has_patient_access(state, auth, patient_id).await? {
         Ok(())
     } else {
         Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
     }
+}
+
+/// [`ensure_patient_access`] for a change (new appointment, request decision,
+/// portal release): an explicit deny of editing the patient refuses it as well.
+async fn ensure_patient_change_access(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    ensure_patient_access(state, auth, patient_id).await?;
+    if patient_denied_by_explicit_rule(state, auth, patient_id, true).await? {
+        return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+    }
+    Ok(())
+}
+
+/// Whether an explicit access rule (per-user rule or access profile, set by
+/// the CEO) denies the caller this patient. It only ever narrows: a path that
+/// admits by something other than the patient assignment (own or owned
+/// appointment, team context, service or task assignee) calls it after its own
+/// decision, so an allow rule never opens such a path. `change` also honours a
+/// deny of editing. The CEO has no rules; the patient portal is not governed
+/// by staff rules.
+pub(crate) async fn patient_denied_by_explicit_rule(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+    change: bool,
+) -> Result<bool, axum::response::Response> {
+    if matches!(auth.role, Role::Ceo | Role::Patient) {
+        return Ok(false);
+    }
+    let capabilities: &[AccessCapability] = if change {
+        &[AccessCapability::View, AccessCapability::Edit]
+    } else {
+        &[AccessCapability::View]
+    };
+    for capability in capabilities {
+        let decision = access::resolve_explicit_resource_access(
+            &state.db,
+            auth.user_id,
+            auth.role,
+            ResourceAccessRequest {
+                resource_type: ResourceType::Patient,
+                resource_id: patient_id,
+                capability: *capability,
+                is_medical: false,
+            },
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, patient_id = %patient_id, "Failed to resolve explicit patient access");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate patient access",
+            )
+        })?;
+        if matches!(
+            decision,
+            ResourceAccessDecision::Deny(_) | ResourceAccessDecision::DenySystemBoundary
+        ) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Read access to one appointment (detail, report, reminders, communication),
@@ -13643,7 +13713,7 @@ async fn appointment_in_scope(
         }
     };
 
-    access::can_view_appointment_row(
+    let in_scope = access::can_view_appointment_row(
         &state.db,
         access::AppointmentRow {
             role: auth.role,
@@ -13659,7 +13729,21 @@ async fn appointment_in_scope(
     .map_err(|e| {
         tracing::error!(error = %e, appointment_id = %appointment_id, patient_id = %patient_id, "Failed to validate appointment assignment");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate appointment access")
-    })
+    })?;
+    if !in_scope {
+        return Ok(false);
+    }
+    // An explicit deny on the patient closes its appointments for the staff
+    // member, whichever way the row was admitted (assignment, own or owned
+    // visit, team context). The row scope itself is not widened.
+    let denied = patient_denied_by_explicit_rule(
+        state,
+        auth,
+        patient_id,
+        mode == access::AppointmentAccess::Change,
+    )
+    .await?;
+    Ok(!denied)
 }
 
 async fn ensure_appointment_order_link_allowed(
@@ -13706,7 +13790,8 @@ async fn ensure_appointment_order_link_allowed(
                     "Failed to validate appointment order access",
                 )
             })?;
-        if !assigned {
+        // The order's patient may be closed for the caller by an explicit deny.
+        if !assigned || !super::patients::has_patient_access(state, auth, order_patient_id).await? {
             return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
         }
     }

@@ -92,7 +92,7 @@ echo "[$(date -u +%FT%TZ)] backup start → s3://$BACKUP_S3_BUCKET/$KEY"
 # `-T` not needed (no -i interactive flag); the pipe naturally gives a
 # non-TTY stdin. `-Fc` is the custom format (pg_restore-friendly),
 # `-Z 6` is zstd-level compression inside the dump.
-docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" "$POSTGRES_CONTAINER" \
+PGPASSWORD="$POSTGRES_PASSWORD" docker exec -e PGPASSWORD "$POSTGRES_CONTAINER" \
   pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -Z 6 \
   | age -e -R <(printf '%s\n' "$BACKUP_AGE_RECIPIENTS") \
   | rclone rcat \

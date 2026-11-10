@@ -29,7 +29,9 @@ use uuid::Uuid;
 use super::store::{self, Cause};
 use crate::audit;
 use crate::auth::middleware::AuthUser;
-use crate::sanctions::gate::{self as sanctions_gate, GateAction, Rule, Scope, Target};
+use crate::sanctions::gate::{
+    self as sanctions_gate, GateAction, MalformedId, Rule, Scope, Target,
+};
 use crate::state::AppState;
 
 /// Largest JSON body the gate reads (the axum default limit).
@@ -48,32 +50,45 @@ pub enum RiskRoute {
     PayerLink(Uuid),
 }
 
-/// Maps a request to the risk gate; `None` = not guarded.
+/// Maps a request to the risk gate; `None` = not guarded. A guarded route with
+/// a malformed id is `None` here; the middleware uses [`route`], which refuses
+/// it.
+#[cfg(test)]
 pub fn classify(method: &Method, path: &str) -> Option<RiskRoute> {
+    route(method, path).ok().flatten()
+}
+
+/// [`classify`] on the percent-decoded path (what the handler's `Path<Uuid>`
+/// sees); a guarded route whose id is no UUID is refused, not passed.
+pub fn route(method: &Method, path: &str) -> Result<Option<RiskRoute>, MalformedId> {
     if *method != Method::POST {
-        return None;
+        return Ok(None);
     }
-    let trimmed = path.strip_prefix("/api/v1").unwrap_or(path);
-    let segments: Vec<&str> = trimmed.trim_matches('/').split('/').collect();
+    let decoded = sanctions_gate::decoded_segments(path);
+    let segments: Vec<&str> = decoded.iter().map(String::as_str).collect();
+    let id = |value: &str| Uuid::parse_str(value).map_err(|_| MalformedId);
     match segments.as_slice() {
         ["leads", lead, "payer-signature-package", "send"] => {
-            return Uuid::parse_str(lead).ok().map(RiskRoute::PayerPackageSend);
+            return Ok(Some(RiskRoute::PayerPackageSend(id(lead)?)));
         }
         ["leads", lead, "payer-link"] => {
-            return Uuid::parse_str(lead).ok().map(RiskRoute::PayerLink);
+            return Ok(Some(RiskRoute::PayerLink(id(lead)?)));
         }
         // A signature confirmed by staff is a paper signature too (QA 2026-10-10);
         // the DSGVO consent and the identity document stay open here
         // (`document_leads`). The sanctions
         // gate maps the route itself (same rule as `paper-signature`).
         ["documents", document, "mark-signed"] => {
-            return Uuid::parse_str(document)
-                .ok()
-                .map(|id| RiskRoute::Mapped(Target::Document(id), Rule::PaperSignature));
+            return Ok(Some(RiskRoute::Mapped(
+                Target::Document(id(document)?),
+                Rule::PaperSignature,
+            )));
         }
         _ => {}
     }
-    let (target, rule) = sanctions_gate::classify(method, path)?;
+    let Some((target, rule)) = sanctions_gate::route(method, path)? else {
+        return Ok(None);
+    };
     let guarded = matches!(
         rule,
         Rule::LeadQualify
@@ -84,7 +99,7 @@ pub fn classify(method: &Method, path: &str) -> Option<RiskRoute> {
             | Rule::OrderCommercialBasis
             | Rule::OrderIntake
     );
-    guarded.then_some(RiskRoute::Mapped(target, rule))
+    Ok(guarded.then_some(RiskRoute::Mapped(target, rule)))
 }
 
 impl RiskRoute {
@@ -270,8 +285,10 @@ pub async fn middleware(State(state): State<AppState>, request: Request, next: N
     {
         return next.run(request).await;
     }
-    let Some(route) = classify(request.method(), request.uri().path()) else {
-        return next.run(request).await;
+    let route = match route(request.method(), request.uri().path()) {
+        Ok(Some(route)) => route,
+        Ok(None) => return next.run(request).await,
+        Err(malformed) => return malformed.response(),
     };
     let (request, body) = if route.needs_body() {
         let (parts, body) = request.into_parts();
@@ -399,6 +416,60 @@ mod tests {
             classify(&Method::GET, &format!("/leads/{ID}/payer-link")),
             None
         );
+    }
+
+    #[test]
+    fn a_percent_encoded_id_is_guarded_like_the_plain_one() {
+        // `%31` = `1`, `%2D` = `-`, `%70` = `p`.
+        let encoded = ID.replacen('1', "%31", 1).replacen('-', "%2D", 1);
+        let id = Uuid::parse_str(ID).unwrap();
+        for path in [
+            "/leads/{id}/qualify",
+            "/leads/{id}/convert",
+            "/api/v1/leads/{id}/wizard-convert",
+            "/leads/{id}/payer-signature-package/send",
+            "/leads/{id}/payer-link",
+            "/documents/{id}/signature-requests",
+            "/documents/{id}/mark-signed",
+            "/framework-contracts/{id}/status",
+            "/orders/{id}/commercial-basis",
+            // Drafting stays open.
+            "/orders/{id}/quotes",
+            "/leads/{id}/payer-link/revoke",
+            "/framework-contracts/{id}/terminate",
+        ] {
+            assert_eq!(
+                route(&Method::POST, &path.replace("{id}", &encoded)),
+                route(&Method::POST, &path.replace("{id}", ID)),
+                "{path}"
+            );
+        }
+        assert_eq!(
+            route(&Method::POST, &format!("/leads/{encoded}/payer-link")),
+            Ok(Some(RiskRoute::PayerLink(id)))
+        );
+        assert_eq!(
+            route(&Method::POST, &format!("/leads/{ID}/%70ayer-link")),
+            Ok(Some(RiskRoute::PayerLink(id)))
+        );
+    }
+
+    #[test]
+    fn a_malformed_id_on_a_guarded_route_is_refused() {
+        for path in [
+            "/leads/x/convert",
+            "/leads/x/payer-link",
+            "/leads/%ZZ/payer-signature-package/send",
+            "/documents/x/mark-signed",
+            "/framework-contracts/x/status",
+        ] {
+            assert_eq!(route(&Method::POST, path), Err(MalformedId), "{path}");
+            assert_eq!(classify(&Method::POST, path), None, "{path}");
+        }
+        for path in ["/leads/x/update", "/leads/x/payer-link/revoke"] {
+            assert_eq!(route(&Method::POST, path), Ok(None), "{path}");
+        }
+        assert_eq!(route(&Method::GET, "/leads/x/payer-link"), Ok(None));
     }
 
     #[test]

@@ -442,7 +442,7 @@ async fn add_patient_workflow_item(
     if let Err(resp) = require_workflow_manage_role(&auth) {
         return resp;
     }
-    if let Err(resp) = ensure_patient_scope_visible(&state, &auth, patient_id).await {
+    if let Err(resp) = ensure_patient_scope_changeable(&state, &auth, patient_id).await {
         return resp;
     }
     let context = match load_patient_scope_context(&state, patient_id).await {
@@ -468,7 +468,7 @@ async fn complete_patient_workflow_item(
     if let Err(resp) = require_workflow_view_role(&auth) {
         return resp;
     }
-    if let Err(resp) = ensure_patient_scope_visible(&state, &auth, patient_id).await {
+    if let Err(resp) = ensure_patient_scope_changeable(&state, &auth, patient_id).await {
         return resp;
     }
     complete_workflow_item(&state, &auth, WorkflowScope::Patient, patient_id, item_id).await
@@ -548,7 +548,7 @@ async fn add_order_workflow_item(
         Ok(context) => context,
         Err(resp) => return resp,
     };
-    if let Err(resp) = ensure_patient_scope_visible(&state, &auth, context.patient_id).await {
+    if let Err(resp) = ensure_patient_scope_changeable(&state, &auth, context.patient_id).await {
         return resp;
     }
     create_custom_workflow_item(&state, &auth, WorkflowScope::Order, order_id, context, body).await
@@ -569,7 +569,7 @@ async fn complete_order_workflow_item(
         Ok(context) => context,
         Err(resp) => return resp,
     };
-    if let Err(resp) = ensure_patient_scope_visible(&state, &auth, context.patient_id).await {
+    if let Err(resp) = ensure_patient_scope_changeable(&state, &auth, context.patient_id).await {
         return resp;
     }
     complete_workflow_item(&state, &auth, WorkflowScope::Order, order_id, item_id).await
@@ -583,7 +583,7 @@ async fn mark_patient_workflow_item_not_required(
     if let Err(resp) = require_workflow_manage_role(&auth) {
         return resp;
     }
-    if let Err(resp) = ensure_patient_scope_visible(&state, &auth, patient_id).await {
+    if let Err(resp) = ensure_patient_scope_changeable(&state, &auth, patient_id).await {
         return resp;
     }
     change_workflow_item_resolution(
@@ -605,7 +605,7 @@ async fn reopen_patient_workflow_item(
     if let Err(resp) = require_workflow_manage_role(&auth) {
         return resp;
     }
-    if let Err(resp) = ensure_patient_scope_visible(&state, &auth, patient_id).await {
+    if let Err(resp) = ensure_patient_scope_changeable(&state, &auth, patient_id).await {
         return resp;
     }
     change_workflow_item_resolution(
@@ -659,7 +659,7 @@ async fn order_workflow_item_resolution(
         Ok(context) => context,
         Err(resp) => return resp,
     };
-    if let Err(resp) = ensure_patient_scope_visible(&state, &auth, context.patient_id).await {
+    if let Err(resp) = ensure_patient_scope_changeable(&state, &auth, context.patient_id).await {
         return resp;
     }
     change_workflow_item_resolution(
@@ -966,25 +966,45 @@ async fn ensure_patient_scope_visible(
     if auth.role == Role::Ceo {
         return Ok(());
     }
-    if !access::requires_patient_assignment(auth.role) {
-        return Ok(());
+    if access::requires_patient_assignment(auth.role) {
+        let assigned = access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, patient_id = %patient_id, "Failed to validate workflow patient assignment");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate workflow access",
+                )
+            })?;
+        if !assigned {
+            return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+        }
     }
 
-    let assigned = access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, patient_id = %patient_id, "Failed to validate workflow patient assignment");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to validate workflow access",
-            )
-        })?;
-
-    if assigned {
+    // The role or the assignment admits; an explicit per-user deny on the
+    // patient still refuses (canonical patient check). The assignment above
+    // stays required, so an allow rule opens nothing here.
+    if crate::routes::patients::has_patient_access(state, auth, patient_id).await? {
         Ok(())
     } else {
         Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
     }
+}
+
+/// [`ensure_patient_scope_visible`] for a change of the checklist: an explicit
+/// deny of editing the patient refuses it as well.
+async fn ensure_patient_scope_changeable(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    ensure_patient_scope_visible(state, auth, patient_id).await?;
+    if crate::routes::appointments::patient_denied_by_explicit_rule(state, auth, patient_id, true)
+        .await?
+    {
+        return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+    }
+    Ok(())
 }
 
 async fn load_patient_scope_context(

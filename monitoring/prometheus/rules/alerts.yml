@@ -5,8 +5,9 @@
 # prove the alert delivery path end-to-end before we layer on real
 # PROD-side rules in Phase 3e2.
 #
-# Reload after edits: `curl -X POST http://localhost:9090/-/reload`
-# or restart the prometheus container.
+# Reload after edits: `docker kill --signal=HUP gmed-prometheus`
+# or restart the prometheus container. (The HTTP reload endpoint is off:
+# --web.enable-lifecycle also exposes an unauthenticated shutdown.)
 
 groups:
   - name: monitoring-host

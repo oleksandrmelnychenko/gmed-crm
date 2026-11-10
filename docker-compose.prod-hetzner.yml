@@ -54,6 +54,11 @@ services:
 
   backend:
     environment:
+      # PROD logs at info. The shared default in docker-compose.release.yml
+      # (info,gmed_server=debug) stays for DEV; debug lines of the application
+      # can carry request details that do not belong in the PROD log store.
+      # Set GMED_RUST_LOG in the secrets bundle to raise it for a diagnosis.
+      RUST_LOG: "${GMED_RUST_LOG:-info}"
       INVOICE_PARSER_URL: "http://invoice-parser:8091"
       INVOICE_PARSER_API_KEY: "${GMED_INVOICE_PARSER_API_KEY:?Set the internal invoice parser service key}"
     networks: [default, invoice-internal, translation-internal]
@@ -61,8 +66,12 @@ services:
     # over the tailnet. The main API port (3000) stays internal to
     # the docker network — Caddy is the only public ingress for /api.
     # The Hetzner firewall keeps 9091 closed to the public internet.
+    # The bind address comes from GMED_METRICS_BIND_ADDR in the env file.
+    # Unset = 0.0.0.0, every IPv4 interface as before. Set to the host's
+    # Tailscale IPv4 address, the port is published on the tailnet only and
+    # no longer depends on the cloud firewall alone.
     ports:
-      - "9091:9091"
+      - "${GMED_METRICS_BIND_ADDR:-0.0.0.0}:9091:9091"
     logging:
       driver: json-file
       options:
@@ -129,10 +138,12 @@ services:
         max-file: "5"
 
   # --- Observability exporters (Phase 3e2) ----------------------------------
-  # All sidecars listen on the host's all-interfaces (`network_mode: host`
-  # for node_exporter and cAdvisor, published ports for postgres_exporter
-  # and promtail). The Hetzner firewall keeps those ports closed to the
-  # public internet; only tailnet peers (the monitoring host) can scrape.
+  # By default all sidecars listen on every interface of the host
+  # (`network_mode: host` for node_exporter and cAdvisor, a published port
+  # for postgres_exporter) and only the Hetzner firewall keeps those ports
+  # closed to the public internet. Set GMED_METRICS_BIND_ADDR (secrets
+  # bundle) to the host's Tailscale IPv4 address to bind them, and the
+  # backend metrics port, to the tailnet only.
   # --------------------------------------------------------------------------
 
   node-exporter:
@@ -152,7 +163,9 @@ services:
       # Exclude pseudo-filesystems and the docker/overlayfs mountpoints
       # so disk metrics reflect the real root + Postgres volume only.
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|var/lib/docker)($$|/)'
-      - '--web.listen-address=:9100'
+      # Host network: the listen address is the bind address. Empty default
+      # = every interface (as before); GMED_METRICS_BIND_ADDR = tailnet only.
+      - '--web.listen-address=${GMED_METRICS_BIND_ADDR:-}:9100'
     logging:
       driver: json-file
       options:
@@ -175,6 +188,8 @@ services:
       - /etc/machine-id:/etc/machine-id:ro
     command:
       - '--port=9080'
+      # Empty default = every interface (as before); see GMED_METRICS_BIND_ADDR.
+      - '--listen_ip=${GMED_METRICS_BIND_ADDR:-}'
       # Disable cAdvisor's own UI — we only want the /metrics endpoint
       # exposed to Prometheus over the tailnet.
       - '--disable_metrics=disk,referenced_memory,udp,advtcp,sched,hugetlb,process'
@@ -202,8 +217,9 @@ services:
       DATA_SOURCE_NAME: "postgresql://${POSTGRES_METRICS_USER:?Set POSTGRES_METRICS_USER in release.env}:${POSTGRES_METRICS_PASSWORD:?Set POSTGRES_METRICS_PASSWORD}@postgres:5432/${POSTGRES_DB:-gmed}?sslmode=disable"
       PG_EXPORTER_AUTO_DISCOVER_DATABASES: "false"
       PG_EXPORTER_WEB_LISTEN_ADDRESS: ":9187"
+    # Same bind address rule as the backend metrics port above.
     ports:
-      - "9187:9187"
+      - "${GMED_METRICS_BIND_ADDR:-0.0.0.0}:9187:9187"
     depends_on:
       postgres:
         condition: service_healthy

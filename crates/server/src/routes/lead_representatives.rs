@@ -210,6 +210,10 @@ pub(crate) struct Extras {
     pub id_data_entered_at: Option<DateTime<Utc>>,
     /// The cabinet typed the document's data (owner 2026-11-10).
     pub id_data_client_at: Option<DateTime<Utc>>,
+    /// The e-mail address a cabinet login wrote for the contact (lower
+    /// case). The contact's address is the cabinet's while it equals this
+    /// one: the automatic parent link never follows it.
+    pub cabinet_email: Option<String>,
     pub country_questions: Value,
 }
 
@@ -248,6 +252,7 @@ impl Extras {
                 .unwrap_or(false),
             id_data_entered_at: row.try_get("id_data_entered_at").ok().flatten(),
             id_data_client_at: row.try_get("id_data_client_at").ok().flatten(),
+            cabinet_email: text("cabinet_email").map(|email| email.to_lowercase()),
             country_questions: row
                 .try_get("country_questions")
                 .unwrap_or_else(|_| json!({})),
@@ -345,7 +350,8 @@ impl Representative {
     /// login the automatic parent link attaches to the request, so the
     /// cabinet of a minor does not change it: GMED does (owner decision
     /// 2026-10-23). An address staff left empty the cabinet may still add,
-    /// otherwise the request could not be sent.
+    /// otherwise the request could not be sent; that address stays the
+    /// cabinet's ([`Extras::cabinet_email`]) and never links a login.
     pub(crate) fn email_set_by_staff(&self) -> bool {
         !self.has_login()
             && self.extras.contact_origin != ORIGIN_PORTAL
@@ -353,6 +359,12 @@ impl Representative {
                 .email
                 .as_deref()
                 .is_some_and(|email| !email.trim().is_empty())
+            && !self.email_set_by_cabinet()
+    }
+
+    /// The contact's address is the one a cabinet login wrote.
+    pub(crate) fn email_set_by_cabinet(&self) -> bool {
+        cabinet_wrote_email(self.email.as_deref(), self.extras.cabinet_email.as_deref())
     }
 
     /// A guardian (Vormund, Pfleger) of a minor rather than a parent: the
@@ -361,6 +373,18 @@ impl Representative {
         custody == CUSTODY_GUARDIAN
             || crate::routes::leads::is_legal_guardian_relation(self.relation.as_deref())
     }
+}
+
+/// Whether `email` is the address a cabinet login wrote (`cabinet_email`):
+/// case and outer spaces do not matter, an empty address is nobody's.
+fn cabinet_wrote_email(email: Option<&str>, cabinet_email: Option<&str>) -> bool {
+    let normalize = |value: Option<&str>| {
+        value
+            .map(|value| value.trim().to_lowercase())
+            .filter(|value| !value.is_empty())
+    };
+    let email = normalize(email);
+    email.is_some() && email == normalize(cabinet_email)
 }
 
 fn full_name(first_name: &str, last_name: &str) -> String {
@@ -829,6 +853,7 @@ pub(crate) async fn load_on(
                 // Who typed the data of the identity document is the row's.
                 effective.id_data_entered_at = stored.id_data_entered_at;
                 effective.id_data_client_at = stored.id_data_client_at;
+                effective.cabinet_email = stored.cabinet_email.clone();
             } else {
                 effective.contact_origin = ORIGIN_STAFF.to_string();
             }
@@ -3517,6 +3542,22 @@ pub(crate) async fn upsert_my_representative(
             auth.user_id,
         )
         .await?;
+        // Who wrote the address: one a cabinet login wrote is remembered
+        // (the automatic parent link never follows it), one staff wrote
+        // here clears the mark.
+        if next.email != current.email {
+            sqlx::query(
+                r#"UPDATE lead_representatives
+                   SET cabinet_email = CASE WHEN $4 THEN NULLIF(lower(btrim($3)), '') END
+                   WHERE lead_id = $1 AND contact_id = $2"#,
+            )
+            .bind(lead_id)
+            .bind(representative_id)
+            .bind(next.email.as_deref().unwrap_or_default())
+            .bind(kind != AccessKind::Staff)
+            .execute(&mut *tx)
+            .await?;
+        }
         // The data of the identity document as typed in the cabinet: the
         // upsert above leaves them alone on an existing row (staff's saves
         // run through it too). Typed by the client, the wizard asks staff
@@ -6237,5 +6278,40 @@ mod tests {
         assert_eq!(subject_representative(&subject), Some(id(7)));
         assert_eq!(subject_representative("representative:someone"), None);
         assert_eq!(subject_representative("payer"), None);
+    }
+
+    /// Security review 2026-11-10: an address a cabinet login wrote for a
+    /// contact staff entered is the cabinet's, not staff's, until staff
+    /// change it.
+    #[test]
+    fn an_address_the_cabinet_wrote_is_not_staffs() {
+        assert!(cabinet_wrote_email(
+            Some(" Mother@Example.com "),
+            Some("mother@example.com")
+        ));
+        assert!(!cabinet_wrote_email(
+            Some("other@example.com"),
+            Some("mother@example.com")
+        ));
+        assert!(!cabinet_wrote_email(Some("mother@example.com"), None));
+        assert!(!cabinet_wrote_email(None, None));
+        assert!(!cabinet_wrote_email(Some(" "), Some("")));
+
+        let mut parent = complete_person(1, SLOT_REP1, ROLE_LEGAL_REPRESENTATIVE);
+        parent.login_user_ids.clear();
+        parent.extras.contact_origin = ORIGIN_STAFF.into();
+        parent.email = Some("mother@example.com".into());
+        // Staff entered the contact with the address.
+        parent.extras.cabinet_email = None;
+        assert!(parent.email_set_by_staff());
+        assert!(!parent.email_set_by_cabinet());
+        // Staff left it empty and a cabinet login added it.
+        parent.extras.cabinet_email = Some("mother@example.com".into());
+        assert!(!parent.email_set_by_staff());
+        assert!(parent.email_set_by_cabinet());
+        // Staff changed it since.
+        parent.email = Some("staff-checked@example.com".into());
+        assert!(parent.email_set_by_staff());
+        assert!(!parent.email_set_by_cabinet());
     }
 }

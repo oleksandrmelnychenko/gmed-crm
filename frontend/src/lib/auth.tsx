@@ -97,7 +97,17 @@ interface AuthTokens {
 interface PendingLoginResponse {
   status: "mfa_pending";
   pending_id: string;
+  /** Redeems the approved sign-in; only this client holds it. */
+  poll_secret?: string;
   message?: string;
+}
+
+// Poll secrets of the sign-ins waiting for an administrator, by pending id.
+// Kept in memory only: after a reload the person signs in again.
+const pendingPollSecrets = new Map<string, string>();
+
+function rememberPendingLogin(result: PendingLoginResponse) {
+  if (result.poll_secret) pendingPollSecrets.set(result.pending_id, result.poll_secret);
 }
 
 interface TotpRequiredResponse {
@@ -483,6 +493,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (isPendingLoginResponse(result)) {
+      rememberPendingLogin(result);
       throw new PendingLoginError(result.pending_id, result.message);
     }
     if (isTotpRequiredResponse(result)) {
@@ -504,6 +515,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ challenge_id: challengeId, code }),
     });
     if (isPendingLoginResponse(result)) {
+      rememberPendingLogin(result);
       throw new PendingLoginError(result.pending_id, result.message);
     }
     await saveTokens(result);
@@ -548,19 +560,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user?.id, user?.role, user?.portal_mode, user?.password_change_required, user?.totp_enrolment_required, refreshUser]);
 
   const checkPending = async (pendingId: string): Promise<PendingLoginStatus> => {
+    // The approved sign-in is redeemed with the secret this client got at
+    // sign-in (sent as a bearer header, never in the URL). Without it — a
+    // reload, another tab — the person signs in again.
+    const pollSecret = pendingPollSecrets.get(pendingId);
+    if (!pollSecret) return "rejected";
     try {
-      const result = await fetchJson<{ status: string; access_token?: string; refresh_token?: string }>(
-        `/auth/pending/${pendingId}`,
-        { method: "GET" },
-      );
+      const response = await fetchWithApiTimeout(buildApiUrl(`/auth/pending/${pendingId}`), {
+        method: "GET",
+        headers: { Authorization: `Bearer ${pollSecret}` },
+      });
+      // The sign-in endpoints share a tight request budget: a refused poll
+      // is not an answer, the next one asks again.
+      if (response.status === 429) return "pending";
+      if (response.status === 401) {
+        pendingPollSecrets.delete(pendingId);
+        return "rejected";
+      }
+      if (!response.ok) return "error";
+      const result = (await response.json()) as { status: string; access_token?: string; refresh_token?: string };
       if (result.status === "approved" && result.access_token && result.refresh_token) {
+        pendingPollSecrets.delete(pendingId);
         await saveTokens({ access_token: result.access_token, refresh_token: result.refresh_token, token_type: "Bearer", expires_in: 900 });
         const me = await fetchMe(result.access_token);
         applyPreferredLanguage(me);
         dispatchAuthState({ user: me, signOut: null });
         return "approved";
       }
-      if (result.status === "rejected") return "rejected";
+      if (result.status === "rejected") {
+        pendingPollSecrets.delete(pendingId);
+        return "rejected";
+      }
       return "pending";
     } catch {
       return "error";

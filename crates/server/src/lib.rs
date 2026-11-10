@@ -59,8 +59,8 @@ async fn api_not_found() -> impl IntoResponse {
 /// The layer stack is built bottom-up:
 ///
 /// 1. Health endpoints carry no rate limit and no auth.
-/// 2. Unauthenticated auth endpoints (`/auth/login`, `/auth/refresh`,
-///    `/auth/pending/{id}`) sit behind the tight per-IP limiter from
+/// 2. Unauthenticated auth endpoints (`/auth/login`, `/auth/totp`,
+///    `/auth/refresh`, `/auth/pending/{id}`) sit behind the tight per-IP limiter from
 ///    [`rate_limit::apply_auth_tight`].
 /// 3. Other public endpoints (public `leads` and `messages` surfaces) sit
 ///    behind the general per-IP limiter. The payer's own link (token and
@@ -85,7 +85,10 @@ pub fn build_app_for_role_contract_tests(app_state: state::AppState) -> Router {
 }
 
 fn build_app_inner(app_state: state::AppState) -> Router {
-    let auth_public = rate_limit::apply_auth_tight(routes::auth::public_router());
+    // The authenticator-code step shares the sign-in's tight bucket.
+    let auth_public = rate_limit::apply_auth_tight(
+        routes::auth::public_router().merge(routes::totp::public_router()),
+    );
     // A bucket of its own: guessing codes must not share the login's budget.
     let payer_link_public =
         rate_limit::apply_auth_tight(routes::lead_payer_link::public_tight_router());
@@ -96,7 +99,6 @@ fn build_app_inner(app_state: state::AppState) -> Router {
             .merge(routes::leads::public_router())
             .merge(routes::lead_payer_link::public_router())
             .merge(routes::legal::public_router())
-            .merge(routes::totp::public_router())
             .merge(routes::messages::public_router())
             .merge(routes::realtime::public_router())
             .merge(routes::e2e_support::public_router()),

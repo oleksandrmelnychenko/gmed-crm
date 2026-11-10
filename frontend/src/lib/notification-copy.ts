@@ -332,6 +332,37 @@ function securityIncident(item: NotificationFacts, lang: Lang): NotificationCopy
   };
 }
 
+/** An administrator without CEO rights changed an account that reaches patient or finance data. */
+function securityAccountChange(item: NotificationFacts, lang: Lang): NotificationCopy {
+  const tr = translationsFor(lang);
+  const role = text(item, "role");
+  const roleLabel = role
+    ? (tr[`role_${role}` as keyof Translations] as string | undefined) ?? humanizeAuditCode(role)
+    : "";
+  const actor = text(item, "actor_name") ?? pick({ ru: "Администратор", de: "Ein Administrator" }, lang);
+  const target = text(item, "target_name") ?? pick({ ru: "учётная запись", de: "ein Konto" }, lang);
+  const changes: Record<string, Texts> = {
+    created: { ru: "создал учётную запись", de: "hat ein Konto angelegt" },
+    role_changed: { ru: "изменил роль", de: "hat die Rolle geändert" },
+    password_reset: { ru: "сбросил пароль", de: "hat das Passwort zurückgesetzt" },
+    totp_reset: { ru: "сбросил второй фактор", de: "hat den zweiten Faktor zurückgesetzt" },
+  };
+  const change = pick(
+    changes[text(item, "change") ?? ""] ?? { ru: "изменил учётную запись", de: "hat ein Konto geändert" },
+    lang,
+  );
+  return {
+    title: pick({
+      ru: "Администратор изменил учётную запись с доступом к данным",
+      de: "Administrator hat ein Konto mit Datenzugriff geändert",
+    }, lang),
+    body: fill({
+      ru: "{actor} {change}: {target}, роль «{role}». Проверьте изменение в журнале действий.",
+      de: "{actor} {change}: {target}, Rolle „{role}“. Bitte im Aktivitätsprotokoll prüfen.",
+    }, lang, { actor, change, target, role: roleLabel }),
+  };
+}
+
 function privacyRequestTypeLabel(type: string, tr: Translations): string {
   const key = `compliance_request_type_${type}` as keyof Translations;
   const label = tr[key];
@@ -884,6 +915,8 @@ export function notificationCopyFromFacts(
       return emailUndelivered(item, lang);
     case "security_incident":
       return securityIncident(item, lang);
+    case "security_account_change":
+      return securityAccountChange(item, lang);
     case "privacy_request":
       return privacyRequest(item, lang);
     case "privacy_request_completed":

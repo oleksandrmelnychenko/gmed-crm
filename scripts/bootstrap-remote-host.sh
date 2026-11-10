@@ -79,7 +79,17 @@ else
   sudo git -C /opt/gmed/repo fetch origin "$REPO_BRANCH"
 fi
 
-sudo env GIT_BRANCH="$REPO_BRANCH" "/opt/gmed/repo/$DEPLOY_SCRIPT"
+# A PROD host that has already completed a deploy is an existing installation:
+# run the upgrade path (backup + migration rehearsal, never the first-install
+# data sanitizer). Only a host without /etc/gmed/deploy.last gets the plain
+# first deploy.
+deploy_args=()
+if [[ "$DEPLOY_SCRIPT" == "scripts/deploy-prod.sh" ]] && sudo test -e /etc/gmed/deploy.last; then
+  echo "Existing PROD installation found (/etc/gmed/deploy.last): using --upgrade-only."
+  deploy_args=(--upgrade-only)
+fi
+
+sudo env GIT_BRANCH="$REPO_BRANCH" "/opt/gmed/repo/$DEPLOY_SCRIPT" "${deploy_args[@]}"
 REMOTE
 
 echo "Remote bootstrap complete."

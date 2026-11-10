@@ -79,9 +79,54 @@ export type DocumentPreviewObjectUrl = {
   url: string;
 };
 
+function normalizedMime(contentType?: string | null) {
+  return contentType?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+}
+
+// The only types a preview may hand to the browser for rendering. None of them
+// can run script: no HTML, no SVG, no XML of any kind. Everything else is
+// shown as plain text or offered as a download.
+const INLINE_PREVIEW_IMAGE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/bmp",
+  "image/avif",
+  "image/tiff",
+  "image/heic",
+  "image/heif",
+]);
+
+function isTextualPreviewType(mime: string) {
+  return (
+    mime.startsWith("text/") ||
+    mime.endsWith("/xml") ||
+    mime.endsWith("+xml") ||
+    mime === "application/json" ||
+    mime === "application/javascript" ||
+    mime === "application/ecmascript"
+  );
+}
+
+/**
+ * The `sandbox` attribute of an iframe that shows a preview blob. Chromium's
+ * built-in PDF viewer cannot start inside a sandboxed frame, so a PDF (whose
+ * blob type is forced by `safePreviewBlob`) stays unsandboxed. Images and
+ * plain text are fully sandboxed; a file that cannot be shown may only be
+ * downloaded.
+ */
 export function documentPreviewSandbox(contentType?: string) {
-  const mime = contentType?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-  return mime === "application/pdf" ? undefined : "";
+  const mime = normalizedMime(contentType);
+  if (mime === "application/pdf") return undefined;
+  return mime === "text/plain" || INLINE_PREVIEW_IMAGE_TYPES.has(mime) ? "" : "allow-downloads";
+}
+
+/** A copy of the blob typed as PDF, or `null` when the bytes are not a PDF. */
+export async function pdfPreviewBlob(blob: Blob): Promise<Blob | null> {
+  // PDF readers accept the header anywhere in the first 1024 bytes.
+  const head = await blob.slice(0, 1024).text();
+  return head.includes("%PDF-") ? new Blob([blob], { type: "application/pdf" }) : null;
 }
 
 function postJson<T>(path: string, payload: JsonPayload, timeoutMs?: number) {
@@ -107,33 +152,34 @@ export async function fetchDocumentBlob(id: string, noStore = false) {
   );
 }
 
-function isActivePreviewType(contentType: string) {
-  const mime = contentType.split(";", 1)[0]?.trim().toLowerCase();
-  return (
-    mime === "text/html" ||
-    mime === "application/xhtml+xml" ||
-    mime === "image/svg+xml" ||
-    mime === "application/xml" ||
-    mime === "text/xml" ||
-    mime === "application/xslt+xml"
-  );
-}
-
+// Allow-list: a PDF (checked by its header), raster images and plain text keep
+// a type the browser renders; any other textual type is shown as plain text and
+// the rest is re-typed to a download. The blob type is always set here, never
+// taken from the response, so the browser has nothing to sniff.
 async function safePreviewBlob(blob: Blob, contentType: string, filename?: string | null) {
-  const mime = contentType.split(";", 1)[0]?.trim().toLowerCase();
-  const invoiceXmlDownload = mime === "application/octet-stream"
-    && filename?.toLowerCase().endsWith(".xml");
+  const mime = normalizedMime(contentType);
+  if (mime === "application/pdf") {
+    return (await pdfPreviewBlob(blob)) ?? new Blob([blob], { type: "application/octet-stream" });
+  }
+  if (INLINE_PREVIEW_IMAGE_TYPES.has(mime)) return new Blob([blob], { type: mime });
   // Plain-text files (e.g. saved translations) are UTF-8; without an explicit
   // charset the browser iframe would decode Cyrillic as Latin-1.
-  const plainTextWithoutCharset = mime === "text/plain" && !/charset=/i.test(contentType);
-  if (!isActivePreviewType(contentType) && !invoiceXmlDownload && !plainTextWithoutCharset) return blob;
-  return new Blob([await blob.text()], { type: "text/plain;charset=utf-8" });
+  const charset = mime === "text/plain" ? /charset=([\w-]+)/i.exec(contentType)?.[1] : undefined;
+  if (charset) return new Blob([blob], { type: `text/plain;charset=${charset.toLowerCase()}` });
+  const invoiceXmlDownload = mime === "application/octet-stream"
+    && filename?.toLowerCase().endsWith(".xml");
+  if (isTextualPreviewType(mime) || invoiceXmlDownload) {
+    return new Blob([await blob.text()], { type: "text/plain;charset=utf-8" });
+  }
+  return new Blob([blob], { type: "application/octet-stream" });
 }
 
 function openBlobPreviewWindow(previewWindow: Window | null, blob: Blob) {
-  const openedWindow =
-    previewWindow ?? window.open("", "_blank", "noopener,noreferrer");
+  // `window.open` with "noopener" returns null by specification, so the tab is
+  // opened plainly and detached from this page before it is navigated.
+  const openedWindow = previewWindow ?? window.open("", "_blank");
   if (!openedWindow) return false;
+  openedWindow.opener = null;
   const objectUrl = URL.createObjectURL(blob);
   openedWindow.location.href = objectUrl;
   window.setTimeout(

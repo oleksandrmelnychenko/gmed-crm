@@ -3133,8 +3133,10 @@ async fn book_task_provider(
         Ok(value) => value,
         Err(response) => return response,
     };
-    if !can_access_task_service(&auth, &task) {
-        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    match can_access_task_service(&state, &auth, task_id, &task, true).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
     }
     if matches!(task.status.as_str(), "completed" | "cancelled") {
         return err(
@@ -3475,8 +3477,10 @@ async fn list_task_key_events(
         Ok(value) => value,
         Err(response) => return response,
     };
-    if !can_access_task_service(&auth, &task) {
-        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    match can_access_task_service(&state, &auth, task_id, &task, false).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
     }
     if !is_key_task_row(&task_row) {
         return err(
@@ -3531,8 +3535,10 @@ async fn record_task_key_event(
         Ok(value) => value,
         Err(response) => return response,
     };
-    if !can_access_task_service(&auth, &task) {
-        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    match can_access_task_service(&state, &auth, task_id, &task, true).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
     }
     if !is_key_task_row(&task_row) {
         return err(
@@ -3772,8 +3778,10 @@ async fn list_task_partner_interactions(
         Ok(value) => value,
         Err(response) => return response,
     };
-    if !can_access_task_service(&auth, &task) {
-        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    match can_access_task_service(&state, &auth, task_id, &task, false).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
     }
     if let Err(response) = load_task_non_medical_partner_id(&state, &task).await {
         return response;
@@ -3866,8 +3874,10 @@ async fn record_task_partner_interaction(
         Ok(value) => value,
         Err(response) => return response,
     };
-    if !can_access_task_service(&auth, &task) {
-        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    match can_access_task_service(&state, &auth, task_id, &task, true).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
     }
     let provider_id = match load_task_non_medical_partner_id(&state, &task).await {
         Ok(value) => value,
@@ -4054,8 +4064,10 @@ async fn apply_task_partner_quote_as_cost_estimate(
         Ok(value) => value,
         Err(response) => return response,
     };
-    if !can_access_task_service(&auth, &task) {
-        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    match can_access_task_service(&state, &auth, task_id, &task, true).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
     }
     let provider_id = match load_task_non_medical_partner_id(&state, &task).await {
         Ok(value) => value,
@@ -5804,12 +5816,69 @@ fn require_service_task_write(auth: &AuthUser) -> Result<(), axum::response::Res
     }
 }
 
-fn can_access_task_service(auth: &AuthUser, task: &TaskServiceContext) -> bool {
-    matches!(
-        auth.role,
-        Role::Ceo | Role::CeoAssistant | Role::PatientManager
-    ) || task.assigned_to == auth.user_id
-        || task.assigned_by == auth.user_id
+/// Booking, key custody, partner calls and quotes of a service task follow the
+/// task manager's rule: the CEO, the CEO assistant (reads; the mutating routes
+/// refuse it through [`require_service_task_write`]), the task's assignee and
+/// creator, and a patient manager only for the patients of its pool (active
+/// assignment to the task's patient). An explicit per-user deny on that
+/// patient closes the task's service data for everyone but the CEO; `change`
+/// also honours a deny of editing.
+async fn can_access_task_service(
+    state: &AppState,
+    auth: &AuthUser,
+    task_id: Uuid,
+    task: &TaskServiceContext,
+    change: bool,
+) -> Result<bool, axum::response::Response> {
+    if auth.role == Role::Ceo {
+        return Ok(true);
+    }
+    let failed = |error: sqlx::Error| {
+        tracing::error!(error = %error, task_id = %task_id, "validate task service access");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate task access",
+        )
+    };
+    // The task's own patient, or the patient of the service it runs.
+    let patient_id = sqlx::query_scalar::<_, Option<Uuid>>(
+        r#"SELECT COALESCE(task.patient_id, service.patient_id)
+           FROM tasks task
+           LEFT JOIN concierge_services service
+             ON service.id = task.concierge_service_id
+           WHERE task.id = $1"#,
+    )
+    .bind(task_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(failed)?
+    .flatten();
+
+    let own_task = task.assigned_to == auth.user_id || task.assigned_by == auth.user_id;
+    let admitted = if own_task || auth.role == Role::CeoAssistant {
+        true
+    } else if auth.role == Role::PatientManager {
+        match patient_id {
+            Some(patient_id) => {
+                access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
+                    .await
+                    .map_err(failed)?
+            }
+            None => false,
+        }
+    } else {
+        false
+    };
+    if !admitted {
+        return Ok(false);
+    }
+    match patient_id {
+        Some(patient_id) => Ok(!super::appointments::patient_denied_by_explicit_rule(
+            state, auth, patient_id, change,
+        )
+        .await?),
+        None => Ok(true),
+    }
 }
 
 async fn load_task_non_medical_partner_id(
@@ -6468,27 +6537,38 @@ async fn can_access_service(
     patient_id: Uuid,
     assigned_concierge_id: Option<Uuid>,
 ) -> Result<bool, axum::response::Response> {
-    if auth.role.has_full_access() || auth.role == Role::Billing {
+    if auth.role.has_full_access() {
         return Ok(true);
     }
 
-    if auth.role == Role::Concierge && assigned_concierge_id == Some(auth.user_id) {
-        return Ok(true);
-    }
-
-    if !access::requires_patient_assignment(auth.role) {
+    let admitted = if auth.role == Role::Billing
+        || (auth.role == Role::Concierge && assigned_concierge_id == Some(auth.user_id))
+    {
+        true
+    } else if !access::requires_patient_assignment(auth.role) {
+        false
+    } else {
+        access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, patient_id = %patient_id, "Failed to validate concierge service access");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate concierge service access",
+                )
+            })?
+    };
+    if !admitted {
         return Ok(false);
     }
 
-    access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, patient_id = %patient_id, "Failed to validate concierge service access");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to validate concierge service access",
-            )
-        })
+    // An explicit per-user deny on the patient (the rule
+    // `patients::has_patient_access` honours) closes its services too; an
+    // allow rule opens nothing beyond the checks above.
+    Ok(
+        !super::appointments::patient_denied_by_explicit_rule(state, auth, patient_id, false)
+            .await?,
+    )
 }
 
 fn parse_optional_datetime(

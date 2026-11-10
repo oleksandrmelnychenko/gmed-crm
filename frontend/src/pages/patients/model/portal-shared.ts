@@ -1258,12 +1258,16 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 function openBlobPreview(blob: Blob) {
-  const url = URL.createObjectURL(blob);
-  const previewWindow = window.open(url, "_blank", "noopener,noreferrer");
+  // The tab only ever receives a PDF: the type is forced, never sniffed.
+  const url = URL.createObjectURL(new Blob([blob], { type: "application/pdf" }));
+  // With "noopener" `window.open` returns null even when the tab opened, so
+  // the tab is opened plainly and detached from this page afterwards.
+  const previewWindow = window.open(url, "_blank");
   if (!previewWindow) {
     URL.revokeObjectURL(url);
     throw new Error(portalText("patients_portal_allow_pop_ups_to_preview_the_pdf"));
   }
+  previewWindow.opener = null;
 
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }

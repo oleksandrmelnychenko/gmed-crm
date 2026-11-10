@@ -12,7 +12,6 @@ use serde::Deserialize;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::money::CommercialRounding;
@@ -445,7 +444,7 @@ async fn create_patient_medication_drug_match(
     if let Err(resp) = require_patient_drug_access(&auth) {
         return resp;
     }
-    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+    if let Err(resp) = ensure_patient_write_access(&state, &auth, patient_id).await {
         return resp;
     }
     if let Err(resp) = ensure_patient_medication(&state, patient_id, medication_id).await {
@@ -520,7 +519,7 @@ async fn verify_patient_medication_drug_match(
     if let Err(resp) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return resp;
     }
-    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+    if let Err(resp) = ensure_patient_write_access(&state, &auth, patient_id).await {
         return resp;
     }
     if let Err(resp) = ensure_patient_medication(&state, patient_id, medication_id).await {
@@ -598,7 +597,7 @@ async fn confirm_patient_medication_expiry(
     if let Err(resp) = require_patient_drug_access(&auth) {
         return resp;
     }
-    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+    if let Err(resp) = ensure_patient_write_access(&state, &auth, patient_id).await {
         return resp;
     }
 
@@ -682,22 +681,23 @@ async fn ensure_patient_access(
     auth: &AuthUser,
     patient_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    if auth.role.has_full_access() {
-        return Ok(());
+    // Canonical rule: assignment plus the explicit per-user allow/deny rules.
+    if crate::routes::patients::has_patient_access(state, auth, patient_id).await? {
+        Ok(())
+    } else {
+        Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
     }
-    if !access::requires_patient_assignment(auth.role) {
-        return Ok(());
-    }
-    let assigned = access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
-        .await
-        .map_err(|error| {
-            tracing::error!(error = %error, patient_id = %patient_id, "validate patient assignment");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to validate patient access",
-            )
-        })?;
-    if assigned {
+}
+
+/// Writes need current access first, then the canonical edit rule, which
+/// refuses a restricted or anonymised record (Art. 18 / Art. 17 DSGVO, 423).
+async fn ensure_patient_write_access(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    ensure_patient_access(state, auth, patient_id).await?;
+    if crate::routes::patients::has_patient_edit_access(state, auth, patient_id).await? {
         Ok(())
     } else {
         Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))

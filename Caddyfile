@@ -40,6 +40,32 @@
 		-Server
 	}
 
+	# Content-Security-Policy for the web application.
+	#
+	# `?` writes the header only when the upstream did not send one, so the
+	# backend's own stricter policy on every /api response
+	# (`default-src 'none'`, crates/server/src/security_headers.rs) is kept
+	# as it is and never duplicated; everything else (the app shell, bundles,
+	# static files) gets the policy below.
+	#
+	# What the application needs, and nothing more:
+	#   script-src   own bundles only (no inline script, no eval);
+	#                'wasm-unsafe-eval' for the pdf.js image decoders
+	#   style-src    'unsafe-inline' for style attributes set by UI libraries
+	#   img/font     own files, plus blob:/data: previews and inlined fonts
+	#   connect-src  own API; the same-origin WebSocket is spelled out for
+	#                browsers that do not treat it as 'self'
+	#   frame-src    document previews are blob: URLs in an <iframe>
+	#   object-src   a PDF opened from a blob: URL inherits this policy and
+	#                some built-in PDF viewers load it as a plugin; no other
+	#                origin is allowed
+	#   worker-src   pdf.js worker and the service worker
+	#
+	# The header name comes from GMED_CSP_HEADER (docker-compose.hetzner.yml):
+	# set it to Content-Security-Policy-Report-Only in the env file to watch
+	# violations in the browser console without blocking anything.
+	header ?{$GMED_CSP_HEADER:Content-Security-Policy} "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' data:; connect-src 'self' wss://{host}; frame-src 'self' blob:; worker-src 'self' blob:; object-src 'self' blob:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+
 	reverse_proxy frontend:8080 {
 		# Caddy sets X-Forwarded-For / X-Forwarded-Proto / X-Forwarded-Host
 		# automatically; no overrides needed.

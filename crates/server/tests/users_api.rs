@@ -869,6 +869,31 @@ async fn it_admin_manages_users_but_never_the_ceo() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
     let created_id = created["id"].as_str().expect("created id").to_string();
+    // The administrator knows the first password: it must be replaced.
+    assert_eq!(created["password_reset_required"], true, "{created}");
+    // The technical admin opened an account with patient access: the CEO is told.
+    let ceo_notices: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM user_notifications
+         WHERE user_id = $1 AND kind = 'security_account_change' AND entity_id = $2::uuid",
+    )
+    .bind(admin_id)
+    .bind(&created_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(ceo_notices, 1);
+
+    // Nobody changes their own role.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{it_admin_id}/update"),
+        &bearer,
+        json!({ "role": "billing" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"], "own_role_change_forbidden");
 
     // ...but a CEO account can only be created by the CEO.
     let (status, body) = json_request(

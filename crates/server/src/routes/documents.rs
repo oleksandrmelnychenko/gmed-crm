@@ -36729,6 +36729,45 @@ async fn update_document(
         }
     }
 
+    // Re-filing follows the upload rule: a changed patient, order or
+    // appointment link needs edit access to the patient the document lands
+    // with (CEO passes), not only to the document as it is filed now. A
+    // lead's order without a patient stays with CEO and patient manager.
+    let refile_requested = body
+        .patient_id
+        .is_some_and(|value| Some(value) != current_patient_id)
+        || body
+            .order_id
+            .is_some_and(|value| Some(value) != current_order_id)
+        || body
+            .appointment_id
+            .is_some_and(|value| Some(value) != current_appointment_id);
+    if refile_requested || patient_id != current_patient_id {
+        match patient_id {
+            Some(target_patient_id) => {
+                match super::patients::has_patient_edit_access(&state, &auth, target_patient_id)
+                    .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        return err(
+                            StatusCode::FORBIDDEN,
+                            "You are not assigned to this patient",
+                        );
+                    }
+                    Err(resp) => return resp,
+                }
+            }
+            None if !matches!(auth.role, Role::Ceo | Role::PatientManager) => {
+                return err(
+                    StatusCode::FORBIDDEN,
+                    "Insufficient permissions for lead documents",
+                );
+            }
+            None => {}
+        }
+    }
+
     let auto_name = body.auto_name.clone().unwrap_or_else(|| {
         current
             .try_get::<String, _>("auto_name")
@@ -36958,6 +36997,20 @@ async fn update_document(
         return err(
             StatusCode::FORBIDDEN,
             "Teamlead review cannot change document visibility",
+        );
+    }
+    // Releasing follows the upload rule: only CEO and patient manager choose
+    // a document's visibility there; every other role keeps the stored one.
+    if !matches!(auth.role, Role::Ceo | Role::PatientManager)
+        && visibility.trim()
+            != current
+                .try_get::<String, _>("visibility")
+                .unwrap_or_default()
+                .trim()
+    {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Only CEO and patient manager can change document visibility",
         );
     }
 
@@ -37645,7 +37698,7 @@ async fn delete_document_file(
            SET data = ''::bytea,
                size_bytes = 0
            WHERE imported_document_id = $1
-             AND octet_length(data) > 0"#,
+             AND (octet_length(data) > 0 OR size_bytes <> 0)"#,
     )
     .bind(id)
     .execute(&mut *tx)

@@ -156,6 +156,16 @@ async fn general_task_booking_is_task_native_and_manager_accessible() {
     let other_id = seed_user(&ctx.pool, "concierge", &format!("task-other-{tag}")).await;
     let manager_id = seed_user(&ctx.pool, "patient_manager", &format!("task-manager-{tag}")).await;
     let patient_id = seed_patient(&ctx.pool, ctx.admin_id, &format!("task-{tag}")).await;
+    // The pool rule: a patient manager reaches the task's sub-routes through the patient assignment.
+    sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $3)",
+    )
+    .bind(patient_id)
+    .bind(manager_id)
+    .bind(ctx.admin_id)
+    .execute(&ctx.pool)
+    .await
+    .expect("assign manager");
     let provider_id = seed_provider(&ctx.pool, "non_medical", &format!("task-{tag}")).await;
     let task_id = seed_general_task(&ctx.pool, patient_id, assignee_id, ctx.admin_id, &tag).await;
     let path = format!("/api/v1/tasks/{task_id}/book-provider");

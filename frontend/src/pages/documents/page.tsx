@@ -152,6 +152,7 @@ import {
   createBulkDocumentShares,
   createDocumentShare,
   createDocumentPreviewObjectUrl,
+  documentPreviewSandbox,
   createTranslationRequest,
   deleteStoredDocumentFile,
   downloadDocumentFile,
@@ -6259,6 +6260,7 @@ function StaffDocumentsPage({
                     <iframe
                       title={editPreview.title || t.documents_preview}
                       src={editPreview.url}
+                      sandbox={documentPreviewSandbox(editPreview.contentType)}
                       className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
                     />
                   ) : (
@@ -6419,6 +6421,7 @@ function StaffDocumentsPage({
               <iframe
                 title={documentPreview.title || t.documents_preview}
                 src={documentPreview.url}
+                sandbox={documentPreviewSandbox(documentPreview.contentType)}
                 className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
               />
             ) : null}

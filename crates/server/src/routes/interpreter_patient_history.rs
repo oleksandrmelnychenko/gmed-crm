@@ -181,8 +181,18 @@ async fn get_patient_interpreter_history(
         if let Err(resp) = require_history_role(&auth) {
             return resp;
         }
-        if let Err(resp) = ensure_patient_scope(&state, &auth, patient_id).await {
+        if let Err(resp) = ensure_patient_scope(&state, &auth, patient_id, false).await {
             return resp;
+        }
+    } else {
+        // The assistant reads every patient unless an explicit deny rule
+        // closes this one.
+        match super::appointments::patient_denied_by_explicit_rule(&state, &auth, patient_id, false)
+            .await
+        {
+            Ok(false) => {}
+            Ok(true) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+            Err(resp) => return resp,
         }
     }
 
@@ -288,7 +298,7 @@ async fn set_interpreter_patient_preference(
     if let Err(resp) = require_history_role(&auth) {
         return resp;
     }
-    if let Err(resp) = ensure_patient_scope(&state, &auth, patient_id).await {
+    if let Err(resp) = ensure_patient_scope(&state, &auth, patient_id, true).await {
         return resp;
     }
     if !matches!(body.preference.as_str(), "preferred" | "neutral" | "avoid") {
@@ -381,29 +391,42 @@ fn require_history_role(auth: &AuthUser) -> Result<(), axum::response::Response>
     auth.require_any_role(&[Role::PatientManager, Role::TeamleadInterpreter, Role::Ceo])
 }
 
+/// `change` is true for setting a preference: an explicit deny of editing the
+/// patient refuses it as well.
 async fn ensure_patient_scope(
     state: &AppState,
     auth: &AuthUser,
     patient_id: Uuid,
+    change: bool,
 ) -> Result<(), axum::response::Response> {
-    if matches!(auth.role, Role::Ceo | Role::TeamleadInterpreter) {
+    if auth.role == Role::Ceo {
         return Ok(());
     }
 
-    let assigned = access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
-        .await
-        .map_err(|error| {
-            tracing::error!(error = %error, patient_id = %patient_id, "validate patient scope");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to validate access",
-            )
-        })?;
-    if assigned {
-        Ok(())
-    } else {
-        Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
+    // The team lead plans the team without a patient assignment; the Patient
+    // Manager needs one.
+    if auth.role != Role::TeamleadInterpreter {
+        let assigned = access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, patient_id = %patient_id, "validate patient scope");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate access",
+                )
+            })?;
+        if !assigned {
+            return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+        }
     }
+
+    // An explicit per-user deny on the patient closes this path for both
+    // roles; it never opens it (same rule as `patients::has_patient_access`).
+    if super::appointments::patient_denied_by_explicit_rule(state, auth, patient_id, change).await?
+    {
+        return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+    }
+    Ok(())
 }
 
 fn normalize_optional_text(value: Option<String>) -> Option<String> {

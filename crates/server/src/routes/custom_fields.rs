@@ -206,11 +206,7 @@ async fn get_values(
     Extension(auth): Extension<AuthUser>,
     Path(entity_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_capability(&[
-        Capability::AdminCustomFields,
-        Capability::PatientsEdit,
-        Capability::LeadsEdit,
-    ]) {
+    if let Err(e) = authorize_values_access(&state, &auth, entity_id, false).await {
         return e;
     }
 
@@ -260,12 +256,39 @@ async fn set_values(
     Path(entity_id): Path<Uuid>,
     Json(body): Json<SetValuesReq>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_capability(&[
-        Capability::AdminCustomFields,
-        Capability::PatientsEdit,
-        Capability::LeadsEdit,
-    ]) {
-        return e;
+    let entity_type = match authorize_values_access(&state, &auth, entity_id, true).await {
+        Ok(value) => value,
+        Err(e) => return e,
+    };
+
+    // Only active fields defined for this entity type may carry its values.
+    let field_ids: Vec<Uuid> = body
+        .values
+        .iter()
+        .map(|fv| fv.field_id)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    match sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM custom_fields
+         WHERE id = ANY($1) AND entity_type = $2 AND is_active = true",
+    )
+    .bind(&field_ids)
+    .bind(entity_type)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(known) if known == field_ids.len() as i64 => {}
+        Ok(_) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Unknown custom field for this entity",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, entity_id = %entity_id, "validate custom field ids");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
     }
 
     for fv in &body.values {
@@ -284,7 +307,77 @@ async fn set_values(
         }
     }
 
+    // Field ids only: the values may be personal data.
+    state.audit_sender.try_send(audit::domain_event(
+        "set_custom_field_values",
+        Some(auth.user_id),
+        entity_type,
+        Some(entity_id),
+        serde_json::json!({ "field_ids": field_ids }),
+    ));
+
     Json(serde_json::json!({"ok": true})).into_response()
+}
+
+/// Object scope of custom field VALUES. The entity is resolved as a patient
+/// (`patients.edit` plus the canonical patient access rule; writes also need
+/// the edit rule with the Art. 18 / Art. 17 DSGVO lock) or as a lead
+/// (`leads.edit`, the rule of the lead routes; a converted lead is frozen).
+/// `admin.custom_fields` manages field definitions only and opens no values.
+/// Any other entity is refused with 404. Returns the entity type.
+async fn authorize_values_access(
+    state: &AppState,
+    auth: &AuthUser,
+    entity_id: Uuid,
+    write: bool,
+) -> Result<&'static str, axum::response::Response> {
+    auth.require_any_capability(&[Capability::PatientsEdit, Capability::LeadsEdit])?;
+
+    let is_patient =
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
+            .bind(entity_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, entity_id = %entity_id, "resolve custom field entity");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+            })?;
+    if is_patient {
+        auth.require_capability(Capability::PatientsEdit)?;
+        if !crate::routes::patients::has_patient_access(state, auth, entity_id).await? {
+            return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+        }
+        if write
+            && !crate::routes::patients::has_patient_edit_access(state, auth, entity_id).await?
+        {
+            return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+        }
+        return Ok("patient");
+    }
+
+    let lead = sqlx::query_scalar::<_, Option<Uuid>>(
+        "SELECT converted_patient_id FROM leads WHERE id = $1",
+    )
+    .bind(entity_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, entity_id = %entity_id, "resolve custom field entity");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })?;
+    match lead {
+        None => Err(err(StatusCode::NOT_FOUND, "Entity not found")),
+        Some(converted_patient_id) => {
+            auth.require_capability(Capability::LeadsEdit)?;
+            if write && converted_patient_id.is_some() {
+                return Err(err(
+                    StatusCode::CONFLICT,
+                    "Converted lead must use its patient context",
+                ));
+            }
+            Ok("lead")
+        }
+    }
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {

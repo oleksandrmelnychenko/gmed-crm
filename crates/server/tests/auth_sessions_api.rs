@@ -506,6 +506,12 @@ async fn failed_sign_ins_hold_the_account_only_for_their_address() {
     let Some((app, pool)) = test_context().await else {
         return;
     };
+    // The client address comes from the forwarding headers only behind a
+    // trusted proxy (`TRUST_FORWARDED_HEADERS`); requests without the header
+    // keep the suite's peer address.
+    // SAFETY: the variable is only read through `std::env`, which serialises
+    // access, and every test of this binary tolerates either value.
+    unsafe { std::env::set_var("TRUST_FORWARDED_HEADERS", "true") };
 
     let tag = Uuid::new_v4().simple();
     let email = format!("auth-lockout-{tag}@example.com");
@@ -1051,17 +1057,32 @@ async fn mfa_pending_login_admin_approve_yields_tokens_via_check_pending() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(login_body["status"], "mfa_pending");
     let pending_id = login_body["pending_id"].as_str().expect("pending_id");
+    let poll_bearer = bearer(login_body["poll_secret"].as_str().expect("poll_secret"));
 
     let (status, check1) = json_request(
         &app,
         "GET",
         &format!("/api/v1/auth/pending/{pending_id}"),
-        None,
+        Some(&poll_bearer),
         None,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(check1["status"], "pending");
+
+    // The row id alone (administrators see it) redeems nothing.
+    for wrong in [None, Some(bearer("not-the-poll-secret"))] {
+        let (status, refused) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/auth/pending/{pending_id}"),
+            wrong.as_deref(),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{refused}");
+        assert!(refused.get("access_token").is_none());
+    }
 
     let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
         .bind("admin@gmed.de")
@@ -1083,7 +1104,7 @@ async fn mfa_pending_login_admin_approve_yields_tokens_via_check_pending() {
         &app,
         "GET",
         &format!("/api/v1/auth/pending/{pending_id}"),
-        None,
+        Some(&poll_bearer),
         None,
     )
     .await;
@@ -1102,7 +1123,7 @@ async fn mfa_pending_login_admin_approve_yields_tokens_via_check_pending() {
         &app,
         "GET",
         &format!("/api/v1/auth/pending/{pending_id}"),
-        None,
+        Some(&poll_bearer),
         None,
     )
     .await;
@@ -1148,6 +1169,7 @@ async fn expired_mfa_pending_login_cannot_be_approved_or_redeemed() {
     )
     .await;
     let pending_id = Uuid::parse_str(login_body["pending_id"].as_str().unwrap()).unwrap();
+    let poll_bearer = bearer(login_body["poll_secret"].as_str().expect("poll_secret"));
     sqlx::query("UPDATE pending_logins SET expires_at = now() - interval '1 second' WHERE id = $1")
         .bind(pending_id)
         .execute(&pool)
@@ -1171,7 +1193,7 @@ async fn expired_mfa_pending_login_cannot_be_approved_or_redeemed() {
         &app,
         "GET",
         &format!("/api/v1/auth/pending/{pending_id}"),
-        None,
+        Some(&poll_bearer),
         None,
     )
     .await;
@@ -1206,6 +1228,7 @@ async fn password_replacement_invalidates_an_approved_mfa_pending_login() {
     .await;
     assert_eq!(status, StatusCode::OK);
     let pending_id = Uuid::parse_str(login_body["pending_id"].as_str().unwrap()).unwrap();
+    let poll_bearer = bearer(login_body["poll_secret"].as_str().expect("poll_secret"));
 
     let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = 'admin@gmed.de'")
         .fetch_one(&pool)
@@ -1240,7 +1263,7 @@ async fn password_replacement_invalidates_an_approved_mfa_pending_login() {
         &app,
         "GET",
         &format!("/api/v1/auth/pending/{pending_id}"),
-        None,
+        Some(&poll_bearer),
         None,
     )
     .await;
@@ -1287,6 +1310,7 @@ async fn mfa_pending_login_admin_reject_surfaces_on_check_pending() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(login_body["status"], "mfa_pending");
     let pending_id = login_body["pending_id"].as_str().expect("pending_id");
+    let poll_bearer = bearer(login_body["poll_secret"].as_str().expect("poll_secret"));
 
     let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
         .bind("admin@gmed.de")
@@ -1308,7 +1332,7 @@ async fn mfa_pending_login_admin_reject_surfaces_on_check_pending() {
         &app,
         "GET",
         &format!("/api/v1/auth/pending/{pending_id}"),
-        None,
+        Some(&poll_bearer),
         None,
     )
     .await;
@@ -1694,6 +1718,7 @@ async fn admin_approval_with_a_forced_password_change_starts_a_confined_session(
     assert_eq!(status, StatusCode::OK, "{login_body}");
     assert_eq!(login_body["status"], "mfa_pending");
     let pending_id = login_body["pending_id"].as_str().unwrap().to_string();
+    let poll_bearer = bearer(login_body["poll_secret"].as_str().expect("poll_secret"));
 
     let admin = seeded_admin_bearer(&pool).await;
     let (status, body) = json_request(
@@ -1710,7 +1735,7 @@ async fn admin_approval_with_a_forced_password_change_starts_a_confined_session(
         &app,
         "GET",
         &format!("/api/v1/auth/pending/{pending_id}"),
-        None,
+        Some(&poll_bearer),
         None,
     )
     .await;
@@ -2055,6 +2080,7 @@ async fn admin_approval_still_applies_after_the_authenticator_code() {
     assert_eq!(body["status"], "mfa_pending", "{body}");
     assert!(body.get("access_token").is_none());
     let pending_id = body["pending_id"].as_str().unwrap().to_string();
+    let poll_bearer = bearer(body["poll_secret"].as_str().expect("poll_secret"));
 
     let admin = seeded_admin_bearer(&pool).await;
     let (status, _) = json_request(
@@ -2070,7 +2096,7 @@ async fn admin_approval_still_applies_after_the_authenticator_code() {
         &app,
         "GET",
         &format!("/api/v1/auth/pending/{pending_id}"),
-        None,
+        Some(&poll_bearer),
         None,
     )
     .await;

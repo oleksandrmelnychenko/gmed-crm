@@ -569,13 +569,14 @@ struct UpdateSettingsRequest {
     tsa_url: Option<String>,
 }
 
-/// Accepts an empty value (time stamps off) or an absolute http(s) URL.
+/// Accepts an empty value (time stamps off) or an absolute `https` URL of a
+/// public host ([`tsa::parse_tsa_url`]): the server posts to this address,
+/// so it must not name the server's own network.
 fn valid_tsa_url(value: &str) -> bool {
     value.is_empty()
-        || ((value.starts_with("https://") || value.starts_with("http://"))
-            && value.len() <= 500
+        || (value.len() <= 500
             && !value.chars().any(char::is_whitespace)
-            && reqwest::Url::parse(value).is_ok())
+            && tsa::parse_tsa_url(value).is_ok())
 }
 
 async fn update_settings(
@@ -1190,13 +1191,26 @@ mod tests {
     }
 
     #[test]
-    fn tsa_urls_must_be_absolute_http() {
+    fn tsa_urls_must_be_absolute_https_on_a_public_host() {
         assert!(valid_tsa_url(""));
-        assert!(valid_tsa_url("http://timestamp.example.org/tsa"));
         assert!(valid_tsa_url("https://tsa.example.org"));
+        assert!(valid_tsa_url("https://timestamp.sectigo.com"));
+        assert!(valid_tsa_url("https://tsa.example.org:8443/tsr"));
+        assert!(!valid_tsa_url("http://timestamp.example.org/tsa"));
         assert!(!valid_tsa_url("ftp://tsa.example.org"));
         assert!(!valid_tsa_url("tsa.example.org"));
         assert!(!valid_tsa_url("https://tsa example.org"));
+        // The server's own network is not a time-stamping authority.
+        assert!(!valid_tsa_url("https://postgres:5432"));
+        assert!(!valid_tsa_url("https://localhost/tsa"));
+        assert!(!valid_tsa_url("https://127.0.0.1/tsa"));
+        assert!(!valid_tsa_url("https://10.1.2.3/tsa"));
+        assert!(!valid_tsa_url("https://169.254.169.254/latest"));
+        assert!(!valid_tsa_url("https://[::1]/tsa"));
+        assert!(!valid_tsa_url(&format!(
+            "https://tsa.example.org/{}",
+            "a".repeat(500)
+        )));
     }
 
     #[test]

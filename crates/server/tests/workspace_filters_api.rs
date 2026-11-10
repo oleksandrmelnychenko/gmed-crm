@@ -11414,7 +11414,7 @@ async fn providers_list_supports_all_and_inactive_only_filters() {
 
 #[tokio::test]
 async fn providers_list_and_detail_include_non_medical_concierge_activity() {
-    let Some((app, pool, admin_id, _)) = test_context().await else {
+    let Some((app, pool, admin_id, ceo_bearer)) = test_context().await else {
         return;
     };
 
@@ -11442,7 +11442,7 @@ async fn providers_list_and_detail_include_non_medical_concierge_activity() {
         &app,
         "GET",
         "/api/v1/providers?provider_type=non_medical&service_name=Elite&search=escort",
-        &sales_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -11459,7 +11459,7 @@ async fn providers_list_and_detail_include_non_medical_concierge_activity() {
         &app,
         "GET",
         &format!("/api/v1/providers/{provider_id}"),
-        &sales_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -11477,6 +11477,41 @@ async fn providers_list_and_detail_include_non_medical_concierge_activity() {
                     && item["location"] == "Elite Drives"
             })
     );
+
+    // Sales holds no `patients.view`: the registry stays readable, but nothing
+    // about the patients behind it (linked patients, interactions, the last
+    // contact) is returned.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/providers?provider_type=non_medical&service_name=Elite&search=escort",
+        &sales_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body[0]["id"], provider_id.to_string());
+    assert_eq!(body[0]["last_interaction_at"], Value::Null);
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}"),
+        &sales_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["linked_patients"], json!([]));
+    assert_eq!(detail["interactions"], json!([]));
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}/patients"),
+        &sales_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

@@ -5,7 +5,7 @@
 //! other:
 //!
 //! - [`apply_auth_tight`] — wraps the unauthenticated auth endpoints
-//!   (`/auth/login`, `/auth/refresh`, `/auth/pending/{id}`) with 10 requests
+//!   (`/auth/login`, `/auth/totp`, `/auth/refresh`, `/auth/pending/{id}`) with 10 requests
 //!   per 60 seconds per peer IP. The ceiling is a deliberate compromise:
 //!   strict enough to break credential-stuffing and password-spray campaigns,
 //!   lax enough that a real user who fat-fingers a password three times
@@ -46,9 +46,11 @@
 //! the behaviour ISO 27001 A.8.6 and BSI C5 OPS-13 expect from an effective
 //! "capacity management" control.
 
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use axum::Router;
+use axum::http::HeaderMap;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::{PeerIpKeyExtractor, SmartIpKeyExtractor};
@@ -77,6 +79,34 @@ fn trust_forwarded_headers() -> bool {
         .ok()
         .as_deref()
         .is_some_and(|value| matches!(value, "1" | "true" | "TRUE" | "yes" | "YES"))
+}
+
+/// The client address the sign-in handlers use (IP allow-list, sign-in
+/// throttle, audit), derived like the limiter's bucket key: the forwarding
+/// headers count only with `TRUST_FORWARDED_HEADERS`, otherwise (or when they
+/// carry no address) the TCP peer. `None` when neither is known — a header
+/// sent by the client is never trusted with the flag off.
+pub fn client_ip(headers: &HeaderMap, peer: Option<SocketAddr>) -> Option<String> {
+    client_ip_with(trust_forwarded_headers(), headers, peer)
+}
+
+fn client_ip_with(
+    trust_forwarded: bool,
+    headers: &HeaderMap,
+    peer: Option<SocketAddr>,
+) -> Option<String> {
+    if trust_forwarded {
+        let forwarded = headers
+            .get("x-forwarded-for")
+            .or_else(|| headers.get("x-real-ip"))
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.split(',').next().unwrap_or(value).trim())
+            .and_then(|value| value.parse::<IpAddr>().ok());
+        if let Some(ip) = forwarded {
+            return Some(ip.to_canonical().to_string());
+        }
+    }
+    peer.map(|addr| addr.ip().to_canonical().to_string())
 }
 
 fn build_and_wrap<S>(router: Router<S>, burst: u32, refill: Duration) -> Router<S>
@@ -144,6 +174,42 @@ mod tests {
         // Validates that the quota constants yield a valid GovernorConfig
         // and that the layer can be attached to a Router<()>.
         let _router: Router = apply_auth_tight(Router::new().route("/", get(|| async { "ok" })));
+    }
+
+    #[test]
+    fn forwarded_headers_count_only_when_trusted() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "203.0.113.7, 10.0.0.2".parse().unwrap());
+        let peer: SocketAddr = "192.0.2.1:40000".parse().unwrap();
+
+        assert_eq!(
+            client_ip_with(true, &headers, Some(peer)).as_deref(),
+            Some("203.0.113.7")
+        );
+        // Flag off: the header is the client's own claim.
+        assert_eq!(
+            client_ip_with(false, &headers, Some(peer)).as_deref(),
+            Some("192.0.2.1")
+        );
+        assert_eq!(client_ip_with(false, &headers, None), None);
+    }
+
+    #[test]
+    fn an_unusable_forwarded_header_falls_back_to_the_peer() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "not-an-address".parse().unwrap());
+        let peer: SocketAddr = "[::ffff:192.0.2.9]:40000".parse().unwrap();
+        assert_eq!(
+            client_ip_with(true, &headers, Some(peer)).as_deref(),
+            Some("192.0.2.9")
+        );
+
+        let mut headers = HeaderMap::new();
+        headers.insert("x-real-ip", "198.51.100.4".parse().unwrap());
+        assert_eq!(
+            client_ip_with(true, &headers, None).as_deref(),
+            Some("198.51.100.4")
+        );
     }
 
     #[test]

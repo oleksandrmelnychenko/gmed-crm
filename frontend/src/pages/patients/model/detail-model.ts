@@ -858,14 +858,6 @@ export function buildPatientLabelPrintHtml(payload: PatientLabelPayload) {
       <div class="agency">${escapeHtml(agencyLine || payload.agency.name || tr.patient_label_print_agency_not_configured)}</div>
       <div class="footer">${escapeHtml(footerLine)}</div>
     </article>
-    <script>
-      window.addEventListener("load", function () {
-        window.setTimeout(function () {
-          window.focus();
-          window.print();
-        }, 80);
-      });
-    </script>
   </body>
 </html>`;
 }

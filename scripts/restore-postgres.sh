@@ -120,13 +120,13 @@ EOF
 fi
 
 echo "[$(date -u +%FT%TZ)] dropping and recreating database '$POSTGRES_DB'"
-docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" "$POSTGRES_CONTAINER" \
+PGPASSWORD="$POSTGRES_PASSWORD" docker exec -e PGPASSWORD "$POSTGRES_CONTAINER" \
   dropdb -U "$POSTGRES_USER" --if-exists "$POSTGRES_DB"
-docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" "$POSTGRES_CONTAINER" \
+PGPASSWORD="$POSTGRES_PASSWORD" docker exec -e PGPASSWORD "$POSTGRES_CONTAINER" \
   createdb -U "$POSTGRES_USER" "$POSTGRES_DB"
 
 echo "[$(date -u +%FT%TZ)] pg_restore in progress (this may take a while)"
-docker exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" "$POSTGRES_CONTAINER" \
+PGPASSWORD="$POSTGRES_PASSWORD" docker exec -i -e PGPASSWORD "$POSTGRES_CONTAINER" \
   pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
     --no-owner --no-privileges --exit-on-error \
   < "$TMP"

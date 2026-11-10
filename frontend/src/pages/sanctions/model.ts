@@ -217,15 +217,19 @@ export function regulationLabel(regulation: ListRegulation): string {
     .join(" ");
 }
 
-/** Only official EUR-Lex links are rendered as links. */
+/**
+ * Only official EUR-Lex links are rendered as links, and only over HTTPS. The
+ * EU list still carries `http://eur-lex.europa.eu/…` for older acts; those are
+ * upgraded to HTTPS rather than dropped.
+ */
 export function safeLegalActUrl(url: string | undefined): string | null {
   if (!url) return null;
   try {
     const parsed = new URL(url);
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
-    return parsed.hostname === "eur-lex.europa.eu" || parsed.hostname.endsWith(".europa.eu")
-      ? parsed.toString()
-      : null;
+    if (parsed.hostname !== "eur-lex.europa.eu" || parsed.username || parsed.password) return null;
+    if (parsed.protocol === "http:" && !parsed.port) parsed.protocol = "https:";
+    if (parsed.protocol !== "https:" || parsed.port) return null;
+    return parsed.toString();
   } catch {
     return null;
   }

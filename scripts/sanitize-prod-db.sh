@@ -52,9 +52,21 @@ POSTGRES_DB="${POSTGRES_DB:-gmed}"
 PROD_ADMIN_EMAIL="${PROD_ADMIN_EMAIL:-h.hudiiev@gmed-health.com}"
 PROD_ADMIN_NAME="${PROD_ADMIN_NAME:-Heorhii Hudiiev}"
 
+# Secrets reach the container through its environment, passed by NAME
+# (`docker exec -e PGPASSWORD`), never as `-e NAME=value` or `psql -v`:
+# command-line arguments are readable by every user on the host in /proc.
+export PGPASSWORD="$POSTGRES_PASSWORD"
+export GMED_SANITIZE_ADMIN_PASSWORD="$PROD_ADMIN_PASSWORD"
+
+# A database counts as new only while nobody has signed in and its first
+# migration is younger than this many hours (the first deploy applies all
+# migrations minutes before this script runs).
+SANITIZE_NEW_DATABASE_MAX_HOURS=24
+SANITIZE_BACKUP_ROOT="${PROD_SANITIZE_BACKUP_ROOT:-/var/backups/gmed/sanitize}"
+
 echo "Waiting for Postgres before production data sanitizer"
 for attempt in {1..60}; do
-  if docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" "$POSTGRES_CONTAINER" \
+  if docker exec -e PGPASSWORD "$POSTGRES_CONTAINER" \
     pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then
     break
   fi
@@ -65,22 +77,50 @@ for attempt in {1..60}; do
   sleep 1
 done
 
-db_marker="$(
-  docker exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" "$POSTGRES_CONTAINER" \
+# Read the state of the database BEFORE anything is removed. This query must
+# succeed: an error (no connection, wrong password, missing table, unexpected
+# output) stops the script. It used to be read as "not sanitized yet", which
+# let a broken query lead straight to the TRUNCATE below.
+if ! db_state="$(
+  docker exec -i -e PGPASSWORD "$POSTGRES_CONTAINER" \
     psql \
+      --no-psqlrc \
+      --quiet \
+      --tuples-only \
+      --no-align \
+      --field-separator='|' \
       -v ON_ERROR_STOP=1 \
       -U "$POSTGRES_USER" \
-      -d "$POSTGRES_DB" \
-      -tA 2>/dev/null <<'SQL' || true
-SELECT COALESCE((
-  SELECT value #>> '{}'
-  FROM system_settings
-  WHERE key = 'prod_db_sanitized_at'
-), '');
+      -d "$POSTGRES_DB" <<'SQL'
+SELECT
+  COALESCE((
+    SELECT value #>> '{}'
+    FROM system_settings
+    WHERE key = 'prod_db_sanitized_at'
+  ), ''),
+  (SELECT count(*) FROM patients)
+    + (SELECT count(*) FROM leads)
+    + (SELECT count(*) FROM cases)
+    + (SELECT count(*) FROM orders)
+    + (SELECT count(*) FROM invoices)
+    + (SELECT count(*) FROM documents),
+  (SELECT count(*) FROM token_families),
+  COALESCE((
+    SELECT floor(extract(epoch FROM now() - min(installed_on)) / 3600)::bigint
+    FROM _sqlx_migrations
+  ), 999999);
 SQL
-)"
-db_marker="${db_marker//$'\r'/}"
-db_marker="${db_marker//$'\n'/}"
+)"; then
+  echo "ERROR: cannot read the sanitizer marker and row counts from the database; nothing was changed." >&2
+  exit 1
+fi
+db_state="${db_state//$'\r'/}"
+db_state="${db_state//$'\n'/}"
+IFS='|' read -r db_marker core_rows sign_ins db_age_hours <<<"$db_state"
+if [[ ! "${core_rows:-}" =~ ^[0-9]+$ || ! "${sign_ins:-}" =~ ^[0-9]+$ || ! "${db_age_hours:-}" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: unexpected answer from the database state query; nothing was changed." >&2
+  exit 1
+fi
 
 if [[ -n "$db_marker" && "${PROD_EMPTY_DATABASE_FORCE:-false}" != "true" ]]; then
   echo "Production DB sanitizer already recorded in DB ($db_marker); writing host marker and skipping."
@@ -90,15 +130,67 @@ if [[ -n "$db_marker" && "${PROD_EMPTY_DATABASE_FORCE:-false}" != "true" ]]; the
   exit 0
 fi
 
+# A database that is in use is never emptied by accident. The migrations seed
+# demo rows, so "has rows" alone cannot be the test on a first deploy; a
+# database is treated as in use when somebody has signed in, or when it holds
+# patient/lead/case/order/invoice/document rows and was created more than
+# SANITIZE_NEW_DATABASE_MAX_HOURS ago. Emptying such a database needs the
+# confirmation below in the environment of the command, with today's UTC date,
+# so a value left in a file or in the shell history stops working tomorrow.
+wipe_confirmation="wipe-${POSTGRES_DB}-$(date -u +%Y-%m-%d)"
+if (( sign_ins > 0 )) || (( core_rows > 0 && db_age_hours >= SANITIZE_NEW_DATABASE_MAX_HOURS )); then
+  if [[ "${PROD_SANITIZE_CONFIRM_DELETE_ALL_BUSINESS_DATA:-}" != "$wipe_confirmation" ]]; then
+    echo "ERROR: database '$POSTGRES_DB' is in use (sign-ins=$sign_ins, patient/lead/case/order/invoice/document rows=$core_rows, first migration ${db_age_hours}h ago); the sanitizer refuses to empty it." >&2
+    echo "An existing installation is upgraded with: deploy-prod.sh --upgrade-only" >&2
+    echo "To delete ALL business data on purpose, rerun with PROD_SANITIZE_CONFIRM_DELETE_ALL_BUSINESS_DATA=$wipe_confirmation" >&2
+    exit 1
+  fi
+  echo "WARNING: confirmed deletion of all business data in a database that is in use (sign-ins=$sign_ins, rows=$core_rows)."
+fi
+
+# Keep a copy of what is about to be removed. The dump stays on this host in a
+# root-only directory; it is encrypted for the backup recipients when they are
+# configured (restore: age -d with the backup private key, then pg_restore).
+# A failed dump stops the script before any row is touched.
+sanitize_backup_dir="$SANITIZE_BACKUP_ROOT/$(date -u +%Y%m%dT%H%M%SZ)"
+install -d -o root -g root -m 700 "$SANITIZE_BACKUP_ROOT" "$sanitize_backup_dir"
+(
+  umask 077
+  if [[ -n "${BACKUP_AGE_RECIPIENTS:-}" ]] && command -v age >/dev/null 2>&1; then
+    sanitize_backup_file="$sanitize_backup_dir/database-before-sanitize.pgdump.age"
+    docker exec -e PGPASSWORD "$POSTGRES_CONTAINER" \
+      pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc \
+      | age -e -R <(printf '%s\n' "$BACKUP_AGE_RECIPIENTS") -o "$sanitize_backup_file"
+  else
+    sanitize_backup_file="$sanitize_backup_dir/database-before-sanitize.pgdump"
+    docker exec -e PGPASSWORD "$POSTGRES_CONTAINER" \
+      pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc > "$sanitize_backup_file"
+  fi
+  if [[ ! -s "$sanitize_backup_file" ]]; then
+    echo "ERROR: the backup before sanitizing is empty: $sanitize_backup_file" >&2
+    exit 1
+  fi
+  echo "Backup before sanitizing: $sanitize_backup_file"
+)
+
 echo "Sanitizing production database data; keeping admin '$PROD_ADMIN_EMAIL'"
-docker exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" "$POSTGRES_CONTAINER" \
+# The admin password is read inside psql from the container environment
+# (\getenv, psql 15+; the postgres:16 image ships psql 16). With an older psql or a
+# missing variable the statements below fail and nothing is committed.
+docker exec -i -e PGPASSWORD -e GMED_SANITIZE_ADMIN_PASSWORD "$POSTGRES_CONTAINER" \
   psql \
+    --no-psqlrc \
     -v ON_ERROR_STOP=1 \
     -v admin_email="$PROD_ADMIN_EMAIL" \
     -v admin_name="$PROD_ADMIN_NAME" \
-    -v admin_password="$PROD_ADMIN_PASSWORD" \
     -U "$POSTGRES_USER" \
     -d "$POSTGRES_DB" <<'SQL'
+\getenv admin_password GMED_SANITIZE_ADMIN_PASSWORD
+\if :{?admin_password}
+\else
+  \echo 'ERROR: the admin password did not reach psql'
+  \quit
+\endif
 BEGIN;
 
 SELECT set_config('gmed.sanitize.admin_email', :'admin_email', true);

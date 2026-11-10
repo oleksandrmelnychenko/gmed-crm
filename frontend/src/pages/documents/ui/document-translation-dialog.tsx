@@ -14,6 +14,7 @@ import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import {
   createDocumentPreviewObjectUrl,
+  documentPreviewSandbox,
   createDocumentTranslation,
   downloadDocumentFile,
   fetchDocumentTranslations,
@@ -270,6 +271,7 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
               <iframe
                 title={title}
                 src={preview.url}
+                sandbox={documentPreviewSandbox(preview.contentType)}
                 className="h-full min-h-[320px] w-full rounded-lg border border-border bg-white"
               />
             ) : previewError ? (

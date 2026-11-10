@@ -132,8 +132,10 @@ export function LeadIdentityDocumentsBlock({
 
   const open = async (file: IdentityDocumentFile) => {
     // The tab is opened with the click, before the file arrives, so the
-    // browser does not block it as a popup.
-    const previewWindow = window.open("", "_blank", "noopener,noreferrer");
+    // browser does not block it as a popup. With "noopener" `window.open`
+    // returns null even when the tab opened, so it is detached afterwards.
+    const previewWindow = window.open("", "_blank");
+    if (previewWindow) previewWindow.opener = null;
     setBusy(`open-${file.id}`);
     setActionError("");
     try {

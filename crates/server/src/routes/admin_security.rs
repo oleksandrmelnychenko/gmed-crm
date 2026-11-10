@@ -156,6 +156,12 @@ async fn unlock_user(
     )
     .execute(&state.db)
     .await;
+    // The authenticator-code lock and its escalation level end with the unlock.
+    let _ =
+        sqlx::query("UPDATE users SET totp_failed_attempts = 0, totp_lock_level = 0 WHERE id = $1")
+            .bind(user_id)
+            .execute(&state.db)
+            .await;
     super::users::clear_login_holds(&state, user_id).await;
 
     state.audit_sender.try_send(audit::domain_event(

@@ -46,6 +46,11 @@ services:
     environment:
       CADDY_HOSTNAME: "${CADDY_HOSTNAME:?Set CADDY_HOSTNAME in release.env (e.g. console-dev.gmed-health.com)}"
       ACME_EMAIL: "${ACME_EMAIL:?Set ACME_EMAIL in release.env for Let's Encrypt registration}"
+      # Name of the policy header written by the Caddyfile. The default
+      # enforces the policy; Content-Security-Policy-Report-Only only reports.
+      # (Adding this variable also recreates the container on the next deploy,
+      # which is what makes it read the changed Caddyfile.)
+      GMED_CSP_HEADER: "${GMED_CSP_HEADER:-Content-Security-Policy}"
     depends_on:
       backend:
         condition: service_healthy

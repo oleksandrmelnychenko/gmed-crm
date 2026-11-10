@@ -1953,11 +1953,14 @@ function usePatientDetailPageContent() {
     if (!id) return;
     const chosenFormat = format ?? patientLabelFormatRef.current;
 
-    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+    // With "noopener" `window.open` returns null even when the tab opened, so
+    // the tab is opened plainly and detached from this page.
+    const printWindow = window.open("", "_blank");
     if (!printWindow) {
       setTabActionError(patientDetailText("patients_error_allow_popups_print_label"));
       return;
     }
+    printWindow.opener = null;
 
     setPatientLabelBusy(true);
     setTabActionError("");
@@ -1968,6 +1971,13 @@ function usePatientDetailPageContent() {
       printWindow.document.write(buildPatientLabelPrintHtml(payload));
       printWindow.document.close();
       toast.info(l("patients_label_opened"));
+      // The label carries no script (the page's CSP forbids inline scripts):
+      // printing starts from here once the written document is laid out.
+      window.setTimeout(() => {
+        if (printWindow.closed) return;
+        printWindow.focus();
+        printWindow.print();
+      }, 80);
     } catch (error) {
       printWindow.close();
       setTabActionError(

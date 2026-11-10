@@ -405,6 +405,123 @@ pub(crate) async fn ensure_can_act_on_account(
     }
 }
 
+/// Whether accounts of `role` reach patient or finance data (capability
+/// registry). The technical admin's own role and portal logins do not.
+pub(crate) fn role_reaches_patient_or_finance_data(role: &str) -> bool {
+    serde_json::from_value::<Role>(serde_json::Value::String(role.to_string()))
+        .map(|role| {
+            role != Role::Patient
+                && role.can_any(&[
+                    Capability::PatientsView,
+                    Capability::LeadsView,
+                    Capability::InvoicesView,
+                ])
+        })
+        .unwrap_or(false)
+}
+
+/// Whether the CEO is told about this account change: the caller manages
+/// users without `users.manage_ceo` (the technical admin, who holds no
+/// patient or finance access) and the account's role has such access.
+pub(crate) fn account_change_needs_ceo_notice(auth: &AuthUser, role: &str) -> bool {
+    !auth.can(Capability::UsersManageCeo) && role_reaches_patient_or_finance_data(role)
+}
+
+pub(crate) const ACCOUNT_CHANGE_NOTIFICATION_KIND: &str = "security_account_change";
+
+/// Tells every active CEO that the technical admin opened, moved or took
+/// over an account with patient or finance access (`change`: `created`,
+/// `role_changed`, `password_reset`, `totp_reset`). The action itself is not
+/// blocked (owner decision 2026-09-20: IT Admin manages users except CEO);
+/// the CEO sees it at once. A no-op for other callers and roles.
+pub(crate) async fn notify_ceos_of_account_change(
+    state: &AppState,
+    auth: &AuthUser,
+    target_user_id: Uuid,
+    target_role: &str,
+    change: &str,
+) {
+    if !account_change_needs_ceo_notice(auth, target_role) {
+        return;
+    }
+    let names = sqlx::query(
+        r#"SELECT (SELECT name FROM users WHERE id = $1) AS actor_name,
+                  (SELECT name FROM users WHERE id = $2) AS target_name"#,
+    )
+    .bind(auth.user_id)
+    .bind(target_user_id)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
+    let actor_name: Option<String> = names
+        .as_ref()
+        .and_then(|row| row.try_get::<Option<String>, _>("actor_name").ok())
+        .flatten();
+    let target_name: Option<String> = names
+        .as_ref()
+        .and_then(|row| row.try_get::<Option<String>, _>("target_name").ok())
+        .flatten();
+    let params = serde_json::json!({
+        "change": change,
+        "role": target_role,
+        "actor_name": actor_name,
+        "target_name": target_name,
+    });
+    let rows = sqlx::query(
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+           SELECT u.id, $1::text, 'Account with patient or finance access changed by an administrator',
+                  $2::text, 'user', $3::uuid, $4::jsonb
+           FROM users u
+           WHERE u.is_active = true AND u.role = 'ceo'
+           RETURNING id, user_id"#,
+    )
+    .bind(ACCOUNT_CHANGE_NOTIFICATION_KIND)
+    .bind(format!(
+        "{} ({change}): {} — role {target_role}. Check the change in the activity log.",
+        actor_name.as_deref().unwrap_or("An administrator"),
+        target_name.as_deref().unwrap_or("an account"),
+    ))
+    .bind(target_user_id)
+    .bind(params)
+    .fetch_all(&state.db)
+    .await;
+    match rows {
+        Ok(rows) => {
+            for row in rows {
+                let (Ok(notification_id), Ok(recipient)) = (
+                    row.try_get::<Uuid, _>("id"),
+                    row.try_get::<Uuid, _>("user_id"),
+                ) else {
+                    continue;
+                };
+                crate::realtime::publish_notification_event(
+                    state,
+                    recipient,
+                    "notification.created",
+                    Some(notification_id),
+                    serde_json::json!({ "entity_type": "user", "entity_id": target_user_id }),
+                )
+                .await;
+            }
+        }
+        Err(error) => {
+            tracing::error!(%error, target = %target_user_id, change, "Notify CEO about an account change");
+        }
+    }
+}
+
+/// The role of an account, empty when it is unknown.
+pub(crate) async fn account_role(state: &AppState, user_id: Uuid) -> String {
+    sqlx::query_scalar::<_, String>("SELECT role FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+}
+
 fn validate_create(req: &CreateUserRequest) -> Result<(), &'static str> {
     if !crate::email_address::is_valid_email(&req.email) {
         return Err("Invalid email");
@@ -633,7 +750,8 @@ async fn create_user(
 
     // Without a password the account is onboarded with a one-time password:
     // it is returned once to the administrator, who hands it over out of
-    // band (no SMTP), and the person replaces it at the first login.
+    // band (no SMTP). Either way the administrator knows the first password,
+    // so the person always replaces it at the first login.
     let (password, one_time) = match body.password {
         Some(password) => (password, false),
         None => (password_policy::generate_one_time_password(), true),
@@ -662,7 +780,7 @@ async fn create_user(
         .bind(hash)
         .bind(&body.name)
         .bind(&body.role)
-        .bind(one_time)
+        .bind(true)
         .fetch_one(&state.db)
         .await
     {
@@ -686,6 +804,7 @@ async fn create_user(
                     "email": body.email,
                     "one_time_password": one_time,
                     "password_reset_required": created.password_reset_required,
+                    "ceo_notified": account_change_needs_ceo_notice(&auth, &body.role),
                 }),
             ));
             crate::realtime::publish_admin_event(
@@ -700,6 +819,7 @@ async fn create_user(
                 }),
             )
             .await;
+            notify_ceos_of_account_change(&state, &auth, created.id, &body.role, "created").await;
 
             if one_time {
                 created.one_time_password = Some(password);
@@ -798,6 +918,16 @@ async fn update_user(
         if would_remove_last_ceo(&current_role, current_is_active, other_active_ceos) {
             return Err(last_ceo_protected());
         }
+    }
+
+    // Nobody changes their own role, whatever their rights: a second
+    // administrator decides it (deactivating oneself is refused as well).
+    if role_changed && user_id == auth.user_id {
+        return Err(err_code(
+            StatusCode::FORBIDDEN,
+            "own_role_change_forbidden",
+            "You cannot change your own role",
+        ));
     }
 
     let row = sqlx::query(
@@ -905,6 +1035,8 @@ async fn update_user(
             "email": response.email,
             "revoked_profile_assignments": revoked_profile_assignments,
             "revoked_direct_rules": revoked_direct_rules,
+            "ceo_notified": role_changed
+                && account_change_needs_ceo_notice(&auth, &response.role),
         }),
     ));
     crate::realtime::publish_admin_event(
@@ -919,6 +1051,10 @@ async fn update_user(
         }),
     )
     .await;
+
+    if role_changed {
+        notify_ceos_of_account_change(&state, &auth, user_id, &response.role, "role_changed").await;
+    }
 
     Ok(Json(response))
 }
@@ -1207,6 +1343,8 @@ async fn unlock_user(
         r#"UPDATE users
            SET failed_login_attempts = 0,
                locked_until = NULL,
+               totp_failed_attempts = 0,
+               totp_lock_level = 0,
                updated_at = now()
            WHERE id = $1"#,
     )
@@ -1267,6 +1405,7 @@ async fn reset_password(
 
     // An administrator reset always hands over a temporary password: the
     // person must replace it at the next login (Stage 1's forced change).
+    let target_role = account_role(&state, user_id).await;
     let (new_password, generated) = resolve_reset_password(body);
     match password_policy::replace_password(&state.db, user_id, &new_password, true).await {
         Ok(()) => {}
@@ -1303,9 +1442,11 @@ async fn reset_password(
             "account_unlocked": true,
             "one_time_password": generated,
             "password_reset_required": true,
+            "ceo_notified": account_change_needs_ceo_notice(&auth, &target_role),
         }),
     ));
     tracing::info!(by = %auth.user_id, target = %user_id, one_time_password = generated, "Password reset");
+    notify_ceos_of_account_change(&state, &auth, user_id, &target_role, "password_reset").await;
     crate::realtime::publish_admin_event(
         &state,
         Some(auth.user_id),
@@ -1412,7 +1553,7 @@ fn err_code(status: StatusCode, code: &str, message: &str) -> axum::response::Re
 mod tests {
     use super::{
         ResetPasswordRequest, ensure_role_change_stays_on_its_side, resolve_reset_password,
-        would_remove_last_ceo,
+        role_reaches_patient_or_finance_data, would_remove_last_ceo,
     };
     use crate::auth::password_policy::validate_password_policy;
 
@@ -1424,6 +1565,25 @@ mod tests {
         }
         assert!(ensure_role_change_stays_on_its_side("sales", "billing").is_ok());
         assert!(ensure_role_change_stays_on_its_side("patient", "patient").is_ok());
+    }
+
+    #[test]
+    fn the_ceo_notice_covers_every_role_with_patient_or_finance_access() {
+        for role in [
+            "ceo_assistant",
+            "patient_manager",
+            "billing",
+            "sales",
+            "concierge",
+            "teamlead_interpreter",
+            "interpreter",
+        ] {
+            assert!(role_reaches_patient_or_finance_data(role), "{role}");
+        }
+        // The technical admin holds neither, portal logins are not staff.
+        for role in ["it_admin", "patient", "", "unknown_role"] {
+            assert!(!role_reaches_patient_or_finance_data(role), "{role}");
+        }
     }
 
     #[test]

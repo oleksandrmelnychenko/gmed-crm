@@ -35,6 +35,7 @@ import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { companyFinanceErrorCode, localizeCompanyFinanceError } from "./errors";
 import { useFinanceAutoRefresh } from "./use-finance-auto-refresh";
+import { pdfPreviewBlob } from "@/pages/documents/data/document-api";
 
 import {
   buildExpensePostPayload,
@@ -635,13 +636,17 @@ export function ConciergeExpenseReviewPanel({
         selected.task_id,
         selected.id,
       );
+      const receiptType = result.contentType || receipt.mime_type || "";
+      // The PDF frame is not sandboxed, so it only ever receives a real PDF
+      // whose blob type is forced; images go to an <img>, the rest is not shown.
+      const pdf = receiptType === "application/pdf" ? await pdfPreviewBlob(result.blob) : null;
       if (previewRequestRef.current !== request) return;
       revokePreview();
-      const url = URL.createObjectURL(result.blob);
+      const url = URL.createObjectURL(pdf ?? result.blob);
       previewUrlRef.current = url;
       setPreview({
         url,
-        contentType: result.contentType || receipt.mime_type || "",
+        contentType: receiptType === "application/pdf" && !pdf ? "application/octet-stream" : receiptType,
         filename: result.filename || receipt.original_filename || "receipt",
       });
     } catch (error) {

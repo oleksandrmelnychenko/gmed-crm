@@ -166,9 +166,15 @@ async fn list_patient_recommendations(
     {
         return resp;
     }
-    if auth.role != Role::CeoAssistant
-        && let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await
-    {
+    if auth.role == Role::CeoAssistant {
+        // The assistant reads every patient unless an explicit deny rule
+        // closes this one (canonical patient check).
+        match super::patients::has_patient_access(&state, &auth, patient_id).await {
+            Ok(true) => {}
+            Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+            Err(resp) => return resp,
+        }
+    } else if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
         return resp;
     }
 
@@ -202,7 +208,7 @@ async fn create_patient_recommendation(
     if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return resp;
     }
-    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+    if let Err(resp) = ensure_patient_change_access(&state, &auth, patient_id).await {
         return resp;
     }
     if let Err(resp) = ensure_patient_exists(&state, patient_id).await {
@@ -399,7 +405,7 @@ async fn update_patient_recommendation(
     if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return resp;
     }
-    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+    if let Err(resp) = ensure_patient_change_access(&state, &auth, patient_id).await {
         return resp;
     }
 
@@ -657,7 +663,7 @@ async fn delete_patient_recommendation(
     if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return resp;
     }
-    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+    if let Err(resp) = ensure_patient_change_access(&state, &auth, patient_id).await {
         return resp;
     }
     // Art. 18 DSGVO: a recommendation is clinical data (QA 2026-11-01).
@@ -1145,16 +1151,38 @@ async fn ensure_patient_access(
     }
 
     match access::has_active_patient_assignment(&state.db, patient_id, auth.user_id).await {
-        Ok(true) => Ok(()),
-        Ok(false) => Err(err(StatusCode::FORBIDDEN, "Insufficient permissions")),
+        Ok(true) => {}
+        Ok(false) => return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions")),
         Err(e) => {
             tracing::error!(error = %e, patient_id = %patient_id, "validate recommendation access");
-            Err(err(
+            return Err(err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to validate patient access",
-            ))
+            ));
         }
     }
+
+    // The assignment admits; an explicit per-user deny on the patient still
+    // refuses (canonical patient check, never wider than the assignment).
+    if super::patients::has_patient_access(state, auth, patient_id).await? {
+        Ok(())
+    } else {
+        Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
+    }
+}
+
+/// [`ensure_patient_access`] for a write: an explicit deny of editing the
+/// patient refuses it as well.
+async fn ensure_patient_change_access(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    ensure_patient_access(state, auth, patient_id).await?;
+    if super::appointments::patient_denied_by_explicit_rule(state, auth, patient_id, true).await? {
+        return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+    }
+    Ok(())
 }
 
 async fn validate_sources(

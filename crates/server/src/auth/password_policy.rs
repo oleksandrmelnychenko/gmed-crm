@@ -183,6 +183,8 @@ pub async fn replace_password_in_tx(
                password_reset_required = $3,
                failed_login_attempts = 0,
                locked_until = NULL,
+               totp_failed_attempts = 0,
+               totp_lock_level = 0,
                updated_at = now()
            WHERE id = $1"#,
     )

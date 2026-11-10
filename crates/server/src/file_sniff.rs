@@ -1,8 +1,65 @@
+/// The effective extension: trailing dots and spaces do not hide it
+/// (Windows drops them, so `x.hta.` opens as `x.hta`).
 fn extension_from_name(file_name: Option<&str>) -> Option<String> {
     file_name
+        .map(trim_name_tail)
         .and_then(|value| value.rsplit_once('.'))
         .map(|(_, ext)| ext.trim().to_ascii_lowercase())
         .filter(|ext| !ext.is_empty())
+}
+
+fn trim_name_tail(file_name: &str) -> &str {
+    file_name.trim_end_matches(|c: char| c == '.' || c.is_whitespace() || c.is_control())
+}
+
+/// Executable, script, shortcut, installer, disk-image and macro-enabled
+/// types: never stored, whatever the declared MIME type says.
+const BLOCKED_EXTENSIONS: &[&str] = &[
+    "exe", "dll", "com", "scr", "pif", "cpl", "msi", "msp", "msix", "appx", "bat", "cmd", "ps1",
+    "psm1", "vbs", "vbe", "js", "jse", "mjs", "wsf", "wsh", "hta", "lnk", "url", "scf", "jar",
+    "jnlp", "reg", "inf", "chm", "hlp", "iso", "img", "vhd", "vhdx", "apk", "app", "dmg", "pkg",
+    "deb", "rpm", "sh", "py", "php", "pl", "rb", "docm", "dotm", "xlsm", "xltm", "xlam", "pptm",
+    "potm", "ppsm", "sldm", "one",
+];
+
+/// Whether the effective extension is a blocked type: the last non-empty
+/// dot-separated suffix, so `Befund.pdf.hta` and `x.HTA.` are caught (Windows
+/// drops trailing dots and spaces) while `www.praxis.com.pdf` stays a PDF.
+fn has_blocked_extension(file_name: Option<&str>) -> bool {
+    let Some(file_name) = file_name else {
+        return false;
+    };
+    // Only the last path component names the file.
+    let base = file_name.rsplit(['/', '\\']).next().unwrap_or(file_name);
+    base.split('.')
+        .skip(1)
+        .map(|suffix| {
+            suffix
+                .trim_matches(|c: char| c.is_whitespace() || c.is_control())
+                .to_ascii_lowercase()
+        })
+        .filter(|suffix| !suffix.is_empty())
+        .last()
+        .is_some_and(|suffix| BLOCKED_EXTENSIONS.contains(&suffix.as_str()))
+}
+
+/// Windows PE (`MZ`), ELF, Mach-O (thin and universal) or a shell shebang.
+fn is_executable_content(bytes: &[u8]) -> bool {
+    if bytes.starts_with(b"MZ") || bytes.starts_with(b"\x7FELF") || bytes.starts_with(b"#!") {
+        return true;
+    }
+    bytes.len() >= 4
+        && matches!(
+            [bytes[0], bytes[1], bytes[2], bytes[3]],
+            [0xFE, 0xED, 0xFA, 0xCE]
+                | [0xFE, 0xED, 0xFA, 0xCF]
+                | [0xCE, 0xFA, 0xED, 0xFE]
+                | [0xCF, 0xFA, 0xED, 0xFE]
+                | [0xCA, 0xFE, 0xBA, 0xBE]
+                | [0xCA, 0xFE, 0xBA, 0xBF]
+                | [0xBE, 0xBA, 0xFE, 0xCA]
+                | [0xBF, 0xBA, 0xFE, 0xCA]
+        )
 }
 
 fn is_active_document_type(mime_type: Option<&str>, extension: Option<&str>, bytes: &[u8]) -> bool {
@@ -113,12 +170,8 @@ fn canonical_mime_for_kind(
     declared_mime: Option<&str>,
 ) -> String {
     if kind == "zip" {
-        if let Some(mime) = declared_mime {
-            let normalized = mime.trim().to_ascii_lowercase();
-            if !normalized.is_empty() && normalized != "application/octet-stream" {
-                return normalized;
-            }
-        }
+        // The stored type comes from the extension and a fixed list only: the
+        // declared MIME type is the uploader's claim and is never echoed.
         return match extension {
             Some("docx") => {
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -212,6 +265,11 @@ pub fn validate_upload_magic_bytes(
     let extension = extension_from_name(file_name);
     if is_active_document_type(declared_mime, extension.as_deref(), bytes) {
         return Err("Active HTML, SVG, and XML document formats are not accepted");
+    }
+    if has_blocked_extension(file_name) || is_executable_content(bytes) {
+        return Err(
+            "Executable, script, installer, and macro-enabled file formats are not accepted",
+        );
     }
     let expected_kind = expected_binary_kind(declared_mime, extension.as_deref());
     let detected_kind = sniff_magic_kind(bytes);
@@ -334,5 +392,156 @@ mod tests {
             validate_upload_magic_bytes(Some("scan.pdf"), Some("application/pdf"), b"%PDF-1.7"),
             Ok(Some("application/pdf".to_string()))
         );
+    }
+
+    const BLOCKED: &str =
+        "Executable, script, installer, and macro-enabled file formats are not accepted";
+
+    #[test]
+    fn rejects_blocked_effective_extensions() {
+        for name in [
+            "setup.exe",
+            "Befund.pdf.hta",
+            "Befund.HTA",
+            "x.hta.",
+            "x.hta. . ",
+            "macro.docm",
+            "sheet.XLSM",
+            "run.ps1",
+            "link.lnk",
+            "disk.iso",
+            "notes.one",
+            ".sh",
+            "dir/inner.pdf.js",
+        ] {
+            assert_eq!(
+                validate_upload_magic_bytes(Some(name), Some("application/pdf"), b"%PDF-1.7"),
+                Err(BLOCKED),
+                "{name}"
+            );
+            assert_eq!(
+                validate_upload_magic_bytes(Some(name), None, b"plain notes"),
+                Err(BLOCKED),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_legitimate_names_that_only_resemble_blocked_types() {
+        // A blocked word is refused as a suffix only, not inside a name.
+        for name in [
+            "exe",
+            "shell notes.txt",
+            "one-pager.txt",
+            "app_report.txt",
+            "www.praxis.com.txt",
+            "script.py.txt",
+        ] {
+            assert_eq!(
+                validate_upload_magic_bytes(Some(name), Some("text/plain"), b"plain notes"),
+                Ok(Some("text/plain".to_string())),
+                "{name}"
+            );
+        }
+        // Types without a recognised signature stay accepted as binary.
+        for name in [
+            "scan.dcm",
+            "photo.heic",
+            "mail.eml",
+            "mail.msg",
+            "letter.rtf",
+        ] {
+            assert_eq!(
+                validate_upload_magic_bytes(Some(name), None, b"\x00\x01 opaque bytes"),
+                Ok(Some("application/octet-stream".to_string())),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_executable_content_whatever_the_name() {
+        for bytes in [
+            b"MZ\x90\x00\x03".as_slice(),
+            b"\x7FELF\x02\x01".as_slice(),
+            b"#!/bin/sh\nrm -rf /".as_slice(),
+            b"\xFE\xED\xFA\xCE\x00".as_slice(),
+            b"\xFE\xED\xFA\xCF\x00".as_slice(),
+            b"\xCE\xFA\xED\xFE\x00".as_slice(),
+            b"\xCF\xFA\xED\xFE\x00".as_slice(),
+            b"\xCA\xFE\xBA\xBE\x00".as_slice(),
+        ] {
+            assert_eq!(
+                validate_upload_magic_bytes(Some("report.bin"), None, bytes),
+                Err(BLOCKED)
+            );
+            assert_eq!(
+                validate_upload_magic_bytes(None, Some("text/plain"), bytes),
+                Err(BLOCKED)
+            );
+        }
+    }
+
+    #[test]
+    fn zip_content_gets_its_type_from_the_extension_only() {
+        let zip = b"PK\x03\x04rest";
+        for (name, mime) in [
+            (
+                "letter.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            (
+                "table.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+            (
+                "slides.pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ),
+            ("letter.odt", "application/vnd.oasis.opendocument.text"),
+            (
+                "table.ods",
+                "application/vnd.oasis.opendocument.spreadsheet",
+            ),
+            (
+                "slides.odp",
+                "application/vnd.oasis.opendocument.presentation",
+            ),
+            ("scans.zip", "application/zip"),
+            ("scans.ZIP.", "application/zip"),
+        ] {
+            // The declared type is never stored, whatever it claims.
+            for declared in [
+                None,
+                Some("application/octet-stream"),
+                Some("application/zip"),
+                Some("application/x-msdownload"),
+                Some("application/hta"),
+            ] {
+                assert_eq!(
+                    validate_upload_magic_bytes(Some(name), declared, zip),
+                    Ok(Some(mime.to_string())),
+                    "{name} {declared:?}"
+                );
+            }
+        }
+        assert_eq!(
+            validate_upload_magic_bytes(Some("archive.unknown"), Some("application/hta"), zip),
+            Ok(Some("application/zip".to_string()))
+        );
+        assert_eq!(
+            validate_upload_magic_bytes(None, Some("text/x-anything"), zip),
+            Ok(Some("application/zip".to_string()))
+        );
+    }
+
+    #[test]
+    fn trailing_dots_do_not_hide_the_extension() {
+        assert_eq!(
+            validate_upload_magic_bytes(Some("scan.pdf."), None, b"%PDF-1.7"),
+            Ok(Some("application/pdf".to_string()))
+        );
+        assert!(validate_upload_magic_bytes(Some("scan.pdf. "), None, b"not a pdf").is_err());
     }
 }

@@ -247,12 +247,30 @@ pub(crate) fn german_date(value: NaiveDate) -> String {
     value.format("%d.%m.%Y").to_string()
 }
 
+/// A spreadsheet runs a cell that starts with `=`, `+`, `-`, `@`, tab or CR as
+/// a formula: such text gets a leading apostrophe (as in the personnel
+/// export). A plain signed number ("-12,50") stays numeric.
+fn neutralise_csv_formula(value: &str) -> String {
+    let plain_number = value.strip_prefix(['+', '-']).is_some_and(|rest| {
+        rest.starts_with(|ch: char| ch.is_ascii_digit())
+            && rest
+                .chars()
+                .all(|ch| ch.is_ascii_digit() || ch == '.' || ch == ',')
+    });
+    if value.starts_with(['=', '+', '-', '@', '\t', '\r']) && !plain_number {
+        format!("'{value}")
+    } else {
+        value.to_string()
+    }
+}
+
 /// One CSV field for the `;`-separated German export.
 pub(crate) fn csv_field(value: &str) -> String {
+    let value = neutralise_csv_formula(value);
     if value.contains([';', '"', '\n', '\r']) {
         format!("\"{}\"", value.replace('"', "\"\""))
     } else {
-        value.to_string()
+        value
     }
 }
 
@@ -394,5 +412,28 @@ mod tests {
         assert_eq!(csv_field("Beispiel; GmbH"), "\"Beispiel; GmbH\"");
         assert_eq!(csv_field("Ben \"B\""), "\"Ben \"\"B\"\"\"");
         assert_eq!(csv_field("Anna Muster"), "Anna Muster");
+    }
+
+    #[test]
+    fn csv_text_that_starts_a_formula_is_neutralised() {
+        assert_eq!(csv_field("=HYPERLINK(\"x\")"), "\"'=HYPERLINK(\"\"x\"\")\"");
+        assert_eq!(csv_field("=1+1"), "'=1+1");
+        assert_eq!(csv_field("+49 170 1"), "'+49 170 1");
+        assert_eq!(
+            csv_field("-2+3+cmd|' /C calc'!A0"),
+            "'-2+3+cmd|' /C calc'!A0"
+        );
+        assert_eq!(csv_field("@SUM(A1)"), "'@SUM(A1)");
+        assert_eq!(csv_field("\t=1"), "'\t=1");
+        assert_eq!(csv_field("\r=1"), "\"'\r=1\"");
+        assert_eq!(csv_field("- Storno"), "'- Storno");
+        assert_eq!(csv_field("-"), "'-");
+        // Amounts stay numeric; text with a sign inside is untouched.
+        assert_eq!(csv_field("-30,69"), "-30,69");
+        assert_eq!(csv_field("-30.69"), "-30.69");
+        assert_eq!(csv_field("+5"), "+5");
+        assert_eq!(csv_field("12.10.2026"), "12.10.2026");
+        assert_eq!(csv_field("Storno - Rechnung"), "Storno - Rechnung");
+        assert_eq!(csv_field("—"), "—");
     }
 }

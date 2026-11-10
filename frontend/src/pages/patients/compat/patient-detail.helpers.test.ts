@@ -299,6 +299,8 @@ describe("buildPatientLabelPrintHtml", () => {
     });
 
     expect(html).toContain("@page");
+    // Inline scripts are forbidden by the page CSP; the opener starts printing.
+    expect(html).not.toMatch(/<script|\son\w+=/i);
     expect(html).toContain("70mm 37mm");
     expect(html).toContain("Herr Dr. Max Mustermann");
     expect(html).toContain("P-20260410-0001");

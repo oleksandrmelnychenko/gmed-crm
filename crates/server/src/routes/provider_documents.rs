@@ -20,6 +20,7 @@ use crate::{
     },
     state::AppState,
 };
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
@@ -219,8 +220,16 @@ async fn upload_provider_document(
     if !provider_document_upload_scope_allowed(auth.role, is_hotel, patient_id, is_medical) {
         return err(
             StatusCode::FORBIDDEN,
-            "Concierge can upload general hotel documents only",
+            if auth.role == Role::ItAdmin {
+                "IT Admin can upload general provider documents only"
+            } else {
+                "Concierge can upload general hotel documents only"
+            },
         );
+    }
+    // Medical documents need the medical edit capability (CEO, patient manager).
+    if is_medical && !auth.can(Capability::PatientsMedicalEdit) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
     if is_medical && patient_id.is_none() {
         return err(
@@ -237,6 +246,19 @@ async fn upload_provider_document(
                 .unwrap_or(false);
         if !exists {
             return err(StatusCode::UNPROCESSABLE_ENTITY, "Patient not found");
+        }
+        // Binding a file to a patient follows the patient rule: current
+        // access (assignment, explicit per-user rules; CEO passes), then the
+        // edit rule with the Art. 18 / Art. 17 DSGVO lock (423).
+        match crate::routes::patients::has_patient_access(&state, &auth, patient_id).await {
+            Ok(true) => {}
+            Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+            Err(response) => return response,
+        }
+        match crate::routes::patients::has_patient_edit_access(&state, &auth, patient_id).await {
+            Ok(true) => {}
+            Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+            Err(response) => return response,
         }
     }
     let mime_type = match validate_upload_magic_bytes(Some(&file_name), Some(&claimed_mime), &data)
@@ -367,7 +389,12 @@ fn provider_document_upload_scope_allowed(
     patient_id: Option<Uuid>,
     is_medical: bool,
 ) -> bool {
-    role != Role::Concierge || (is_hotel && patient_id.is_none() && !is_medical)
+    match role {
+        Role::Concierge => is_hotel && patient_id.is_none() && !is_medical,
+        // IT Admin holds no patient data (RBAC matrix): general files only.
+        Role::ItAdmin => patient_id.is_none() && !is_medical,
+        _ => true,
+    }
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
@@ -405,5 +432,23 @@ mod hotel_access_tests {
             Some(Uuid::nil()),
             true
         ));
+        assert!(provider_document_upload_scope_allowed(
+            Role::ItAdmin,
+            false,
+            None,
+            false
+        ));
+        for (patient, medical) in [
+            (Some(Uuid::nil()), false),
+            (None, true),
+            (Some(Uuid::nil()), true),
+        ] {
+            assert!(!provider_document_upload_scope_allowed(
+                Role::ItAdmin,
+                false,
+                patient,
+                medical
+            ));
+        }
     }
 }

@@ -40,10 +40,17 @@ done
 
 POSTGRES_DB="${POSTGRES_DB:-gmed}"
 
+# Both passwords reach the container through its environment, passed by NAME
+# (`docker exec -e NAME`), and psql reads the role password with \getenv
+# (psql 15+; the postgres:16 image ships psql 16). They are never put on a
+# command line, which every user on the host can read in /proc.
+export PGPASSWORD="$POSTGRES_PASSWORD"
+export GMED_METRICS_ROLE_PASSWORD="$POSTGRES_METRICS_PASSWORD"
+
 echo "Ensuring postgres metrics role '$POSTGRES_METRICS_USER' exists"
 
 for attempt in {1..60}; do
-  if docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" "$POSTGRES_CONTAINER" \
+  if docker exec -e PGPASSWORD "$POSTGRES_CONTAINER" \
     pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then
     break
   fi
@@ -54,14 +61,14 @@ for attempt in {1..60}; do
   sleep 1
 done
 
-docker exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" "$POSTGRES_CONTAINER" \
+docker exec -i -e PGPASSWORD -e GMED_METRICS_ROLE_PASSWORD "$POSTGRES_CONTAINER" \
   psql \
     --quiet \
     -v ON_ERROR_STOP=1 \
     -v metrics_user="$POSTGRES_METRICS_USER" \
-    -v metrics_password="$POSTGRES_METRICS_PASSWORD" \
     -U "$POSTGRES_USER" \
     -d "$POSTGRES_DB" >/dev/null <<'SQL'
+\getenv metrics_password GMED_METRICS_ROLE_PASSWORD
 SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'metrics_user', :'metrics_password')
 WHERE NOT EXISTS (
   SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = :'metrics_user'

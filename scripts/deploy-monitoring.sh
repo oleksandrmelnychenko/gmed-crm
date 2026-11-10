@@ -110,16 +110,34 @@ if command -v tailscale >/dev/null 2>&1; then
   fi
 fi
 
+# GMED_METRICS_BIND_ADDR (optional, secrets bundle) binds the metrics and
+# monitoring ports to one address, normally this host's Tailscale IPv4
+# address. A wrong or not yet assigned address would stop the containers that
+# publish on it from starting, so it is checked before Compose runs.
+if [[ -n "${GMED_METRICS_BIND_ADDR:-}" ]]; then
+  if [[ ! "$GMED_METRICS_BIND_ADDR" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    echo "ERROR: GMED_METRICS_BIND_ADDR must be an IPv4 address. Got: $GMED_METRICS_BIND_ADDR" >&2
+    exit 1
+  fi
+  if [[ "$GMED_METRICS_BIND_ADDR" != "0.0.0.0" ]] &&
+     ! ip -4 -o addr show | grep -qF " ${GMED_METRICS_BIND_ADDR}/"; then
+    echo "ERROR: GMED_METRICS_BIND_ADDR=$GMED_METRICS_BIND_ADDR is not an address of this host (is Tailscale up?)." >&2
+    exit 1
+  fi
+  echo "Metrics and monitoring ports bind to $GMED_METRICS_BIND_ADDR"
+fi
+
 # Healthchecks.io ping cron — pings every 5 minutes so a dead
 # monitoring host alerts via Healthchecks.io's own channels.
 if [[ -n "${MONITORING_HEALTHCHECKS_PING_URL:-}" ]]; then
   install -d -m 755 /etc/cron.d
   cat > /etc/cron.d/gmed-monitoring-ping <<EOF
 # Auto-installed by deploy-monitoring.sh. Pings Healthchecks.io if
-# Prometheus is healthy (proxies "the monitoring host is up").
+# Prometheus is healthy (proxies "the monitoring host is up"). The probe
+# uses the address Prometheus is published on (GMED_METRICS_BIND_ADDR).
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-*/5 * * * * root curl -fsS --max-time 10 http://127.0.0.1:9090/-/healthy >/dev/null 2>&1 && curl -fsS --retry 3 --max-time 10 "$MONITORING_HEALTHCHECKS_PING_URL" >/dev/null 2>&1
+*/5 * * * * root curl -fsS --max-time 10 http://${GMED_METRICS_BIND_ADDR:-127.0.0.1}:9090/-/healthy >/dev/null 2>&1 && curl -fsS --retry 3 --max-time 10 "$MONITORING_HEALTHCHECKS_PING_URL" >/dev/null 2>&1
 EOF
   chmod 600 /etc/cron.d/gmed-monitoring-ping
 fi

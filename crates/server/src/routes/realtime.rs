@@ -358,6 +358,13 @@ async fn can_receive_event(
         }
     }
 
+    // A portal login hears only what the portal itself shows: an allow-list,
+    // so a staff event of the login's own patient (the staff copy of an order
+    // event, a case, a task, a hidden invoice) never reaches it.
+    if auth.role == Role::Patient {
+        return can_receive_portal_event(state, auth, event).await;
+    }
+
     // Patient-scoped persisted events must always be checked against current
     // access. A historical direct target or role target must not resurrect an
     // event after an assignment has been revoked.
@@ -374,26 +381,36 @@ async fn can_receive_event(
         }
     }
 
-    // An interpreter sees only the documents opened to him, not every document
-    // of a patient he is linked to (owner decision 2026-09-28), so document
-    // events follow the document rule instead of the patient link — both ways:
-    // a document shared to him reaches him without a patient link.
-    if auth.role == Role::Interpreter {
-        if event.entity_type == "document" {
-            return crate::routes::documents::current_user_can_view_document(
-                state,
-                auth,
-                event.entity_id,
-            )
-            .await;
+    // A document event reaches only who may open the document (as
+    // `GET /documents/{id}`): Billing, the concierge and the team lead hear
+    // nothing about a paper closed to them. An interpreter sees only the
+    // documents opened to him, not every document of a patient he is linked
+    // to (owner decision 2026-09-28), so for him the document rule replaces
+    // the patient link — both ways: a document shared to him reaches him
+    // without a patient link. The other roles need the patient too.
+    if event.entity_type == "document" && auth.role != Role::Ceo {
+        if auth.role != Role::Interpreter {
+            let Some(patient_id) = event.patient_id else {
+                return Ok(false);
+            };
+            if !can_receive_patient_event(state, auth, patient_id).await? {
+                return Ok(false);
+            }
         }
-        if event.entity_type == "patient"
-            && let Some(document_id) = payload_uuid(event, "document_id")
-            && !crate::routes::documents::current_user_can_view_document(state, auth, document_id)
-                .await?
-        {
-            return Ok(false);
-        }
+        return crate::routes::documents::current_user_can_view_document(
+            state,
+            auth,
+            event.entity_id,
+        )
+        .await;
+    }
+    if auth.role == Role::Interpreter
+        && event.entity_type == "patient"
+        && let Some(document_id) = payload_uuid(event, "document_id")
+        && !crate::routes::documents::current_user_can_view_document(state, auth, document_id)
+            .await?
+    {
+        return Ok(false);
     }
 
     match event.entity_type.as_str() {
@@ -517,23 +534,200 @@ fn requires_current_entity_authorization(event: &RealtimeEvent) -> bool {
     )
 }
 
+/// How a portal (patient) login's right to an event is decided. An allow-list:
+/// what is not named in [`portal_event_rule`] stays with staff.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PortalEventRule {
+    Never,
+    /// Sent to the login itself or to every patient login (no entity scope).
+    Addressed,
+    /// Of the login's own patient.
+    OwnPatient,
+    /// Names the login (the copy without the staff's notes) and is of its
+    /// own patient.
+    AddressedOwnPatient,
+    /// A released appointment of the own patient.
+    Appointment,
+    /// An invoice `/me/invoices` shows with its amounts.
+    Invoice,
+    /// A document `/me/documents` shows.
+    Document,
+}
+
+fn portal_event_rule(event: &RealtimeEvent) -> PortalEventRule {
+    if !requires_current_entity_authorization(event) {
+        return PortalEventRule::Addressed;
+    }
+    let event_type = event.event_type.as_str();
+    match event.entity_type.as_str() {
+        // Of the patient events the portal shows recommendations and service
+        // packages, and `patient.updated` carries no payload; clinical,
+        // assignment, balance and consent events are the staff's.
+        "patient"
+            if event_type == "patient.updated"
+                || event_type.starts_with("recommendation.")
+                || event_type.starts_with("service_package.") =>
+        {
+            PortalEventRule::OwnPatient
+        }
+        "appointment" => PortalEventRule::Appointment,
+        "appointment_request" | "privacy_request" | "feedback" => PortalEventRule::OwnPatient,
+        // The portal's service list; expenses, partner contacts, keys and
+        // cost estimates stay with staff.
+        "concierge_service"
+            if matches!(
+                event_type,
+                "concierge_service.created"
+                    | "concierge_service.updated"
+                    | "concierge_service.cancelled"
+                    | "concierge_service.billing_ready"
+            ) =>
+        {
+            PortalEventRule::OwnPatient
+        }
+        // Only the copy `publish_order_event` addresses to the patient's
+        // logins, never the staff copy with the notes.
+        "order" => PortalEventRule::AddressedOwnPatient,
+        "invoice" => PortalEventRule::Invoice,
+        "document" => PortalEventRule::Document,
+        // Cases, quotes, framework contracts, tasks, checklists and reminders
+        // have no portal view.
+        _ => PortalEventRule::Never,
+    }
+}
+
+/// A document the portal no longer lists after the event: the login hears of
+/// it when the document was shared to it before.
+fn is_portal_document_withdrawal(event_type: &str) -> bool {
+    matches!(event_type, "document.portal_revoked" | "document.deleted")
+}
+
+/// The login's own upload in the portal (a payment proof), which
+/// `/me/documents` lists only once staff release it.
+fn is_portal_document_upload(event_type: &str) -> bool {
+    matches!(
+        event_type,
+        "document.uploaded" | "document.payment_proof_uploaded"
+    )
+}
+
+async fn can_receive_portal_event(
+    state: &AppState,
+    auth: &AuthUser,
+    event: &RealtimeEvent,
+) -> Result<bool, axum::response::Response> {
+    let addressed = event.target_user_ids.contains(&auth.user_id);
+    let own_patient = async {
+        let patient_id = event
+            .patient_id
+            .or_else(|| (event.entity_type == "patient").then_some(event.entity_id));
+        match patient_id {
+            Some(patient_id) => can_receive_patient_event(state, auth, patient_id).await,
+            None => Ok(false),
+        }
+    };
+    match portal_event_rule(event) {
+        PortalEventRule::Never => Ok(false),
+        PortalEventRule::Addressed => Ok(addressed
+            || event.role_names.iter().any(|role| role == "patient")
+            || event.entity_type == "announcement"),
+        PortalEventRule::OwnPatient => own_patient.await,
+        PortalEventRule::AddressedOwnPatient => {
+            if !addressed {
+                return Ok(false);
+            }
+            own_patient.await
+        }
+        PortalEventRule::Appointment => {
+            can_receive_appointment_event(state, auth, event.entity_id).await
+        }
+        PortalEventRule::Invoice => {
+            let Some(patient_id) = super::me::resolve_linked_patient_id(state, auth).await? else {
+                return Ok(false);
+            };
+            // As `GET /me/invoices`; an invoice whose amounts are hidden from
+            // the patient is not announced (its events carry amounts).
+            sqlx::query_scalar::<_, bool>(
+                r#"SELECT EXISTS(
+                       SELECT 1
+                       FROM invoices
+                       WHERE id = $1
+                         AND patient_id = $2
+                         AND released_at IS NOT NULL
+                         AND portal_visible = true
+                         AND hide_amounts_from_patient = false
+                   )"#,
+            )
+            .bind(event.entity_id)
+            .bind(patient_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, invoice_id = %event.entity_id, "check realtime portal invoice access");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate event access")
+            })
+        }
+        PortalEventRule::Document => {
+            let Some(patient_id) = super::me::resolve_linked_patient_id(state, auth).await? else {
+                return Ok(false);
+            };
+            // As `GET /me/documents`: released, current and shared to the
+            // login.
+            sqlx::query_scalar::<_, bool>(&format!(
+                r#"SELECT EXISTS(
+                       SELECT 1
+                       FROM documents d
+                       WHERE d.id = $1
+                         AND d.patient_id = $2
+                         AND (
+                             ($4 AND d.uploaded_by = $3 AND d.ursprung = 'patient_portal')
+                             OR EXISTS (
+                                 SELECT 1
+                                 FROM document_shares ds
+                                 WHERE ds.document_id = d.id
+                                   AND ds.shared_with_user_id = $3
+                                   AND ($5 OR (ds.revoked_at IS NULL
+                                               AND d.visibility = 'patient_visible'
+                                               AND {current}))
+                             )
+                         )
+                   )"#,
+                current = super::me::PORTAL_CURRENT_DOCUMENT_SQL
+            ))
+            .bind(event.entity_id)
+            .bind(patient_id)
+            .bind(auth.user_id)
+            .bind(is_portal_document_upload(&event.event_type))
+            .bind(is_portal_document_withdrawal(&event.event_type))
+            .fetch_one(&state.db)
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, document_id = %event.entity_id, "check realtime portal document access");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate event access")
+            })
+        }
+    }
+}
+
 async fn can_receive_patient_event(
     state: &AppState,
     auth: &AuthUser,
     patient_id: Uuid,
 ) -> Result<bool, axum::response::Response> {
     match auth.role {
-        Role::Ceo | Role::CeoAssistant | Role::Billing => Ok(true),
+        Role::Ceo => Ok(true),
         Role::Patient => crate::routes::me::resolve_linked_patient_id(state, auth)
             .await
             .map(|linked_patient_id| linked_patient_id == Some(patient_id)),
-        Role::PatientManager | Role::TeamleadInterpreter | Role::Interpreter | Role::Concierge => {
-            access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
-                .await
-                .map_err(|e| {
-                    tracing::error!(error = %e, patient_id = %patient_id, "check realtime patient access");
-                    err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate event access")
-                })
+        // As the patient API: the role's baseline (assignment, a concierge's
+        // open task) and the per-user access rules, an explicit deny included.
+        Role::CeoAssistant
+        | Role::Billing
+        | Role::PatientManager
+        | Role::TeamleadInterpreter
+        | Role::Interpreter
+        | Role::Concierge => {
+            crate::routes::patients::has_patient_access(state, auth, patient_id).await
         }
         _ => Ok(false),
     }
@@ -712,7 +906,8 @@ async fn can_receive_order_event(
     if matches!(auth.role, Role::Concierge | Role::TeamleadInterpreter) {
         return Ok(false);
     }
-    if !matches!(auth.role, Role::Patient) && !access::requires_patient_assignment(auth.role) {
+    // A portal login gets its own copy (`can_receive_portal_event`).
+    if !access::requires_patient_assignment(auth.role) {
         return Ok(false);
     }
 
@@ -720,12 +915,7 @@ async fn can_receive_order_event(
         return Ok(false);
     };
 
-    access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, patient_id = %patient_id, "check realtime order assignment");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate event access")
-        })
+    can_receive_patient_event(state, auth, patient_id).await
 }
 
 async fn can_receive_contract_event(
@@ -736,13 +926,8 @@ async fn can_receive_contract_event(
     if matches!(auth.role, Role::Ceo | Role::CeoAssistant | Role::Billing) {
         return Ok(true);
     }
-    if auth.role == Role::Patient {
-        let Some(patient_id) = event.patient_id else {
-            return Ok(false);
-        };
-        return can_receive_patient_event(state, auth, patient_id).await;
-    }
-    if !matches!(auth.role, Role::Patient | Role::PatientManager) {
+    // The portal has no contract or quote view: nothing for a portal login.
+    if auth.role != Role::PatientManager {
         return Ok(false);
     }
 
@@ -750,12 +935,7 @@ async fn can_receive_contract_event(
         return Ok(false);
     };
 
-    access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, patient_id = %patient_id, "check realtime contract assignment");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate event access")
-        })
+    can_receive_patient_event(state, auth, patient_id).await
 }
 
 async fn can_receive_case_event(
@@ -766,7 +946,8 @@ async fn can_receive_case_event(
     if auth.role == Role::Ceo {
         return Ok(true);
     }
-    if !matches!(auth.role, Role::Patient | Role::PatientManager) {
+    // The portal has no case view: nothing for a portal login.
+    if auth.role != Role::PatientManager {
         return Ok(false);
     }
 
@@ -798,16 +979,7 @@ async fn can_receive_case_event(
         )
     })?;
 
-    if auth.role == Role::Patient {
-        return can_receive_patient_event(state, auth, patient_id).await;
-    }
-
-    access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, case_id = %event.entity_id, "check realtime case assignment");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate event access")
-        })
+    can_receive_patient_event(state, auth, patient_id).await
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
@@ -821,7 +993,8 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 #[cfg(test)]
 mod tests {
     use super::{
-        appointment_event_role_decision, is_order_checklist_event,
+        PortalEventRule, appointment_event_role_decision, is_order_checklist_event,
+        is_portal_document_upload, is_portal_document_withdrawal, portal_event_rule,
         requires_current_entity_authorization,
     };
     use crate::realtime::RealtimeEvent;
@@ -877,6 +1050,125 @@ mod tests {
         assert!(is_order_checklist_event(&event));
         event.payload = serde_json::json!({ "scope_type": "patient" });
         assert!(!is_order_checklist_event(&event));
+    }
+
+    fn portal_rule(event_type: &str, entity_type: &str) -> PortalEventRule {
+        portal_event_rule(&RealtimeEvent::new(event_type, entity_type, Uuid::new_v4()))
+    }
+
+    #[test]
+    fn a_portal_login_never_gets_the_staff_copy_of_an_order_event() {
+        // Being the patient is not enough: the event must name the login,
+        // which only the copy without the staff's notes does.
+        assert_eq!(
+            portal_rule("order.phase_changed", "order"),
+            PortalEventRule::AddressedOwnPatient
+        );
+        assert_eq!(
+            portal_rule("order.debt_management_updated", "order"),
+            PortalEventRule::AddressedOwnPatient
+        );
+    }
+
+    #[test]
+    fn staff_only_entities_never_reach_a_portal_login() {
+        for (event_type, entity_type) in [
+            ("case.updated", "case"),
+            ("quote.status_changed", "quote"),
+            ("framework_contract.updated", "framework_contract"),
+            ("task.created", "task"),
+            ("concierge_operational_item.updated", "task"),
+            (
+                "workflow_checklist_item.completed",
+                "workflow_checklist_item",
+            ),
+            ("appointment_checklist.updated", "appointment_checklist"),
+            ("reminder.created", "reminder"),
+            ("patient.clinical_updated", "patient"),
+            ("patient.assigned", "patient"),
+            ("patient.balance_adjustment_created", "patient"),
+            ("consent.revoked", "patient"),
+            ("concierge_expense.submitted", "concierge_service"),
+            (
+                "concierge_service.partner_interaction_recorded",
+                "concierge_service",
+            ),
+        ] {
+            assert_eq!(
+                portal_rule(event_type, entity_type),
+                PortalEventRule::Never,
+                "{event_type}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_portal_keeps_the_events_its_pages_listen_to() {
+        for (event_type, entity_type, rule) in [
+            ("patient.updated", "patient", PortalEventRule::OwnPatient),
+            (
+                "recommendation.created",
+                "patient",
+                PortalEventRule::OwnPatient,
+            ),
+            (
+                "service_package.assigned",
+                "patient",
+                PortalEventRule::OwnPatient,
+            ),
+            (
+                "concierge_service.updated",
+                "concierge_service",
+                PortalEventRule::OwnPatient,
+            ),
+            (
+                "appointment_request.reviewed",
+                "appointment_request",
+                PortalEventRule::OwnPatient,
+            ),
+            (
+                "privacy_request.executed",
+                "privacy_request",
+                PortalEventRule::OwnPatient,
+            ),
+            ("feedback.reviewed", "feedback", PortalEventRule::OwnPatient),
+            (
+                "appointment.updated",
+                "appointment",
+                PortalEventRule::Appointment,
+            ),
+            (
+                "invoice.status_changed",
+                "invoice",
+                PortalEventRule::Invoice,
+            ),
+            (
+                "document.portal_released",
+                "document",
+                PortalEventRule::Document,
+            ),
+            (
+                "notification.created",
+                "notification",
+                PortalEventRule::Addressed,
+            ),
+            (
+                "announcement.published",
+                "announcement",
+                PortalEventRule::Addressed,
+            ),
+        ] {
+            assert_eq!(portal_rule(event_type, entity_type), rule, "{event_type}");
+        }
+    }
+
+    #[test]
+    fn portal_document_events_are_told_apart() {
+        assert!(is_portal_document_withdrawal("document.portal_revoked"));
+        assert!(is_portal_document_withdrawal("document.deleted"));
+        assert!(!is_portal_document_withdrawal("document.updated"));
+        assert!(is_portal_document_upload("document.payment_proof_uploaded"));
+        assert!(!is_portal_document_upload("document.updated"));
     }
 
     #[test]

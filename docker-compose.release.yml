@@ -1,5 +1,9 @@
 services:
   postgres:
+    # Second network: the clinical document parser reaches the database over
+    # parser-db-internal only (see that service). `default` stays for the
+    # backend and the metrics exporter.
+    networks: [default, parser-db-internal]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gmed} -d ${POSTGRES_DB:-gmed}"]
       interval: 10s
@@ -105,6 +109,18 @@ services:
     security_opt:
       - no-new-privileges:true
     user: "100:101"
+    # The worker opens untrusted uploads while holding the database URL and
+    # the upload encryption keys, so it gets the same confinement as the
+    # invoice parser and the translation service:
+    #   - no route out: its only network is internal and shared with postgres
+    #     alone (OCR models are baked into the image, nothing is downloaded);
+    #   - read-only root filesystem; the only writable place is /tmp in memory
+    #     (temporary page images of Tesseract). Checked with the real OCR and
+    #     translation pipeline under --read-only --network none.
+    networks: [parser-db-internal]
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
     volumes:
       - uploads:/app/uploads:ro
 
@@ -161,4 +177,7 @@ volumes:
 
 networks:
   translation-internal:
+    internal: true
+  # Database access for the clinical document parser, without internet egress.
+  parser-db-internal:
     internal: true

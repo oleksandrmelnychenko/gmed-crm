@@ -271,7 +271,7 @@ export function LoginPage() {
     void pollPendingLogin();
     const interval = setInterval(() => {
       void pollPendingLogin();
-    }, 3000);
+    }, 6000);
 
     return () => {
       cancelled = true;

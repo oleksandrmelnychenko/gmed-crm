@@ -1419,7 +1419,11 @@ async fn list_guardian_candidates(
         ), picked AS (
             SELECT * FROM candidates
             WHERE (birth_date IS NULL OR birth_date <= ($2::date - INTERVAL '18 years')::date)
-              AND ($1::text = '%%' OR de_normalize(concat_ws(' ', display_id, first_name, last_name, email, phone)) LIKE de_normalize($1))
+              AND ($1::text = '%%' OR de_normalize(
+                      CASE WHEN source = 'patient' AND NOT $4::bool
+                           THEN concat_ws(' ', display_id, first_name, last_name)
+                           ELSE concat_ws(' ', display_id, first_name, last_name, email, phone)
+                      END) LIKE de_normalize($1))
             ORDER BY lower(last_name), lower(first_name), source, id LIMIT 50
         )
         SELECT c.*, CASE WHEN c.source = 'patient' THEN (
@@ -1437,7 +1441,7 @@ async fn list_guardian_candidates(
         identity = crate::services::lead_guardian_identity::PATIENT_IDENTITY_JSON,
         gwg = crate::services::lead_guardian_identity::PATIENT_GWG_JOIN,
     );
-    let search = format!("%{}%", query.search.unwrap_or_default().trim());
+    let search = like_contains_pattern(&query.search.unwrap_or_default());
     let failed = |error: sqlx::Error| {
         tracing::error!(%error, "list guardian candidates");
         err(
@@ -1445,10 +1449,15 @@ async fn list_guardian_candidates(
             "Failed to load guardian candidates",
         )
     };
+    // A role without `patients.view` gets a patient's e-mail and phone
+    // blanked below, so its search must not match on them either: a hit
+    // would tell whose address or number it is.
+    let full_patient_contact = auth.can(Capability::PatientsView);
     let rows = sqlx::query(&sql)
         .bind(&search)
         .bind(crate::app_time::today())
         .bind(query.exclude_lead_id)
+        .bind(full_patient_contact)
         .fetch_all(&state.db)
         .await
         .map_err(failed)?;
@@ -1456,7 +1465,6 @@ async fn list_guardian_candidates(
     let contacts = guardian_contact_candidates(&mut conn, &search, query.exclude_lead_id)
         .await
         .map_err(failed)?;
-    let full_patient_contact = auth.can(Capability::PatientsView);
     let known: std::collections::HashSet<(String, Option<NaiveDate>)> = rows
         .iter()
         .map(|row| {
@@ -1500,6 +1508,22 @@ async fn list_guardian_candidates(
             .chain(contacts.map(|candidate| guardian_candidate_value(candidate, true)))
             .collect(),
     )))
+}
+
+/// The `LIKE` pattern "contains `search`": the term is taken literally, so
+/// `%`, `_` and the escape character `\` in it match only themselves. An
+/// empty term gives `%%`, which the picker queries read as "no search".
+fn like_contains_pattern(search: &str) -> String {
+    let mut pattern = String::with_capacity(search.len() + 2);
+    pattern.push('%');
+    for ch in search.trim().chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            pattern.push('\\');
+        }
+        pattern.push(ch);
+    }
+    pattern.push('%');
+    pattern
 }
 
 fn person_key(first: &str, last: &str) -> String {
@@ -1794,6 +1818,16 @@ mod lead_picker_contact_tests {
     }
 
     #[test]
+    fn the_search_term_is_taken_literally() {
+        assert_eq!(like_contains_pattern(""), "%%");
+        assert_eq!(like_contains_pattern("   "), "%%");
+        assert_eq!(like_contains_pattern(" Muster "), "%Muster%");
+        assert_eq!(like_contains_pattern("%"), "%\\%%");
+        assert_eq!(like_contains_pattern("a_b%c"), "%a\\_b\\%c%");
+        assert_eq!(like_contains_pattern("a\\b"), "%a\\\\b%");
+    }
+
+    #[test]
     fn a_lead_candidate_stays_complete_for_sales() {
         let mut candidate = patient_candidate();
         candidate.source = "lead".into();
@@ -1815,7 +1849,7 @@ async fn list_lead_referrer_patients(
     }
 
     let full_patient_contact = auth.can(Capability::PatientsView);
-    let search_pattern = format!("%{}%", query.search.unwrap_or_default().trim());
+    let search_pattern = like_contains_pattern(&query.search.unwrap_or_default());
     match sqlx::query(
         r#"SELECT id, patient_id, title, first_name, last_name,
                   birth_date, email, phone_primary
@@ -8083,10 +8117,19 @@ async fn import_lead_attachments_internal(
             }
         }
 
+        // The file now lives sealed in the document store: the plaintext
+        // copy of the questionnaire upload goes with the import mark (one
+        // statement), but only while the document really holds a file.
+        // `download_attachment` serves an imported upload from the document.
         sqlx::query(
-            r#"UPDATE lead_attachments
-               SET imported_document_id = $2, imported_at = now()
-               WHERE id = $1 AND imported_at IS NULL"#,
+            r#"UPDATE lead_attachments a
+               SET imported_document_id = $2, imported_at = now(),
+                   data = CASE WHEN EXISTS (
+                              SELECT 1 FROM documents d
+                              WHERE d.id = $2 AND d.storage_key IS NOT NULL
+                                AND d.file_deleted_at IS NULL)
+                          THEN ''::bytea ELSE a.data END
+               WHERE a.id = $1 AND a.imported_at IS NULL"#,
         )
         .bind(attachment_id)
         .bind(attachment_id)
@@ -11183,7 +11226,11 @@ async fn download_attachment(
     match sqlx::query(
         r#"SELECT attachment.file_name, attachment.content_type, attachment.data,
                   imported.category, imported.art, imported.generated_template_id,
-                  imported.compliance_kind
+                  imported.compliance_kind,
+                  imported.id AS imported_id,
+                  CASE WHEN imported.file_deleted_at IS NULL
+                       THEN imported.storage_key END AS imported_storage_key,
+                  imported.mime_type AS imported_mime_type
            FROM lead_attachments attachment
            LEFT JOIN documents imported ON imported.id = attachment.imported_document_id
            WHERE attachment.id = $1 AND attachment.lead_id = $2"#,
@@ -11202,8 +11249,45 @@ async fn download_attachment(
         }
         Ok(Some(row)) => {
             let file_name: String = row.try_get("file_name").unwrap_or_default();
-            let content_type: Option<String> = row.try_get("content_type").ok().flatten();
-            let data: Vec<u8> = row.try_get("data").unwrap_or_default();
+            let mut content_type: Option<String> = row.try_get("content_type").ok().flatten();
+            let mut data: Vec<u8> = row.try_get("data").unwrap_or_default();
+            // An imported upload keeps no plaintext copy here: its bytes are
+            // the imported document's sealed file (none once that document
+            // is deleted — the empty file as before).
+            if data.is_empty()
+                && let Some(storage_key) = row
+                    .try_get::<Option<String>, _>("imported_storage_key")
+                    .ok()
+                    .flatten()
+            {
+                let imported_mime: Option<String> =
+                    row.try_get("imported_mime_type").ok().flatten();
+                let document_id = row
+                    .try_get::<Option<Uuid>, _>("imported_id")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(attachment_id);
+                match crate::routes::documents::read_document_storage_bytes(
+                    document_id,
+                    &storage_key,
+                    imported_mime.as_deref(),
+                    None,
+                    None,
+                )
+                .await
+                {
+                    Ok(bytes) => {
+                        data = bytes;
+                        if imported_mime.is_some() {
+                            content_type = imported_mime;
+                        }
+                    }
+                    Err(error) => {
+                        tracing::error!(error = %error, lead_id = %lead_id, attachment_id = %attachment_id, "read imported questionnaire attachment");
+                        return err(StatusCode::NOT_FOUND, "Attachment file not found");
+                    }
+                }
+            }
 
             let mime = content_type.unwrap_or_else(|| "application/octet-stream".to_string());
             let disposition = crate::content_disposition::attachment(&file_name);

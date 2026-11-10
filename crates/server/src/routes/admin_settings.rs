@@ -235,14 +235,18 @@ async fn revoke_all_sessions(
         return e;
     }
 
+    // CEO sessions end only for a caller who may manage CEO accounts
+    // (`users.manage_ceo`); the technical admin ends everyone else's.
+    let include_ceo = auth.can(Capability::UsersManageCeo);
     tokens::revoke_all_users(
         &state.db,
         auth.user_id,
         &format!("admin_global_logout_by_{}", auth.user_id),
+        include_ceo,
     )
     .await;
 
-    tracing::warn!(admin = %auth.user_id, "Admin force-logout ALL users");
+    tracing::warn!(admin = %auth.user_id, include_ceo, "Admin force-logout ALL users");
     crate::realtime::publish_admin_event(
         &state,
         Some(auth.user_id),
@@ -253,7 +257,7 @@ async fn revoke_all_sessions(
     )
     .await;
 
-    Json(serde_json::json!({ "ok": true })).into_response()
+    Json(serde_json::json!({ "ok": true, "ceo_sessions_kept": !include_ceo })).into_response()
 }
 
 // ── Activity / audit log ─────────────────────────────────────

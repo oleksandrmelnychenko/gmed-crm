@@ -1,6 +1,8 @@
+use std::net::SocketAddr;
+
 use axum::{
     Json, Router,
-    extract::{Extension, Path, State},
+    extract::{ConnectInfo, Extension, Path, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
@@ -103,21 +105,18 @@ fn validate_refresh(req: &RefreshRequest) -> Result<(), &'static str> {
     Ok(())
 }
 
-async fn login(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(body): Json<LoginRequest>,
-) -> impl IntoResponse {
-    if let Err(msg) = validate_login(&body) {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "validation_error", msg);
-    }
+/// The client address of a public sign-in request
+/// (`rate_limit::client_ip`: forwarding headers only when trusted).
+pub(crate) fn request_ip(
+    headers: &HeaderMap,
+    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
+) -> Option<String> {
+    crate::rate_limit::client_ip(headers, peer.map(|Extension(ConnectInfo(addr))| addr))
+}
 
-    let ip = headers
-        .get("x-forwarded-for")
-        .or_else(|| headers.get("x-real-ip"))
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').next().unwrap_or(s).trim().to_string());
-
+/// Whether the IP allow-list (`ip_whitelist_enabled`) refuses this address.
+/// An unknown address is refused while the list is on.
+async fn blocked_by_ip_whitelist(state: &AppState, ip: Option<&str>) -> bool {
     let ip_whitelist_enabled = sqlx::query_scalar!(
         r#"SELECT value::TEXT AS "v!" FROM system_settings WHERE key = 'ip_whitelist_enabled'"#
     )
@@ -127,44 +126,61 @@ async fn login(
     .flatten()
     .unwrap_or_default()
         == "true";
+    if !ip_whitelist_enabled {
+        return false;
+    }
 
-    if ip_whitelist_enabled {
-        let client_ip = ip.as_deref().unwrap_or("0.0.0.0");
-        let allowed = sqlx::query(
-            r#"SELECT EXISTS(
-                    SELECT 1
-                    FROM ip_whitelist
-                    WHERE is_active = true
-                      AND $1::inet <<= cidr::inet
-                ) AS allowed"#,
+    let client_ip = ip.unwrap_or("0.0.0.0");
+    let allowed = sqlx::query(
+        r#"SELECT EXISTS(
+                SELECT 1
+                FROM ip_whitelist
+                WHERE is_active = true
+                  AND $1::inet <<= cidr::inet
+            ) AS allowed"#,
+    )
+    .bind(client_ip)
+    .fetch_one(&state.db)
+    .await
+    .ok()
+    .and_then(|row| row.try_get::<bool, _>("allowed").ok())
+    .unwrap_or(false);
+    if !allowed {
+        tracing::warn!(ip = client_ip, "Blocked by IP whitelist");
+    }
+    !allowed
+}
+
+async fn login(
+    State(state): State<AppState>,
+    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
+    headers: HeaderMap,
+    Json(body): Json<LoginRequest>,
+) -> impl IntoResponse {
+    if let Err(msg) = validate_login(&body) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "validation_error", msg);
+    }
+
+    let ip = request_ip(&headers, peer);
+
+    if blocked_by_ip_whitelist(&state, ip.as_deref()).await {
+        state.audit_sender.try_send(audit::auth_event(
+            "login_blocked",
+            None,
+            ip_hash_opt(&state, ip.as_deref()),
+            json!({ "reason": "ip_whitelist" }),
+        ));
+        metrics::counter!(
+            LOGIN_ATTEMPTS_TOTAL,
+            "outcome" => "blocked",
+            "reason" => "ip_whitelist",
         )
-        .bind(client_ip)
-        .fetch_one(&state.db)
-        .await
-        .ok()
-        .and_then(|row| row.try_get::<bool, _>("allowed").ok())
-        .unwrap_or(false);
-
-        if !allowed {
-            tracing::warn!(ip = client_ip, "Login blocked by IP whitelist");
-            state.audit_sender.try_send(audit::auth_event(
-                "login_blocked",
-                None,
-                ip_hash_opt(&state, ip.as_deref()),
-                json!({ "reason": "ip_whitelist" }),
-            ));
-            metrics::counter!(
-                LOGIN_ATTEMPTS_TOTAL,
-                "outcome" => "blocked",
-                "reason" => "ip_whitelist",
-            )
-            .increment(1);
-            return err(
-                StatusCode::FORBIDDEN,
-                "ip_blocked",
-                "Access denied from this IP address",
-            );
-        }
+        .increment(1);
+        return err(
+            StatusCode::FORBIDDEN,
+            "ip_blocked",
+            "Access denied from this IP address",
+        );
     }
 
     // E-mail addresses match case-insensitively (owner decision 2026-09-28,
@@ -385,22 +401,11 @@ async fn login(
         );
     }
 
-    if let Err(e) = login_throttle::clear_pair(&state.db, &subject, &ip_hash_value).await {
-        tracing::warn!(error = %e, "Failed to clear the sign-in throttle");
-    }
-
     // A forced reset (`password_reset_required`) or an expired password no
     // longer blocks sign-in: the session is created, flagged
     // (`TokenPair::password_change_required`) and confined by the middleware
     // to the password-change endpoints until the password is replaced.
     let settings = state.settings.get().await;
-
-    let _ = sqlx::query!(
-        "UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = $1",
-        user.id
-    )
-    .execute(&state.db)
-    .await;
 
     let ua = headers
         .get("user-agent")
@@ -462,6 +467,19 @@ async fn login(
         }
     }
 
+    // The password was the whole proof: the failure counts start over. With
+    // an authenticator code still to come they stay until the code matched
+    // (`complete_totp_login`), so a known password does not buy fresh guesses.
+    if let Err(e) = login_throttle::clear_pair(&state.db, &subject, &ip_hash_value).await {
+        tracing::warn!(error = %e, "Failed to clear the sign-in throttle");
+    }
+    let _ = sqlx::query!(
+        "UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = $1",
+        user.id
+    )
+    .execute(&state.db)
+    .await;
+
     if user.mfa_required {
         let pending = sqlx::query!(
             "INSERT INTO pending_logins (user_id, ip_address, user_agent, device_info)
@@ -474,8 +492,15 @@ async fn login(
         .fetch_one(&state.db)
         .await;
 
+        let pending = match pending {
+            Ok(row) => issue_pending_poll_secret(&state.db, row.id)
+                .await
+                .map(|secret| (row, secret)),
+            Err(e) => Err(e),
+        };
+
         match pending {
-            Ok(row) => {
+            Ok((row, poll_secret)) => {
                 tracing::info!(user_id = %user.id, pending = %row.id, "MFA pending login created");
                 state.audit_sender.try_send(audit::auth_event(
                     "login_mfa_requested",
@@ -492,6 +517,7 @@ async fn login(
                 return Json(serde_json::json!({
                     "status": "mfa_pending",
                     "pending_id": row.id,
+                    "poll_secret": poll_secret,
                     "message": "Login requires admin approval"
                 }))
                 .into_response();
@@ -565,16 +591,30 @@ async fn login(
 
 async fn refresh(
     State(state): State<AppState>,
+    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     Json(body): Json<RefreshRequest>,
 ) -> impl IntoResponse {
-    let ip = headers
-        .get("x-forwarded-for")
-        .or_else(|| headers.get("x-real-ip"))
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').next().unwrap_or(s).trim().to_string());
+    let ip = request_ip(&headers, peer);
     if let Err(msg) = validate_refresh(&body) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "validation_error", msg);
+    }
+
+    // The IP allow-list holds for the whole session, not only its start. The
+    // refresh token is left untouched, so it works again from an allowed
+    // address.
+    if blocked_by_ip_whitelist(&state, ip.as_deref()).await {
+        state.audit_sender.try_send(audit::auth_event(
+            "login_blocked",
+            None,
+            ip_hash_opt(&state, ip.as_deref()),
+            json!({ "reason": "ip_whitelist", "step": "refresh" }),
+        ));
+        return err(
+            StatusCode::FORBIDDEN,
+            "ip_blocked",
+            "Access denied from this IP address",
+        );
     }
 
     let settings = state.settings.get().await;
@@ -752,9 +792,48 @@ async fn revoke_session(
     StatusCode::NO_CONTENT.into_response()
 }
 
+/// Stores the hash of a fresh poll secret on a pending login and returns the
+/// secret for the signing-in client. The row id alone (administrators see it)
+/// does not redeem the approved login.
+pub(crate) async fn issue_pending_poll_secret(
+    db: &sqlx::PgPool,
+    pending_id: Uuid,
+) -> Result<String, sqlx::Error> {
+    let (secret, hash) = tokens::generate_pending_poll_secret();
+    sqlx::query("UPDATE pending_logins SET poll_secret_hash = $2 WHERE id = $1")
+        .bind(pending_id)
+        .bind(hash)
+        .execute(db)
+        .await?;
+    Ok(secret)
+}
+
+/// The poll secret of a pending login travels as `Authorization: Bearer`,
+/// never in the URL.
+fn pending_poll_secret(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(str::trim)
+        .filter(|secret| !secret.is_empty() && secret.len() <= 256)
+}
+
+/// Whether `presented` is the secret whose hash the pending login stores.
+/// A row without a hash (created before poll secrets) matches nothing.
+fn poll_secret_matches(stored_hash: Option<&str>, presented: Option<&str>) -> bool {
+    match (stored_hash, presented) {
+        (Some(stored), Some(presented)) => {
+            tokens::same_token_hash(stored, &tokens::hash_token(presented))
+        }
+        _ => false,
+    }
+}
+
 async fn check_pending(
     State(state): State<AppState>,
     Path(pending_id): Path<Uuid>,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
     let settings = state.settings.get().await;
     let mut tx = match state.db.begin().await {
@@ -766,7 +845,7 @@ async fn check_pending(
     };
     let row = match sqlx::query(
         r#"SELECT pl.status, pl.user_id, pl.ip_address, pl.user_agent, pl.created_at,
-                  pl.expires_at, pl.consumed_at,
+                  pl.expires_at, pl.consumed_at, pl.poll_secret_hash,
                   u.role, u.is_active, u.password_changed_at
            FROM pending_logins pl
            JOIN users u ON u.id = pl.user_id
@@ -790,6 +869,20 @@ async fn check_pending(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "internal", "Failed");
         }
     };
+
+    // Only the client that started the sign-in holds the secret. A login
+    // waiting since before poll secrets existed has none: sign in again.
+    let stored_hash: Option<String> = row.try_get("poll_secret_hash").unwrap_or_default();
+    if stored_hash.is_none() {
+        return Json(serde_json::json!({ "status": "rejected" })).into_response();
+    }
+    if !poll_secret_matches(stored_hash.as_deref(), pending_poll_secret(&headers)) {
+        return err(
+            StatusCode::UNAUTHORIZED,
+            "pending_secret_required",
+            "Sign in again",
+        );
+    }
 
     let status: String = row.try_get("status").unwrap_or_default();
     let expires_at: chrono::DateTime<chrono::Utc> = match row.try_get("expires_at") {
@@ -911,7 +1004,7 @@ fn invalid_credentials() -> axum::response::Response {
 
 /// `max_failed_login_attempts` and `lockout_duration_minutes` from the
 /// system settings (defaults 5 and 30).
-async fn login_lockout_settings(state: &AppState) -> (i32, i64) {
+pub(crate) async fn login_lockout_settings(state: &AppState) -> (i32, i64) {
     async fn setting(pool: &sqlx::PgPool, key: &str) -> Option<String> {
         sqlx::query_scalar::<_, String>("SELECT value::TEXT FROM system_settings WHERE key = $1")
             .bind(key)
@@ -955,4 +1048,37 @@ fn err(status: StatusCode, error: &str, message: &str) -> axum::response::Respon
         Json(serde_json::json!({ "error": error, "message": message })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_pending_login_is_redeemed_only_with_its_own_secret() {
+        let (secret, hash) = tokens::generate_pending_poll_secret();
+        assert_eq!(secret.len(), 64);
+        assert!(poll_secret_matches(Some(&hash), Some(&secret)));
+        assert!(!poll_secret_matches(Some(&hash), Some("another-secret")));
+        assert!(!poll_secret_matches(Some(&hash), None));
+        // A login waiting since before poll secrets existed.
+        assert!(!poll_secret_matches(None, Some(&secret)));
+        assert!(!poll_secret_matches(None, None));
+    }
+
+    #[test]
+    fn the_poll_secret_is_read_from_the_bearer_header_only() {
+        let mut headers = HeaderMap::new();
+        assert_eq!(pending_poll_secret(&headers), None);
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            "Bearer abc123".parse().unwrap(),
+        );
+        assert_eq!(pending_poll_secret(&headers), Some("abc123"));
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            "Bearer ".parse().unwrap(),
+        );
+        assert_eq!(pending_poll_secret(&headers), None);
+    }
 }

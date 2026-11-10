@@ -581,11 +581,39 @@ where
     .await
 }
 
-/// The lead id of a path `/me/lead-requests/{lead_id}[/…]`.
-fn lead_request_path_id(path: &str) -> Option<Uuid> {
+/// The lead id of a path `/me/lead-requests/{lead_id}[/…]`: `None` for any
+/// other path, `Some(None)` when the path has that shape but its id cannot be
+/// read. The segment is percent-decoded first, as the router does before a
+/// handler parses it — an encoded id must not pass the guard unread.
+fn lead_request_path_id(path: &str) -> Option<Option<Uuid>> {
     let path = path.strip_prefix("/api/v1").unwrap_or(path);
     let rest = path.strip_prefix("/me/lead-requests/")?;
-    Uuid::parse_str(rest.split('/').next()?).ok()
+    let segment = rest.split('/').next().unwrap_or_default();
+    Some(percent_decode_segment(segment).and_then(|id| Uuid::parse_str(&id).ok()))
+}
+
+/// A path segment with its `%XX` escapes decoded; `None` for a broken escape
+/// or bytes that are not UTF-8.
+fn percent_decode_segment(segment: &str) -> Option<String> {
+    let bytes = segment.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let digit = |at: usize| {
+                bytes
+                    .get(at)
+                    .and_then(|byte| char::from(*byte).to_digit(16))
+            };
+            let value = digit(index + 1)? * 16 + digit(index + 2)?;
+            decoded.push(u8::try_from(value).ok()?);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
 }
 
 /// The requests `user_id` reaches, oldest first. The own login of a minor
@@ -733,12 +761,15 @@ pub async fn lead_portal_guard(
     };
     // The own login of a minor whose parents have access reaches nothing of
     // the request, read or write (QA 2026-10-12, A3-01).
-    if let Some(lead_id) = lead_request_path_id(request.uri().path()) {
-        match own_login_closed(&state.db, user_id, Some(lead_id)).await {
+    match lead_request_path_id(request.uri().path()) {
+        None => {}
+        // A request path whose id the guard cannot read is not passed on.
+        Some(None) => return not_found(),
+        Some(Some(lead_id)) => match own_login_closed(&state.db, user_id, Some(lead_id)).await {
             Ok(true) => return guardian_only(),
             Ok(false) => {}
             Err(error) => return internal(error, "check the minor's own login"),
-        }
+        },
     }
     if lead_portal_allows_path(request.uri().path()) {
         return next.run(request).await;
@@ -10309,6 +10340,50 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Security review 2026-11-10: the guard of the minor's own login reads
+    /// the id as the router does (percent-decoded) and refuses what it
+    /// cannot read.
+    #[test]
+    fn the_request_guard_reads_an_encoded_lead_id_and_fails_closed() {
+        let id = Uuid::parse_str("0f4e7a52-1c3b-4d5e-8f90-a1b2c3d4e5f6").unwrap();
+        for path in [
+            "/me/lead-requests/0f4e7a52-1c3b-4d5e-8f90-a1b2c3d4e5f6",
+            "/api/v1/me/lead-requests/0f4e7a52-1c3b-4d5e-8f90-a1b2c3d4e5f6/documents",
+            "/me/lead-requests/0F4E7A52-1C3B-4D5E-8F90-A1B2C3D4E5F6/send",
+            // One character or the whole id percent-encoded.
+            "/me/lead-requests/%30f4e7a52-1c3b-4d5e-8f90-a1b2c3d4e5f6/documents",
+            "/me/lead-requests/0f4e7a52%2D1c3b%2d4d5e-8f90-a1b2c3d4e5f6",
+            "/api/v1/me/lead-requests/%30%66%34%65%37%61%35%32-1c3b-4d5e-8f90-a1b2c3d4e5f6/x",
+        ] {
+            assert_eq!(lead_request_path_id(path), Some(Some(id)), "{path}");
+        }
+        // The shape of a request path with an id nobody can read.
+        for path in [
+            "/me/lead-requests/",
+            "/me/lead-requests/0f4e/documents",
+            "/me/lead-requests/%",
+            "/me/lead-requests/%3",
+            "/me/lead-requests/%zz4e7a52-1c3b-4d5e-8f90-a1b2c3d4e5f6",
+            "/me/lead-requests/%+30f4e7a52-1c3b-4d5e-8f90-a1b2c3d4e5f6",
+            "/me/lead-requests/%ff%fe",
+            "/me/lead-requests/0f4e7a52-1c3b-4d5e-8f90-a1b2c3d4e5f6%2Fdocuments",
+        ] {
+            assert_eq!(lead_request_path_id(path), Some(None), "{path}");
+        }
+        // Other paths are not the guard's.
+        for path in [
+            "/me",
+            "/me/lead-requests",
+            "/me/lead-requestsX/1",
+            "/leads/1",
+        ] {
+            assert_eq!(lead_request_path_id(path), None, "{path}");
+        }
+        assert_eq!(percent_decode_segment("a%20b%2f").as_deref(), Some("a b/"));
+        assert_eq!(percent_decode_segment("plain").as_deref(), Some("plain"));
+        assert_eq!(percent_decode_segment("%4"), None);
     }
 
     #[test]

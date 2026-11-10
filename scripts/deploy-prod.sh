@@ -55,9 +55,24 @@ fi
 # release workflow in THIS repository — Sigstore Fulcio's certificate
 # embeds the workflow identity, so the regex below is the trust
 # anchor. Update the owner/repo if the repository moves.
-COSIGN_CERT_IDENTITY_REGEXP="${COSIGN_CERT_IDENTITY_REGEXP:-^https://github\.com/oleksandrmelnychenko/gmed-crm/\.github/workflows/release\.yml@refs/.*$}"
-COSIGN_OIDC_ISSUER="${COSIGN_OIDC_ISSUER:-https://token.actions.githubusercontent.com}"
-COSIGN_VERSION="${COSIGN_VERSION:-v2.4.1}"
+#
+# The identity is limited to the two refs the Release Build workflow is
+# really started from: a pushed version tag (`v*`, the documented procedure)
+# and a manual `workflow_dispatch` on main (still enabled in release.yml and
+# the origin of images built before 2026-10-26). A run from any other branch
+# or from a pull request ref no longer verifies.
+#
+# Both values are fixed HERE, from the operator's own environment, before
+# release.env or the image pins file is read, and kept in readonly variables
+# that nothing below assigns: neither file can widen the trust anchor.
+readonly cosign_cert_identity_regexp="${COSIGN_CERT_IDENTITY_REGEXP:-^https://github\.com/oleksandrmelnychenko/gmed-crm/\.github/workflows/release\.yml@refs/(tags/v[0-9A-Za-z._-]+|heads/main)$}"
+readonly cosign_oidc_issuer="${COSIGN_OIDC_ISSUER:-https://token.actions.githubusercontent.com}"
+# Pinned tool versions with the checksums published by the upstream projects
+# (cosign_checksums.txt of the sigstore/cosign release). Changing the version
+# means changing the checksums in the same commit.
+readonly cosign_version="v2.4.1"
+readonly cosign_sha256_amd64="8b24b946dd5809c6bd93de08033bcf6bc0ed7d336b7785787c080f574b89249b"
+readonly cosign_sha256_arm64="3b2e2e3854d0356c45fe6607047526ccd04742d20bd44afb5be91fa2a6e7cb4a"
 RCLONE_VERSION="${RCLONE_VERSION:-v1.75.0}"
 
 # Run as root: needs to read /etc/gmed/age.key and run `docker compose`.
@@ -136,12 +151,78 @@ if (( $(free_gb) < ABORT_FREE_GB )); then
   exit 1
 fi
 
+# Every upgrade leaves a full database dump and copies of the environment
+# file (all secrets) under RELEASE_BACKUP_ROOT. They are a short-lived way
+# back from a failed upgrade, not an archive (the encrypted daily backup is
+# the archive), so independent of free disk space only the newest
+# RELEASE_BACKUP_KEEP are kept and none older than RELEASE_BACKUP_MAX_AGE_DAYS.
+# The backup of the running upgrade is never removed.
+RELEASE_BACKUP_KEEP="${RELEASE_BACKUP_KEEP:-5}"
+RELEASE_BACKUP_MAX_AGE_DAYS="${RELEASE_BACKUP_MAX_AGE_DAYS:-14}"
+if [[ ! "$RELEASE_BACKUP_KEEP" =~ ^[1-9][0-9]*$ || ! "$RELEASE_BACKUP_MAX_AGE_DAYS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "ERROR: RELEASE_BACKUP_KEEP and RELEASE_BACKUP_MAX_AGE_DAYS must be positive whole numbers." >&2
+  exit 1
+fi
+
+prune_release_backups() {
+  local current="$1" name cutoff position=0
+  local -a names=()
+  [[ -d "$RELEASE_BACKUP_ROOT" ]] || return 0
+  cutoff="$(date -u -d "${RELEASE_BACKUP_MAX_AGE_DAYS} days ago" +%Y%m%dT%H%M%SZ)"
+  # Directory names start with the UTC timestamp: newest first after sort -r.
+  mapfile -t names < <(find "$RELEASE_BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -r)
+  for name in "${names[@]}"; do
+    # Only directories this script created (<UTC timestamp>-<commit>).
+    [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9a-f]+$ ]] || continue
+    position=$((position + 1))
+    [[ "$name" == "$current" ]] && continue
+    if (( position > RELEASE_BACKUP_KEEP )) || [[ "${name%%-*}" < "$cutoff" ]]; then
+      echo "Removing release backup $name (keeping the newest ${RELEASE_BACKUP_KEEP}, none older than ${RELEASE_BACKUP_MAX_AGE_DAYS} days)"
+      rm -rf -- "${RELEASE_BACKUP_ROOT:?}/$name"
+    fi
+  done
+}
+
+# After a successful deploy the dump and the files that contain secrets are
+# encrypted for the backup recipients (the same public keys as the daily
+# backup) and the readable originals are removed. Until then they stay
+# readable, so a failed upgrade can be undone at once without the offline
+# private key. Later use: `age -d -i <backup private key> <file>.age`.
+# Without BACKUP_AGE_RECIPIENTS the files stay as they are (root-only).
+# Never fails the deploy: it runs after the new release is healthy.
+seal_release_backups() {
+  local directory name file
+  if [[ -z "${BACKUP_AGE_RECIPIENTS:-}" ]] || ! command -v age >/dev/null 2>&1; then
+    echo "Release backups stay unencrypted (root-only): BACKUP_AGE_RECIPIENTS or age is missing."
+    return 0
+  fi
+  [[ -d "$RELEASE_BACKUP_ROOT" ]] || return 0
+  while IFS= read -r directory; do
+    for name in database-before-upgrade.dump previous-release.env release.env postgres-container.json; do
+      file="$directory/$name"
+      [[ -f "$file" ]] || continue
+      if (umask 077; age -e -R <(printf '%s\n' "$BACKUP_AGE_RECIPIENTS") -o "$file.age.partial" "$file") &&
+         [[ -s "$file.age.partial" ]]; then
+        mv -f -- "$file.age.partial" "$file.age"
+        rm -f -- "$file"
+      else
+        rm -f -- "$file.age.partial"
+        echo "WARN: could not encrypt $file; it stays readable for root only."
+        return 0
+      fi
+    done
+  done < <(find "$RELEASE_BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d)
+  echo "Release backups encrypted for the backup recipients."
+}
+
 if [[ "$UPGRADE_ONLY" == "true" ]]; then
-  upgrade_backup_dir="/var/backups/gmed/releases/$(date -u +%Y%m%dT%H%M%SZ)-$(git -C "$REPO_DIR" rev-parse --short=12 HEAD)"
-  install -d -m 700 "$upgrade_backup_dir"
+  upgrade_backup_name="$(date -u +%Y%m%dT%H%M%SZ)-$(git -C "$REPO_DIR" rev-parse --short=12 HEAD)"
+  upgrade_backup_dir="$RELEASE_BACKUP_ROOT/$upgrade_backup_name"
+  # Root-only all the way down: the directory names alone list every release.
+  install -d -o root -g root -m 700 "$(dirname "$RELEASE_BACKUP_ROOT")" "$RELEASE_BACKUP_ROOT" "$upgrade_backup_dir"
   install -m 600 "$RELEASE_ENV" "$upgrade_backup_dir/previous-release.env"
   install -m 600 "$REPO_DIR/$IMAGE_PINS_PATH" "$upgrade_backup_dir/previous-images.pins"
-  docker ps --format '{{.Names}} {{.Image}}' > "$upgrade_backup_dir/previous-containers.txt"
+  (umask 077; docker ps --format '{{.Names}} {{.Image}}' > "$upgrade_backup_dir/previous-containers.txt")
 fi
 
 # Refresh the repo. `git reset --hard` discards any local drift; PROD
@@ -201,13 +282,55 @@ install -m 600 "$TMP_ENV" "$RELEASE_ENV"
 set -a
 # shellcheck disable=SC1090
 . "$RELEASE_ENV"
+set +a
+
 # Image digests are public release metadata, not secrets. Keep them in a
 # separately reviewable Git-tracked file so promoting a signed release never
-# requires distributing the production age private key. The repository is
-# already the trusted source of this root-run deployment script.
-# shellcheck disable=SC1090
-. "$REPO_DIR/$IMAGE_PINS_PATH"
-set +a
+# requires distributing the production age private key.
+#
+# The file is read as DATA, never executed: only comments, blank lines and
+# exactly one `KEY=value` line for each of the four image variables are
+# accepted, and the value must be the expected GHCR repository pinned by a
+# sha256 digest. Anything else (another variable, a command, a duplicate, a
+# missing image) stops the deploy before a single image is verified or pulled.
+load_image_pins() {
+  local file="$1" line key ref repository count=0
+  local -A seen=()
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    key="${line%%=*}"
+    ref="${line#*=}"
+    case "$key" in
+      GMED_BACKEND_IMAGE) repository=gmed-crm-server ;;
+      GMED_FRONTEND_IMAGE) repository=gmed-crm-frontend ;;
+      GMED_PARSER_IMAGE) repository=gmed-crm-clinical-document-parser ;;
+      GMED_INVOICE_PARSER_IMAGE) repository=gmed-crm-invoice-parser ;;
+      *)
+        echo "ERROR: $file: only the four GMED_*_IMAGE pins are allowed; unexpected line." >&2
+        return 1
+        ;;
+    esac
+    if [[ "$line" != "$key=$ref" || -n "${seen[$key]:-}" ||
+          ! "$ref" =~ ^ghcr\.io/oleksandrmelnychenko/${repository}@sha256:[0-9a-f]{64}$ ]]; then
+      echo "ERROR: $file: invalid or duplicate image pin for $key." >&2
+      return 1
+    fi
+    seen[$key]="$ref"
+    count=$((count + 1))
+  done < "$file"
+  if [[ "$count" -ne 4 ]]; then
+    echo "ERROR: $file must pin all four images (backend, frontend, parser, invoice parser)." >&2
+    return 1
+  fi
+  # Exported so Docker Compose uses these refs instead of any older value
+  # that is still present in release.env.
+  export GMED_BACKEND_IMAGE="${seen[GMED_BACKEND_IMAGE]}"
+  export GMED_FRONTEND_IMAGE="${seen[GMED_FRONTEND_IMAGE]}"
+  export GMED_PARSER_IMAGE="${seen[GMED_PARSER_IMAGE]}"
+  export GMED_INVOICE_PARSER_IMAGE="${seen[GMED_INVOICE_PARSER_IMAGE]}"
+}
+load_image_pins "$REPO_DIR/$IMAGE_PINS_PATH"
 
 # An ordinary release upgrade must never become a first-install data reset,
 # even if the host's bootstrap marker is missing or its old SOPS flags remain.
@@ -288,15 +411,32 @@ if [[ -n "${BACKUP_S3_ENDPOINT:-}" && -n "${BACKUP_S3_BUCKET:-}" && \
 fi
 
 # Install cosign from upstream releases (Ubuntu apt does not ship it).
-# Pinned by version + verified by the binary's own self-test on first
-# invocation. The download URL is HTTPS to github.com which we already
-# trust for the repo clone.
-if [[ ! -x /usr/local/bin/cosign ]] || ! /usr/local/bin/cosign version 2>/dev/null | grep -q "${COSIGN_VERSION#v}"; then
-  ARCH="$(dpkg --print-architecture)"   # arm64 | amd64
-  curl -fsSL \
-    "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-${ARCH}" \
-    -o /usr/local/bin/cosign
-  chmod +x /usr/local/bin/cosign
+# The binary decides whether an image may run, so it is pinned by version
+# AND by the sha256 from the release's cosign_checksums.txt (same rule as
+# rclone above). The binary already on the host is checked against the same
+# checksum on every deploy; a different file is replaced. The download is
+# verified in a temporary directory and installed only after it matches.
+COSIGN_ARCH="$(dpkg --print-architecture)"   # arm64 | amd64
+case "$COSIGN_ARCH" in
+  amd64) cosign_sha256="$cosign_sha256_amd64" ;;
+  arm64) cosign_sha256="$cosign_sha256_arm64" ;;
+  *)
+    echo "ERROR: no pinned cosign checksum for architecture $COSIGN_ARCH." >&2
+    exit 1
+    ;;
+esac
+if [[ ! -x /usr/local/bin/cosign ]] ||
+   [[ "$(sha256sum /usr/local/bin/cosign | cut -d' ' -f1)" != "$cosign_sha256" ]]; then
+  (
+    COSIGN_TMP_DIR="$(mktemp -d)"
+    trap 'rm -rf "$COSIGN_TMP_DIR"' EXIT
+    cd "$COSIGN_TMP_DIR"
+    curl -fsSL \
+      "https://github.com/sigstore/cosign/releases/download/${cosign_version}/cosign-linux-${COSIGN_ARCH}" \
+      -o cosign
+    printf '%s  cosign\n' "$cosign_sha256" | sha256sum -c -
+    install -o root -g root -m 755 cosign /usr/local/bin/cosign
+  )
 fi
 
 # Cosign keyless verification. Each image ref MUST be digest-pinned
@@ -328,8 +468,8 @@ for image_var in GMED_BACKEND_IMAGE GMED_FRONTEND_IMAGE GMED_PARSER_IMAGE GMED_I
   fi
   echo "Verifying cosign signature on $ref"
   /usr/local/bin/cosign verify \
-    --certificate-identity-regexp "$COSIGN_CERT_IDENTITY_REGEXP" \
-    --certificate-oidc-issuer "$COSIGN_OIDC_ISSUER" \
+    --certificate-identity-regexp "$cosign_cert_identity_regexp" \
+    --certificate-oidc-issuer "$cosign_oidc_issuer" \
     "$ref" >/dev/null
 done
 
@@ -381,6 +521,23 @@ EOF
   chmod 600 /etc/cron.d/gmed-app-healthcheck
 else
   rm -f /etc/cron.d/gmed-app-healthcheck
+fi
+
+# GMED_METRICS_BIND_ADDR (optional, secrets bundle) binds the metrics and
+# monitoring ports to one address, normally this host's Tailscale IPv4
+# address. A wrong or not yet assigned address would stop the containers that
+# publish on it from starting, so it is checked before Compose runs.
+if [[ -n "${GMED_METRICS_BIND_ADDR:-}" ]]; then
+  if [[ ! "$GMED_METRICS_BIND_ADDR" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    echo "ERROR: GMED_METRICS_BIND_ADDR must be an IPv4 address. Got: $GMED_METRICS_BIND_ADDR" >&2
+    exit 1
+  fi
+  if [[ "$GMED_METRICS_BIND_ADDR" != "0.0.0.0" ]] &&
+     ! ip -4 -o addr show | grep -qF " ${GMED_METRICS_BIND_ADDR}/"; then
+    echo "ERROR: GMED_METRICS_BIND_ADDR=$GMED_METRICS_BIND_ADDR is not an address of this host (is Tailscale up?)." >&2
+    exit 1
+  fi
+  echo "Metrics and monitoring ports bind to $GMED_METRICS_BIND_ADDR"
 fi
 
 compose_cmd=(
@@ -487,7 +644,7 @@ verify_sanitized_production_database() {
   local counts=""
   local users admins patients leads cases orders invoices documents appointments tasks
 
-  counts="$(docker exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" gmed-postgres \
+  counts="$(PGPASSWORD="$POSTGRES_PASSWORD" docker exec -i -e PGPASSWORD gmed-postgres \
     psql \
       --quiet \
       --tuples-only \
@@ -530,9 +687,13 @@ SQL
 
 if [[ "$UPGRADE_ONLY" == "true" ]]; then
   install -m 600 "$RELEASE_ENV" "$upgrade_backup_dir/release.env"
-  docker inspect gmed-postgres > "$upgrade_backup_dir/postgres-container.json"
+  # The container description includes its environment (database password).
+  (umask 077; docker inspect gmed-postgres > "$upgrade_backup_dir/postgres-container.json")
   python3 "$REPO_DIR/scripts/preflight-prod-migrations.py" \
     --migrations "$REPO_DIR/migrations" --backup-dir "$upgrade_backup_dir"
+  # Older release backups go only now, when this upgrade has its own complete
+  # dump and a passed rehearsal.
+  prune_release_backups "$upgrade_backup_name"
 fi
 
 sanitized_this_run=false
@@ -570,7 +731,7 @@ login_preservation_migrations=(
 for login_preservation_migration in "${login_preservation_migrations[@]}"; do
   if [[ -r "$login_preservation_migration" ]]; then
     echo "Applying $(basename "$login_preservation_migration")"
-    docker exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" gmed-postgres \
+    PGPASSWORD="$POSTGRES_PASSWORD" docker exec -i -e PGPASSWORD gmed-postgres \
       psql \
         --quiet \
         --no-psqlrc \
@@ -614,11 +775,14 @@ docker image prune -f --filter "until=24h"
 
 date -u +%Y-%m-%dT%H:%M:%SZ > /etc/gmed/deploy.last
 git rev-parse HEAD > /etc/gmed/deploy.revision
-docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" gmed-postgres \
+PGPASSWORD="$POSTGRES_PASSWORD" docker exec -e PGPASSWORD gmed-postgres \
   psql -X -qAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "${POSTGRES_DB:-gmed}" \
   -c "SELECT 'Successful migrations: ' || count(*) FROM _sqlx_migrations WHERE success"
 for service in backend frontend clinical-document-parser machine-translation invoice-parser; do
   cid="$("${compose_cmd[@]}" ps -q "$service")"
   docker inspect -f '{{.Name}} {{.Config.Image}} status={{.State.Status}} restarts={{.RestartCount}} {{if .State.Health}}health={{.State.Health.Status}}{{end}}' "$cid"
 done
+if [[ "$UPGRADE_ONLY" == "true" ]]; then
+  seal_release_backups || echo "WARN: release backups were not encrypted."
+fi
 echo "Deploy complete."

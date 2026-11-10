@@ -7,6 +7,7 @@
 //! `openssl ts -verify` against the TSA certificate (see the export's
 //! README), so no certificate store has to be maintained here.
 
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -212,35 +213,166 @@ pub fn parse_response(
     Ok(gen_time)
 }
 
+/// Whether a request may go to `ip`: a public unicast address. Loopback,
+/// private, link-local, unspecified and other special-purpose ranges are
+/// the server's own network, never a time-stamping authority.
+fn is_public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => is_public_ipv4(ip),
+        IpAddr::V6(ip) => {
+            if let Some(mapped) = ip.to_ipv4_mapped() {
+                return is_public_ipv4(mapped);
+            }
+            let segments = ip.segments();
+            // NAT64 (64:ff9b::/96) carries an IPv4 address.
+            if segments[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
+                let [a, b] = segments[6].to_be_bytes();
+                let [c, d] = segments[7].to_be_bytes();
+                return is_public_ipv4(Ipv4Addr::new(a, b, c, d));
+            }
+            !(ip.is_unspecified()
+                || ip.is_loopback()
+                || ip.is_multicast()
+                // Unique local fc00::/7, link-local fe80::/10, site-local fec0::/10.
+                || (segments[0] & 0xfe00) == 0xfc00
+                || (segments[0] & 0xffc0) == 0xfe80
+                || (segments[0] & 0xffc0) == 0xfec0
+                // IPv4-compatible ::a.b.c.d and the documentation range.
+                || segments[..6] == [0, 0, 0, 0, 0, 0]
+                || (segments[0] == 0x2001 && segments[1] == 0x0db8))
+        }
+    }
+}
+
+fn is_public_ipv4(ip: Ipv4Addr) -> bool {
+    let octets = ip.octets();
+    !(ip.is_unspecified()
+        || ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_broadcast()
+        || ip.is_multicast()
+        || ip.is_documentation()
+        // 0.0.0.0/8, carrier-grade NAT 100.64.0.0/10, 192.0.0.0/24,
+        // benchmarking 198.18.0.0/15 and the reserved 240.0.0.0/4.
+        || octets[0] == 0
+        || (octets[0] == 100 && (octets[1] & 0xC0) == 64)
+        || (octets[0] == 192 && octets[1] == 0 && octets[2] == 0)
+        || (octets[0] == 198 && (octets[1] & 0xFE) == 18)
+        || octets[0] >= 240)
+}
+
+/// The host of a URL when it is an IP literal (`[::1]` comes in brackets).
+fn host_ip(host: &str) -> Option<IpAddr> {
+    host.strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(host)
+        .parse()
+        .ok()
+}
+
+/// The address of a time-stamping authority as it is accepted: `https`, no
+/// credentials, and a host that is a public address or a qualified public
+/// name. A single-label name (`postgres`), `localhost` and the names of a
+/// local network are refused, so the setting cannot point the server at its
+/// own network. What a name resolves to is checked before each request
+/// ([`request_time_stamp`]).
+pub(crate) fn parse_tsa_url(value: &str) -> Result<reqwest::Url, &'static str> {
+    let url = reqwest::Url::parse(value).map_err(|_| "the URL is malformed")?;
+    if url.scheme() != "https" {
+        return Err("the URL must use https");
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("the URL must not carry credentials");
+    }
+    let host = url.host_str().ok_or("the URL has no host")?;
+    match host_ip(host) {
+        Some(ip) if is_public_ip(ip) => {}
+        Some(_) => return Err("the address is not a public one"),
+        None => {
+            let name = host.trim_end_matches('.').to_ascii_lowercase();
+            if !name.contains('.')
+                || [".localhost", ".local", ".internal", ".lan", ".home.arpa"]
+                    .iter()
+                    .any(|suffix| name.ends_with(*suffix))
+            {
+                return Err("the host is not a public name");
+            }
+        }
+    }
+    Ok(url)
+}
+
+/// The addresses the request goes to: the literal address, or everything the
+/// name resolves to — refused as a whole when any of them is not public.
+async fn public_addresses(host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
+    if let Some(ip) = host_ip(host) {
+        return Ok(vec![SocketAddr::new(ip, port)]);
+    }
+    let addresses: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|error| {
+            tracing::warn!(%error, "time-stamping authority host lookup failed");
+            "time-stamping authority host does not resolve".to_string()
+        })?
+        .collect();
+    if addresses.is_empty() {
+        return Err("time-stamping authority host does not resolve".into());
+    }
+    if addresses.iter().any(|address| !is_public_ip(address.ip())) {
+        return Err("time-stamping authority host resolves to a non-public address".into());
+    }
+    Ok(addresses)
+}
+
 /// Requests a time stamp for `digest` from the TSA at `url`.
+///
+/// The address is checked again here ([`parse_tsa_url`]: a value stored
+/// before the rule is refused too), the host must resolve to public
+/// addresses only, the connection goes to exactly those addresses, and no
+/// redirect is followed. Failures are reported without the peer's details.
 pub async fn request_time_stamp(url: &str, digest: &[u8; 32]) -> Result<TimeStamp, String> {
+    let endpoint = parse_tsa_url(url)
+        .map_err(|problem| format!("time-stamping authority address refused: {problem}"))?;
+    let host = endpoint.host_str().unwrap_or_default().to_string();
+    let port = endpoint.port_or_known_default().unwrap_or(443);
+    let addresses = public_addresses(&host, port).await?;
     let mut nonce: [u8; 8] = rand::random();
     nonce[0] = (nonce[0] & 0x7F).max(1);
     let request = build_request(digest, &nonce);
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(3))
+    let mut builder = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(30));
+    if host_ip(&host).is_none() {
+        // The checked addresses are the ones used: a second lookup could
+        // answer differently.
+        builder = builder.resolve_to_addrs(&host, &addresses);
+    }
+    let client = builder
         .build()
         .map_err(|error| format!("http client: {error}"))?;
     let response = client
-        .post(url)
+        .post(endpoint)
         .header(reqwest::header::CONTENT_TYPE, "application/timestamp-query")
         .header(reqwest::header::ACCEPT, "application/timestamp-reply")
         .body(request)
         .send()
         .await
-        .map_err(|error| format!("time-stamping authority unreachable: {error}"))?;
+        .map_err(|error| {
+            tracing::warn!(error = %error.without_url(), "time-stamping authority request failed");
+            "time-stamping authority unreachable".to_string()
+        })?;
     if !response.status().is_success() {
         return Err(format!(
             "time-stamping authority answered HTTP {}",
             response.status().as_u16()
         ));
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| format!("time-stamping authority response: {error}"))?;
+    let bytes = response.bytes().await.map_err(|error| {
+        tracing::warn!(error = %error.without_url(), "time-stamping authority response failed");
+        "time-stamping authority response could not be read".to_string()
+    })?;
     if bytes.len() > 64 * 1024 {
         return Err("time-stamping authority response is too large".into());
     }
@@ -381,5 +513,113 @@ mod tests {
                 .contains("refused")
         );
         assert!(parse_response(&[0x30, 0x05, 0x01], &digest, &nonce).is_err());
+    }
+
+    #[test]
+    fn only_public_addresses_are_reachable() {
+        for address in [
+            "0.0.0.0",
+            "0.1.2.3",
+            "127.0.0.1",
+            "127.8.9.10",
+            "10.0.0.5",
+            "172.16.0.1",
+            "172.31.255.255",
+            "192.168.1.1",
+            "169.254.169.254",
+            "100.64.0.1",
+            "192.0.0.8",
+            "198.18.0.1",
+            "224.0.0.1",
+            "240.0.0.1",
+            "255.255.255.255",
+            "::",
+            "::1",
+            "::ffff:127.0.0.1",
+            "::ffff:10.0.0.5",
+            "::10.0.0.5",
+            "64:ff9b::a00:5",
+            "fc00::1",
+            "fd12:3456::1",
+            "fe80::1",
+            "fec0::1",
+            "ff02::1",
+            "2001:db8::1",
+        ] {
+            let ip: IpAddr = address.parse().unwrap();
+            assert!(!is_public_ip(ip), "{address}");
+        }
+        for address in [
+            "8.8.8.8",
+            "172.15.0.1",
+            "172.32.0.1",
+            "100.128.0.1",
+            "198.20.0.1",
+            "::ffff:8.8.8.8",
+            "64:ff9b::808:808",
+            "2606:4700:4700::1111",
+        ] {
+            let ip: IpAddr = address.parse().unwrap();
+            assert!(is_public_ip(ip), "{address}");
+        }
+    }
+
+    #[test]
+    fn the_address_must_be_https_on_a_public_host() {
+        for url in [
+            "https://timestamp.sectigo.com",
+            "https://timestamp.digicert.com/",
+            "https://tsa.example.org:8443/tsr?policy=1",
+            "https://TSA.Example.org./tsr",
+            "https://8.8.8.8/tsa",
+            "https://[2606:4700:4700::1111]/tsa",
+        ] {
+            assert!(parse_tsa_url(url).is_ok(), "{url}");
+        }
+        for url in [
+            "",
+            "tsa.example.org",
+            "http://timestamp.sectigo.com",
+            "ftp://tsa.example.org",
+            "file:///etc/passwd",
+            "https://",
+            "https://user:secret@tsa.example.org",
+            "https://user@tsa.example.org",
+            // Single-label and local names.
+            "https://postgres",
+            "https://postgres:5432/",
+            "https://localhost/tsa",
+            "https://backend.localhost/tsa",
+            "https://printer.local",
+            "https://db.internal",
+            "https://nas.lan",
+            // Address literals of the own network, in every notation.
+            "https://127.0.0.1/tsa",
+            "https://127.1/tsa",
+            "https://2130706433/tsa",
+            "https://0x7f.0.0.1/tsa",
+            "https://10.0.0.5",
+            "https://192.168.1.10:8200/v1/sys",
+            "https://169.254.169.254/latest/meta-data/",
+            "https://0.0.0.0",
+            "https://[::1]/tsa",
+            "https://[::ffff:127.0.0.1]/tsa",
+            "https://[fe80::1]/tsa",
+            "https://[fd00::1]/tsa",
+        ] {
+            assert!(parse_tsa_url(url).is_err(), "{url}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_refused_address_is_never_requested() {
+        for url in [
+            "http://timestamp.sectigo.com",
+            "https://127.0.0.1:9/tsa",
+            "https://postgres/tsa",
+        ] {
+            let problem = request_time_stamp(url, &[0x11; 32]).await.unwrap_err();
+            assert!(problem.contains("address refused"), "{url}: {problem}");
+        }
     }
 }

@@ -2947,11 +2947,29 @@ async fn reverse_patient_balance_adjustment(
     Json(serde_json::json!({ "reversal_id": reversal_id })).into_response()
 }
 
-fn csv_escape(value: &str) -> String {
-    if value.contains([',', '"', '\n']) {
-        format!("\"{}\"", value.replace('"', "\"\""))
+/// A spreadsheet runs a cell that starts with `=`, `+`, `-`, `@`, tab or CR as
+/// a formula: such text gets a leading apostrophe (as in the personnel
+/// export). A plain signed number ("-12.50") stays numeric.
+fn neutralise_csv_formula(value: &str) -> String {
+    let plain_number = value.strip_prefix(['+', '-']).is_some_and(|rest| {
+        rest.starts_with(|ch: char| ch.is_ascii_digit())
+            && rest
+                .chars()
+                .all(|ch| ch.is_ascii_digit() || ch == '.' || ch == ',')
+    });
+    if value.starts_with(['=', '+', '-', '@', '\t', '\r']) && !plain_number {
+        format!("'{value}")
     } else {
         value.to_string()
+    }
+}
+
+fn csv_escape(value: &str) -> String {
+    let value = neutralise_csv_formula(value);
+    if value.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value
     }
 }
 
@@ -3107,4 +3125,32 @@ async fn export_patient_financial_ledger(
         csv,
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod csv_escape_tests {
+    use super::csv_escape;
+
+    #[test]
+    fn text_that_starts_a_formula_is_neutralised() {
+        assert_eq!(csv_escape("=1+1"), "'=1+1");
+        assert_eq!(csv_escape("=SUM(A1,A2)"), "\"'=SUM(A1,A2)\"");
+        assert_eq!(csv_escape("+49 170 1"), "'+49 170 1");
+        assert_eq!(
+            csv_escape("-2+3+cmd|' /C calc'!A0"),
+            "'-2+3+cmd|' /C calc'!A0"
+        );
+        assert_eq!(csv_escape("@SUM(A1)"), "'@SUM(A1)");
+        assert_eq!(csv_escape("\t=1"), "'\t=1");
+        assert_eq!(csv_escape("\r=1"), "\"'\r=1\"");
+    }
+
+    #[test]
+    fn amounts_and_plain_text_are_unchanged() {
+        assert_eq!(csv_escape("-12.50"), "-12.50");
+        assert_eq!(csv_escape("12.50"), "12.50");
+        assert_eq!(csv_escape("2026-10-12"), "2026-10-12");
+        assert_eq!(csv_escape("Anna Muster"), "Anna Muster");
+        assert_eq!(csv_escape("Muster, Anna"), "\"Muster, Anna\"");
+    }
 }

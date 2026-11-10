@@ -4474,11 +4474,29 @@ async fn load_forecast_clinic_capacity(state: &AppState) -> Result<Value, sqlx::
     }))
 }
 
+/// A spreadsheet runs a cell that starts with `=`, `+`, `-`, `@`, tab or CR as
+/// a formula: such text gets a leading apostrophe (as in the personnel
+/// export). A plain signed number ("-12.50") stays numeric.
+fn neutralise_csv_formula(value: &str) -> String {
+    let plain_number = value.strip_prefix(['+', '-']).is_some_and(|rest| {
+        rest.starts_with(|ch: char| ch.is_ascii_digit())
+            && rest
+                .chars()
+                .all(|ch| ch.is_ascii_digit() || ch == '.' || ch == ',')
+    });
+    if value.starts_with(['=', '+', '-', '@', '\t', '\r']) && !plain_number {
+        format!("'{value}")
+    } else {
+        value.to_string()
+    }
+}
+
 fn csv_escape(value: &str) -> String {
+    let value = neutralise_csv_formula(value);
     if value.contains(',') || value.contains('"') || value.contains('\n') || value.contains('\r') {
         format!("\"{}\"", value.replace('"', "\"\""))
     } else {
-        value.to_string()
+        value
     }
 }
 
@@ -5705,6 +5723,19 @@ fn dashboard_roles() -> [Role; 6] {
     ]
 }
 
+/// Who reads `cases.hauptanfragegrund` on the dashboard: the roles that read
+/// the clinical record. Mirrors `can_read_clinical_record` in
+/// `routes/patients.rs`: `patients.medical.view`, and never the interpreter
+/// or its team lead.
+fn can_read_case_reasons(auth: &AuthUser) -> bool {
+    role_reads_case_reasons(auth.role)
+}
+
+fn role_reads_case_reasons(role: Role) -> bool {
+    role.can(Capability::PatientsMedicalView)
+        && !matches!(role, Role::Interpreter | Role::TeamleadInterpreter)
+}
+
 async fn dashboard_demographics(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -5756,9 +5787,15 @@ async fn dashboard_clinical(
 
     let clause = dashboard_period_clause(&q.period, "created_at");
 
-    let top_case_reasons = load_top_case_reasons(&state, &clause)
-        .await
-        .unwrap_or_default();
+    // The main request reason is free text from the case anamnesis, part of
+    // the clinical record: the other dashboard roles get no reasons.
+    let top_case_reasons = if can_read_case_reasons(&auth) {
+        load_top_case_reasons(&state, &clause)
+            .await
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     let cases_by_status = load_cases_by_status(&state, &clause)
         .await
         .unwrap_or_else(|_| json!({}));
@@ -6231,5 +6268,62 @@ mod hours_approval_rate_tests {
             Some(0.0)
         );
         assert_eq!(hours_approval_rate_pct(Decimal::ZERO, Decimal::ZERO), None);
+    }
+}
+
+#[cfg(test)]
+mod csv_escape_tests {
+    use super::{csv_escape, csv_row};
+
+    #[test]
+    fn text_that_starts_a_formula_is_neutralised() {
+        assert_eq!(csv_escape("=1+1"), "'=1+1");
+        assert_eq!(csv_escape("=SUM(A1,A2)"), "\"'=SUM(A1,A2)\"");
+        assert_eq!(csv_escape("+49 170 1"), "'+49 170 1");
+        assert_eq!(
+            csv_escape("-2+3+cmd|' /C calc'!A0"),
+            "'-2+3+cmd|' /C calc'!A0"
+        );
+        assert_eq!(csv_escape("@SUM(A1)"), "'@SUM(A1)");
+        assert_eq!(csv_escape("\t=1"), "'\t=1");
+        assert_eq!(csv_escape("\r=1"), "\"'\r=1\"");
+    }
+
+    #[test]
+    fn numbers_and_plain_text_are_unchanged() {
+        assert_eq!(
+            csv_row(&[
+                "Klinik A".to_string(),
+                "-12.50".to_string(),
+                "-3".to_string(),
+                "4.5".to_string(),
+                "=cmd".to_string(),
+            ]),
+            "Klinik A,-12.50,-3,4.5,'=cmd"
+        );
+        assert_eq!(csv_escape("Muster, Anna"), "\"Muster, Anna\"");
+    }
+}
+
+#[cfg(test)]
+mod case_reason_access_tests {
+    use super::role_reads_case_reasons;
+    use gmed_domain::role::Role;
+
+    #[test]
+    fn only_clinical_record_readers_get_the_case_reasons() {
+        for role in [Role::Ceo, Role::CeoAssistant, Role::PatientManager] {
+            assert!(role_reads_case_reasons(role), "{role:?}");
+        }
+        for role in [
+            Role::TeamleadInterpreter,
+            Role::Interpreter,
+            Role::Billing,
+            Role::Sales,
+            Role::Concierge,
+            Role::ItAdmin,
+        ] {
+            assert!(!role_reads_case_reasons(role), "{role:?}");
+        }
     }
 }

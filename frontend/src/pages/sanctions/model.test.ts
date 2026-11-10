@@ -236,6 +236,18 @@ describe("list entry display", () => {
     );
     expect(safeLegalActUrl("javascript:alert(1)")).toBeNull();
     expect(safeLegalActUrl("https://example.com/x")).toBeNull();
+    // Older acts in the EU list use plain HTTP: the link is upgraded.
+    expect(safeLegalActUrl("http://eur-lex.europa.eu/LexUriServ/LexUriServ.do?uri=OJ:L:2099:001:0001:0002:EN:PDF")).toBe(
+      "https://eur-lex.europa.eu/LexUriServ/LexUriServ.do?uri=OJ:L:2099:001:0001:0002:EN:PDF",
+    );
+    // No other europa.eu host, no look-alike, no credentials or foreign port.
+    expect(safeLegalActUrl("https://evil.europa.eu/x")).toBeNull();
+    expect(safeLegalActUrl("https://webgate.ec.europa.eu/fsd/fsf")).toBeNull();
+    expect(safeLegalActUrl("https://eur-lex.europa.eu.example.com/x")).toBeNull();
+    expect(safeLegalActUrl("https://user:pw@eur-lex.europa.eu/x")).toBeNull();
+    expect(safeLegalActUrl("http://eur-lex.europa.eu:8080/x")).toBeNull();
+    expect(safeLegalActUrl("ftp://eur-lex.europa.eu/x")).toBeNull();
+    expect(safeLegalActUrl(undefined)).toBeNull();
     expect(scorePercent(0.9612)).toBe("96 %");
   });
 

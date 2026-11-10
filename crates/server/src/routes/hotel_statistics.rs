@@ -50,6 +50,13 @@ fn allowed(auth: &AuthUser) -> Result<(), Response> {
     ])
 }
 
+/// Room and breakfast details are changed by the roles that save the hotel
+/// breakfast terms (`breakfast_terms::save`): CEO, PM and Concierge. Billing
+/// and the CEO assistant read the report only (docs/architecture/hotel-statistics.md).
+fn allowed_to_write(auth: &AuthUser) -> Result<(), Response> {
+    auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge])
+}
+
 fn error(status: StatusCode, message: &str) -> Response {
     (status, Json(json!({ "error": message }))).into_response()
 }
@@ -72,6 +79,30 @@ mod hotel_access_tests {
         for role in [Role::Patient, Role::Sales, Role::Interpreter] {
             auth.role = role;
             assert_eq!(allowed(&auth).unwrap_err().status(), StatusCode::FORBIDDEN);
+        }
+    }
+
+    #[test]
+    fn billing_and_assistant_read_but_do_not_write() {
+        let mut auth = AuthUser {
+            selected_patient_id: None,
+            user_id: Uuid::nil(),
+            role: Role::Billing,
+            family_id: Uuid::nil(),
+            access_token_jti: Uuid::nil(),
+            access_token_expires_at: Utc::now(),
+        };
+        for role in [Role::Billing, Role::CeoAssistant] {
+            auth.role = role;
+            assert!(allowed(&auth).is_ok());
+            assert_eq!(
+                allowed_to_write(&auth).unwrap_err().status(),
+                StatusCode::FORBIDDEN
+            );
+        }
+        for role in [Role::Ceo, Role::PatientManager, Role::Concierge] {
+            auth.role = role;
+            assert!(allowed_to_write(&auth).is_ok());
         }
     }
 }
@@ -188,11 +219,8 @@ async fn update_breakfast(
     Path((source, id)): Path<(String, Uuid)>,
     Json(body): Json<Breakfast>,
 ) -> Response {
-    if let Err(response) = allowed(&auth) {
+    if let Err(response) = allowed_to_write(&auth) {
         return response;
-    }
-    if auth.role == Role::CeoAssistant {
-        return error(StatusCode::FORBIDDEN, "Read-only access");
     }
     if !matches!(source.as_str(), "service" | "task") || !body.valid() {
         return error(
@@ -286,11 +314,8 @@ async fn update_rooms(
     Path((source, id)): Path<(String, Uuid)>,
     Json(body): Json<RoomCount>,
 ) -> Response {
-    if let Err(response) = allowed(&auth) {
+    if let Err(response) = allowed_to_write(&auth) {
         return response;
-    }
-    if auth.role == Role::CeoAssistant {
-        return error(StatusCode::FORBIDDEN, "Read-only access");
     }
     if !matches!(source.as_str(), "service" | "task")
         || body

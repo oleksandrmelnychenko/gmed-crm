@@ -588,19 +588,103 @@ pub enum Target {
     BodyDocuments,
 }
 
-/// Maps a mutating request to its target and rule; `None` = not guarded.
+/// A guarded route whose id segment is no UUID: the request is refused instead
+/// of passing as "not guarded" (fail closed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MalformedId;
+
+impl MalformedId {
+    pub fn response(self) -> Response {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "invalid_path_id",
+                "message": "The id in the path is not valid",
+            })),
+        )
+            .into_response()
+    }
+}
+
+/// Decodes `%XX` like axum does before `Path<Uuid>`; a segment that is not
+/// valid percent-encoded UTF-8 stays as it is (and is no id).
+fn percent_decode(segment: &str) -> String {
+    if !segment.contains('%') {
+        return segment.to_owned();
+    }
+    let hex = |byte: u8| (byte as char).to_digit(16).map(|digit| digit as u8);
+    let bytes = segment.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && let Some(high) = bytes.get(index + 1).copied().and_then(hex)
+            && let Some(low) = bytes.get(index + 2).copied().and_then(hex)
+        {
+            decoded.push(high * 16 + low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).unwrap_or_else(|_| segment.to_owned())
+}
+
+/// The path segments below `/api/v1`, as sent.
+fn raw_segments(path: &str) -> Vec<&str> {
+    let path = path.strip_prefix("/api/v1").unwrap_or(path);
+    path.trim_matches('/').split('/').collect()
+}
+
+/// The path segments below `/api/v1`, percent-decoded one by one (an encoded
+/// slash never splits a segment).
+pub(crate) fn decoded_segments(path: &str) -> Vec<String> {
+    let mut segments: Vec<String> = path
+        .trim_matches('/')
+        .split('/')
+        .map(percent_decode)
+        .collect();
+    if segments.len() >= 2 && segments[0] == "api" && segments[1] == "v1" {
+        segments.drain(..2);
+    }
+    segments
+}
+
+/// Maps a mutating request to its target and rule; `None` = not guarded. A
+/// guarded route with a malformed id is `None` here; the middleware uses
+/// [`route`], which refuses it.
 pub fn classify(method: &Method, path: &str) -> Option<(Target, Rule)> {
+    route(method, path).ok().flatten()
+}
+
+/// [`classify`] on the path as axum routes it: the handler gets percent-decoded
+/// path parameters, so the segments are decoded before matching. A route
+/// counts as guarded when either the decoded or the raw segments say so (an
+/// encoded literal never moves a request into an unguarded arm).
+pub fn route(method: &Method, path: &str) -> Result<Option<(Target, Rule)>, MalformedId> {
+    let decoded = decoded_segments(path);
+    let decoded: Vec<&str> = decoded.iter().map(String::as_str).collect();
+    let raw = raw_segments(path);
+    match classify_segments(method, &decoded) {
+        Ok(None) if decoded != raw => classify_segments(method, &raw),
+        outcome => outcome,
+    }
+}
+
+fn classify_segments(
+    method: &Method,
+    segments: &[&str],
+) -> Result<Option<(Target, Rule)>, MalformedId> {
     if !matches!(
         *method,
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE
     ) {
-        return None;
+        return Ok(None);
     }
-    let path = path.strip_prefix("/api/v1").unwrap_or(path);
-    let segments: Vec<&str> = path.trim_matches('/').split('/').collect();
-    let id = |value: &str| Uuid::parse_str(value).ok();
+    let id = |value: &str| Uuid::parse_str(value).map_err(|_| MalformedId);
     use GateAction::*;
-    match segments.as_slice() {
+    Ok(match segments {
         ["leads", lead, "qualify"] => Some((Target::Lead(id(lead)?), Rule::LeadQualify)),
         ["leads", lead, "convert" | "wizard-convert"] => {
             Some((Target::Lead(id(lead)?), Rule::Always(QualifyOrConvert)))
@@ -608,28 +692,29 @@ pub fn classify(method: &Method, path: &str) -> Option<(Target, Rule)> {
         ["orders"] if *method == Method::POST => {
             Some((Target::BodySubjects, Rule::Always(OrderContractWork)))
         }
+        // The rule comes first: an unguarded route stays unguarded whatever
+        // its id segment is.
         ["orders", order, rest @ ..] => {
-            let order = Target::Order(id(order)?);
-            match rest {
-                ["status"] => Some((order, Rule::OrderStatus)),
-                ["commercial-basis"] => Some((order, Rule::OrderCommercialBasis)),
-                ["intake"] => Some((order, Rule::OrderIntake)),
+            let rule = match rest {
+                ["status"] => Rule::OrderStatus,
+                ["commercial-basis"] => Rule::OrderCommercialBasis,
+                ["intake"] => Rule::OrderIntake,
                 // Winding down and bookkeeping stay possible.
                 ["external-invoices", ..]
                 | ["debt-management"]
                 | ["ungroup"]
-                | ["leistungen", _, "cancel"] => None,
+                | ["leistungen", _, "cancel"] => return Ok(None),
                 // Correcting the payer (a mistyped name, the organisation
                 // box) stays possible while a hit is open (QA 2026-10-12):
                 // the order is queued and screened again, and the hold stays
                 // until the CEO decides the old hit — an open hit counts
                 // also when its subject is gone (`still_matches = false`),
                 // so renaming the payer lifts nothing.
-                ["payer"] => None,
-                [] if *method == Method::DELETE => None,
-                [] => Some((order, Rule::Always(OrderContractWork))),
-                _ => Some((order, Rule::Always(OrderContractWork))),
-            }
+                ["payer"] => return Ok(None),
+                [] if *method == Method::DELETE => return Ok(None),
+                _ => Rule::Always(OrderContractWork),
+            };
+            Some((Target::Order(id(order)?), rule))
         }
         ["patients", patient, "order-intakes"] => Some((
             Target::Patient(id(patient)?),
@@ -639,12 +724,12 @@ pub fn classify(method: &Method, path: &str) -> Option<(Target, Rule)> {
             Some((Target::BodySubjects, Rule::ContractStatus))
         }
         ["framework-contracts", contract, rest @ ..] => {
-            let contract = Target::Contract(id(contract)?);
-            match rest {
-                ["terminate"] => None,
-                ["status"] => Some((contract, Rule::ContractStatus)),
-                _ => Some((contract, Rule::Always(OrderContractWork))),
-            }
+            let rule = match rest {
+                ["terminate"] => return Ok(None),
+                ["status"] => Rule::ContractStatus,
+                _ => Rule::Always(OrderContractWork),
+            };
+            Some((Target::Contract(id(contract)?), rule))
         }
         ["quotes", quote, "status"] => Some((Target::Quote(id(quote)?), Rule::QuoteStatus)),
         ["quotes", _] if *method == Method::DELETE => None,
@@ -661,7 +746,7 @@ pub fn classify(method: &Method, path: &str) -> Option<(Target, Rule)> {
             Some((Target::Document(id(document)?), Rule::PaperSignature))
         }
         _ => None,
-    }
+    })
 }
 
 fn body_uuid(body: &Value, key: &str) -> Option<Uuid> {
@@ -869,8 +954,10 @@ pub async fn middleware(State(state): State<AppState>, request: Request, next: N
     {
         return next.run(request).await;
     }
-    let Some((target, rule)) = classify(request.method(), request.uri().path()) else {
-        return next.run(request).await;
+    let (target, rule) = match route(request.method(), request.uri().path()) {
+        Ok(Some(guarded)) => guarded,
+        Ok(None) => return next.run(request).await,
+        Err(malformed) => return malformed.response(),
     };
     let needs_body =
         rule.needs_body() || matches!(target, Target::BodySubjects | Target::BodyDocuments);
@@ -1281,6 +1368,107 @@ mod tests {
 
     fn post(path: &str) -> Option<(Target, Rule)> {
         classify(&Method::POST, &path.replace("{id}", ID))
+    }
+
+    #[test]
+    fn a_percent_encoded_path_is_classified_like_the_plain_one() {
+        // `%31` = `1`, `%2D` = `-`, `%63` = `c`.
+        let encoded = ID.replacen('1', "%31", 1).replacen('-', "%2D", 1);
+        for path in [
+            "/leads/{id}/qualify",
+            "/leads/{id}/convert",
+            "/api/v1/leads/{id}/wizard-convert",
+            "/orders/{id}/status",
+            "/orders/{id}",
+            "/patients/{id}/order-intakes",
+            "/framework-contracts/{id}/status",
+            "/quotes/{id}/status",
+            "/documents/{id}/signature-requests",
+            "/documents/{id}/mark-signed",
+            // Unguarded routes stay unguarded.
+            "/orders/{id}/payer",
+            "/orders/{id}/external-invoices",
+            "/framework-contracts/{id}/terminate",
+            "/leads/{id}/update",
+        ] {
+            let plain = route(&Method::POST, &path.replace("{id}", ID));
+            assert_eq!(
+                route(&Method::POST, &path.replace("{id}", &encoded)),
+                plain,
+                "{path}"
+            );
+            // A trailing slash changes nothing.
+            assert_eq!(
+                route(&Method::POST, &format!("{}/", path.replace("{id}", ID))),
+                plain,
+                "{path}/"
+            );
+        }
+        assert_eq!(
+            route(&Method::POST, &format!("/leads/{encoded}/convert")),
+            Ok(Some((
+                Target::Lead(uuid()),
+                Rule::Always(GateAction::QualifyOrConvert)
+            )))
+        );
+        assert_eq!(
+            route(&Method::POST, &format!("/leads/{ID}/%63onvert")),
+            route(&Method::POST, &format!("/leads/{ID}/convert"))
+        );
+        assert_eq!(
+            route(&Method::POST, &format!("/%61pi/v1/leads/{encoded}/convert")),
+            route(&Method::POST, &format!("/leads/{ID}/convert"))
+        );
+        // An encoded literal never moves a guarded request into an open arm.
+        assert_eq!(
+            route(&Method::POST, &format!("/orders/{ID}/%70ayer")),
+            Ok(Some((
+                Target::Order(uuid()),
+                Rule::Always(GateAction::OrderContractWork)
+            )))
+        );
+    }
+
+    #[test]
+    fn a_malformed_id_on_a_guarded_route_is_refused() {
+        for path in [
+            "/leads/not-an-id/convert",
+            "/leads/%ZZ/qualify",
+            "/leads/11111111-2222-3333-4444-55555555555%2F/convert",
+            "/orders/not-an-id/status",
+            "/orders/not-an-id",
+            "/patients/x/order-intakes",
+            "/framework-contracts/x/status",
+            "/quotes/x/status",
+            "/documents/x/paper-signature",
+        ] {
+            assert_eq!(route(&Method::POST, path), Err(MalformedId), "{path}");
+            assert_eq!(classify(&Method::POST, path), None, "{path}");
+        }
+        // Unguarded shapes and methods are left to the handler.
+        for path in [
+            "/orders/x/payer",
+            "/orders/x/external-invoices",
+            "/framework-contracts/x/terminate",
+            "/leads/x/update",
+        ] {
+            assert_eq!(route(&Method::POST, path), Ok(None), "{path}");
+        }
+        assert_eq!(route(&Method::GET, "/orders/debt-management"), Ok(None));
+        assert_eq!(route(&Method::DELETE, "/orders/x"), Ok(None));
+    }
+
+    #[test]
+    fn percent_decoding_matches_the_router() {
+        assert_eq!(percent_decode("%31a%2d"), "1a-");
+        assert_eq!(percent_decode("a%2Fb"), "a/b");
+        assert_eq!(percent_decode("%zz%4"), "%zz%4");
+        // Invalid UTF-8 stays as sent.
+        assert_eq!(percent_decode("%ff"), "%ff");
+        assert_eq!(
+            decoded_segments("/api/v1/leads/%31/x/"),
+            vec!["leads", "1", "x"]
+        );
     }
 
     #[test]

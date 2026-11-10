@@ -1,9 +1,18 @@
 # Monitoring stack — Prometheus + Loki + Grafana + Alertmanager.
 #
 # Deployed by `scripts/deploy-monitoring.sh` on the monitoring host.
-# All services bind to the host's 0.0.0.0; the Hetzner firewall
-# closes everything except SSH (Tailscale handles the rest). The
-# practical effect is "only tailnet peers can reach these ports".
+# By default all published ports bind to the host's 0.0.0.0; the Hetzner
+# firewall closes everything except SSH (Tailscale handles the rest), so the
+# practical effect is "only tailnet peers can reach these ports" while that
+# firewall stays as it is.
+#
+# GMED_METRICS_BIND_ADDR (monitoring secrets bundle) replaces 0.0.0.0 for
+# Prometheus, Loki, Alertmanager and Grafana. Set it to this host's Tailscale
+# IPv4 address to publish them on the tailnet only: Loki has no
+# authentication of its own, and neither has Prometheus or Alertmanager.
+# scripts/deploy-monitoring.sh points its local Prometheus probe at the same
+# address. node_exporter keeps listening on every interface: Prometheus
+# reaches it from inside its container over the Docker bridge.
 #
 # Service versions pinned by tag for reproducibility. Upstream
 # upstream images (grafana, prometheus) are well-maintained; pinning
@@ -23,9 +32,12 @@ services:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=90d'
-      - '--web.enable-lifecycle'   # POST /-/reload to apply config changes
+      # No --web.enable-lifecycle: it lets anyone who reaches the port reload
+      # or SHUT DOWN Prometheus with an unauthenticated POST, and nothing in
+      # this repository uses it. Apply config or rule changes with
+      # `docker kill --signal=HUP gmed-prometheus` or a container restart.
     ports:
-      - "9090:9090"
+      - "${GMED_METRICS_BIND_ADDR:-0.0.0.0}:9090:9090"
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9090/-/healthy"]
       interval: 30s
@@ -43,7 +55,7 @@ services:
       - loki_data:/loki
     command: -config.file=/etc/loki/loki-config.yml
     ports:
-      - "3100:3100"
+      - "${GMED_METRICS_BIND_ADDR:-0.0.0.0}:3100:3100"
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3100/ready | grep -q 'ready'"]
       interval: 30s
@@ -72,7 +84,7 @@ services:
       # (SMTP creds piped through from the sops-decrypted env).
       - '--config.expand-env=true'
     ports:
-      - "9093:9093"
+      - "${GMED_METRICS_BIND_ADDR:-0.0.0.0}:9093:9093"
 
   grafana:
     image: grafana/grafana:11.4.0
@@ -96,7 +108,7 @@ services:
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       GF_SECURITY_COOKIE_SECURE: "false"   # we're not behind HTTPS on the tailnet IP
     ports:
-      - "3000:3000"
+      - "${GMED_METRICS_BIND_ADDR:-0.0.0.0}:3000:3000"
     depends_on:
       prometheus:
         condition: service_healthy

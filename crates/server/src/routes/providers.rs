@@ -656,6 +656,13 @@ fn redact_provider_patient_metrics(item: &mut Value) {
 /// patients" rule, then the role baseline (assignments, Concierge tasks). The
 /// per-row filter still runs afterwards as the authoritative check.
 struct LinkedPatientScope {
+    /// The role holds no `patients.view` (Sales): no linked patient, no
+    /// interaction and no patient metric leaves the server.
+    none: bool,
+    /// The role sees patients but no appointments (Billing): only patients
+    /// linked through order lines, as name + PID, and only order-line
+    /// interactions. Appointment, concierge and clinical links stay hidden.
+    finance_only: bool,
     requires_assignment: bool,
     baseline_patient_ids: Vec<Uuid>,
     allowed_record_ids: Vec<Uuid>,
@@ -667,8 +674,19 @@ async fn load_linked_patient_scope(
     state: &AppState,
     auth: &AuthUser,
 ) -> Result<LinkedPatientScope, axum::response::Response> {
-    let rules = crate::routes::patients::load_patient_view_rule_scope(state, auth).await?;
     let requires_assignment = crate::access::requires_patient_assignment(auth.role);
+    if !can_see_linked_patients(auth.role) {
+        return Ok(LinkedPatientScope {
+            none: true,
+            finance_only: false,
+            requires_assignment,
+            baseline_patient_ids: Vec::new(),
+            allowed_record_ids: Vec::new(),
+            record_rule_ids: Vec::new(),
+            all_decision: Some(false),
+        });
+    }
+    let rules = crate::routes::patients::load_patient_view_rule_scope(state, auth).await?;
     let mut baseline_patient_ids = HashSet::new();
     if requires_assignment {
         let scope_error = |e: sqlx::Error| {
@@ -694,12 +712,26 @@ async fn load_linked_patient_scope(
         }
     }
     Ok(LinkedPatientScope {
+        none: false,
+        finance_only: linked_patients_finance_only(auth.role),
         requires_assignment,
         baseline_patient_ids: baseline_patient_ids.into_iter().collect(),
         allowed_record_ids: rules.allowed_record_ids().collect(),
         record_rule_ids: rules.record_rule_ids().collect(),
         all_decision: rules.all_decision(),
     })
+}
+
+/// Patients linked to a provider are patient data: a role without
+/// `patients.view` (Sales) sees none of them, whatever the provider access.
+fn can_see_linked_patients(role: Role) -> bool {
+    role.can(Capability::PatientsView)
+}
+
+/// A role with `patients.view` but without `appointments.view` (Billing) has
+/// no medical scope: it sees the provider's patients only through order lines.
+fn linked_patients_finance_only(role: Role) -> bool {
+    role.can(Capability::PatientsView) && !role.can(Capability::AppointmentsView)
 }
 
 /// Patients linked to a provider (or one of its doctors) within the caller's scope.
@@ -717,6 +749,11 @@ async fn can_access_linked_patient(
 ) -> Result<bool, axum::response::Response> {
     if auth.role == Role::Ceo {
         return Ok(true);
+    }
+    // No `patients.view`, no linked patient: record rules scope rows inside
+    // the capability, they do not replace it.
+    if !can_see_linked_patients(auth.role) {
+        return Ok(false);
     }
 
     let decision = resolve_explicit_resource_access(
@@ -1544,7 +1581,11 @@ async fn list_providers(
             });
         match provider_row_json(row, &enrichment, show_parent) {
             Ok(mut value) => {
-                if crate::access::requires_patient_assignment(auth.role) {
+                // Aggregate patient metrics stay hidden from assignment
+                // roles and from roles without `patients.view`.
+                if crate::access::requires_patient_assignment(auth.role)
+                    || !can_see_linked_patients(auth.role)
+                {
                     redact_provider_patient_metrics(&mut value);
                 }
                 providers.push(value);
@@ -3784,6 +3825,10 @@ async fn list_provider_patients(
     {
         return e;
     }
+    // The patient list of a provider or doctor is patient data.
+    if let Err(e) = auth.require_capability(Capability::PatientsView) {
+        return e;
+    }
     if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, false).await {
         return resp;
     }
@@ -4053,6 +4098,10 @@ async fn list_doctor_patients(
     if let Err(e) =
         auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Billing, Role::Sales])
     {
+        return e;
+    }
+    // The patient list of a provider or doctor is patient data.
+    if let Err(e) = auth.require_capability(Capability::PatientsView) {
         return e;
     }
     if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, false).await {
@@ -9995,6 +10044,15 @@ async fn load_provider_patients_json(
     provider_id: Uuid,
     doctor_id: Option<Uuid>,
 ) -> Result<ProviderLinkedPatients, axum::response::Response> {
+    if scope.none {
+        // Hidden, not empty: aggregate metrics must stay hidden as well.
+        return Ok(ProviderLinkedPatients {
+            items: Vec::new(),
+            restricted: true,
+        });
+    }
+    // `$8` (finance only) keeps the order-line link alone: appointment,
+    // concierge and clinical links are outside a finance role's scope.
     let rows = sqlx::query(
         r#"WITH links AS (
                 SELECT a.patient_id,
@@ -10005,6 +10063,7 @@ async fn load_provider_patients_json(
                 FROM appointments a
                 WHERE a.provider_id = $1
                   AND ($2::uuid IS NULL OR a.doctor_id = $2)
+                  AND $8::boolean = false
                 GROUP BY a.patient_id
 
                 UNION ALL
@@ -10030,6 +10089,7 @@ async fn load_provider_patients_json(
                 FROM concierge_services cs
                 WHERE cs.provider_id = $1
                   AND $2::uuid IS NULL
+                  AND $8::boolean = false
                 GROUP BY cs.patient_id
 
                 UNION ALL
@@ -10044,6 +10104,7 @@ async fn load_provider_patients_json(
                     ($2::uuid IS NULL AND pd.provider_id = $1)
                     OR ($2::uuid IS NOT NULL AND (pd.doctor_id = $2 OR pd.treating_doctor_id = $2))
                   )
+                  AND $8::boolean = false
                 GROUP BY pd.patient_id
 
                 UNION ALL
@@ -10056,6 +10117,7 @@ async fn load_provider_patients_json(
                 FROM patient_medications pm
                 WHERE pm.provider_id = $1
                   AND ($2::uuid IS NULL OR pm.doctor_id = $2)
+                  AND $8::boolean = false
                 GROUP BY pm.patient_id
 
                 UNION ALL
@@ -10068,6 +10130,7 @@ async fn load_provider_patients_json(
                 FROM patient_examinations pe
                 WHERE pe.provider_id = $1
                   AND ($2::uuid IS NULL OR pe.doctor_id = $2)
+                  AND $8::boolean = false
                 GROUP BY pe.patient_id
 
                 UNION ALL
@@ -10080,6 +10143,7 @@ async fn load_provider_patients_json(
                 FROM patient_procedures pp
                 WHERE pp.provider_id = $1
                   AND ($2::uuid IS NULL OR pp.doctor_id = $2)
+                  AND $8::boolean = false
                 GROUP BY pp.patient_id
 
                 UNION ALL
@@ -10093,7 +10157,8 @@ async fn load_provider_patients_json(
                 JOIN provider_doctor_links pdl
                   ON pdl.doctor_id = pr.source_doctor_id
                  AND pdl.provider_id = $1
-                WHERE $2::uuid IS NULL OR pr.source_doctor_id = $2
+                WHERE ($2::uuid IS NULL OR pr.source_doctor_id = $2)
+                  AND $8::boolean = false
                 GROUP BY pr.patient_id
             ),
             linked AS (
@@ -10151,6 +10216,7 @@ async fn load_provider_patients_json(
     .bind(&scope.allowed_record_ids)
     .bind(&scope.record_rule_ids)
     .bind(scope.all_decision)
+    .bind(scope.finance_only)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
@@ -10161,24 +10227,35 @@ async fn load_provider_patients_json(
         )
     })?;
 
-    let restricted = rows.first().is_some_and(|row| {
-        row.try_get::<i64, _>("hidden_count")
-            .is_ok_and(|hidden| hidden > 0)
-    });
+    // A finance-only caller sees a part of the links, so aggregate metrics
+    // over all of them stay hidden.
+    let restricted = scope.finance_only
+        || rows.first().is_some_and(|row| {
+            row.try_get::<i64, _>("hidden_count")
+                .is_ok_and(|hidden| hidden > 0)
+        });
     let mut patients = Vec::with_capacity(rows.len());
     for row in rows {
         let Some(id) = row.try_get::<Option<Uuid>, _>("id").ok().flatten() else {
             continue;
+        };
+        // Finance only: name + PID, no address.
+        let address = |column: &str| -> Option<String> {
+            if scope.finance_only {
+                None
+            } else {
+                row.try_get::<Option<String>, _>(column).unwrap_or_default()
+            }
         };
         patients.push(json!({
             "id": id,
             "patient_id": row.try_get::<String, _>("patient_id").unwrap_or_default(),
             "first_name": row.try_get::<String, _>("first_name").unwrap_or_default(),
             "last_name": row.try_get::<String, _>("last_name").unwrap_or_default(),
-            "address_street": row.try_get::<Option<String>, _>("address_street").unwrap_or_default(),
-            "address_city": row.try_get::<Option<String>, _>("address_city").unwrap_or_default(),
-            "address_zip": row.try_get::<Option<String>, _>("address_zip").unwrap_or_default(),
-            "address_country": row.try_get::<Option<String>, _>("address_country").unwrap_or_default(),
+            "address_street": address("address_street"),
+            "address_city": address("address_city"),
+            "address_zip": address("address_zip"),
+            "address_country": address("address_country"),
             "appointment_count": row.try_get::<i64, _>("appointment_count").unwrap_or_default(),
             "leistung_count": row.try_get::<i64, _>("leistung_count").unwrap_or_default(),
             "concierge_count": row.try_get::<i64, _>("concierge_count").unwrap_or_default(),
@@ -10198,6 +10275,11 @@ async fn load_provider_interactions_json(
     provider_id: Uuid,
     doctor_id: Option<Uuid>,
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+    if scope.none {
+        return Ok(Vec::new());
+    }
+    // `$8` (finance only) keeps order lines alone: appointment title, type,
+    // location and notes and concierge service notes are not finance data.
     let rows = sqlx::query(
         r#"SELECT kind, interaction_id, patient_uuid, patient_id, patient_name, doctor_id, doctor_name,
                   order_id, order_number, status, title, appointment_type, location, notes,
@@ -10285,14 +10367,17 @@ async fn load_provider_interactions_json(
                 WHERE cs.provider_id = $1
                   AND $2::uuid IS NULL
             ) interactions
-           WHERE patient_uuid = ANY($5::uuid[])
-              OR (
+           WHERE ($8::boolean = false OR kind = 'leistung')
+             AND (
+               patient_uuid = ANY($5::uuid[])
+               OR (
                   NOT (patient_uuid = ANY($6::uuid[]))
                   AND CASE
                       WHEN $7::boolean IS NOT NULL THEN $7::boolean
                       ELSE $3::boolean = false OR patient_uuid = ANY($4::uuid[])
                   END
-              )
+               )
+             )
            ORDER BY occurred_at DESC, patient_name, title
            LIMIT 200"#,
     )
@@ -10303,6 +10388,7 @@ async fn load_provider_interactions_json(
     .bind(&scope.allowed_record_ids)
     .bind(&scope.record_rule_ids)
     .bind(scope.all_decision)
+    .bind(scope.finance_only)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
@@ -10371,4 +10457,31 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         Json(json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod linked_patient_scope_tests {
+    use super::{can_see_linked_patients, linked_patients_finance_only};
+    use gmed_domain::role::Role;
+
+    #[test]
+    fn sales_sees_no_linked_patients() {
+        assert!(!can_see_linked_patients(Role::Sales));
+        assert!(!can_see_linked_patients(Role::ItAdmin));
+        assert!(!linked_patients_finance_only(Role::Sales));
+    }
+
+    #[test]
+    fn billing_sees_linked_patients_through_order_lines_only() {
+        assert!(can_see_linked_patients(Role::Billing));
+        assert!(linked_patients_finance_only(Role::Billing));
+    }
+
+    #[test]
+    fn roles_with_appointments_keep_the_full_linked_patient_view() {
+        for role in [Role::Ceo, Role::PatientManager, Role::Concierge] {
+            assert!(can_see_linked_patients(role), "{role:?}");
+            assert!(!linked_patients_finance_only(role), "{role:?}");
+        }
+    }
 }
