@@ -577,6 +577,7 @@ export function ConsentCheckbox({
   testId,
   privacyLink = false,
   invalidText = null,
+  withdrawAfterSend = false,
 }: {
   request: LeadRequest;
   purpose: string;
@@ -589,6 +590,8 @@ export function ConsentCheckbox({
   privacyLink?: boolean;
   /** The required consent was not given when Next was pressed: said at the box itself. */
   invalidText?: string | null;
+  /** The consent can be withdrawn in the cabinet after the request was sent (the health-data consent). */
+  withdrawAfterSend?: boolean;
 }) {
   const consent = request.consents[purpose];
   const given = consentGiven(request, purpose);
@@ -606,13 +609,15 @@ export function ConsentCheckbox({
       setRecordOpen(true);
       return;
     }
-    if (!checked && !window.confirm(text.consentWithdrawConfirm)) return;
+    // After the send the withdrawal says what follows (owner 2026-11-10); before it, the short question.
+    const afterSend = Boolean(request.submitted_at) && !staffMode;
+    if (!checked && !window.confirm(afterSend && withdrawAfterSend ? text.healthConsentWithdrawConfirm : text.consentWithdrawConfirm)) return;
     setBusy(true);
     setError("");
-    const withConsent = (givenAt: string | null) =>
+    const withConsent = (givenAt: string | null, withdrawnAt: string | null = null) =>
       patch((current) => ({
         ...current,
-        consents: { ...current.consents, [purpose]: { ...(current.consents[purpose] ?? consent), given_at: givenAt } },
+        consents: { ...current.consents, [purpose]: { ...(current.consents[purpose] ?? consent), given_at: givenAt, withdrawn_at: withdrawnAt } },
       }));
     try {
       if (checked) {
@@ -620,8 +625,10 @@ export function ConsentCheckbox({
         withConsent(result.given_at);
         setRecordOpen(false);
       } else {
-        await enqueue(() => revokeLeadConsent(request.lead_id, purpose));
-        withConsent(null);
+        const result = await enqueue(() => revokeLeadConsent(request.lead_id, purpose));
+        // Only the own consent is withdrawn here: one the other parent or representative gave stays.
+        if (result.revoked === false && afterSend) setError(text.consentWithdrawNotYours);
+        else withConsent(null, new Date().toISOString());
       }
     } catch (cause) {
       setError(errorMessage(cause, text));
@@ -641,7 +648,8 @@ export function ConsentCheckbox({
           className={cn(checkboxClass, "mt-0.5")}
           // While staff say how the client consented the tick shows, unsaved until recorded.
           checked={given || (staffMode && recordOpen)}
-          // Sent is sent (owner 2026-10-26): a given consent is withdrawn through GMED.
+          // Sent is sent (owner 2026-10-26): the box of a given consent is locked. The health-data
+          // consent has its own "withdraw" below (owner 2026-11-10), the others go through GMED.
           disabled={busy || !consent || (Boolean(request.submitted_at) && given && !staffMode)}
           onChange={(event) => {
             if (staffMode && recordOpen && !given && !event.target.checked) {
@@ -674,8 +682,24 @@ export function ConsentCheckbox({
       {invalidText && !given && !staffMode ? <p id={`${testId}-error`} role="alert" className="mt-1.5 text-xs font-medium text-destructive">{invalidText}</p> : null}
       {/* The box is locked once the request is sent, while the consent text speaks of a withdrawal
           in the portal: how it is withdrawn now is said here (QA 2026-11-10, finding 9). */}
-      {Boolean(request.submitted_at) && given && !staffMode ? (
+      {Boolean(request.submitted_at) && given && !staffMode && !withdrawAfterSend ? (
         <p className="mt-1.5 text-xs leading-5 text-muted-foreground" data-testid={`${testId}-after-send`}>{text.consentWithdrawAfterSend}</p>
+      ) : null}
+      {/* The consent to process health data is withdrawn here also after the send, as its text
+          promises (owner 2026-11-10): an action of its own, with what follows said first. */}
+      {Boolean(request.submitted_at) && given && !staffMode && withdrawAfterSend ? (
+        <div className="mt-2 space-y-1.5" data-testid={`${testId}-withdraw`}>
+          <p className="text-xs leading-5 text-muted-foreground">{text.healthConsentWithdrawHint}</p>
+          <Button type="button" variant="outline" size="sm" className="h-auto min-h-8 whitespace-normal py-1.5 text-left text-destructive hover:bg-destructive/10 hover:text-destructive"
+            disabled={busy} onClick={() => void toggle(false)}>
+            {text.healthConsentWithdraw}
+          </Button>
+        </div>
+      ) : null}
+      {!given && consent?.withdrawn_at && !staffMode ? (
+        <p className="mt-1.5 text-xs font-medium leading-5 text-amber-800 dark:text-amber-200" role="status" data-testid={`${testId}-withdrawn`}>
+          {text.consentWithdrawnAt(formatPortalTimestamp(consent.withdrawn_at))}
+        </p>
       ) : null}
       {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
     </div>

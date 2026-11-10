@@ -452,7 +452,7 @@ describe("lead cabinet languages", () => {
     expect(submitFieldLabel(de, "invoice_city")).toBe("Rechnungsempfänger: Ort");
     expect(submitFieldLabel(de, "invoice_country")).toBe("Rechnungsempfänger: Land");
     expect(submitFieldLabel(de, "payment_method")).toBe("Welche Zahlungsart für Rechnungen bevorzugen Sie?");
-    expect(submitFieldLabel(de, "payment_method_details")).toBe("Zahlungsweg: Sonstiges – Bitte beschreiben");
+    expect(submitFieldLabel(de, "payment_method_details")).toBe("Zahlungsweg: Sonstiges (nicht mehr unterstützt) – Bitte beschreiben");
     expect(submitFieldLabel(de, "account_country")).toBe("Zahlungsweg: Land des Kontos");
     expect(submitFieldLabel(de, "account_holder")).toBe("Zahlungsweg: Kontoinhaber/in");
     expect(submitFieldLabel(de, "bank_name")).toBe("Zahlungsweg: Name der Bank");
@@ -462,7 +462,7 @@ describe("lead cabinet languages", () => {
     expect(submitFieldLabel(de, "via_third_party_details")).toBe("Zahlungsweg: Bitte beschreiben (wer, welcher Dienst)");
     expect(submitFieldLabel(leadRequestText("en"), "invoice_zip")).toBe("Invoice recipient: Postcode");
     expect(submitFieldLabel(leadRequestText("uk"), "account_holder")).toBe("Спосіб оплати: Власник рахунку");
-    expect(submitFieldLabel(leadRequestText("ru"), "payment_method_details")).toBe("Способ оплаты: Другое – Опишите, пожалуйста");
+    expect(submitFieldLabel(leadRequestText("ru"), "payment_method_details")).toBe("Способ оплаты: Другое (больше не поддерживается) – Опишите, пожалуйста");
   });
 
   it("names where the invoice goes per login: a parent reads 'to the patient', a paying parent 'to me (I pay)'", () => {

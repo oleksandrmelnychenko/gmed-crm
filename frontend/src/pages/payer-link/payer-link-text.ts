@@ -182,6 +182,8 @@ export type PayerLinkText = {
   removeOwner: string;
   ownerIncomplete: string;
   ownerShare: string;
+  /** A share of 25 % or less: only persons above 25 % are named (owner 2026-11-10). */
+  ownerShareLow: string;
   ownersTotal: string;
   noOwners: string;
   ownersLimit: string;
@@ -480,6 +482,7 @@ const de: PayerLinkText = {
   removeOwner: "Person entfernen",
   ownerIncomplete: "Bitte Vorname und Nachname angeben; erst dann wird diese Person gespeichert.",
   ownerShare: "Bitte einen Anteil über 0 und bis 100 % angeben (höchstens zwei Nachkommastellen).",
+  ownerShareLow: "Bitte nennen Sie nur Personen mit einem Anteil von mehr als 25 %. Gibt es keine solche Person, wählen Sie oben „Es gibt keine natürliche Person mit mehr als 25 %“.",
   ownersTotal: "Die Anteile ergeben zusammen mehr als 100 %.",
   noOwners: "Noch keine Person angegeben.",
   ownersLimit: "Es können höchstens 10 Personen angegeben werden.",
@@ -524,7 +527,7 @@ const de: PayerLinkText = {
     card: "Karte",
     cash: "Bar",
     crypto: "Kryptowährung (nicht mehr unterstützt)",
-    other: "Sonstiges",
+    other: "Sonstiges (nicht mehr unterstützt)",
   },
   declarationsIntroOrganisation:
     "Die Fragen betreffen die Organisation, die vertretungsberechtigten Personen und die wirtschaftlich Berechtigten.",
@@ -807,6 +810,7 @@ const en: PayerLinkText = {
   removeOwner: "Remove this person",
   ownerIncomplete: "Please enter the first and last name; only then is this person saved.",
   ownerShare: "Please enter a share above 0 and up to 100 % (at most two decimals).",
+  ownerShareLow: "Please name only persons holding more than 25 %. If there is no such person, choose “There is no natural person holding more than 25 %” above.",
   ownersTotal: "The shares add up to more than 100 %.",
   noOwners: "No person entered yet.",
   ownersLimit: "At most 10 persons can be entered.",
@@ -851,7 +855,7 @@ const en: PayerLinkText = {
     card: "Card",
     cash: "Cash",
     crypto: "Cryptocurrency (no longer supported)",
-    other: "Other",
+    other: "Other (no longer supported)",
   },
   declarationsIntroOrganisation:
     "The questions concern the organisation, the persons authorised to represent it and its beneficial owners.",
@@ -1137,6 +1141,7 @@ const uk: PayerLinkText = {
   removeOwner: "Видалити особу",
   ownerIncomplete: "Будь ласка, вкажіть ім’я та прізвище; лише тоді цю особу буде збережено.",
   ownerShare: "Будь ласка, вкажіть частку більше 0 і не більше 100 % (не більше двох знаків після коми).",
+  ownerShareLow: "Будь ласка, вкажіть лише осіб із часткою понад 25 %. Якщо такої особи немає, виберіть вище «Немає фізичної особи з часткою понад 25 %».",
   ownersTotal: "Разом частки перевищують 100 %.",
   noOwners: "Ще не вказано жодної особи.",
   ownersLimit: "Можна вказати не більше 10 осіб.",
@@ -1181,7 +1186,7 @@ const uk: PayerLinkText = {
     card: "Картка",
     cash: "Готівка",
     crypto: "Криптовалюта (більше не підтримується)",
-    other: "Інше",
+    other: "Інше (більше не підтримується)",
   },
   declarationsIntroOrganisation: "Запитання стосуються організації, її уповноважених представників і кінцевих бенефіціарів.",
   yesNo: { yes: "Так", no: "Ні" },
@@ -1466,6 +1471,7 @@ const ru: PayerLinkText = {
   removeOwner: "Удалить лицо",
   ownerIncomplete: "Пожалуйста, укажите имя и фамилию; только тогда это лицо будет сохранено.",
   ownerShare: "Пожалуйста, укажите долю больше 0 и не более 100 % (не более двух знаков после запятой).",
+  ownerShareLow: "Пожалуйста, укажите только лиц с долей более 25 %. Если такого лица нет, выберите выше «Нет физического лица с долей более 25 %».",
   ownersTotal: "В сумме доли превышают 100 %.",
   noOwners: "Пока не указано ни одного лица.",
   ownersLimit: "Можно указать не более 10 лиц.",
@@ -1510,7 +1516,7 @@ const ru: PayerLinkText = {
     card: "Карта",
     cash: "Наличные",
     crypto: "Криптовалюта (больше не поддерживается)",
-    other: "Другое",
+    other: "Другое (больше не поддерживается)",
   },
   declarationsIntroOrganisation: "Вопросы касаются организации, её уполномоченных представителей и конечных бенефициаров.",
   yesNo: { yes: "Да", no: "Нет" },

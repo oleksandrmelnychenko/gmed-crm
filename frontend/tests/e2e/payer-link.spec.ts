@@ -1795,7 +1795,7 @@ test.describe("payer link", () => {
       await expect(page.getByTestId("payer-link-payment-method-note")).toHaveCount(0);
       // A company is asked how the payment is made.
       await page.getByRole("combobox", { name: "Welche Zahlungsart für Rechnungen bevorzugt die Organisation?" }).click();
-      const edge = await page.getByRole("option", { name: "Sonstiges" }).evaluate((node) => node.getBoundingClientRect().right);
+      const edge = await page.getByRole("option", { name: "Bar" }).evaluate((node) => node.getBoundingClientRect().right);
       expect(edge, `${width}px`).toBeLessThanOrEqual(width);
       await page.keyboard.press("Escape");
       await expect(page.getByRole("option")).toHaveCount(0);

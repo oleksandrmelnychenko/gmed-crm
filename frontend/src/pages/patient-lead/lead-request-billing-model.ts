@@ -18,10 +18,17 @@ export const INVOICE_TARGETS = ["self", "payer", "other"] as const satisfies rea
 
 /**
  * How GMED's services can be paid, in the order of the form. Cryptocurrency
- * is no longer offered (owner 2026-10-12); an older answer keeps its label
- * and the server asks for another method before sending.
+ * is no longer offered (owner 2026-10-12), neither is "other" (owner 2026-11-10: it asked for no
+ * explanation); an older answer keeps its label and the server asks for another method before sending.
  */
-export const PAYMENT_METHODS = ["bank_transfer", "card", "cash", "other"] as const satisfies readonly PaymentMethod[];
+export const PAYMENT_METHODS = ["bank_transfer", "card", "cash"] as const satisfies readonly PaymentMethod[];
+
+/** Methods of older answers: shown with their label, never offered, to be changed before sending. */
+export const REMOVED_PAYMENT_METHODS = ["crypto", "other"] as const satisfies readonly PaymentMethod[];
+
+export function isRemovedPaymentMethod(method: string): method is (typeof REMOVED_PAYMENT_METHODS)[number] {
+  return (REMOVED_PAYMENT_METHODS as readonly string[]).includes(method);
+}
 
 /** The two sections as the patient types them (strings; answers as "yes", "no" or ""). */
 export type BillingDraft = {

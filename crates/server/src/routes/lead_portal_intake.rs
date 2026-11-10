@@ -3422,6 +3422,22 @@ pub(crate) async fn request_payload(
     let guardianship = under_guardianship(&mut *state.db.acquire().await?, lead_id).await?;
     for purpose in ConsentPurpose::ALL {
         let given = active_consent(&state.db, lead_id, user_id, purpose).await?;
+        // When this login last withdrew the consent, while none is given: the
+        // cabinet shows it as withdrawn, with the time (owner 2026-11-10).
+        let withdrawn_at: Option<DateTime<Utc>> = if given.is_none() {
+            sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
+                "SELECT max(revoked_at) FROM consent_records \
+                 WHERE lead_id = $1 AND user_id = $2 AND consent_type = $3 \
+                   AND granted = true AND revoked_at IS NOT NULL",
+            )
+            .bind(lead_id)
+            .bind(user_id)
+            .bind(purpose.consent_type())
+            .fetch_one(&state.db)
+            .await?
+        } else {
+            None
+        };
         let texts: Map<String, Value> = CONSENT_LANGUAGES
             .iter()
             .filter_map(|language| {
@@ -3441,6 +3457,7 @@ pub(crate) async fn request_payload(
                 "version": purpose.version(),
                 "texts": texts,
                 "given_at": given.map(|(_, given_at)| given_at),
+                "withdrawn_at": withdrawn_at,
             }),
         );
     }

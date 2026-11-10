@@ -167,6 +167,14 @@ export type LeadRequestText = {
   sentChangeRefused: string;
   /** Under a consent given before the send: how it is withdrawn now (QA 2026-11-10, finding 9). */
   consentWithdrawAfterSend: string;
+  /** The health-data consent after the send: its own withdrawal in the cabinet (owner 2026-11-10). */
+  healthConsentWithdrawHint: string;
+  healthConsentWithdraw: string;
+  /** Asked before that withdrawal: what follows from it. */
+  healthConsentWithdrawConfirm: string;
+  /** The consent was given by the other parent or representative: only that person or GMED withdraws it. */
+  consentWithdrawNotYours: string;
+  consentWithdrawnAt: (date: string) => string;
   /** The payer's three legal answers were taken over from the same person's answers as representative (finding 15). */
   payerLegalPrefilled: string;
   /** «Dokumente nachreichen»: documents added to the sent request. */
@@ -1264,6 +1272,11 @@ const de: LeadRequestText = {
   sentLockedHint: "Ihre Anfrage ist bei GMED. Möchten Sie etwas ändern? Schreiben Sie Ihrem Kontakt bei GMED oder rufen Sie an.",
   sentChangeRefused: "Die Anfrage wurde bereits gesendet – diese Änderung wurde nicht gespeichert. Möchten Sie etwas ändern, schreiben Sie Ihrem Kontakt bei GMED oder rufen Sie an.",
   consentWithdrawAfterSend: "Ihre Anfrage ist gesendet: Widerrufen können Sie diese Einwilligung jetzt jederzeit über Ihren Kontakt bei GMED.",
+  healthConsentWithdrawHint: "Sie können diese Einwilligung jederzeit hier widerrufen.",
+  healthConsentWithdraw: "Einwilligung zur Verarbeitung der Gesundheitsdaten widerrufen",
+  healthConsentWithdrawConfirm: "Einwilligung zur Verarbeitung der Gesundheitsdaten widerrufen? GMED darf Gesundheitsdaten für diese Anfrage dann nicht weiter verarbeiten und kann die Anfrage ohne sie möglicherweise nicht fortführen. GMED wird benachrichtigt und meldet sich bei Ihnen. Der Widerruf gilt für die Zukunft.",
+  consentWithdrawNotYours: "Diese Einwilligung hat eine andere vertretungsberechtigte Person erteilt. Widerrufen kann sie nur diese Person selbst oder Ihr Kontakt bei GMED.",
+  consentWithdrawnAt: (date) => `Einwilligung widerrufen am ${date}. GMED wurde benachrichtigt und meldet sich bei Ihnen.`,
   payerLegalPrefilled: "Diese drei Antworten haben wir aus Ihren Angaben als gesetzliche Vertretung übernommen. Bitte prüfen Sie sie.",
   addDocumentsAfterSend: "Dokumente nachreichen",
   addedAfterSend: "Nachgereicht",
@@ -1705,7 +1718,7 @@ const de: LeadRequestText = {
     card: "Karte",
     cash: "Bar",
     crypto: "Kryptowährung (nicht mehr unterstützt)",
-    other: "Sonstiges",
+    other: "Sonstiges (nicht mehr unterstützt)",
   },
   paymentRouteByPayer: "Die Zahlungsart klärt GMED mit der zahlenden Person.",
   paymentRouteByPayerShort: "klärt GMED mit der zahlenden Person",
@@ -1929,6 +1942,11 @@ const ru: LeadRequestText = {
   sentLockedHint: "Ваша заявка в GMED. Хотите что-то изменить? Напишите или позвоните вашему контакту в GMED.",
   sentChangeRefused: "Заявка уже отправлена — это изменение не сохранено. Если нужно что-то изменить, напишите или позвоните вашему контакту в GMED.",
   consentWithdrawAfterSend: "Заявка отправлена: теперь отозвать это согласие можно в любое время через вашего контакта в GMED.",
+  healthConsentWithdrawHint: "Вы можете в любое время отозвать это согласие здесь.",
+  healthConsentWithdraw: "Отозвать согласие на обработку данных о здоровье",
+  healthConsentWithdrawConfirm: "Отозвать согласие на обработку данных о здоровье? После этого GMED не сможет дальше обрабатывать данные о здоровье по этой заявке и, возможно, не сможет продолжить работу по ней. GMED получит уведомление и свяжется с вами. Отзыв действует на будущее.",
+  consentWithdrawNotYours: "Это согласие дал другой законный представитель. Отозвать его может только он сам или ваш контакт в GMED.",
+  consentWithdrawnAt: (date) => `Согласие отозвано ${date}. GMED получила уведомление и свяжется с вами.`,
   payerLegalPrefilled: "Эти три ответа мы взяли из того, что вы указали как законный представитель. Проверьте их, пожалуйста.",
   addDocumentsAfterSend: "Дослать документы",
   addedAfterSend: "Дослано",
@@ -2365,7 +2383,7 @@ const ru: LeadRequestText = {
     card: "Карта",
     cash: "Наличные",
     crypto: "Криптовалюта (больше не поддерживается)",
-    other: "Другое",
+    other: "Другое (больше не поддерживается)",
   },
   paymentRouteByPayer: "Способ оплаты GMED согласует с плательщиком.",
   paymentRouteByPayerShort: "GMED согласует с плательщиком",
@@ -2589,6 +2607,11 @@ const uk: LeadRequestText = {
   sentLockedHint: "Ваша заявка в GMED. Бажаєте щось змінити? Напишіть або зателефонуйте вашому контакту у GMED.",
   sentChangeRefused: "Заявку вже надіслано — цю зміну не збережено. Якщо потрібно щось змінити, напишіть або зателефонуйте вашому контакту у GMED.",
   consentWithdrawAfterSend: "Заявку надіслано: тепер відкликати цю згоду можна будь-коли через ваш контакт у GMED.",
+  healthConsentWithdrawHint: "Ви можете будь-коли відкликати цю згоду тут.",
+  healthConsentWithdraw: "Відкликати згоду на обробку даних про здоров’я",
+  healthConsentWithdrawConfirm: "Відкликати згоду на обробку даних про здоров’я? Після цього GMED не зможе далі обробляти дані про здоров’я за цією заявкою і, можливо, не зможе продовжити роботу за нею. GMED отримає повідомлення і зв’яжеться з вами. Відкликання діє на майбутнє.",
+  consentWithdrawNotYours: "Цю згоду дав інший законний представник. Відкликати її може лише він сам або ваш контакт у GMED.",
+  consentWithdrawnAt: (date) => `Згоду відкликано ${date}. GMED отримала повідомлення і зв’яжеться з вами.`,
   payerLegalPrefilled: "Ці три відповіді ми взяли з того, що ви зазначили як законний представник. Перевірте їх, будь ласка.",
   addDocumentsAfterSend: "Додати документи",
   addedAfterSend: "Додано після надсилання",
@@ -3025,7 +3048,7 @@ const uk: LeadRequestText = {
     card: "Картка",
     cash: "Готівка",
     crypto: "Криптовалюта (більше не підтримується)",
-    other: "Інше",
+    other: "Інше (більше не підтримується)",
   },
   paymentRouteByPayer: "Спосіб оплати GMED узгодить із платником.",
   paymentRouteByPayerShort: "GMED узгодить із платником",
@@ -3249,6 +3272,11 @@ const en: LeadRequestText = {
   sentLockedHint: "Your request is with GMED. Would you like to change something? Write to or call your contact at GMED.",
   sentChangeRefused: "The request has already been sent – this change was not saved. If you need to change something, write to or call your contact at GMED.",
   consentWithdrawAfterSend: "Your request has been sent: you can now withdraw this consent at any time through your contact at GMED.",
+  healthConsentWithdrawHint: "You can withdraw this consent here at any time.",
+  healthConsentWithdraw: "Withdraw the consent to process health data",
+  healthConsentWithdrawConfirm: "Withdraw the consent to process health data? GMED may then no longer process health data for this request and may not be able to continue with it. GMED will be informed and will get in touch with you. The withdrawal applies to the future.",
+  consentWithdrawNotYours: "This consent was given by another legal representative. Only that person or your contact at GMED can withdraw it.",
+  consentWithdrawnAt: (date) => `Consent withdrawn on ${date}. GMED has been informed and will get in touch with you.`,
   payerLegalPrefilled: "We took these three answers from what you stated as the legal representative. Please check them.",
   addDocumentsAfterSend: "Add documents",
   addedAfterSend: "Added after sending",
@@ -3678,7 +3706,7 @@ const en: LeadRequestText = {
     card: "Card",
     cash: "Cash",
     crypto: "Cryptocurrency (no longer supported)",
-    other: "Other",
+    other: "Other (no longer supported)",
   },
   paymentRouteByPayer: "GMED agrees the payment method with the payer.",
   paymentRouteByPayerShort: "agreed by GMED with the payer",

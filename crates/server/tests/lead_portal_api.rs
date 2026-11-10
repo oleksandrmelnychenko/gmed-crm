@@ -4073,10 +4073,19 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
     )
     .await;
     assert!(status.is_client_error(), "{status} {body}");
+    // Neither is "other" (owner 2026-11-10).
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &billing,
+        &patient,
+        Some(json!({ "payment_method": "other", "payment_method_details": "Scheck" })),
+    )
+    .await;
+    assert!(status.is_client_error(), "{status} {body}");
 
-    // Cash and other methods are flagged; "to me" drops the other address
-    // and keeps the e-mail named with it; `null` clears; "no" drops the
-    // description.
+    // Cash is flagged; "to me" drops the other address and keeps the e-mail
+    // named with it; `null` clears; "no" drops the description.
     let (status, body) = json_request(
         router,
         "POST",
@@ -4086,8 +4095,7 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
             "invoice_recipient": "self",
             "invoice_recipient_is_payer": true,
             "recipient_email": "rechnung@example.com",
-            "payment_method": "other",
-            "payment_method_details": "Scheck",
+            "payment_method": "cash",
             "via_third_party": false,
             "via_third_party_details": "stray text"
         })),
@@ -4105,7 +4113,7 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
     let (_, staff) = json_request(router, "GET", &intake, &manager, None).await;
     assert_eq!(
         staff["billing"]["compliance_flags"],
-        json!(["other_method"]),
+        json!(["cash_payment"]),
         "{staff}"
     );
     let (status, body) = json_request(
@@ -7672,6 +7680,45 @@ async fn a_sent_request_is_read_only_but_takes_added_documents_and_withdrawals()
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    // Owner 2026-11-10: the cabinet offers this withdrawal after the send too,
+    // as the consent text promises. The record stays, with the time of the
+    // withdrawal; the cabinet then shows the consent as not given.
+    assert_eq!(body["revoked"], true, "{body}");
+    let (withdrawn, kept): (i64, i64) = sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE revoked_at IS NOT NULL), count(*) FROM consent_records \
+         WHERE lead_id = $1 AND consent_type = 'health_data_processing'",
+    )
+    .bind(lead)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert!(withdrawn >= 1 && kept >= withdrawn, "{withdrawn} of {kept}");
+    let notices: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM user_notifications
+         WHERE entity_id = $1 AND kind = 'lead_portal_consent_revoked' AND user_id = $2",
+    )
+    .bind(lead)
+    .bind(app.patient_manager_id)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert!(notices >= 1, "staff are told about the withdrawal");
+    let (status, shown) = json_request(&app.suite.app, "GET", &request, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{shown}");
+    assert!(
+        shown["consents"]["health_data_processing"]["given_at"].is_null(),
+        "{shown}"
+    );
+    // A second withdrawal finds nothing to withdraw.
+    let (_, again) = json_request(
+        &app.suite.app,
+        "POST",
+        &format!("{request}/consent/revoke"),
+        &patient,
+        Some(json!({ "purpose": "health_data_processing" })),
+    )
+    .await;
+    assert_eq!(again["revoked"], false, "{again}");
 }
 
 #[tokio::test]

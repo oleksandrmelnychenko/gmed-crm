@@ -490,7 +490,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     // A bank transfer asks for the account; the holder is offered, the rest is typed.
     const method = route.getByRole("combobox", { name: METHOD_QUESTION });
     await method.click();
-    await expect(page.getByRole("option")).toHaveText(["Auswählen", "Überweisung", "Karte", "Bar", "Sonstiges"]);
+    await expect(page.getByRole("option")).toHaveText(["Auswählen", "Überweisung", "Karte", "Bar"]);
     await page.getByRole("option", { name: "Überweisung" }).click();
     await expect(page.getByRole("option")).toHaveCount(0);
     const holder = route.getByRole("textbox", { name: "Kontoinhaber/in" });
@@ -572,25 +572,19 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
       });
     await expect(billing.getByRole("textbox", { name: "E-Mail für Rechnungen (optional)" })).toBeVisible();
 
-    // "Other" as method says what it is; cash gets no note on checks (no tipping-off); a card needs no bank.
+    // "Other" is no longer offered (owner 2026-11-10); cash gets no note on checks (no tipping-off); a card needs no bank.
     const method = route.getByRole("combobox", { name: METHOD_QUESTION });
     const details = route.getByRole("textbox", { name: "Bitte beschreiben", exact: true });
     const note = page.getByTestId("lead-request-payment-method-note");
-    await choose(page, method, "Sonstiges");
-    await expect(details).toBeVisible();
-    await expect(note).toHaveCount(0);
-    await expect.poll(() => calls.billing.at(-1)).toEqual({ payment_method: "other" });
-    await page.locator('[data-step="send"]').click();
-    await expect(missing).toContainText("Zahlungsweg: Sonstiges – Bitte beschreiben");
-    await step(page, "billing");
-    await details.fill("Scheck");
-    await expect.poll(() => calls.billing.at(-1)).toEqual({ payment_method_details: "Scheck" });
+    await method.click();
+    await expect(page.getByRole("option", { name: /Sonstiges/ })).toHaveCount(0);
+    await page.keyboard.press("Escape");
     await choose(page, method, "Bar");
     await expect(details).toHaveCount(0);
     await expect(note).toHaveCount(0);
     await expect(route).not.toContainText("Geldwäschegesetz");
     await expect(route.getByRole("textbox", { name: "Kontoinhaber/in" })).toHaveCount(0);
-    await expect.poll(() => calls.billing.at(-1)).toEqual({ payment_method: "cash", payment_method_details: "" });
+    await expect.poll(() => calls.billing.at(-1)).toMatchObject({ payment_method: "cash" });
     await choose(page, method, "Karte");
     await expect(note).toHaveCount(0);
     await expect(route.getByRole("textbox", { name: "Kontoinhaber/in" })).toHaveValue("Anna Muster");
@@ -853,7 +847,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
       expect(await widestOverhang(page, "lead-request-step-billing"), `${width}px`).toBeLessThanOrEqual(1);
       // The method list opens inside the screen.
       await route.getByRole("combobox", { name: METHOD_QUESTION }).click();
-      const optionEdge = await page.getByRole("option", { name: "Sonstiges" }).evaluate((node) => node.getBoundingClientRect().right);
+      const optionEdge = await page.getByRole("option", { name: "Bar" }).evaluate((node) => node.getBoundingClientRect().right);
       expect(optionEdge, `${width}px`).toBeLessThanOrEqual(width);
       await page.keyboard.press("Escape");
       await expect(page.getByRole("option")).toHaveCount(0);

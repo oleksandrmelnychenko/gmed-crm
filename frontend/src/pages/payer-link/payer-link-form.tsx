@@ -693,7 +693,7 @@ function DraftForm({
 
       {ownersHold ? (
         <Notice tone="error" role="alert" testId="payer-link-owners-hold">
-          {ownersHold.index === null ? text.ownersTotal : `${text.ownerHeading(ownersHold.index + 1)}: ${ownersHold.problem === "incomplete" ? text.ownerIncomplete : text.ownerShare}`}
+          {ownersHold.index === null ? text.ownersTotal : `${text.ownerHeading(ownersHold.index + 1)}: ${ownersHold.problem === "incomplete" ? text.ownerIncomplete : ownersHold.problem === "low" ? text.ownerShareLow : text.ownerShare}`}
         </Notice>
       ) : null}
 
@@ -757,7 +757,7 @@ const UPLOAD_IDS: Record<string, string> = {
 function revealOwnerProblem(blocker: OwnersBlocker, owners: readonly OwnerDraft[]): boolean {
   if (blocker.index === null) return false;
   const owner = owners[blocker.index];
-  const field: OwnerField = blocker.problem === "share" ? "share_percent" : owner?.first_name.trim() ? "last_name" : "first_name";
+  const field: OwnerField = blocker.problem === "share" || blocker.problem === "low" ? "share_percent" : owner?.first_name.trim() ? "last_name" : "first_name";
   const input = document.getElementById(ownerFieldId(blocker.index, field));
   if (!input) return false;
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;

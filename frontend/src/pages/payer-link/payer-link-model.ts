@@ -412,17 +412,24 @@ export function parseShare(value: string): number | null {
   return number > 0 && number <= 100 ? number : null;
 }
 
-export type OwnerProblem = "incomplete" | "share";
+export type OwnerProblem = "incomplete" | "share" | "low";
+
+/** The step asks for persons holding more than this share (owner 2026-11-10: 25 % or less is refused). */
+export const OWNER_SHARE_ABOVE = 25;
 
 /**
  * What keeps the list of beneficial owners from being sent: a person without
- * both names, a share that is not 0 < x ≤ 100, and the shares together over
- * 100 % (`total`). A list in this state stays on the page until it is fixed.
+ * both names, a share that is not 0 < x ≤ 100, a share of 25 % or less
+ * (`low`: only persons above 25 % are named; "nobody above 25 %" is the
+ * answer otherwise), and the shares together over 100 % (`total`). A list in
+ * this state stays on the page until it is fixed.
  */
 export function ownerProblems(owners: readonly OwnerDraft[]): { rows: (OwnerProblem | null)[]; total: boolean } {
   const rows = owners.map((owner): OwnerProblem | null => {
     if (!collapse(owner.first_name) || !collapse(owner.last_name)) return "incomplete";
-    return parseShare(owner.share_percent) === null ? "share" : null;
+    const share = parseShare(owner.share_percent);
+    if (share === null) return "share";
+    return share <= OWNER_SHARE_ABOVE ? "low" : null;
   });
   const sum = owners.reduce((total, owner) => total + (parseShare(owner.share_percent) ?? 0), 0);
   return { rows, total: Math.round(sum * 100) > 100 * 100 };

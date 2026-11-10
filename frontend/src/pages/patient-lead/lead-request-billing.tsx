@@ -27,6 +27,7 @@ import {
 import {
   BILLING_EXTRAS_FIELDS,
   PAYMENT_METHODS,
+  isRemovedPaymentMethod,
   VIA_THIRD_PARTY_KINDS,
   billingExtrasPatch,
   billingExtrasValue,
@@ -350,7 +351,8 @@ export function BillingSections({
         {...control("payment_method")}
         className={selectClass}
         value={draft.payment_method}
-        missingValueLabel={draft.payment_method === "crypto" ? text.paymentMethodOptions.crypto : undefined}
+        // A method no longer offered (cryptocurrency, "other") keeps its label until it is changed.
+        missingValueLabel={isRemovedPaymentMethod(draft.payment_method) ? text.paymentMethodOptions[draft.payment_method] : undefined}
         onChange={(event) => {
           const method = event.target.value;
           // The account holder is offered only where the account is asked (block C):

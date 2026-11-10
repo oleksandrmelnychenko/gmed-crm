@@ -15,7 +15,7 @@ import {
 } from "@/components/record-workspace/primitives/design-tokens";
 import { appDateKey } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
-import { PAYMENT_METHODS, asksAccount, withPaymentMethod, withViaThirdParty } from "@/pages/patient-lead/lead-request-billing-model";
+import { PAYMENT_METHODS, asksAccount, isRemovedPaymentMethod, withPaymentMethod, withViaThirdParty } from "@/pages/patient-lead/lead-request-billing-model";
 import { asLeadCabinetLang } from "@/pages/patient-lead/lead-request-text";
 
 import {
@@ -66,7 +66,7 @@ function OwnerCard({
   context: StepContext;
   index: number;
   owner: OwnerDraft;
-  problem: "incomplete" | "share" | null;
+  problem: "incomplete" | "share" | "low" | null;
   onChange: (field: OwnerField, value: string) => void;
   onRemove: () => void;
 }) {
@@ -148,7 +148,7 @@ function OwnerCard({
       </div>
       {problem ? (
         <p className="text-xs text-amber-800 dark:text-amber-200" data-testid={`payer-link-owner-${index}-problem`}>
-          {problem === "incomplete" ? text.ownerIncomplete : text.ownerShare}
+          {problem === "incomplete" ? text.ownerIncomplete : problem === "low" ? text.ownerShareLow : text.ownerShare}
         </p>
       ) : null}
     </fieldset>
@@ -356,6 +356,8 @@ export function PaymentStep({ context, suggestion }: { context: StepContext; sug
             {...controlProps(form, "payment_method")}
             className={selectClass}
             value={draft.payment_method}
+            // A method no longer offered (cryptocurrency, "other") keeps its label until it is changed.
+            missingValueLabel={isRemovedPaymentMethod(draft.payment_method) ? text.paymentMethods[draft.payment_method] : undefined}
             onChange={(event) => {
               const method = event.target.value;
               const offer = offered.current ? null : suggestion;

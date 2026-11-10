@@ -714,14 +714,14 @@ describe("autosave body", () => {
   });
 
   it("holds the step on a list of owners that cannot be saved, and never sends it (QA 2026-11-10)", () => {
-    const anna = { ...emptyOwner(), first_name: "Anna", last_name: "Muster", share_percent: "10" };
+    const anna = { ...emptyOwner(), first_name: "Anna", last_name: "Muster", share_percent: "30" };
     const saved = draftFromQuestionnaire(
       questionnaire("company", {
-        beneficial_owners: [{ first_name: "Anna", last_name: "Muster", date_of_birth: null, birth_place: null, street: null, zip: null, city: null, country: null, share_percent: 10 }],
+        beneficial_owners: [{ first_name: "Anna", last_name: "Muster", date_of_birth: null, birth_place: null, street: null, zip: null, city: null, country: null, share_percent: 30 }],
       }),
     );
     expect(ownersBlocker(saved)).toBeNull();
-    // 150 %: the list is not sent — the saved 10 % would stay — so the step must not be left.
+    // 150 %: the list is not sent — the saved 30 % would stay — so the step must not be left.
     const tooMuch = { ...saved, beneficial_owners: [{ ...anna, share_percent: "150" }] };
     expect(answersPatch(saved, tooMuch, company)).toEqual({});
     expect(ownersBlocker(tooMuch)).toEqual({ problem: "share", index: 0 });
@@ -735,8 +735,14 @@ describe("autosave body", () => {
       problem: "total",
       index: null,
     });
-    // A share of 25 % or less stays possible: the step also asks who controls the organisation in another way.
-    expect(ownersBlocker({ ...saved, beneficial_owners: [{ ...anna, share_percent: "10" }] })).toBeNull();
+    // Only persons above 25 % are named (owner 2026-11-10): 25 % or less is refused and never sent.
+    const low = { ...saved, beneficial_owners: [{ ...anna, share_percent: "25" }] };
+    expect(ownersBlocker(low)).toEqual({ problem: "low", index: 0 });
+    expect(ownersBlocker({ ...saved, beneficial_owners: [{ ...anna, share_percent: "10" }] })).toEqual({ problem: "low", index: 0 });
+    expect(answersPatch(saved, low, company)).toEqual({});
+    expect(ownersBlocker({ ...saved, beneficial_owners: [{ ...anna, share_percent: "25,01" }] })).toBeNull();
+    // The organisation can say that nobody holds more than 25 % instead.
+    expect(ownersBlocker(withOwnersNone(low, true))).toBeNull();
     // Nothing typed, or "nobody above 25 %": nothing holds the step.
     expect(ownersBlocker({ ...saved, beneficial_owners: [] })).toBeNull();
     expect(ownersBlocker(withOwnersNone(tooMuch, true))).toBeNull();

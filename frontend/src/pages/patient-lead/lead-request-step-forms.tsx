@@ -1357,6 +1357,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
         enqueue={enqueue}
         onChange={onChange}
         testId="lead-request-health-consent"
+        withdrawAfterSend
       />
       {/* The reason and the uploads below wait for this consent: said once, here (labels audit 2026-10-26, A6). */}
       {!consentReady ? <ConsentNeededNote>{text.healthConsentRequired}</ConsentNeededNote> : null}

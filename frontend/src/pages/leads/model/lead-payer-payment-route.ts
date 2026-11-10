@@ -28,10 +28,10 @@ export type PaymentRouteField = (typeof PAYMENT_ROUTE_FIELDS)[number];
 
 /**
  * The methods staff choose from: those the server accepts. Cryptocurrency is
- * no longer offered (owner 2026-10-12); an older answer is shown and kept
- * while staff leave the method alone.
+ * no longer offered (owner 2026-10-12), neither is "other" (owner 2026-11-10);
+ * an older answer is shown and kept while staff leave the method alone.
  */
-export const STAFF_PAYMENT_METHODS = ["bank_transfer", "card", "cash", "other"] as const;
+export const STAFF_PAYMENT_METHODS = ["bank_transfer", "card", "cash"] as const;
 
 /** Who gave the stored route (`declaration.payment_route_source`). */
 export type PaymentRouteSource = "payer" | "staff" | "lead";
@@ -99,7 +99,7 @@ const CONTROL_MULTILINE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/;
 export function paymentRouteErrors(draft: PaymentRouteDraft, tx: Tx): Partial<Record<PaymentRouteField, string>> {
   const errors: Partial<Record<PaymentRouteField, string>> = {};
   const method = routeValue("payment_method", draft);
-  if (method && !(STAFF_PAYMENT_METHODS as readonly string[]).includes(method) && method !== "crypto") {
+  if (method && !(STAFF_PAYMENT_METHODS as readonly string[]).includes(method) && method !== "crypto" && method !== "other") {
     errors.payment_method = tx("Выберите способ из списка", "Bitte eine Zahlungsart aus der Liste wählen");
   }
   const country = routeValue("account_country", draft);

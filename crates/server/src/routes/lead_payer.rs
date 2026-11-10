@@ -203,12 +203,14 @@ pub const PAYMENT_METHOD_CASH: &str = "cash";
 /// No longer offered (owner 2026-10-12): an older answer keeps its
 /// compliance flag and is asked again before the request is sent.
 pub const PAYMENT_METHOD_CRYPTO: &str = "crypto";
+/// No longer offered either (owner 2026-11-10: it asked for no explanation
+/// and said nothing): an older answer keeps its words and its flag and is
+/// asked again before the request is sent, like `crypto`.
 pub const PAYMENT_METHOD_OTHER: &str = "other";
 pub const PAYMENT_METHODS: &[&str] = &[
     PAYMENT_METHOD_BANK_TRANSFER,
     PAYMENT_METHOD_CARD,
     PAYMENT_METHOD_CASH,
-    PAYMENT_METHOD_OTHER,
 ];
 
 /// Template of the cost assumption declaration (Kostenübernahmeerklärung).
@@ -5489,9 +5491,8 @@ pub(crate) fn portal_missing_billing(
         return missing;
     }
     match declaration.payment_method.as_deref() {
-        None | Some(PAYMENT_METHOD_CRYPTO) => missing.push("payment_method"),
-        Some(PAYMENT_METHOD_OTHER) if blank(&declaration.payment_method_details) => {
-            missing.push("payment_method_details");
+        None | Some(PAYMENT_METHOD_CRYPTO | PAYMENT_METHOD_OTHER) => {
+            missing.push("payment_method");
         }
         Some(method @ (PAYMENT_METHOD_BANK_TRANSFER | PAYMENT_METHOD_CARD)) => {
             if declaration.account_country.is_none() {
@@ -6806,12 +6807,24 @@ mod tests {
         assert_eq!(cash.via_third_party, Some(false));
         assert_eq!(cash.via_third_party_details, None);
         assert_eq!(cash.payment_route_flags(), ["cash_payment"]);
-        let other = apply_billing_patch(
-            &cash,
-            &patch(json!({ "payment_method": "other", "payment_method_details": "Scheck" })),
-        )
-        .unwrap();
-        assert_eq!(other.payment_method_details.as_deref(), Some("Scheck"));
+        // "Other" is no longer offered (owner 2026-11-10); an older answer
+        // keeps its words and its flag and is asked again.
+        assert!(
+            apply_billing_patch(
+                &cash,
+                &patch(json!({ "payment_method": "other", "payment_method_details": "Scheck" })),
+            )
+            .is_err()
+        );
+        let other = Declaration {
+            payment_method: Some("other".into()),
+            payment_method_details: Some("Scheck".into()),
+            ..cash.clone()
+        };
+        assert_eq!(
+            portal_missing_billing(Some(&other), PaymentRouteBy::Patient),
+            ["payment_method"]
+        );
         assert_eq!(other.payment_route_flags(), ["other_method"]);
         // Cryptocurrency is no longer offered (owner 2026-10-12); an older
         // answer keeps its flag.
@@ -7023,14 +7036,15 @@ mod tests {
             ["account_holder"],
             "the bank is optional for a card"
         );
-        let described = apply_billing_patch(
-            &card,
-            &patch(json!({ "payment_method": "other", "payment_method_details": "" })),
-        )
-        .unwrap();
+        // An older "other" is no answer any more, with or without words.
+        let described = Declaration {
+            payment_method: Some("other".into()),
+            payment_method_details: None,
+            ..card.clone()
+        };
         assert_eq!(
             portal_missing_billing(Some(&described), PaymentRouteBy::Patient),
-            ["payment_method_details"]
+            ["payment_method"]
         );
         let complete =
             apply_billing_patch(&described, &patch(json!({ "payment_method": "cash" }))).unwrap();

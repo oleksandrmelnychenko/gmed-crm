@@ -268,6 +268,8 @@ export type LeadRequestConsent = {
   /** The exact text per language (de, ru, uk, en); what is shown is what is stored. */
   texts: Record<string, string>;
   given_at: string | null;
+  /** When this login last withdrew the consent, while none is given; absent on an older server. */
+  withdrawn_at?: string | null;
 };
 
 /**

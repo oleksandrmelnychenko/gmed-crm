@@ -876,9 +876,9 @@ describe("lead request summary", () => {
         "billing",
       ),
     ).toMatchObject({ "Kontoinhaber/in": "Anna Muster" });
-    // "Other" shows its details.
+    // An older "other" (no longer offered, owner 2026-11-10) shows its label and its details.
     expect(rows(requestSummary(request({ billing: billing({ payment_method: "other", payment_method_details: "Scheck" }) }), de, "de"), "billing")).toMatchObject({
-      "Welche Zahlungsart für Rechnungen bevorzugen Sie?": "Sonstiges",
+      "Welche Zahlungsart für Rechnungen bevorzugen Sie?": "Sonstiges (nicht mehr unterstützt)",
       "Bitte beschreiben": "Scheck",
     });
 
