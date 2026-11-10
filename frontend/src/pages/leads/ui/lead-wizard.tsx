@@ -185,7 +185,7 @@ import { uploadEach } from "../model/upload-each";
 import { LEAD_UPLOAD_ACCEPT } from "@/pages/patient-lead/lead-request-model";
 import { useLeadIdentificationStatus } from "../model/use-lead-identification-status";
 import { removeLeadRepresentativeData, removeLeadTrustedContact, updateLeadRepresentativeDetails, type RepresentativeDetails } from "../data/lead-representation-api";
-import { EMPTY_REPRESENTATIVE_DETAILS, fillEmptyRepresentativeDetails, guardianCandidateDetails, pendingRepresentativeDetailsReady, representativeDetailsChanged, representativeDetailsErrors } from "../model/lead-representative-details";
+import { EMPTY_REPRESENTATIVE_DETAILS, fillEmptyRepresentativeDetails, guardianCandidateDetails, pendingRepresentativeDetailsReady, representativeDetailsChanged, representativeDetailsErrors, representativeDetailsOf } from "../model/lead-representative-details";
 import { saveLeadParentBillingRole } from "../data/lead-payer-api";
 import {
   PARENT_BILLING_ROLES,
@@ -11102,6 +11102,41 @@ ${serviceCommentLines.join("\n")}`
                         if (next.legalSex) patch("legalSex", next.legalSex);
                         if (next.citizenship && !draft.citizenships.includes(next.citizenship)) {
                           handleAmlCountryChange({ citizenships: [...draft.citizenships, next.citizenship] });
+                        }
+                      }}
+                      // A representative's ticked name and birth date go into the
+                      // contact (stored with the lead's autosave, as the contact
+                      // dialog would); a citizenship is added to the person's data
+                      // at once (owner 2026-11-10: the scan fills, not only compares).
+                      onApplyRepresentativeHolder={(person, next) => {
+                        if (next.lastName || next.firstName || next.birthDate) {
+                          const first = next.firstName ?? person.first_name ?? "";
+                          const last = next.lastName ?? person.last_name ?? "";
+                          setDraft((current) => current ? {
+                            ...current,
+                            trustedContacts: current.trustedContacts.map((contact) => contact.id === person.id
+                              ? {
+                                ...contact,
+                                name: [first.trim(), last.trim()].filter(Boolean).join(" ") || contact.name,
+                                birthDate: next.birthDate ?? contact.birthDate,
+                              }
+                              : contact),
+                          } : current);
+                        }
+                        if (next.citizenship && !person.citizenships.includes(next.citizenship) && leadId) {
+                          const loaded = representativeDetailsOf(person);
+                          void updateLeadRepresentativeDetails(
+                            leadId,
+                            person.id,
+                            { ...loaded, citizenships: [...loaded.citizenships, next.citizenship] },
+                            loaded,
+                          ).then(
+                            (representation) => {
+                              applyStep1Representation(representation);
+                              void risk.controller.reload();
+                            },
+                            (cause) => setError(errorText(cause, tx)),
+                          );
                         }
                       }}
                       representativeFiles={representativeFileRows}

@@ -2557,3 +2557,73 @@ async fn a_converted_leads_assessment_is_frozen() {
     // Reading it still works.
     assert_eq!(assessment(&app, lead_id).await["level"], 2);
 }
+
+/// Owner 2026-11-10: the parent without a billing role whose country is on a
+/// list is shown in the assessment, and Sales (or the CEO) confirms being
+/// aware; the confirmation is stored with who gave it and audited.
+#[tokio::test]
+async fn sales_acknowledge_a_listed_parent_without_a_billing_role() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let parent_id = Uuid::new_v4();
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, date_of_birth, citizenships, country,
+                              email, created_by, trusted_contacts)
+           VALUES ('Mila', 'Kenntnis', '2015-04-06', '{DE}', 'DE', $1, $2, $3)
+           RETURNING id"#,
+    )
+    .bind(format!("lead-{}@example.com", Uuid::new_v4().simple()))
+    .bind(app.pm_id)
+    .bind(json!([{
+        "id": parent_id,
+        "name": "Reza Kenntnis",
+        "relation": "father",
+        "email": format!("parent-{}@example.com", Uuid::new_v4().simple()),
+        "birth_date": "1985-01-01",
+        "citizenships": ["IR"]
+    }]))
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+
+    let read = assessment(&app, lead_id).await;
+    let parents = read["uncounted_parents"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(parents.len(), 1, "{read}");
+    assert_eq!(parents[0]["representative_id"], parent_id.to_string());
+    assert_eq!(parents[0]["countries"], json!(["IR"]), "{read}");
+    assert!(parents[0]["acknowledged_at"].is_null(), "{read}");
+
+    let path =
+        format!("/leads/{lead_id}/risk-assessment/uncounted-parents/{parent_id}/acknowledge");
+    // Somebody else's id is not a parent of this lead.
+    let (status, body) = request(
+        &app,
+        "POST",
+        &format!(
+            "/leads/{lead_id}/risk-assessment/uncounted-parents/{}/acknowledge",
+            Uuid::new_v4()
+        ),
+        &app.sales(),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    let (status, body) = request(&app, "POST", &path, &app.sales(), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let parent = &body["uncounted_parents"][0];
+    assert!(parent["acknowledged_at"].is_string(), "{body}");
+    assert!(parent["acknowledged_by_name"].is_string(), "{body}");
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action = 'lead_uncounted_parent_acknowledged' AND entity_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+}

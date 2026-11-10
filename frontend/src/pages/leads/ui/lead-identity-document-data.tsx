@@ -605,10 +605,13 @@ function RepresentativeForm({
   today,
   onSaved,
   onUploaded,
+  onApplyHolder,
 }: {
   leadId: string;
   person: LeadRepresentative;
   custody: LeadCustody | null | undefined;
+  /** Takes the person's data staff ticked in the scan's proposal; without it they are only compared. */
+  onApplyHolder?: (patch: RecognitionHolderPatch) => void;
   /** The person's own uploads of a kind (identity scan, power of attorney), under the person's card. */
   renderFiles?: (person: LeadRepresentative, kind: RepresentativeUploadKind) => ReactNode;
   tx: Tx;
@@ -674,6 +677,7 @@ function RepresentativeForm({
             birthDate: person.date_of_birth,
             citizenships: person.citizenships,
           }}
+          onApplyHolder={onApplyHolder}
           clientMayType={person.id_data_typed_by_client === true}
           testId={`lead-representative-id-data-${person.id}`}
           save={async (input, options) => {
@@ -707,6 +711,7 @@ export function LeadIdentityDocumentData({
   patientHolder,
   onApplyPatientHolder,
   representativeFiles,
+  onApplyRepresentativeHolder,
   today = appDateKey(),
   onSaved,
   onUploaded,
@@ -737,6 +742,8 @@ export function LeadIdentityDocumentData({
   patientHolder?: RecognitionHolderCurrent;
   /** Takes the patient's data staff ticked in the scan's proposal (the wizard's fields). */
   onApplyPatientHolder?: (patch: RecognitionHolderPatch) => void;
+  /** Takes a representative's data staff ticked in the scan's proposal (owner 2026-11-10). */
+  onApplyRepresentativeHolder?: (person: LeadRepresentative, patch: RecognitionHolderPatch) => void;
   /** A representative's own uploads of a kind, under that person's card. */
   representativeFiles?: (person: LeadRepresentative, kind: RepresentativeUploadKind) => ReactNode;
   today?: string;
@@ -810,6 +817,7 @@ export function LeadIdentityDocumentData({
               today={today}
               onSaved={onSaved}
               onUploaded={onUploaded ?? onSaved}
+              onApplyHolder={onApplyRepresentativeHolder ? (patch) => onApplyRepresentativeHolder(person, patch) : undefined}
             />
           ))}
         </div>

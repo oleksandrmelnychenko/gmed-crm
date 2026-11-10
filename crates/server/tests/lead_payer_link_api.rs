@@ -39,6 +39,7 @@ const CONSENT: &str = "/api/v1/public/payer-link/consent";
 const IDENTITY: &str = "/api/v1/public/payer-link/identity-document";
 const FUNDS: &str = "/api/v1/public/payer-link/funds-proof";
 const SUBMIT: &str = "/api/v1/public/payer-link/submit";
+const REGISTER_EXTRACT: &str = "/api/v1/public/payer-link/register-extract";
 
 static NEXT_PEER: AtomicU32 = AtomicU32::new(1);
 
@@ -4046,4 +4047,59 @@ async fn the_paper_questionnaire_is_only_for_a_third_party() {
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["code"], "no_third_party", "{body}");
+}
+
+/// Owner decision 2026-11-10: a paying organisation uploads its commercial
+/// register extract on its own link; the extract is then on file (it lifts
+/// the representative's ID). A person payer has no register extract.
+#[tokio::test]
+async fn an_organisation_uploads_its_register_extract_on_the_link() {
+    let Some(app) = payer_app().await else { return };
+    let pool = app.pool();
+    let (lead_id, patient) = lead(&app, "register-extract").await;
+    name_payer(
+        &app,
+        lead_id,
+        &patient,
+        json!({
+            "payer_kind": "third_party",
+            "payer_type": "company",
+            "organisation_name": "Beispiel Register GmbH",
+            "country": "DE",
+            "relationship_kind": "employer",
+            "email": "register@example.com",
+            "contact_consent": true
+        }),
+    )
+    .await;
+    submit_request(&app, lead_id).await;
+    let (token, _) = send_link(&app, lead_id, json!({})).await;
+    let session = open_session(&app, &token).await;
+    // Nothing is uploaded before the privacy notice.
+    let (status, body) =
+        payer_upload(&app, REGISTER_EXTRACT, &token, &session, "hr-auszug.pdf").await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    consent(&app, &token, &session).await;
+    let (status, body) =
+        payer_upload(&app, REGISTER_EXTRACT, &token, &session, "hr-auszug.pdf").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["register_extract_on_file"], true, "{body}");
+    let (name, notes): (String, Option<String>) = sqlx::query_as(
+        "SELECT auto_name, notes FROM documents WHERE lead_id = $1 AND notes LIKE 'Handelsregisterauszug%'",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .expect("the extract is filed with the lead");
+    assert!(name.starts_with("Handelsregisterauszug"), "{name}");
+    assert!(notes.unwrap_or_default().contains("über den Link"));
+
+    // A person payer is refused.
+    let (person_lead, _) = lead_with_payer(&app, "register-extract-person").await;
+    let (token, _) = send_link(&app, person_lead, json!({})).await;
+    let session = open_session(&app, &token).await;
+    consent(&app, &token, &session).await;
+    let (status, body) = payer_upload(&app, REGISTER_EXTRACT, &token, &session, "hr.pdf").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "register_extract_organisation_only", "{body}");
 }
