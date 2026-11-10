@@ -172,7 +172,7 @@ pub(super) async fn load_dunning_letter_context(
         recipient: document::recipient_from_row(&row),
         agency: InvoicePdfAgency {
             name: setting("agency_name")
-                .unwrap_or_else(|| "GMED - Agentur für Patientenbetreuung".to_string()),
+                .unwrap_or_else(|| "GMED – Agentur für Patientenbetreuung".to_string()),
             care_of: setting("agency_care_of"),
             address: setting("agency_address"),
             phone: setting("agency_phone"),

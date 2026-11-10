@@ -209,7 +209,7 @@ pub(crate) async fn load_credit_note_pdf_context(
         ),
         agency: PatientPdfBrand {
             name: setting(&row, "agency_name")
-                .unwrap_or_else(|| "GMED - Agentur für Patientenbetreuung".to_string()),
+                .unwrap_or_else(|| "GMED – Agentur für Patientenbetreuung".to_string()),
             responsible_person: setting(&row, "agency_care_of").unwrap_or_default(),
             address: setting(&row, "agency_address"),
             phone: setting(&row, "agency_phone"),
@@ -348,7 +348,7 @@ pub(crate) async fn load_storno_pdf_context(
         ),
         agency: PatientPdfBrand {
             name: setting(&row, "agency_name")
-                .unwrap_or_else(|| "GMED - Agentur für Patientenbetreuung".to_string()),
+                .unwrap_or_else(|| "GMED – Agentur für Patientenbetreuung".to_string()),
             responsible_person: setting(&row, "agency_care_of").unwrap_or_default(),
             address: setting(&row, "agency_address"),
             phone: setting(&row, "agency_phone"),

@@ -5625,7 +5625,7 @@ async fn load_invoice_pdf_context_on(
         line_items: pdf_lines,
         agency: InvoicePdfAgency {
             name: setting("agency_name")
-                .unwrap_or_else(|| "GMED - Agentur für Patientenbetreuung".to_string()),
+                .unwrap_or_else(|| "GMED – Agentur für Patientenbetreuung".to_string()),
             care_of: setting("agency_care_of"),
             address: setting("agency_address"),
             phone: setting("agency_phone"),
