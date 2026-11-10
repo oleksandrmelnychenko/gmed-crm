@@ -1340,7 +1340,7 @@ async fn patient_is_told_about_changes_of_the_visits_the_portal_shows() {
     let notices = patient_visit_notices(&pool, patient_user_id).await;
     assert_eq!(notices.len(), 1, "{notices:?}");
     assert_eq!(notices[0].0, "patient_appointment_added");
-    assert_eq!(notices[0].1, "New visit in your schedule");
+    assert_eq!(notices[0].1, "Новый приём в вашем расписании");
     assert_eq!(notices[0].3["appointment_date"], "2027-04-10");
     assert_eq!(notices[0].3["time_start"], "10:00");
 
