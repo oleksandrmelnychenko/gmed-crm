@@ -8,7 +8,8 @@
 //! * The lead's cabinet has its own route,
 //!   `POST /me/lead-requests/{lead_id}/documents/{document_id}/identity-recognition`:
 //!   whoever fills the request (the lead, a parent, staff for the client)
-//!   has a copy of the lead's own identity document read, never another file.
+//!   has a copy of the identity document of the lead or of a representative
+//!   read, never another file.
 //! * Nothing is stored and nothing is written to the log: staff see the
 //!   values, confirm or correct them, and the form's own save stores them.
 //! * The reading is recorded like a download (who had which scan read, and
@@ -168,9 +169,10 @@ async fn recognize_identity_document(
     Json(recognition_json(found.as_ref())).into_response()
 }
 
-/// The cabinet: a copy of the lead's own identity document, read for the
-/// person who fills the request. The file is found only among the lead's
-/// identity copies, so no other document is ever read this way.
+/// The cabinet: a copy of the identity document of the lead or of a person
+/// who acts for the lead, read for whoever fills the request. The file is
+/// found only among the request's identity copies, so no other document is
+/// ever read this way.
 async fn recognize_my_identity_document(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -191,7 +193,7 @@ async fn recognize_my_identity_document(
            JOIN documents d ON d.id = u.document_id
            WHERE u.document_id = $1
              AND u.lead_id = $2
-             AND u.kind = 'identity'
+             AND u.kind IN ('identity', 'representative_identity')
              AND u.withdrawn_at IS NULL
              AND d.file_deleted_at IS NULL"#,
     )

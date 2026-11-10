@@ -446,6 +446,15 @@ export type LeadRequestRepresentative = {
   country: string | null;
   email: string | null;
   phone: string | null;
+  /** The data of this person's identity document, typed next to the copy (owner 2026-11-10). */
+  id_document_type?: string | null;
+  id_document_number?: string | null;
+  id_issuing_authority?: string | null;
+  id_issuing_country?: string | null;
+  id_issued_on?: string | null;
+  id_valid_until?: string | null;
+  /** Staff saved the document's data in the wizard: read-only here. */
+  id_data_by_staff?: boolean;
   /** Photos or scans of this person's identity document. */
   identity_documents: LeadRequestDocument[];
   /** Proof that this person may act: power of attorney, appointment, sole custody. */
@@ -497,6 +506,7 @@ export type RepresentativePatch = Partial<
       | "email_locked"
       | "email_locked_reason"
       | "can_remove"
+      | "id_data_by_staff"
       | "citizenships"
       | "identity_documents"
       | "authority_documents"

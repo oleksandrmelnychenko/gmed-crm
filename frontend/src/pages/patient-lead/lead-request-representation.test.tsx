@@ -103,6 +103,25 @@ describe("a minor's parent in the cabinet", () => {
     expect(html).toContain("Документ второго родителя (Ben Muster)");
   });
 
+  // Owner 2026-11-10: parents may type the data of their document like the lead, with the reading of the scan.
+  it("asks the data of each parent's document under its copy, with the reading of the scan", () => {
+    const copy = { id: "doc-1", file_name: "pass.jpg", mime_type: "image/jpeg", size_bytes: 1024, uploaded_at: "2026-11-10T08:00:00Z", uploaded_by_me: true, reviewed: false, can_delete: true };
+    const html = renderDocumentStep([{ ...mother, identity_documents: [copy] }, father]);
+    expect(html).toContain("lead-request-rep1-identity-data");
+    expect(html).toContain("lead-request-rep1_id_document_number");
+    expect(html).toContain("lead-request-rep2_id_valid_until");
+    // The reading needs a copy: the mother has one, the father none yet.
+    expect(html).toContain("lead-request-rep1-recognition-run");
+    expect(html).not.toContain("lead-request-rep2-recognition-run");
+  });
+
+  it("shows the data GMED saved from the copy read-only", () => {
+    const html = renderDocumentStep([{ ...mother, id_document_number: "L898902C3", id_data_by_staff: true }, father]);
+    expect(html).toContain("Эти данные GMED внесла по копии документа");
+    expect(html).not.toContain("lead-request-rep1-recognition-run");
+    expect(html).toMatch(/id="lead-request-rep1_id_document_number"[^>]*disabled/);
+  });
+
   it("points to step 1 while the other parent is not named yet", () => {
     const html = renderDocumentStep([mother]);
     expect(html).toContain("lead-request-rep1-identity-upload");

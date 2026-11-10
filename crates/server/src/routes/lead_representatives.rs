@@ -205,6 +205,11 @@ pub(crate) struct Extras {
     pub id_valid_until: Option<NaiveDate>,
     /// Staff marked the scan unreadable: a new one is needed.
     pub id_document_unreadable: bool,
+    /// Staff saved the document's data in the wizard: from then on the
+    /// cabinet no longer changes them.
+    pub id_data_entered_at: Option<DateTime<Utc>>,
+    /// The cabinet typed the document's data (owner 2026-11-10).
+    pub id_data_client_at: Option<DateTime<Utc>>,
     pub country_questions: Value,
 }
 
@@ -241,6 +246,8 @@ impl Extras {
             id_document_unreadable: row
                 .try_get::<bool, _>("id_document_unreadable")
                 .unwrap_or(false),
+            id_data_entered_at: row.try_get("id_data_entered_at").ok().flatten(),
+            id_data_client_at: row.try_get("id_data_client_at").ok().flatten(),
             country_questions: row
                 .try_get("country_questions")
                 .unwrap_or_else(|_| json!({})),
@@ -819,6 +826,9 @@ pub(crate) async fn load_on(
             if let Some(stored) = rows.get(&id) {
                 effective.contact_origin = stored.contact_origin.clone();
                 effective.country_questions = stored.country_questions.clone();
+                // Who typed the data of the identity document is the row's.
+                effective.id_data_entered_at = stored.id_data_entered_at;
+                effective.id_data_client_at = stored.id_data_client_at;
             } else {
                 effective.contact_origin = ORIGIN_STAFF.to_string();
             }
@@ -1605,6 +1615,11 @@ pub(crate) fn portal_payload(loaded: &Loaded, user_id: Uuid) -> Value {
                 }),
             );
             value.insert("can_remove".into(), json!(loaded.can_remove(person)));
+            // Staff saved the document's data: the cabinet shows them read-only.
+            value.insert(
+                "id_data_by_staff".into(),
+                json!(person.extras.id_data_entered_at.is_some()),
+            );
             value.insert(
                 "identity_locked".into(),
                 json!(loaded.identity_locked(person, user_id)),
@@ -1672,6 +1687,19 @@ pub(crate) fn staff_payload(loaded: &Loaded) -> Value {
         .map(|person| {
             let mut value = person_json(person);
             value.insert("has_login".into(), json!(person.has_login()));
+            value.insert(
+                "id_data_entered_at".into(),
+                json!(person.extras.id_data_entered_at),
+            );
+            // Typed in the cabinet and not yet saved by staff: to compare
+            // with the scan.
+            value.insert(
+                "id_data_typed_by_client".into(),
+                json!(
+                    person.extras.id_data_client_at.is_some()
+                        && person.extras.id_data_entered_at.is_none()
+                ),
+            );
             value.insert("has_data".into(), json!(person.has_data));
             value.insert(
                 "contact_origin".into(),
@@ -3222,15 +3250,9 @@ pub(crate) async fn upsert_my_representative(
     if let Err(response) = intake::require_cabinet_editor(&auth) {
         return response;
     }
-    // The identity document data of a representative are staff's (trigger
-    // flow 2026-10-07): the cabinet uploads the document only.
-    if let Some(field) = body.as_object().and_then(|object| {
-        object
-            .keys()
-            .find(|key| crate::risk::cabinet::is_id_data_key(key))
-    }) {
-        return crate::risk::cabinet::staff_only(field);
-    }
+    // The data of a representative's identity document may be typed in the
+    // cabinet next to the copy (owner 2026-11-10), until staff saved them in
+    // the wizard — see below.
     let patch = match parse_person_patch(&body) {
         Ok(patch) => patch,
         Err(response) => return response,
@@ -3406,6 +3428,17 @@ pub(crate) async fn upsert_my_representative(
         }
     }
     let mut fields = changed_person_fields(&current, &next);
+    // The data of the identity document staff saved in the wizard stay
+    // staff's: they compared them with the scan.
+    let id_data_changed = fields
+        .iter()
+        .copied()
+        .find(|field| crate::risk::cabinet::is_id_data_key(field));
+    if let Some(field) = id_data_changed
+        && known.is_some_and(|person| person.extras.id_data_entered_at.is_some())
+    {
+        return crate::risk::cabinet::staff_only(field);
+    }
     if relation_changed {
         fields.push("relation");
     }
@@ -3484,6 +3517,34 @@ pub(crate) async fn upsert_my_representative(
             auth.user_id,
         )
         .await?;
+        // The data of the identity document as typed in the cabinet: the
+        // upsert above leaves them alone on an existing row (staff's saves
+        // run through it too). Typed by the client, the wizard asks staff
+        // to compare them with the scan.
+        if id_data_changed.is_some() {
+            sqlx::query(
+                r#"UPDATE lead_representatives SET
+                       id_document_type = $3,
+                       id_document_number = $4,
+                       id_issuing_authority = $5,
+                       id_issuing_country = $6,
+                       id_issued_on = $7,
+                       id_valid_until = $8,
+                       id_data_client_at = CASE WHEN $9 THEN now() ELSE id_data_client_at END
+                   WHERE lead_id = $1 AND contact_id = $2"#,
+            )
+            .bind(lead_id)
+            .bind(representative_id)
+            .bind(&next.id_document_type)
+            .bind(&next.id_document_number)
+            .bind(&next.id_issuing_authority)
+            .bind(&next.id_issuing_country)
+            .bind(next.id_issued_on)
+            .bind(next.id_valid_until)
+            .bind(kind != AccessKind::Staff)
+            .execute(&mut *tx)
+            .await?;
+        }
         finish_cabinet_write(
             &mut tx,
             lead_id,

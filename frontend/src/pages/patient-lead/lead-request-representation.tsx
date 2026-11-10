@@ -93,6 +93,7 @@ import {
   type RepresentativeDraft,
   type RepresentativeField,
 } from "./lead-request-representation-model";
+import { RepresentativeIdentityData } from "./lead-request-representative-identity-data";
 import { RepresentativePepQuestions } from "./lead-request-representative-questions";
 import {
   asLeadCabinetLang,
@@ -464,6 +465,7 @@ export function RepresentativeUpload({
   person,
   documents,
   text,
+  lang,
   enqueue,
   onChange,
 }: {
@@ -476,6 +478,8 @@ export function RepresentativeUpload({
   person: LeadRequestRepresentative | null;
   documents: readonly LeadRequestDocument[];
   text: LeadRequestText;
+  /** With the language, the fields of the identity document show under its copies. */
+  lang?: string;
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
 }) {
@@ -583,6 +587,9 @@ export function RepresentativeUpload({
         testId={`${id}-list`}
         onRemove={(documentId) => void remove(documentId)}
       />
+      {kind === "identity" && person && lang ? (
+        <RepresentativeIdentityData request={request} slot={slot} person={person} text={text} lang={lang} enqueue={enqueue} onChange={onChange} />
+      ) : null}
     </div>
   );
 }
@@ -907,7 +914,7 @@ function RepresentativeBlock({
           onSaveState={onPepState}
         />
       ) : null}
-      {/* The identity document: a copy only; GMED enters its data. */}
+      {/* The identity document: the copy and, optional, its data (owner 2026-11-10). */}
       {identityUpload ? (
         <RepresentativeUpload
           request={request}
@@ -918,6 +925,7 @@ function RepresentativeBlock({
           person={person}
           documents={person?.identity_documents ?? []}
           text={text}
+          lang={lang}
           enqueue={enqueue}
           onChange={onChange}
         />

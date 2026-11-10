@@ -779,18 +779,25 @@ export function IdentityStep({ request, text, lang, enqueue, onChange, missing, 
             onChange={onChange}
             title={forChild ? text.childDocumentTitle : undefined}
           />
-          <LeadRequestIdentityRecognition request={request} form={identification} text={text} lang={lang} />
+          <LeadRequestIdentityRecognition
+            leadId={request.lead_id}
+            documents={request.identity_documents ?? []}
+            draft={identification.draft}
+            onTake={(field, value) => identification.set(field, value)}
+            text={text}
+            lang={lang}
+          />
           <IdentityDocumentDataFields form={identification} text={text} lang={lang} />
         </div>
       ) : null}
       {parentOfMinor ? (
-        <OwnRepresentativeDocumentSection request={request} text={text} enqueue={enqueue} onChange={onChange} />
+        <OwnRepresentativeDocumentSection request={request} text={text} lang={lang} enqueue={enqueue} onChange={onChange} />
       ) : null}
       {parentOfMinor ? (
-        <OtherParentDocumentSection request={request} text={text} enqueue={enqueue} onChange={onChange} />
+        <OtherParentDocumentSection request={request} text={text} lang={lang} enqueue={enqueue} onChange={onChange} />
       ) : null}
       {staffParentSlots.map((slot) => (
-        <OtherParentDocumentSection key={slot} request={request} text={text} enqueue={enqueue} onChange={onChange} slot={slot} />
+        <OtherParentDocumentSection key={slot} request={request} text={text} lang={lang} enqueue={enqueue} onChange={onChange} slot={slot} />
       ))}
       </ConsentNoteAboveContext.Provider>
     </StepFrame>
@@ -806,9 +813,10 @@ export function IdentityStep({ request, text, lang, enqueue, onChange, missing, 
 export function OwnRepresentativeDocumentSection({
   request,
   text,
+  lang,
   enqueue,
   onChange,
-}: Pick<StepProps, "request" | "text" | "enqueue" | "onChange">) {
+}: Pick<StepProps, "request" | "text" | "enqueue" | "onChange"> & { lang?: string }) {
   const me = request.representation?.representatives.find((person) => person.mine && person.slot !== null) ?? null;
   const slot = me?.slot ?? null;
   const required = slot !== null && (
@@ -829,6 +837,7 @@ export function OwnRepresentativeDocumentSection({
               person={me}
               documents={me.identity_documents}
               text={text}
+              lang={lang}
               enqueue={enqueue}
               onChange={onChange}
             />
@@ -862,10 +871,12 @@ export function OwnRepresentativeDocumentSection({
 export function OtherParentDocumentSection({
   request,
   text,
+  lang,
   enqueue,
   onChange,
   slot: givenSlot,
 }: Pick<StepProps, "request" | "text" | "enqueue" | "onChange"> & {
+  lang?: string;
   /** Staff on a minor's form name the parent's place: they are none of the parents (owner 2026-10-30). */
   slot?: "rep1" | "rep2";
 }) {
@@ -894,6 +905,7 @@ export function OtherParentDocumentSection({
               person={person}
               documents={person.identity_documents}
               text={text}
+              lang={lang}
               enqueue={enqueue}
               onChange={onChange}
             />

@@ -746,9 +746,11 @@ async fn an_adult_names_the_person_who_acts_for_him() {
             "date_of_birth",
         ),
         (json!({ "country": "Germany" }), "invalid_field", "country"),
+        // The data of the own document may be typed here (owner
+        // 2026-11-10); an expired document has its own code.
         (
-            json!({ "id_valid_until": "2099-01-01" }),
-            "staff_only",
+            json!({ "id_valid_until": "2020-01-01" }),
+            "id_document_expired",
             "id_valid_until",
         ),
         (
@@ -790,6 +792,91 @@ async fn an_adult_names_the_person_who_acts_for_him() {
         "{body}"
     );
     answer_pep(router, &agent_path, &patient).await;
+
+    // The data of the representative's identity document, typed in the
+    // cabinet (owner 2026-11-10): stored as typed and marked for staff.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &agent_path,
+        &patient,
+        Some(json!({ "id_document_type": "passport", "id_document_number": " l898902c3 ", "id_valid_until": "2099-01-01" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let person = representative(&body, agent);
+    assert_eq!(person["id_document_type"], "passport", "{person}");
+    assert_eq!(person["id_valid_until"], "2099-01-01", "{person}");
+    assert_eq!(person["id_data_by_staff"], false, "{person}");
+    let (_, intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/portal-intake"),
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    let seen = representative(&intake, agent);
+    assert_eq!(seen["id_data_typed_by_client"], true, "{seen}");
+    assert!(seen["id_data_entered_at"].is_null(), "{seen}");
+    // Once staff saved the data in the wizard they are staff's: the cabinet
+    // reads them and no longer changes them.
+    sqlx::query("UPDATE lead_representatives SET id_data_entered_at = now() WHERE lead_id = $1 AND contact_id = $2")
+        .bind(lead_id)
+        .bind(agent)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, error) = json_request(
+        router,
+        "POST",
+        &agent_path,
+        &patient,
+        Some(json!({ "id_document_number": "X1234567" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+    assert_eq!(error["code"], "staff_only", "{error}");
+    assert_eq!(error["field"], "id_document_number", "{error}");
+    // The other fields of the person still save.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &agent_path,
+        &patient,
+        Some(complete_adult_person("authorised_representative")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        representative(&body, agent)["id_data_by_staff"],
+        true,
+        "{body}"
+    );
+    let (_, intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/portal-intake"),
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        representative(&intake, agent)["id_data_typed_by_client"],
+        false,
+        "{intake}"
+    );
+    // The rest of the walk runs without document data, as before.
+    sqlx::query(
+        "UPDATE lead_representatives SET id_document_type = NULL, id_document_number = NULL, \
+         id_valid_until = NULL, id_data_entered_at = NULL, id_data_client_at = NULL \
+         WHERE lead_id = $1 AND contact_id = $2",
+    )
+    .bind(lead_id)
+    .bind(agent)
+    .execute(pool)
+    .await
+    .unwrap();
 
     // The person is a trusted contact of the lead (the keys the wizard
     // writes) with a row for the rest; the aunt is untouched.
@@ -834,7 +921,13 @@ async fn an_adult_names_the_person_who_acts_for_him() {
 
     // The audit events name the changed fields, never what was entered.
     let events = audit_contexts(pool, "lead_portal_update_representative", lead_id).await;
-    assert_eq!(events.len(), 2, "{events:?}");
+    assert_eq!(events.len(), 3, "{events:?}");
+    // The data of the identity document typed in the cabinet (above).
+    assert_eq!(
+        events[2]["fields"],
+        json!(["id_document_type", "id_document_number", "id_valid_until"]),
+        "{events:?}"
+    );
     assert_eq!(events[0]["created"], true, "{events:?}");
     assert_eq!(events[0]["fields"], json!(["last_name"]), "{events:?}");
     assert_eq!(events[1]["created"], false, "{events:?}");

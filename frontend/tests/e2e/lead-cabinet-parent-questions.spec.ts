@@ -421,6 +421,52 @@ test.describe("Parent country follow-up", () => {
     expect(writes).toHaveLength(1);
   });
 
+  test("a parent reads the data of the own document from the copy and takes them over (owner 2026-11-10)", async ({ page }) => {
+    const { dataCalls } = await setup(page, (request) => {
+      Object.assign(request.representation.representatives[0], {
+        identity_documents: [{
+          id: "parent-copy-1", file_name: "pass-mutter.jpg", size_bytes: 4096, mime_type: "image/jpeg",
+          uploaded_at: "2026-11-10T08:00:00Z", uploaded_by_me: true, reviewed: false, can_delete: true,
+        }],
+      });
+    });
+    const read: string[] = [];
+    await page.route("**/me/lead-requests/lead-1/documents/*/identity-recognition", (route) => {
+      read.push(new URL(route.request().url()).pathname.split("/").at(-2) ?? "");
+      // Synthetic values of the ICAO specimen, never a real document.
+      return route.fulfill({ json: {
+        status: "verified", format: "TD3",
+        checks: { document_number: true, birth_date: true, valid_until: true, composite: true },
+        names_truncated: false,
+        document: { id_document_type: "passport", id_document_number: "L898902C3", id_issuing_country: "DE", id_valid_until: "2032-04-15" },
+        holder: { last_name: "Eriksson", first_name: "Anna Maria", date_of_birth: "1974-08-12", legal_sex: "female", citizenship: "DE" },
+      } });
+    });
+    await page.goto("/");
+    await step(page, "identity");
+    const data = page.getByTestId("lead-request-rep1-identity-data");
+    await expect(data).toBeVisible();
+    // The other parent has no copy yet: nothing to read there.
+    await expect(page.getByTestId("lead-request-rep2-recognition")).toHaveCount(0);
+    await page.getByTestId("lead-request-rep1-recognition-run").click();
+    const proposal = page.getByTestId("lead-request-rep1-recognition-proposal");
+    await expect(proposal).toContainText("Prüfziffern stimmen");
+    expect(read).toEqual(["parent-copy-1"]);
+    // Nothing is in the form before the parent takes it over.
+    await expect(page.locator("#lead-request-rep1_id_document_number")).toHaveValue("");
+    expect(dataCalls).toHaveLength(0);
+    await page.getByTestId("lead-request-rep1-recognition-apply").click();
+    await expect(page.locator("#lead-request-rep1_id_document_number")).toHaveValue("L898902C3");
+    await expect(page.locator("#lead-request-rep1_id_valid_until")).toHaveValue("15.04.2032");
+    await expect.poll(() => dataCalls.at(-1)).toEqual({
+      id: ANNA,
+      patch: { id_document_type: "passport", id_document_number: "L898902C3", id_issuing_country: "DE", id_valid_until: "2032-04-15" },
+    });
+    // What the reading leaves open is typed by hand and saved on its own.
+    await page.locator("#lead-request-rep1_id_issuing_authority").fill("Stadt Musterstadt");
+    await expect.poll(() => dataCalls.at(-1)?.patch).toEqual({ id_issuing_authority: "Stadt Musterstadt" });
+  });
+
   test("document stage keeps the full representative form and required uploads visible", async ({ page }) => {
     await setup(page, (request) => {
       request.representation.document_stage = true;

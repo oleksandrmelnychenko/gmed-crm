@@ -7,14 +7,14 @@ import { formatAppDate } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { normalizeIdentityRecognition, type IdentityRecognition } from "@/pages/leads/model/identity-recognition-result";
 
-import { recognizeLeadIdentityDocument, type LeadRequest } from "./lead-request-api";
-import type { IdentificationForm } from "./lead-request-identification";
+import { recognizeLeadIdentityDocument, type LeadRequestDocument } from "./lead-request-api";
 import { identificationFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 /** The copies tried in one run, newest first. */
 const MAX_SCANS_PER_RUN = 3;
 
-type DocumentField = "id_document_type" | "id_document_number" | "id_issuing_country" | "id_valid_until";
+export type RecognitionDocumentField = "id_document_type" | "id_document_number" | "id_issuing_country" | "id_valid_until";
+type DocumentField = RecognitionDocumentField;
 const FIELDS: readonly DocumentField[] = ["id_document_type", "id_document_number", "id_issuing_country", "id_valid_until"];
 
 export type RecognitionRow = {
@@ -39,7 +39,7 @@ const normalNumber = (value: string) => value.trim().split(/\s+/).filter(Boolean
 /** What was read, next to what the form holds. A field the zone leaves open has no row. */
 export function recognitionRows(
   result: IdentityRecognition,
-  draft: Pick<IdentificationForm["draft"], DocumentField>,
+  draft: Readonly<Record<DocumentField, string>>,
   text: LeadRequestText,
   lang: string,
 ): RecognitionRow[] {
@@ -93,23 +93,33 @@ export function defaultRecognitionSelection(rows: readonly RecognitionRow[]): Do
 }
 
 /**
- * «Read the data from the scan» between the lead's copy and the document's
- * fields: the server reads the machine readable zone of an uploaded copy and
+ * «Read the data from the scan» between a copy of an identity document (the
+ * lead's own or a representative's) and the document's fields: the server reads the machine readable zone of an uploaded copy and
  * the values show as a proposal. Nothing enters the form before «take over»;
  * a field that already holds another value is never ticked by itself, and
  * nothing is ticked when a check digit fails. The form's own autosave stores
  * what the person took over.
  */
 export function LeadRequestIdentityRecognition({
-  request,
-  form,
+  leadId,
+  documents,
+  draft,
+  onTake,
   text,
   lang,
+  disabled = false,
+  testId = "lead-request-recognition",
 }: {
-  request: LeadRequest;
-  form: IdentificationForm;
+  leadId: string;
+  /** The copies of this person's document. */
+  documents: readonly LeadRequestDocument[];
+  /** What the form holds now. */
+  draft: Readonly<Record<RecognitionDocumentField, string>>;
+  onTake: (field: RecognitionDocumentField, value: string) => void;
   text: LeadRequestText;
   lang: string;
+  disabled?: boolean;
+  testId?: string;
 }) {
   const words = text.recognition;
   const [state, setState] = useState<State>({ kind: "idle" });
@@ -123,7 +133,6 @@ export function LeadRequestIdentityRecognition({
     };
   }, []);
 
-  const documents = request.identity_documents ?? [];
   if (documents.length === 0) return null;
 
   const run = async () => {
@@ -135,7 +144,7 @@ export function LeadRequestIdentityRecognition({
     const newestFirst = [...documents].sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at));
     for (const document of newestFirst.slice(0, MAX_SCANS_PER_RUN)) {
       try {
-        const result = normalizeIdentityRecognition(await recognizeLeadIdentityDocument(request.lead_id, document.id));
+        const result = normalizeIdentityRecognition(await recognizeLeadIdentityDocument(leadId, document.id));
         if (!current()) return;
         if (result && result.status !== "not_found" && (!best || result.status === "verified")) best = result;
         if (best?.status === "verified") break;
@@ -148,14 +157,14 @@ export function LeadRequestIdentityRecognition({
       setState({ kind: failed ? "failed" : "not_found" });
       return;
     }
-    setSelected(new Set(defaultRecognitionSelection(recognitionRows(best, form.draft, text, lang))));
+    setSelected(new Set(defaultRecognitionSelection(recognitionRows(best, draft, text, lang))));
     setState({ kind: "result", result: best });
   };
 
-  const proposal = state.kind === "result" ? recognitionRows(state.result, form.draft, text, lang) : [];
+  const proposal = state.kind === "result" ? recognitionRows(state.result, draft, text, lang) : [];
   const taken = proposal.filter((row) => row.state !== "same" && selected.has(row.field));
   const apply = () => {
-    for (const row of taken) form.set(row.field, row.value);
+    for (const row of taken) onTake(row.field, row.value);
     setState({ kind: "applied" });
   };
   const toggle = (field: DocumentField) =>
@@ -167,16 +176,16 @@ export function LeadRequestIdentityRecognition({
     });
 
   return (
-    <div className="space-y-2" data-testid="lead-request-recognition" data-state={state.kind}>
+    <div className="space-y-2" data-testid={testId} data-state={state.kind}>
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
           size="sm"
           variant="outline"
           className="h-auto min-h-8 whitespace-normal py-1.5 text-left"
-          disabled={state.kind === "running"}
+          disabled={disabled || state.kind === "running"}
           onClick={() => void run()}
-          data-testid="lead-request-recognition-run"
+          data-testid={`${testId}-run`}
         >
           {state.kind === "running" ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <ScanText aria-hidden="true" className="size-3.5" />}
           {state.kind === "idle" ? words.run : words.again}
@@ -186,29 +195,29 @@ export function LeadRequestIdentityRecognition({
         </span>
       </div>
       {state.kind === "failed" ? (
-        <p role="alert" className="text-xs font-medium text-destructive" data-testid="lead-request-recognition-failed">
+        <p role="alert" className="text-xs font-medium text-destructive" data-testid={`${testId}-failed`}>
           {words.failed}
         </p>
       ) : null}
       {state.kind === "not_found" ? (
-        <p role="status" className="text-xs font-medium leading-5 text-amber-700 dark:text-amber-300" data-testid="lead-request-recognition-not-found">
+        <p role="status" className="text-xs font-medium leading-5 text-amber-700 dark:text-amber-300" data-testid={`${testId}-not-found`}>
           {words.notFound}
         </p>
       ) : null}
       {state.kind === "result" ? (
-        <div className="space-y-2.5 rounded-xl border border-border bg-muted/20 p-3" data-testid="lead-request-recognition-proposal" data-status={state.result.status}>
+        <div className="space-y-2.5 rounded-xl border border-border bg-muted/20 p-3" data-testid={`${testId}-proposal`} data-status={state.result.status}>
           <div className="flex flex-wrap items-baseline gap-x-2">
             <span className="text-sm font-semibold text-foreground">{words.title}</span>
             {state.result.status === "verified" ? <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">{words.verified}</span> : null}
           </div>
           {state.result.status === "unverified" ? (
-            <p role="alert" className="text-xs font-medium leading-5 text-amber-700 dark:text-amber-300" data-testid="lead-request-recognition-unverified">
+            <p role="alert" className="text-xs font-medium leading-5 text-amber-700 dark:text-amber-300" data-testid={`${testId}-unverified`}>
               {words.unverified}
             </p>
           ) : null}
           <ul className="space-y-1">
             {proposal.map((row) => (
-              <li key={row.field} data-testid={`lead-request-recognition-${row.field}`} data-state={row.state}>
+              <li key={row.field} data-testid={`${testId}-${row.field}`} data-state={row.state}>
                 <label className={cn("flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm", row.state !== "same" && "cursor-pointer")}>
                   {row.state !== "same" ? (
                     <input
@@ -235,10 +244,10 @@ export function LeadRequestIdentityRecognition({
           </ul>
           <p className="text-xs leading-5 text-muted-foreground">{words.authorityHint}</p>
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" size="sm" disabled={taken.length === 0} onClick={apply} data-testid="lead-request-recognition-apply">
+            <Button type="button" size="sm" disabled={taken.length === 0} onClick={apply} data-testid={`${testId}-apply`}>
               {words.apply}
             </Button>
-            <Button type="button" size="sm" variant="ghost" onClick={() => setState({ kind: "idle" })} data-testid="lead-request-recognition-dismiss">
+            <Button type="button" size="sm" variant="ghost" onClick={() => setState({ kind: "idle" })} data-testid={`${testId}-dismiss`}>
               {words.dismiss}
             </Button>
           </div>

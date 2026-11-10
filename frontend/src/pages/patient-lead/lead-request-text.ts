@@ -505,6 +505,10 @@ export type LeadRequestText = {
   representativeEmailLocked: string;
   /** The address of the other parent GMED entered: read-only in the cabinet (owner 2026-10-23). */
   representativeEmailStaff: string;
+  /** A representative's document data staff saved: read-only in the cabinet. */
+  representativeIdDataStaff: string;
+  /** Above the fields of a representative's identity document. */
+  representativeIdDataIntro: string;
   /** Under the other parent without a login: GMED invites that parent; nothing happens by itself (owner 2026-10-23). */
   representativeOtherParentInvite: string;
   /** At a field the other parent changed while this one typed in it (owner 2026-10-23); `serverChangedField` for a cabinet without a second parent. */
@@ -1609,6 +1613,9 @@ const de: LeadRequestText = {
   representativeLimit: "Für diese Anfrage kann keine weitere Person angegeben werden.",
   representativeEmailLocked: "Diese Adresse ist eine Anmeldeadresse und kann hier nicht geändert werden.",
   representativeEmailStaff: "Diese Adresse hat GMED eingetragen; Änderungen nimmt GMED vor.",
+  representativeIdDataStaff: "Diese Angaben hat GMED anhand der Kopie eingetragen; Änderungen nimmt GMED vor.",
+  representativeIdDataIntro:
+    "Tragen Sie hier die Angaben aus dem Dokument ein – so erscheinen sie in den Unterlagen. Fehlt etwas, trägt GMED es aus der Kopie nach.",
   representativeOtherParentInvite:
     "Der andere Elternteil erhält einen eigenen Zugang, sobald GMED ihn dazu einlädt. Bitte geben Sie dafür seine E-Mail-Adresse an.",
   serverChangedByParent: "Die Angaben hat der andere Elternteil geändert – bitte prüfen Sie das Feld.",
@@ -2254,6 +2261,9 @@ const ru: LeadRequestText = {
   representativeLimit: "В этой заявке больше нельзя указать ни одного человека.",
   representativeEmailLocked: "Это адрес для входа, изменить его здесь нельзя.",
   representativeEmailStaff: "Этот адрес внесла GMED; изменяет его GMED.",
+  representativeIdDataStaff: "Эти данные GMED внесла по копии документа; изменяет их GMED.",
+  representativeIdDataIntro:
+    "Впишите сюда данные из документа — так они будут указаны в документах. Если чего-то не хватит, GMED внесёт это по копии.",
   representativeOtherParentInvite:
     "Второй родитель получит собственный доступ, когда GMED пригласит его. Для этого укажите его адрес электронной почты.",
   serverChangedByParent: "Данные изменил другой родитель — проверьте поле.",
@@ -2899,6 +2909,9 @@ const uk: LeadRequestText = {
   representativeLimit: "У цій заявці більше не можна вказати жодної людини.",
   representativeEmailLocked: "Це адреса для входу, змінити її тут не можна.",
   representativeEmailStaff: "Цю адресу внесла GMED; змінює її GMED.",
+  representativeIdDataStaff: "Ці дані GMED внесла з копії документа; змінює їх GMED.",
+  representativeIdDataIntro:
+    "Впишіть сюди дані з документа — так вони будуть указані в документах. Якщо чогось бракуватиме, GMED внесе це з копії.",
   representativeOtherParentInvite:
     "Другий з батьків отримає власний доступ, коли GMED запросить його. Для цього вкажіть його адресу електронної пошти.",
   serverChangedByParent: "Дані змінив другий з батьків — перевірте поле.",
@@ -3537,6 +3550,9 @@ const en: LeadRequestText = {
   representativeLimit: "No further person can be named for this request.",
   representativeEmailLocked: "This is a sign-in address and cannot be changed here.",
   representativeEmailStaff: "GMED entered this address; GMED changes it.",
+  representativeIdDataStaff: "GMED entered these details from the copy; GMED changes them.",
+  representativeIdDataIntro:
+    "Enter the details of the document here — this is how they appear in the documents. Anything missing GMED adds from the copy.",
   representativeOtherParentInvite:
     "The other parent gets their own access once GMED invites them. Please enter their e-mail address for this.",
   serverChangedByParent: "The other parent changed this entry – please check the field.",

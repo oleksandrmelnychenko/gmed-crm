@@ -446,6 +446,7 @@ describe("who acts for the lead, in the portal state", () => {
           contact_origin: "staff",
           // Staff enter the document data (trigger flow 2026-10-07): nobody did yet.
           id_data_entered_by_name: null,
+          id_data_typed_by_client: false,
           id_data_entered_at: null,
         },
       ],

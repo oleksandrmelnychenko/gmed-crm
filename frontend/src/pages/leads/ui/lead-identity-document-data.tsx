@@ -181,8 +181,9 @@ export function LeadIdentityDocumentDataForm({
   /** Takes the person's data staff ticked in the proposal; without it they are only compared. */
   onApplyHolder?: (patch: RecognitionHolderPatch) => void;
   /**
-   * The lead's own document: the cabinet may type its data (owner
-   * 2026-11-10). A representative's never comes from the cabinet.
+   * The cabinet may have typed the data (owner 2026-11-10): always possible
+   * for the lead's own document, for a representative's when the server
+   * says so (`id_data_typed_by_client`).
    */
   clientMayType?: boolean;
 }) {
@@ -673,6 +674,7 @@ function RepresentativeForm({
             birthDate: person.date_of_birth,
             citizenships: person.citizenships,
           }}
+          clientMayType={person.id_data_typed_by_client === true}
           testId={`lead-representative-id-data-${person.id}`}
           save={async (input, options) => {
             const stored = await saveRepresentativeIdentityDocumentData(leadId, person.id, input, options);

@@ -125,13 +125,14 @@ describe("identity document data entered by staff", () => {
     expect(readable).toContain('data-status="expired"');
   });
 
-  it("marks the lead's own document data typed in the cabinet, never a representative's", () => {
+  it("marks document data typed in the cabinet only where the cabinet typed them", () => {
     const typed = { ...stored, id_data_entered_by_name: null, id_data_entered_at: null };
     const own = withPickers(
       <LeadIdentityDocumentDataForm source={typed} save={async () => undefined} tx={ru} lang="ru" testId="lead-id-data" today="2026-10-07" clientMayType />,
     );
     expect(own).toContain("Внесено клиентом в кабинете: сверьте со сканом");
-    // A representative's data come from staff only (QA 2026-11-10, A F-3).
+    // A representative's data staff entered carry no such mark (QA 2026-11-10, A F-3);
+    // one typed in the cabinet is named by the server (`id_data_typed_by_client`).
     const representative = withPickers(
       <LeadIdentityDocumentDataForm source={typed} save={async () => undefined} tx={ru} lang="ru" testId="lead-rep-id-data" today="2026-10-07" />,
     );

@@ -159,6 +159,8 @@ export type LeadRepresentative = {
   has_data: boolean;
   /** `portal` when the cabinet created the trusted contact, `staff` when it existed. */
   contact_origin: string | null;
+  /** The document's data were typed in the cabinet and staff have not saved them yet (owner 2026-11-10). */
+  id_data_typed_by_client?: boolean;
   /**
    * This person's OWN answers of block R (owner decision 2026-10-23: PEP and
    * sanctions answers are per person); null while unanswered, absent on an
@@ -633,6 +635,7 @@ function normalizeRepresentative(value: unknown): LeadRepresentative | null {
     has_login: raw.has_login === true,
     has_data: raw.has_data === true,
     contact_origin: textOrNull(raw.contact_origin),
+    id_data_typed_by_client: raw.id_data_typed_by_client === true,
     ...representativeLegalAnswers(raw.country_questions),
     ...normalizeStaffIdDataMarks(raw),
   };
