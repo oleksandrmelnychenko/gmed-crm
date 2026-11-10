@@ -1,4 +1,4 @@
-import { SectionHeading } from "@/components/ui/section-heading";
+import { HeadingMarker, SectionHeading } from "@/components/ui/section-heading";
 import {
   useCallback,
   useEffect,
@@ -13,8 +13,10 @@ import {
   CircleAlert,
   FileInput,
   FilePenLine,
+  FileSearch,
   Files,
   FileText,
+  LayoutTemplate,
   LoaderCircle,
   RefreshCw,
 } from "lucide-react";
@@ -438,7 +440,7 @@ export function TemplateImportDialog({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="min-w-0">
                 <h3><SectionHeading icon={FilePenLine}>{selected.label}</SectionHeading></h3>
-                <p className="text-xs text-muted-foreground">
+                <p className="wrap-anywhere text-xs text-muted-foreground">
                   {tx.version} {selected.version_number}
                   {selected.source_filename ? ` · ${selected.source_filename}` : ""}
                   {selected.created_at ? ` · ${formatAppDateTime(selected.created_at)}` : ""}
@@ -489,7 +491,7 @@ export function TemplateImportDialog({
             ) : null}
 
             <div className="space-y-1.5" data-testid="template-import-pdf">
-              <span className={fieldLabelClass}>{tx.preview}</span>
+              <h4><SectionHeading icon={FileSearch}>{tx.preview}</SectionHeading></h4>
               {previewPdf ? (
                 <PdfPagesPreview
                   data={previewPdf}
@@ -557,10 +559,9 @@ export function TemplateImportDialog({
                 <li key={template.id}>
                   <button
                     type="button"
-                    className={cn(
-                      "flex w-full flex-wrap items-center justify-between gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted/50",
-                      template.id === selectedId ? "bg-muted/50" : "",
-                    )}
+                    data-workspace-tab
+                    aria-pressed={template.id === selectedId}
+                    className="flex w-full flex-wrap items-center justify-between gap-2 px-2.5 py-2 text-left text-sm"
                     onClick={() => {
                       setError("");
                       setNotice("");
@@ -568,8 +569,12 @@ export function TemplateImportDialog({
                     }}
                   >
                     <span className="min-w-0">
-                      <span className="block truncate font-medium">{template.label}</span>
-                      <span className="block text-xs text-muted-foreground">
+                      <span className="flex items-center gap-2 font-medium text-foreground">
+                        <LayoutTemplate aria-hidden="true" className="size-4 shrink-0" />
+                        <span className="min-w-0 wrap-anywhere">{template.label}</span>
+                        {template.id === selectedId && <HeadingMarker />}
+                      </span>
+                      <span className="block ps-6 text-xs font-normal text-muted-foreground">
                         {tx.version} {template.version_number}
                         {template.created_at ? ` · ${formatAppDateTime(template.created_at)}` : ""}
                       </span>

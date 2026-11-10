@@ -418,6 +418,79 @@ async fn own_sessions_mark_the_current_one() {
 }
 
 #[tokio::test]
+async fn portal_themes_follow_the_cabinet_without_changing_personal_preferences() {
+    let Some((app, pool, admin)) = test_context().await else {
+        return;
+    };
+    let ceo = ceo_bearer(admin);
+    let path = "/api/v1/me/appearance";
+    let default_path = "/api/v1/me/appearance?portal_default=true";
+    let custom = json!({"version":1,"id":"agency","name":"Agency","colors":{"primary":"#445566"}});
+    let prefs = json!({"selectedId":"agency","themes":[custom]});
+    assert_eq!(
+        json_request(&app, "PUT", path, Some(&ceo), Some(prefs.clone()))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    for (key, id) in [
+        ("patient_portal_default_theme", "gmed-clay"),
+        ("lead_portal_default_theme", "agency"),
+    ] {
+        let result = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/admin/settings/{key}"),
+            Some(&ceo),
+            Some(json!({"value":id})),
+        )
+        .await;
+        assert_eq!(result.0, StatusCode::OK, "{result:?}");
+    }
+    let personal = json!({"selectedId":"gmed-ink","themes":[]});
+    assert_eq!(
+        json_request(&app, "PUT", path, Some(&ceo), Some(personal.clone()))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    let (user_id, email) =
+        seed_user_with_password(&pool, "theme", "patient", "Original-pass-1!").await;
+    let bearer = format!(
+        "Bearer {}",
+        jwt::issue_access_token(TEST_SECRET, user_id, "patient", Uuid::new_v4()).unwrap()
+    );
+    assert_eq!(
+        json_request(&app, "GET", default_path, Some(&bearer), None).await,
+        (
+            StatusCode::OK,
+            json!({"selectedId":"gmed-clay","themes":[]})
+        )
+    );
+    sqlx::query("INSERT INTO leads (first_name, last_name, date_of_birth, email, portal_user_id, qualification_status, created_by)
+                 VALUES ('Test', 'Portal', '1990-01-01', $1, $2, 'new', $3)")
+        .bind(email).bind(user_id).bind(admin).execute(&pool).await.unwrap();
+    assert_eq!(
+        json_request(&app, "GET", default_path, Some(&bearer), None).await,
+        (StatusCode::OK, prefs)
+    );
+    assert_eq!(
+        json_request(&app, "GET", path, Some(&bearer), None).await,
+        (StatusCode::OK, Value::Null)
+    );
+    assert_eq!(
+        json_request(&app, "PUT", path, Some(&bearer), Some(personal.clone()))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        json_request(&app, "GET", path, Some(&bearer), None).await,
+        (StatusCode::OK, personal)
+    );
+}
+
+#[tokio::test]
 async fn appearance_is_persistent_and_scoped_to_the_account() {
     let Some((app, pool, admin)) = test_context().await else {
         return;

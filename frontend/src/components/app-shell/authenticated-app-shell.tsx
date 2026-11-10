@@ -65,7 +65,7 @@ export function AuthenticatedAppShell() {
 
   return (
     <NavStateProvider>
-      <AppearanceProvider key={user.id} userId={user.id}>
+      <AppearanceProvider key={user.id} userId={user.id} portalMode={user.role === "patient" ? (leadCabinet ? "lead" : "patient") : undefined}>
         <AuthenticatedAppShellContent />
       </AppearanceProvider>
     </NavStateProvider>

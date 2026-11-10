@@ -5,6 +5,9 @@ use sqlx::Row;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+pub const PATIENT_PORTAL_DEFAULT_THEME: &str = "patient_portal_default_theme";
+pub const LEAD_PORTAL_DEFAULT_THEME: &str = "lead_portal_default_theme";
+
 /// Cached system settings loaded from the `system_settings` table.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenSettings {
@@ -237,6 +240,9 @@ pub async fn update_setting(
         }
         "agency_country_code" => validate_string_setting(value, 2, false, "Agency country code")?,
         "required_patient_documents" => validate_required_patient_documents_setting(value)?,
+        PATIENT_PORTAL_DEFAULT_THEME | LEAD_PORTAL_DEFAULT_THEME => {
+            portal_theme_snapshot(pool, user_id, value).await?
+        }
         crate::document_signatures::retention::DELETION_ENABLED_SETTING => match value.trim() {
             "true" => Value::Bool(true),
             "false" => Value::Bool(false),
@@ -282,6 +288,33 @@ pub struct SettingRow {
     pub updated_at: chrono::DateTime<chrono::Utc>,
     /// The signed-in administrator may change this setting.
     pub editable: bool,
+}
+
+/// Publish just the selected palette. An imported theme stays available to the
+/// portal even if the CEO later removes it from their own account.
+async fn portal_theme_snapshot(
+    pool: &PgPool,
+    user_id: uuid::Uuid,
+    id: &str,
+) -> Result<Value, UpdateError> {
+    let themes = match id {
+        "gmed-graphite" | "gmed-orange" | "gmed-clay" | "gmed-ink" => vec![],
+        _ => {
+            let theme = sqlx::query_scalar::<_, Value>(
+                "SELECT theme FROM users u,
+                 LATERAL jsonb_array_elements(u.appearance_preferences->'themes') AS theme
+                 WHERE u.id = $1 AND theme->>'id' = $2 LIMIT 1",
+            )
+            .bind(user_id)
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| UpdateError::Db(error.to_string()))?
+            .ok_or_else(|| UpdateError::InvalidValue("Unknown theme".into()))?;
+            vec![theme]
+        }
+    };
+    Ok(serde_json::json!({ "selectedId": id, "themes": themes }))
 }
 
 /// Length of an IBAN per country (ISO 13616 registry, SEPA countries and the

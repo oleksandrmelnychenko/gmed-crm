@@ -8,6 +8,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, put},
 };
+use gmed_domain::role::Role;
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::Row;
@@ -26,7 +27,35 @@ pub fn router() -> Router<AppState> {
 async fn get_appearance(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
+    axum::extract::Query(query): axum::extract::Query<AppearanceReadQuery>,
 ) -> axum::response::Response {
+    if query.portal_default {
+        if auth.role != Role::Patient {
+            return Json(serde_json::Value::Null).into_response();
+        }
+        let key = match super::lead_portal_intake::is_lead_only_login(&state.db, auth.user_id).await
+        {
+            Ok(true) => crate::settings::LEAD_PORTAL_DEFAULT_THEME,
+            Ok(false) => crate::settings::PATIENT_PORTAL_DEFAULT_THEME,
+            Err(error) => {
+                tracing::error!(%error, "resolve portal for default theme");
+                return internal();
+            }
+        };
+        return match sqlx::query_scalar::<_, serde_json::Value>(
+            "SELECT value FROM system_settings WHERE key = $1",
+        )
+        .bind(key)
+        .fetch_one(&state.db)
+        .await
+        {
+            Ok(value) => Json(value).into_response(),
+            Err(error) => {
+                tracing::error!(%error, "read portal default theme");
+                internal()
+            }
+        };
+    }
     match sqlx::query_scalar::<_, Option<serde_json::Value>>(
         "SELECT appearance_preferences FROM users WHERE id = $1 AND is_active",
     )
@@ -40,6 +69,12 @@ async fn get_appearance(
             internal()
         }
     }
+}
+
+#[derive(Deserialize)]
+struct AppearanceReadQuery {
+    #[serde(default)]
+    portal_default: bool,
 }
 
 #[derive(Deserialize)]

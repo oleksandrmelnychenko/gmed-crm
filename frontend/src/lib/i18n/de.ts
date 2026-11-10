@@ -790,6 +790,10 @@ export const de = {
     "Steuert die Aufbewahrungsfrist für medizinische Fälle und die append-only Anamnese-Historie.",
   settings_clinical_retention_years: "Aufbewahrung medizinischer Fälle (Jahre)",
   settings_concierge_preparation: "Vorbereitung von Concierge-Services",
+  settings_portal_themes: "Portaldesigns",
+  settings_portal_themes_hint: "Diese Designs gelten, bis im jeweiligen Konto ein eigenes Design gewählt wird.",
+  settings_patient_theme: "Patientenportal",
+  settings_lead_theme: "Leadportal",
   settings_concierge_preparation_hint:
     "Wie viele Stunden vor Beginn eines Concierge-Services die Erinnerung kommt und die Vorbereitungsaufgabe fällig ist.",
   settings_concierge_reminder_lead_hours: "Erinnerung an den anstehenden Service, Stunden vorher",

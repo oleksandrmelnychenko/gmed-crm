@@ -575,6 +575,36 @@ test.beforeEach(async ({ page }) => {
   await installAdminPatternMocks(page);
 });
 
+test("CEO can save different default themes for patients and leads", async ({ page }) => {
+  const custom = { id: "agency", name: "Agency blue", version: 1, colors: { primary: "#445566" } };
+  const defaults: Record<string, string> = { patient_portal_default_theme: "gmed-graphite", lead_portal_default_theme: "gmed-graphite" };
+  const writes: Record<string, string> = {};
+  await page.route("**/api/v1/me/appearance", (route) => json(route, { selectedId: "gmed-ink", themes: [custom] }));
+  await page.route("**/api/v1/admin/settings", (route) => json(route, Object.entries(defaults).map(([key, id]) => ({
+    key, editable: true, value: JSON.stringify({ selectedId: id, themes: id === custom.id ? [custom] : [] }),
+  }))));
+  await page.route("**/api/v1/admin/settings/*", (route) => {
+    const key = new URL(route.request().url()).pathname.split("/").pop()!;
+    writes[key] = defaults[key] = route.request().postDataJSON().value;
+    return json(route, { ok: true });
+  });
+  await page.goto("/admin/settings");
+  await page.getByRole("button", { name: "Bearbeiten: Portaldesigns", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Portaldesigns", exact: true });
+  await dialog.getByRole("combobox", { name: "Patientenportal" }).click();
+  await page.getByRole("option", { name: "GMED Clay" }).click();
+  await expect(page.getByRole("listbox")).toBeHidden();
+  await dialog.getByRole("combobox", { name: "Leadportal" }).click();
+  await page.getByRole("option", { name: "Agency blue" }).click();
+  await dialog.getByRole("button", { name: "Speichern" }).click();
+  await expect(dialog).toBeHidden();
+  expect(writes).toEqual({ patient_portal_default_theme: "gmed-clay", lead_portal_default_theme: "agency" });
+  await page.reload();
+  const card = page.getByRole("region", { name: "Portaldesigns", exact: true });
+  await expect(card.getByText("GMED Clay")).toBeVisible();
+  await expect(card.getByText("Agency blue")).toBeVisible();
+});
+
 test("admin routes stay on the patients-style shell", async ({ page }) => {
   await page.goto("/admin/notifications");
   await expect(page.locator("h1", { hasText: "Benachrichtigungskanäle" })).toBeVisible();

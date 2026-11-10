@@ -1981,12 +1981,13 @@ test.describe("staff smoke flows", () => {
     await appointmentConfirmationRow.click();
     const detail = page.getByRole("main");
     await expect(
-      detail.getByRole("heading", { name: "Terminbestätigung" }),
+      page.getByRole("heading", { name: "Terminbestätigung", level: 1, exact: true }),
     ).toBeVisible();
 
     await detail.getByRole("button", { name: /Neue Version/i }).click();
-    const dialog = page.getByRole("dialog");
+    const dialog = page.getByRole("dialog", { name: "Neue Version", exact: true });
     await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveAccessibleDescription("Terminbestätigung");
     await expect(dialog.getByLabel("Reisepass-Nr.")).toHaveValue("MA1234567");
     // Date bindings use the segmented date picker, whose day/month/year fields sit next to the label.
     const passportValidUntil = dialog.getByText("Reisepass gültig bis", { exact: true }).locator("..");

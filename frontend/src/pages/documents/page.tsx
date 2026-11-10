@@ -38,12 +38,15 @@ import {
   ContactRound,
   Download,
   Eye,
+  FileClock,
+  FileOutput,
   FilePenLine,
   FileText,
   FileUp,
   FolderInput,
   FolderPlus,
   Languages,
+  Layers2,
   LayoutTemplate,
   ListChecks,
   ListTree,
@@ -3937,7 +3940,14 @@ function StaffDocumentsPage({
             className="flex min-h-0 flex-1 flex-col"
           >
             <DialogHeader className="relative shrink-0 border-b border-border px-5 py-4 pr-12">
-              <DialogTitle><SectionHeading icon={LayoutTemplate}>{t.documents_generate_title}</SectionHeading></DialogTitle>
+              <DialogTitle>
+                <SectionHeading icon={generateForm.replaceDocumentId ? FileClock : FileOutput}>
+                  {generateForm.replaceDocumentId ? text.newVersion : t.documents_generate_title}
+                </SectionHeading>
+              </DialogTitle>
+              {generateForm.replaceDocumentId && detail?.id === generateForm.replaceDocumentId ? (
+                <DialogDescription className="wrap-anywhere text-xs">{localizeDocumentCode(detail.auto_name, l)}</DialogDescription>
+              ) : null}
               <Button
                 type="button"
                 variant="ghost"
@@ -6463,6 +6473,7 @@ function StaffDocumentsPage({
                           <span className="flex min-w-0 max-w-full items-start gap-2 lg:items-center" title={documentTitle}>
                             <FileText aria-hidden="true" className="mt-0.5 size-4 shrink-0 lg:mt-0" />
                             <span className="min-w-0 wrap-anywhere whitespace-normal lg:truncate">{documentTitle}</span>
+                            <span className="flex self-center"><HeadingMarker /></span>
                           </span>
                         }
                       />
@@ -6791,20 +6802,16 @@ function StaffDocumentsPage({
                     </DocumentMetaPanel>
 
                     <aside className="p-3">
-                      <div className="mb-3 flex items-end justify-between gap-3">
-                        <div className="min-w-0">
-                          <span className="text-[11px] font-medium leading-4 text-muted-foreground">
-                            {t.documents_version_chain}
+                      <div className="mb-3">
+                        <h3><SectionHeading icon={Layers2}>{t.documents_version_chain}</SectionHeading></h3>
+                        <p className="mt-1.5 flex min-w-0 items-baseline gap-1.5">
+                          <span className="text-lg font-semibold leading-6 tracking-tight text-foreground">
+                            {l("common_version_prefix")}{detail.version_number}
                           </span>
-                          <p className="mt-1 flex min-w-0 items-baseline gap-1.5">
-                            <span className="text-lg font-semibold leading-6 tracking-tight text-foreground">
-                              {l("common_version_prefix")}{detail.version_number}
-                            </span>
-                            <span className="text-xs font-medium text-muted-foreground">
-                              {l("documents_of")} {detail.version_count}
-                            </span>
-                          </p>
-                        </div>
+                          <span className="text-xs font-medium text-muted-foreground">
+                            {l("documents_of")} {detail.version_count}
+                          </span>
+                        </p>
                       </div>
                       <div className="space-y-1.5">
                         <DetailField
@@ -6845,7 +6852,7 @@ function StaffDocumentsPage({
                     title={t.documents_version_history}
                   >
                     <div className="space-y-1">
-                      {detailVersions.map((version, index) => {
+                      {detailVersions.map((version) => {
                         const selected = version.id === detail.id;
                         const filename =
                           version.original_filename ||
@@ -6853,72 +6860,28 @@ function StaffDocumentsPage({
                           t.common_not_set;
 
                         return (
-                        <button
-                          key={version.id}
-                          type="button"
-                          onClick={() => openDocument(version.id)}
-                          className={cn(
-                            "group relative grid w-full rounded-lg gap-3 bg-transparent px-3.5 py-1.5 text-left transition hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:grid-cols-[64px_minmax(0,1fr)_minmax(132px,auto)]",
-                            selected &&
-                              "before:absolute before:bottom-3 before:left-0 before:top-3 before:w-0.5 before:rounded-full before:bg-[var(--brand)]",
-                          )}
-                        >
-                          <div className="flex items-center justify-center">
-                            <span
-                              className={cn(
-                                "inline-flex h-8 w-12 items-center justify-center rounded-lg border text-xs font-semibold leading-none tabular-nums",
-                                selected
-                                  ? "border-[var(--brand)]/30 bg-[var(--brand)]/10 text-[var(--brand)]"
-                                  : "border-border/60 bg-background text-foreground",
-                              )}
-                            >
-                              {l("common_version_prefix")}{version.version_number}
+                          <button
+                            key={version.id}
+                            type="button"
+                            data-workspace-tab
+                            aria-current={selected ? "page" : undefined}
+                            onClick={() => openDocument(version.id)}
+                            className="grid w-full grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2.5 gap-y-1 px-3 py-2 text-left sm:grid-cols-[auto_minmax(0,1fr)_auto]"
+                          >
+                            <Badge variant="outline" className="row-span-2 tabular-nums">{l("common_version_prefix")}{version.version_number}</Badge>
+                            <span className="flex min-w-0 items-center gap-2 text-sm font-semibold text-foreground">
+                              <FileClock aria-hidden="true" className="size-4 shrink-0" />
+                              <span className="min-w-0 wrap-anywhere">{localizeDocumentCode(version.auto_name, l)}</span>
+                              {selected && <HeadingMarker />}
                             </span>
-                          </div>
-
-                          <div className="min-w-0">
-                            <div className="flex min-w-0 flex-wrap items-center gap-2">
-                              <span className="min-w-0 break-words text-sm font-semibold text-foreground">
-                                {localizeDocumentCode(version.auto_name, l)}
-                              </span>
-                            </div>
-                            <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                              <span className="tabular-nums">
-                                {formatDateTime(version.created_at)}
-                              </span>
-                              <span className="min-w-0 break-words">{filename}</span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground sm:justify-end">
-                            <span className="tabular-nums sm:hidden">
-                              {index + 1} / {detailVersions.length}
+                            <span className="col-start-2 row-start-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs font-normal text-muted-foreground">
+                              <time dateTime={version.created_at} className="tabular-nums">{formatDateTime(version.created_at)}</time>
+                              <span className="min-w-0 wrap-anywhere">{filename}</span>
                             </span>
-                            <span className="flex min-w-0 flex-wrap justify-end gap-1.5">
-                              {selected ? (
-                                <Badge
-                                  variant="outline"
-                                  className="rounded-full border-[var(--brand)]/30 bg-[var(--brand)]/10 text-[10px] text-[var(--brand)]"
-                                >
-                                  {l("documents_open")}
-                                </Badge>
-                              ) : null}
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "rounded-full bg-transparent text-[10px]",
-                                  version.is_latest_version
-                                    ? "border-emerald-200 text-emerald-700"
-                                    : "border-border/60 text-muted-foreground",
-                                )}
-                              >
-                                {version.is_latest_version
-                                  ? text.current
-                                  : t.documents_archived}
-                              </Badge>
-                            </span>
-                          </div>
-                        </button>
+                            <StatusBadge tone={version.is_latest_version ? "success" : "neutral"} className="col-start-2 justify-self-start sm:col-start-3 sm:row-start-1">
+                              {version.is_latest_version ? text.current : t.documents_archived}
+                            </StatusBadge>
+                          </button>
                         );
                       })}
                     </div>

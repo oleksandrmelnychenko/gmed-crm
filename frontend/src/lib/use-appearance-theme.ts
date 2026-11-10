@@ -10,7 +10,9 @@ function cached(key: string | null) {
 }
 
 // Mounted with the account id as the React key, above the patient-specific shell.
-export function AppearanceProvider({ userId, children }: { userId: string | null; children: ReactNode }) {
+export function AppearanceProvider({ userId, portalMode, children }: {
+  userId: string | null; portalMode?: "lead" | "patient"; children: ReactNode;
+}) {
   const key = userId ? appearanceStorageKey(userId) : null;
   const [preferences, setPreferences] = useState(() => parseAppearancePreferences(cached(key)));
   const writer = useRef<((update: Update) => Promise<void>) | null>(null);
@@ -20,11 +22,11 @@ export function AppearanceProvider({ userId, children }: { userId: string | null
     const { signal } = controller;
     let current = parseAppearancePreferences(cached(key));
     let initialized = false;
-    const publish = (value: AppearancePreferences | null) => {
+    const publish = (value: AppearancePreferences | null, personal: boolean) => {
       signal.throwIfAborted();
       current = parseAppearancePreferences(JSON.stringify(value));
       setPreferences(current);
-      try { if (value !== null) localStorage.setItem(key, JSON.stringify(current)); } catch { /* Cache is optional. */ }
+      try { if (personal && value !== null) localStorage.setItem(key, JSON.stringify(current)); } catch { /* Cache is optional. */ }
     };
     const load = async () => {
       let value = await apiFetch<AppearancePreferences | null>("/me/appearance", { signal, cache: "no-store" });
@@ -35,7 +37,12 @@ export function AppearanceProvider({ userId, children }: { userId: string | null
           method: "PUT", body: JSON.stringify(parseAppearancePreferences(legacy)), signal,
         });
       }
-      publish(value);
+      if (value === null && portalMode) {
+        // Keep inherited themes out of the cache used to migrate personal choices.
+        publish(await apiFetch<AppearancePreferences>("/me/appearance?portal_default=true", { signal, cache: "no-store" }), false);
+      } else {
+        publish(value, true);
+      }
       initialized = true;
     };
     let queue = load().catch(() => { /* Keep the cached palette; retry on the next edit. */ });
@@ -46,7 +53,7 @@ export function AppearanceProvider({ userId, children }: { userId: string | null
         const next = update(current);
         publish(await apiFetch<AppearancePreferences>("/me/appearance", {
           method: "PUT", signal, body: JSON.stringify(next),
-        }));
+        }), true);
       });
       queue = write.catch(() => {});
       return write;
@@ -59,7 +66,7 @@ export function AppearanceProvider({ userId, children }: { userId: string | null
     };
     window.addEventListener("storage", sync);
     return () => { controller.abort(); writer.current = null; window.removeEventListener("storage", sync); };
-  }, [key]);
+  }, [key, portalMode]);
   const save = useCallback((update: Update) => writer.current?.(update) ?? Promise.reject(new Error("Account required")), []);
   return createElement(Context.Provider, { value: { preferences, save } }, children);
 }

@@ -190,6 +190,8 @@ async fn it_admin_cannot_change_business_or_legal_settings() {
         ("interpreter_booking_access_days", "30"),
         ("unqualified_lead_retention_days", "30"),
         ("required_patient_documents", "[]"),
+        ("patient_portal_default_theme", "gmed-clay"),
+        ("lead_portal_default_theme", "gmed-orange"),
     ] {
         let before: Option<String> =
             sqlx::query_scalar("SELECT value::TEXT FROM system_settings WHERE key = $1")

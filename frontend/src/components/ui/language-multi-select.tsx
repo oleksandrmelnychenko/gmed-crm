@@ -174,7 +174,6 @@ export function LanguageMultiSelect({
         selectedValues={selectedOptionValues(options, selectedKeys)}
         showValueIndicator={false}
         hidePlaceholderOption
-        keepOpenOnSelect
         title={selected.map((item) => languageLabel(item, lang)).join(", ") || placeholder}
       >
         <option value="">{triggerLabel}</option>

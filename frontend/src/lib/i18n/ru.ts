@@ -787,6 +787,10 @@ export const ru = {
     "Управляет сроком хранения медицинских кейсов и append-only истории анамнеза.",
   settings_clinical_retention_years: "Срок хранения медкейсов (лет)",
   settings_concierge_preparation: "Подготовка консьерж-услуг",
+  settings_portal_themes: "Темы кабинетов",
+  settings_portal_themes_hint: "Эти темы используются, пока пользователь не выбрал свою в настройках аккаунта.",
+  settings_patient_theme: "Кабинет пациента",
+  settings_lead_theme: "Кабинет лида",
   settings_concierge_preparation_hint:
     "За сколько часов до начала консьерж-услуги приходит напоминание и истекает срок задачи на подготовку.",
   settings_concierge_reminder_lead_hours: "Напоминание о предстоящей услуге, часов до начала",

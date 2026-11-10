@@ -15,6 +15,7 @@ import {
   KeyRound,
   LoaderCircle,
   Monitor,
+  Palette,
   Pencil,
   Receipt,
   RefreshCcw,
@@ -59,6 +60,9 @@ import {
   textareaClass,
 } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { BUILTIN_THEMES, DEFAULT_THEME, parseAppearancePreferences } from "@/lib/appearance-theme";
+import { useAppearanceTheme } from "@/lib/use-appearance-theme";
 import { InfoHint } from "@/components/ui/info-hint";
 import { issuerTaxRegistrationText } from "@/components/issuer-tax-registration-banner";
 import { clearApiCache } from "@/lib/api";
@@ -84,6 +88,18 @@ interface SettingRow {
   updated_at: string;
   /** The signed-in administrator may change it (business and legal settings: CEO only). */
   editable?: boolean;
+}
+
+function storedPortalTheme(value: string) {
+  const { selectedId, themes } = parseAppearancePreferences(value);
+  return [...BUILTIN_THEMES, ...themes].find((theme) => theme.id === selectedId) ?? DEFAULT_THEME;
+}
+
+function settingEditValue(row?: SettingRow) {
+  if (row?.key === "patient_portal_default_theme" || row?.key === "lead_portal_default_theme") {
+    return storedPortalTheme(row.value).id;
+  }
+  return normalizeAdminSettingValue(row?.value);
 }
 
 /**
@@ -133,7 +149,7 @@ interface PendingLogin {
 type SettingFieldMeta = {
   key: string;
   labelKey: string;
-  inputType: "number" | "text" | "email" | "date" | "textarea";
+  inputType: "number" | "text" | "email" | "date" | "textarea" | "theme";
   min?: number;
   maxLength?: number;
   rows?: number;
@@ -142,6 +158,7 @@ type SettingFieldMeta = {
 type SettingsGroupId =
   | "tokens"
   | "agency"
+  | "portal_themes"
   | "documents"
   | "clinical"
   | "concierge"
@@ -290,6 +307,16 @@ const SETTINGS_GROUPS: SettingsGroup[] = [
     icon: Building2,
   },
   {
+    id: "portal_themes",
+    titleKey: "settings_portal_themes",
+    descriptionKey: "settings_portal_themes_hint",
+    fields: [
+      { key: "patient_portal_default_theme", labelKey: "settings_patient_theme", inputType: "theme" },
+      { key: "lead_portal_default_theme", labelKey: "settings_lead_theme", inputType: "theme" },
+    ],
+    icon: Palette,
+  },
+  {
     id: "documents",
     titleKey: "settings_document_requirements",
     descriptionKey: "settings_document_requirements_hint",
@@ -402,6 +429,7 @@ function createAdminSettingsFieldPatch<K extends keyof AdminSettingsState>(
 
 function useAdminSettingsPageContent() {
   const { t, lang } = useLang();
+  const { themes } = useAppearanceTheme();
   const { user: currentUser } = useAuth();
   // Mirrors the server: signing out an existing CEO or deciding the CEO's
   // pending login is a change to the CEO account, so it needs
@@ -495,7 +523,7 @@ function useAdminSettingsPageContent() {
       setPending(pendingRows);
       setEditValues(
         settingsRows.reduce<Record<string, string>>((acc, row) => {
-          acc[row.key] = normalizeAdminSettingValue(row.value);
+          acc[row.key] = settingEditValue(row);
           return acc;
         }, {}),
       );
@@ -522,7 +550,7 @@ function useAdminSettingsPageContent() {
     setSheetState({ saving: false, error: "", warning: "" });
     setEditValues(
       settings.reduce<Record<string, string>>((acc, row) => {
-        acc[row.key] = normalizeAdminSettingValue(row.value);
+        acc[row.key] = settingEditValue(row);
         return acc;
       }, {}),
     );
@@ -539,7 +567,7 @@ function useAdminSettingsPageContent() {
   }
 
   function hasFieldChanged(key: string): boolean {
-    return normalizeAdminSettingValue(settingsMap[key]?.value) !== (editValues[key] ?? "");
+    return settingEditValue(settingsMap[key]) !== (editValues[key] ?? "");
   }
 
   const roleLabel = useCallback(
@@ -569,7 +597,7 @@ function useAdminSettingsPageContent() {
     }
     return selectedGroup.fields.reduce<string[]>((labels, field) => {
       if (
-        normalizeAdminSettingValue(settingsMap[field.key]?.value) !==
+        settingEditValue(settingsMap[field.key]) !==
         (editValues[field.key] ?? "")
       ) {
         labels.push(tr[field.labelKey] ?? field.key);
@@ -1005,7 +1033,10 @@ function useAdminSettingsPageContent() {
                         <div className="flex flex-1 flex-col px-3 py-2">
                           <dl className="flex-1 divide-y divide-border/60">
                             {group.fields.slice(0, 3).map((field) => {
-                              const value = summarizeAdminSettingValue(field.key, settingsMap[field.key]?.value ?? "");
+                              const raw = settingsMap[field.key]?.value ?? "";
+                              const value = field.inputType === "theme" && raw
+                                ? storedPortalTheme(raw).name
+                                : summarizeAdminSettingValue(field.key, raw);
                               return <div key={field.key} className="flex min-w-0 items-baseline justify-between gap-3 py-1.5">
                                 <dt className="min-w-0 flex-1 text-xs leading-5 text-muted-foreground">{tr[field.labelKey] ?? field.key}</dt>
                                 <dd className="max-w-[55%] break-words text-right text-xs font-medium leading-5 text-foreground tabular-nums" title={value || undefined}>{value || "—"}</dd>
@@ -1135,6 +1166,8 @@ function useAdminSettingsPageContent() {
                   <div className={cn("grid gap-x-3 gap-y-2.5", selectedGroup.fields.length > 3 && "sm:grid-cols-2")}>
                     {selectedGroup.fields.map((field) => {
                       const changed = hasFieldChanged(field.key);
+                      const storedTheme = field.inputType === "theme" && settingsMap[field.key]
+                        ? storedPortalTheme(settingsMap[field.key].value) : undefined;
                       const inputClassName = cn(
                         field.inputType === "textarea"
                           ? textareaClass
@@ -1150,7 +1183,20 @@ function useAdminSettingsPageContent() {
                           className={field.inputType === "textarea" && selectedGroup.fields.length > 3 ? "sm:col-span-2" : undefined}
                         >
                           <>
-                            {field.inputType === "textarea" ? (
+                            {field.inputType === "theme" ? (
+                              <NativeComboboxSelect
+                                id={`setting-${field.key}`}
+                                value={editValues[field.key] ?? ""}
+                                disabled={!storedTheme || settingsMap[field.key]?.editable === false}
+                                onChange={(event) => updateEditValue(field.key, event.target.value)}
+                                className={inputClassName}
+                              >
+                                {storedTheme && !themes.some((theme) => theme.id === storedTheme.id) && (
+                                  <option value={storedTheme.id}>{storedTheme.name}</option>
+                                )}
+                                {themes.map((theme) => <option key={theme.id} value={theme.id}>{theme.name}</option>)}
+                              </NativeComboboxSelect>
+                            ) : field.inputType === "textarea" ? (
                               <textarea
                                 id={`setting-${field.key}`}
                                 rows={field.rows ?? 4}

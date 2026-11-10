@@ -50,12 +50,6 @@ type ComboboxSelectProps = {
   onFocus?: React.FocusEventHandler<HTMLButtonElement>
   /** Fires as the user types in the built-in search box (for server-driven lookups). */
   onSearchChange?: (query: string) => void
-  /**
-   * A list that adds to a set (citizenships, specialisations, languages) stays
-   * open after a pick, with the search cleared: the next choice is one click
-   * away and Escape closes only the list, not the dialog behind it (QA C2-01).
-   */
-  keepOpenOnSelect?: boolean
 } & ReadOnlyExemptProps
 
 type NativeComboboxSelectProps = Omit<
@@ -75,7 +69,6 @@ type NativeComboboxSelectProps = Omit<
   missingValueLabel?: React.ReactNode | ((value: string) => React.ReactNode)
   onSearchChange?: (query: string) => void
   selectedLabel?: React.ReactNode
-  keepOpenOnSelect?: boolean
   value?: PrimitiveValue | readonly string[] | null
 } & ReadOnlyExemptProps
 
@@ -217,11 +210,9 @@ function ComboboxSelect({
   onBlur,
   onFocus,
   onSearchChange,
-  keepOpenOnSelect = false,
   "data-readonly": readOnlyExempt,
   ...ariaProps
 }: ComboboxSelectProps) {
-  const [query, setQuery] = React.useState("")
   const actionsRef = React.useRef<ComboboxPrimitive.Root.Actions | null>(null)
   const { t } = useLang()
   const pageText = useComboboxText()
@@ -291,13 +282,9 @@ function ComboboxSelect({
         setUncontrolledValue(next)
       }
 
-      if (keepOpenOnSelect) {
-        setQuery("")
-      }
-
       onValueChange?.(next)
     },
-    [keepOpenOnSelect, updateOverlayField, normalizedValue, onValueChange, selectedValue],
+    [updateOverlayField, normalizedValue, onValueChange, selectedValue],
   )
 
   return (
@@ -308,24 +295,7 @@ function ComboboxSelect({
       disabled={disabled}
       value={selectedValue}
       onValueChange={handleValueChange}
-      onOpenChange={
-        keepOpenOnSelect
-          ? (nextOpen, eventDetails) => {
-              if (nextOpen) return
-              if (eventDetails.reason === "item-press") eventDetails.cancel()
-              else setQuery("")
-            }
-          : undefined
-      }
-      inputValue={keepOpenOnSelect ? query : undefined}
-      onInputValueChange={
-        keepOpenOnSelect || onSearchChange
-          ? (inputValue) => {
-              if (keepOpenOnSelect) setQuery(inputValue)
-              onSearchChange?.(inputValue)
-            }
-          : undefined
-      }
+      onInputValueChange={onSearchChange}
       items={listOptions.map((option) => option.value)}
       itemToStringLabel={(itemValue) =>
         textFromNode(optionsByValue.get(String(itemValue))?.label ?? t.select_missing_value)
@@ -457,7 +427,6 @@ function NativeComboboxSelect({
   onFocus,
   onSearchChange,
   selectedLabel,
-  keepOpenOnSelect,
   "aria-label": ariaLabel,
   "aria-describedby": ariaDescribedBy,
   "aria-invalid": ariaInvalid,
@@ -494,7 +463,6 @@ function NativeComboboxSelect({
       onFocus={(event) => onFocus?.(event as unknown as React.FocusEvent<HTMLSelectElement>)}
       onValueChange={(nextValue) => onChange?.(createSelectChangeEvent(nextValue, name))}
       onSearchChange={onSearchChange}
-      keepOpenOnSelect={keepOpenOnSelect}
     />
   )
 }

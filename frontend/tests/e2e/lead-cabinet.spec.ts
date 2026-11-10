@@ -773,6 +773,27 @@ async function setup(
 }
 
 test.describe("lead cabinet", () => {
+  test("an inherited portal theme follows the server until the user chooses their own", async ({ page }) => {
+    await setup(page, "lead");
+    let defaultId = "gmed-orange";
+    let personal: { selectedId: string; themes: unknown[] } | null = null;
+    await page.route("**/api/v1/me/appearance*", (route) => {
+      if (route.request().method() === "PUT") personal = route.request().postDataJSON();
+      const inherited = new URL(route.request().url()).searchParams.has("portal_default");
+      return route.fulfill({ body: JSON.stringify(inherited ? { selectedId: defaultId, themes: [] } : personal), contentType: "application/json" });
+    });
+    await page.goto("/account");
+    await expect(page.getByRole("button", { name: "Themes: GMED Orange" })).toBeVisible();
+    defaultId = "gmed-clay";
+    await page.reload();
+    const menu = page.getByRole("button", { name: "Themes: GMED Clay" });
+    await menu.click();
+    await page.getByRole("menuitemradio", { name: "GMED Ink" }).click();
+    await expect(page.getByRole("button", { name: "Themes: GMED Ink" })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Themes: GMED Ink" })).toBeVisible();
+  });
+
   test("audit: concern waits for health consent and the combined upload limit applies", async ({ page }) => {
     const { request, calls } = await setup(page, "lead");
     Object.assign(request, { documents_used: 30 });

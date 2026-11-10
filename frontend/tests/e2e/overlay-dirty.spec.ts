@@ -94,14 +94,12 @@ for (const kind of ["dialog", "sheet"]) {
       await expect(page.getByRole("alertdialog")).toBeVisible();
     });
 
-    test("Escape right after a pick in a multi-select closes only its list (QA C2-01)", async ({ page }) => {
+    test("multi-select closes after each pick and keeps the editor open", async ({ page }) => {
       const picker = page.locator("#harness-citizenships");
       await picker.click();
       await page.getByRole("option", { name: "Deutschland (DE)" }).click();
       await expect(page.getByLabel("Chosen citizenships")).toHaveText("DE");
-      // The list stays open for the next pick; Escape closes only the list.
-      await expect(page.getByRole("option", { name: "Österreich (AT)" })).toBeVisible();
-      await page.keyboard.press("Escape");
+      await expect(picker).toHaveAttribute("aria-expanded", "false");
       await expect(page.getByRole("option")).toHaveCount(0);
       await expect(page.getByRole("alertdialog")).toHaveCount(0);
       await expect(page.getByRole("dialog", { name: "Edit values" })).toBeVisible();
@@ -113,8 +111,11 @@ for (const kind of ["dialog", "sheet"]) {
       await expect(page.getByRole("option")).toHaveCount(1);
       await search.press("Enter");
       await expect(page.getByLabel("Chosen citizenships")).toHaveText("DE,AT");
-      await expect(page.getByRole("option", { name: "Frankreich (FR)" })).toBeVisible();
+      await expect(picker).toHaveAttribute("aria-expanded", "false");
+      await expect(page.getByRole("option")).toHaveCount(0);
       // A search left behind is gone the next time the list opens.
+      await picker.click();
+      await expect(search).toHaveValue("");
       await search.fill("Fra");
       await page.keyboard.press("Escape");
       await expect(page.getByRole("option")).toHaveCount(0);
