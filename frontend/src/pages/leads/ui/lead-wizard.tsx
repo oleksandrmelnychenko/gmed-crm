@@ -1270,6 +1270,49 @@ function autosaveSnapshotSignature(snapshot: AutosaveSnapshot) {
   });
 }
 
+/**
+ * The answers the client's form writes too (insurance, phone, middle name),
+ * as the wizard sends them. The wizard sends the whole lead on every save: a
+ * value staff entered in the client's form was overwritten by the wizard's
+ * older draft (QA 2026-11-10: «Есть ли страховка: Нет» became «Не указано»).
+ * A value equal to the last one loaded or sent is left out — the server keeps
+ * what is stored.
+ */
+const CLIENT_FORM_PAYLOAD_KEYS = [
+  "has_insurance",
+  "insurance_covers_germany",
+  "insurance_type",
+  "insurance_provider",
+  "insurance_number",
+  "phone",
+  "middle_name",
+] as const;
+
+function clientFormPayloadValues(draft: Draft): Record<(typeof CLIENT_FORM_PAYLOAD_KEYS)[number], unknown> {
+  return {
+    has_insurance: draft.hasInsurance ? draft.hasInsurance === "yes" : null,
+    insurance_covers_germany: draft.insuranceCoversGermany,
+    insurance_type: draft.insuranceType || null,
+    insurance_provider: draft.insuranceProvider.trim(),
+    insurance_number: draft.insuranceNumber.trim(),
+    phone: draft.phone.trim(),
+    middle_name: draft.middleName.trim(),
+  };
+}
+
+/** `payload` without the client's-form answers that equal `known` (see {@link CLIENT_FORM_PAYLOAD_KEYS}). */
+export function withoutUnchangedClientFormAnswers<T extends Record<string, unknown>>(
+  payload: T,
+  known: Partial<Record<string, unknown>> | null,
+): T {
+  if (!known) return payload;
+  const next: Record<string, unknown> = { ...payload };
+  for (const key of CLIENT_FORM_PAYLOAD_KEYS) {
+    if (key in next && key in known && JSON.stringify(next[key]) === JSON.stringify(known[key])) delete next[key];
+  }
+  return next as T;
+}
+
 function autosavePayload(
   snapshot: AutosaveSnapshot,
   previousWizardState: Record<string, unknown>,
@@ -3955,6 +3998,11 @@ export function LeadWizard({
   const wizardStateBaseRef = useRef<Record<string, unknown>>({});
   const currentAutosaveSignatureRef = useRef("");
   const lastSavedAutosaveSignatureRef = useRef("");
+  // The client's-form answers as last loaded or sent (`withoutUnchangedClientFormAnswers`).
+  const knownClientFormAnswersRef = useRef<Record<string, unknown> | null>(null);
+  useEffect(() => {
+    knownClientFormAnswersRef.current = lead ? clientFormPayloadValues(draftFromLead(lead)) : null;
+  }, [lead]);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   // Saves the lead's pending autosave now (not after the debounce) and waits
   // for the save under way; set below once `persistSnapshot` exists.
@@ -4699,6 +4747,15 @@ export function LeadWizard({
     [mergeCabinetChanges],
   );
   const step1Portal = useLeadStep1Portal({ leadId, open, onPatientDataChanged: mergePatientStep1 });
+  // The acting representatives' citizenships and residence count for the
+  // enhanced check like the payer's (QA 2026-11-10: T1 fired on a Betreuerin's
+  // Iranian citizenship, the EDD form said «Betroffener Drittstaat —»).
+  const representativeAmlCountries = useMemo(
+    () => (step1Portal.intake?.representation?.representatives ?? [])
+      .filter((person) => person.slot !== null)
+      .flatMap((person) => [...person.citizenships, ...(person.country ? [person.country] : [])]),
+    [step1Portal.intake],
+  );
   // Who entered each part of the client's form: staff's own entries are not the patient's (owner 2026-10-30).
   const portalMarkerKinds = useMemo(() => step1Portal.intake?.marker_kinds ?? {}, [step1Portal.intake]);
   /** The reason the lead wrote in the cabinet (trigger flow 13.1); "" without one or without medical access. */
@@ -5268,8 +5325,8 @@ export function LeadWizard({
   // residence, the citizenships and the payer's countries: facts for the
   // forms and an amber hint. A PEP is a hint too.
   const amlRisk = useMemo(
-    () => draft ? amlRiskForCountries(riskCountryLists, draft.country, ...draft.citizenships, ...payerCountries) : null,
-    [riskCountryLists, draft?.country, draft?.citizenships, payerCountries],
+    () => draft ? amlRiskForCountries(riskCountryLists, draft.country, ...draft.citizenships, ...payerCountries, ...representativeAmlCountries) : null,
+    [riskCountryLists, draft?.country, draft?.citizenships, payerCountries, representativeAmlCountries],
   );
   // Step-1 fields that hold a value: no "the patient fills it in" hint over them.
   const step1FilledDraftKeys = useMemo(() => {
@@ -5890,12 +5947,13 @@ export function LeadWizard({
   ) => {
     const signature = knownSignature ?? autosaveSnapshotSignature(snapshot);
     const previousWizardState = wizardStateBaseRef.current;
-    const payload = autosavePayload(
+    const knownClientFormAnswers = knownClientFormAnswersRef.current;
+    const payload = withoutUnchangedClientFormAnswers(autosavePayload(
       snapshot,
       previousWizardState,
       !lead?.prospect_patient_id,
       !prospectMergeOnlyRef.current,
-    );
+    ), knownClientFormAnswers);
 
     const run = async () => {
       if (!force && currentAutosaveSignatureRef.current !== signature) return;
@@ -6038,6 +6096,7 @@ export function LeadWizard({
         }
 
         wizardStateBaseRef.current = payload.wizard_state;
+        knownClientFormAnswersRef.current = { ...knownClientFormAnswers, ...clientFormPayloadValues(snapshot.draft) };
         if (initializing) {
           const freshTicket = leadLoadGuardRef.current.begin();
           const fresh = await fetchLeadDetail(targetLeadId);
@@ -6223,7 +6282,7 @@ export function LeadWizard({
   }) {
     const country = change.country !== undefined ? change.country : draft?.country;
     const citizenships = change.citizenships ?? draft?.citizenships ?? [];
-    const nextPayerCountries = change.payerCountries ?? payerCountries;
+    const nextPayerCountries = [...(change.payerCountries ?? payerCountries), ...representativeAmlCountries];
     const nextRisk = amlRiskForCountries(
       riskCountryLists,
       country,
@@ -6320,7 +6379,7 @@ export function LeadWizard({
     setDraft((current) => {
       if (!current) return current;
       // Residence only for the patient's own country (QA 2026-10-10 B4).
-      const boxes = amlCountryBoxes(riskCountryLists, current.country, current.citizenships, payerCountries);
+      const boxes = amlCountryBoxes(riskCountryLists, current.country, current.citizenships, [...payerCountries, ...representativeAmlCountries]);
       return {
         ...current,
         amlEnhancedDueDiligence: {

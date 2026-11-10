@@ -156,6 +156,7 @@ export function LeadIdentityDocumentDataForm({
   scanIds,
   holder,
   onApplyHolder,
+  clientMayType = false,
 }: {
   source: IdentityDocumentSource | null | undefined;
   /** The wizard's old "passport valid until", read only while nothing is stored in the new place. */
@@ -179,6 +180,11 @@ export function LeadIdentityDocumentDataForm({
   holder?: RecognitionHolderCurrent;
   /** Takes the person's data staff ticked in the proposal; without it they are only compared. */
   onApplyHolder?: (patch: RecognitionHolderPatch) => void;
+  /**
+   * The lead's own document: the cabinet may type its data (owner
+   * 2026-11-10). A representative's never comes from the cabinet.
+   */
+  clientMayType?: boolean;
 }) {
   const fieldId = useId();
   const savedKey = JSON.stringify(identityDocumentDraft(source, fallbackValidUntil));
@@ -382,7 +388,7 @@ export function LeadIdentityDocumentDataForm({
   const entered = identityDocumentEnteredLine(marks ?? source, tx);
   // The lead may type the data in the cabinet (owner 2026-11-10): until staff
   // saved them here, they are the client's and need a look at the scan.
-  const typedByClient = !entered && Boolean(source?.id_document_number || source?.id_valid_until);
+  const typedByClient = clientMayType && !entered && Boolean(source?.id_document_number || source?.id_valid_until);
   const errorId = (field: IdentityDocumentField) => `${fieldId}-${field}-error`;
   const described = (field: IdentityDocumentField) => (fieldError(field) ? errorId(field) : undefined);
 
@@ -775,6 +781,7 @@ export function LeadIdentityDocumentData({
         scanIds={[...cabinetScans.map((file) => file.id), ...(patientScanIds ?? [])]}
         holder={patientHolder}
         onApplyHolder={onApplyPatientHolder}
+        clientMayType
         testId="lead-id-data"
         save={async (input, options) => {
           const stored = await saveLeadIdentityDocumentData(leadId, input, options);

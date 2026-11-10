@@ -125,6 +125,19 @@ describe("identity document data entered by staff", () => {
     expect(readable).toContain('data-status="expired"');
   });
 
+  it("marks the lead's own document data typed in the cabinet, never a representative's", () => {
+    const typed = { ...stored, id_data_entered_by_name: null, id_data_entered_at: null };
+    const own = withPickers(
+      <LeadIdentityDocumentDataForm source={typed} save={async () => undefined} tx={ru} lang="ru" testId="lead-id-data" today="2026-10-07" clientMayType />,
+    );
+    expect(own).toContain("Внесено клиентом в кабинете: сверьте со сканом");
+    // A representative's data come from staff only (QA 2026-11-10, A F-3).
+    const representative = withPickers(
+      <LeadIdentityDocumentDataForm source={typed} save={async () => undefined} tx={ru} lang="ru" testId="lead-rep-id-data" today="2026-10-07" />,
+    );
+    expect(representative).not.toContain("Внесено клиентом");
+  });
+
   it("checks each field like the server and names what is missing", () => {
     const draft = identityDocumentDraft({ ...stored, id_document_unreadable: false });
     const rules = { today: "2026-10-07", birthDate: "1990-05-01" };
