@@ -5,6 +5,10 @@
 //! * Access is the file's own: whoever may take a copy of the scan
 //!   (`GET /documents/{id}/download`, the same checks) may have it read.
 //!   Medical files are refused.
+//! * The lead's cabinet has its own route,
+//!   `POST /me/lead-requests/{lead_id}/documents/{document_id}/identity-recognition`:
+//!   whoever fills the request (the lead, a parent, staff for the client)
+//!   has a copy of the lead's own identity document read, never another file.
 //! * Nothing is stored and nothing is written to the log: staff see the
 //!   values, confirm or correct them, and the form's own save stores them.
 //! * The reading is recorded like a download (who had which scan read, and
@@ -24,15 +28,21 @@ use uuid::Uuid;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::documents::{StaffDocumentCopy, load_staff_document_copy};
+use crate::routes::lead_portal_intake as intake;
 use crate::services::identity_recognition::{self, RecognitionError};
 use crate::services::mrz::MrzData;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
-    Router::new().route(
-        "/documents/{id}/identity-recognition",
-        post(recognize_identity_document),
-    )
+    Router::new()
+        .route(
+            "/documents/{id}/identity-recognition",
+            post(recognize_identity_document),
+        )
+        .route(
+            "/me/lead-requests/{lead_id}/documents/{document_id}/identity-recognition",
+            post(recognize_my_identity_document),
+        )
 }
 
 fn error(status: StatusCode, code: &str, message: &str) -> Response {
@@ -155,6 +165,91 @@ async fn recognize_identity_document(
         );
     }
 
+    Json(recognition_json(found.as_ref())).into_response()
+}
+
+/// The cabinet: a copy of the lead's own identity document, read for the
+/// person who fills the request. The file is found only among the lead's
+/// identity copies, so no other document is ever read this way.
+async fn recognize_my_identity_document(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((lead_id, document_id)): Path<(Uuid, Uuid)>,
+) -> Response {
+    if let Err(response) = intake::require_cabinet_editor(&auth) {
+        return response;
+    }
+    let not_found = || error(StatusCode::NOT_FOUND, "not_found", "Document not found");
+    match intake::my_lead_access(&state, lead_id, auth.user_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return not_found(),
+        Err(error_value) => return intake::internal(error_value, "check request access"),
+    }
+    let upload = match sqlx::query(
+        r#"SELECT d.storage_key, d.mime_type
+           FROM lead_portal_uploads u
+           JOIN documents d ON d.id = u.document_id
+           WHERE u.document_id = $1
+             AND u.lead_id = $2
+             AND u.kind = 'identity'
+             AND u.withdrawn_at IS NULL
+             AND d.file_deleted_at IS NULL"#,
+    )
+    .bind(document_id)
+    .bind(lead_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(found) => found,
+        Err(error_value) => return intake::internal(error_value, "load identity upload"),
+    };
+    let Some(storage_key) = upload.as_ref().and_then(|row| {
+        row.try_get::<Option<String>, _>("storage_key")
+            .ok()
+            .flatten()
+    }) else {
+        return not_found();
+    };
+    let mime_type = upload
+        .as_ref()
+        .and_then(|row| row.try_get::<Option<String>, _>("mime_type").ok().flatten());
+    let Ok(data) = crate::routes::documents::read_document_storage_bytes(
+        document_id,
+        &storage_key,
+        mime_type.as_deref(),
+        None,
+        None,
+    )
+    .await
+    else {
+        return not_found();
+    };
+
+    let found = match identity_recognition::recognize(&data, crate::app_time::today()).await {
+        Ok(found) => found,
+        Err(error_kind) => {
+            tracing::warn!(document_id = %document_id, reason = ?error_kind, "cabinet identity recognition failed");
+            return recognition_error_response(error_kind);
+        }
+    };
+    let event = audit::domain_event(
+        "identity_document_recognized",
+        Some(auth.user_id),
+        "document",
+        Some(document_id),
+        json!({
+            "lead_id": lead_id,
+            "outcome": recognition_status(found.as_ref()),
+        }),
+    );
+    let recorded = async {
+        let mut conn = state.db.acquire().await?;
+        audit::write_in_transaction(&mut conn, &event).await
+    }
+    .await;
+    if let Err(error_value) = recorded {
+        return intake::internal(error_value, "record cabinet identity recognition");
+    }
     Json(recognition_json(found.as_ref())).into_response()
 }
 

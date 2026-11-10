@@ -84,6 +84,7 @@ import { missingFieldKeys, missingListKeys, recipientIsPayer } from "./lead-requ
 import { draftFromRecipient, flowOf, knowsRecipient, payerChoices, payerFitsFlow } from "./lead-request-recipient-model";
 import { RepresentationSection, RepresentativeUpload } from "./lead-request-representation";
 import { AgencyContactLine, HealthConsentText, useAgencyContact } from "./health-consent-text";
+import { LeadRequestIdentityRecognition } from "./lead-request-identity-recognition";
 import { useServerDraftSync } from "./lead-request-server-sync";
 import { inquiryConsentMissing, refusedIdentityUploadKeys, type StepId } from "./lead-request-steps";
 import { actsAsVormund, asLeadCabinetLang, childSectionTitle, hasInsuranceLabel, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
@@ -778,6 +779,7 @@ export function IdentityStep({ request, text, lang, enqueue, onChange, missing, 
             onChange={onChange}
             title={forChild ? text.childDocumentTitle : undefined}
           />
+          <LeadRequestIdentityRecognition request={request} form={identification} text={text} lang={lang} />
           <IdentityDocumentDataFields form={identification} text={text} lang={lang} />
         </div>
       ) : null}

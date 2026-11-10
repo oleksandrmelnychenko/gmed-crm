@@ -1328,6 +1328,14 @@ export function withdrawLeadDocument(leadId: string, documentId: string): Promis
   });
 }
 
+/**
+ * Has the machine readable zone of an own identity copy read. The answer is
+ * a proposal for the form: nothing is stored by the reading.
+ */
+export function recognizeLeadIdentityDocument(leadId: string, documentId: string): Promise<unknown> {
+  return apiFetch<unknown>(`${base(leadId)}/documents/${encodeURIComponent(documentId)}/identity-recognition`, { method: "POST" });
+}
+
 const payerQuestionnaire = (leadId: string) => `${base(leadId)}/payer-questionnaire`;
 
 // The paying parent's own questionnaire (contract phase 3a, 5.2). Every call

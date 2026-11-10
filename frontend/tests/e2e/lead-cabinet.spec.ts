@@ -488,6 +488,7 @@ async function setup(
     consentChoices: [] as Record<string, unknown>[],
     uploads: 0,
     identityUploads: 0,
+    recognitions: [] as string[],
     submits: 0,
     submitBodies: [] as unknown[],
     blocked: [] as string[],
@@ -687,6 +688,20 @@ async function setup(
       if (request.submitted_at) request.changed_since_submit = true;
       recompute(request);
       return route.fulfill({ status: 201, json: request });
+    }
+    if (path.startsWith("/me/lead-requests/lead-1/documents/") && path.endsWith("/identity-recognition") && method === "POST") {
+      calls.recognitions.push(path.split("/").at(-2) ?? "");
+      // Synthetic values of the ICAO specimen, never a real document.
+      return route.fulfill({
+        json: {
+          status: "verified",
+          format: "TD3",
+          checks: { document_number: true, birth_date: true, valid_until: true, composite: true },
+          names_truncated: false,
+          document: { id_document_type: "passport", id_document_number: "L898902C3", id_issuing_country: "DE", id_valid_until: "2032-04-15" },
+          holder: { last_name: "Eriksson", first_name: "Anna Maria", date_of_birth: "1974-08-12", legal_sex: "female", citizenship: "DE" },
+        },
+      });
     }
     if (path.startsWith("/me/lead-requests/lead-1/documents/") && method === "DELETE") {
       // One route withdraws either kind of upload.
@@ -1878,11 +1893,10 @@ test.describe("lead cabinet", () => {
     const button = upload.getByRole("button", { name: "Foto oder Scan des Ausweises hochladen" });
     const list = page.getByTestId("lead-request-identity-list");
 
-    // GMED enters the document's data: the step asks for the copy only.
-    // No intro sentence above the upload (owner 2026-10-09): the button and its hint say what to do.
-    await expect(page.getByTestId("lead-request-step-identity")).not.toContainText("Bitte laden Sie ein Foto oder einen Scan");
-    await expect(page.locator("#lead-request-id_document_type")).toHaveCount(0);
-    await expect(page.locator("#lead-request-id_valid_until")).toHaveCount(0);
+    // The lead may type the data of the own document under the copy (owner 2026-11-10).
+    await expect(page.getByTestId("lead-request-identity-data")).toContainText("Tragen Sie darunter die Angaben aus dem Dokument ein");
+    await expect(page.locator("#lead-request-id_document_type")).toHaveCount(1);
+    await expect(page.locator("#lead-request-id_valid_until")).toHaveCount(1);
     // Like the health consent before the medical documents: no consent, no upload.
     await expect(button).toBeDisabled();
     await expect(page.locator("#lead-request-identity-files")).toBeDisabled();
@@ -1918,6 +1932,49 @@ test.describe("lead cabinet", () => {
     await step(page, "identity");
     await list.getByRole("button", { name: "Entfernen" }).click();
     await expect(list).toHaveText("");
+  });
+
+  test("the data of the document is read from the copy as a proposal the person takes over", async ({ page }) => {
+    const { calls } = await setup(page, "lead", {
+      prepare: (request) => {
+        for (const field of ["id_document_type", "id_document_number", "id_issuing_authority", "id_issuing_country", "id_issued_on", "id_valid_until"]) {
+          (request.identification as Record<string, unknown>)[field] = null;
+        }
+      },
+    });
+    await page.goto("/");
+    await step(page, "identity");
+    // Without a copy there is nothing to read.
+    await expect(page.getByTestId("lead-request-recognition")).toHaveCount(0);
+    await step(page, "person");
+    await page.getByTestId("lead-request-inquiry-consent").getByRole("checkbox").click();
+    await expect(page.getByTestId("lead-request-inquiry-consent")).toContainText("Zugestimmt am");
+    await step(page, "identity");
+    await page.locator("#lead-request-identity-files").setInputFiles({
+      name: "reisepass.jpg",
+      mimeType: "image/jpeg",
+      buffer: Buffer.from("synthetic image"),
+    });
+    await expect(page.getByTestId("lead-request-identity-list")).toContainText("reisepass.jpg");
+
+    await page.locator("#lead-request-id_document_number").fill("X1");
+    await page.getByTestId("lead-request-recognition-run").click();
+    const proposal = page.getByTestId("lead-request-recognition-proposal");
+    await expect(proposal).toContainText("Prüfziffern stimmen");
+    await expect(proposal).toContainText("Reisepass");
+    await expect(proposal).toContainText("15.04.2032");
+    expect(calls.recognitions).toEqual(["id-doc-1"]);
+    // Nothing is in the form yet, and the typed number is not ticked by itself.
+    await expect(page.locator("#lead-request-id_valid_until")).toHaveValue("");
+    await expect(page.getByTestId("lead-request-recognition-id_document_number").getByRole("checkbox")).not.toBeChecked();
+    await expect(page.getByTestId("lead-request-recognition-id_valid_until").getByRole("checkbox")).toBeChecked();
+
+    await page.getByTestId("lead-request-recognition-apply").click();
+    await expect(page.locator("#lead-request-id_valid_until")).toHaveValue("15.04.2032");
+    await expect(page.locator("#lead-request-id_document_number")).toHaveValue("X1");
+    await expect
+      .poll(() => calls.identification.at(-1))
+      .toMatchObject({ id_document_type: "passport", id_issuing_country: "DE", id_valid_until: "2032-04-15" });
   });
 
   test("acting for somebody else asks who that is (follow-up block L)", async ({ page }) => {

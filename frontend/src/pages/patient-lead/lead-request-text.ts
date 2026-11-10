@@ -410,6 +410,24 @@ export type LeadRequestText = {
   identityRenewIntro: string;
   /** Step "Ausweis": the copy only, GMED enters the data from it. */
   identityIntro: string;
+  /** «Read the data from the scan»: the proposal of the machine readable zone. */
+  recognition: {
+    run: string;
+    again: string;
+    hint: string;
+    running: string;
+    notFound: string;
+    failed: string;
+    title: string;
+    verified: string;
+    unverified: string;
+    same: string;
+    current: string;
+    authorityHint: string;
+    apply: string;
+    dismiss: string;
+    applied: string;
+  };
   /** Step "Anliegen & Unterlagen" (13.1): the reason of the request. */
   sectionRequest: string;
   requestReasonHint: string;
@@ -1448,6 +1466,23 @@ const de: LeadRequestText = {
   identityRenewIntro: "Bitte laden Sie ein aktuelles, gut lesbares Foto oder einen Scan Ihres Ausweisdokuments hoch.",
   identityIntro:
     "Bitte laden Sie ein Foto oder einen Scan Ihres Ausweisdokuments hoch (bei einem Personalausweis Vorder- und Rückseite). Tragen Sie darunter die Angaben aus dem Dokument ein – so erscheinen sie in Ihren Unterlagen. Fehlt etwas, trägt GMED es aus der Kopie nach.",
+  recognition: {
+    run: "Daten aus dem Scan lesen",
+    again: "Erneut lesen",
+    hint: "Liest die maschinenlesbare Zone des Ausweises und schlägt die Werte vor. Nichts wird ohne Ihre Bestätigung übernommen.",
+    running: "Die maschinenlesbare Zone wird gelesen…",
+    notFound: "Auf dem Scan wurde keine maschinenlesbare Zone gefunden. Bitte geben Sie die Daten manuell ein. Am besten lesbar ist ein gerader Scan der ganzen Datenseite ohne Reflexionen.",
+    failed: "Das Dokument konnte nicht gelesen werden. Bitte geben Sie die Daten manuell ein.",
+    title: "Aus dem Scan gelesen",
+    verified: "Prüfziffern stimmen",
+    unverified: "Der Scan wurde fehlerhaft gelesen (Prüfziffern stimmen nicht). Die Werte können falsch sein: Bitte vergleichen Sie jeden Wert mit dem Dokument, bevor Sie ihn übernehmen.",
+    same: "stimmt überein",
+    current: "im Formular",
+    authorityHint: "Ausstellende Behörde und Ausstellungsdatum stehen nicht in der maschinenlesbaren Zone – bitte selbst eintragen.",
+    apply: "Angekreuztes übernehmen",
+    dismiss: "Ausblenden",
+    applied: "Übernommen. Bitte prüfen Sie die Felder und ergänzen Sie die Behörde.",
+  },
   sectionRequest: "Ihr Anliegen",
   requestReasonHint: "Beschreiben Sie kurz, wobei wir Ihnen helfen sollen.",
   payerLegalForm: "Rechtsform",
@@ -2073,6 +2108,23 @@ const ru: LeadRequestText = {
   identityRenewIntro: "Пожалуйста, загрузите актуальное, хорошо читаемое фото или скан вашего документа.",
   identityIntro:
     "Пожалуйста, загрузите фото или скан документа, удостоверяющего личность (для ID-карты — обе стороны). Ниже впишите данные из документа — так они будут указаны в ваших документах. Если чего-то не хватит, GMED внесёт это по копии.",
+  recognition: {
+    run: "Распознать данные со скана",
+    again: "Распознать ещё раз",
+    hint: "Читает машиночитаемую зону документа и предлагает значения. Ничего не подставляется без вашего подтверждения.",
+    running: "Читаем машиночитаемую зону документа…",
+    notFound: "Машиночитаемая зона на скане не найдена. Введите данные вручную. Лучше всего читается ровный скан страницы с фото целиком, без бликов.",
+    failed: "Не удалось распознать документ. Введите данные вручную.",
+    title: "Распознано со скана",
+    verified: "Контрольные цифры совпали",
+    unverified: "Скан прочитан с ошибками (контрольные цифры не совпали). Значения могут быть неверными: сверьте каждое с документом, прежде чем подставлять.",
+    same: "совпадает",
+    current: "сейчас в форме",
+    authorityHint: "«Кем выдан» и даты выдачи в машиночитаемой зоне нет — внесите их сами.",
+    apply: "Подставить отмеченное",
+    dismiss: "Скрыть",
+    applied: "Подставлено. Проверьте поля и укажите, кем выдан документ.",
+  },
   sectionRequest: "Ваше обращение",
   requestReasonHint: "Кратко опишите, с чем мы можем вам помочь.",
   payerLegalForm: "Правовая форма",
@@ -2701,6 +2753,23 @@ const uk: LeadRequestText = {
   identityRenewIntro: "Будь ласка, завантажте актуальне, добре читабельне фото або скан вашого документа.",
   identityIntro:
     "Будь ласка, завантажте фото або скан документа, що посвідчує особу (для ID-картки — обидва боки). Нижче впишіть дані з документа — так вони будуть указані у ваших документах. Якщо чогось бракуватиме, GMED внесе це з копії.",
+  recognition: {
+    run: "Розпізнати дані зі скану",
+    again: "Розпізнати ще раз",
+    hint: "Читає машинозчитувану зону документа і пропонує значення. Нічого не підставляється без вашого підтвердження.",
+    running: "Читаємо машинозчитувану зону документа…",
+    notFound: "Машинозчитувану зону на скані не знайдено. Введіть дані вручну. Найкраще читається рівний скан сторінки з фото повністю, без відблисків.",
+    failed: "Не вдалося розпізнати документ. Введіть дані вручну.",
+    title: "Розпізнано зі скану",
+    verified: "Контрольні цифри зійшлися",
+    unverified: "Скан прочитано з помилками (контрольні цифри не зійшлися). Значення можуть бути хибними: звірте кожне з документом, перш ніж підставляти.",
+    same: "те саме значення",
+    current: "зараз у формі",
+    authorityHint: "«Ким видано» і дати видачі в машинозчитуваній зоні немає — внесіть їх самостійно.",
+    apply: "Підставити позначене",
+    dismiss: "Сховати",
+    applied: "Підставлено. Перевірте поля і додайте, ким видано документ.",
+  },
   sectionRequest: "Ваше звернення",
   requestReasonHint: "Коротко опишіть, із чим ми можемо вам допомогти.",
   payerLegalForm: "Правова форма",
@@ -3329,6 +3398,23 @@ const en: LeadRequestText = {
   identityRenewIntro: "Please upload a current, clearly readable photo or scan of your identity document.",
   identityIntro:
     "Please upload a photo or scan of your identity document (for an ID card both sides). Enter the details of the document below — this is how they appear in your documents. Anything missing GMED adds from the copy.",
+  recognition: {
+    run: "Read the data from the scan",
+    again: "Read again",
+    hint: "Reads the machine-readable zone of the document and proposes the values. Nothing is taken over without your confirmation.",
+    running: "Reading the machine-readable zone…",
+    notFound: "No machine-readable zone was found on the scan. Please enter the data by hand. A straight scan of the whole data page without glare reads best.",
+    failed: "The document could not be read. Please enter the data by hand.",
+    title: "Read from the scan",
+    verified: "Check digits match",
+    unverified: "The scan was read with errors (check digits do not match). The values may be wrong: please compare each one with the document before you take it over.",
+    same: "matches",
+    current: "in the form",
+    authorityHint: "The issuing authority and the date of issue are not in the machine-readable zone – please enter them yourself.",
+    apply: "Take over the ticked values",
+    dismiss: "Hide",
+    applied: "Taken over. Please check the fields and add the issuing authority.",
+  },
   sectionRequest: "Your request",
   requestReasonHint: "Briefly describe what we can help you with.",
   payerLegalForm: "Legal form",

@@ -2534,6 +2534,22 @@ async fn the_identity_document_needs_the_request_consent_and_is_not_a_medical_do
     // The lead's own login has no such route.
     let (status, body) = json_request(router, "POST", &recognition, &patient, None).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    // The cabinet has its own: the lead has the own copy read.
+    let my_recognition = format!("{request}/documents/{document_id}/identity-recognition");
+    let (status, body) = json_request(router, "POST", &my_recognition, &patient, None).await;
+    let read_nothing_mine = status == StatusCode::OK && body == json!({ "status": "not_found" });
+    assert!(
+        read_nothing_mine
+            || matches!(
+                body["code"].as_str(),
+                Some("recognition_unavailable" | "recognition_failed")
+            ),
+        "{status} {body}"
+    );
+    assert_eq!(
+        audit_count(pool, "identity_document_recognized", document_id).await,
+        i64::from(read_nothing) + i64::from(read_nothing_mine)
+    );
     let (_, intake) = json_request(
         router,
         "GET",
@@ -2556,6 +2572,16 @@ async fn the_identity_document_needs_the_request_consent_and_is_not_a_medical_do
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["code"], "not_an_identity_document", "{body}");
+    // The cabinet's route reads identity copies only.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/documents/{medical_id}/identity-recognition"),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     let (_, list) = json_request(
         router,
         "GET",
