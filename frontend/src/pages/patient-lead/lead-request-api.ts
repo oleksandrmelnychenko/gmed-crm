@@ -2,6 +2,19 @@ import { ApiRequestError, apiFetch as request } from "@/lib/api";
 import type { ConsentRecipientScope } from "@/lib/consent-recipient-scope";
 
 export const LEAD_REQUEST_ACCESS_CHANGED = "gmed:lead-request-access-changed";
+/**
+ * A write was refused because the request is already with GMED (409 `request_already_sent`):
+ * the page reads the request again, shows its sent state and never keeps the person on the step
+ * for an entry that cannot be saved any more (QA 2026-11-10, A-1).
+ */
+export const LEAD_REQUEST_SENT_REFUSED = "gmed:lead-request-sent-refused";
+export const REQUEST_ALREADY_SENT = "request_already_sent";
+
+/** Whether the server refused a write because the request is sent. */
+export function refusedBecauseSent(error: unknown): boolean {
+  return error instanceof ApiRequestError && error.status === 409
+    && (error.code === REQUEST_ALREADY_SENT || error.body?.code === REQUEST_ALREADY_SENT);
+}
 
 // Autosave handlers consume validation errors inside the write queue. Notify the
 // cabinet at the API boundary so an access change also reaches those handlers.
@@ -9,6 +22,7 @@ async function apiFetch<T>(path: string, options?: Parameters<typeof request>[1]
   try {
     return await request<T>(path, options);
   } catch (error) {
+    if (refusedBecauseSent(error)) window.dispatchEvent(new Event(LEAD_REQUEST_SENT_REFUSED));
     // A request that is gone for this login (404: the child came of age, staff
     // took it over) also reloads the list, instead of failing every save.
     const gone = error instanceof ApiRequestError && error.status === 404 && /^\/me\/lead-requests\/[^/]+(\/|$)/.test(path);

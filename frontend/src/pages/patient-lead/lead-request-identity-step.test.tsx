@@ -232,3 +232,41 @@ describe("the legal questions of a minor", () => {
     for (const question of ["pep_self", "pep_related", "sanctions_links"]) expect(adult).toContain(`lead-request-legal-${question}`);
   });
 });
+
+// QA 2026-11-10, A-1: after the send the date fields of a locked step stayed open (they are no
+// form controls of the browser, so the disabled fieldset alone did not reach them).
+describe("the sent request locks the date fields too", () => {
+  const sent = (followUp?: LeadRequest["follow_up"]) => ({
+    ...request({ guardian: false, minor: false }),
+    submitted_at: "2026-11-10T10:00:00Z",
+    follow_up: followUp,
+  }) as LeadRequest;
+  // The date field marks its disabled state on its own elements (`class="… Mui-disabled"`).
+  const disabledPickers = (html: string) => (html.match(/class="[^"]*\bMui-disabled\b/g) ?? []).length;
+
+  it("disables the dates of the document in the locked step, and none before the send", () => {
+    const open = render(request({ guardian: false, minor: false }));
+    expect(open).not.toContain("lead-request-step-locked");
+    expect(disabledPickers(open)).toBe(0);
+    const locked = render(sent());
+    expect(locked).toContain("lead-request-step-locked");
+    expect(locked).toContain("lead-request-sent-locked");
+    expect(disabledPickers(locked)).toBeGreaterThan(0);
+  });
+
+  it("keeps the typed data read-only while only a new copy of a refused document is asked for", () => {
+    // GMED refused the only copy: the step stays open for a new one; the typed data are still
+    // the sent ones (the server refuses them unless GMED asks for more).
+    const refused = sent({
+      required: false, blocks: [], missing: {}, answered_at: null,
+      refused_identity_documents: [{ id: "doc-child", representative_id: null, file_name: "pass-kind.jpg", uploaded_at: "2026-10-21T08:00:00Z", reason: "unreadable" }],
+    } as unknown as LeadRequest["follow_up"]);
+    const html = render({ ...refused, identity_documents: [] } as LeadRequest);
+    expect(html).not.toContain("lead-request-step-locked");
+    expect(html).toContain("lead-request-part-locked");
+    expect(disabledPickers(html)).toBeGreaterThan(0);
+    // GMED asks for more: the data can be typed again.
+    const asked = render({ ...refused, identity_documents: [], follow_up: { ...refused.follow_up!, required: true } } as LeadRequest);
+    expect(asked).not.toContain("lead-request-part-locked");
+  });
+});

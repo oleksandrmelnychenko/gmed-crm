@@ -308,6 +308,25 @@ export function stillRejectedPayerFields(
   return next;
 }
 
+/**
+ * The paying parent answered the same three questions as the child's representative (step 1):
+ * the payer's set starts with those answers, to be checked, instead of asking them again from
+ * nothing (QA 2026-11-10, finding 15). Only a question the payer's set leaves open is filled;
+ * the words to a "yes" are typed here.
+ */
+export function withRepresentativeLegalAnswers(
+  draft: PayerQuestionnaireDraft,
+  own: Partial<Record<PayerLegalQuestion, boolean | null>> | null | undefined,
+): PayerQuestionnaireDraft {
+  if (!own) return draft;
+  let next = draft;
+  for (const question of PAYER_LEGAL_QUESTIONS) {
+    const answer = own[question];
+    if (next[question] === "" && typeof answer === "boolean") next = { ...next, [question]: answer ? "yes" : "no" };
+  }
+  return next;
+}
+
 /** The draft after the answer to a legal question: the details belong to a "yes" only (the server does the same). */
 export function withPayerLegalAnswer(
   draft: PayerQuestionnaireDraft,

@@ -143,6 +143,19 @@ describe("payer page texts", () => {
     }
   });
 
+  it("says why an empty file is not taken, and only hints at an unusual VAT id (QA 2026-11-10)", () => {
+    const de = payerLinkText("de");
+    expect(de.fileEmpty("leer.pdf")).toBe("leer.pdf ist leer (0 Bytes). Bitte wählen Sie die Datei erneut aus oder laden Sie eine andere hoch.");
+    for (const lang of LANGS) {
+      const text = payerLinkText(lang);
+      expect(text.fileEmpty("leer.pdf"), lang).toContain("leer.pdf");
+      expect(text.fileEmpty("leer.pdf"), lang).toMatch(/\(0 (Bytes|bytes|байтів|байт)\)/);
+      expect(text.fileEmpty("leer.pdf"), lang).not.toBe(text.uploadFailed("leer.pdf"));
+      // A hint, never a refusal (owner 2026-10-22): the value is saved as typed.
+      expect(text.vatIdHint, lang).toMatch(/trotzdem gespeichert|saved as entered|збережено як є|сохранится как есть/);
+    }
+  });
+
   it("addresses the payer formally", () => {
     for (const value of strings(PAYER_LINK_TEXTS.de)) expect(value).not.toMatch(/\b(du|dein|deine|dich|dir)\b/i);
     for (const value of strings(PAYER_LINK_TEXTS.uk)) expect(value).not.toMatch(/(^|\s)(ти|твій|твоя|тебе)(\s|$)/i);

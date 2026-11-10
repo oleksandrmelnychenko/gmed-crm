@@ -37,6 +37,7 @@ import { ServicesStep } from "./lead-request-services-step";
 
 import {
   LEAD_REQUEST_ACCESS_CHANGED,
+  LEAD_REQUEST_SENT_REFUSED,
   fetchMyLeadRequest,
   fetchMyLeadRequestList,
   saveCabinetLanguage,
@@ -50,6 +51,7 @@ import {
   AutosaveSavedContext,
   CabinetGoToContext,
   RequestPatchContext,
+  SaveBlockedContext,
   createRequestQueue,
   type AutosaveFlush,
   type CabinetGoTo,
@@ -151,9 +153,19 @@ export function LeadRequestPage({
   // Switching requests must not replace a queue whose uploads are still running.
   const [sessions] = useState(() => new Map<string, { enqueue: RequestQueue; flushers: Set<AutosaveFlush>; saved: () => void }>());
   const [saveBlocked, setSaveBlocked] = useState(false);
+  // Every refused step change: the step then names the fields to check.
+  const [blockedCount, setBlockedCount] = useState(0);
   const saveBlockedRef = useRef(false);
   saveBlockedRef.current = saveBlocked;
   const leaving = useRef(false);
+  // Writes the server refused because the request is already sent (QA 2026-11-10, A-1): such an
+  // entry can never be saved, so it must not keep the person on the step.
+  const sentRefusals = useRef(0);
+  useEffect(() => {
+    const count = () => { sentRefusals.current += 1; };
+    window.addEventListener(LEAD_REQUEST_SENT_REFUSED, count);
+    return () => window.removeEventListener(LEAD_REQUEST_SENT_REFUSED, count);
+  }, []);
   // The corrected entry saved itself: the notice that it could not be saved
   // goes once every part of the step is saved, without another step change.
   const savedAfterBlock = useCallback((leadId: string) => {
@@ -170,9 +182,18 @@ export function LeadRequestPage({
       const flushers = sessions.get(leadId)?.flushers ?? new Set<AutosaveFlush>();
       for (;;) {
         const versions = new Map(Array.from(flushers, (flush) => [flush, flush.version()] as const));
+        const refusedBefore = sentRefusals.current;
         const results = await Promise.all(Array.from(versions.keys(), (flush) => flush.save()));
         if (!results.every(Boolean)) {
+          // The request is with GMED: what was typed cannot be saved any more, and trying again
+          // would never work. The step is left; the page says that the change was not saved.
+          if (sentRefusals.current !== refusedBefore) {
+            setSaveBlocked(false);
+            action();
+            break;
+          }
           setSaveBlocked(true);
+          setBlockedCount((count) => count + 1);
           onBlocked?.();
           break;
         }
@@ -302,6 +323,18 @@ export function LeadRequestPage({
     if (chosenLang || accountLang) return;
     if (requestLang === "de" || requestLang === "ru") chooseLang(requestLang);
   }, [accountLang, chosenLang, requestLang, chooseLang]);
+  // The language the cabinet first opened in stays in this browser: afterwards only the switch
+  // changes it. The "preferred language" the person enters in the form is the language GMED
+  // speaks with them, not a choice of the interface (QA 2026-11-10, finding 12: choosing German
+  // there turned the whole cabinet German on the next load). Kept in the browser only: the
+  // account's language, which the e-mails follow, stays the person's own choice.
+  const requestsLoaded = requests !== null;
+  useEffect(() => {
+    if (staffMode || !userId || !requestsLoaded || chosenLang || accountLang) return;
+    if (requestLang === "de" || requestLang === "ru") return;
+    storeLeadCabinetLang(userId, lang);
+    setChosen({ userId, lang });
+  }, [accountLang, chosenLang, lang, requestLang, requestsLoaded, staffMode, userId]);
 
   const replaceRequest = useCallback((next: LeadRequest) => {
     setRequests((current) =>
@@ -416,7 +449,9 @@ export function LeadRequestPage({
       {saveBlocked ? <div role="alert" data-testid="lead-request-save-blocked"><Banner tone="error">{text.saveBeforeLeaving}</Banner></div> : null}
       <AutosaveFlushContext.Provider value={session.flushers}>
         <AutosaveSavedContext.Provider value={session.saved}>
-          <LeadRequestView key={request.lead_id} request={request} text={text} lang={lang} enqueue={session.enqueue} switchAfterSave={switchAfterSave} onChange={replaceRequest} onAccessLost={load} startStep={startStep} syncAddress={!embedded} />
+          <SaveBlockedContext.Provider value={saveBlocked ? blockedCount : 0}>
+            <LeadRequestView key={request.lead_id} request={request} text={text} lang={lang} enqueue={session.enqueue} switchAfterSave={switchAfterSave} onChange={replaceRequest} onAccessLost={load} startStep={startStep} syncAddress={!embedded} />
+          </SaveBlockedContext.Provider>
         </AutosaveSavedContext.Provider>
       </AutosaveFlushContext.Provider>
     </LeadCabinetFrame>
@@ -586,9 +621,30 @@ function LeadRequestView({
     if (userId && event.actor_user_id === userId) return;
     refreshFromServer("event");
   });
+  // A write the server refused because the request is already sent (QA 2026-11-10, A-1): the
+  // request is read again (the steps then show their sent state), the entry that can never be
+  // saved goes from the form, and one sentence says that it was not saved and whom to ask.
+  const [sentRefused, setSentRefused] = useState<"fresh" | "seen" | null>(null);
+  const [formEpoch, setFormEpoch] = useState(0);
+  const lastSentRefusal = useRef(0);
+  useEffect(() => {
+    const onRefused = () => {
+      setSentRefused("fresh");
+      refreshFromServer("event");
+      // Once per burst: the last save of the step that goes is refused as well.
+      const now = Date.now();
+      if (now - lastSentRefusal.current > 3000) setFormEpoch((epoch) => epoch + 1);
+      lastSentRefusal.current = now;
+    };
+    window.addEventListener(LEAD_REQUEST_SENT_REFUSED, onRefused);
+    return () => window.removeEventListener(LEAD_REQUEST_SENT_REFUSED, onRefused);
+  }, [refreshFromServer]);
   const [searchParams, setSearchParams] = useSearchParams();
-  const requestedStep = startStep ?? (syncAddress ? searchParams.get("step") : null);
+  const addressStep = syncAddress ? searchParams.get("step") : null;
+  const requestedStep = startStep ?? addressStep;
   const [chosenStep, setChosenStep] = useState<StepId>(() => visibleSteps(request).find((step) => step === requestedStep) ?? initialStep(request));
+  const chosenStepRef = useRef(chosenStep);
+  chosenStepRef.current = chosenStep;
   useEffect(() => {
     const reload = () => { void onAccessLost(); };
     window.addEventListener(LEAD_REQUEST_ACCESS_CHANGED, reload);
@@ -665,6 +721,19 @@ function LeadRequestView({
         setPendingTarget({ field: "inquiry_consent" });
         return;
       }
+      // The payer's consents are needed to send, and a changed name or date of birth of the payer
+      // unticks them: Next does not leave step 3 without them, the box is shown (QA 2026-11-10,
+      // finding 11). The step tabs stay free, as with the consent of the first step.
+      if (validateCurrent && step === "billing" && !staffMode) {
+        const consent = missingByStep(latestRequest.current).billing.find(
+          (key) => key === "payer_contact_consent" || key === "payer_cost_estimate_consent",
+        );
+        if (consent) {
+          showMissingOf(step);
+          setPendingTarget({ field: consent });
+          return;
+        }
+      }
       // All sections have now saved. The pre-save render can still list fields
       // the user just completed, especially in Insurance & Invoice.
       if (validateCurrent && !missingShownSteps.has(step) && stepMissingCount(latestRequest.current, step) > 0) {
@@ -672,13 +741,17 @@ function LeadRequestView({
         return;
       }
       setChosenStep(next);
+      // The notice of a refused change stays for the step that opens now, then goes.
+      setSentRefused((current) => (current === "fresh" ? "seen" : null));
       if (syncAddress) {
         setSearchParams((current) => {
           const params = new URLSearchParams(current);
           params.set("lead", request.lead_id);
           params.set("step", next);
           return params;
-        }, { replace: true });
+          // Every step is an entry of the browser history: Back opens the step before, it does
+          // not leave the cabinet (QA 2026-11-10, finding 6).
+        }, { replace: next === step });
       }
       if (next === "send") setSendOpened(true);
       if (target?.anchor || target?.field) {
@@ -703,6 +776,30 @@ function LeadRequestView({
       else window.requestAnimationFrame(() => document.querySelector('[data-testid="lead-request-save-blocked"]')?.scrollIntoView?.({ block: "nearest" }));
     });
   }, [switchAfterSave, request.lead_id, setSearchParams, syncAddress, missingShownSteps, step, showMissingOf, staffMode]);
+
+  // Browser Back / Forward: the step on screen follows the address, saved first like any step
+  // change. The entry before the first step change names no step: the request's own first step.
+  const seenAddressStep = useRef(addressStep);
+  useEffect(() => {
+    if (!syncAddress || startStep || seenAddressStep.current === addressStep) return;
+    seenAddressStep.current = addressStep;
+    const current = latestRequest.current;
+    const target = addressStep ? visibleSteps(current).find((id) => id === addressStep) : initialStep(current);
+    if (!target || target === chosenStepRef.current) return;
+    void switchAfterSave(current.lead_id, () => {
+      setChosenStep(target);
+      setSentRefused((notice) => (notice === "fresh" ? "seen" : null));
+      if (target === "send") setSendOpened(true);
+    }, () => {
+      // An entry could not be saved: the step stays, and the address names it again.
+      setSearchParams((params) => {
+        const next = new URLSearchParams(params);
+        next.set("lead", current.lead_id);
+        next.set("step", chosenStepRef.current);
+        return next;
+      }, { replace: true });
+    });
+  }, [addressStep, setSearchParams, startStep, switchAfterSave, syncAddress]);
 
   const nav: StepNav = {
     index: position + 1,
@@ -756,12 +853,18 @@ function LeadRequestView({
           {/* A short step keeps its footer at the bottom of the column; a new step fades in instead of jumping. */}
           <CabinetGoToContext.Provider value={goTo}>
           <div
-            key={step}
+            // A refused change of the sent request starts the step's forms anew from what GMED has.
+            key={`${step}:${formEpoch}`}
             ref={stepRef}
             className="flex min-w-0 flex-1 flex-col bg-background px-4 pt-3 sm:px-5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200 [&>section]:flex [&>section]:flex-1 [&>section]:flex-col"
             data-testid="lead-request-step"
             data-current-step={step}
           >
+            {sentRefused && !staffMode ? (
+              <div role="status" className="mb-3" data-testid="lead-request-sent-refused">
+                <Banner tone="warning">{text.sentChangeRefused}</Banner>
+              </div>
+            ) : null}
             {/* No "send again" since 2026-10-26 (owner): the sent request is read-only; each step says so. */}
             {step === "person" ? <PersonStep {...props} /> : null}
             {step === "contact" ? <ContactStep {...props} /> : null}

@@ -138,6 +138,8 @@ export function errorMessage(error: unknown, text?: LeadRequestText): string {
     if (code === "health_consent_required") return text.healthConsentRequired;
     if (code === "dob_staff_only") return text.dobStaffOnly;
     if (code === "lead_request_guardian_only") return text.guardianOnly;
+    // The request is with GMED: said in words, with whom to ask (QA 2026-11-10, A-1).
+    if (code === "request_already_sent") return text.sentChangeRefused;
     if (error instanceof ApiRequestError && error.status === 413) return text.errors.file_too_large;
     // The limit as the server states it (`max_documents`), not a number of the cabinet's own.
     if (code === "too_many_documents" && typeof body?.max_documents === "number") return text.tooManyDocuments(body.max_documents);
@@ -240,6 +242,11 @@ export function useRequestPatch(onChange: (request: LeadRequest) => void, reques
 }
 /** Told after an autosave went through: a "could not be saved" notice may be over. */
 export const AutosaveSavedContext = createContext<(() => void) | null>(null);
+/**
+ * How often a step change was refused because an entry could not be saved, while the page's
+ * notice says so; 0 otherwise. The step then names the fields to check (QA 2026-11-10, findings 8, 23).
+ */
+export const SaveBlockedContext = createContext(0);
 
 /** An unchanged form can be left while uploads continue in its request queue. */
 export function runDraftSave<Result>(enqueue: RequestQueue, fields: ReadonlySet<string>, task: () => Promise<Result>) {
@@ -665,6 +672,11 @@ export function ConsentCheckbox({
           onRecord={(recorded) => void toggle(true, recorded)} onCancel={() => setRecordOpen(false)} />
       ) : null}
       {invalidText && !given && !staffMode ? <p id={`${testId}-error`} role="alert" className="mt-1.5 text-xs font-medium text-destructive">{invalidText}</p> : null}
+      {/* The box is locked once the request is sent, while the consent text speaks of a withdrawal
+          in the portal: how it is withdrawn now is said here (QA 2026-11-10, finding 9). */}
+      {Boolean(request.submitted_at) && given && !staffMode ? (
+        <p className="mt-1.5 text-xs leading-5 text-muted-foreground" data-testid={`${testId}-after-send`}>{text.consentWithdrawAfterSend}</p>
+      ) : null}
       {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
     </div>
   );
@@ -796,6 +808,11 @@ export function FileUploadField({
     // Reserve all files together so a follow-up submit cannot split the batch.
     await enqueueUploadBatch(enqueue, async () => {
       for (const file of files) {
+        // An empty file is said as such, not as a failed action (QA 2026-11-10, finding 10).
+        if (file.size === 0) {
+          nextErrors.push(text.fileEmpty(file.name));
+          continue;
+        }
         if (file.size > 25 * 1024 * 1024) {
           nextErrors.push(text.fileTooLarge(file.name));
           continue;

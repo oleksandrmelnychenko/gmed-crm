@@ -27,6 +27,8 @@ type Doc = {
   uploaded_at: string;
   reviewed: boolean;
   can_delete: boolean;
+  /** Among the identity copies: the organisation's register extract (the server's mark). */
+  register_extract?: boolean;
 };
 
 type Answers = Record<string, unknown> & {
@@ -234,6 +236,11 @@ type Options = {
   language?: string;
   /** A code was mailed this long ago (the page then shows the code field at once). */
   codeSentSecondsAgo?: number;
+  /**
+   * What the link's GET says about that code (`code_pending`): false for a code
+   * that was used or has expired. Left out, the key is absent (an older server).
+   */
+  codePending?: boolean;
   /** Five codes in the last hour: "send" is refused with 429. */
   hourlyCodeLimitReached?: boolean;
   /** Wrong codes in total before the link locks (contract: 10). */
@@ -455,6 +462,7 @@ async function setup(page: Page, options: Options = {}) {
           language: options.language ?? "de",
           expires_at: "2026-11-05T10:00:00Z",
           code_sent_at: link.codeSentAt ? new Date(link.codeSentAt).toISOString() : null,
+          ...(options.codePending !== undefined ? { code_pending: options.codePending } : {}),
           session_valid: sessionValid,
           ...(signature.value !== undefined && (sessionValid || !options.signaturePackageWithSession)
             ? { signature_package: signature.value }
@@ -536,6 +544,10 @@ async function setup(page: Page, options: Options = {}) {
       if (!q.privacy.acknowledged_at) return refuse(route, 403, "payer_consent_required");
       if (payerType === "person") return refuse(route, 422, "register_extract_organisation_only");
       calls.extracts += 1;
+      // Like the server: the extract is filed among the identity copies, marked as the extract.
+      state.documents += 1;
+      const name = (body as { file?: string } | null)?.file ?? "extract.pdf";
+      q.identity_documents.push({ ...document(`doc-${state.documents}`, name), register_extract: true });
       q.register_extract_on_file = true;
       recompute();
       return route.fulfill({ status: 201, json: view() });
@@ -1208,6 +1220,10 @@ test.describe("payer link", () => {
     await setDatePickerValue(page.locator("#payer-link-id_valid_until"), "2031-03-04");
     await expect.poll(() => q.answers.id_valid_until).toBe("2031-03-04");
     await expect(identity.getByText("Das Dokument ist abgelaufen.")).toHaveCount(0);
+    // An empty file is refused on the page, with its reason; nothing is sent (QA 2026-11-10).
+    await page.locator("#payer-link-identity-files").setInputFiles({ name: "leer.pdf", mimeType: "application/pdf", buffer: Buffer.alloc(0) });
+    await expect(page.getByTestId("payer-link-identity-upload")).toContainText("leer.pdf ist leer (0 Bytes).");
+    expect(calls.payer.filter((call) => call.path.endsWith("/identity-document"))).toHaveLength(0);
     await page.locator("#payer-link-identity-files").setInputFiles({
       name: "pass.pdf",
       mimeType: "application/pdf",
@@ -1325,10 +1341,25 @@ test.describe("payer link", () => {
       buffer: Buffer.from("%PDF-1.4 synthetic"),
     });
     await expect.poll(() => calls.extracts).toBe(1);
-    // The extract stands for the ID: the upload block goes, the intro says so, nothing of the ID is missing.
-    await expect(extract).toHaveCount(0);
+    // The extract stands for the ID: the intro says so, nothing of the ID is missing.
     await expect(page.getByTestId("payer-link-identity-intro")).toContainText("Die Angaben zum Ausweis sind daher freiwillig");
     expect(q.missing_for_submit.filter((key) => key.startsWith("id_"))).toEqual([]);
+    // QA 2026-11-10: the file is listed as the register extract — not as a scan of the
+    // representative's ID, and no document data are read from it.
+    await expect(extract).toContainText("hr-auszug.pdf");
+    await expect(page.getByTestId("payer-link-identity-upload")).not.toContainText("hr-auszug.pdf");
+    await expect(page.getByTestId("payer-link-recognition")).toHaveCount(0);
+    // The summary names it as the extract too: no «Keine Angabe», no «Foto oder Scan des Ausweises».
+    for (const title of ["Wirtschaftlich Berechtigte", "Beziehung und Herkunft der Mittel", "Zahlungsweg", "Erklärungen", "Zusammenfassung"]) {
+      await next(page);
+      await expect(stepTitle(page)).toHaveText(title);
+    }
+    const identitySummary = page.getByTestId("payer-link-summary-identity");
+    await expect(identitySummary.getByTestId("payer-link-summary-register-extract")).toContainText("Handelsregisterauszug");
+    await expect(identitySummary.getByTestId("payer-link-summary-register-extract")).toContainText("hr-auszug.pdf");
+    await expect(identitySummary).not.toContainText("Keine Angabe");
+    await expect(identitySummary).not.toContainText("Foto oder Scan des Ausweises");
+    expect(calls.others).toEqual([]);
   });
 
   test("a company names its register, its representative and its beneficial owners", async ({ page }) => {
@@ -1405,6 +1436,21 @@ test.describe("payer link", () => {
     await second.getByRole("textbox", { name: "Anteil in %" }).fill("40");
     await expect.poll(() => q.answers.beneficial_owners.map((owner) => owner.share_percent)).toEqual([60, 40]);
     await expect(page.getByTestId("payer-link-owners-total")).toHaveCount(0);
+
+    // A share that is none is not saved, so "Weiter" stays on the step and says why (QA 2026-11-10:
+    // it went on, and the summary showed the share saved before).
+    await second.getByRole("textbox", { name: "Anteil in %" }).fill("150");
+    await expect(page.getByTestId("payer-link-owner-1-problem")).toHaveText(
+      "Bitte einen Anteil über 0 und bis 100 % angeben (höchstens zwei Nachkommastellen).",
+    );
+    await next(page);
+    await expect(page.getByTestId("payer-link-owners-hold")).toHaveText(
+      "Person 2: Bitte einen Anteil über 0 und bis 100 % angeben (höchstens zwei Nachkommastellen).",
+    );
+    await expect(stepTitle(page)).toHaveText("Wirtschaftlich Berechtigte");
+    expect(q.answers.beneficial_owners.map((owner) => owner.share_percent)).toEqual([60, 40]);
+    await second.getByRole("textbox", { name: "Anteil in %" }).fill("40");
+    await expect(page.getByTestId("payer-link-owners-hold")).toHaveCount(0);
     await next(page);
 
     await expect(stepTitle(page)).toHaveText("Beziehung und Herkunft der Mittel");
@@ -1611,6 +1657,35 @@ test.describe("payer link", () => {
       await expect(page.getByTestId("payer-link-thanks")).toBeVisible(lazyPageLoad);
       await expect(page.getByTestId("payer-link-signature")).toHaveCount(0);
     }
+    expect(calls.others).toEqual([]);
+  });
+
+  test("a link opened again after its code was used offers to send a code, in the language of the page (QA 2026-11-10)", async ({ page }) => {
+    const { calls } = await setup(page, {
+      acknowledged: true,
+      answers: completeAnswers("person"),
+      route: completeRoute(),
+      identityDocuments: [document("doc-id", "pass.pdf")],
+      submitted: true,
+      // The code of the visit before was mailed five minutes ago and used: none waits to be entered.
+      codeSentSecondsAgo: 300,
+      codePending: false,
+    });
+    await page.goto(`/payer#${TOKEN}`);
+    await expect(page.getByTestId("payer-link-submitted-note")).toBeVisible(lazyPageLoad);
+    // Before: "Wir haben einen Code … gesendet" and the code field, though no e-mail went out.
+    await expect(page.getByTestId("payer-link-code-target")).toHaveText("Wir senden einen Bestätigungscode an v***r@example.com.");
+    await expect(page.locator("#payer-link-code")).toHaveCount(0);
+    await expect(page.getByTestId("payer-link-resend")).toHaveCount(0);
+
+    // The language chosen on the page goes with "send the code": the e-mail follows it.
+    await page.getByTestId("payer-link-language").getByRole("radio", { name: "RU" }).click();
+    await page.getByRole("button", { name: "Отправить код" }).click();
+    await expect(page.getByTestId("payer-link-code-target")).toHaveText("Мы отправили код на v***r@example.com. Он действует 15 минут.");
+    expect(calls.payer.filter((call) => call.path === "/public/payer-link/code").map((call) => call.body)).toEqual([{ language: "ru" }]);
+    await page.getByLabel("Код подтверждения (6 цифр)").fill(CODE);
+    await page.getByRole("button", { name: "Подтвердить" }).click();
+    await expect(page.getByTestId("payer-link-thanks")).toBeVisible();
     expect(calls.others).toEqual([]);
   });
 

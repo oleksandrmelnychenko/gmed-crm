@@ -283,7 +283,8 @@ export function PayerLinkPage() {
           current.kind === "form"
             ? {
                 kind: "code",
-                info: { ...current.info, code_sent_at: null, session_valid: false, state: current.questionnaire.state === "submitted" ? "submitted" : current.info.state },
+                // The code of this session was used: a new one is to be sent.
+                info: { ...current.info, code_sent_at: null, code_pending: false, session_valid: false, state: current.questionnaire.state === "submitted" ? "submitted" : current.info.state },
                 notice: "session_expired",
               }
             : current,
@@ -345,6 +346,7 @@ export function PayerLinkPage() {
           key={view.notice ?? "start"}
           info={view.info}
           text={text}
+          lang={lang}
           client={client}
           notice={view.notice === "session_expired" ? text.sessionExpired : null}
           onVerified={verified}

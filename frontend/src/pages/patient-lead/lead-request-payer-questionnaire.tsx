@@ -50,6 +50,7 @@ import {
   payerSignaturePackageOf,
   stillRejectedPayerFields,
   withFundsSource,
+  withRepresentativeLegalAnswers,
   withPayerLegalAnswer,
   withRejectedPayerField,
   type PayerLegalQuestion,
@@ -233,6 +234,26 @@ function PayerQuestionnaireForm({
   // What the server last answered, also before the next render: "send" checks it after the last save.
   const questionnaireRef = useRef(questionnaire);
   questionnaireRef.current = questionnaire;
+  // The paying parent already answered the three legal questions as the child's representative:
+  // the payer's set takes those answers over once it can be written, to be checked here
+  // (QA 2026-11-10, finding 15). Saved like every other entry of the form.
+  const ownLegalAnswers = request.follow_up?.representatives?.find(
+    (person) => person.id === request.representation?.representatives.find((item) => item.mine)?.id,
+  )?.fields;
+  const ownLegalRef = useRef(ownLegalAnswers);
+  ownLegalRef.current = ownLegalAnswers;
+  const legalTakenOver = useRef(false);
+  const [legalPrefilled, setLegalPrefilled] = useState(false);
+  const writable = acknowledged && !submitted;
+  useEffect(() => {
+    if (legalTakenOver.current || !writable) return;
+    legalTakenOver.current = true;
+    setDraft((current) => {
+      const next = withRepresentativeLegalAnswers(current, ownLegalRef.current);
+      if (next !== current) setLegalPrefilled(true);
+      return next;
+    });
+  }, [writable]);
   const [channels, setChannels] = useState<string[]>(() => questionnaire.privacy.contact_channels);
   const [noticeBusy, setNoticeBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -360,6 +381,10 @@ function PayerQuestionnaireForm({
     const nextErrors: string[] = [];
     await enqueueUploadBatch(enqueue, async () => {
       for (const file of files) {
+        if (file.size === 0) {
+          nextErrors.push(text.fileEmpty(file.name));
+          continue;
+        }
         if (file.size > MAX_UPLOAD_BYTES) {
           nextErrors.push(text.fileTooLarge(file.name));
           continue;
@@ -666,6 +691,9 @@ function PayerQuestionnaireForm({
           ) : null}
 
           <div className="space-y-3" data-testid="lead-request-payer-legal">
+            {legalPrefilled ? (
+              <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-request-payer-legal-prefilled">{text.payerLegalPrefilled}</p>
+            ) : null}
             {PAYER_LEGAL_QUESTIONS.map((question) => {
               const details = PAYER_LEGAL_DETAILS[question];
               return (

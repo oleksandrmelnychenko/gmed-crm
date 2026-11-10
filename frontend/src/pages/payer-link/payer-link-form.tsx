@@ -15,13 +15,18 @@ import {
   fundsSourceOptions,
   isOrganisation,
   missingByStep,
+  ownersBlocker,
   payerSteps,
   refusedField,
   industryRequired,
   occupationRequired,
   requiredFields,
+  splitIdentityDocuments,
   stillRejected,
   withRejectedField,
+  type OwnerDraft,
+  type OwnerField,
+  type OwnersBlocker,
   type PatchContext,
   type PayerDraft,
   type PayerField,
@@ -30,6 +35,7 @@ import {
 } from "./payer-link-model";
 import { isFatalKind, payerErrorKind, payerErrorMessage, type PayerErrorKind } from "./payer-link-session";
 import { Notice, SaveIndicator, useAutosave, useRequestQueue, type RequestQueue, type SaveState } from "./payer-link-parts";
+import { ownerFieldId } from "./payer-link-fields";
 import {
   DeclarationsStep,
   DetailsStep,
@@ -233,6 +239,11 @@ function useUploads({
     setBusy(true);
     const messages: string[] = [];
     for (const file of files) {
+      // An empty file is not sent: the server would only answer "no file" (QA 2026-11-10).
+      if (file.size === 0) {
+        messages.push(text.fileEmpty(file.name));
+        continue;
+      }
       if (file.size > MAX_UPLOAD_BYTES) {
         messages.push(text.fileTooLarge(file.name));
         continue;
@@ -366,6 +377,8 @@ function DraftForm({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [missingShownSteps, setMissingShownSteps] = useState<ReadonlySet<PayerStep>>(() => new Set());
+  // "Next" was pressed on a list of beneficial owners that cannot be saved: the step says why, until the list is put right.
+  const [ownersHeld, setOwnersHeld] = useState(false);
   const enqueue = useRequestQueue();
   const topRef = useRef<HTMLDivElement | null>(null);
   const textRef = useRef(text);
@@ -444,19 +457,23 @@ function DraftForm({
     onFailure: handleFailure,
   });
 
+  // The server files an organisation's register extract among the identity copies and marks it.
+  // The page keeps the two apart: the extract is no scan of the representative's ID, and no
+  // document data are read from it (QA 2026-11-10).
+  const identityDocuments = questionnaire.identity_documents;
+  const identityFiles = useMemo(() => splitIdentityDocuments(identityDocuments), [identityDocuments]);
   const identityUploads = useUploads({
     kind: "identity",
-    documents: questionnaire.identity_documents ?? [],
+    documents: identityFiles.identity,
     client,
     enqueue,
     text,
     onQuestionnaire,
     onFailure: handleFailure,
   });
-  // The register extract joins the identity files once stored (it is one of them).
   const extractUploads = useUploads({
     kind: "extract",
-    documents: [],
+    documents: identityFiles.extract,
     client,
     enqueue,
     text,
@@ -503,6 +520,7 @@ function DraftForm({
     }
     setNotice(null);
     setSubmitError(null);
+    setOwnersHeld(false);
     setStep(next);
     // Staff may have filed the register extract while this page stayed open: the
     // step and the summary then ask less (QA 2026-11-01).
@@ -572,10 +590,22 @@ function DraftForm({
   // stays, the next press goes on; nothing is shown before.
   const stepMissing = missingByStep(questionnaire.missing_for_submit ?? [], payerType, steps).find((group) => group.step === step)?.keys ?? [];
   const missingShown = missingShownSteps.has(step);
+  // Why "next" stayed on the beneficial owners, read from the list as it is now: it goes once the list is right.
+  const ownersHold = step === "owners" && ownersHeld ? ownersBlocker(form.draft) : null;
   const next = async () => {
     if (!following || advancingRef.current) return;
     advancingRef.current = true;
     try {
+      // A list of beneficial owners the page holds back — a share that is none, a person without
+      // both names, more than 100 % together — is never saved: the step stays until it is put
+      // right. Going on would show, and later send, the list saved before (QA 2026-11-10: the
+      // field said 150, the summary 10 %).
+      const blocker = step === "owners" ? ownersBlocker(form.draft) : null;
+      if (blocker) {
+        setOwnersHeld(true);
+        if (!revealOwnerProblem(blocker, form.draft.beneficial_owners)) topRef.current?.scrollIntoView({ block: "start" });
+        return;
+      }
       // The list counts what is saved: the answer typed just before the press is
       // saved first, or that press only saved it (QA 2026-11-01). Without one there is
       // nothing to wait for: uploads share the queue, and a batch must not freeze the button.
@@ -607,6 +637,7 @@ function DraftForm({
           context={context}
           uploads={identityUploads}
           extractUploads={client.canUploadRegisterExtract ? extractUploads : undefined}
+          extractDocuments={identityFiles.extract}
           extractOnFile={questionnaire.register_extract_on_file === true}
         />
       );
@@ -657,6 +688,12 @@ function DraftForm({
       {notice ? (
         <Notice tone="error" role="alert" testId="payer-link-notice">
           {notice}
+        </Notice>
+      ) : null}
+
+      {ownersHold ? (
+        <Notice tone="error" role="alert" testId="payer-link-owners-hold">
+          {ownersHold.index === null ? text.ownersTotal : `${text.ownerHeading(ownersHold.index + 1)}: ${ownersHold.problem === "incomplete" ? text.ownerIncomplete : text.ownerShare}`}
         </Notice>
       ) : null}
 
@@ -712,6 +749,22 @@ const UPLOAD_IDS: Record<string, string> = {
   id_document_upload: "payer-link-identity-files",
   funds_proof_upload: "payer-link-funds-files",
 };
+
+/**
+ * Leads to what holds the list of beneficial owners: the share, or the missing name, of the
+ * first person with a problem. False when the problem is the shares together (no single field).
+ */
+function revealOwnerProblem(blocker: OwnersBlocker, owners: readonly OwnerDraft[]): boolean {
+  if (blocker.index === null) return false;
+  const owner = owners[blocker.index];
+  const field: OwnerField = blocker.problem === "share" ? "share_percent" : owner?.first_name.trim() ? "last_name" : "first_name";
+  const input = document.getElementById(ownerFieldId(blocker.index, field));
+  if (!input) return false;
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  input.scrollIntoView({ block: "center", behavior: reduced ? "auto" : "smooth" });
+  input.focus({ preventScroll: true });
+  return true;
+}
 
 function revealPayerField(key: string) {
   const id = UPLOAD_IDS[key] ?? `payer-link-${key}`;

@@ -25,6 +25,7 @@ import {
   TextInput,
   controlProps,
   fieldId,
+  ownerFieldId,
   type StepContext,
   type UploadControl,
 } from "./payer-link-fields";
@@ -70,7 +71,7 @@ function OwnerCard({
   onRemove: () => void;
 }) {
   const { text, lang } = context;
-  const id = (field: OwnerField) => `payer-link-owner-${index}-${field}`;
+  const id = (field: OwnerField) => ownerFieldId(index, field);
   const input = (field: OwnerField, maxLength: number, inputMode?: "decimal") => (
     <Input
       id={id(field)}

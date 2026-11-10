@@ -21,6 +21,11 @@ export type ConsentFormText = {
   coreHint: string;
   /** The server refused a choice without the three (`consent_core_required`). */
   coreRequired: string;
+  /** At a required box that is not ticked, once the step was to be left with a partial choice (QA 2026-11-10, finding 5). */
+  coreMissingBox: string;
+  /** A partial choice is not saved; `OrNone` while nothing was saved before: unticking everything decides later. */
+  coreIncomplete: string;
+  coreIncompleteOrNone: string;
   save: string;
   saving: string;
   /** The choice the other parent or guardian saved (QA 2026-10-12, A3-01). */
@@ -86,6 +91,9 @@ const de: ConsentFormText = {
   required: "erforderlich",
   coreHint: "Diese drei Einwilligungen brauchen wir für Ihre Anfrage.",
   coreRequired: "Bitte kreuzen Sie die drei erforderlichen Einwilligungen an.",
+  coreMissingBox: "Diese Einwilligung ist erforderlich. Bitte kreuzen Sie sie an.",
+  coreIncomplete: "Ihre Auswahl ist noch nicht gespeichert: Bitte kreuzen Sie alle drei erforderlichen Einwilligungen an.",
+  coreIncompleteOrNone: "Ihre Auswahl ist noch nicht gespeichert: Bitte kreuzen Sie alle drei erforderlichen Einwilligungen an – oder entfernen Sie alle Häkchen, wenn Sie später entscheiden möchten.",
   save: "Auswahl speichern",
   saving: "Wird gespeichert…",
   savedByOtherAt: (date) =>
@@ -154,6 +162,9 @@ const en: ConsentFormText = {
   required: "required",
   coreHint: "We need these three consents for your request.",
   coreRequired: "Please tick the three required consents.",
+  coreMissingBox: "This consent is required. Please tick it.",
+  coreIncomplete: "Your choice is not saved yet: please tick all three required consents.",
+  coreIncompleteOrNone: "Your choice is not saved yet: please tick all three required consents – or untick everything if you would like to decide later.",
   save: "Save my choice",
   saving: "Saving…",
   savedByOtherAt: (date) =>
@@ -220,6 +231,9 @@ const uk: ConsentFormText = {
   required: "обов’язково",
   coreHint: "Ці три згоди потрібні для вашої заявки.",
   coreRequired: "Позначте, будь ласка, три обов’язкові згоди.",
+  coreMissingBox: "Ця згода обов’язкова. Позначте її, будь ласка.",
+  coreIncomplete: "Ваш вибір ще не збережено: позначте, будь ласка, усі три обов’язкові згоди.",
+  coreIncompleteOrNone: "Ваш вибір ще не збережено: позначте, будь ласка, усі три обов’язкові згоди — або зніміть усі позначки, якщо хочете вирішити пізніше.",
   save: "Зберегти вибір",
   saving: "Зберігаємо…",
   savedByOtherAt: (date) =>
@@ -286,6 +300,9 @@ const ru: ConsentFormText = {
   required: "обязательно",
   coreHint: "Эти три согласия нужны для вашей заявки.",
   coreRequired: "Отметьте, пожалуйста, три обязательных согласия.",
+  coreMissingBox: "Это согласие обязательно. Отметьте его, пожалуйста.",
+  coreIncomplete: "Ваш выбор ещё не сохранён: отметьте, пожалуйста, все три обязательных согласия.",
+  coreIncompleteOrNone: "Ваш выбор ещё не сохранён: отметьте, пожалуйста, все три обязательных согласия — или снимите все отметки, если хотите решить позже.",
   save: "Сохранить выбор",
   saving: "Сохраняем…",
   savedByOtherAt: (date) =>

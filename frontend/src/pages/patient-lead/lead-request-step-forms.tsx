@@ -1,5 +1,5 @@
 import { authorityProofOf } from "./lead-request-representation-model";
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import { preferredLanguageOptions } from "@/pages/leads/model/lead-wizard.model";
 import {
@@ -27,7 +27,10 @@ import { Input } from "@/components/ui/input";
 import { StatusChip } from "@/components/ui/status-chip";
 import { LANGUAGE_OPTIONS } from "@/components/ui/language-multi-select";
 import { inputClass, selectClass } from "@/components/record-workspace/primitives/design-tokens";
+import { ReadOnlyScope } from "@/components/read-only-scope";
 import { appDateKey } from "@/lib/app-time-zone";
+import { useCabinetStaffMode } from "./lead-request-staff-mode";
+import { useDateRefusal } from "./lead-request-date-refusal";
 
 import {
   HEALTH_CONSENT,
@@ -57,6 +60,7 @@ import {
   consentGiven,
   consentText,
   draftFromPersonalData,
+  germanZipRefused,
   payerAnswer,
   languageName,
   personalDataPatch,
@@ -81,6 +85,7 @@ import {
   MissingList,
   MissingShownContext,
   SECTION_ANCHORS,
+  SaveBlockedContext,
   SaveIndicator,
   SentLockHint,
   StepMissingContext,
@@ -95,7 +100,7 @@ import {
 import { InvoiceRecipientSection } from "./lead-request-invoice-recipient";
 import { PayerSection } from "./lead-request-payer-section";
 import { PayerQuestionnaireSection } from "./lead-request-payer-questionnaire";
-import { missingFieldKeys, missingListKeys, recipientIsPayer } from "./lead-request-field-target";
+import { invalidFieldsIn, missingFieldKeys, missingListKeys, recipientIsPayer, revealCabinetTarget, type InvalidField } from "./lead-request-field-target";
 import { draftFromRecipient, flowOf, knowsRecipient, payerChoices, payerFitsFlow } from "./lead-request-recipient-model";
 import { RepresentationSection, RepresentativeUpload } from "./lead-request-representation";
 import { AgencyContactLine, HealthConsentText, useAgencyContact } from "./health-consent-text";
@@ -219,16 +224,52 @@ export function StepFrame({
     // The page validates the fresh server response after flushing this step.
     nav.onNext?.();
   };
+  // The step could not be left because an entry was not saved: the fields that are marked are
+  // named here, each with the way to it (QA 2026-11-10, findings 8 and 23) — read off the form
+  // once the refusal has rendered its marks.
+  const blocked = useContext(SaveBlockedContext);
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const [invalid, setInvalid] = useState<InvalidField[]>([]);
+  useEffect(() => {
+    if (!blocked) {
+      setInvalid([]);
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => setInvalid(invalidFieldsIn(sectionRef.current)));
+    return () => window.cancelAnimationFrame(frame);
+  }, [blocked]);
   return (
-    <section className="flex flex-col gap-3" data-testid={testId}>
+    <section ref={sectionRef} className="flex flex-col gap-3" data-testid={testId}>
       {locked ? <SentLockHint text={text} /> : null}
       {showMissing ? <MissingList title={text.stepMissingTitle} labels={labels} fields={fields} step={step} testId="lead-request-step-missing" /> : null}
+      {invalid.length > 0 && !locked ? (
+        <div
+          className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+          data-testid="lead-request-step-invalid"
+        >
+          <p className="font-medium">{text.stepInvalidTitle}</p>
+          <ul className="mt-1 list-outside list-disc space-y-0.5 pl-5 text-[13px] leading-5">
+            {invalid.map(({ label, element }) => (
+              <li key={label} className="break-words">
+                <button
+                  type="button"
+                  className="text-left align-top underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => { if (element.isConnected) revealCabinetTarget({ element, field: true }); }}
+                >
+                  {label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <MissingShownContext.Provider value={showMissing}>
         <StepMissingContext.Provider value={stepMissing}>
           {open}
           {locked ? (
             <fieldset disabled className="m-0 min-w-0 space-y-3 border-0 p-0" data-testid="lead-request-step-locked">
-              {children}
+              {/* The date fields are no form controls of the browser: the scope disables them (QA 2026-11-10, A-1). */}
+              <ReadOnlyScope banner={false}>{children}</ReadOnlyScope>
             </fieldset>
           ) : (
             children
@@ -250,6 +291,20 @@ export function StepFrame({
         ) : null}
       </StepFooter>
     </section>
+  );
+}
+
+/**
+ * A part of a sent step that the server no longer takes, inside a step that stays open for
+ * something else (the typed document data next to the new copy of a refused document):
+ * read-only like a locked step.
+ */
+function SentReadOnly({ active, children }: { active: boolean; children: ReactNode }) {
+  if (!active) return <>{children}</>;
+  return (
+    <fieldset disabled className="m-0 min-w-0 space-y-3 border-0 p-0" data-testid="lead-request-part-locked">
+      <ReadOnlyScope banner={false}>{children}</ReadOnlyScope>
+    </fieldset>
   );
 }
 
@@ -277,6 +332,8 @@ function usePersonalForm({
   const savedRef = useRef<PersonalDraft>(draftFromPersonalData(request.personal_data));
   const queuedDraftRef = useRef<PersonalDraft>(draftFromPersonalData(request.personal_data));
   const rejectedRef = useRef<RejectedPersonal>({});
+  // The postal code this form itself refused for its format (the server takes any).
+  const zipFormatRef = useRef<string | null>(null);
   const failedRef = useRef(false);
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<PersonalField, string>>>({});
 
@@ -290,7 +347,22 @@ function usePersonalForm({
       return runDraftSave(enqueue, fields, async () => {
         const rejected: RejectedPersonal = {};
         for (const [field, value] of Object.entries(rejectedRef.current)) {
+          // A postal code refused for Germany is fine once the country is another one.
+          if (field === "zip_code" && zipFormatRef.current === value && !germanZipRefused(snapshot)) {
+            zipFormatRef.current = null;
+            continue;
+          }
           if (rejectedValue(field, snapshot)?.value === value) rejected[field as PersonalField] = value;
+        }
+        // A German postal code has five digits (QA 2026-11-10, finding 10): another value is not
+        // sent, and the field says so. Only when the person changes the code or the country —
+        // a stored code never holds anybody on the step.
+        const changed = personalDataPatch(savedRef.current, snapshot);
+        if (("zip_code" in changed || "country" in changed) && germanZipRefused(snapshot)) {
+          const zip = rejectedValue("zip_code", snapshot)?.value ?? "";
+          rejected.zip_code = zip;
+          zipFormatRef.current = zip;
+          setFieldErrors((current) => ({ ...current, zip_code: text.invalidGermanZip }));
         }
         let failed = false;
         let saved = false;
@@ -377,6 +449,8 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
   const identification = useIdentificationForm({ request, text, enqueue, onChange, onSaveState: parts.on("identification") });
   const withIdentification = request.identification !== undefined;
   const { draft, set, errorFor, fieldProps } = personal;
+  // A date of birth the field did not take (31.02., in the future) says so, not "required".
+  const birthDate = useDateRefusal(lang, draft.date_of_birth, { min: "1900-01-01", max: appDateKey() });
   // The step's list follows the badge: the consent only while the request was never sent (QA 2026-10-24).
   const consentMissing = inquiryConsentMissing(request) ? [{ label: text.sectionConsent, field: "inquiry_consent" }] : [];
 
@@ -522,8 +596,8 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
             />
             {nameCorrection("middle_name")}
           </FormField>
-          <FormField field="date_of_birth" text={text} error={errorFor("date_of_birth")} required>
-            <Input
+          <FormField field="date_of_birth" text={text} error={birthDate.message ?? errorFor("date_of_birth")} required>
+            {birthDate.wrap(<Input
               key={`date_of_birth-${lang}`}
               {...fieldProps("date_of_birth")}
               className={inputClass}
@@ -532,13 +606,14 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
               pickerLang={asLeadCabinetLang(lang) ?? undefined}
               max={appDateKey()}
               min="1900-01-01"
+              onPickerValidation={birthDate.onPickerValidation}
               // A parent sets the child's date of birth once; a stored one only GMED corrects
               // (the server refuses the change: `dob_staff_only`).
               disabled={dobLocked}
-              aria-describedby={[fieldProps("date_of_birth")["aria-describedby"], dobLocked ? "lead-request-date_of_birth-locked" : null].filter(Boolean).join(" ") || undefined}
+              aria-describedby={[fieldProps("date_of_birth")["aria-describedby"], birthDate.message ? "lead-request-date_of_birth-error" : null, dobLocked ? "lead-request-date_of_birth-locked" : null].filter(Boolean).join(" ") || undefined}
               value={draft.date_of_birth}
               onChange={(event) => set("date_of_birth", event.target.value)}
-            />
+            />)}
             {dobLocked ? (
               <p id="lead-request-date_of_birth-locked" className="text-xs text-muted-foreground" data-testid="lead-request-date_of_birth-locked">
                 {text.dobStaffOnly}
@@ -779,6 +854,7 @@ export function IdentityStep({ request, text, lang, enqueue, onChange, missing, 
   // Staff on a minor's form upload the parents' copies here too, each parent's (owner 2026-10-30).
   const staffParentSlots = staffForChild(request) && request.representation ? parentDocumentSlots(request) : [];
   const forChild = parentOfMinor || staffParentSlots.length > 0;
+  const staffMode = useCabinetStaffMode();
   // Three uploads on one step: "consent first" is said once above them (labels audit 2026-10-26, A6).
   const consentNoteAbove = forChild && !consentGiven(request, INQUIRY_CONSENT);
   return (
@@ -794,15 +870,19 @@ export function IdentityStep({ request, text, lang, enqueue, onChange, missing, 
             onChange={onChange}
             title={forChild ? text.childDocumentTitle : undefined}
           />
-          <LeadRequestIdentityRecognition
-            leadId={request.lead_id}
-            documents={request.identity_documents ?? []}
-            draft={identification.draft}
-            onTake={(field, value) => identification.set(field, value)}
-            text={text}
-            lang={lang}
-          />
-          <IdentityDocumentDataFields form={identification} text={text} lang={lang} />
+          {/* After the send only a new copy of a refused document is taken here; the typed data
+              stay as sent unless GMED asks for more (the server refuses them otherwise). */}
+          <SentReadOnly active={Boolean(request.submitted_at) && !staffMode && !request.follow_up?.required}>
+            <LeadRequestIdentityRecognition
+              leadId={request.lead_id}
+              documents={request.identity_documents ?? []}
+              draft={identification.draft}
+              onTake={(field, value) => identification.set(field, value)}
+              text={text}
+              lang={lang}
+            />
+            <IdentityDocumentDataFields form={identification} text={text} lang={lang} />
+          </SentReadOnly>
         </div>
       ) : null}
       {parentOfMinor ? (
@@ -1231,6 +1311,10 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
     // Sending from the next step must wait for every selected document.
     await enqueue(async () => {
       for (const file of files) {
+        if (file.size === 0) {
+          nextErrors.push(text.fileEmpty(file.name));
+          continue;
+        }
         if (file.size > MAX_UPLOAD_BYTES) {
           nextErrors.push(text.fileTooLarge(file.name));
           continue;

@@ -6,7 +6,7 @@ import { appDateKey, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { LEAD_CABINET_LANGS } from "@/pages/patient-lead/lead-request-text";
 
-import type { PayerQuestionnaire } from "./payer-link-api";
+import type { PayerDocument, PayerQuestionnaire } from "./payer-link-api";
 import {
   ChoiceInput,
   CountryInput,
@@ -26,10 +26,11 @@ import {
   LEGAL_QUESTIONS,
   SALUTATIONS,
   isOrganisation,
+  vatIdLooksUnusual,
   withContactChannel,
   withLegalAnswer,
 } from "./payer-link-model";
-import { RequiredMark, UploadBlock, YesNoSelect } from "./payer-link-parts";
+import { DocumentList, RequiredMark, UploadBlock, YesNoSelect } from "./payer-link-parts";
 import { PayerIdentityRecognition } from "./payer-link-recognition";
 import type { PayerLinkText } from "./payer-link-text";
 
@@ -207,6 +208,12 @@ export function DetailsStep({ context, email }: { context: StepContext; email: s
         {context.organisationExtras ? (
           <Field context={context} field="vat_id">
             <TextInput context={context} field="vat_id" maxLength={20} />
+            {/* A hint, never a refusal (owner 2026-10-22): the value is saved as typed. */}
+            {vatIdLooksUnusual(form.draft.vat_id) ? (
+              <p className="text-xs leading-5 text-amber-800 dark:text-amber-200" data-testid="payer-link-vat-id-hint">
+                {text.vatIdHint}
+              </p>
+            ) : null}
           </Field>
         ) : null}
         <SubHeading>{text.representative}</SubHeading>
@@ -304,12 +311,16 @@ export function IdentityStep({
   context,
   uploads,
   extractUploads,
+  extractDocuments = [],
   extractOnFile = false,
 }: {
   context: StepContext;
+  /** The copies of the identity document — without the register extract, which is no scan to read. */
   uploads: UploadControl;
   /** An organisation uploads its register extract instead (owner 2026-11-10). */
   extractUploads?: UploadControl;
+  /** The register extract files the organisation uploaded here, listed under their own name (QA 2026-11-10). */
+  extractDocuments?: readonly PayerDocument[];
   /** GMED holds the organisation's register extract: nothing here is required. */
   extractOnFile?: boolean;
 }) {
@@ -323,14 +334,15 @@ export function IdentityStep({
           {extractOnFile ? text.identityExtractOnFile : text.identityIntroOrganisation}
         </p>
       ) : null}
-      {organisation && !extractOnFile && extractUploads ? (
+      {/* Offered until an extract is on file; the organisation's own upload stays listed here, with "remove". */}
+      {organisation && extractUploads && (!extractOnFile || extractDocuments.length > 0) ? (
         <UploadBlock
           id="payer-link-register-extract"
           label={text.identityExtractUpload}
           required={false}
           hint={text.identityExtractUploadHint}
           buttonLabel={text.identityExtractUploadButton}
-          documents={extractUploads.documents}
+          documents={extractDocuments}
           busy={extractUploads.busy}
           errors={extractUploads.errors}
           disabled={false}
@@ -339,6 +351,12 @@ export function IdentityStep({
           onFiles={extractUploads.upload}
           onRemove={extractUploads.remove}
         />
+      ) : organisation && extractDocuments.length > 0 ? (
+        // Where the extract cannot be uploaded (staff's transcription of the paper form): the list only.
+        <div className="space-y-2" data-testid="payer-link-register-extract-files">
+          <p className={tokens.text.label}>{text.identityExtractLabel}</p>
+          <DocumentList documents={extractDocuments} text={text} emptyText="" />
+        </div>
       ) : null}
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         <Field context={context} field="id_document_type">

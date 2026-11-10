@@ -433,6 +433,52 @@ export function ownersReady(owners: readonly OwnerDraft[]): boolean {
   return !problems.total && problems.rows.every((problem) => problem === null);
 }
 
+/** What holds the step of the beneficial owners: the first person with a problem (`index`), or the shares together. */
+export type OwnersBlocker = { problem: OwnerProblem | "total"; index: number | null };
+
+/**
+ * The first thing that keeps the typed list of beneficial owners from being
+ * saved, or null. Such a list is never sent, so the step stays on it: going
+ * on would show — and send — the list saved before, e.g. the share of 10 %
+ * while the field says 150 (QA 2026-11-10).
+ */
+export function ownersBlocker(draft: Pick<PayerDraft, "beneficial_owners" | "beneficial_owners_none">): OwnersBlocker | null {
+  if (draft.beneficial_owners_none === "yes") return null;
+  const problems = ownerProblems(draft.beneficial_owners);
+  const index = problems.rows.findIndex((problem) => problem !== null);
+  const problem = index === -1 ? null : problems.rows[index];
+  if (problem) return { problem, index };
+  return problems.total ? { problem: "total", index: null } : null;
+}
+
+/**
+ * Whether a typed VAT id looks like none: two letters of the country and 2–12
+ * letters or digits, spaces, dots and hyphens aside. A hint on the page only —
+ * the format never refuses a value (owner 2026-10-22), and a tax number of
+ * another country is saved as typed.
+ */
+export function vatIdLooksUnusual(value: string): boolean {
+  const compact = value.replace(/[\s.-]/g, "").toUpperCase();
+  return compact !== "" && !/^[A-Z]{2}[A-Z0-9]{2,12}$/.test(compact);
+}
+
+/**
+ * The identity files apart: the copies of the ID, and an organisation's
+ * register extract, which the server files among them and marks
+ * (`register_extract`). The extract is no scan of the representative's ID: it
+ * is listed under its own name and no document data are read from it (QA
+ * 2026-11-10).
+ */
+export function splitIdentityDocuments<Document extends { register_extract?: boolean }>(
+  documents: readonly Document[] | null | undefined,
+): { identity: Document[]; extract: Document[] } {
+  const all = documents ?? [];
+  return {
+    identity: all.filter((document) => document.register_extract !== true),
+    extract: all.filter((document) => document.register_extract === true),
+  };
+}
+
 /** The list as the server takes it (contract 3.4): names and share required, empty texts as null. */
 export function ownersPayload(owners: readonly OwnerDraft[]): PayerBeneficialOwner[] {
   return owners.map((owner) => {

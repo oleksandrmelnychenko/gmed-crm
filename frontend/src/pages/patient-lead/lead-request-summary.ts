@@ -6,7 +6,8 @@ import { formatPortalTimestamp } from "@/lib/portal-datetime";
 import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api";
 import { actsAsGuardian } from "./lead-request-access";
 import { consentFormText } from "./lead-request-consent-form-text";
-import { disclosureDefaultsToNo, formatBirthDate, personScope, storedTrustedPersons } from "./lead-trusted-persons-model";
+import { citizenshipFieldLabel } from "@/components/ui/citizenship-multi-select";
+import { disclosureDefaultsToNo, formatBirthDate, personCitizenships, personScope, storedTrustedPersons } from "./lead-trusted-persons-model";
 import { REPRESENTATIVE_COUNTRY_FIELDS } from "./lead-request-representative-questions-model";
 import { trustedPersonsText } from "./lead-trusted-persons-text";
 import { asksAccount, asksPaymentRoute, type BillingField } from "./lead-request-billing-model";
@@ -217,6 +218,23 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
   };
   const fileNames = (documents: readonly { file_name: string | null }[] | null | undefined) =>
     (documents ?? []).map((document) => document.file_name ?? "—").join(", ");
+  // The data of an identity document typed next to its copy (owner 2026-11-10) are statements
+  // like any other: the review and "what we received" show them (QA 2026-11-10, finding 7).
+  const idDocumentRows = (source: {
+    id_document_type?: string | null;
+    id_document_number?: string | null;
+    id_issuing_authority?: string | null;
+    id_issuing_country?: string | null;
+    id_issued_on?: string | null;
+    id_valid_until?: string | null;
+  } | null | undefined): Array<[string, string | null | undefined]> => [
+    [identificationFieldLabel(text, "id_document_type"), option(text.idDocumentTypeOptions, source?.id_document_type)],
+    [identificationFieldLabel(text, "id_document_number"), source?.id_document_number],
+    [identificationFieldLabel(text, "id_issuing_authority"), source?.id_issuing_authority],
+    [identificationFieldLabel(text, "id_issuing_country"), source?.id_issuing_country ? country(source.id_issuing_country) : ""],
+    [identificationFieldLabel(text, "id_issued_on"), source?.id_issued_on ? formatAppDate(source.id_issued_on) : ""],
+    [identificationFieldLabel(text, "id_valid_until"), source?.id_valid_until ? formatAppDate(source.id_valid_until) : ""],
+  ];
 
   group("person", childSectionTitle(text, "person", request.minor), [
     [identificationLabel("salutation"), request.minor ? "" : option(text.salutationOptions, identification?.salutation)],
@@ -278,6 +296,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
               (field): [string, string | null | undefined] => [representativeFieldLabel(text, field), stated(person, field)],
             ),
             [representativeUploadLabel(text, slot, "identity"), fileNames(person.identity_documents)],
+            ...idDocumentRows(person),
             // A proof is listed where the form asks for one.
             [
               proof ? text.representativeAuthority[proof.proof] : "",
@@ -305,9 +324,12 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     });
   }
 
-  // The identity document, the step after the person: the copies only, GMED enters the data.
+  // The identity document, the step after the person: the copies, and the data typed next to them.
   if (identification) {
-    group("identity", childSectionTitle(text, "identity", request.minor), [[request.minor ? text.childIdentityFiles : text.identityFiles, fileNames(request.identity_documents)]]);
+    group("identity", childSectionTitle(text, "identity", request.minor), [
+      [request.minor ? text.childIdentityFiles : text.identityFiles, fileNames(request.identity_documents)],
+      ...idDocumentRows(identification),
+    ]);
   }
 
   group("insurance", childSectionTitle(text, "insurance", request.minor), [
@@ -596,7 +618,8 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       parts: disclosure.allow_disclosure ? storedTrustedPersons(request).map((person, index) => ({
         id: `disclosure-person-${index}`, title: person.name,
         // Date of birth and the phone the person calls from (owner 2026-10-26); a legacy contact while there is no phone.
-        rows: entered([[wording.relation, relations[person.relation]], [wording.birthDate, formatBirthDate(person.birth_date)], [wording.phone, person.phone],
+        rows: entered([[wording.relation, relations[person.relation]], [wording.birthDate, formatBirthDate(person.birth_date)],
+          [citizenshipFieldLabel(lang), countries(personCitizenships(person.citizenships))], [wording.phone, person.phone],
           [wording.contact, person.phone ? "" : person.contact], [wording.scope, personScope(person, lang)]]),
       })) : [],
     });

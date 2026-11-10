@@ -25,7 +25,13 @@ export type PayerLinkInfo = {
   email_masked: string;
   language: string | null;
   expires_at: string | null;
+  /** When the last code was mailed — also one that was used or has expired since (the minute between two codes). */
   code_sent_at: string | null;
+  /**
+   * A mailed code can still be entered: neither used nor used up nor expired
+   * (QA 2026-11-10). Absent on an older server, where `code_sent_at` stood for it.
+   */
+  code_pending?: boolean;
   session_valid: boolean;
   /** Phase 3b; absent on an older server (nothing is shown then). */
   signature_package?: PayerSignaturePackage | null;
@@ -125,6 +131,11 @@ export type PayerDocument = {
   uploaded_at: string | null;
   reviewed: boolean;
   can_delete: boolean;
+  /**
+   * Among the identity copies: the organisation's register extract, not a
+   * copy of the representative's ID (QA 2026-11-10). Absent on an older server.
+   */
+  register_extract?: boolean;
 };
 
 /** 3.5: the questionnaire as the payer sees it. */
@@ -278,8 +289,9 @@ export function createPayerLinkClient(credentials: PayerCredentials) {
   return {
     info: async (withSession: boolean): Promise<PayerLinkInfo> =>
       (await call(credentials, base, { withSession })) as PayerLinkInfo,
-    requestCode: async (): Promise<PayerCodeSent> =>
-      (await call(credentials, `${base}/code`, { method: "POST", json: {} })) as PayerCodeSent,
+    /** `language`: the language the page is read in; the code e-mail follows it (QA 2026-11-10), else the link's. */
+    requestCode: async (language?: string): Promise<PayerCodeSent> =>
+      (await call(credentials, `${base}/code`, { method: "POST", json: language ? { language } : {} })) as PayerCodeSent,
     verifyCode: async (code: string): Promise<PayerVerified> =>
       (await call(credentials, `${base}/verify`, { method: "POST", json: { code } })) as PayerVerified,
     questionnaire,

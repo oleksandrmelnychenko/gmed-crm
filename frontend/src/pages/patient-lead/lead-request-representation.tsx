@@ -12,6 +12,7 @@ import { StatusChip } from "@/components/ui/status-chip";
 import { nameNeedsLatinSpelling, suggestPassportSpelling } from "./name-transliteration";
 import { inputClass, selectClass } from "@/components/record-workspace/primitives/design-tokens";
 import { appDateKey } from "@/lib/app-time-zone";
+import { useDateRefusal } from "./lead-request-date-refusal";
 import { cn } from "@/lib/utils";
 import { ApiRequestError } from "@/lib/api";
 import { EmailDomainWarning, emailDomainWarningText } from "@/components/email-domain-warning";
@@ -506,6 +507,10 @@ export function RepresentativeUpload({
     // The parent step may unmount while the selection is still uploading.
     await enqueue(async () => {
       for (const file of files) {
+        if (file.size === 0) {
+          nextErrors.push(text.fileEmpty(file.name));
+          continue;
+        }
         if (file.size > MAX_UPLOAD_BYTES) {
           nextErrors.push(text.fileTooLarge(file.name));
           continue;
@@ -677,6 +682,7 @@ function RepresentativeBlock({
   );
 
   const form = useRepresentativeForm({ request, slot, person, text, lang, enqueue, onChange, onSaveState, isShown });
+  const birthRefusal = useDateRefusal(lang, form.draft.date_of_birth, { min: "1900-01-01", max: appDateKey() });
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState("");
   const entries = hasRepresentativeEntries(form.draft);
@@ -733,7 +739,7 @@ function RepresentativeBlock({
     />
   );
   const asked = (field: RepresentativeField) => fields.has(field) && asksRepresentativeField(slot, field);
-  const dateInput = (field: "date_of_birth", max?: string) => (
+  const dateInput = (field: "date_of_birth") => birthRefusal.wrap(
     <Input
       key={`${fieldId(field)}-${lang}`}
       {...control(field)}
@@ -741,10 +747,13 @@ function RepresentativeBlock({
       type="date"
       autoComplete="off"
       pickerLang={pickerLang}
-      max={max}
+      // A person's date of birth is no day in the future (QA 2026-11-10, finding 4).
+      min="1900-01-01"
+      max={appDateKey()}
+      onPickerValidation={birthRefusal.onPickerValidation}
       value={form.draft[field]}
       onChange={(event) => form.set(field, event.target.value)}
-    />
+    />,
   );
   const countrySelect = (field: "birth_country" | "country") => (
     <CountrySelect
@@ -832,7 +841,7 @@ function RepresentativeBlock({
         {asked("first_name") ? <LabeledField {...labeled("first_name")}>{textInput("first_name", 100)}</LabeledField> : null}
         {asked("last_name") ? <LabeledField {...labeled("last_name")}>{textInput("last_name", 100)}</LabeledField> : null}
         {asked("date_of_birth") ? (
-          <LabeledField {...labeled("date_of_birth")}>{dateInput("date_of_birth")}</LabeledField>
+          <LabeledField {...labeled("date_of_birth")} error={birthRefusal.message ?? form.errorFor("date_of_birth")}>{dateInput("date_of_birth")}</LabeledField>
         ) : null}
         {asked("birth_place") ? <LabeledField {...labeled("birth_place")}>{textInput("birth_place", 200)}</LabeledField> : null}
         {asked("birth_country") ? (

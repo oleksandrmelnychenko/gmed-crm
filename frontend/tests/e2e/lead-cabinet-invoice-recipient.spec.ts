@@ -682,6 +682,20 @@ test("two parents and a login that is none of them: choose the named invoice par
   await page.reload();
   await step(page, "billing");
   await expect(parent).toContainText("Ben Muster");
+  // The invoice moves from one parent to the other only after a confirmation that says what
+  // happens (owner 2026-11-10): declined, nothing changes; confirmed, the other parent is named.
+  const asked: string[] = [];
+  page.once("dialog", (dialog) => {
+    asked.push(dialog.message());
+    void dialog.dismiss();
+  });
+  await choose(page, parent, "Maria Muster");
+  await expect.poll(() => asked.length).toBe(1);
+  expect(asked[0]).toContain("Maria Muster statt Ben Muster");
+  expect(asked[0]).toContain("Zahlungsart");
+  await expect(parent).toContainText("Ben Muster");
+  expect(request.billing.recipient.representative_id).toBe(father);
+  page.once("dialog", (dialog) => void dialog.accept());
   await choose(page, parent, "Maria Muster");
   await expect.poll(() => request.billing.recipient.representative_id).toBe(mother);
   await expect.poll(() => request.payer?.email).toBe("maria.muster@example.com");

@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
-import { FORM_PRIVACY_SECTIONS } from "./form-privacy-content";
+import { FORM_PRIVACY_SECTIONS, FORM_PRIVACY_TRANSLATION_NOTE } from "./form-privacy-content";
 import { FormPrivacyNotice } from "./form-privacy-notice";
 import { LegalNoticePage } from "./legal";
 
@@ -47,15 +47,45 @@ describe("inquiry privacy notice", () => {
       .find((block) => block.kind === "list")?.items).toHaveLength(5);
   });
 
-  it.each(["de", "en", "uk", "ru"] as const)("opens the complete notice from a %s cabinet link, German unless Russian", (lang) => {
+  it.each(["de", "en", "uk", "ru"] as const)("opens the complete notice from a %s cabinet link in that language", (lang) => {
     auth.user = { role: "patient", portal_mode: "lead" };
-    const notice = lang === "ru" ? "ru" : "de";
     const html = renderToStaticMarkup(<MemoryRouter initialEntries={[`/legal?lang=${lang}#privacy`]}><LegalNoticePage /></MemoryRouter>);
-    expect(html).toContain(`lang="${notice}"`);
-    expect(html).toContain(FORM_PRIVACY_SECTIONS[notice][0].title);
-    expect(html).toContain(FORM_PRIVACY_SECTIONS[notice][13].title);
-    if (notice === "ru") expect(html).not.toContain(FORM_PRIVACY_SECTIONS.de[4].title);
+    expect(html).toContain(`lang="${lang}"`);
+    expect(html).toContain(FORM_PRIVACY_SECTIONS[lang][0].title);
+    expect(html).toContain(FORM_PRIVACY_SECTIONS[lang][13].title);
+    // The body is the reader's language too, not German below translated headings (QA 2026-11-10, finding 21).
+    if (lang !== "de") expect(html).not.toContain(FORM_PRIVACY_SECTIONS.de[4].title);
     expect(html).toContain({ de: "Impressum", en: "Legal notice", uk: "Правова інформація", ru: "Правовая информация" }[lang]);
+  });
+
+  it.each(["en", "uk"] as const)("the %s translation follows the German text block by block and says that the German version counts", (lang) => {
+    const html = renderToStaticMarkup(<FormPrivacyNotice lang={lang} />);
+    expect(html).toContain('data-testid="form-privacy-translation-note"');
+    expect(html).toContain(FORM_PRIVACY_TRANSLATION_NOTE[lang]);
+    expect(FORM_PRIVACY_TRANSLATION_NOTE.de).toBeUndefined();
+    expect(FORM_PRIVACY_TRANSLATION_NOTE.ru).toBeUndefined();
+    // The same sections, blocks and list items as the German original, with the same bold beginnings.
+    const shape = (code: "de" | "en" | "uk") => FORM_PRIVACY_SECTIONS[code].map((section) => [
+      section.number,
+      section.blocks.map((block) => block.kind === "list"
+        ? block.items.map((item) => Boolean(item.lead))
+        : block.kind === "address" ? block.lines.length : Boolean(block.lead)),
+    ]);
+    expect(shape(lang)).toEqual(shape("de"));
+    // Names, addresses, periods and references stay as in the original.
+    for (const fixed of [
+      "GMED - Agentur für Patientenbetreuung,", "Albert-Schweitzer-Straße 56", "81735 München", "contact@gmed-health.com",
+      "datenschutz@gmed-health.com", "+49 151 20943768", "GMED-EDV-System", "Hetzner Online GmbH, Industriestr. 25, 91710 Gunzenhausen",
+      "Skribble AG, Talacker 21, 8001 Zürich", "FiSaLis", "TLS", "12.10.2026", "www.gmed-health.com/legal",
+    ]) expect(html).toContain(fixed);
+    const text = JSON.stringify(FORM_PRIVACY_SECTIONS[lang]);
+    expect(text).not.toContain("DSGVO");
+    // Every article the German text cites is cited, as often.
+    const articles = (value: string, word: string) => (value.match(new RegExp(`${word}\\.? ?(\\d+)`, "g")) ?? []).map((hit) => hit.replace(/\D+/g, "")).sort();
+    expect(articles(text, lang === "en" ? "Art" : "ст")).toEqual(articles(JSON.stringify(FORM_PRIVACY_SECTIONS.de), "Art"));
+    for (const period of ["14", "180", "3"]) expect(JSON.stringify(FORM_PRIVACY_SECTIONS[lang][8])).toContain(period);
+    expect(html.match(/<strong\b/g)).toHaveLength(9);
+    expect(html.match(/<li\b/g)).toHaveLength(22);
   });
 
   it("makes the form notice available to leads and before signing in", () => {

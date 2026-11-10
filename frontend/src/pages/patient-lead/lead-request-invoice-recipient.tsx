@@ -1,5 +1,5 @@
 import { ContactRound, Wallet, ListPlus } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
@@ -25,10 +25,13 @@ import { actsAsGuardian, staffForChild } from "./lead-request-access";
 import { fetchMyLeadRequest, saveLeadInvoiceRecipient, type LeadRequest } from "./lead-request-api";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import type { IdentificationForm } from "./lead-request-identification";
+import { useDateRefusal } from "./lead-request-date-refusal";
 import {
+  PAYER_BORN_AFTER_PATIENT,
   RELATIONSHIP_KINDS,
   costEstimateConsentAsked,
   draftFromPayer,
+  nameCorrected,
   otherParentOf,
   payerAnswer,
   payerIdentityKey,
@@ -38,11 +41,13 @@ import {
   withPayerChoice,
   type PayerDraft,
   type RecipientPayerExtras,
+  type RecipientPayerMemo,
   type SaveState,
 } from "./lead-request-model";
 import {
   CabinetSection as Section,
   CabinetHint,
+  ConsentNeededNote,
   LabeledField,
   RequiredMark,
   useStepMissingError,
@@ -277,6 +282,8 @@ export function InvoiceRecipientSection({
 
   // What the person changes here may also name the payer: the changes of the server do not.
   const payerEditsRef = usePayerEdits();
+  // What was entered about the recipient who pays outlives a correction of the recipient's name.
+  const payerMemoRef = useRef<RecipientPayerMemo | null>(null);
   // "The patient pays" is the answer of the radio alone, whatever else is edited in the step.
   const partyEditsRef = usePayerEdits();
   const update = (change: (current: RecipientDraft) => RecipientDraft) => {
@@ -284,6 +291,19 @@ export function InvoiceRecipientSection({
     setDraft(change);
   };
   const set = (field: RecipientField, value: string) => update((current) => ({ ...current, [field]: value }));
+  // The invoice — and with it who pays — moves from one parent to the other only after the
+  // person read what that means and confirmed (owner decision 2026-11-10; QA finding 2: one
+  // click took the role and dropped the other parent's payment method without a word). The
+  // first naming of a parent asks nothing.
+  const confirmParentChange = (next: RecipientDraft): boolean => {
+    if (next.recipient !== "self" || !next.representative_id || savedRef.current.recipient !== "self") return true;
+    const from = parents.find((person) => person.id === savedRef.current.representative_id);
+    const to = parents.find((person) => person.id === next.representative_id);
+    if (!from || !to || from.id === to.id) return true;
+    const nameOf = (person: { first_name: string | null; last_name: string | null }) =>
+      [person.first_name, person.last_name].filter(Boolean).join(" ");
+    return window.confirm(text.recipient.parentChangeConfirm(nameOf(from), nameOf(to), flowOf(next).isPayer !== "no"));
+  };
   const errorFor = (field: keyof RecipientDraft) => {
     if (refused[field] === undefined || refused[field] !== recipientValue(field, draft)) return undefined;
     if (field !== "email") return text.invalidField;
@@ -394,6 +414,7 @@ export function InvoiceRecipientSection({
                       checked={checked}
                       disabled={locked}
                       onChange={() => {
+                        if (!confirmParentChange(withOwnParent(withRecipientAnswer(draft, answer), ownParent?.id))) return;
                         setPartyChoice(null);
                         if (identification && third && organisation && recipientPays) identification.set("payment_background", "");
                         update((current) => withOwnParent(withRecipientAnswer(current, answer), ownParent?.id));
@@ -426,7 +447,11 @@ export function InvoiceRecipientSection({
                 // A parent no longer on file is no answer: the question is open again (QA 2026-10-31, B-7).
                 value={invoiceParent ? draft.representative_id : ""}
                 disabled={locked}
-                onChange={(event) => update((current) => ({ ...current, representative_id: event.target.value, email: "" }))}
+                onChange={(event) => {
+                  const chosen = event.target.value;
+                  if (!confirmParentChange({ ...draft, representative_id: chosen, email: "" })) return;
+                  update((current) => ({ ...current, representative_id: chosen, email: "" }));
+                }}
               >
                 <option value="">{text.choose}</option>
                 {parents.map((person) => <option key={person.id} value={person.id}>{[person.first_name, person.last_name].filter(Boolean).join(" ")}</option>)}
@@ -683,6 +708,7 @@ export function InvoiceRecipientSection({
           text={text}
           lang={lang}
           recipient={draft}
+          memoRef={payerMemoRef}
           editsRef={payerEditsRef}
           enqueue={enqueue}
           onChange={onChange}
@@ -861,6 +887,7 @@ function RecipientPayer({
   text,
   lang,
   recipient,
+  memoRef,
   editsRef,
   enqueue,
   onChange,
@@ -870,6 +897,8 @@ function RecipientPayer({
   text: LeadRequestText;
   lang: string;
   recipient: RecipientDraft;
+  /** What was entered about the payer, kept across a correction of the recipient's name. */
+  memoRef: MutableRefObject<RecipientPayerMemo | null>;
   /** The person's changes of the recipient: this payer is built from a copy that may be older. */
   editsRef: PayerEdits;
   enqueue: RequestQueue;
@@ -888,7 +917,26 @@ function RecipientPayer({
   );
   const [base] = useState<PayerDraft>(() => fits ? draftFromPayer(request.payer) : unansweredPayerDraft(request.payer));
   const [replacementConfirmed, setReplacementConfirmed] = useState(false);
-  const [extras, setExtras] = useState<RecipientPayerExtras>(() => recipientPayerExtras(fits ? request.payer : null));
+  // This block starts anew with every change of the recipient's name. A corrected name (a typo) is
+  // the same person: what was entered about the payer stays, only the consents — they belong to the
+  // person named — are asked again, and the block says so (QA 2026-11-10, finding 11).
+  const organisation = recipient.type === "organisation";
+  const recipientName = organisation ? recipient.organisation_name : [recipient.first_name, recipient.last_name].join(" ");
+  const [kept] = useState<RecipientPayerMemo | null>(() => {
+    const memo = memoRef.current;
+    return !fits && memo && memo.organisation === organisation && nameCorrected(memo.name, recipientName) ? memo : null;
+  });
+  const [extras, setExtras] = useState<RecipientPayerExtras>(() => kept
+    ? { ...kept.extras, citizenships: [...kept.extras.citizenships], contact_consent: false }
+    : recipientPayerExtras(fits ? request.payer : null));
+  const [consentAskedAgain, setConsentAskedAgain] = useState(
+    () => Boolean(kept && (kept.consentAskedAgain || kept.extras.contact_consent || request.payer?.cost_estimate_consent_at)),
+  );
+  const editedHere = useRef(false);
+  useEffect(() => {
+    // The entries belong to the name they were stored or made for.
+    if (fits || editedHere.current) memoRef.current = { name: recipientName, organisation, extras, consentAskedAgain };
+  });
   // The payer's extras as the server last had them: the other parent's newer values are taken
   // over where nothing is typed; the recipient's own data come through the recipient's sync.
   const savedExtrasRef = useRef<RecipientPayerExtras>(recipientPayerExtras(fits ? request.payer : null));
@@ -919,12 +967,20 @@ function RecipientPayer({
   const replacementPending = Boolean(request.payer) && request.payer?.payer_kind !== "self" && !fits && !replacementConfirmed;
   const readyToReplace = recipientPayerReady(recipient);
   const sameIdentity = fits && payerIdentityKey(draftFromPayer(request.payer)) === payerIdentityKey(draft);
-  const { fieldError } = usePayerAutosave({ request, draft, editsRef, enqueue, onChange, onSaveState, enabled: !replacementPending && (fits || readyToReplace) });
-  const organisation = recipient.type === "organisation";
+  const { fieldError, fieldErrorCode } = usePayerAutosave({ request, draft, editsRef, enqueue, onChange, onSaveState, enabled: !replacementPending && (fits || readyToReplace) });
   const payerType = organisation ? "organisation" : "person";
-  const errorFor = (field: string) => (fieldError === field ? text.invalidField : undefined);
+  const errorFor = (field: string) => (fieldError === field
+    ? field === "payer_date_of_birth" && fieldErrorCode === PAYER_BORN_AFTER_PATIENT ? text.payerBornAfterPatient : text.invalidField
+    : undefined);
+  // A date of birth the field did not take says what is wrong (QA 2026-11-10, finding 4).
+  const payerBirth = useDateRefusal(lang, extras.date_of_birth, { min: "1900-01-01", max: appDateKey() });
   const set = <K extends keyof RecipientPayerExtras>(field: K, value: RecipientPayerExtras[K]) => {
     editsRef.current.made += 1;
+    editedHere.current = true;
+    // Another date of birth is another person to the consents: said at the boxes, not done silently.
+    const birthChanged = field === "date_of_birth" && value !== extras.date_of_birth;
+    if (birthChanged && (extras.contact_consent || (sameIdentity && request.payer?.cost_estimate_consent_at))) setConsentAskedAgain(true);
+    else if (field === "contact_consent" && value === true) setConsentAskedAgain(false);
     setExtras((current) => ({ ...current, [field]: value, ...(field === "date_of_birth" && value !== current.date_of_birth ? { contact_consent: false } : {}) }));
   };
 
@@ -932,7 +988,8 @@ function RecipientPayer({
     <Section icon={ListPlus} title={text.recipient.payerExtrasBlock}>
       <div className="space-y-3" data-testid="lead-request-recipient-payer">
         {replacementPending ? <div className="space-y-3" data-testid="lead-request-payer-replacement">
-          <StatusChip tone="warning">{text.recipient.replacePayerHint}</StatusChip>
+          {/* A corrected name keeps what was entered; another payer replaces it. */}
+          <StatusChip tone="warning" className="items-start whitespace-normal">{kept ? text.payerRenamedHint : text.recipient.replacePayerHint}</StatusChip>
           <Button type="button" disabled={!readyToReplace} onClick={() => {
             editsRef.current.made += 1;
             setReplacementConfirmed(true);
@@ -974,19 +1031,22 @@ function RecipientPayer({
               <LabeledField
                 id="lead-request-payer_date_of_birth"
                 label={payerFieldLabel(text, "payer_date_of_birth", guardian, payerType)}
-                error={errorFor("payer_date_of_birth")}
+                error={payerBirth.message ?? errorFor("payer_date_of_birth")}
               >
-                <Input
+                {payerBirth.wrap(<Input
                   key={`payer_date_of_birth-${lang}`}
                   id="lead-request-payer_date_of_birth"
                   className={inputClass}
                   type="date"
                   autoComplete="off"
                   pickerLang={asLeadCabinetLang(lang) ?? undefined}
+                  min="1900-01-01"
                   max={appDateKey()}
+                  onPickerValidation={payerBirth.onPickerValidation}
+                  aria-invalid={Boolean(errorFor("payer_date_of_birth")) || undefined}
                   value={extras.date_of_birth}
                   onChange={(event) => set("date_of_birth", event.target.value)}
-                />
+                />)}
               </LabeledField>
               <MessengerField
                 text={text}
@@ -1004,6 +1064,7 @@ function RecipientPayer({
             </>
           )}
         </div>
+        {consentAskedAgain ? <ConsentNeededNote>{text.payerConsentAskedAgain}</ConsentNeededNote> : null}
         <PayerContactConsent
           text={text}
           guardian={guardian}

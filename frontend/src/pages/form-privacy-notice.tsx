@@ -1,4 +1,4 @@
-import { FORM_PRIVACY_SECTIONS, FORM_PRIVACY_VERSION, type FormPrivacyLanguage, type FormPrivacyText } from "./form-privacy-content";
+import { FORM_PRIVACY_SECTIONS, FORM_PRIVACY_TRANSLATION_NOTE, FORM_PRIVACY_VERSION, type FormPrivacyLanguage, type FormPrivacyText } from "./form-privacy-content";
 
 export type FormPrivacyAgency = Partial<Record<
   | "agency_name"
@@ -39,8 +39,15 @@ function Text({ entry }: { entry: FormPrivacyText }) {
  * `agency` prop is kept for the callers' signature.
  */
 export function FormPrivacyNotice({ lang }: { lang: FormPrivacyLanguage; agency?: FormPrivacyAgency | null }) {
+  const translationNote = FORM_PRIVACY_TRANSLATION_NOTE[lang];
   return (
     <div className="space-y-5" data-testid="form-privacy-notice" data-version={FORM_PRIVACY_VERSION} lang={lang}>
+      {/* A translation made for convenience says so first: the German version counts (owner 2026-11-10). */}
+      {translationNote ? (
+        <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-muted-foreground" data-testid="form-privacy-translation-note">
+          {translationNote}
+        </p>
+      ) : null}
       {FORM_PRIVACY_SECTIONS[lang].map((section) => (
         <section key={section.number} className="space-y-2.5 border-t border-border/50 pt-4 first:border-t-0 first:pt-0" aria-labelledby={`form-privacy-section-${section.number}`}>
           <h3 id={`form-privacy-section-${section.number}`} className="flex items-baseline gap-2 text-[13px] font-semibold leading-5 tracking-tight">

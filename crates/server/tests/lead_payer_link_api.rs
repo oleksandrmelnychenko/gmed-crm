@@ -729,6 +729,7 @@ async fn staff_send_the_link_only_through_the_gate_and_resend_or_revoke_it() {
     assert_eq!(opened["language"], "en");
     assert_eq!(opened["session_valid"], false);
     assert!(opened["code_sent_at"].is_null());
+    assert_eq!(opened["code_pending"], false, "{opened}");
     assert!(!opened.to_string().contains(&lead_id.to_string()));
     let (_, info) = with_login(&app, "GET", &path, &app.manager(), None).await;
     assert_eq!(info["link"]["status"], "opened", "{info}");
@@ -918,6 +919,8 @@ async fn the_code_yields_a_session_and_wrong_codes_lock_the_link() {
     assert!(limited["retry_after_seconds"].as_i64().unwrap() > 0);
     let (_, opened) = as_payer(&app, "GET", OPEN, &link, None).await;
     assert!(opened["code_sent_at"].is_string(), "{opened}");
+    // The mailed code can be entered: the page shows the code field.
+    assert_eq!(opened["code_pending"], true, "{opened}");
 
     // Five wrong tries void the code.
     let wrong = if code == "000000" { "111111" } else { "000000" };
@@ -936,6 +939,9 @@ async fn the_code_yields_a_session_and_wrong_codes_lock_the_link() {
     let (_, body) = as_payer(&app, "POST", VERIFY, &link, Some(json!({ "code": code }))).await;
     assert_eq!(body["code"], "code_expired", "the right code is void too");
     assert_eq!(body["reason"], "too_many_attempts", "{body}");
+    // A code used up by wrong tries is no code to enter any more.
+    let (_, opened) = as_payer(&app, "GET", OPEN, &link, None).await;
+    assert_eq!(opened["code_pending"], false, "{opened}");
 
     // A new code; five more wrong tries make ten and lock the link.
     sqlx::query(
@@ -1030,6 +1036,13 @@ async fn the_code_yields_a_session_and_wrong_codes_lock_the_link() {
     let (_, opened) = as_payer(&app, "GET", OPEN, &with_session, None).await;
     assert_eq!(opened["state"], "active", "{opened}");
     assert_eq!(opened["session_valid"], true);
+    // QA 2026-11-10: the link opened again in another browser said "we have
+    // sent a code" for the code used before. When it was mailed stays known
+    // (the minute between two codes), but there is none to enter.
+    let (_, opened) = as_payer(&app, "GET", OPEN, &link, None).await;
+    assert_eq!(opened["state"], "code_required", "{opened}");
+    assert!(opened["code_sent_at"].is_string(), "{opened}");
+    assert_eq!(opened["code_pending"], false, "{opened}");
     let (status, body) = as_payer(&app, "GET", QUESTIONNAIRE, &link, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(body["code"], "session_required");
@@ -1085,6 +1098,55 @@ async fn the_code_yields_a_session_and_wrong_codes_lock_the_link() {
     let (status, body) = as_payer(&app, "GET", QUESTIONNAIRE, &with_session, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
     assert_eq!(body["code"], "session_expired");
+}
+
+/// QA 2026-11-10: the code e-mail was German although the payer had switched
+/// the page to Russian. "Send the code" names the language of the page; the
+/// e-mail and its log follow it. Without one, or with one the page does not
+/// offer, the e-mail stays in the language the link was sent in.
+#[tokio::test]
+async fn the_code_email_follows_the_language_of_the_page() {
+    let Some(app) = payer_app().await else { return };
+    let pool = app.pool();
+    let (lead_id, _) = lead_with_payer(&app, "code-language").await;
+    let (token, _) = send_link(&app, lead_id, json!({ "language": "de" })).await;
+    let link = [("X-Payer-Link", token.as_str())];
+    for (body, subject) in [
+        (
+            Some(json!({ "language": "ru" })),
+            "Ваш код подтверждения – GMED",
+        ),
+        (
+            Some(json!({ "language": "fr" })),
+            "Ihr Bestätigungscode – GMED",
+        ),
+        (None, "Ihr Bestätigungscode – GMED"),
+    ] {
+        // Past the minute between two codes.
+        sqlx::query(
+            "UPDATE lead_payer_links SET code_sent_at = now() - interval '2 minutes' WHERE lead_id = $1",
+        )
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
+        let (status, sent) = as_payer(&app, "POST", CODE, &link, body).await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{sent}");
+        let received = app.fake.received.lock().unwrap();
+        assert_eq!(received.last().unwrap()["subject"], subject);
+    }
+    let mut logged: Vec<String> = sqlx::query_scalar(
+        "SELECT language FROM lead_payer_link_emails WHERE lead_id = $1 AND kind = 'code'",
+    )
+    .bind(lead_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    logged.sort();
+    assert_eq!(logged, ["de", "de", "ru"]);
+    // The link itself keeps the language it was sent in.
+    let (_, opened) = as_payer(&app, "GET", OPEN, &link, None).await;
+    assert_eq!(opened["language"], "de", "{opened}");
 }
 
 #[tokio::test]
@@ -1248,6 +1310,8 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     let (status, body) = payer_upload(&app, IDENTITY, &token, &session, "pass.pdf").await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     assert_eq!(body["identity_documents"][0]["can_delete"], true);
+    // A copy of the ID is no register extract.
+    assert_eq!(body["identity_documents"][0]["register_extract"], false);
     assert_eq!(body["missing_for_submit"], json!([]), "{body}");
     let identity_document = body["identity_documents"][0]["id"]
         .as_str()
@@ -4084,6 +4148,29 @@ async fn an_organisation_uploads_its_register_extract_on_the_link() {
         payer_upload(&app, REGISTER_EXTRACT, &token, &session, "hr-auszug.pdf").await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     assert_eq!(body["register_extract_on_file"], true, "{body}");
+    // QA 2026-11-10: the page listed the extract as a scan of the
+    // representative's ID and offered to read a passport from it. The file is
+    // named as the extract, and no identity document is read from it.
+    assert_eq!(
+        body["identity_documents"][0]["register_extract"], true,
+        "{body}"
+    );
+    let extract = body["identity_documents"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, read) = as_payer(
+        &app,
+        "POST",
+        &format!("/api/v1/public/payer-link/documents/{extract}/identity-recognition"),
+        &[
+            ("X-Payer-Link", token.as_str()),
+            ("X-Payer-Session", session.as_str()),
+        ],
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{read}");
     let (name, notes): (String, Option<String>) = sqlx::query_as(
         "SELECT auto_name, notes FROM documents WHERE lead_id = $1 AND notes LIKE 'Handelsregisterauszug%'",
     )

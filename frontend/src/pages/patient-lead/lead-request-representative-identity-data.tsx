@@ -4,7 +4,9 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { inputClass, selectClass } from "@/components/record-workspace/primitives/design-tokens";
+import { appDateKey } from "@/lib/app-time-zone";
 
+import { dateRangeMessage, useDateRefusal } from "./lead-request-date-refusal";
 import {
   saveLeadRepresentative,
   type LeadRequest,
@@ -162,13 +164,22 @@ export function RepresentativeIdentityData({
       "aria-describedby": invalid ? `${idOf(field)}-error` : undefined,
     };
   };
+  // A date the field does not take (31.02., a date of issue in the future) says what is wrong
+  // (QA 2026-11-10, finding 4); an expired document keeps the server's own sentence.
+  const issuedBounds = { min: "1900-01-01", max: appDateKey() };
+  const refusals = {
+    id_issued_on: useDateRefusal(lang, draft.id_issued_on, issuedBounds),
+    id_valid_until: useDateRefusal(lang, draft.id_valid_until),
+  };
   const labeled = (field: RepresentativeIdField) => ({
     id: idOf(field),
     label: identificationFieldLabel(text, field),
-    error: errorFor(field),
+    error: (field === "id_issued_on" || field === "id_valid_until" ? refusals[field].message : undefined)
+      ?? (field === "id_issued_on" && errorFor(field) ? dateRangeMessage(lang, draft.id_issued_on, issuedBounds) : undefined)
+      ?? errorFor(field),
   });
   const pickerLang = lang === "de" || lang === "ru" || lang === "uk" || lang === "en" ? lang : undefined;
-  const dateInput = (field: "id_issued_on" | "id_valid_until", bounds: { min?: string }) => (
+  const dateInput = (field: "id_issued_on" | "id_valid_until", bounds: { min?: string; max?: string }) => refusals[field].wrap(
     <Input
       key={`${field}-${lang}`}
       {...control(field)}
@@ -176,9 +187,10 @@ export function RepresentativeIdentityData({
       type="date"
       pickerLang={pickerLang}
       {...bounds}
+      onPickerValidation={refusals[field].onPickerValidation}
       value={draft[field]}
       onChange={(event) => set(field, event.target.value)}
-    />
+    />,
   );
   const textInput = (field: "id_document_number" | "id_issuing_authority", maxLength: number) => (
     <Input
@@ -237,7 +249,7 @@ export function RepresentativeIdentityData({
             onChange={(code) => set("id_issuing_country", code ?? "")}
           />
         </LabeledField>
-        <LabeledField {...labeled("id_issued_on")}>{dateInput("id_issued_on", { min: "1900-01-01" })}</LabeledField>
+        <LabeledField {...labeled("id_issued_on")}>{dateInput("id_issued_on", issuedBounds)}</LabeledField>
         <LabeledField {...labeled("id_valid_until")}>{dateInput("id_valid_until", {})}</LabeledField>
       </div>
     </div>

@@ -182,3 +182,42 @@ export function revealCabinetTarget({ element, field }: FoundCabinetTarget) {
   element.classList.add(...RING);
   window.setTimeout(() => element.classList.remove(...RING), 1600);
 }
+
+/** A field of the step whose entry was not taken, with the name its label gives it. */
+export type InvalidField = { label: string; element: HTMLElement };
+
+/** The visible name of a control: its `<label for>`, its accessible name, or the label of the field around it. */
+function controlLabel(element: HTMLElement): string {
+  // Without the mark of a required field (a word joiner and an asterisk).
+  const clean = (value: string | null | undefined) => (value ?? "").replace(/[⁠*]/g, "").replace(/\s+/g, " ").trim();
+  const id = element.id;
+  const byFor = id ? Array.from(element.ownerDocument.querySelectorAll("label")).find((label) => label.htmlFor === id) : undefined;
+  if (byFor) return clean(byFor.textContent);
+  const named = clean(element.getAttribute("aria-label"));
+  if (named) return named;
+  // The field's own box: the nearest ancestor that holds a label (a date field has no control with an id).
+  for (let box = element.parentElement; box; box = box.parentElement) {
+    const label = box.querySelector<HTMLElement>("[data-cabinet-field-label], label");
+    if (label) return clean(label.textContent);
+    if (box.hasAttribute("data-cabinet-section")) break;
+  }
+  return "";
+}
+
+/**
+ * The fields of a step that are marked as not taken (`aria-invalid`, or a date the field
+ * refused), each once, in the order of the form: what "check the marked fields" means, in
+ * words (QA 2026-11-10, findings 8 and 23: the step named no field, or not the invalid one).
+ */
+export function invalidFieldsIn(root: ParentNode | null): InvalidField[] {
+  if (!root) return [];
+  const seen = new Set<string>();
+  const result: InvalidField[] = [];
+  for (const element of root.querySelectorAll<HTMLElement>('[aria-invalid="true"], [data-cabinet-invalid="true"]')) {
+    const label = controlLabel(element);
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    result.push({ label, element });
+  }
+  return result;
+}

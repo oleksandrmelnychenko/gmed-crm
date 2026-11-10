@@ -8,6 +8,7 @@ import { PayerLinkError, type PayerLinkClient, type PayerLinkInfo, type PayerVer
 import {
   codeDigits,
   codeProblemMessage,
+  codeWaiting,
   isFatalKind,
   payerErrorKind,
   resendAllowedAt,
@@ -26,6 +27,7 @@ import type { PayerLinkText } from "./payer-link-text";
 export function PayerCodeStep({
   info,
   text,
+  lang,
   client,
   notice,
   onVerified,
@@ -33,13 +35,17 @@ export function PayerCodeStep({
 }: {
   info: PayerLinkInfo;
   text: PayerLinkText;
+  /** The language the page is read in: the code e-mail follows it (QA 2026-11-10). */
+  lang: string;
   client: PayerLinkClient;
   /** Why the payer is here again (the session ended). */
   notice: string | null;
   onVerified: (verified: PayerVerified) => void;
   onFatal: (kind: FatalKind) => void;
 }) {
-  const [codeSent, setCodeSent] = useState(Boolean(info.code_sent_at));
+  // The code field only for a code that can still be entered: one used on an earlier visit, or
+  // expired since, is not "sent" — the page offers to send one (QA 2026-11-10).
+  const [codeSent, setCodeSent] = useState(() => codeWaiting(info));
   const [resendAt, setResendAt] = useState<number | null>(() =>
     info.code_sent_at ? resendAllowedAt(info.code_sent_at, null, Date.now()) : null,
   );
@@ -77,8 +83,9 @@ export function PayerCodeStep({
       const at = Date.now();
       setResendAt(resendAllowedAt(null, retry, at));
       setNow(at);
-      // A code was sent a moment ago: it can be entered.
-      setCodeSent(true);
+      // A code was sent a moment ago: it can be entered — unless the server said that none
+      // waits (the last one was used): then "send" stays and counts the time down.
+      if (info.code_pending !== false) setCodeSent(true);
     }
     if (failure.code === "code_expired") setCode("");
     setProblem({ kind: "refused", status: failure.status, code: failure.code, body: failure.body });
@@ -88,7 +95,7 @@ export function PayerCodeStep({
     setBusy("send");
     setProblem(null);
     try {
-      const sent = await client.requestCode();
+      const sent = await client.requestCode(lang);
       const at = Date.now();
       // Counted from this browser's clock: the server's may differ.
       setResendAt(resendAllowedAt(null, sent.resend_after_seconds, at));
@@ -190,9 +197,10 @@ export function PayerCodeStep({
           </Button>
         </form>
       ) : (
-        <Button type="button" className="h-10 gap-2 px-4" disabled={busy !== null} onClick={() => void send()} data-testid="payer-link-send-code">
+        // A code mailed less than a minute ago and used since: the next one waits out the minute.
+        <Button type="button" className="h-10 gap-2 px-4" disabled={busy !== null || seconds > 0} onClick={() => void send()} data-testid="payer-link-send-code">
           {busy === "send" ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : null}
-          {busy === "send" ? text.sendingCode : text.sendCode}
+          {busy === "send" ? text.sendingCode : seconds > 0 ? text.resendIn(seconds) : text.sendCode}
         </Button>
       )}
 

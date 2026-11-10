@@ -112,7 +112,8 @@ export function LegalNoticePage() {
 
       <section id="privacy" className={`${cardClass} scroll-mt-4 leading-relaxed`} data-testid="legal-privacy">
         <h2 className={headingClass}><SectionHeading icon={ShieldCheck}>{l("legal_privacy_title")}</SectionHeading></h2>
-        {formNotice ? <FormPrivacyNotice lang={noticeLang === "ru" ? "ru" : "de"} agency={notice} /> : <>
+        {/* In the reader's language (QA 2026-11-10, finding 21: English and Ukrainian read German below translated headings). */}
+        {formNotice ? <FormPrivacyNotice lang={noticeLang} agency={notice} /> : <>
         <p>
           <strong>{l("legal_privacy_controller")}:</strong> {name}
           {notice?.agency_address ? `, ${notice.agency_address}` : ""}

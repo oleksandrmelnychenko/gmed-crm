@@ -149,6 +149,31 @@ export function rejectedValue(field: string, draft: PersonalDraft): RejectedValu
   return { field: field as PersonalField, value: normalized(field as PersonalField, draft) };
 }
 
+/**
+ * An address in Germany with a postal code that is not five digits (QA 2026-11-10, finding 10:
+ * "ABCDE!!" was taken). Other countries keep their own formats; an empty code is "missing", not this.
+ */
+export function germanZipRefused(draft: Pick<PersonalDraft, "country" | "zip_code">): boolean {
+  const zip = draft.zip_code.trim();
+  return draft.country === "DE" && zip !== "" && !/^\d{5}$/.test(zip);
+}
+
+/** The cabinet's own refusal of a payer's date of birth; no code of the server. */
+export const PAYER_BORN_AFTER_PATIENT = "payer_born_after_patient";
+
+/**
+ * A payer named as the patient's parent or grandparent who is not older than the patient
+ * (QA 2026-11-10, finding 10: a "mother / father" born after the patient was taken).
+ */
+export function payerBornAfterPatient(
+  payer: { payer_kind?: string | null; relationship_kind?: string | null; date_of_birth?: string | null },
+  patientBirthDate: string | null | undefined,
+): boolean {
+  if (payer.payer_kind !== "third_party") return false;
+  if (payer.relationship_kind !== "parent" && payer.relationship_kind !== "grandparent") return false;
+  return Boolean(payer.date_of_birth && patientBirthDate && payer.date_of_birth >= patientBirthDate);
+}
+
 /** What a third-party payer can be, in the order of the form. */
 export const PAYER_TYPES = ["person", "company", "organisation", "insurance"] as const satisfies readonly PayerType[];
 
@@ -588,6 +613,39 @@ export type RecipientPayerExtras = {
   register_number: string;
   contact_consent: boolean;
 };
+
+/**
+ * What the person entered about the recipient who pays, kept while the recipient's name is
+ * corrected (QA 2026-11-10, finding 11: one changed letter wiped citizenship, date of birth and
+ * messenger). `name` is the name the entries were made or stored for.
+ */
+export type RecipientPayerMemo = { name: string; organisation: boolean; extras: RecipientPayerExtras; consentAskedAgain: boolean };
+
+function editDistance(left: string, right: string): number {
+  let row = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= left.length; i += 1) {
+    const next = [i];
+    for (let j = 1; j <= right.length; j += 1) {
+      next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (left[i - 1] === right[j - 1] ? 0 : 1));
+    }
+    row = next;
+  }
+  return row[right.length];
+}
+
+/**
+ * Whether `current` reads as the same name with a correction (a typo, a letter more or less),
+ * not as another person: at most a fifth of the letters differ, three at most. Another name is
+ * another payer, whose data are asked anew.
+ */
+export function nameCorrected(anchor: string, current: string): boolean {
+  const left = anchor.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+  const right = current.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+  if (!left || !right) return false;
+  if (left === right) return true;
+  const allowed = Math.min(3, Math.max(1, Math.floor(Math.max(left.length, right.length) / 5)));
+  return editDistance(left, right) <= allowed;
+}
 
 export function recipientPayerExtras(payer: LeadRequestPayer | null | undefined): RecipientPayerExtras {
   const third = payer?.payer_kind === "third_party" ? payer : null;

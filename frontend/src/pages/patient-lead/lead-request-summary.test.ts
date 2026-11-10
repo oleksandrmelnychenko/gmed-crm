@@ -935,6 +935,32 @@ describe("lead request summary", () => {
     expect(open).toBeUndefined();
   });
 
+  // QA 2026-11-10, finding 7: the review and "what we received" left out the document data
+  // typed next to the copy, the guardian's document data and the trusted persons' citizenships.
+  it("shows the typed data of the identity documents and the citizenships of the trusted persons", () => {
+    const typed = {
+      id_document_type: "passport",
+      id_document_number: "L898902C3",
+      id_issuing_authority: "Stadt Berlin",
+      id_issuing_country: "DE",
+      id_issued_on: "2021-02-01",
+      id_valid_until: "2031-01-31",
+    };
+    const item = request({
+      identification: { ...request().identification!, ...typed },
+      disclosure: { allow_disclosure: true, consent_given: true, version: "2026-10-14", language: "de", chosen_at: "2026-10-14T08:00:00Z", chosen_by: "lead", chosen_by_name: "Anna Muster", access_kind: "self", company_name: "GMED" },
+      trusted_persons: [{ name: "Eva Friend", relation: "friend", phone: "+49 30 5550100", birth_date: "1970-05-06", scope_codes: ["all"], citizenships: ["AT", "DE"] }],
+    } as Partial<LeadRequest>);
+    const groups = requestSummary(item, de, "de");
+    const identity = rows(groups, "identity");
+    expect(identity[de.identityFiles]).toBe("pass-vorne.jpg, pass-hinten.jpg");
+    expect(Object.values(identity)).toEqual(expect.arrayContaining(["Reisepass", "L898902C3", "Stadt Berlin", "Deutschland", "01.02.2021", "31.01.2031"]));
+    const person = groups.find((group) => group.id === "disclosure")?.parts?.[0];
+    expect(person?.rows.map((row) => row.value)).toEqual(expect.arrayContaining(["Österreich, Deutschland"]));
+    // Nothing typed: no empty rows, as before.
+    expect(Object.keys(rows(requestSummary(request(), de, "de"), "identity"))).toEqual([de.identityFiles]);
+  });
+
   it("shows no identification on a server that does not know it", () => {
     const older = request({ identification: undefined, identity_documents: undefined, payer: undefined });
     expect(requestSummary(older, de, "de").map((group) => group.id)).toEqual([

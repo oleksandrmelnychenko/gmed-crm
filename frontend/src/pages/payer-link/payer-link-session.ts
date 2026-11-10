@@ -280,18 +280,33 @@ export function codeProblemMessage(problem: CodeProblem, text: CodeTexts): strin
 // Code step
 // ---------------------------------------------------------------------------
 
+/**
+ * Whether a mailed code waits to be entered when the link is opened: what the
+ * server says (`code_pending`). `code_sent_at` alone also names a code that
+ * was used or has expired — the page then said "we have sent a code" for one
+ * that no longer worked, and no new one went out (QA 2026-11-10). Only an
+ * older server, which does not say, is read by the time as before.
+ */
+export function codeWaiting(info: { code_pending?: boolean | null; code_sent_at: string | null }): boolean {
+  return info.code_pending ?? Boolean(info.code_sent_at);
+}
+
 /** Seconds left of a cooldown that ends at `untilMs`. */
 export function secondsLeft(untilMs: number | null, nowMs: number): number {
   if (untilMs === null) return 0;
   return Math.max(0, Math.ceil((untilMs - nowMs) / 1000));
 }
 
-/** When a code may be asked for again: `resend_after_seconds` after it was sent (60 s by default). */
+/**
+ * When a code may be asked for again: `resend_after_seconds` after it was sent (60 s by default) —
+ * never later than that long from now: `sentAt` is the server's time, and a browser clock that runs
+ * behind must not hold "send" back for longer than the wait itself.
+ */
 export function resendAllowedAt(sentAt: string | null, resendAfterSeconds: number | null, nowMs: number): number | null {
   const wait = (resendAfterSeconds ?? 60) * 1000;
   if (!sentAt) return nowMs + wait;
   const sent = Date.parse(sentAt);
-  return Number.isFinite(sent) ? sent + wait : nowMs + wait;
+  return Number.isFinite(sent) ? Math.min(sent + wait, nowMs + wait) : nowMs + wait;
 }
 
 /** The six digits of a typed or pasted code; anything else is dropped. */

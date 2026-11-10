@@ -102,6 +102,8 @@ export type PayerLinkText = {
   invalidField: string;
   /** A phone with fewer than six digits or other characters than + ( ) - / and spaces. */
   invalidPhone: string;
+  /** A hint, never a refusal (owner 2026-10-22): the typed VAT id does not look like one. */
+  vatIdHint: string;
   idDocumentExpired: string;
   /** Refusals of the identity document rules, by the server's code (owner 2026-10-22). */
   idDocumentRules: Record<string, string>;
@@ -163,6 +165,8 @@ export type PayerLinkText = {
   removeDocument: string;
   documentReviewed: string;
   fileTooLarge: (name: string) => string;
+  /** A file of 0 bytes: refused on the page, before any upload (QA 2026-11-10). */
+  fileEmpty: (name: string) => string;
   tooManyDocuments: string;
   duplicateDocument: (name: string) => string;
   heicNotSupported: (name: string) => string;
@@ -294,6 +298,7 @@ const de: PayerLinkText = {
   choose: "Auswählen",
   invalidField: "Bitte prüfen Sie diese Angabe.",
   invalidPhone: "Bitte geben Sie eine gültige Telefonnummer ein: mindestens 6 Ziffern, erlaubt sind nur +, Leerzeichen, ( ) - /.",
+  vatIdHint: "Die Nummer sieht ungewöhnlich aus: üblich sind 2 Buchstaben für das Land und 2 bis 12 Buchstaben oder Ziffern. Sie wird trotzdem gespeichert.",
   idDocumentExpired: "Das Dokument ist abgelaufen. Bitte geben Sie ein gültiges Dokument an.",
   idDocumentRules: {
     id_document_number_invalid: "Nur lateinische Buchstaben A–Z, Ziffern, Leerzeichen, „-“ und „<“.",
@@ -447,6 +452,7 @@ const de: PayerLinkText = {
   removeDocument: "Entfernen",
   documentReviewed: "Von GMED geprüft",
   fileTooLarge: (name) => `${name} ist größer als 25 MB.`,
+  fileEmpty: (name) => `${name} ist leer (0 Bytes). Bitte wählen Sie die Datei erneut aus oder laden Sie eine andere hoch.`,
   tooManyDocuments: "Es können keine weiteren Dateien hochgeladen werden. Bitte wenden Sie sich an GMED.",
   duplicateDocument: (name) => `${name} ist bereits hochgeladen.`,
   heicNotSupported: (name) => `${name}: HEIC-Fotos (iPhone) können wir nicht annehmen. Bitte speichern Sie das Foto als JPG und laden Sie es erneut hoch.`,
@@ -620,6 +626,7 @@ const en: PayerLinkText = {
   choose: "Select",
   invalidField: "Please check this entry.",
   invalidPhone: "Please enter a valid phone number: at least 6 digits; only +, spaces, ( ) - / are allowed.",
+  vatIdHint: "This number looks unusual: normally it is 2 letters for the country and 2 to 12 letters or digits. It is saved as entered.",
   idDocumentExpired: "The document has expired. Please enter a valid document.",
   idDocumentRules: {
     id_document_number_invalid: "Only Latin letters A–Z, digits, spaces, “-” and “<”.",
@@ -772,6 +779,7 @@ const en: PayerLinkText = {
   removeDocument: "Remove",
   documentReviewed: "Checked by GMED",
   fileTooLarge: (name) => `${name} is larger than 25 MB.`,
+  fileEmpty: (name) => `${name} is empty (0 bytes). Please choose the file again or upload another one.`,
   tooManyDocuments: "No further files can be uploaded. Please contact GMED.",
   duplicateDocument: (name) => `${name} is already uploaded.`,
   heicNotSupported: (name) => `${name}: we cannot accept HEIC photos (iPhone). Please save the photo as JPG and upload it again.`,
@@ -943,6 +951,7 @@ const uk: PayerLinkText = {
   choose: "Виберіть",
   invalidField: "Будь ласка, перевірте це поле.",
   invalidPhone: "Введіть коректний номер телефону: щонайменше 6 цифр, допустимі лише +, пробіли, ( ) - /.",
+  vatIdHint: "Номер виглядає незвично: зазвичай це 2 літери країни і від 2 до 12 літер або цифр. Його буде збережено як є.",
   idDocumentExpired: "Термін дії документа минув. Будь ласка, вкажіть дійсний документ.",
   idDocumentRules: {
     id_document_number_invalid: "Лише латинські літери A–Z, цифри, пробіл, «-» і «<».",
@@ -1100,6 +1109,7 @@ const uk: PayerLinkText = {
   removeDocument: "Видалити",
   documentReviewed: "Перевірено GMED",
   fileTooLarge: (name) => `${name} більший за 25 МБ.`,
+  fileEmpty: (name) => `Файл ${name} порожній (0 байтів). Будь ласка, виберіть файл ще раз або завантажте інший.`,
   tooManyDocuments: "Більше файлів завантажити не можна. Будь ласка, зверніться до GMED.",
   duplicateDocument: (name) => `${name} уже завантажено.`,
   heicNotSupported: (name) => `${name}: фото у форматі HEIC (iPhone) ми не можемо прийняти. Збережіть фото як JPG і завантажте його знову.`,
@@ -1270,6 +1280,7 @@ const ru: PayerLinkText = {
   choose: "Выберите",
   invalidField: "Пожалуйста, проверьте это поле.",
   invalidPhone: "Введите корректный номер телефона: не менее 6 цифр, допустимы только +, пробелы, ( ) - /.",
+  vatIdHint: "Номер выглядит необычно: обычно это 2 буквы страны и от 2 до 12 букв или цифр. Он сохранится как есть.",
   idDocumentExpired: "Срок действия документа истёк. Пожалуйста, укажите действующий документ.",
   idDocumentRules: {
     id_document_number_invalid: "Только латинские буквы A–Z, цифры, пробел, «-» и «<».",
@@ -1427,6 +1438,7 @@ const ru: PayerLinkText = {
   removeDocument: "Удалить",
   documentReviewed: "Проверено GMED",
   fileTooLarge: (name) => `${name} больше 25 МБ.`,
+  fileEmpty: (name) => `Файл ${name} пустой (0 байт). Пожалуйста, выберите файл ещё раз или загрузите другой.`,
   tooManyDocuments: "Больше файлов загрузить нельзя. Пожалуйста, обратитесь в GMED.",
   duplicateDocument: (name) => `${name} уже загружен.`,
   heicNotSupported: (name) => `${name}: фото в формате HEIC (iPhone) мы не можем принять. Сохраните фото как JPG и загрузите его снова.`,

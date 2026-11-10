@@ -14,8 +14,10 @@ import {
   selectClass,
   textareaClass,
 } from "@/components/record-workspace/primitives/design-tokens";
+import { appDateKey } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
+import { dateRangeMessage, useDateRefusal } from "./lead-request-date-refusal";
 import {
   INQUIRY_CONSENT,
   saveLeadIdentification,
@@ -202,6 +204,7 @@ export function IdentificationFormField({
   required = false,
   question = false,
   className,
+  error,
   children,
 }: {
   form: IdentificationForm;
@@ -211,6 +214,8 @@ export function IdentificationFormField({
   required?: boolean;
   question?: boolean;
   className?: string;
+  /** A more exact sentence than the form's own objection (a date the field did not take). */
+  error?: string;
   children: ReactNode;
 }) {
   const subject = useContext(IdentificationSubjectContext);
@@ -219,7 +224,7 @@ export function IdentificationFormField({
     <LabeledField
       id={`lead-request-${field}`}
       label={named ?? identificationFieldLabel(text, field, guardian)}
-      error={form.errorFor(field)}
+      error={error ?? form.errorFor(field)}
       required={required}
       question={question}
       className={className}
@@ -351,7 +356,14 @@ export function IdentityDocumentDataFields({
   lang: string;
 }) {
   const pickerLang = lang === "de" || lang === "ru" || lang === "uk" || lang === "en" ? lang : undefined;
-  const dateInput = (field: "id_issued_on" | "id_valid_until", bounds: { min?: string; max?: string }) => (
+  // A date the field does not take (31.02., a date of issue in the future) says what is wrong
+  // at the field (QA 2026-11-10, finding 4); an expired document keeps the server's own sentence.
+  const issuedBounds = { min: "1900-01-01", max: appDateKey() };
+  const refusals = {
+    id_issued_on: useDateRefusal(lang, form.draft.id_issued_on, issuedBounds),
+    id_valid_until: useDateRefusal(lang, form.draft.id_valid_until),
+  };
+  const dateInput = (field: "id_issued_on" | "id_valid_until", bounds: { min?: string; max?: string }) => refusals[field].wrap(
     <Input
       key={`${field}-${lang}`}
       {...controlProps(form, field)}
@@ -359,10 +371,13 @@ export function IdentityDocumentDataFields({
       type="date"
       pickerLang={pickerLang}
       {...bounds}
+      onPickerValidation={refusals[field].onPickerValidation}
       value={form.draft[field]}
       onChange={(event) => form.set(field, event.target.value)}
-    />
+    />,
   );
+  const dateError = (field: "id_issued_on" | "id_valid_until") => refusals[field].message
+    ?? (field === "id_issued_on" && form.errorFor(field) ? dateRangeMessage(lang, form.draft.id_issued_on, issuedBounds) : undefined);
   return (
     <div className="space-y-3" data-testid="lead-request-identity-data">
       <p className="text-sm leading-6 text-muted-foreground">{text.identityIntro}</p>
@@ -379,10 +394,10 @@ export function IdentityDocumentDataFields({
         <IdentificationFormField form={form} field="id_issuing_country" text={text}>
           <IdentificationCountrySelect form={form} field="id_issuing_country" text={text} lang={lang} />
         </IdentificationFormField>
-        <IdentificationFormField form={form} field="id_issued_on" text={text}>
-          {dateInput("id_issued_on", { min: "1900-01-01" })}
+        <IdentificationFormField form={form} field="id_issued_on" text={text} error={dateError("id_issued_on")}>
+          {dateInput("id_issued_on", issuedBounds)}
         </IdentificationFormField>
-        <IdentificationFormField form={form} field="id_valid_until" text={text}>
+        <IdentificationFormField form={form} field="id_valid_until" text={text} error={dateError("id_valid_until")}>
           {dateInput("id_valid_until", {})}
         </IdentificationFormField>
       </div>
@@ -459,6 +474,10 @@ export function IdentityDocumentSection({
     // Reserve the whole selection before navigation can queue a submission.
     await enqueue(async () => {
       for (const file of files) {
+        if (file.size === 0) {
+          nextErrors.push(text.fileEmpty(file.name));
+          continue;
+        }
         if (file.size > MAX_UPLOAD_BYTES) {
           nextErrors.push(text.fileTooLarge(file.name));
           continue;

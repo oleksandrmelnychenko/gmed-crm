@@ -20,6 +20,7 @@ import {
   isOrganisation,
   missingByStep,
   ownerCitizenships,
+  splitIdentityDocuments,
   type PayerDraft,
   type PayerStep,
 } from "./payer-link-model";
@@ -31,7 +32,10 @@ import { fieldLabel, missingLabel, stepTitle, type PayerLabelField, type PayerLi
 
 type Row = { label: string; value: string };
 
-type Group = { step: PayerStep; rows: Row[]; documents?: { label: string; items: readonly PayerDocument[] } };
+type Files = { label: string; items: readonly PayerDocument[] };
+
+/** `extract`: the register extract an organisation uploaded itself, listed under its own name before the ID copies. */
+type Group = { step: PayerStep; rows: Row[]; documents?: Files; extract?: Files };
 
 const LANGUAGE_NAMES = Object.fromEntries(LEAD_CABINET_LANGS.map((option) => [option.value, option.name])) as Record<string, string>;
 
@@ -179,16 +183,22 @@ export function summaryGroups(questionnaire: PayerQuestionnaire, draft: PayerDra
   });
 
   // The extract replaces the ID: no "not stated", no "no file" for what is not asked (QA 2026-11-01).
-  const identityFiles = questionnaire.identity_documents ?? [];
-  const extractInstead = organisation && questionnaire.register_extract_on_file === true && identity.length === 0 && identityFiles.length === 0;
+  // An extract the organisation uploaded itself is no scan of the representative's ID: it is listed
+  // as the extract, apart from the ID copies (QA 2026-11-10).
+  const { identity: identityFiles, extract: extractFiles } = splitIdentityDocuments(questionnaire.identity_documents);
+  const extractOnFile = organisation && questionnaire.register_extract_on_file === true;
+  const extractInstead = extractOnFile && identity.length === 0 && identityFiles.length === 0;
 
   const all: Group[] = [
     { step: "privacy", rows: privacy },
     { step: "details", rows: details },
     {
       step: "identity",
-      rows: extractInstead ? [{ label: text.identityExtractLabel, value: text.identityExtractOnFileShort }] : identity,
-      documents: extractInstead ? undefined : { label: text.identityFiles, items: identityFiles },
+      // "GMED holds it" for an extract filed by GMED; the organisation's own upload is the file below.
+      rows: extractInstead ? (extractFiles.length > 0 ? [] : [{ label: text.identityExtractLabel, value: text.identityExtractOnFileShort }]) : identity,
+      extract: extractFiles.length > 0 ? { label: text.identityExtractLabel, items: extractFiles } : undefined,
+      // With the extract on file a copy of the ID is not asked: no "no file" row for it.
+      documents: extractInstead || (extractOnFile && identityFiles.length === 0) ? undefined : { label: text.identityFiles, items: identityFiles },
     },
     { step: "owners", rows: owners },
     {
@@ -243,9 +253,15 @@ export function AnswersSummary({
                 </div>
               ))}
             </dl>
-          ) : (
+          ) : group.extract ? null : (
             <p className="text-sm text-muted-foreground">{text.notStated}</p>
           )}
+          {group.extract ? (
+            <div className="space-y-1.5" data-testid="payer-link-summary-register-extract">
+              <p className="text-xs text-muted-foreground">{group.extract.label}</p>
+              <DocumentList documents={group.extract.items} text={text} emptyText={text.noDocuments} />
+            </div>
+          ) : null}
           {group.documents ? (
             <div className="space-y-1.5">
               <p className="text-xs text-muted-foreground">{group.documents.label}</p>

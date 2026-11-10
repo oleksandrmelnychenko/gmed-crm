@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { asLeadCabinetLang } from "@/pages/patient-lead/lead-request-text";
 
 import type { PayerDocument, PayerType } from "./payer-link-api";
-import type { FundsSource, PayerDraft, PayerField, PayerTextField } from "./payer-link-model";
+import type { FundsSource, OwnerField, PayerDraft, PayerField, PayerTextField } from "./payer-link-model";
 import { LabeledField } from "./payer-link-parts";
 import { fieldLabel, type PayerLinkText } from "./payer-link-text";
 
@@ -51,6 +51,9 @@ export type UploadControl = {
 };
 
 export const fieldId = (field: string) => `payer-link-${field}`;
+
+/** The id of a field of the beneficial owner at `index` (owners have no id of their own). */
+export const ownerFieldId = (index: number, field: OwnerField) => `payer-link-owner-${index}-${field}`;
 
 export function controlProps(form: AnswersForm, field: PayerField) {
   const invalid = Boolean(form.errorFor(field));

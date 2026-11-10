@@ -13,6 +13,7 @@ import {
   fundsSourceOptions,
   missingByStep,
   ownerProblems,
+  ownersBlocker,
   ownersPayload,
   parseShare,
   payerSteps,
@@ -23,8 +24,10 @@ import {
   relationshipKindsFor,
   requiredFields,
   sortMissing,
+  splitIdentityDocuments,
   stepOfMissing,
   stillRejected,
+  vatIdLooksUnusual,
   withFundsSource,
   withLegalAnswer,
   withOwnersNone,
@@ -41,6 +44,7 @@ import {
   codeDigits,
   codeErrorMessage,
   codeProblemMessage,
+  codeWaiting,
   fatalPageLang,
   isFatalKind,
   linkTokenFromHash,
@@ -143,7 +147,52 @@ describe("the register extract in the summary (QA 2026-11-01)", () => {
   it("keeps the ID the payer gave anyway, and the file row without an extract", () => {
     const given = identityGroup({ ...questionnaire("company", { id_document_number: "L01X00T47" }), register_extract_on_file: true });
     expect(given?.rows.map((row) => row.value)).toEqual(["L01X00T47"]);
+    // The extract is on file: a copy of the ID is not asked, so no «Keine Datei» row for it.
+    expect(given?.documents).toBeUndefined();
     expect(identityGroup(questionnaire("company"))?.documents).toBeDefined();
+  });
+
+  const file = (id: string, name: string, extract?: boolean) => ({
+    id,
+    file_name: name,
+    size_bytes: 2048,
+    mime_type: "application/pdf",
+    uploaded_at: "2026-11-10T16:04:00Z",
+    reviewed: false,
+    can_delete: true,
+    ...(extract === undefined ? {} : { register_extract: extract }),
+  });
+
+  it("lists the extract the organisation uploaded as the extract, not as a scan of the ID (QA 2026-11-10)", () => {
+    const extract = file("doc-1", "hr-auszug.pdf", true);
+    const own = identityGroup({ ...questionnaire("company"), register_extract_on_file: true, identity_documents: [extract] });
+    // Before: «Keine Angabe» and the file under «Foto oder Scan des Ausweises».
+    expect(own?.rows).toEqual([]);
+    expect(own?.extract).toEqual({ label: "Handelsregisterauszug", items: [extract] });
+    expect(own?.documents).toBeUndefined();
+
+    // With a copy of the ID too: each under its own name.
+    const scan = file("doc-2", "ausweis.pdf", false);
+    const both = identityGroup({
+      ...questionnaire("company", { id_document_number: "L01X00T47" }),
+      register_extract_on_file: true,
+      identity_documents: [extract, scan],
+    });
+    expect(both?.extract?.items).toEqual([extract]);
+    expect(both?.documents).toEqual({ label: "Foto oder Scan des Ausweises", items: [scan] });
+    for (const lang of ["de", "en", "uk", "ru"]) {
+      expect(payerLinkText(lang).identityExtractLabel, lang).not.toBe(payerLinkText(lang).identityFiles);
+    }
+  });
+
+  it("tells the extract from the ID copies by the server's mark; an older server marks none", () => {
+    const extract = file("doc-1", "hr-auszug.pdf", true);
+    const scan = file("doc-2", "ausweis.pdf", false);
+    const unmarked = file("doc-3", "pass.pdf");
+    expect(splitIdentityDocuments([extract, scan, unmarked])).toEqual({ identity: [scan, unmarked], extract: [extract] });
+    expect(splitIdentityDocuments(null)).toEqual({ identity: [], extract: [] });
+    // A person's identity copies stay where they were.
+    expect(identityGroup({ ...questionnaire("person"), identity_documents: [unmarked] })?.documents?.items).toEqual([unmarked]);
   });
 });
 
@@ -664,6 +713,47 @@ describe("autosave body", () => {
     });
   });
 
+  it("holds the step on a list of owners that cannot be saved, and never sends it (QA 2026-11-10)", () => {
+    const anna = { ...emptyOwner(), first_name: "Anna", last_name: "Muster", share_percent: "10" };
+    const saved = draftFromQuestionnaire(
+      questionnaire("company", {
+        beneficial_owners: [{ first_name: "Anna", last_name: "Muster", date_of_birth: null, birth_place: null, street: null, zip: null, city: null, country: null, share_percent: 10 }],
+      }),
+    );
+    expect(ownersBlocker(saved)).toBeNull();
+    // 150 %: the list is not sent — the saved 10 % would stay — so the step must not be left.
+    const tooMuch = { ...saved, beneficial_owners: [{ ...anna, share_percent: "150" }] };
+    expect(answersPatch(saved, tooMuch, company)).toEqual({});
+    expect(ownersBlocker(tooMuch)).toEqual({ problem: "share", index: 0 });
+    // The first person with a problem is named; a missing name comes before the share of a later one.
+    expect(ownersBlocker({ ...saved, beneficial_owners: [anna, { ...emptyOwner(), first_name: "Ben" }, { ...anna, share_percent: "0" }] })).toEqual({
+      problem: "incomplete",
+      index: 1,
+    });
+    // Each share is fine, together more than 100 %.
+    expect(ownersBlocker({ ...saved, beneficial_owners: [{ ...anna, share_percent: "60" }, { ...anna, first_name: "Ben", share_percent: "50" }] })).toEqual({
+      problem: "total",
+      index: null,
+    });
+    // A share of 25 % or less stays possible: the step also asks who controls the organisation in another way.
+    expect(ownersBlocker({ ...saved, beneficial_owners: [{ ...anna, share_percent: "10" }] })).toBeNull();
+    // Nothing typed, or "nobody above 25 %": nothing holds the step.
+    expect(ownersBlocker({ ...saved, beneficial_owners: [] })).toBeNull();
+    expect(ownersBlocker(withOwnersNone(tooMuch, true))).toBeNull();
+  });
+
+  it("only hints at a VAT id that looks like none (owner 2026-10-22: the format never refuses)", () => {
+    for (const fine of ["", "  ", "DE123456789", "de 123 456 789", "ATU12345678", "NL123456789B01", "CHE-123.456.789", "RO12"]) {
+      expect(vatIdLooksUnusual(fine), fine).toBe(false);
+    }
+    for (const odd of ["XX", "X", "12345", "7707083893", "DE-", "ABCDEFGHIJKLMNOP"]) {
+      expect(vatIdLooksUnusual(odd), odd).toBe(true);
+    }
+    // The value is sent as typed all the same.
+    const stored = draftFromQuestionnaire(questionnaire("company"));
+    expect(answersPatch(stored, { ...stored, vat_id: "XX" }, company)).toEqual({ vat_id: "XX" });
+  });
+
   it("clears what belongs to another answer, as the server does", () => {
     const draft = draftFromQuestionnaire(questionnaire("person", { relationship_kind: "other", relationship: "Patenonkel", pep_self: true, pep_self_details: "Minister" }));
     expect(withRelationshipKind(draft, "friend").relationship).toBe("");
@@ -735,6 +825,8 @@ describe("code step helpers", () => {
     const now = Date.parse("2026-10-06T10:00:00Z");
     expect(resendAllowedAt(null, 60, now)).toBe(now + 60_000);
     expect(resendAllowedAt("2026-10-06T09:59:30Z", null, now)).toBe(now + 30_000);
+    // The server's time against a browser clock that runs behind: never more than the wait itself.
+    expect(resendAllowedAt("2026-10-06T10:20:00Z", null, now)).toBe(now + 60_000);
     expect(secondsLeft(now + 59_100, now)).toBe(60);
     expect(secondsLeft(now - 1, now)).toBe(0);
     expect(secondsLeft(null, now)).toBe(0);
@@ -744,6 +836,23 @@ describe("code step helpers", () => {
     expect(codeDigits("12 34-56")).toBe("123456");
     expect(codeDigits("1234567")).toBe("123456");
     expect(codeDigits("abc")).toBe("");
+  });
+
+  it("shows the code field only for a code that can still be entered (QA 2026-11-10)", () => {
+    const sent = "2026-11-10T16:00:00Z";
+    // The link opened again after the code was used, or after its 15 minutes: nothing to enter, a code is to be sent.
+    expect(codeWaiting({ code_pending: false, code_sent_at: sent })).toBe(false);
+    expect(codeWaiting({ code_pending: true, code_sent_at: sent })).toBe(true);
+    expect(codeWaiting({ code_pending: false, code_sent_at: null })).toBe(false);
+    // An older server does not say: a mailed code counts as before.
+    expect(codeWaiting({ code_sent_at: sent })).toBe(true);
+    expect(codeWaiting({ code_sent_at: null })).toBe(false);
+    // What the page offers then, in every language: to send a code, not that one was sent.
+    for (const lang of ["de", "en", "uk", "ru"]) {
+      const text = payerLinkText(lang);
+      expect(text.codeWillBeSent("v***r@example.com"), lang).not.toBe(text.codeSentTo("v***r@example.com"));
+      expect(text.submittedCodeNote, lang).toBeTruthy();
+    }
   });
 });
 

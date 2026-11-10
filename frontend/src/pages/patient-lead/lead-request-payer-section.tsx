@@ -43,6 +43,7 @@ import {
   type IdentificationForm,
 } from "./lead-request-identification";
 import {
+  PAYER_BORN_AFTER_PATIENT,
   PAYER_FIELDS,
   RELATIONSHIP_KINDS,
   costEstimateConsentAsked,
@@ -52,8 +53,10 @@ import {
   otherParentOf,
   payerAnswer,
   payerAnswerSavable,
+  payerBornAfterPatient,
   payerChoiceOf,
   payerFieldOfDraft,
+  payerIdentityKey,
   payerInput,
   payerTypeOf,
   payerContactRequired,
@@ -69,6 +72,7 @@ import {
   CabinetSection as Section,
   CabinetHint,
   ConsentGivenChip,
+  ConsentNeededNote,
   LabeledField,
   RequiredMark,
   YesNoSelect,
@@ -79,6 +83,7 @@ import {
 } from "./lead-request-parts";
 import { payerFitsFlow, type PayerChoice, type RecipientDraft, type RecipientFlow } from "./lead-request-recipient-model";
 import { useServerDraftSync } from "./lead-request-server-sync";
+import { useDateRefusal } from "./lead-request-date-refusal";
 import { SummaryRows } from "./lead-request-send-step";
 import { answeredPayerRows, payerAnsweredByPayer } from "./lead-request-summary";
 import { LEAD_CABINET_LANGS, asLeadCabinetLang, leadRequestText, payerFieldLabel, type LeadRequestText } from "./lead-request-text";
@@ -139,6 +144,8 @@ export function usePayerAutosave({
   const savedRef = useRef<PayerDraft>(draftFromPayer(request.payer));
   const queuedDraftRef = useRef(savedRef.current);
   const rejectedRef = useRef<string | null>(null);
+  const patientBirthRef = useRef(request.personal_data.date_of_birth);
+  patientBirthRef.current = request.personal_data.date_of_birth;
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [fieldErrorCode, setFieldErrorCode] = useState<string | null>(null);
   // A parent who pays is not asked to agree that GMED contacts them (the
@@ -195,6 +202,15 @@ export function usePayerAutosave({
         // A domain known to receive no mail is refused too; the field's domain warning says why.
         if (input.email && isKnownNoMailEmail(input.email)) {
           rejectedRef.current = key;
+          onSaveState("error");
+          return false;
+        }
+        // A parent or grandparent is older than the patient (QA 2026-11-10, finding 10): a date
+        // of birth that says otherwise is not sent, and the field says why.
+        if (payerBornAfterPatient(snapshot, patientBirthRef.current)) {
+          rejectedRef.current = key;
+          setFieldError("payer_date_of_birth");
+          setFieldErrorCode(PAYER_BORN_AFTER_PATIENT);
           onSaveState("error");
           return false;
         }
@@ -340,6 +356,11 @@ export function PayerSection({
     && ((!draft.guardian_pays && !(draft.representative_id && payerTypeOf(draft) === "person")
       && request.payer?.payer_kind !== "representative") || serverAsksConsent);
   const costConsent = { request, text, lang, enqueue, onChange, onSaveState };
+  // A date of birth the field did not take says what is wrong (QA 2026-11-10, finding 4).
+  const payerBirth = useDateRefusal(lang, draft.date_of_birth, { min: "1900-01-01", max: appDateKey() });
+  // The consent to contact the payer belongs to the person named: a changed name or date of birth
+  // unticks it. Said at the box, not done silently (QA 2026-11-10, finding 11).
+  const [consentAskedAgain, setConsentAskedAgain] = useState(false);
 
   // Block L asks the own economic interest also after the payer answered
   // through its own link; the server saves that answer alone (QA 2026-11-04 B S1).
@@ -363,6 +384,10 @@ export function PayerSection({
   }
 
   const set = <K extends keyof PayerDraft>(field: K, value: PayerDraft[K]) => {
+    // Another name or date of birth is another person to the consents: they are asked again.
+    const identityChanged = payerIdentityKey(withPayerField(draft, field, value)) !== payerIdentityKey(draft);
+    if (identityChanged && (draft.contact_consent || request.payer?.cost_estimate_consent_at)) setConsentAskedAgain(true);
+    else if (field === "contact_consent" && value === true) setConsentAskedAgain(false);
     setDraft((current) => withPayerField(current, field, value));
   };
   const choice = payerChoiceOf(draft);
@@ -387,7 +412,9 @@ export function PayerSection({
           : text.invalidEmail
         : field === "payer_phone"
           ? text.invalidPhone
-          : text.invalidField
+          : field === "payer_date_of_birth" && fieldErrorCode === PAYER_BORN_AFTER_PATIENT
+            ? text.payerBornAfterPatient
+            : text.invalidField
       : undefined;
   const fieldProps = (field: PayerField) => ({
     id: `lead-request-${field}`,
@@ -569,18 +596,20 @@ export function PayerSection({
                       onChange={(next) => set("citizenships", next)}
                     />
                   </LabeledField>
-                  <LabeledField {...field("payer_date_of_birth")}>
-                    <Input
+                  <LabeledField {...field("payer_date_of_birth")} error={payerBirth.message ?? errorFor("payer_date_of_birth")}>
+                    {payerBirth.wrap(<Input
                       key={`payer_date_of_birth-${lang}`}
                       {...fieldProps("payer_date_of_birth")}
                       className={inputClass}
                       type="date"
                       autoComplete="off"
                       pickerLang={asLeadCabinetLang(lang) ?? undefined}
+                      min="1900-01-01"
                       max={appDateKey()}
+                      onPickerValidation={payerBirth.onPickerValidation}
                       value={draft.date_of_birth}
                       onChange={(event) => set("date_of_birth", event.target.value)}
-                    />
+                    />)}
                   </LabeledField>
                   {!typed ? (
                     <LabeledField {...field("payer_relationship", false, "sm:col-span-2 lg:col-span-3 2xl:col-span-4")}>
@@ -728,6 +757,9 @@ export function PayerSection({
           {consentAsked || costEstimateConsentAsked(request, draft.guardian_pays) ? (
             <Section icon={ShieldCheck} title={text.payerBlockConsent}>
               <div className="space-y-3">
+                {consentAskedAgain ? (
+                  <ConsentNeededNote>{text.payerConsentAskedAgain}</ConsentNeededNote>
+                ) : null}
                 {consentAsked ? (
                   <PayerContactConsent
                     text={text}

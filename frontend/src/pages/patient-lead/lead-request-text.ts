@@ -94,6 +94,18 @@ export type LeadRequestText = {
   invalidEmail: string;
   /** A phone number with fewer than six digits or other characters than + ( ) - / and spaces. */
   invalidPhone: string;
+  /** A German address whose postal code is not five digits (QA 2026-11-10, finding 10). */
+  invalidGermanZip: string;
+  /** A payer named as parent or grandparent who is not older than the patient. */
+  payerBornAfterPatient: string;
+  /** The payer's consents were unticked because the payer's name or date of birth changed (finding 11). */
+  payerConsentAskedAgain: string;
+  /** The recipient who pays was renamed: what was entered about the payer stays, the consents are asked again. */
+  payerRenamedHint: string;
+  /** The fields of the step whose entry could not be saved, above the form (findings 8, 23). */
+  stepInvalidTitle: string;
+  /** The missing passport spelling of the name, as an item of the list (finding 8). */
+  nameLatinMissing: string;
   dobStaffOnly: string;
   healthConsentRequired: string;
   furtherDetails: string;
@@ -114,6 +126,8 @@ export type LeadRequestText = {
   uploadButton: string;
   uploading: string;
   fileTooLarge: (name: string) => string;
+  /** A file of 0 bytes (QA 2026-11-10, finding 10). */
+  fileEmpty: (name: string) => string;
   noDocuments: string;
   documentsOptional: string;
   removeDocument: string;
@@ -149,6 +163,12 @@ export type LeadRequestText = {
   addDocuments: string;
   /** After the send (owner 2026-10-26): the form is read-only; changes go through the contact at GMED. */
   sentLockedHint: string;
+  /** A change the server refused because the request is already sent (QA 2026-11-10, A-1). */
+  sentChangeRefused: string;
+  /** Under a consent given before the send: how it is withdrawn now (QA 2026-11-10, finding 9). */
+  consentWithdrawAfterSend: string;
+  /** The payer's three legal answers were taken over from the same person's answers as representative (finding 15). */
+  payerLegalPrefilled: string;
   /** «Dokumente nachreichen»: documents added to the sent request. */
   addDocumentsAfterSend: string;
   addedAfterSend: string;
@@ -286,6 +306,12 @@ export type LeadRequestText = {
     vormundSelf: string;
     isPayerVormund: string;
     confirmPayerChange: string;
+    /**
+     * Asked before the invoice (and with it the payment) moves from one parent to the other
+     * (owner 2026-11-10): who receives and pays from now on, and that what the other parent
+     * entered as payer is asked again.
+     */
+    parentChangeConfirm: (from: string, to: string, pays: boolean) => string;
     replacePayerHint: string;
     question: string;
     options: Record<InvoiceRecipient, string>;
@@ -1068,7 +1094,8 @@ export function submitFieldLabel(
   }
   if (field === "id_document_upload") return `${text.sectionIdentity}: ${text.identityFiles}`;
   if (field === "request_reason") return text.identificationFields.request_reason;
-  if (field === "name_latin") return text.namePassportCorrection;
+  // The list names the field; the sentence "Latin letters only" stays at the field itself (QA 2026-11-10, finding 8).
+  if (field === "name_latin") return text.nameLatinMissing;
   if (field === "custody") return text.custodyQuestion;
   if (field === "has_representative") return text.hasRepresentativeQuestion;
   if (field === "under_guardianship") return text.underGuardianshipQuestion;
@@ -1082,10 +1109,12 @@ export function submitFieldLabel(
         : person.part === "authority_upload"
           ? representativeUploadLabel(text, person.slot, "authority")
           : person.part === "name_latin"
-            ? text.namePassportCorrection
+            ? text.nameLatinMissing
             : isRepresentativePepPart(person.part)
               ? person.part === "pep_self" || person.part === "pep_related" || person.part === "sanctions_links"
-                ? text.payerLegalFields[person.part]
+                // "Do you hold …" only to the person who reads the list; about anybody else the topic
+                // is named (QA 2026-11-10, finding 16: "Other parent: do you hold a high office").
+                ? who.mineSlot && person.slot === who.mineSlot ? text.payerLegalFields[person.part] : text.legalTopics[person.part]
                 : followUpFieldLabel(text, person.part)
               : representativeFieldLabel(text, person.part);
     // A parent's login: "You: …" and "Other parent: …" instead of the place numbers (QA 2026-10-22).
@@ -1172,6 +1201,12 @@ const de: LeadRequestText = {
   invalidField: "Bitte prüfen Sie diese Angabe.",
   invalidEmail: "Bitte geben Sie eine gültige E-Mail-Adresse ein, z. B. name@example.de.",
   invalidPhone: "Bitte geben Sie eine gültige Telefonnummer ein: mindestens 6 Ziffern, erlaubt sind nur +, Leerzeichen, ( ) - /.",
+  invalidGermanZip: "Eine deutsche Postleitzahl hat fünf Ziffern.",
+  payerBornAfterPatient: "Ein Elternteil oder Großelternteil kann nicht jünger sein als die Patientin bzw. der Patient. Bitte prüfen Sie das Geburtsdatum und die Beziehung.",
+  payerConsentAskedAgain: "Sie haben den Namen oder das Geburtsdatum des Zahlers geändert. Die Einwilligungen gelten für die genannte Person – bitte bestätigen Sie sie erneut.",
+  payerRenamedHint: "Sie haben den Namen des Rechnungsempfängers geändert, der zahlt. Ihre Angaben zum Zahler bleiben erhalten – bitte prüfen Sie sie. Die Einwilligungen gelten für die genannte Person und werden nach der Bestätigung erneut abgefragt.",
+  stepInvalidTitle: "Bitte prüfen Sie diese Angaben:",
+  nameLatinMissing: "Vor- und Nachname in lateinischen Buchstaben, wie im Reisepass",
   dobStaffOnly: "Bitte wenden Sie sich an GMED, um das Geburtsdatum zu korrigieren.",
   healthConsentRequired: "Bitte stimmen Sie zuerst der Verarbeitung der Gesundheitsdaten zu.",
   furtherDetails: "Weitere Angaben",
@@ -1194,6 +1229,7 @@ const de: LeadRequestText = {
   uploadButton: "Dateien auswählen",
   uploading: "Wird hochgeladen…",
   fileTooLarge: (name) => `${name} ist größer als 25 MB.`,
+  fileEmpty: (name) => `${name} ist leer (0 Bytes). Bitte wählen Sie die Datei erneut aus oder laden Sie eine andere hoch.`,
   noDocuments: "Noch keine Unterlagen hochgeladen.",
   documentsOptional: "Sie können die Anfrage auch ohne Unterlagen senden.",
   removeDocument: "Entfernen",
@@ -1226,6 +1262,9 @@ const de: LeadRequestText = {
   editData: "Angaben ändern",
   addDocuments: "Unterlagen ergänzen",
   sentLockedHint: "Ihre Anfrage ist bei GMED. Möchten Sie etwas ändern? Schreiben Sie Ihrem Kontakt bei GMED oder rufen Sie an.",
+  sentChangeRefused: "Die Anfrage wurde bereits gesendet – diese Änderung wurde nicht gespeichert. Möchten Sie etwas ändern, schreiben Sie Ihrem Kontakt bei GMED oder rufen Sie an.",
+  consentWithdrawAfterSend: "Ihre Anfrage ist gesendet: Widerrufen können Sie diese Einwilligung jetzt jederzeit über Ihren Kontakt bei GMED.",
+  payerLegalPrefilled: "Diese drei Antworten haben wir aus Ihren Angaben als gesetzliche Vertretung übernommen. Bitte prüfen Sie sie.",
   addDocumentsAfterSend: "Dokumente nachreichen",
   addedAfterSend: "Nachgereicht",
   addedAfterSendNote: "Nachreichen können Sie medizinische Unterlagen (Befunde, Berichte, Bilder, Laborwerte). Sie gehen direkt an GMED und ändern Ihre gesendeten Angaben und das Patientenformular nicht – ein erneutes Senden ist nicht nötig. Gesendete Dokumente bleiben bei der Anfrage.",
@@ -1335,6 +1374,7 @@ const de: LeadRequestText = {
     section: "Rechnungsempfänger",
     changedMeanwhile: "Der Rechnungsempfänger wurde inzwischen geändert. Wir haben die aktuellen Angaben geladen – bitte prüfen Sie sie und geben Sie Ihre Änderung erneut ein.",
     confirmPayerChange: "Diesen Rechnungsempfänger als Zahler bestätigen",
+    parentChangeConfirm: (from, to, pays) => `Die Rechnung erhält künftig ${to} statt ${from}${pays ? " – und zahlt sie auch" : ""}. Was ${from} als Zahler angegeben hat (die Zahlungsart), gilt dann nicht mehr und wird neu abgefragt. Möchten Sie das ändern?`,
     replacePayerHint: "Ihre bisherigen Angaben zum Zahler werden ersetzt.",
     question: "Wer ist Rechnungsempfänger?",
     parentQuestion: "Welcher Elternteil erhält die Rechnung?",
@@ -1828,6 +1868,12 @@ const ru: LeadRequestText = {
   invalidField: "Пожалуйста, проверьте это поле.",
   invalidEmail: "Введите корректный адрес электронной почты, например name@example.de.",
   invalidPhone: "Введите корректный номер телефона: не менее 6 цифр, допустимы только +, пробелы, ( ) - /.",
+  invalidGermanZip: "Почтовый индекс в Германии состоит из пяти цифр.",
+  payerBornAfterPatient: "Мать, отец, бабушка или дедушка не могут быть младше пациента. Проверьте, пожалуйста, дату рождения и степень родства.",
+  payerConsentAskedAgain: "Вы изменили имя или дату рождения плательщика. Согласия относятся к названному человеку — подтвердите их, пожалуйста, ещё раз.",
+  payerRenamedHint: "Вы изменили имя получателя счёта, который платит. Введённые данные о плательщике сохранены — проверьте их, пожалуйста. Согласия относятся к названному человеку: после подтверждения их нужно отметить ещё раз.",
+  stepInvalidTitle: "Проверьте, пожалуйста, эти поля:",
+  nameLatinMissing: "Имя и фамилия латинскими буквами, как в загранпаспорте",
   dobStaffOnly: "Чтобы исправить дату рождения, обратитесь в GMED.",
   healthConsentRequired: "Сначала дайте согласие на обработку данных о здоровье.",
   furtherDetails: "Дополнительные сведения",
@@ -1849,6 +1895,7 @@ const ru: LeadRequestText = {
   uploadButton: "Выбрать файлы",
   uploading: "Загружается…",
   fileTooLarge: (name) => `${name} больше 25 МБ.`,
+  fileEmpty: (name) => `Файл ${name} пустой (0 байт). Пожалуйста, выберите файл ещё раз или загрузите другой.`,
   noDocuments: "Документы ещё не загружены.",
   documentsOptional: "Заявку можно отправить и без документов.",
   removeDocument: "Удалить",
@@ -1880,6 +1927,9 @@ const ru: LeadRequestText = {
   editData: "Изменить данные",
   addDocuments: "Добавить документы",
   sentLockedHint: "Ваша заявка в GMED. Хотите что-то изменить? Напишите или позвоните вашему контакту в GMED.",
+  sentChangeRefused: "Заявка уже отправлена — это изменение не сохранено. Если нужно что-то изменить, напишите или позвоните вашему контакту в GMED.",
+  consentWithdrawAfterSend: "Заявка отправлена: теперь отозвать это согласие можно в любое время через вашего контакта в GMED.",
+  payerLegalPrefilled: "Эти три ответа мы взяли из того, что вы указали как законный представитель. Проверьте их, пожалуйста.",
   addDocumentsAfterSend: "Дослать документы",
   addedAfterSend: "Дослано",
   addedAfterSendNote: "Дослать можно медицинские документы (выписки, заключения, снимки, анализы). Они сразу попадают в GMED и не меняют отправленные данные и формуляр — повторно отправлять заявку не нужно. Отправленные документы остаются в заявке.",
@@ -1987,6 +2037,7 @@ const ru: LeadRequestText = {
     section: "Получатель счёта",
     changedMeanwhile: "Получатель счёта тем временем изменился. Мы загрузили актуальные данные — проверьте их и при необходимости введите изменение ещё раз.",
     confirmPayerChange: "Подтвердить этого получателя как плательщика",
+    parentChangeConfirm: (from, to, pays) => `Счёт теперь будет получать ${to}, а не ${from}${pays ? ", и оплачивать его тоже" : ""}. То, что указано от имени ${from} как плательщика (способ оплаты), перестанет действовать и будет запрошено заново. Изменить?`,
     replacePayerHint: "Прежние данные о плательщике будут заменены.",
     question: "Кто является получателем счёта?",
     parentQuestion: "Кто из родителей получит счёт?",
@@ -2049,7 +2100,7 @@ const ru: LeadRequestText = {
   followUpBeforeSubmitIntro: "При международных заказах мы документируем происхождение платежа. Мы опираемся на действующие нормы о предотвращении отмывания денег и санкционные правила ЕС, обязательные для любой компании, а также на нашу внутреннюю политику комплаенса. Процедура единая для всех заказов и не является личной оценкой. Ваши данные строго конфиденциальны и используются только для этой цели.",
   followUpIntro: "Пожалуйста, дополните сведения и отправьте их.",
   followUpAboutPerson: (name) => `Все сведения на этом шаге — о ${name}, не о вас.`,
-  residenceSinceHint: "Год, с которого живёт там постоянно, например 2015 или «с рождения». Достаточно примерно.",
+  residenceSinceHint: "Укажите год, например 2015, или «с рождения». Достаточно примерно.",
   followUpBlocks: {
     R: "Дополнительные сведения родителей или законных представителей",
     A: "Происхождение средств",
@@ -2477,6 +2528,12 @@ const uk: LeadRequestText = {
   invalidField: "Будь ласка, перевірте це поле.",
   invalidEmail: "Введіть коректну адресу електронної пошти, наприклад name@example.de.",
   invalidPhone: "Введіть коректний номер телефону: щонайменше 6 цифр, допустимі лише +, пробіли, ( ) - /.",
+  invalidGermanZip: "Поштовий індекс у Німеччині складається з п’яти цифр.",
+  payerBornAfterPatient: "Мати, батько, бабуся чи дідусь не можуть бути молодшими за пацієнта. Перевірте, будь ласка, дату народження і ступінь спорідненості.",
+  payerConsentAskedAgain: "Ви змінили ім’я або дату народження платника. Згоди стосуються названої особи — підтвердьте їх, будь ласка, ще раз.",
+  payerRenamedHint: "Ви змінили ім’я отримувача рахунку, який платить. Введені дані про платника збережено — перевірте їх, будь ласка. Згоди стосуються названої особи: після підтвердження їх потрібно позначити ще раз.",
+  stepInvalidTitle: "Перевірте, будь ласка, ці поля:",
+  nameLatinMissing: "Ім’я та прізвище латинськими літерами, як у закордонному паспорті",
   dobStaffOnly: "Щоб виправити дату народження, зверніться до GMED.",
   healthConsentRequired: "Спочатку дайте згоду на обробку даних про здоров’я.",
   furtherDetails: "Додаткові відомості",
@@ -2498,6 +2555,7 @@ const uk: LeadRequestText = {
   uploadButton: "Вибрати файли",
   uploading: "Завантажується…",
   fileTooLarge: (name) => `${name} більший за 25 МБ.`,
+  fileEmpty: (name) => `Файл ${name} порожній (0 байтів). Будь ласка, виберіть файл ще раз або завантажте інший.`,
   noDocuments: "Документи ще не завантажено.",
   documentsOptional: "Заявку можна надіслати і без документів.",
   removeDocument: "Видалити",
@@ -2529,6 +2587,9 @@ const uk: LeadRequestText = {
   editData: "Змінити дані",
   addDocuments: "Додати документи",
   sentLockedHint: "Ваша заявка в GMED. Бажаєте щось змінити? Напишіть або зателефонуйте вашому контакту у GMED.",
+  sentChangeRefused: "Заявку вже надіслано — цю зміну не збережено. Якщо потрібно щось змінити, напишіть або зателефонуйте вашому контакту у GMED.",
+  consentWithdrawAfterSend: "Заявку надіслано: тепер відкликати цю згоду можна будь-коли через ваш контакт у GMED.",
+  payerLegalPrefilled: "Ці три відповіді ми взяли з того, що ви зазначили як законний представник. Перевірте їх, будь ласка.",
   addDocumentsAfterSend: "Додати документи",
   addedAfterSend: "Додано після надсилання",
   addedAfterSendNote: "Досилати можна медичні документи (виписки, висновки, знімки, аналізи). Вони одразу надходять до GMED і не змінюють надіслані дані та формуляр — повторно надсилати заявку не потрібно. Надіслані документи залишаються в заявці.",
@@ -2636,6 +2697,7 @@ const uk: LeadRequestText = {
     section: "Отримувач рахунку",
     changedMeanwhile: "Отримувача рахунку тим часом змінено. Ми завантажили актуальні дані — перевірте їх і за потреби введіть зміну ще раз.",
     confirmPayerChange: "Підтвердити цього отримувача як платника",
+    parentChangeConfirm: (from, to, pays) => `Рахунок тепер отримуватиме ${to}, а не ${from}${pays ? ", і оплачуватиме його також" : ""}. Те, що вказано від імені ${from} як платника (спосіб оплати), більше не діятиме і буде запитано знову. Змінити?`,
     replacePayerHint: "Попередні дані про платника буде замінено.",
     question: "Хто є отримувачем рахунку?",
     parentQuestion: "Хто з батьків отримає рахунок?",
@@ -2698,7 +2760,7 @@ const uk: LeadRequestText = {
   followUpBeforeSubmitIntro: "Для вашого запиту нам потрібні ще деякі додаткові відомості. Відповіді зберігаються автоматично.",
   followUpIntro: "Будь ласка, доповніть відомості та надішліть їх.",
   followUpAboutPerson: (name) => `Усі відомості на цьому кроці — про ${name}, не про вас.`,
-  residenceSinceHint: "Рік, з якого живе там постійно, наприклад 2015 або «з народження». Достатньо приблизно.",
+  residenceSinceHint: "Вкажіть рік, наприклад 2015, або «з народження». Достатньо приблизно.",
   followUpBlocks: {
     R: "Додаткові відомості батьків або законних представників",
     A: "Походження коштів",
@@ -3126,6 +3188,12 @@ const en: LeadRequestText = {
   invalidField: "Please check this entry.",
   invalidEmail: "Please enter a valid e-mail address, e.g. name@example.com.",
   invalidPhone: "Please enter a valid phone number: at least 6 digits; only +, spaces, ( ) - / are allowed.",
+  invalidGermanZip: "A German postal code has five digits.",
+  payerBornAfterPatient: "A parent or grandparent cannot be younger than the patient. Please check the date of birth and the relationship.",
+  payerConsentAskedAgain: "You changed the payer's name or date of birth. The consents apply to the person named – please confirm them again.",
+  payerRenamedHint: "You changed the name of the invoice recipient who pays. What you entered about the payer is kept – please check it. The consents apply to the person named and are asked again after you confirm.",
+  stepInvalidTitle: "Please check these entries:",
+  nameLatinMissing: "First and last name in Latin letters, as in the passport",
   dobStaffOnly: "Please contact GMED to correct the date of birth.",
   healthConsentRequired: "Please consent to health data processing first.",
   furtherDetails: "Further information",
@@ -3147,6 +3215,7 @@ const en: LeadRequestText = {
   uploadButton: "Choose files",
   uploading: "Uploading…",
   fileTooLarge: (name) => `${name} is larger than 25 MB.`,
+  fileEmpty: (name) => `${name} is empty (0 bytes). Please choose the file again or upload another one.`,
   noDocuments: "No documents uploaded yet.",
   documentsOptional: "You can also send the request without documents.",
   removeDocument: "Remove",
@@ -3178,6 +3247,9 @@ const en: LeadRequestText = {
   editData: "Edit details",
   addDocuments: "Add documents",
   sentLockedHint: "Your request is with GMED. Would you like to change something? Write to or call your contact at GMED.",
+  sentChangeRefused: "The request has already been sent – this change was not saved. If you need to change something, write to or call your contact at GMED.",
+  consentWithdrawAfterSend: "Your request has been sent: you can now withdraw this consent at any time through your contact at GMED.",
+  payerLegalPrefilled: "We took these three answers from what you stated as the legal representative. Please check them.",
   addDocumentsAfterSend: "Add documents",
   addedAfterSend: "Added after sending",
   addedAfterSendNote: "You can add medical documents (reports, findings, images, lab results). They go straight to GMED and do not change the details you sent or the patient form – there is no need to send the request again. Documents already sent stay with the request.",
@@ -3285,6 +3357,7 @@ const en: LeadRequestText = {
     section: "Invoice recipient",
     changedMeanwhile: "The invoice recipient was changed in the meantime. We loaded the current details — please check them and enter your change again.",
     confirmPayerChange: "Confirm this recipient as the payer",
+    parentChangeConfirm: (from, to, pays) => `From now on ${to} receives the invoice instead of ${from}${pays ? " and pays it" : ""}. What ${from} entered as the payer (the payment method) will no longer apply and will be asked again. Change it?`,
     replacePayerHint: "Your previous payer details will be replaced.",
     question: "Who is the invoice recipient?",
     parentQuestion: "Which parent will receive the invoice?",

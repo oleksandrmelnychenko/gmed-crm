@@ -1838,6 +1838,9 @@ struct PayerUpload {
     reviewed: bool,
     /// Staff use the file: reviewed, signed, shared, in a review, moved.
     locked: bool,
+    /// An organisation's register extract, filed as a payer identity copy
+    /// and told apart by its note ([`REGISTER_EXTRACT_NOTE`]).
+    register_extract: bool,
 }
 
 async fn load_payer_uploads(
@@ -1848,6 +1851,8 @@ async fn load_payer_uploads(
         r#"SELECT u.document_id, u.kind, u.access_kind, u.uploaded_by, u.created_at,
                   u.reviewed_at, d.original_filename, d.auto_name, d.file_size, d.mime_type,
                   d.patient_id, d.signed_at,
+                  (u.kind = 'payer_identity'
+                   AND COALESCE(d.notes, '') LIKE 'Handelsregisterauszug%') AS register_extract,
                   EXISTS(SELECT 1 FROM document_shares s WHERE s.document_id = d.id) AS shared,
                   EXISTS(SELECT 1 FROM document_review_events r WHERE r.document_id = d.id)
                       AS in_review
@@ -1885,6 +1890,7 @@ async fn load_payer_uploads(
                     || moved
                     || row.try_get::<bool, _>("shared").unwrap_or(true)
                     || row.try_get::<bool, _>("in_review").unwrap_or(true),
+                register_extract: row.try_get::<bool, _>("register_extract").unwrap_or(false),
             })
         })
         .collect())
@@ -2143,6 +2149,10 @@ struct DocumentItem {
     uploaded_at: Option<DateTime<Utc>>,
     reviewed: bool,
     can_delete: bool,
+    /// The organisation's register extract among the identity copies: the
+    /// page names it as such and offers no reading of an ID for it (QA
+    /// 2026-11-10).
+    register_extract: bool,
 }
 
 impl DocumentItem {
@@ -2155,6 +2165,7 @@ impl DocumentItem {
             "uploaded_at": self.uploaded_at,
             "reviewed": self.reviewed,
             "can_delete": self.can_delete,
+            "register_extract": self.register_extract,
         })
     }
 }
@@ -2226,6 +2237,7 @@ fn questionnaire(
         uploaded_at: upload.uploaded_at,
         reviewed: upload.reviewed,
         can_delete: may_delete(&upload.access_kind, upload.uploaded_by, upload.locked),
+        register_extract: upload.register_extract,
     };
     let identity_documents: Vec<DocumentItem> = match parent {
         // The parent's identity document is the representative's copy.
@@ -2245,6 +2257,7 @@ fn questionnaire(
                 uploaded_at: upload.uploaded_at,
                 reviewed: upload.reviewed,
                 can_delete: may_delete("guardian", upload.uploaded_by, upload.locked),
+                register_extract: false,
             })
             .collect(),
         None => context
@@ -3548,6 +3561,12 @@ async fn open_link(State(state): State<AppState>, headers: HeaderMap) -> Respons
         .as_ref()
         .and_then(|declaration| declaration.payer_type.clone())
         .unwrap_or_else(|| lead_payer::PAYER_TYPE_PERSON.to_string());
+    // A code that can still be entered: mailed, neither used nor used up by
+    // wrong tries, and within its time. `code_sent_at` alone also names the
+    // code of an earlier visit (QA 2026-11-10: the page said "we have sent a
+    // code" for one that no longer worked, and no new one went out).
+    let code_pending =
+        link.code_hash.is_some() && link.code_expires_at.is_some_and(|until| until > now);
     Json(json!({
         "state": state_name,
         "patient_name": context.patient_name,
@@ -3556,6 +3575,7 @@ async fn open_link(State(state): State<AppState>, headers: HeaderMap) -> Respons
         "language": link.language,
         "expires_at": link.expires_at,
         "code_sent_at": link.code_sent_at,
+        "code_pending": code_pending,
         "session_valid": session_valid,
         "signature_package": signature_package,
     }))
@@ -3570,9 +3590,19 @@ fn mail_unavailable(code: &str) -> Response {
     )
 }
 
+/// The language of the payer page sent with "send the code" (`language`),
+/// when it is one the page offers; `None` without a body, without the key or
+/// for anything else — the e-mail then follows the link's language.
+fn page_language(body: &[u8]) -> Option<String> {
+    let value: Value = serde_json::from_slice(body).ok()?;
+    let language = value.get("language")?.as_str()?.trim();
+    LANGUAGES.contains(&language).then(|| language.to_string())
+}
+
 /// `POST /public/payer-link/code` (3.2): mails a new six-digit code to the
-/// link's address. At most one a minute and five an hour.
-async fn send_code(State(state): State<AppState>, headers: HeaderMap) -> Response {
+/// link's address, in the language the payer reads the page in (`language`
+/// of the body; else the link's). At most one a minute and five an hour.
+async fn send_code(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
     let mailer = match current_mailer(&state).await {
         Ok(mailer) => mailer,
         Err(code) => return mail_unavailable(code),
@@ -3641,7 +3671,18 @@ async fn send_code(State(state): State<AppState>, headers: HeaderMap) -> Respons
 
     let agency = crate::mail::agency_identity(&state.db).await;
     let logo_url = templates::logo_url(&console_url);
-    let language = MailLanguage::from_code(Some(&link.language));
+    // The payer switched the page to another language than the link was sent
+    // in (QA 2026-11-10: a German code e-mail for a Russian page): the code
+    // follows the page. The e-mail log names the language it was mailed in.
+    let language = MailLanguage::from_code(Some(
+        page_language(&body)
+            .as_deref()
+            .unwrap_or(link.language.as_str()),
+    ));
+    let link = Link {
+        language: language.code().to_string(),
+        ..link
+    };
     let rendered = templates::payer_code(&PayerCodeEmail {
         language,
         code: &code,
@@ -4183,7 +4224,8 @@ async fn link_upload(
 /// the machine readable zone of an identity copy the payer uploaded through
 /// this link, as a proposal for the payer's own form. The file is read on
 /// this server and nothing is stored; the payer confirms or corrects the
-/// values. Recorded without any value of the document.
+/// values. Recorded without any value of the document. An organisation's
+/// register extract is no identity document: it is not read (404).
 async fn recognize_upload(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -4201,6 +4243,7 @@ async fn recognize_upload(
              AND u.lead_id = $2
              AND u.access_kind = 'payer'
              AND u.kind = 'payer_identity'
+             AND COALESCE(d.notes, '') NOT LIKE 'Handelsregisterauszug%'
              AND u.withdrawn_at IS NULL
              AND d.file_deleted_at IS NULL"#,
     )
@@ -7007,6 +7050,32 @@ mod tests {
             &code_hash(link, "123456"),
             &code_hash(link, "123457")
         ));
+    }
+
+    /// QA 2026-11-10: the code e-mail follows the language of the page, when
+    /// the page names one it offers; anything else leaves it to the link.
+    #[test]
+    fn the_code_email_takes_only_a_language_the_page_offers() {
+        assert_eq!(
+            page_language(br#"{"language":"ru"}"#).as_deref(),
+            Some("ru")
+        );
+        assert_eq!(
+            page_language(br#"{"language":" uk "}"#).as_deref(),
+            Some("uk")
+        );
+        let refused: [&[u8]; 7] = [
+            b"",
+            b"{}",
+            br#"{"language":null}"#,
+            br#"{"language":"fr"}"#,
+            br#"{"language":7}"#,
+            b"[]",
+            b"not json",
+        ];
+        for body in refused {
+            assert_eq!(page_language(body), None);
+        }
     }
 
     #[test]

@@ -13,6 +13,7 @@ import { isValidPersonPhone } from "@/lib/person-fields";
 import { cn } from "@/lib/utils";
 import { CONSENT_RECIPIENT_RELATIONS, MAX_CONSENT_RECIPIENTS, type ConsentRecipient, type ConsentRecipientRelation } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
+import { dateRefusalMessage } from "./lead-request-date-refusal";
 import { asLeadCabinetLang } from "./lead-request-text";
 import { blankRecipient, formatBirthDate, isInstitution, personCitizenships, personScope, recipientProblems, typedRecipient, unchangedStored, type RecipientDraft, type RecipientField } from "./lead-trusted-persons-model";
 import { trustedPersonsText } from "./lead-trusted-persons-text";
@@ -107,12 +108,29 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
   const messages: Record<RecipientField, string> = {
     name: fields.nameRequired, relation: fields.relationRequired, phone: fields.phoneRequired, birth_date: fields.birthDateRequired, scope: fields.scopeRequired,
   };
+  // A typed date of birth the field did not take (in the future, 31.02.): why, instead of
+  // "please state the date of birth" (QA 2026-11-10, finding 4).
+  const [refusedDates, setRefusedDates] = useState<Readonly<Record<number, string>>>({});
+  const noteDate = (index: number, reason: string | null) => setRefusedDates((current) => {
+    if ((current[index] ?? null) === reason) return current;
+    const next = { ...current };
+    if (reason) next[index] = reason;
+    else delete next[index];
+    return next;
+  });
   const message = (field: RecipientField, problems: ReadonlySet<RecipientField>, index: number) => problems.has(field)
-    ? <p className="text-destructive" role="alert" id={`trusted-person-${field}-${index}-error`} data-testid={`trusted-person-${field}-error`}>{messages[field]}</p>
+    ? <p className="text-destructive" role="alert" id={`trusted-person-${field}-${index}-error`} data-testid={`trusted-person-${field}-error`}>
+      {field === "birth_date" && refusedDates[index] && !persons[index]?.birthDate
+        ? dateRefusalMessage(lang, refusedDates[index], { min: "1900-01-01", max: today })
+        : messages[field]}
+    </p>
     : null;
   const removeAt = (index: number) => {
     onChange(persons.filter((_, at) => at !== index));
     setLeftPhone((current) => new Set([...current].filter((at) => at !== index).map((at) => (at > index ? at - 1 : at))));
+    setRefusedDates((current) => Object.fromEntries(
+      Object.entries(current).filter(([at]) => Number(at) !== index).map(([at, reason]) => [Number(at) > index ? Number(at) - 1 : Number(at), reason]),
+    ));
   };
   return <div className="space-y-2" data-testid="trusted-persons-editor">
     {persons.length === 0 ? <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground"><UserRound aria-hidden="true" className="size-4 shrink-0" /><p>{fields.empty}</p></div> : null}
@@ -156,6 +174,7 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
         <Input id={`trusted-person-birth-date-${index}`} key={`trusted-person-birth-date-${index}-${lang}`} className={inputClass} type="date" pickerLang={asLeadCabinetLang(lang) ?? undefined}
           min="1900-01-01" max={today} value={person.birthDate} disabled={disabled} autoComplete="off" required
           aria-invalid={problems.has("birth_date") || undefined} aria-describedby={describedBy("birth_date")} data-testid="trusted-person-birth-date"
+          onPickerValidation={(reason) => noteDate(index, reason)}
           onChange={(event) => update(index, { birthDate: event.target.value })} />
         {message("birth_date", problems, index)}
       </div>}

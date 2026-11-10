@@ -113,8 +113,15 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     }
     // After the send only a withdrawal is saved; the server refuses anything else too (not from staff).
     if (base.submitted_at && !staffMode && !onlyWithdraws(current, base)) {
-      setError(common.sentLockedHint);
-      return false;
+      // The request was sent meanwhile (the other parent, another tab): what was typed here can
+      // never be saved. It goes, the step shows what GMED has, and nobody is held on the step for
+      // it (QA 2026-11-10, A-1: the locked view has no field left to correct).
+      const stored = disclosureDraft(base, viewerId);
+      draftRef.current = stored;
+      markEdited(false);
+      setDraft(stored);
+      setError(common.sentChangeRefused);
+      return true;
     }
     setBusy(true);
     setError("");
@@ -139,7 +146,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
         const index = field ? draftIndexOfSent(current.persons, body?.index) : null;
         setServerProblem(field && index !== null ? { index, field } : null);
         if (field && index !== null) setAttempted(true);
-        setError(code === "request_already_sent" ? common.sentLockedHint
+        setError(code === "request_already_sent" ? common.sentChangeRefused
           : code === CONSENT_RECIPIENTS_INVALID ? text.invalid
           : code === "disclosure_consent_required" ? text.consentRequired
           : code === "disclosure_version_outdated" ? text.outdated
@@ -156,7 +163,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     })();
     saving.current = pending;
     return pending;
-  }, [ownMinor, problemMessage, text, enqueue, lang, staffMode, viewerId, onChange, common.errors.request_failed, common.sentLockedHint]);
+  }, [ownMinor, problemMessage, text, enqueue, lang, staffMode, viewerId, onChange, common.errors.request_failed, common.sentChangeRefused]);
 
   // Leaving via a tab, Next or another child's request saves a valid choice
   // in the shared queue. A failed/incomplete draft stays visible for correction.

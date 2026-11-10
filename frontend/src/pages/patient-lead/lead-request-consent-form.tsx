@@ -1,4 +1,4 @@
-import { useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FileSignature, LoaderCircle } from "lucide-react";
 import { cabinetStaffText, useCabinetStaffMode } from "./lead-request-staff-mode";
 import { StaffConsentRecordFields } from "./lead-request-staff-consent";
@@ -23,7 +23,7 @@ import {
 import { actsAsGuardian } from "./lead-request-access";
 import { consentFormText } from "./lead-request-consent-form-text";
 import { leadRequestText } from "./lead-request-text";
-import { CabinetGoToContext, CabinetSection as Section, ConsentGivenChip, InfoNote, RequiredMark, errorBody, errorMessage, useAutosave, type RequestQueue } from "./lead-request-parts";
+import { AutosaveFlushContext, CabinetGoToContext, CabinetSection as Section, ConsentGivenChip, InfoNote, RequiredMark, errorBody, errorMessage, useAutosave, type AutosaveFlush, type RequestQueue } from "./lead-request-parts";
 import type { SaveState } from "./lead-request-model";
 
 import { disclosureDefaultsToNo, storedTrustedPersons, trustedPersonsPath } from "./lead-trusted-persons-model";
@@ -131,14 +131,50 @@ export function ConsentFormChoicesSection({
   const editedRef = useRef(false);
   const draftRef = useRef(draft);
   draftRef.current = draft;
+  const sentRef = useRef(sent);
+  sentRef.current = sent;
+  // A partial choice keeps the step (it is no consent). Leaving the step then marks the required
+  // boxes that are not ticked, instead of a refusal that names nothing (QA 2026-11-10, finding 5).
+  const [attempted, setAttempted] = useState(false);
+  const attemptedRef = useRef(false);
+  const flushers = useContext(AutosaveFlushContext);
+  const onSaveStateRef = useRef(onSaveState);
+  onSaveStateRef.current = onSaveState;
+  useEffect(() => {
+    if (staffMode) return;
+    const flush: AutosaveFlush = {
+      save: () => {
+        if (!sentRef.current && editedRef.current && consentFormChanged(draftRef.current, savedRef.current?.choices) && !hasCoreConsents(draftRef.current)) {
+          attemptedRef.current = true;
+          setAttempted(true);
+          onSaveStateRef.current?.("error");
+        }
+        // The choice itself is saved (or held back) by the autosave of this section.
+        return Promise.resolve(true);
+      },
+      version: () => undefined,
+    };
+    flushers?.add(flush);
+    return () => { flushers?.delete(flush); };
+  }, [flushers, staffMode]);
   const save = useCallback(async (snapshot: ConsentFormChoices, recorded: StaffConsentRecord | null = null): Promise<boolean> => {
     if (!version || ownMinor) return true;
     return enqueue(async () => {
       // Recheck inside the shared queue: a timer and Next can flush the same choice.
       if (!editedRef.current && !recorded) return true;
+      // The request was sent meanwhile (the other parent, another tab): the boxes are locked now,
+      // so a choice not saved before can never be completed or saved. It goes, and nobody is
+      // held on the step for it (QA 2026-11-10, A-1).
+      if (sentRef.current && !recorded) {
+        editedRef.current = false;
+        setDraft(savedRef.current?.choices ?? NO_CONSENT_FORM_CHOICES);
+        onSaveState?.("idle");
+        return true;
+      }
       if (!consentFormChanged(snapshot, savedRef.current?.choices)) return true;
       if (!hasCoreConsents(snapshot)) {
-        onSaveState?.("idle");
+        // Once the step was to be left with a partial choice, the step's indicator says "not saved".
+        onSaveState?.(attemptedRef.current ? "error" : "idle");
         return false;
       }
       setBusy(true);
@@ -189,6 +225,9 @@ export function ConsentFormChoicesSection({
   }
   const changed = consentFormChanged(draft, form.choices);
   const coreTicked = hasCoreConsents(draft);
+  // Some boxes ticked, the three required ones not all: nothing of it is saved.
+  const partial = !sent && !staffMode && changed && !coreTicked;
+  const markMissing = attempted && partial;
 
   // The step-4 answer as one line with a jump back, not repeated as a block (owner 2026-10-26, C3).
   // Not answered counts as "no" (owner decision 2026-10-22). The printed form is unchanged.
@@ -218,13 +257,20 @@ export function ConsentFormChoicesSection({
     </div>
   );
 
-  const option = (key: keyof ConsentFormChoices) => (
-    <label key={key} className="flex cursor-pointer items-start gap-3 rounded-lg bg-card py-2 text-sm transition-colors hover:bg-muted/30 focus-within:ring-2 focus-within:ring-ring">
+  const option = (key: keyof ConsentFormChoices) => {
+    const missing = markMissing && CONSENT_FORM_CORE.includes(key) && !draft[key];
+    return (
+    <label key={key} className={cn(
+      "flex cursor-pointer items-start gap-3 rounded-lg bg-card py-2 text-sm transition-colors hover:bg-muted/30 focus-within:ring-2 focus-within:ring-ring",
+      missing && "px-2 ring-1 ring-destructive/60",
+    )}>
       <input
         type="checkbox"
         // Named by the visible text, never by the raw value «on» (labels audit 2026-10-26, S1).
         aria-label={text.options[key]}
         aria-required={CONSENT_FORM_CORE.includes(key) || undefined}
+        aria-invalid={missing || undefined}
+        aria-describedby={missing ? `lead-request-consent-option-${key}-error` : undefined}
         className={cn(checkboxClass, "mt-0.5")}
         checked={draft[key]}
         disabled={sent}
@@ -246,9 +292,15 @@ export function ConsentFormChoicesSection({
             <span className="sr-only"> ({text.required})</span>
           </span>
         ) : null}
+        {missing ? (
+          <span id={`lead-request-consent-option-${key}-error`} role="alert" className="mt-1 block text-xs font-medium text-destructive" data-testid="lead-request-consent-form-missing-box">
+            {text.coreMissingBox}
+          </span>
+        ) : null}
       </span>
     </label>
-  );
+    );
+  };
 
   return (
     <div data-testid="lead-request-consent-form">
@@ -285,8 +337,11 @@ export function ConsentFormChoicesSection({
           <div className="flex flex-wrap items-center gap-3">
             {busy ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : null}
             {/* The step's save indicator covers the own choice; only the other parent's choice is named (B8). */}
-            <p className="text-xs text-muted-foreground" aria-live="polite" data-testid="lead-request-consent-form-state">
-              {busy ? text.saving : changed
+            <p className={cn("text-xs", markMissing ? "font-medium text-destructive" : "text-muted-foreground")} aria-live="polite" data-testid="lead-request-consent-form-state">
+              {busy ? text.saving : partial
+                // Why it is not saved and what to do, not only "not saved yet" next to the step's "saved".
+                ? (form.choices ? text.coreIncomplete : text.coreIncompleteOrNone)
+                : changed
                 ? text.unsaved
                 : !staffMode && form.chosen_at && form.chosen_by_me === false
                   ? (form.chosen_by_staff ? text.savedByStaffAt : text.savedByOtherAt)(formatPortalTimestamp(form.chosen_at))
