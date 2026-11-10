@@ -3183,6 +3183,11 @@ struct GenerateDocumentRequest {
     /// with blank lines the payer fills in by hand and signs.
     #[serde(default)]
     paper_form: bool,
+    /// The Word file of an imported agency template with the patient's data
+    /// filled in (`super::document_template_imports`): set only by
+    /// [`generate_document`], never read from a body.
+    #[serde(skip)]
+    agency_template_docx: Option<Vec<u8>>,
 }
 
 /// Optional manual binding fields ("yellow sockets") for the generated
@@ -8936,6 +8941,52 @@ impl TreatmentPlanPdfLayout {
             self.ensure_space(line_height_mm);
             let width_mm = approx_text_width_mm(&line, size_pt);
             let x_mm = PDF_LEFT_MARGIN_MM + ((PDF_CONTENT_WIDTH_MM - width_mm) / 2.0).max(0.0);
+            append_pdf_text_line(
+                &mut self.page_ops,
+                &line,
+                x_mm,
+                self.y_mm,
+                size_pt,
+                &font,
+                color,
+            );
+            self.y_mm -= line_height_mm;
+        }
+
+        if after_mm > 0.0 {
+            self.spacer(after_mm);
+        }
+    }
+
+    /// A block set against the right margin (the date line of a letter).
+    fn text_block_right(
+        &mut self,
+        text: &str,
+        size_pt: f32,
+        bold: bool,
+        color: TreatmentPlanPdfColor,
+        before_mm: f32,
+        after_mm: f32,
+    ) {
+        let lines = wrap_text_to_width(text, size_pt, self.available_width(0.0));
+        if lines.is_empty() {
+            return;
+        }
+
+        if before_mm > 0.0 {
+            self.spacer(before_mm);
+        }
+
+        let line_height_mm = pdf_line_height_mm(size_pt, 1.45);
+        let font = if bold {
+            self.bold_font.clone()
+        } else {
+            self.regular_font.clone()
+        };
+        for line in lines {
+            self.ensure_space(line_height_mm);
+            let width_mm = approx_text_width_mm(&line, size_pt);
+            let x_mm = PDF_LEFT_MARGIN_MM + (PDF_CONTENT_WIDTH_MM - width_mm).max(0.0);
             append_pdf_text_line(
                 &mut self.page_ops,
                 &line,
@@ -16977,9 +17028,12 @@ async fn generate_document(
             |value: &Option<String>| value.as_deref().is_none_or(|value| value.trim().is_empty());
         body.template_id = "free_text_document".to_string();
         body.ursprung = Some(format!("template:{}", rendered.public_id));
-        if is_blank(&body.manual_text) {
+        // A Word template is printed from its file: its text is kept with the
+        // document for reading and search only, and is never typed over.
+        if rendered.docx.is_some() || is_blank(&body.manual_text) {
             body.manual_text = Some(rendered.text);
         }
+        body.agency_template_docx = rendered.docx;
         if is_blank(&body.title_override) {
             body.title_override = Some(rendered.label.clone());
         }
@@ -18156,7 +18210,27 @@ async fn generate_document(
                     Ok(value) => value,
                     Err(response) => return response,
                 };
-                build_agency_free_text_document_pdf(&agency, &title, manual_text, &generated_doc_id)
+                if is_agency_template_source(body.ursprung.as_deref()) {
+                    match agency_template_pdf(
+                        &agency,
+                        &title,
+                        manual_text,
+                        body.agency_template_docx.as_deref(),
+                        &generated_doc_id,
+                    )
+                    .await
+                    {
+                        Ok(bytes) => Ok(bytes),
+                        Err(response) => return response,
+                    }
+                } else {
+                    build_agency_free_text_document_pdf(
+                        &agency,
+                        &title,
+                        manual_text,
+                        &generated_doc_id,
+                    )
+                }
             } else {
                 build_manual_generated_text_pdf(&auto_name, &title, manual_text, &generated_doc_id)
             };
@@ -21146,17 +21220,142 @@ fn build_agency_free_text_document_pdf(
     Ok(finalize_admin_pdf(document, layout))
 }
 
+/// A document made from an imported agency template
+/// (`super::document_template_imports`): the letterhead of "Freies Dokument"
+/// with the little formatting the import keeps — a heading, bold lines and
+/// centred or right-aligned lines (owner sample 2026-11-10). A text that
+/// opens with its own heading is not given the template name above it.
+fn build_agency_template_document_pdf(
+    agency: &AgencyContractSettings,
+    title: &str,
+    text: &str,
+    document_reference: &str,
+) -> Result<Vec<u8>, &'static str> {
+    use super::document_template_imports::{
+        TemplateLineKind, parse_template_line, template_text_starts_with_heading,
+    };
+    let (document, regular, bold) = new_admin_pdf()?;
+    let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
+    if !template_text_starts_with_heading(text) {
+        layout.text_block_centered(title, 16.0, true, TreatmentPlanPdfColor::Body, 0.0, 4.0);
+    }
+    for line in generated_manual_text_paragraphs(text) {
+        if line.trim().is_empty() {
+            layout.spacer(3.0);
+            continue;
+        }
+        let line = parse_template_line(&line);
+        let color = TreatmentPlanPdfColor::Body;
+        match line.kind {
+            TemplateLineKind::Heading => {
+                layout.text_block_centered(line.text, 16.0, true, color, 0.0, 4.0);
+            }
+            TemplateLineKind::Center => {
+                layout.text_block_centered(line.text, 11.0, line.bold, color, 0.0, 1.0);
+            }
+            TemplateLineKind::Right => {
+                layout.text_block_right(line.text, 11.0, line.bold, color, 0.0, 1.0);
+            }
+            TemplateLineKind::Plain if line.bold => {
+                layout.text_block(line.text, 11.0, true, 0.0, color, 0.0, 1.0);
+            }
+            TemplateLineKind::Plain => admin_block(&mut layout, line.text, 0.0, 1.0),
+        }
+    }
+    Ok(finalize_admin_pdf(document, layout))
+}
+
+/// Whether a generated free document was made from an imported agency
+/// template: `generate_document` names the template version in the source.
+fn is_agency_template_source(ursprung: Option<&str>) -> bool {
+    ursprung.is_some_and(|value| {
+        value
+            .trim()
+            .strip_prefix("template:")
+            .is_some_and(|id| super::document_template_imports::parse_public_id(id).is_some())
+    })
+}
+
+/// The room the GMED letterhead leaves for a page's own content: a Word
+/// template gets these as its top and bottom margins and as the least of
+/// its side margins
+/// (`crate::docx_render::prepare_docx`).
+pub(crate) const AGENCY_TEMPLATE_PAGE_FRAME: crate::docx_render::PageFrame =
+    crate::docx_render::PageFrame {
+        top_mm: PDF_LEGAL_TOP_MARGIN_MM,
+        bottom_mm: PDF_LEGAL_CONTENT_BOTTOM_MM,
+        left_mm: PDF_LEFT_MARGIN_MM,
+        right_mm: PDF_RIGHT_MARGIN_MM,
+    };
+
+/// The letterhead alone — header rule and document number, footer with logo,
+/// agency lines and page numbers — on `pages` empty pages. It is drawn over
+/// the pages LibreOffice made from a Word template.
+fn build_agency_letterhead_pdf(
+    agency: &AgencyContractSettings,
+    document_reference: &str,
+    pages: usize,
+) -> Result<Vec<u8>, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
+    for _ in 0..pages.max(1) {
+        // A page without any operation is not emitted: give it a no-op pair.
+        layout.page_ops.push(Op::SaveGraphicsState);
+        layout.page_ops.push(Op::RestoreGraphicsState);
+        layout.page_break();
+    }
+    Ok(finalize_admin_pdf(document, layout))
+}
+
+/// A document made from an imported agency template. With the template's
+/// Word file it looks as in Word (LibreOffice lays it out) under the GMED
+/// letterhead; a text template — or a server without LibreOffice, such as a
+/// developer's stack — prints the text on the letterhead instead.
+async fn agency_template_pdf(
+    agency: &AgencyContractSettings,
+    title: &str,
+    text: &str,
+    docx: Option<&[u8]>,
+    document_reference: &str,
+) -> Result<Vec<u8>, axum::response::Response> {
+    use crate::docx_render::{ConvertError, docx_to_pdf, pdf_page_count, stamp_letterhead};
+    let failed = |message: &str| err(StatusCode::INTERNAL_SERVER_ERROR, message);
+    if let Some(docx) = docx {
+        match docx_to_pdf(docx).await {
+            Ok(content) => {
+                let pages = pdf_page_count(&content).map_err(failed)?;
+                let letterhead = build_agency_letterhead_pdf(agency, document_reference, pages)
+                    .map_err(failed)?;
+                return stamp_letterhead(&content, &letterhead).map_err(failed);
+            }
+            Err(ConvertError::Unavailable) => {
+                tracing::warn!(
+                    "LibreOffice is not installed: the Word template is printed as text"
+                );
+            }
+            Err(ConvertError::Failed(message)) => {
+                tracing::error!(error = %message, "convert agency Word template");
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "The Word file could not be converted to PDF",
+                ));
+            }
+        }
+    }
+    build_agency_template_document_pdf(agency, title, text, document_reference).map_err(failed)
+}
+
 /// The preview of an imported agency template
-/// (`super::document_template_imports`): its text with sample data, printed
+/// (`super::document_template_imports`): printed with sample data exactly
 /// like the document generated from it.
 pub(crate) async fn agency_template_preview_pdf(
     state: &AppState,
     title: &str,
     text: &str,
+    docx: Option<&[u8]>,
 ) -> Result<Vec<u8>, axum::response::Response> {
     let agency = load_agency_contract_settings(state).await?;
-    build_agency_free_text_document_pdf(&agency, title, text, "VORSCHAU")
-        .map_err(|message| err(StatusCode::INTERNAL_SERVER_ERROR, message))
+    agency_template_pdf(&agency, title, text, docx, "VORSCHAU").await
 }
 
 struct AdminSignatureParty<'a> {
@@ -39390,18 +39589,19 @@ mod tests {
         admin_signature_grid, adult_legal_agency_identity, agency_block_lines,
         agency_identity_profile_lines, build_adult_confidentiality_release_pdf,
         build_adult_privacy_consents_pdf, build_adult_privacy_information_pdf,
-        build_agency_free_text_document_pdf, build_consent_pdf, build_cost_estimate_pdf,
-        build_enhanced_due_diligence_pdf, build_framework_contract_pdf,
+        build_agency_free_text_document_pdf, build_agency_template_document_pdf, build_consent_pdf,
+        build_cost_estimate_pdf, build_enhanced_due_diligence_pdf, build_framework_contract_pdf,
         build_manual_generated_text_pdf, build_order_cost_estimate_pdf, build_patient_sticker_pdf,
         build_single_order_pdf, compute_line_item_totals, consent_type_for_compliance_kind,
         cost_coverage_money_cell, cost_estimate_price_text, document_attachment_response,
         document_satisfies_compliance_kind, document_template_by_id, finalize_admin_pdf,
         generated_binding_snapshot, generated_cost_estimate_document_number,
         generated_document_number_for_template, generated_order_reference,
-        generated_typed_document_number, german_document_country, is_fixed_legal_document_template,
-        is_lead_allowed_document_template, is_structured_generated_document_template,
-        legal_agency_block_lines, legal_document_reference, localized_estimate_work_type_sections,
-        new_admin_pdf, parse_document_ocr_max_concurrency, parse_document_ocr_timeout_seconds,
+        generated_typed_document_number, german_document_country, is_agency_template_source,
+        is_fixed_legal_document_template, is_lead_allowed_document_template,
+        is_structured_generated_document_template, legal_agency_block_lines,
+        legal_document_reference, localized_estimate_work_type_sections, new_admin_pdf,
+        parse_document_ocr_max_concurrency, parse_document_ocr_timeout_seconds,
         patient_sticker_agency_line, pdf_mm_to_pt, resolve_cost_estimate_lines,
         single_order_scope_points, tesseract_input_extension, valid_tesseract_language_spec,
     };
@@ -40585,6 +40785,61 @@ mod tests {
         assert!(extracted_text.contains("Freies Dokument"));
         assert!(extracted_text.contains("Sehr geehrte Damen und Herren"));
         assert!(extracted_text.contains("Individueller Text für den Patienten"));
+    }
+
+    /// An imported template keeps a heading, bold and aligned lines (owner
+    /// sample 2026-11-10); its own heading replaces the template name.
+    #[test]
+    fn agency_template_document_pdf_prints_marked_lines_without_marks() {
+        let agency = legal_test_agency();
+        let text = "# Bescheinigung\n>> Datum: 10.11.2026\n\nSehr geehrte Damen und Herren,\n\
+                    **Wichtiger Hinweis**\n>< Mit freundlichen Grüßen";
+        let bytes = build_agency_template_document_pdf(
+            &agency,
+            "Name der Vorlage",
+            text,
+            "ADMIN-20261110-UNITTEST0002",
+        )
+        .unwrap();
+        let extracted = assert_legal_pdf_chrome(&bytes, "ADMIN-20261110-UNITTEST0002");
+        for expected in [
+            "Bescheinigung",
+            "Datum: 10.11.2026",
+            "Sehr geehrte Damen und Herren",
+            "Wichtiger Hinweis",
+            "Mit freundlichen Grüßen",
+        ] {
+            assert!(
+                extracted.contains(expected),
+                "missing {expected}: {extracted}"
+            );
+        }
+        assert!(!extracted.contains("Name der Vorlage"));
+        for mark in ["# ", ">>", "><", "**"] {
+            assert!(
+                !extracted.contains(mark),
+                "mark {mark} printed: {extracted}"
+            );
+        }
+
+        // Without a heading of its own the template name is the title.
+        let bytes = build_agency_template_document_pdf(
+            &agency,
+            "Name der Vorlage",
+            "Nur Text.",
+            "ADMIN-20261110-UNITTEST0003",
+        )
+        .unwrap();
+        let extracted = assert_legal_pdf_chrome(&bytes, "ADMIN-20261110-UNITTEST0003");
+        assert!(extracted.contains("Name der Vorlage"));
+
+        assert!(is_agency_template_source(Some(
+            "template:agency_template:5b0c2f0e-3d0b-4c58-9a51-0f6f1f3b7a11"
+        )));
+        assert!(!is_agency_template_source(Some(
+            "template:free_text_document"
+        )));
+        assert!(!is_agency_template_source(None));
     }
 
     #[test]

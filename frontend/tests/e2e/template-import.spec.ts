@@ -56,23 +56,27 @@ test("a template is imported, corrected and activated", async ({ page }) => {
       calls.push("import");
       const posted = request.postData() ?? "";
       expect(posted).toContain('name="language"');
-      expect(posted).toContain('filename="Bescheinigung.txt"');
+      expect(posted).toContain('filename="Bescheinigung.docx"');
+      const corrected = posted.includes("corrected");
       const template: Template = {
-        id: "synthetic-template-1",
-        public_id: "agency_template:synthetic-template-1",
-        family_id: "synthetic-family-1",
+        id: `synthetic-template-${templates.length + 1}`,
+        public_id: `agency_template:synthetic-template-${templates.length + 1}`,
+        family_id: `synthetic-family-${templates.length + 1}`,
         version_number: 1,
         label: "Bescheinigung",
         description: null,
         language: "de",
         status: "draft",
-        source_filename: "Bescheinigung.txt",
+        source_filename: "Bescheinigung.docx",
+        exact_layout: true,
         created_at: "2026-11-10T10:00:00Z",
         activated_at: null,
         disabled_at: null,
         created_by_name: "Template QA",
         activated_by_name: null,
-        body: "Bescheinigung für {{patient_name}}, geboren am {{geburtsdatum}}.",
+        body: corrected
+          ? "Bescheinigung für {{patient_name}}, geboren am {{birth_date}}."
+          : "Bescheinigung für {{patient_name}}, geboren am {{geburtsdatum}}.",
       };
       templates.push(template);
       return route.fulfill({ status: 201, json: { template: describeTemplate(template) } });
@@ -88,14 +92,15 @@ test("a template is imported, corrected and activated", async ({ page }) => {
       const template = templates.find(item => item.id === action[1])!;
       calls.push(action[2]);
       if (action[2] === "update") {
-        const payload = request.postDataJSON() as { body: string; label: string };
-        template.body = payload.body;
+        const payload = request.postDataJSON() as { label: string };
+        expect(Object.keys(payload)).toEqual(["label"]);
         template.label = payload.label;
       } else if (action[2] === "activate") {
         if (!describeTemplate(template).can_activate) {
           return route.fulfill({ status: 409, json: { error: "template_variables_invalid", message: "invalid" } });
         }
         template.status = "active";
+        template.activated_at = "2026-11-10T10:05:00Z";
       } else {
         template.status = "disabled";
       }
@@ -119,12 +124,13 @@ test("a template is imported, corrected and activated", async ({ page }) => {
   const dialog = page.getByTestId("template-import-dialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("alert")).toContainText("Не удалось загрузить шаблоны.");
-  await expect(dialog.getByText("Импортированных шаблонов пока нет.")).toHaveCount(0);
-  await dialog.locator("#template-import-description").fill("Памятка перед визитом");
+  await expect(dialog.getByText("Шаблонов пока нет.")).toHaveCount(0);
   listUnavailable = false;
   await dialog.getByRole("button", { name: "Повторить", exact: true }).click();
-  await expect(dialog.locator("#template-import-description")).toHaveValue("Памятка перед визитом");
-  await expect(dialog.getByText("Импортированных шаблонов пока нет.")).toBeVisible();
+  await expect(dialog.getByText("Шаблонов пока нет.")).toBeVisible();
+  // The fields for patient data are out of the way until someone opens them.
+  await expect(dialog.locator("details")).not.toHaveAttribute("open", "");
+  await expect(dialog.getByText("{{patient_name}}", { exact: true })).toBeHidden();
 
   // A file that is neither Word nor text is refused before any upload.
   await dialog.locator("#template-import-file").setInputFiles({
@@ -133,51 +139,22 @@ test("a template is imported, corrected and activated", async ({ page }) => {
   await expect(dialog.getByRole("alert")).toContainText("Word (.docx)");
   expect(calls).toEqual([]);
 
+  // Choosing the Word file uploads it at once and shows the finished page.
   await dialog.locator("#template-import-file").setInputFiles({
-    name: "Bescheinigung.txt",
-    mimeType: "text/plain",
-    buffer: Buffer.from("Bescheinigung für {{patient_name}}, geboren am {{geburtsdatum}}."),
+    name: "Bescheinigung.docx",
+    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    buffer: Buffer.from("PK synthetic word file"),
   });
-  await expect(dialog.locator("#template-import-label")).toHaveValue("Bescheinigung");
-  await dialog.getByRole("button", { name: "Импортировать" }).click();
-
-  // The draft shows the unknown variable and cannot be activated.
   const selected = page.getByTestId("template-import-selected");
-  await expect(selected).toContainText("Черновик");
-  await expect(selected.getByRole("alert")).toContainText("{{geburtsdatum}}");
-  await expect(selected.getByRole("button", { name: "Активировать" })).toBeDisabled();
-  await page.screenshot({ path: "../artifacts/design-qa/template-import-unknown-variable.png" });
-
-  // Corrected in place, saved, checked again.
-  await selected.locator("#template-import-body").fill(
-    "Bescheinigung für {{patient_name}}, geboren am {{birth_date}}.",
-  );
-  await selected.getByRole("button", { name: "Сохранить изменения" }).click();
-  await expect(selected.getByRole("alert")).toHaveCount(0);
-  await expect(page.getByTestId("template-import-sample")).toHaveText(
-    "Bescheinigung für Max Mustermann, geboren am 01.02.1980.",
-  );
-
-  await selected.getByRole("button", { name: "Активировать" }).click();
-  await expect(selected).toContainText("Активен");
-  await expect(page.getByTestId("catalog-changes")).toHaveText("1");
-  // The text of an active version is read-only.
-  await expect(selected.locator("#template-import-body")).not.toBeEditable();
-  expect(calls).toEqual(["import", "update", "activate"]);
-  await page.screenshot({ path: "../artifacts/design-qa/template-import-active.png" });
-
-  // The PDF preview is drawn by the app (pdf.js), not by the browser's own
-  // viewer in a frame, which stayed an empty box where that viewer is missing
-  // (owner report 2026-11-10). It appears only on request, with a caption.
-  await expect(page.getByTestId("template-import-pdf")).toHaveCount(0);
-  await selected.getByRole("button", { name: "Просмотр PDF" }).click();
+  await expect(selected).toContainText("Не сохранён");
+  expect(calls).toEqual(["import"]);
   const pdf = page.getByTestId("template-import-pdf");
-  await expect(pdf).toContainText("Просмотр PDF: так документ выглядит на бланке GMED");
+  await expect(pdf).toContainText("Так будет выглядеть документ");
   await expect(pdf.getByTestId("pdf-pages-preview")).toHaveAttribute("data-state", "ready");
+  // Drawn by the app itself: a frame with the browser's own PDF viewer
+  // stayed an empty box where that viewer is missing (owner report).
   await expect(pdf.locator("iframe")).toHaveCount(0);
-  const firstPage = pdf.locator("canvas").first();
-  await expect(firstPage).toBeInViewport();
-  const inked = await firstPage.evaluate((canvas: HTMLCanvasElement) => {
+  const inked = await pdf.locator("canvas").first().evaluate((canvas: HTMLCanvasElement) => {
     const pixels = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data;
     let dark = 0;
     for (let index = 0; index < pixels.length; index += 4) {
@@ -186,7 +163,36 @@ test("a template is imported, corrected and activated", async ({ page }) => {
     return dark;
   });
   expect(inked).toBeGreaterThan(100);
-  await page.screenshot({ path: "../artifacts/design-qa/template-import-pdf-preview.png" });
-  await pdf.getByRole("button", { name: "Скрыть просмотр" }).click();
-  await expect(page.getByTestId("template-import-pdf")).toHaveCount(0);
+
+  // A file with an unknown field cannot be saved; it is corrected in Word.
+  await expect(selected.getByRole("alert")).toContainText("{{geburtsdatum}}");
+  await expect(dialog.getByRole("button", { name: "Сохранить шаблон" })).toBeDisabled();
+  await page.screenshot({ path: "../artifacts/design-qa/template-import-unknown-variable.png" });
+  await dialog.getByRole("button", { name: "Отменить", exact: true }).click();
+  await expect(page.getByTestId("template-import-selected")).toHaveCount(0);
+  expect(calls).toEqual(["import", "disable"]);
+
+  // The corrected file: two buttons, name it, save.
+  await dialog.locator("#template-import-file").setInputFiles({
+    name: "Bescheinigung.docx",
+    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    buffer: Buffer.from("PK synthetic word file, corrected"),
+  });
+  await expect(selected).toContainText("Не сохранён");
+  await expect(selected.getByRole("alert")).toHaveCount(0);
+  await expect(dialog.locator("#template-import-label")).toHaveValue("Bescheinigung");
+  await dialog.locator("#template-import-label").fill("Bescheinigung Aufenthalt");
+  await expect(pdf.getByTestId("pdf-pages-preview")).toHaveAttribute("data-state", "ready");
+  await dialog.getByRole("button", { name: "Сохранить шаблон" }).click();
+  await expect(selected).toContainText("Активен");
+  await expect(selected).toContainText("Bescheinigung Aufenthalt");
+  await expect(dialog.getByRole("status").filter({ hasText: "Шаблон сохранён" })).toBeVisible();
+  await expect(page.getByTestId("catalog-changes")).toHaveText("1");
+  expect(calls).toEqual(["import", "disable", "import", "update", "activate"]);
+
+  // A saved template: disable it or replace its file, nothing else.
+  await expect(selected.getByRole("button")).toHaveText(["Отключить", "Заменить файлом"]);
+  // The discarded upload is not listed.
+  await expect(dialog.getByRole("listitem").filter({ hasText: "Bescheinigung" })).toHaveCount(1);
+  await page.screenshot({ path: "../artifacts/design-qa/template-import-active.png" });
 });

@@ -310,6 +310,13 @@ jobs:
           docker run --rm --entrypoint sh gmed-backend:ci
           -c 'for lang in deu eng rus ukr; do tesseract --list-langs | grep -qx "$lang"; done'
 
+      # Imported Word templates are converted to PDF by LibreOffice inside
+      # the backend (crates/server/src/docx_render.rs).
+      - name: Smoke test backend Word converter
+        run: >-
+          docker run --rm --entrypoint sh gmed-backend:ci
+          -c 'soffice --headless --version | grep -q LibreOffice'
+
       - name: Build frontend image
         run: docker build --file frontend/Dockerfile --tag gmed-frontend:ci frontend
 

@@ -32,6 +32,8 @@ export type ImportedTemplate = {
   /** A `{{` without its `}}`. */
   unclosed_variable: boolean;
   can_activate: boolean;
+  /** A Word template: printed from its file, as it looks in Word. */
+  exact_layout?: boolean;
 };
 
 export type ImportedTemplateVariable = { key: string; sample: string };
@@ -41,6 +43,8 @@ export type ImportedTemplatesResponse = {
   variables: ImportedTemplateVariable[];
   max_file_bytes: number;
   max_body_chars: number;
+  /** `false`: no LibreOffice on this server, Word templates print as text. */
+  exact_layout_available?: boolean;
 };
 
 const BASE = "/documents/template-imports";
@@ -110,4 +114,34 @@ export function isTemplateImportFileName(name: string) {
 /** The default template name of a chosen file: its name without extension. */
 export function templateLabelFromFileName(name: string) {
   return name.trim().replace(/\.[^.]+$/, "").replace(/[_]+/g, " ").trim();
+}
+
+export type TemplateLine = {
+  kind: "heading" | "center" | "right" | "plain";
+  bold: boolean;
+  text: string;
+};
+
+/**
+ * The formatting marks of a template line, as the server prints them
+ * (`parse_template_line`): `# ` heading, `>< ` centred, `>> ` right-aligned,
+ * a line wrapped in `**` bold.
+ */
+export function parseTemplateLine(raw: string): TemplateLine {
+  const line = raw.trim();
+  let kind: TemplateLine["kind"] = "plain";
+  let rest = line;
+  if (line.startsWith("# ")) [kind, rest] = ["heading", line.slice(2)];
+  else if (line.startsWith(">< ")) [kind, rest] = ["center", line.slice(3)];
+  else if (line.startsWith(">> ")) [kind, rest] = ["right", line.slice(3)];
+  rest = rest.trim();
+  const inner =
+    rest.length > 4 && rest.startsWith("**") && rest.endsWith("**")
+      ? rest.slice(2, -2).trim()
+      : "";
+  return {
+    kind,
+    bold: Boolean(inner) || kind === "heading",
+    text: inner || rest,
+  };
 }

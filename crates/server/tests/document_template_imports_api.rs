@@ -476,3 +476,142 @@ async fn template_import_checks_roles_and_file_types() {
             .unwrap();
     assert_eq!(stored, 0);
 }
+
+fn word_file(document_xml: &str) -> Vec<u8> {
+    use std::io::Write;
+    let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    archive.start_file("[Content_Types].xml", options).unwrap();
+    archive.write_all(b"<Types/>").unwrap();
+    archive.start_file("word/document.xml", options).unwrap();
+    archive.write_all(document_xml.as_bytes()).unwrap();
+    archive.finish().unwrap().into_inner()
+}
+
+/// A Word template keeps its file: the document is printed from it (owner
+/// decision 2026-11-10), so its text is changed in Word, not in the CRM.
+#[tokio::test]
+async fn word_template_keeps_its_file_and_is_generated_from_it() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let (app, pool) = (ctx.app, ctx.pool);
+    let tag = format!("tpl-word-{}", Uuid::new_v4().simple());
+    let ceo_id = seed_user(&pool, &tag, "ceo").await;
+    let ceo = auth_header_for(ceo_id, "ceo");
+    let patient_id = seed_patient(&pool, ceo_id, &tag).await;
+
+    let file = word_file(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="36"/></w:rPr><w:t>Bescheinigung</w:t></w:r></w:p>
+    <w:p><w:r><w:t xml:space="preserve">für {{patient_</w:t></w:r><w:r><w:t>name}}</w:t></w:r></w:p>
+    <w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>
+  </w:body>
+</w:document>"#,
+    );
+    let label = format!("Bescheinigung {tag}");
+    let (status, body) = import(
+        &app,
+        &ceo,
+        &[("label", label.as_str()), ("language", "de")],
+        "bescheinigung.docx",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        &file,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "import body: {body}");
+    let template = &body["template"];
+    let template_id = template["id"].as_str().unwrap().to_string();
+    let public_id = template["public_id"].as_str().unwrap().to_string();
+    assert_eq!(template["exact_layout"], true);
+    assert_eq!(template["can_activate"], true);
+    assert_eq!(template["used_variables"], json!(["patient_name"]));
+    let stored: Vec<u8> =
+        sqlx::query_scalar("SELECT source_docx FROM agency_document_templates WHERE id = $1")
+            .bind(Uuid::parse_str(&template_id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, file);
+
+    // Its name may change; its text is the file.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("{BASE}/{template_id}/update"),
+        &ceo,
+        Some(json!({ "label": format!("{label} neu") })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("{BASE}/{template_id}/update"),
+        &ceo,
+        Some(json!({ "body": "Getippter Text" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let (status, pdf) = request(
+        &app,
+        "GET",
+        &format!("{BASE}/{template_id}/preview"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(pdf.starts_with(b"%PDF"));
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("{BASE}/{template_id}/activate"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "activate body: {body}");
+    let (status, generated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        // A text typed into the dialog never replaces a Word template.
+        Some(json!({
+            "template_id": public_id,
+            "patient_id": patient_id,
+            "manual_text": "Text of another template"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "generate body: {generated}");
+    let (ursprung, manual_text): (String, String) =
+        sqlx::query_as("SELECT ursprung, generated_manual_text FROM documents WHERE id = $1")
+            .bind(Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(ursprung, format!("template:{public_id}"));
+    assert_eq!(
+        manual_text,
+        format!("# Bescheinigung\nfür First {tag} Last {tag}")
+    );
+
+    // A file that is not a Word document is refused, whatever its name.
+    let (status, _) = import(
+        &app,
+        &ceo,
+        &[("language", "de")],
+        "kaputt.docx",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        &word_file("<w:document><w:body><w:p>").as_slice()[..40],
+    )
+    .await;
+    assert_ne!(status, StatusCode::CREATED);
+}

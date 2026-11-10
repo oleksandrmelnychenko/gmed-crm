@@ -18,6 +18,7 @@ pub mod content_disposition;
 pub mod crypto;
 pub mod datev;
 pub mod document_signatures;
+pub(crate) mod docx_render;
 pub mod email_address;
 pub mod email_domain;
 pub mod file_scan;

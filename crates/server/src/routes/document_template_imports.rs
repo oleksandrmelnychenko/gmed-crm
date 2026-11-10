@@ -24,9 +24,9 @@ use axum::{
     routing::{get, post},
 };
 use chrono::{NaiveDate, NaiveTime};
-use quick_xml::Reader;
 use quick_xml::escape::resolve_xml_entity;
-use quick_xml::events::Event;
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::{Reader, XmlVersion};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -262,15 +262,183 @@ fn normalize_template_text(text: &str) -> String {
     lines.join("\n")
 }
 
+// ---------------------------------------------------------------------------
+// Line marks: the little formatting a template keeps
+// ---------------------------------------------------------------------------
+
+/// How a line of a template is printed. The marks are plain text at the
+/// start of a line, so the CEO sees and corrects them in the draft:
+/// `# ` a heading (centred, bold, large), `>< ` centred, `>> ` right-aligned;
+/// a line wrapped in `**` is bold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TemplateLineKind {
+    Heading,
+    Center,
+    Right,
+    Plain,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct TemplateLine<'a> {
+    pub(crate) kind: TemplateLineKind,
+    pub(crate) bold: bool,
+    pub(crate) text: &'a str,
+}
+
+const HEADING_MARK: &str = "# ";
+const CENTER_MARK: &str = ">< ";
+const RIGHT_MARK: &str = ">> ";
+const BOLD_MARK: &str = "**";
+
+pub(crate) fn parse_template_line(line: &str) -> TemplateLine<'_> {
+    let line = line.trim();
+    let (kind, rest) = if let Some(rest) = line.strip_prefix(HEADING_MARK) {
+        (TemplateLineKind::Heading, rest)
+    } else if let Some(rest) = line.strip_prefix(CENTER_MARK) {
+        (TemplateLineKind::Center, rest)
+    } else if let Some(rest) = line.strip_prefix(RIGHT_MARK) {
+        (TemplateLineKind::Right, rest)
+    } else {
+        (TemplateLineKind::Plain, line)
+    };
+    let rest = rest.trim();
+    let bold_text = rest
+        .strip_prefix(BOLD_MARK)
+        .and_then(|inner| inner.strip_suffix(BOLD_MARK))
+        .map(str::trim)
+        .filter(|inner| !inner.is_empty());
+    TemplateLine {
+        kind,
+        bold: bold_text.is_some() || kind == TemplateLineKind::Heading,
+        text: bold_text.unwrap_or(rest),
+    }
+}
+
+/// Whether the text opens with its own heading, so the template name is not
+/// printed above it a second time.
+pub(crate) fn template_text_starts_with_heading(text: &str) -> bool {
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .is_some_and(|line| parse_template_line(line).kind == TemplateLineKind::Heading)
+}
+
+/// What a Word paragraph carries over: its alignment and whether all of its
+/// text is bold or large.
+#[derive(Default)]
+struct DocxParagraph {
+    text: String,
+    align: Option<TemplateLineKind>,
+    heading_style: bool,
+    /// Runs with visible text: (bold, size in half-points).
+    runs: Vec<(bool, Option<u32>)>,
+}
+
+impl DocxParagraph {
+    fn marked_lines(&self) -> String {
+        let all_bold = !self.runs.is_empty() && self.runs.iter().all(|(bold, _)| *bold);
+        let size = self.runs.iter().filter_map(|(_, size)| *size).max();
+        // 14 pt and larger in bold, or a heading style, is a heading.
+        let heading = self.heading_style || (all_bold && size.is_some_and(|size| size >= 28));
+        let prefix = if heading {
+            HEADING_MARK
+        } else {
+            match self.align {
+                Some(TemplateLineKind::Center) => CENTER_MARK,
+                Some(TemplateLineKind::Right) => RIGHT_MARK,
+                _ => "",
+            }
+        };
+        self.text
+            .split('\n')
+            .map(|line| {
+                let line = line.trim();
+                if line.is_empty() {
+                    String::new()
+                } else if all_bold && !heading {
+                    format!("{prefix}{BOLD_MARK}{line}{BOLD_MARK}")
+                } else {
+                    format!("{prefix}{line}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+fn docx_attribute(event: &BytesStart<'_>, name: &str) -> Option<String> {
+    event.attributes().flatten().find_map(|attribute| {
+        if attribute.key.local_name().as_ref() != name {
+            return None;
+        }
+        attribute
+            .normalized_value(XmlVersion::Implicit1_0)
+            .ok()
+            .map(|value| value.into_owned())
+    })
+}
+
+/// `<w:b/>` switches on; `<w:b w:val="0"/>` (or "false") switches off.
+fn docx_toggle_on(event: &BytesStart<'_>) -> bool {
+    !matches!(
+        docx_attribute(event, "val").as_deref(),
+        Some("0" | "false" | "off")
+    )
+}
+
+/// The run being read: whether it is bold, its size and whether it has text.
+#[derive(Default)]
+struct DocxRun {
+    open: bool,
+    bold: bool,
+    size: Option<u32>,
+    has_text: bool,
+}
+
+/// The paragraph and run properties the import keeps.
+fn docx_property(
+    event: &BytesStart<'_>,
+    paragraph: &mut DocxParagraph,
+    in_paragraph_properties: bool,
+    run: &mut DocxRun,
+) {
+    match event.local_name().as_ref() {
+        "jc" if in_paragraph_properties => {
+            paragraph.align = match docx_attribute(event, "val").as_deref() {
+                Some("center") => Some(TemplateLineKind::Center),
+                Some("right" | "end") => Some(TemplateLineKind::Right),
+                _ => None,
+            };
+        }
+        "pStyle" if in_paragraph_properties => {
+            let style = docx_attribute(event, "val")
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            paragraph.heading_style = style == "title" || style.starts_with("heading");
+        }
+        // The paragraph mark has run properties of its own: only a run counts.
+        "b" if run.open && !in_paragraph_properties => run.bold = docx_toggle_on(event),
+        "sz" if run.open && !in_paragraph_properties => {
+            run.size = docx_attribute(event, "val").and_then(|value| value.parse().ok());
+        }
+        _ => {}
+    }
+}
+
 /// The text of `word/document.xml`: one line per paragraph, in reading
-/// order. Formatting, tables' borders, images, headers and footers are not
-/// carried over; a table cell is a line of its own.
+/// order. Of the formatting only headings, bold paragraphs and the centred
+/// or right alignment are kept (as line marks); tables' borders, fonts,
+/// images, headers and footers are not carried over, and a table cell is a
+/// line of its own.
 fn docx_xml_to_text(xml: &str) -> Result<String, &'static str> {
     const INVALID: &str = "The Word file could not be read";
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(false);
     let mut out = String::new();
+    let mut paragraph = DocxParagraph::default();
+    let mut run = DocxRun::default();
     let mut in_text = false;
+    let mut in_paragraph_properties = false;
     let mut events = 0usize;
     loop {
         events += 1;
@@ -278,37 +446,65 @@ fn docx_xml_to_text(xml: &str) -> Result<String, &'static str> {
             return Err("The Word file is too large");
         }
         match reader.read_event() {
-            Ok(Event::Start(event)) => match event.local_name().as_ref() {
-                "t" => in_text = true,
-                "tab" => out.push(' '),
-                "br" | "cr" => out.push('\n'),
-                _ => {}
-            },
-            Ok(Event::Empty(event)) => match event.local_name().as_ref() {
-                "tab" => out.push(' '),
-                "br" | "cr" => out.push('\n'),
-                // An empty paragraph is an empty line.
-                "p" => out.push('\n'),
-                _ => {}
-            },
+            Ok(Event::Start(event)) => {
+                match event.local_name().as_ref() {
+                    "p" => paragraph = DocxParagraph::default(),
+                    "pPr" => in_paragraph_properties = true,
+                    "r" => {
+                        run = DocxRun {
+                            open: true,
+                            ..DocxRun::default()
+                        }
+                    }
+                    "t" => in_text = true,
+                    _ => {}
+                }
+                docx_property(&event, &mut paragraph, in_paragraph_properties, &mut run);
+            }
+            Ok(Event::Empty(event)) => {
+                match event.local_name().as_ref() {
+                    "tab" => paragraph.text.push(' '),
+                    "br" | "cr" => paragraph.text.push('\n'),
+                    // An empty paragraph is an empty line.
+                    "p" => out.push('\n'),
+                    _ => {}
+                }
+                docx_property(&event, &mut paragraph, in_paragraph_properties, &mut run);
+            }
             Ok(Event::End(event)) => match event.local_name().as_ref() {
                 "t" => in_text = false,
-                "p" => out.push('\n'),
+                "pPr" => in_paragraph_properties = false,
+                "r" => {
+                    if run.has_text {
+                        paragraph.runs.push((run.bold, run.size));
+                    }
+                    run = DocxRun::default();
+                }
+                "p" => {
+                    out.push_str(&paragraph.marked_lines());
+                    out.push('\n');
+                    paragraph = DocxParagraph::default();
+                }
                 _ => {}
             },
             Ok(Event::Text(text)) => {
                 if in_text {
-                    out.push_str(&text.xml10_content());
+                    let text = text.xml10_content();
+                    run.has_text |= !text.trim().is_empty();
+                    paragraph.text.push_str(&text);
                 }
             }
             Ok(Event::GeneralRef(reference)) => {
                 if in_text {
+                    run.has_text = true;
                     if reference.is_char_ref() {
                         if let Ok(Some(character)) = reference.resolve_char_ref() {
-                            out.push(character);
+                            paragraph.text.push(character);
                         }
                     } else {
-                        out.push_str(resolve_xml_entity(&reference).ok_or(INVALID)?);
+                        paragraph
+                            .text
+                            .push_str(resolve_xml_entity(&reference).ok_or(INVALID)?);
                     }
                 }
             }
@@ -434,6 +630,7 @@ const TEMPLATE_SELECT: &str = r#"
     SELECT t.id, t.family_id, t.version_number, t.label, t.description, t.language,
            t.body, t.status, t.source_filename, t.created_at, t.updated_at,
            t.activated_at, t.disabled_at,
+           (t.source_docx IS NOT NULL) AS exact_layout,
            creator.name AS created_by_name,
            activator.name AS activated_by_name
     FROM agency_document_templates t
@@ -472,6 +669,8 @@ fn template_json(row: &sqlx::postgres::PgRow) -> Value {
         "unknown_variables": check.unknown,
         "unclosed_variable": check.unclosed,
         "can_activate": check.is_clean(),
+        // A Word template is printed from its file, as it looks in Word.
+        "exact_layout": row.try_get::<bool, _>("exact_layout").unwrap_or(false),
         "body": body,
     })
 }
@@ -540,6 +739,23 @@ pub(crate) struct RenderedAgencyTemplate {
     pub(crate) language: String,
     pub(crate) text: String,
     pub(crate) patient_name: String,
+    /// The template's Word file with the data filled in and the page set
+    /// for the letterhead; `None` for a text template.
+    pub(crate) docx: Option<Vec<u8>>,
+}
+
+/// The Word file of a template made ready for printing: the letterhead's
+/// page and the variables replaced by `values`.
+fn prepared_docx(
+    source: &[u8],
+    values: &BTreeMap<&str, String>,
+) -> Result<Vec<u8>, axum::response::Response> {
+    crate::docx_render::prepare_docx(
+        source,
+        super::documents::AGENCY_TEMPLATE_PAGE_FRAME,
+        Some(&|text: &str| render_body(text, values)),
+    )
+    .map_err(|message| err(StatusCode::UNPROCESSABLE_ENTITY, message))
 }
 
 fn format_date(value: Option<NaiveDate>) -> String {
@@ -566,7 +782,7 @@ pub(crate) async fn render_for_generation(
     appointment_id: Option<Uuid>,
 ) -> Result<RenderedAgencyTemplate, axum::response::Response> {
     let template = sqlx::query(
-        r#"SELECT id, label, language, body
+        r#"SELECT id, label, language, body, source_docx
            FROM agency_document_templates
            WHERE id = $1 AND status = 'active'"#,
     )
@@ -680,12 +896,17 @@ pub(crate) async fn render_for_generation(
     values.insert("today", format_date(Some(crate::app_time::today())));
 
     let body: String = template.get("body");
+    let docx = match template.get::<Option<Vec<u8>>, _>("source_docx") {
+        Some(source) => Some(prepared_docx(&source, &values)?),
+        None => None,
+    };
     Ok(RenderedAgencyTemplate {
         public_id: public_id(template.get::<Uuid, _>("id")),
         label: template.get("label"),
         language: template.get("language"),
         text: render_body(&body, &values),
         patient_name,
+        docx,
     })
 }
 
@@ -716,6 +937,9 @@ async fn list_templates(
         "variables": variables_json(),
         "max_file_bytes": MAX_TEMPLATE_FILE_BYTES,
         "max_body_chars": MAX_TEMPLATE_BODY_CHARS,
+        // Without LibreOffice (a developer's stack) a Word template prints
+        // as text on the letterhead instead of looking as in Word.
+        "exact_layout_available": crate::docx_render::converter_available().await,
     }))
     .into_response()
 }
@@ -800,6 +1024,16 @@ async fn import_template(
         Ok(value) => value,
         Err((status, message)) => return err(status, message),
     };
+    // A Word file is kept: the document is printed from it, as it looks in
+    // Word. It has to survive the preparation every print repeats.
+    let source_docx = if extension_of(file_name.as_deref()).as_deref() == Some("docx") {
+        if let Err(response) = prepared_docx(&bytes, &sample_values()) {
+            return response;
+        }
+        Some(bytes.clone())
+    } else {
+        None
+    };
     match scan_upload_bytes(file_name.as_deref(), &bytes).await {
         Ok(_) => {}
         Err(message) if message == crate::file_scan::MALWARE_FOUND => {
@@ -872,8 +1106,8 @@ async fn import_template(
     if let Err(error) = sqlx::query(
         r#"INSERT INTO agency_document_templates (
                 id, family_id, version_number, label, description, language, body,
-                status, source_filename, source_sha256, created_by, updated_by
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'draft', $8, $9, $10, $10)"#,
+                status, source_filename, source_sha256, created_by, updated_by, source_docx
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'draft', $8, $9, $10, $10, $11)"#,
     )
     .bind(template_id)
     .bind(family_id)
@@ -885,6 +1119,7 @@ async fn import_template(
     .bind(&source_filename)
     .bind(&source_sha256)
     .bind(auth.user_id)
+    .bind(&source_docx)
     .execute(&mut *tx)
     .await
     {
@@ -961,7 +1196,8 @@ async fn update_template(
         Err(error) => return db_error("begin agency template update", error),
     };
     let current = match sqlx::query(
-        r#"SELECT label, description, language, body, status
+        r#"SELECT label, description, language, body, status,
+                  (source_docx IS NOT NULL) AS exact_layout
            FROM agency_document_templates
            WHERE id = $1
            FOR UPDATE"#,
@@ -1008,6 +1244,14 @@ async fn update_template(
             let value = normalize_template_text(value);
             if let Err(message) = validate_body(&value) {
                 return err(StatusCode::UNPROCESSABLE_ENTITY, message);
+            }
+            // The text of a Word template is its file: it is changed in
+            // Word and uploaded again, not typed over here.
+            if value != old_body && current.get::<bool, _>("exact_layout") {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Change the Word file and upload it again",
+                );
             }
             value
         }
@@ -1073,10 +1317,12 @@ async fn preview_template(
     if let Err(resp) = auth.require_any_role(TEMPLATE_ROLES) {
         return resp;
     }
-    let row = match sqlx::query("SELECT label, body FROM agency_document_templates WHERE id = $1")
-        .bind(template_id)
-        .fetch_optional(&state.db)
-        .await
+    let row = match sqlx::query(
+        "SELECT label, body, source_docx FROM agency_document_templates WHERE id = $1",
+    )
+    .bind(template_id)
+    .fetch_optional(&state.db)
+    .await
     {
         Ok(Some(row)) => row,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Template not found"),
@@ -1084,11 +1330,22 @@ async fn preview_template(
     };
     let label: String = row.get("label");
     let body: String = row.get("body");
-    let text = render_body(&body, &sample_values());
-    let pdf = match super::documents::agency_template_preview_pdf(&state, &label, &text).await {
-        Ok(bytes) => bytes,
-        Err(resp) => return resp,
+    let samples = sample_values();
+    let text = render_body(&body, &samples);
+    let docx = match row.get::<Option<Vec<u8>>, _>("source_docx") {
+        Some(source) => match prepared_docx(&source, &samples) {
+            Ok(prepared) => Some(prepared),
+            Err(response) => return response,
+        },
+        None => None,
     };
+    let pdf =
+        match super::documents::agency_template_preview_pdf(&state, &label, &text, docx.as_deref())
+            .await
+        {
+            Ok(bytes) => bytes,
+            Err(resp) => return resp,
+        };
     (
         [
             (
@@ -1335,6 +1592,72 @@ mod tests {
         let check = check_variables(&text);
         assert_eq!(check.used, vec!["patient_name", "birth_date"]);
         assert!(check.is_clean());
+    }
+
+    /// The owner's sample of 2026-11-10: a centred bold 18 pt title, a date
+    /// against the right margin, body paragraphs, one bold and one centred.
+    #[test]
+    fn docx_keeps_heading_bold_and_alignment_as_line_marks() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:pPr><w:jc w:val="center"/><w:rPr><w:b/><w:sz w:val="36"/></w:rPr></w:pPr>
+      <w:r><w:rPr><w:b/><w:bCs/><w:sz w:val="36"/></w:rPr><w:t>Lorem</w:t></w:r>
+      <w:r><w:rPr><w:b/><w:sz w:val="36"/></w:rPr><w:t xml:space="preserve"> ipsum</w:t></w:r>
+    </w:p>
+    <w:p><w:pPr><w:jc w:val="right"/></w:pPr><w:r><w:t>Date: 00.00.0000</w:t></w:r></w:p>
+    <w:p><w:pPr><w:rPr><w:b/></w:rPr></w:pPr></w:p>
+    <w:p><w:r><w:t>Plain text</w:t></w:r></w:p>
+    <w:p><w:r><w:rPr><w:b/></w:rPr><w:t>All bold</w:t></w:r></w:p>
+    <w:p><w:r><w:rPr><w:b w:val="0"/></w:rPr><w:t>Bold switched off</w:t></w:r></w:p>
+    <w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Half</w:t></w:r><w:r><w:t xml:space="preserve"> bold</w:t></w:r></w:p>
+    <w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Centred bold</w:t></w:r></w:p>
+    <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Styled heading</w:t></w:r></w:p>
+  </w:body>
+</w:document>"#;
+        let text = template_text_from_file(Some("sample.docx"), None, &docx_with(xml)).unwrap();
+        assert_eq!(
+            text,
+            "# Lorem ipsum\n>> Date: 00.00.0000\n\nPlain text\n**All bold**\nBold switched off\n\
+             Half bold\n>< **Centred bold**\n# Styled heading"
+        );
+        assert!(template_text_starts_with_heading(&text));
+        assert!(!template_text_starts_with_heading("Text\n# Later heading"));
+    }
+
+    #[test]
+    fn line_marks_are_parsed() {
+        let line = |kind, bold, text| TemplateLine { kind, bold, text };
+        assert_eq!(
+            parse_template_line("# Titel"),
+            line(TemplateLineKind::Heading, true, "Titel")
+        );
+        assert_eq!(
+            parse_template_line(">> Datum: {{today}}"),
+            line(TemplateLineKind::Right, false, "Datum: {{today}}")
+        );
+        assert_eq!(
+            parse_template_line(">< **Mitte**"),
+            line(TemplateLineKind::Center, true, "Mitte")
+        );
+        assert_eq!(
+            parse_template_line("**Fett**"),
+            line(TemplateLineKind::Plain, true, "Fett")
+        );
+        // Not marks: no space after the sign, bold only inside the line, an
+        // empty bold pair.
+        assert_eq!(
+            parse_template_line("#1 Nummer"),
+            line(TemplateLineKind::Plain, false, "#1 Nummer")
+        );
+        assert_eq!(
+            parse_template_line("Ein **Wort** fett"),
+            line(TemplateLineKind::Plain, false, "Ein **Wort** fett")
+        );
+        assert_eq!(
+            parse_template_line("****"),
+            line(TemplateLineKind::Plain, false, "****")
+        );
     }
 
     #[test]

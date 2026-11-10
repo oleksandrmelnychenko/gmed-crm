@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isTemplateImportFileName,
+  parseTemplateLine,
   templateLabelFromFileName,
 } from "../data/template-import-api";
 import {
@@ -89,5 +90,25 @@ describe("template import file", () => {
       "Bescheinigung Aufenthalt",
     );
     expect(templateLabelFromFileName(" brief.v2.txt ")).toBe("brief.v2");
+  });
+});
+
+describe("template line marks", () => {
+  it("mirror the server's marks", () => {
+    expect(parseTemplateLine("# Titel")).toEqual({ kind: "heading", bold: true, text: "Titel" });
+    expect(parseTemplateLine(">> Datum: {{today}}")).toEqual({
+      kind: "right",
+      bold: false,
+      text: "Datum: {{today}}",
+    });
+    expect(parseTemplateLine(">< **Mitte**")).toEqual({ kind: "center", bold: true, text: "Mitte" });
+    expect(parseTemplateLine("**Fett**")).toEqual({ kind: "plain", bold: true, text: "Fett" });
+    expect(parseTemplateLine("#1 Nummer")).toEqual({ kind: "plain", bold: false, text: "#1 Nummer" });
+    expect(parseTemplateLine("Ein **Wort** fett")).toEqual({
+      kind: "plain",
+      bold: false,
+      text: "Ein **Wort** fett",
+    });
+    expect(parseTemplateLine("****")).toEqual({ kind: "plain", bold: false, text: "****" });
   });
 });

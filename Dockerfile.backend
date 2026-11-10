@@ -50,6 +50,11 @@ RUN echo "security-refresh=${DEBIAN_SECURITY_REFRESH}" >/dev/null \
         clamav \
         clamav-freshclam \
         curl \
+        fonts-crosextra-caladea \
+        fonts-crosextra-carlito \
+        fonts-dejavu-core \
+        fonts-liberation2 \
+        libreoffice-writer-nogui \
         openssl \
         poppler-utils \
         tesseract-ocr \

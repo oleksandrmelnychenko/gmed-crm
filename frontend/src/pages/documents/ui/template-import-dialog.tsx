@@ -7,17 +7,22 @@ import {
   type ChangeEvent,
   type ReactNode,
 } from "react";
-import { FileInput, Files, Braces, ChevronDown, FilePenLine, FileText, RefreshCw, CircleAlert, CircleCheck, Eye, FileUp, LoaderCircle } from "lucide-react";
+import {
+  Braces,
+  ChevronDown,
+  CircleAlert,
+  FileInput,
+  FilePenLine,
+  Files,
+  FileText,
+  LoaderCircle,
+  RefreshCw,
+} from "lucide-react";
 
 import { AdminDialogScaffold, AdminFormSection } from "@/components/admin-dialog-scaffold";
-import {
-  inputClass,
-  selectClass,
-  textareaClass,
-} from "@/components/ui-shell";
+import { inputClass } from "@/components/ui-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { FilePicker } from "@/components/ui/file-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,22 +48,18 @@ import {
 import { PdfPagesPreview } from "./pdf-pages-preview";
 
 /**
- * Import of the agency's own document templates on the documents page (owner
- * request 2026-11-10): choose a Word or text file, see the variable check
- * and the preview, activate it — then it is offered in "generate from
- * template". The built-in legal templates are not replaced here.
+ * Import of the agency's own document templates on the documents page.
+ *
+ * The owner's wish of 2026-11-10: "I write something in Word, upload it and
+ * it simply looks like that, plus the frames at the top and the bottom." So
+ * the dialog is: choose the file → see the finished page on the GMED
+ * letterhead → save. The fields that fill in patient data (`{{…}}`) stay
+ * possible but out of the way, in a collapsed block.
  */
 
-const TEMPLATE_LANGUAGES = ["de", "en", "uk", "ru"] as const;
+const FILE_INPUT_ID = "template-import-file";
 
-const LANGUAGE_LABELS: Record<string, { de: string; ru: string }> = {
-  de: { de: "Deutsch", ru: "Немецкий" },
-  en: { de: "Englisch", ru: "Английский" },
-  uk: { de: "Ukrainisch", ru: "Украинский" },
-  ru: { de: "Russisch", ru: "Русский" },
-};
-
-/** What each `{{variable}}` stands for; keys mirror the server catalog. */
+/** What each `{{field}}` stands for; keys mirror the server catalog. */
 const VARIABLE_LABELS: Record<string, { de: string; ru: string }> = {
   patient_id: { de: "Patientennummer", ru: "Номер пациента" },
   patient_name: { de: "Vor- und Nachname", ru: "Имя и фамилия" },
@@ -86,91 +87,65 @@ function texts(lang: Lang) {
   const ru = lang === "ru";
   return {
     title: ru ? "Импорт шаблона" : "Vorlage importieren",
+    file: ru ? "Файл Word" : "Word-Datei",
     intro: ru
-      ? "На бланк GMED переносится текст без таблиц, шрифтов и изображений."
-      : "Der Text erscheint auf dem GMED-Briefbogen, ohne Tabellen, Schriftformatierung und Bilder.",
-    legalNote: ru
-      ? "Импорт создаёт отдельный шаблон. Встроенные договоры, согласия, формы GwG и сметы сохраняются."
-      : "Der Import erstellt eine eigene Vorlage. Integrierte Verträge, Einwilligungen, GwG-Formulare und Kostenvoranschläge bleiben erhalten.",
-    file: ru ? "Файл шаблона" : "Vorlagendatei",
-    name: ru ? "Название шаблона" : "Name der Vorlage",
-    description: ru ? "Описание" : "Beschreibung",
-    language: ru ? "Язык шаблона" : "Sprache der Vorlage",
-    importAction: ru ? "Импортировать" : "Importieren",
-    importing: ru ? "Импорт…" : "Import…",
-    newVersionOf: ru ? "Новая версия шаблона" : "Neue Version der Vorlage",
-    cancelNewVersion: ru ? "Отменить" : "Abbrechen",
+      ? "Выберите файл Word (.docx). Документ будет выглядеть как в Word; сверху и снизу добавятся шапка и подвал GMED."
+      : "Wählen Sie eine Word-Datei (.docx). Das Dokument sieht aus wie in Word; oben und unten kommen Kopf- und Fußzeile von GMED hinzu.",
+    replacing: ru ? "Новый файл для шаблона" : "Neue Datei für die Vorlage",
+    cancelReplace: ru ? "Отменить" : "Abbrechen",
+    uploading: ru ? "Файл загружается…" : "Die Datei wird hochgeladen…",
     wrongFile: ru
       ? "Подходит только файл Word (.docx) или текстовый файл (.txt)."
       : "Nur eine Word-Datei (.docx) oder Textdatei (.txt) ist möglich.",
-    chooseFile: ru ? "Выберите файл шаблона." : "Wählen Sie eine Vorlagendatei.",
-    list: ru ? "Импортированные шаблоны" : "Importierte Vorlagen",
-    empty: ru ? "Импортированных шаблонов пока нет." : "Noch keine importierten Vorlagen.",
-    loadFailed: ru ? "Не удалось загрузить шаблоны." : "Vorlagen konnten nicht geladen werden.",
-    retry: ru ? "Повторить" : "Erneut laden",
-    importFailed: ru ? "Не удалось импортировать файл." : "Die Datei konnte nicht importiert werden.",
-    saveFailed: ru ? "Не удалось сохранить изменения." : "Die Änderungen konnten nicht gespeichert werden.",
-    activateFailed: ru ? "Не удалось активировать шаблон." : "Die Vorlage konnte nicht aktiviert werden.",
-    disableFailed: ru ? "Не удалось отключить шаблон." : "Die Vorlage konnte nicht deaktiviert werden.",
-    previewFailed: ru ? "Не удалось открыть предпросмотр PDF." : "Die PDF-Vorschau konnte nicht geöffnet werden.",
-    version: ru ? "версия" : "Version",
-    status: {
-      draft: ru ? "Черновик" : "Entwurf",
-      active: ru ? "Активен" : "Aktiv",
-      disabled: ru ? "Отключён" : "Deaktiviert",
-    },
-    open: ru ? "Открыть" : "Öffnen",
-    checkOk: ru
-      ? "Переменные проверены: все известны."
-      : "Variablen geprüft: alle bekannt.",
-    checkNone: ru
-      ? "В тексте нет переменных — документ будет одинаковым для всех пациентов."
-      : "Der Text enthält keine Variablen – das Dokument ist für alle Patienten gleich.",
+    name: ru ? "Название шаблона" : "Name der Vorlage",
+    preview: ru ? "Так будет выглядеть документ" : "So sieht das Dokument aus",
+    previewLoading: ru ? "Готовим просмотр…" : "Die Vorschau wird erstellt…",
+    previewFailed: ru
+      ? "Не удалось показать документ."
+      : "Das Dokument konnte nicht angezeigt werden.",
+    pdfPage: ru ? "Страница" : "Seite",
     unknown: ru
-      ? "Неизвестные переменные — исправьте их в тексте, иначе шаблон нельзя активировать:"
-      : "Unbekannte Variablen – bitte im Text korrigieren, sonst kann die Vorlage nicht aktiviert werden:",
+      ? "В файле есть неизвестные поля. Исправьте их в Word и загрузите файл снова:"
+      : "Die Datei enthält unbekannte Felder. Korrigieren Sie sie in Word und laden Sie die Datei erneut hoch:",
     unclosed: ru
-      ? "В тексте есть «{{» без закрывающих «}}»."
-      : "Im Text steht ein „{{“ ohne schließendes „}}“.",
-    used: ru ? "Используются" : "Verwendet",
-    text: ru ? "Текст шаблона" : "Text der Vorlage",
-    textReadOnly: ru
-      ? "Текст активированной версии не меняется. Чтобы изменить его, загрузите новую версию."
-      : "Der Text einer aktivierten Version wird nicht geändert. Laden Sie dafür eine neue Version hoch.",
-    saveText: ru ? "Сохранить изменения" : "Änderungen speichern",
-    saved: ru ? "Изменения сохранены." : "Änderungen gespeichert.",
-    sample: ru ? "Пример с тестовыми данными" : "Beispiel mit Testdaten",
-    pdfPreview: ru ? "Просмотр PDF" : "PDF-Vorschau",
-    pdfPreviewCaption: ru
-      ? "Просмотр PDF: так документ выглядит на бланке GMED (с тестовыми данными)"
-      : "PDF-Vorschau: so sieht das Dokument auf dem GMED-Briefbogen aus (mit Testdaten)",
-    hidePdfPreview: ru ? "Скрыть просмотр" : "Vorschau ausblenden",
-    pdfPage: ru ? "PDF, страница" : "PDF, Seite",
-    activate: ru ? "Активировать" : "Aktivieren",
-    activateHint: ru
-      ? "После активации шаблон появится в «Сгенерировать из шаблона»."
-      : "Nach der Aktivierung erscheint die Vorlage unter „Aus Vorlage generieren“.",
-    activated: ru
-      ? "Шаблон активирован и доступен в «Сгенерировать из шаблона»."
-      : "Die Vorlage ist aktiviert und unter „Aus Vorlage generieren“ verfügbar.",
+      ? "В файле есть «{{» без закрывающих «}}». Исправьте в Word и загрузите файл снова."
+      : "Die Datei enthält ein „{{“ ohne schließendes „}}“. Korrigieren Sie es in Word und laden Sie die Datei erneut hoch.",
+    textOnly: ru
+      ? "На этом сервере нет LibreOffice, поэтому документ показан упрощённо: только текст на бланке."
+      : "Auf diesem Server fehlt LibreOffice, daher wird das Dokument vereinfacht gezeigt: nur Text auf dem Briefbogen.",
+    save: ru ? "Сохранить шаблон" : "Vorlage speichern",
+    saving: ru ? "Сохраняем…" : "Wird gespeichert…",
+    discard: ru ? "Отменить" : "Verwerfen",
     disable: ru ? "Отключить" : "Deaktivieren",
-    discard: ru ? "Удалить черновик" : "Entwurf verwerfen",
+    enable: ru ? "Включить снова" : "Wieder aktivieren",
+    replace: ru ? "Заменить файлом" : "Datei ersetzen",
+    close: ru ? "Закрыть" : "Schließen",
+    saved: ru
+      ? "Шаблон сохранён и доступен в «Сгенерировать из шаблона»."
+      : "Die Vorlage ist gespeichert und unter „Aus Vorlage generieren“ verfügbar.",
+    discarded: ru ? "Файл не сохранён." : "Die Datei wurde nicht gespeichert.",
     disabledNotice: ru
       ? "Шаблон отключён. Уже созданные документы не изменились."
       : "Die Vorlage ist deaktiviert. Bereits erzeugte Dokumente bleiben unverändert.",
-    uploadNewVersion: ru ? "Загрузить новую версию" : "Neue Version hochladen",
-    imported: ru
-      ? "Файл импортирован как черновик. Проверьте переменные и просмотр, затем активируйте."
-      : "Die Datei wurde als Entwurf importiert. Prüfen Sie Variablen und Vorschau und aktivieren Sie dann.",
-    unsaved: ru
-      ? "Сначала сохраните изменения текста."
-      : "Speichern Sie zuerst die Textänderungen.",
-    variables: ru ? "Доступные переменные" : "Verfügbare Variablen",
+    list: ru ? "Сохранённые шаблоны" : "Gespeicherte Vorlagen",
+    empty: ru ? "Шаблонов пока нет." : "Noch keine Vorlagen.",
+    loadFailed: ru ? "Не удалось загрузить шаблоны." : "Vorlagen konnten nicht geladen werden.",
+    retry: ru ? "Повторить" : "Erneut laden",
+    importFailed: ru ? "Не удалось загрузить файл." : "Die Datei konnte nicht hochgeladen werden.",
+    saveFailed: ru ? "Не удалось сохранить шаблон." : "Die Vorlage konnte nicht gespeichert werden.",
+    disableFailed: ru ? "Не удалось отключить шаблон." : "Die Vorlage konnte nicht deaktiviert werden.",
+    version: ru ? "версия" : "Version",
+    status: {
+      draft: ru ? "Не сохранён" : "Nicht gespeichert",
+      active: ru ? "Активен" : "Aktiv",
+      disabled: ru ? "Отключён" : "Deaktiviert",
+    },
+    variables: ru
+      ? "Автоподстановка данных пациента (необязательно)"
+      : "Patientendaten automatisch einsetzen (optional)",
     variablesHint: ru
-      ? "Пишите переменную в тексте в двойных фигурных скобках, например {{patient_name}}."
-      : "Schreiben Sie die Variable im Text in doppelten geschweiften Klammern, z. B. {{patient_name}}.",
-    close: ru ? "Закрыть" : "Schließen",
-    importedBy: ru ? "Импортировал(а)" : "Importiert von",
+      ? "Если в документе нужно имя пациента, дата или номер заказа, напишите в Word поле в двойных фигурных скобках, например {{patient_name}}. При создании документа оно заменится данными."
+      : "Wenn das Dokument den Namen des Patienten, ein Datum oder die Auftragsnummer braucht, schreiben Sie in Word ein Feld in doppelten geschweiften Klammern, z. B. {{patient_name}}. Beim Erzeugen wird es durch die Daten ersetzt.",
   };
 }
 
@@ -215,7 +190,7 @@ export function TemplateImportDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** An activation or a disabling changed what "generate from template" offers. */
+  /** A saved or disabled template changed what "generate from template" offers. */
   onCatalogChanged: () => void;
 }) {
   const { lang } = useLang();
@@ -224,69 +199,65 @@ export function TemplateImportDialog({
 
   const [templates, setTemplates] = useState<ImportedTemplate[]>([]);
   const [variables, setVariables] = useState<ImportedTemplateVariable[]>([]);
+  const [exactLayoutAvailable, setExactLayoutAvailable] = useState(true);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState("");
   const listRequest = useRef(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"" | "upload" | "save" | "other">("");
 
-  const [file, setFile] = useState<File | null>(null);
-  const [label, setLabel] = useState("");
-  const [description, setDescription] = useState("");
-  const [templateLanguage, setTemplateLanguage] = useState<string>("de");
-  const [newVersionOf, setNewVersionOf] = useState<ImportedTemplate | null>(null);
-
+  /** The saved template a newly chosen file replaces (a new version of it). */
+  const [replaceTarget, setReplaceTarget] = useState<ImportedTemplate | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [draftBody, setDraftBody] = useState("");
   const [draftLabel, setDraftLabel] = useState("");
   const [previewPdf, setPreviewPdf] = useState<ArrayBuffer | null>(null);
-  const previewRef = useRef<HTMLDivElement>(null);
+  const [previewState, setPreviewState] = useState<"idle" | "loading" | "failed">("idle");
+  const previewRequest = useRef(0);
 
   const selected = templates.find((template) => template.id === selectedId) ?? null;
-  const dirty = Boolean(
-    selected &&
-      selected.status === "draft" &&
-      (draftBody !== selected.body || draftLabel.trim() !== selected.label),
-  );
 
-  const dropPreview = useCallback(() => {
+  const loadPreview = useCallback(async (templateId: string | null) => {
+    const request = ++previewRequest.current;
     setPreviewPdf(null);
+    if (!templateId) {
+      setPreviewState("idle");
+      return;
+    }
+    setPreviewState("loading");
+    try {
+      const pdf = await fetchImportedTemplatePreviewPdf(templateId);
+      if (request !== previewRequest.current) return;
+      setPreviewPdf(pdf);
+      setPreviewState("idle");
+    } catch {
+      if (request === previewRequest.current) setPreviewState("failed");
+    }
   }, []);
 
   const select = useCallback(
     (template: ImportedTemplate | null) => {
-      dropPreview();
       setSelectedId(template?.id ?? null);
-      setDraftBody(template?.body ?? "");
       setDraftLabel(template?.label ?? "");
+      void loadPreview(template?.id ?? null);
     },
-    [dropPreview],
-  );
-
-  const applyTemplate = useCallback(
-    (template: ImportedTemplate) => {
-      setTemplates((current) =>
-        current.some((item) => item.id === template.id)
-          ? current.map((item) => (item.id === template.id ? template : item))
-          : [template, ...current],
-      );
-      select(template);
-    },
-    [select],
+    [loadPreview],
   );
 
   const reload = useCallback(async () => {
     const request = ++listRequest.current;
-    setLoading(true);
     setListError("");
+    setLoading(true);
     try {
       const response = await fetchImportedTemplates();
       if (request !== listRequest.current) return;
       setTemplates(response.templates);
       setVariables(response.variables);
+      setExactLayoutAvailable(response.exact_layout_available !== false);
     } catch (nextError) {
-      if (request === listRequest.current) setListError(errorMessage(nextError, texts(lang).loadFailed));
+      if (request === listRequest.current) {
+        setListError(errorMessage(nextError, texts(lang).loadFailed));
+      }
     } finally {
       if (request === listRequest.current) setLoading(false);
     }
@@ -296,130 +267,99 @@ export function TemplateImportDialog({
     if (!open) return;
     setError("");
     setNotice("");
-    setFile(null);
-    setLabel("");
-    setDescription("");
-    setNewVersionOf(null);
+    setReplaceTarget(null);
     select(null);
     void reload();
-    return () => { listRequest.current += 1; };
+    return () => {
+      listRequest.current += 1;
+    };
   }, [open, reload, select]);
 
-
-  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const next = event.target.files?.[0] ?? null;
-    setError("");
-    if (next && !isTemplateImportFileName(next.name)) {
-      setFile(null);
-      setError(tx.wrongFile);
-      return;
-    }
-    setFile(next);
-    if (next && !label.trim() && !newVersionOf) {
-      setLabel(templateLabelFromFileName(next.name));
-    }
-  }
-
-  async function run(failureMessage: string, action: () => Promise<void>) {
-    setBusy(true);
+  async function run(kind: "upload" | "save" | "other", failure: string, action: () => Promise<void>) {
+    setBusy(kind);
     setError("");
     setNotice("");
     try {
       await action();
     } catch (nextError) {
-      setError(errorMessage(nextError, failureMessage));
+      setError(errorMessage(nextError, failure));
     } finally {
-      setBusy(false);
+      setBusy("");
     }
   }
 
-  function handleImport() {
-    if (!file) {
-      setError(tx.chooseFile);
+  /** Choosing a file uploads it at once and shows how the document will look. */
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = "";
+    if (!file) return;
+    if (!isTemplateImportFileName(file.name)) {
+      setNotice("");
+      setError(tx.wrongFile);
       return;
     }
-    void run(tx.importFailed, async () => {
+    const target = replaceTarget;
+    void run("upload", tx.importFailed, async () => {
       const response = await importTemplateFile({
         file,
-        label,
-        description,
-        language: templateLanguage,
-        familyId: newVersionOf?.family_id ?? null,
+        label: target ? "" : templateLabelFromFileName(file.name),
+        description: "",
+        language: target?.language ?? "de",
+        familyId: target?.family_id ?? null,
       });
-      applyTemplate(response.template);
-      setFile(null);
-      setLabel("");
-      setDescription("");
-      setNewVersionOf(null);
-      setNotice(tx.imported);
+      setReplaceTarget(null);
+      setTemplates((current) => [response.template, ...current]);
+      select(response.template);
     });
   }
 
   function handleSave() {
     if (!selected) return;
-    void run(tx.saveFailed, async () => {
-      const response = await updateImportedTemplate(selected.id, {
-        label: draftLabel,
-        body: draftBody,
-      });
-      applyTemplate(response.template);
-      setNotice(tx.saved);
-    });
-  }
-
-  function handleActivate() {
-    if (!selected) return;
-    if (dirty) {
-      setError(tx.unsaved);
-      return;
-    }
-    void run(tx.activateFailed, async () => {
-      const response = await activateImportedTemplate(selected.id);
-      applyTemplate(response.template);
+    void run("save", tx.saveFailed, async () => {
+      const label = draftLabel.trim();
+      if (selected.status === "draft" && label && label !== selected.label) {
+        await updateImportedTemplate(selected.id, { label });
+      }
+      await activateImportedTemplate(selected.id);
       // The version that was active before steps back: reload the list.
       await reload();
       onCatalogChanged();
-      setNotice(tx.activated);
+      setNotice(tx.saved);
     });
   }
 
   function handleDisable() {
     if (!selected) return;
-    void run(tx.disableFailed, async () => {
-      const response = await disableImportedTemplate(selected.id);
-      applyTemplate(response.template);
-      onCatalogChanged();
-      setNotice(tx.disabledNotice);
+    const wasDraft = selected.status === "draft";
+    void run("other", tx.disableFailed, async () => {
+      await disableImportedTemplate(selected.id);
+      await reload();
+      if (wasDraft) {
+        select(null);
+        setNotice(tx.discarded);
+      } else {
+        onCatalogChanged();
+        setNotice(tx.disabledNotice);
+      }
     });
   }
 
-  function handlePdfPreview() {
+  function handleReplace() {
     if (!selected) return;
-    if (dirty) {
-      setError(tx.unsaved);
-      return;
-    }
-    void run(tx.previewFailed, async () => {
-      dropPreview();
-      setPreviewPdf(await fetchImportedTemplatePreviewPdf(selected.id));
-      // The preview opens below the buttons: bring it into view.
-      window.requestAnimationFrame(() =>
-        previewRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
-      );
-    });
-  }
-
-  function startNewVersion(template: ImportedTemplate) {
-    setNewVersionOf(template);
-    setLabel("");
-    setTemplateLanguage(template.language);
-    setFile(null);
+    setReplaceTarget(selected);
     setError("");
     setNotice("");
+    document.getElementById(FILE_INPUT_ID)?.click();
   }
 
   const variableLabel = (key: string) => VARIABLE_LABELS[key]?.[language] ?? key;
-  const languageLabel = (code: string) => LANGUAGE_LABELS[code]?.[language] ?? code;
+  const fieldsBroken = Boolean(
+    selected && (selected.unknown_variables.length > 0 || selected.unclosed_variable),
+  );
+  // A discarded draft is of no further use: the list shows what was saved.
+  const listed = templates.filter(
+    (template) => template.status !== "disabled" || template.activated_at || template.id === selectedId,
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -427,18 +367,29 @@ export function TemplateImportDialog({
         icon={FileInput}
         title={tx.title}
         testId="template-import-dialog"
-        maxWidthClassName="sm:w-[calc(100vw-2rem)] sm:max-w-2xl"
+        maxWidthClassName="sm:w-[calc(100vw-2rem)] sm:max-w-3xl"
         footer={(
           <div className="flex flex-wrap justify-end gap-2 px-4 py-2.5">
-            <Button type="button" size="sm" variant="outline" onClick={() => onOpenChange(false)}>
-              {tx.close}
-            </Button>
-            {!selected || file || newVersionOf ? (
-              <Button type="button" size="sm" onClick={handleImport} disabled={busy || !file}>
-                {busy ? <LoaderCircle className="animate-spin" /> : <FileUp />}
-                {busy ? tx.importing : tx.importAction}
+            {selected?.status === "draft" ? (
+              <>
+                <Button type="button" size="sm" variant="outline" onClick={handleDisable} disabled={Boolean(busy)}>
+                  {tx.discard}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleSave}
+                  disabled={Boolean(busy) || !selected.can_activate || !draftLabel.trim()}
+                >
+                  {busy === "save" ? <LoaderCircle className="animate-spin" /> : null}
+                  {busy === "save" ? tx.saving : tx.save}
+                </Button>
+              </>
+            ) : (
+              <Button type="button" size="sm" variant="outline" onClick={() => onOpenChange(false)}>
+                {tx.close}
               </Button>
-            ) : null}
+            )}
           </div>
         )}
       >
@@ -446,82 +397,37 @@ export function TemplateImportDialog({
         {notice ? <Notice tone="success">{notice}</Notice> : null}
 
         <AdminFormSection icon={FileText} title={tx.file}>
-          {newVersionOf ? (
+          {replaceTarget ? (
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
               <span>
-                <span className="text-muted-foreground">{tx.newVersionOf}: </span>
-                <span className="font-medium">{newVersionOf.label}</span>
+                <span className="text-muted-foreground">{tx.replacing}: </span>
+                <span className="font-medium">{replaceTarget.label}</span>
               </span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setNewVersionOf(null)}
-              >
-                {tx.cancelNewVersion}
+              <Button type="button" variant="ghost" size="sm" onClick={() => setReplaceTarget(null)}>
+                {tx.cancelReplace}
               </Button>
             </div>
           ) : null}
-          <div className="space-y-1.5">
-            <FilePicker
-              id="template-import-file"
-              aria-label={tx.file}
-              accept={TEMPLATE_IMPORT_ACCEPT}
-              selected={file}
-              emptyLabel=".docx, .txt"
-              onChange={handleFileChange}
-              disabled={busy}
-              className="rounded-lg border border-dashed border-border bg-muted/30 p-2 [&_[data-slot=file-picker-selection]]:text-xs"
-              buttonClassName="h-8"
-            />
-            <p className="text-xs leading-5 text-muted-foreground">{tx.intro}</p>
-          </div>
-          <div className="grid gap-x-3 gap-y-2.5 sm:grid-cols-2">
-            {!newVersionOf ? (
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="template-import-label" className={fieldLabelClass}>
-                  {tx.name}
-                </Label>
-                <Input
-                  id="template-import-label"
-                  value={label}
-                  maxLength={200}
-                  onChange={(event) => setLabel(event.target.value)}
-                  className={inputClass}
-                />
-              </div>
-            ) : null}
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="template-import-language" className={fieldLabelClass}>
-                {tx.language}
-              </Label>
-              <NativeComboboxSelect
-                id="template-import-language"
-                value={templateLanguage}
-                onChange={(event) => setTemplateLanguage(event.target.value)}
-                className={selectClass}
-              >
-                {TEMPLATE_LANGUAGES.map((code) => (
-                  <option key={code} value={code}>
-                    {languageLabel(code)}
-                  </option>
-                ))}
-              </NativeComboboxSelect>
-            </div>
-            <div className="flex flex-col gap-1.5 sm:col-span-2">
-              <Label htmlFor="template-import-description" className={fieldLabelClass}>
-                {tx.description}
-              </Label>
-              <Input
-                id="template-import-description"
-                value={description}
-                maxLength={1000}
-                onChange={(event) => setDescription(event.target.value)}
-                className={inputClass}
-              />
-            </div>
-          </div>
-          <p className="border-t border-border/60 pt-2 text-xs leading-5 text-muted-foreground">{tx.legalNote}</p>
+          <FilePicker
+            id={FILE_INPUT_ID}
+            aria-label={tx.file}
+            accept={TEMPLATE_IMPORT_ACCEPT}
+            showSelection={false}
+            onChange={handleFileChange}
+            disabled={Boolean(busy)}
+            className="rounded-lg border border-dashed border-border bg-muted/30 p-2"
+            buttonClassName="h-8"
+          />
+          <p className="text-xs leading-5 text-muted-foreground">
+            {busy === "upload" ? (
+              <span role="status" className="inline-flex items-center gap-2">
+                <LoaderCircle className="size-3.5 animate-spin" />
+                {tx.uploading}
+              </span>
+            ) : (
+              tx.intro
+            )}
+          </p>
         </AdminFormSection>
 
         {selected ? (
@@ -533,12 +439,9 @@ export function TemplateImportDialog({
               <div className="min-w-0">
                 <h3><SectionHeading icon={FilePenLine}>{selected.label}</SectionHeading></h3>
                 <p className="text-xs text-muted-foreground">
-                  {tx.version} {selected.version_number} · {languageLabel(selected.language)}
+                  {tx.version} {selected.version_number}
                   {selected.source_filename ? ` · ${selected.source_filename}` : ""}
-                  {selected.created_by_name
-                    ? ` · ${tx.importedBy}: ${selected.created_by_name}`
-                    : ""}
-                  {selected.created_at ? `, ${formatAppDateTime(selected.created_at)}` : ""}
+                  {selected.created_at ? ` · ${formatAppDateTime(selected.created_at)}` : ""}
                 </p>
               </div>
               <Badge variant="outline" className={statusTone(selected.status)}>
@@ -546,7 +449,7 @@ export function TemplateImportDialog({
               </Badge>
             </div>
 
-            {selected.unknown_variables.length > 0 || selected.unclosed_variable ? (
+            {fieldsBroken ? (
               <Notice tone="error">
                 <span className="flex items-start gap-2">
                   <CircleAlert className="mt-0.5 size-4 shrink-0" />
@@ -565,30 +468,18 @@ export function TemplateImportDialog({
                   </span>
                 </span>
               </Notice>
-            ) : (
-              <Notice tone="success">
-                <span className="flex items-start gap-2">
-                  <CircleCheck className="mt-0.5 size-4 shrink-0" />
-                  <span>
-                    {selected.used_variables.length > 0 ? tx.checkOk : tx.checkNone}
-                    {selected.used_variables.length > 0 ? (
-                      <span className="block text-xs">
-                        {tx.used}:{" "}
-                        {selected.used_variables.map(variableLabel).join(", ")}
-                      </span>
-                    ) : null}
-                  </span>
-                </span>
-              </Notice>
-            )}
+            ) : null}
+            {selected.exact_layout && !exactLayoutAvailable ? (
+              <Notice tone="warning">{tx.textOnly}</Notice>
+            ) : null}
 
             {selected.status === "draft" ? (
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="template-import-draft-label" className={fieldLabelClass}>
+                <Label htmlFor="template-import-label" className={fieldLabelClass}>
                   {tx.name}
                 </Label>
                 <Input
-                  id="template-import-draft-label"
+                  id="template-import-label"
                   value={draftLabel}
                   maxLength={200}
                   onChange={(event) => setDraftLabel(event.target.value)}
@@ -596,82 +487,50 @@ export function TemplateImportDialog({
                 />
               </div>
             ) : null}
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="template-import-body" className={fieldLabelClass}>
-                {tx.text}
-              </Label>
-              <textarea
-                id="template-import-body"
-                value={draftBody}
-                readOnly={selected.status !== "draft"}
-                onChange={(event) => setDraftBody(event.target.value)}
-                className={cn(textareaClass, "min-h-[220px] font-mono text-[12.5px] leading-relaxed")}
-              />
-              {selected.status !== "draft" ? (
-                <p className="text-xs text-muted-foreground">{tx.textReadOnly}</p>
-              ) : null}
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <span className={fieldLabelClass}>{tx.sample}</span>
-              <div
-                className="max-h-[260px] overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm"
-                data-testid="template-import-sample"
-              >
-                {selected.preview_text}
-              </div>
-            </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              {selected.status === "draft" ? (
-                <Button type="button" variant="outline" onClick={handleSave} disabled={busy || !dirty}>
-                  {tx.saveText}
-                </Button>
-              ) : null}
-              <Button type="button" variant="outline" onClick={handlePdfPreview} disabled={busy} className="gap-1.5">
-                <Eye className="size-3.5" />
-                {tx.pdfPreview}
-              </Button>
-              {selected.status !== "active" ? (
-                <Button
-                  type="button"
-                  onClick={handleActivate}
-                  disabled={busy || !selected.can_activate}
-                  title={tx.activateHint}
-                >
-                  {tx.activate}
-                </Button>
-              ) : null}
-              {selected.status !== "disabled" ? (
-                <Button type="button" variant="ghost" onClick={handleDisable} disabled={busy}>
-                  {selected.status === "draft" ? tx.discard : tx.disable}
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => startNewVersion(selected)}
-                disabled={busy}
-              >
-                {tx.uploadNewVersion}
-              </Button>
-            </div>
-            {selected.status !== "active" ? (
-              <p className="text-xs text-muted-foreground">{tx.activateHint}</p>
-            ) : null}
-            {previewPdf ? (
-              <div ref={previewRef} className="space-y-1.5" data-testid="template-import-pdf">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className={fieldLabelClass}>{tx.pdfPreviewCaption}</span>
-                  <Button type="button" variant="ghost" size="sm" onClick={dropPreview}>
-                    {tx.hidePdfPreview}
-                  </Button>
-                </div>
+            <div className="space-y-1.5" data-testid="template-import-pdf">
+              <span className={fieldLabelClass}>{tx.preview}</span>
+              {previewPdf ? (
                 <PdfPagesPreview
                   data={previewPdf}
                   pageLabel={tx.pdfPage}
                   failedLabel={tx.previewFailed}
-                  className="max-h-[min(640px,60dvh)] overflow-y-auto rounded-lg border border-border bg-muted/40 p-3"
+                  className="max-h-[min(720px,62dvh)] overflow-y-auto rounded-lg border border-border bg-muted/40 p-3"
                 />
+              ) : (
+                <div className="rounded-lg border border-border bg-muted/40 px-3 py-8 text-center text-sm text-muted-foreground">
+                  {previewState === "failed" ? (
+                    <span role="alert" className="text-rose-700">{tx.previewFailed}</span>
+                  ) : (
+                    <span role="status" className="inline-flex items-center gap-2">
+                      <LoaderCircle className="size-4 animate-spin" />
+                      {tx.previewLoading}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {selected.status !== "draft" ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {selected.status === "active" ? (
+                  <Button type="button" size="sm" variant="outline" onClick={handleDisable} disabled={Boolean(busy)}>
+                    {tx.disable}
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleSave}
+                    disabled={Boolean(busy) || !selected.can_activate}
+                  >
+                    {tx.enable}
+                  </Button>
+                )}
+                <Button type="button" size="sm" variant="outline" onClick={handleReplace} disabled={Boolean(busy)}>
+                  {tx.replace}
+                </Button>
               </div>
             ) : null}
           </section>
@@ -685,47 +544,40 @@ export function TemplateImportDialog({
                 <RefreshCw />{tx.retry}
               </Button>
             </div>
-          ) : loading ? (
+          ) : loading && listed.length === 0 ? (
             <p role="status" className="text-muted-foreground">
               <LoaderCircle className="size-4 animate-spin" />
             </p>
-          ) : templates.length === 0 ? (
+          ) : listed.length === 0 ? (
             <p className="text-xs leading-5 text-muted-foreground">{tx.empty}</p>
           ) : null}
-          {templates.length > 0 ? (
+          {listed.length > 0 ? (
             <ul className="divide-y divide-border/60">
-              {templates.map((template) => (
-                <li
-                  key={template.id}
-                  className={cn(
-                    "flex flex-wrap items-center justify-between gap-2 rounded-md px-2 py-2 text-sm",
-                    template.id === selectedId ? "bg-muted/50" : "",
-                  )}
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate font-medium">{template.label}</span>
-                    <span className="block text-xs text-muted-foreground">
-                      {tx.version} {template.version_number} · {languageLabel(template.language)}
-                      {template.created_at ? ` · ${formatAppDateTime(template.created_at)}` : ""}
+              {listed.map((template) => (
+                <li key={template.id}>
+                  <button
+                    type="button"
+                    className={cn(
+                      "flex w-full flex-wrap items-center justify-between gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted/50",
+                      template.id === selectedId ? "bg-muted/50" : "",
+                    )}
+                    onClick={() => {
+                      setError("");
+                      setNotice("");
+                      select(template);
+                    }}
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium">{template.label}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        {tx.version} {template.version_number}
+                        {template.created_at ? ` · ${formatAppDateTime(template.created_at)}` : ""}
+                      </span>
                     </span>
-                  </span>
-                  <span className="flex items-center gap-2">
                     <Badge variant="outline" className={statusTone(template.status)}>
                       {tx.status[template.status]}
                     </Badge>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setError("");
-                        setNotice("");
-                        select(template);
-                      }}
-                    >
-                      {tx.open}
-                    </Button>
-                  </span>
+                  </button>
                 </li>
               ))}
             </ul>
