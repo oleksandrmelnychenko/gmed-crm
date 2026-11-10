@@ -731,6 +731,14 @@ pub(crate) async fn catalog_entries(state: &AppState) -> Result<Vec<Value>, sqlx
 // Generation
 // ---------------------------------------------------------------------------
 
+/// Whom a document is generated for: a patient, or a lead that is not a
+/// patient yet.
+#[derive(Clone, Copy)]
+pub(crate) enum TemplateSubject {
+    Patient(Uuid),
+    Lead(Uuid),
+}
+
 /// An active template filled with the data of the patient, order and
 /// appointment a document is generated for.
 pub(crate) struct RenderedAgencyTemplate {
@@ -777,7 +785,7 @@ fn text_column(row: &sqlx::postgres::PgRow, column: &str) -> String {
 pub(crate) async fn render_for_generation(
     state: &AppState,
     template_id: Uuid,
-    patient_id: Uuid,
+    subject: TemplateSubject,
     order_id: Option<Uuid>,
     appointment_id: Option<Uuid>,
 ) -> Result<RenderedAgencyTemplate, axum::response::Response> {
@@ -797,18 +805,38 @@ pub(crate) async fn render_for_generation(
         )
     })?;
 
-    let patient = sqlx::query(
-        r#"SELECT patient_id, title, first_name, last_name, birth_date,
-                  address_street, address_zip, address_city, address_country,
-                  email, phone_primary
-           FROM patients
-           WHERE id = $1"#,
-    )
-    .bind(patient_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|error| db_error("load agency template patient", error))?
-    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Patient not found"))?;
+    // A lead answers under the same field names as a patient (owner request
+    // 2026-11-11): its request number stands for the patient number, as in
+    // the other documents generated for a lead.
+    let patient = match subject {
+        TemplateSubject::Patient(patient_id) => sqlx::query(
+            r#"SELECT patient_id, title, first_name, last_name, birth_date,
+                      address_street, address_zip, address_city, address_country,
+                      email, phone_primary
+               FROM patients
+               WHERE id = $1"#,
+        )
+        .bind(patient_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|error| db_error("load agency template patient", error))?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "Patient not found"))?,
+        TemplateSubject::Lead(lead_id) => sqlx::query(
+            r#"SELECT 'LEAD-' || upper(left(replace(id::text, '-', ''), 8)) AS patient_id,
+                      NULL::text AS title, first_name, last_name,
+                      date_of_birth AS birth_date,
+                      street_address AS address_street, zip_code AS address_zip,
+                      city AS address_city, country AS address_country,
+                      email, phone AS phone_primary
+               FROM leads
+               WHERE id = $1 AND converted_patient_id IS NULL"#,
+        )
+        .bind(lead_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|error| db_error("load agency template lead", error))?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "Lead not found"))?,
+    };
 
     let first_name = text_column(&patient, "first_name");
     let last_name = text_column(&patient, "last_name");

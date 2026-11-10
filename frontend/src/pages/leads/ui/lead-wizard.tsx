@@ -254,6 +254,7 @@ import { staffRecordedLabel } from "../model/lead-portal-consents";
 import { LeadCustodySelect } from "./lead-custody-select";
 import { LeadGwgSheetActions, gwgSheetBusyKey } from "./lead-gwg-sheet-actions";
 import { LeadPayerDeclarationSection, LeadPayerSignatureFlow } from "./lead-payer-section";
+import { LeadTemplateDocument } from "./lead-template-document";
 import { createPayerAutosaveRegistry } from "../model/lead-payer-autosave";
 import { LANGUAGE_OPTIONS, englishLanguageName, languageLabel } from "@/components/ui/language-multi-select";
 import {
@@ -11283,6 +11284,14 @@ ${serviceCommentLines.join("\n")}`
                 })()}
               </Section>
               </div>
+              {leadId ? (
+                <LeadTemplateDocument
+                  leadId={leadId}
+                  lang={lang}
+                  disabled={isBusy}
+                  onGenerated={() => { void refreshDocumentsState(); }}
+                />
+              ) : null}
               {supplementaryDocuments.length > 0 ? (
                 <Section icon={FolderArchive} className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Другие документы", "Weitere Dokumente")}>
                   <WizardDocumentRows

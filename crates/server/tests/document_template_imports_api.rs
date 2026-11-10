@@ -615,3 +615,94 @@ async fn word_template_keeps_its_file_and_is_generated_from_it() {
     .await;
     assert_ne!(status, StatusCode::CREATED);
 }
+
+/// An imported template is generated for a lead that is not a patient yet
+/// (owner request 2026-11-11), with the lead's own data; a typed free
+/// document stays for patients.
+#[tokio::test]
+async fn imported_template_is_generated_for_a_lead() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let (app, pool) = (ctx.app, ctx.pool);
+    let tag = format!("tpl-lead-{}", Uuid::new_v4().simple());
+    let ceo_id = seed_user(&pool, &tag, "ceo").await;
+    let ceo = auth_header_for(ceo_id, "ceo");
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, date_of_birth, email, city, created_by)
+           VALUES ($1, $2, '1985-12-24', $3, 'Wien', $4)
+           RETURNING id"#,
+    )
+    .bind(format!("Lead {tag}"))
+    .bind("Beispiel")
+    .bind(format!("{tag}@example.com"))
+    .bind(ceo_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = import(
+        &app,
+        &ceo,
+        &[("label", "Anschreiben"), ("language", "de")],
+        "anschreiben.txt",
+        "text/plain",
+        "Guten Tag {{patient_name}}, geboren am {{birth_date}}, aus {{patient_city}} ({{patient_id}})."
+            .as_bytes(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "import body: {body}");
+    let template_id = body["template"]["id"].as_str().unwrap().to_string();
+    let public_id = body["template"]["public_id"].as_str().unwrap().to_string();
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("{BASE}/{template_id}/activate"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, generated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        Some(json!({ "template_id": public_id, "lead_id": lead_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "generate body: {generated}");
+    let (document_lead, patient, manual_text): (Option<Uuid>, Option<Uuid>, String) =
+        sqlx::query_as(
+            "SELECT lead_id, patient_id, generated_manual_text FROM documents WHERE id = $1",
+        )
+        .bind(Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(document_lead, Some(lead_id));
+    assert_eq!(patient, None);
+    let lead_number = format!("LEAD-{}", lead_id.simple().to_string()[..8].to_uppercase());
+    assert_eq!(
+        manual_text,
+        format!("Guten Tag Lead {tag} Beispiel, geboren am 24.12.1985, aus Wien ({lead_number}).")
+    );
+
+    // Typing a free document for a lead is still refused, also when the
+    // request names an imported template as its source.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        Some(json!({
+            "template_id": "free_text_document",
+            "lead_id": lead_id,
+            "manual_text": "Freier Text",
+            "ursprung": format!("template:{public_id}")
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}

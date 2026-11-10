@@ -3188,6 +3188,11 @@ struct GenerateDocumentRequest {
     /// [`generate_document`], never read from a body.
     #[serde(skip)]
     agency_template_docx: Option<Vec<u8>>,
+    /// The request was made from an imported agency template: a lead may
+    /// get such a document, while a typed "Freies Dokument" stays for
+    /// patients. Set only by [`generate_document`].
+    #[serde(skip)]
+    from_agency_template: bool,
 }
 
 /// Optional manual binding fields ("yellow sockets") for the generated
@@ -16982,17 +16987,12 @@ async fn generate_document(
     if let Some(agency_template_id) =
         super::document_template_imports::parse_public_id(&body.template_id)
     {
-        if body.lead_id.is_some() {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "Imported templates require a patient context",
-            );
-        }
-        let (resolved_patient_id, _, resolved_order_id, resolved_appointment_id) =
+        use super::document_template_imports::TemplateSubject;
+        let (resolved_patient_id, resolved_lead_id, resolved_order_id, resolved_appointment_id) =
             match validate_document_context(
                 &state,
                 body.patient_id,
-                None,
+                body.lead_id,
                 body.order_id,
                 body.appointment_id,
             )
@@ -17001,21 +17001,29 @@ async fn generate_document(
                 Ok(value) => value,
                 Err(resp) => return resp,
             };
-        let Some(resolved_patient_id) = resolved_patient_id else {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "Generated documents must be linked to a patient",
-            );
+        // For a patient, or for a lead that is not a patient yet (owner
+        // request 2026-11-11).
+        let subject = match (resolved_patient_id, resolved_lead_id) {
+            (Some(patient_id), _) => {
+                if let Err(resp) =
+                    require_generated_document_patient_access(&state, &auth, patient_id).await
+                {
+                    return resp;
+                }
+                TemplateSubject::Patient(patient_id)
+            }
+            (None, Some(lead_id)) => TemplateSubject::Lead(lead_id),
+            (None, None) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Generated documents must be linked to a patient or lead",
+                );
+            }
         };
-        if let Err(resp) =
-            require_generated_document_patient_access(&state, &auth, resolved_patient_id).await
-        {
-            return resp;
-        }
         let rendered = match super::document_template_imports::render_for_generation(
             &state,
             agency_template_id,
-            resolved_patient_id,
+            subject,
             resolved_order_id,
             resolved_appointment_id,
         )
@@ -17034,6 +17042,7 @@ async fn generate_document(
             body.manual_text = Some(rendered.text);
         }
         body.agency_template_docx = rendered.docx;
+        body.from_agency_template = true;
         if is_blank(&body.title_override) {
             body.title_override = Some(rendered.label.clone());
         }
@@ -17194,7 +17203,10 @@ async fn generate_document(
         return resp;
     }
 
-    if lead_id.is_some() && !is_lead_allowed_document_template(template.id) {
+    if lead_id.is_some()
+        && !is_lead_allowed_document_template(template.id)
+        && !body.from_agency_template
+    {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "This template is only available after patient conversion",
@@ -18210,7 +18222,7 @@ async fn generate_document(
                     Ok(value) => value,
                     Err(response) => return response,
                 };
-                if is_agency_template_source(body.ursprung.as_deref()) {
+                if body.from_agency_template {
                     match agency_template_pdf(
                         &agency,
                         &title,
@@ -21263,17 +21275,6 @@ fn build_agency_template_document_pdf(
         }
     }
     Ok(finalize_admin_pdf(document, layout))
-}
-
-/// Whether a generated free document was made from an imported agency
-/// template: `generate_document` names the template version in the source.
-fn is_agency_template_source(ursprung: Option<&str>) -> bool {
-    ursprung.is_some_and(|value| {
-        value
-            .trim()
-            .strip_prefix("template:")
-            .is_some_and(|id| super::document_template_imports::parse_public_id(id).is_some())
-    })
 }
 
 /// The room the GMED letterhead leaves for a page's own content: a Word
@@ -39597,11 +39598,10 @@ mod tests {
         document_satisfies_compliance_kind, document_template_by_id, finalize_admin_pdf,
         generated_binding_snapshot, generated_cost_estimate_document_number,
         generated_document_number_for_template, generated_order_reference,
-        generated_typed_document_number, german_document_country, is_agency_template_source,
-        is_fixed_legal_document_template, is_lead_allowed_document_template,
-        is_structured_generated_document_template, legal_agency_block_lines,
-        legal_document_reference, localized_estimate_work_type_sections, new_admin_pdf,
-        parse_document_ocr_max_concurrency, parse_document_ocr_timeout_seconds,
+        generated_typed_document_number, german_document_country, is_fixed_legal_document_template,
+        is_lead_allowed_document_template, is_structured_generated_document_template,
+        legal_agency_block_lines, legal_document_reference, localized_estimate_work_type_sections,
+        new_admin_pdf, parse_document_ocr_max_concurrency, parse_document_ocr_timeout_seconds,
         patient_sticker_agency_line, pdf_mm_to_pt, resolve_cost_estimate_lines,
         single_order_scope_points, tesseract_input_extension, valid_tesseract_language_spec,
     };
@@ -40832,14 +40832,6 @@ mod tests {
         .unwrap();
         let extracted = assert_legal_pdf_chrome(&bytes, "ADMIN-20261110-UNITTEST0003");
         assert!(extracted.contains("Name der Vorlage"));
-
-        assert!(is_agency_template_source(Some(
-            "template:agency_template:5b0c2f0e-3d0b-4c58-9a51-0f6f1f3b7a11"
-        )));
-        assert!(!is_agency_template_source(Some(
-            "template:free_text_document"
-        )));
-        assert!(!is_agency_template_source(None));
     }
 
     #[test]
