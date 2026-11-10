@@ -30,7 +30,7 @@ import { cn } from "@/lib/utils";
 import {
   TEMPLATE_IMPORT_ACCEPT,
   activateImportedTemplate,
-  createImportedTemplatePreviewUrl,
+  fetchImportedTemplatePreviewPdf,
   disableImportedTemplate,
   fetchImportedTemplates,
   importTemplateFile,
@@ -40,6 +40,7 @@ import {
   type ImportedTemplate,
   type ImportedTemplateVariable,
 } from "../data/template-import-api";
+import { PdfPagesPreview } from "./pdf-pages-preview";
 
 /**
  * Import of the agency's own document templates on the documents page (owner
@@ -140,6 +141,11 @@ function texts(lang: Lang) {
     saved: ru ? "Изменения сохранены." : "Änderungen gespeichert.",
     sample: ru ? "Пример с тестовыми данными" : "Beispiel mit Testdaten",
     pdfPreview: ru ? "Просмотр PDF" : "PDF-Vorschau",
+    pdfPreviewCaption: ru
+      ? "Просмотр PDF: так документ выглядит на бланке GMED (с тестовыми данными)"
+      : "PDF-Vorschau: so sieht das Dokument auf dem GMED-Briefbogen aus (mit Testdaten)",
+    hidePdfPreview: ru ? "Скрыть просмотр" : "Vorschau ausblenden",
+    pdfPage: ru ? "PDF, страница" : "PDF, Seite",
     activate: ru ? "Активировать" : "Aktivieren",
     activateHint: ru
       ? "После активации шаблон появится в «Сгенерировать из шаблона»."
@@ -234,8 +240,8 @@ export function TemplateImportDialog({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftBody, setDraftBody] = useState("");
   const [draftLabel, setDraftLabel] = useState("");
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const previewUrlRef = useRef<string | null>(null);
+  const [previewPdf, setPreviewPdf] = useState<ArrayBuffer | null>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
 
   const selected = templates.find((template) => template.id === selectedId) ?? null;
   const dirty = Boolean(
@@ -245,9 +251,7 @@ export function TemplateImportDialog({
   );
 
   const dropPreview = useCallback(() => {
-    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
-    previewUrlRef.current = null;
-    setPreviewUrl(null);
+    setPreviewPdf(null);
   }, []);
 
   const select = useCallback(
@@ -301,7 +305,6 @@ export function TemplateImportDialog({
     return () => { listRequest.current += 1; };
   }, [open, reload, select]);
 
-  useEffect(() => dropPreview, [dropPreview]);
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const next = event.target.files?.[0] ?? null;
@@ -398,9 +401,11 @@ export function TemplateImportDialog({
     }
     void run(tx.previewFailed, async () => {
       dropPreview();
-      const url = await createImportedTemplatePreviewUrl(selected.id);
-      previewUrlRef.current = url;
-      setPreviewUrl(url);
+      setPreviewPdf(await fetchImportedTemplatePreviewPdf(selected.id));
+      // The preview opens below the buttons: bring it into view.
+      window.requestAnimationFrame(() =>
+        previewRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+      );
     });
   }
 
@@ -653,12 +658,21 @@ export function TemplateImportDialog({
             {selected.status !== "active" ? (
               <p className="text-xs text-muted-foreground">{tx.activateHint}</p>
             ) : null}
-            {previewUrl ? (
-              <iframe
-                title={tx.pdfPreview}
-                src={previewUrl}
-                className="h-[min(560px,55dvh)] w-full rounded-lg border border-border bg-white"
-              />
+            {previewPdf ? (
+              <div ref={previewRef} className="space-y-1.5" data-testid="template-import-pdf">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className={fieldLabelClass}>{tx.pdfPreviewCaption}</span>
+                  <Button type="button" variant="ghost" size="sm" onClick={dropPreview}>
+                    {tx.hidePdfPreview}
+                  </Button>
+                </div>
+                <PdfPagesPreview
+                  data={previewPdf}
+                  pageLabel={tx.pdfPage}
+                  failedLabel={tx.previewFailed}
+                  className="max-h-[min(640px,60dvh)] overflow-y-auto rounded-lg border border-border bg-muted/40 p-3"
+                />
+              </div>
             ) : null}
           </section>
         ) : null}

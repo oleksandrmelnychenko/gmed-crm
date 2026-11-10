@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
 
 // Import of an agency document template (owner request 2026-11-10): the
 // dialog of the documents page against a mocked API that checks variables
@@ -75,6 +76,12 @@ test("a template is imported, corrected and activated", async ({ page }) => {
       };
       templates.push(template);
       return route.fulfill({ status: 201, json: { template: describeTemplate(template) } });
+    }
+    if (path.endsWith("/preview")) {
+      return route.fulfill({
+        contentType: "application/pdf",
+        body: readFileSync("tests/e2e/fixtures/signature-preview.pdf"),
+      });
     }
     const action = path.match(/template-imports\/([^/]+)\/(update|activate|disable)$/);
     if (action) {
@@ -158,4 +165,28 @@ test("a template is imported, corrected and activated", async ({ page }) => {
   await expect(selected.locator("#template-import-body")).not.toBeEditable();
   expect(calls).toEqual(["import", "update", "activate"]);
   await page.screenshot({ path: "../artifacts/design-qa/template-import-active.png" });
+
+  // The PDF preview is drawn by the app (pdf.js), not by the browser's own
+  // viewer in a frame, which stayed an empty box where that viewer is missing
+  // (owner report 2026-11-10). It appears only on request, with a caption.
+  await expect(page.getByTestId("template-import-pdf")).toHaveCount(0);
+  await selected.getByRole("button", { name: "Просмотр PDF" }).click();
+  const pdf = page.getByTestId("template-import-pdf");
+  await expect(pdf).toContainText("Просмотр PDF: так документ выглядит на бланке GMED");
+  await expect(pdf.getByTestId("pdf-pages-preview")).toHaveAttribute("data-state", "ready");
+  await expect(pdf.locator("iframe")).toHaveCount(0);
+  const firstPage = pdf.locator("canvas").first();
+  await expect(firstPage).toBeInViewport();
+  const inked = await firstPage.evaluate((canvas: HTMLCanvasElement) => {
+    const pixels = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data;
+    let dark = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+      if (pixels[index] + pixels[index + 1] + pixels[index + 2] < 600) dark += 1;
+    }
+    return dark;
+  });
+  expect(inked).toBeGreaterThan(100);
+  await page.screenshot({ path: "../artifacts/design-qa/template-import-pdf-preview.png" });
+  await pdf.getByRole("button", { name: "Скрыть просмотр" }).click();
+  await expect(page.getByTestId("template-import-pdf")).toHaveCount(0);
 });

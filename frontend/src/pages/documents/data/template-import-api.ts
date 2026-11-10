@@ -93,12 +93,10 @@ export function disableImportedTemplate(id: string) {
   });
 }
 
-/** The template as a PDF with sample data; the caller revokes the URL. */
-export async function createImportedTemplatePreviewUrl(id: string) {
+/** The template as a PDF with sample data: its bytes, drawn by the app. */
+export async function fetchImportedTemplatePreviewPdf(id: string) {
   const { blob } = await apiFetchFile(`${BASE}/${id}/preview`, { cache: "no-store" });
-  return URL.createObjectURL(
-    blob.type === "application/pdf" ? blob : new Blob([blob], { type: "application/pdf" }),
-  );
+  return blob.arrayBuffer();
 }
 
 export const TEMPLATE_IMPORT_ACCEPT =
