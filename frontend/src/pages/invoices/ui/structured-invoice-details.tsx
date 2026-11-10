@@ -1,3 +1,5 @@
+import { FileCode2, Percent } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Banner } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { formatRecognizedMoney } from "@/lib/money";
@@ -9,7 +11,7 @@ export function StructuredInvoiceDetails({ preview, labels }: { preview: Invoice
   const warnings = preview.warnings;
   return <>
     {preview.structured ? <div className="space-y-1 rounded-lg border bg-muted/30 p-3 text-xs">
-      <p className="font-medium">{tx("Реквизиты прочитаны из XML", "Angaben aus XML gelesen")} · {preview.structured.syntax.toUpperCase()}{preview.source_format === "embedded_xml" ? tx(" · вложение PDF", " · PDF-Anhang") : ""}</p>
+      <h4><SectionHeading icon={FileCode2}>{tx("Реквизиты прочитаны из XML", "Angaben aus XML gelesen")} · {preview.structured.syntax.toUpperCase()}{preview.source_format === "embedded_xml" ? tx(" · вложение PDF", " · PDF-Anhang") : ""}</SectionHeading></h4>
       <p>{tx("Сверьте реквизиты и получателя с оригиналом перед сохранением.", "Angaben und Empfänger vor dem Speichern mit dem Original abgleichen.")}</p>
       {preview.recipient?.name ? <p>{tx("Получатель счёта", "Rechnungsempfänger")}: {preview.recipient.name}</p> : null}
     </div> : null}
@@ -22,6 +24,6 @@ export function StructuredInvoiceDetails({ preview, labels }: { preview: Invoice
     {warnings.includes("multiple_embedded_invoices") || warnings.includes("embedded_xml_unreadable") || warnings.includes("embedded_xml_limit") ? <Banner tone="warning" withIcon>{tx("XML-вложения PDF не удалось однозначно прочитать. Поля заполнены по видимому документу; XML не использован.", "Die XML-Anhänge des PDFs konnten nicht eindeutig gelesen werden. Die Felder stammen aus dem sichtbaren Dokument; XML wurde nicht übernommen.")}</Banner> : null}
     {warnings.includes("structured_vat_mismatch") || warnings.includes("structured_payable_mismatch") || warnings.includes("structured_currency_mismatch") || warnings.some((warning) => warning.startsWith("invalid_or_ambiguous_")) ? <Banner tone="warning" withIcon>{tx("В XML есть неоднозначные реквизиты или несогласованные суммы, НДС либо валюта. Проверьте реквизиты и условия оплаты по оригиналу.", "Das XML enthält mehrdeutige Angaben oder widersprüchliche Beträge, Steuer- oder Währungsangaben. Angaben und Zahlungsbedingungen im Original prüfen.")}</Banner> : null}
     {warnings.includes("mixed_tax_treatment_requires_review") ? <Banner tone="warning" withIcon>{tx("Счёт содержит части с разным режимом НДС. Итоги сверены арифметически, но налоговую категорию каждой части нужно подтвердить перед бухгалтерским учётом.", "Die Rechnung enthält Positionen mit unterschiedlicher Umsatzsteuerbehandlung. Die Summen wurden rechnerisch abgeglichen; die Steuerkategorie jeder Position muss vor der Buchung geprüft werden.")}</Banner> : null}
-    {preview.tax_breakdown?.length ? <div className="space-y-1 text-xs"><p className="font-medium">{preview.structured ? tx("НДС по XML", "Umsatzsteuer laut XML") : tx("Разбивка НДС из документа", "Umsatzsteuer-Aufteilung laut Dokument")}</p>{preview.tax_breakdown.map((tax, index) => <p key={index}>{tax.label ?? tax.category ?? "—"} · {tax.rate != null ? `${tax.rate} %` : tx("ставка не указана", "Steuersatz nicht angegeben")} · {tx("База", "Basis")}: {tax.base != null ? formatRecognizedMoney(tax.base, preview.fields.currency) : "—"} · {tx("НДС", "USt.")}: {tax.amount != null ? formatRecognizedMoney(tax.amount, preview.fields.currency) : "—"}</p>)}</div> : null}
+    {preview.tax_breakdown?.length ? <div className="space-y-1 text-xs"><h4><SectionHeading icon={Percent}>{preview.structured ? tx("НДС по XML", "Umsatzsteuer laut XML") : tx("Разбивка НДС из документа", "Umsatzsteuer-Aufteilung laut Dokument")}</SectionHeading></h4>{preview.tax_breakdown.map((tax, index) => <p key={index}>{tax.label ?? tax.category ?? "—"} · {tax.rate != null ? `${tax.rate} %` : tx("ставка не указана", "Steuersatz nicht angegeben")} · {tx("База", "Basis")}: {tax.base != null ? formatRecognizedMoney(tax.base, preview.fields.currency) : "—"} · {tx("НДС", "USt.")}: {tax.amount != null ? formatRecognizedMoney(tax.amount, preview.fields.currency) : "—"}</p>)}</div> : null}
   </>;
 }

@@ -23,6 +23,7 @@ import {
   ChevronRight,
   ClipboardCheck,
   ClipboardList,
+  ContactRound,
   FileBadge2,
   FilePlus2,
   Files,
@@ -39,6 +40,7 @@ import {
   NotebookPen,
   NotebookText,
   Plus,
+  ReceiptText,
   Route,
   ScrollText,
   Search,
@@ -46,14 +48,15 @@ import {
   Tags,
   Trash2,
   UserRound,
-  UsersRound,
+  UserRoundPlus,
+  type LucideIcon,
   X,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
-import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
+import { DocumentSignatureAction, SIGNING_ROLES } from "@/pages/documents/ui/document-signature-action";
 import {
   AdminSheetScaffold,
   SheetFormFooter,
@@ -172,6 +175,7 @@ import type {
   QuoteVersionItem,
 } from "./model/types";
 
+const detailCardClassName = "min-w-0 space-y-3 rounded-lg border border-border/70 bg-card p-3 sm:p-4";
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
 const CONTRACT_REALTIME_EVENTS = [
@@ -241,6 +245,36 @@ function useDebouncedValue<T>(value: T, delayMs: number) {
   }, [delayMs, value]);
 
   return debouncedValue;
+}
+
+function subjectReference(record: ContractItem | QuoteItem) {
+  return [record.patient_name, record.patient_pid].filter(Boolean).join(" · ");
+}
+
+function LinkedRecordLinks({ records }: {
+  records: { label: string; href: string; icon: LucideIcon; detail?: string }[];
+}) {
+  if (records.length === 0) return null;
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      {records.map(({ href, label, icon: Icon, detail }) => (
+        <a
+          key={href}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-foreground hover:border-input hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          <Icon aria-hidden="true" className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1 break-words text-sm font-medium">
+            {label}
+            {detail ? <span className="block text-xs font-normal text-muted-foreground">{detail}</span> : null}
+          </span>
+          <ArrowUpRight aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+        </a>
+      ))}
+    </div>
+  );
 }
 
 function ContractSummaryLine({ label, value }: { label: string; value: ReactNode }) {
@@ -405,18 +439,11 @@ function useContractsPageContent() {
       contractPatientStatus: t.revenue_contracts_section_patient_status,
       contractDates: t.revenue_contracts_section_contract_dates,
       contractConditions: t.revenue_contracts_section_conditions,
-      contractLinkedPatientCard: t.revenue_contracts_linked_patient_card_description,
-      contractLinkedOrdersCard: t.revenue_contracts_linked_orders_card_description,
-      contractLinkedDocumentsCard: t.revenue_contracts_linked_documents_card_description,
       createContractDescription: t.revenue_contracts_create_description,
       selectPatient: t.revenue_contracts_select_patient,
       createContract: t.revenue_contracts_create,
       quoteOrderSection: t.revenue_quotes_section_order,
       quoteNotesSection: t.revenue_quotes_section_notes,
-      quoteLinkedPatientCard: t.revenue_quotes_linked_patient_card_description,
-      quoteLinkedOrderCard: t.revenue_quotes_linked_order_card_description,
-      quoteLinkedInvoicesCard: t.revenue_quotes_linked_invoices_card_description,
-      quoteLinkedDocumentsCard: t.revenue_quotes_linked_documents_card_description,
       createQuoteDescription: t.revenue_quotes_create_description,
       loadingOrders: t.revenue_quotes_loading_orders,
       selectOrder: t.revenue_quotes_select_order,
@@ -455,7 +482,6 @@ function useContractsPageContent() {
       lineItemsCount: t.revenue_quotes_line_items_count,
       updatedAt: t.revenue_common_updated_at,
       linkedData: lang === "de" ? "Verknüpfte Daten" : "Связанные данные",
-      openLinkedRecord: lang === "de" ? "Öffnen" : "Открыть",
       deleteQuote: lang === "de" ? "Angebot löschen" : "Удалить предложение",
       deleteQuoteTitle: lang === "de" ? "Angebot löschen?" : "Удалить предложение?",
       deleteQuoteMessage:
@@ -1918,6 +1944,36 @@ function useContractsPageContent() {
   const contractStatusDirty = Boolean(contractDetail && hasFormChanges(contractStatusForm, contractToStatusForm(contractDetail)));
   const quoteStatusDirty = Boolean(quoteDetail && hasFormChanges(quoteStatusForm, quoteToStatusForm(quoteDetail)));
   // A newer quote of the order closed this one; its status is final.
+  function subjectLinks(record: ContractItem | QuoteItem) {
+    if (record.patient_id) {
+      return [{
+        label: t.contracts_patient,
+        detail: subjectReference(record),
+        href: `/patients?patient=${record.patient_id}`,
+        icon: UserRound,
+      }];
+    }
+    if (record.lead_id && hasCapability(user, "leads.view")) {
+      return [{
+        label: t.activity_entity_lead,
+        detail: record.patient_name,
+        href: `/leads?lead=${record.lead_id}`,
+        icon: UserRoundPlus,
+      }];
+    }
+    return [];
+  }
+
+  const contractLinks = contractDetail ? [
+    ...subjectLinks(contractDetail),
+    ...(contractDetail.patient_id ? [
+      { label: text.orders, href: `/orders?patient=${contractDetail.patient_id}`, icon: ClipboardList },
+      { label: text.documents, href: `/documents?patient=${contractDetail.patient_id}`, icon: FolderOpen },
+    ] : []),
+  ] : [];
+  const showContractLinks = contractLinks.length > 0
+    || Boolean(user && SIGNING_ROLES.includes(user.role) && (contractDetail?.patient_id || contractDetail?.lead_id));
+  const quotePatientFilter = quoteDetail?.patient_id ? `&patient=${quoteDetail.patient_id}` : "";
   const quoteSuperseded = isQuoteSuperseded(quoteDetail?.status);
   const agencyServiceBaseline = agencyServices.find((service) => service.id === agencyServiceForm.id);
   const agencyServiceDirty = Boolean(agencyServiceBaseline && hasAgencyServiceFormChanges(agencyServiceForm, agencyServiceToForm(agencyServiceBaseline)));
@@ -2116,9 +2172,9 @@ function useContractsPageContent() {
             onRowClick={permissions.canManageCatalog ? handleEditAgencyService : undefined}
             toolbarStart={
               <>
-                <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
+                <h2 className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
                   <SectionHeading icon={BookOpen}>{text.agencyServiceTitle}</SectionHeading>
-                </span>
+                </h2>
                 <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
                 <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
                 <div className="relative">
@@ -2215,9 +2271,9 @@ function useContractsPageContent() {
                 onRowClick={(row) => openContract(row.id)}
                 toolbarStart={
                   <>
-                    <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
+                    <h2 className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
                       <SectionHeading icon={Files}>{text.contractsTab}</SectionHeading>
-                    </span>
+                    </h2>
                     <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
                     <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
                     <div className="relative">
@@ -2346,9 +2402,9 @@ function useContractsPageContent() {
                 onRowClick={(row) => openQuote(row.id)}
                 toolbarStart={
                   <>
-                  <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
+                  <h2 className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
                     <SectionHeading icon={FileText}>{text.quotesTab}</SectionHeading>
-                  </span>
+                  </h2>
                   <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
                   <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
                   <div className="relative">
@@ -2705,7 +2761,7 @@ function useContractsPageContent() {
             >
               <div className="space-y-4 rounded-xl">
                 <section className="rounded-lg border border-border/70 bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}><SectionHeading icon={FileSignature}>{text.contractPatientStatus}</SectionHeading></h2>
+                  <h2 className={tokens.text.sectionTitle}><SectionHeading icon={ContactRound}>{text.contractPatientStatus}</SectionHeading></h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={t.contracts_patient} required>
                       <NativeComboboxSelect
@@ -2946,20 +3002,18 @@ function useContractsPageContent() {
                 <EmptyState title={t.common_not_set} description={t.contracts_subtitle} />
               ) : (
                 <>
-                  <section>
+                  <section className={detailCardClassName}>
                     <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={ScrollText}>{t.contracts_title}</SectionHeading></h2>
-                      </div>
-                    <Badge variant="outline" className={cn("rounded-full", contractStatusClassName(contractDetail.status))}>
-                      {contractStatusLabel(contractDetail.status)}
-                    </Badge>
+                      <h2 className={tokens.text.sectionTitle}><SectionHeading icon={ClipboardCheck}>{text.basicData}</SectionHeading></h2>
+                      <Badge variant="outline" className={cn("rounded-full", contractStatusClassName(contractDetail.status))}>
+                        {contractStatusLabel(contractDetail.status)}
+                      </Badge>
                     </div>
-                    <div className="mt-5 space-y-5">
+                    <div className="space-y-5">
                       <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
                         <ContractSummaryLine
-                          label={t.contracts_patient}
-                          value={`${contractDetail.patient_name} (${contractDetail.patient_pid})`}
+                          label={contractDetail.lead_id && !contractDetail.patient_id ? t.activity_entity_lead : t.contracts_patient}
+                          value={subjectReference(contractDetail) || t.common_not_set}
                         />
                         <ContractSummaryLine
                           label={t.patients_created}
@@ -2980,11 +3034,7 @@ function useContractsPageContent() {
                       </div>
                       <ContractTerminationNote contract={contractDetail} lang={lang} />
                       <div className="space-y-2.5">
-                        <div className="flex items-start justify-between gap-4">
-                          <div>
-                            <h2 className={tokens.text.sectionTitle}><SectionHeading icon={NotebookPen}>{t.contracts_notes}</SectionHeading></h2>
-                          </div>
-                        </div>
+                        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={NotebookPen}>{t.contracts_notes}</SectionHeading></h2>
                         <pre className="rounded-xl border border-border bg-background/60 p-4 font-mono text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
                           {contractDetail.conditions && Object.keys(contractDetail.conditions).length > 0
                             ? JSON.stringify(contractDetail.conditions, null, 2)
@@ -2994,69 +3044,17 @@ function useContractsPageContent() {
                     </div>
                   </section>
 
-                  <section>
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={UsersRound}>{t.providers_linked_patients}</SectionHeading></h2>
-                      </div>
-                    </div>
-                    <div className="mt-5 grid gap-3 md:grid-cols-3">
-                      <button
-                        type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-border bg-muted/80 p-4 pb-14 text-left transition-colors hover:border-input hover:bg-accent/50"
-                        onClick={() => window.open(`/patients?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
-                      >
-                        <div className="relative z-10">
-                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground"><SectionHeading icon={UserRound}>{t.contracts_patient}</SectionHeading></h3>
-                          <p className="mt-2 text-xs leading-tight text-muted-foreground">
-                            {text.contractLinkedPatientCard}
-                          </p>
-                        </div>
-                        <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center text-foreground">
-                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-border bg-muted/80 p-4 pb-14 text-left transition-colors hover:border-input hover:bg-accent/50"
-                        onClick={() => window.open(`/orders?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
-                      >
-                        <div className="relative z-10">
-                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground"><SectionHeading icon={ClipboardList}>{text.orders}</SectionHeading></h3>
-                          <p className="mt-2 text-xs leading-tight text-muted-foreground">
-                            {text.contractLinkedOrdersCard}
-                          </p>
-                        </div>
-                        <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center text-foreground">
-                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-border bg-muted/80 p-4 pb-14 text-left transition-colors hover:border-input hover:bg-accent/50"
-                        onClick={() => window.open(`/documents?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
-                      >
-                        <div className="relative z-10">
-                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground"><SectionHeading icon={FolderOpen}>{text.documents}</SectionHeading></h3>
-                          <p className="mt-2 text-xs leading-tight text-muted-foreground">
-                            {text.contractLinkedDocumentsCard}
-                          </p>
-                        </div>
-                        <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center text-foreground">
-                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                        </span>
-                      </button>
-                    </div>
-                    <div className="mt-3"><DocumentSignatureAction scope={{ patientId: contractDetail.patient_id, leadId: contractDetail.patient_id ? undefined : contractDetail.lead_id }} title={contractDetail.contract_number} /></div>
-                  </section>
+                  {showContractLinks ? (
+                    <section className={detailCardClassName}>
+                      <h2 className={tokens.text.sectionTitle}><SectionHeading icon={Link2}>{text.linkedData}</SectionHeading></h2>
+                      <LinkedRecordLinks records={contractLinks} />
+                      <div><DocumentSignatureAction scope={{ patientId: contractDetail.patient_id, leadId: contractDetail.patient_id ? undefined : contractDetail.lead_id }} title={contractDetail.contract_number} /></div>
+                    </section>
+                  ) : null}
 
-                  <section>
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={ListTodo}>{t.contracts_status}</SectionHeading></h2>
-                      </div>
-                    </div>
-                    <div className="mt-5 space-y-4">
+                  <section className={detailCardClassName}>
+                    <h2 className={tokens.text.sectionTitle}><SectionHeading icon={ListTodo}>{t.contracts_status}</SectionHeading></h2>
+                    <div className="space-y-4">
                       {contractStatusError && !contractClosed ? <ShellBanner tone="error">{contractStatusError}</ShellBanner> : null}
                       <div className="grid gap-4 sm:grid-cols-2">
                         <Field label={t.users_status}>
@@ -3162,20 +3160,18 @@ function useContractsPageContent() {
                 <EmptyState title={t.common_not_set} description={t.contracts_subtitle} />
               ) : (
                 <>
-                  <section>
+                  <section className={detailCardClassName}>
                     <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={FileText}>{text.quotesTab}</SectionHeading></h2>
-                      </div>
+                      <h2 className={tokens.text.sectionTitle}><SectionHeading icon={ReceiptText}>{text.basicData}</SectionHeading></h2>
                       <Badge variant="outline" className={cn("rounded-full", quoteStatusClassName(quoteDetail.status))}>
                         {quoteStatusLabel(quoteDetail.status)}
                       </Badge>
                     </div>
-                    <div className="mt-5 space-y-5">
+                    <div className="space-y-5">
                       <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
                         <ContractSummaryLine
-                          label={t.contracts_patient}
-                          value={`${quoteDetail.patient_name} (${quoteDetail.patient_pid})`}
+                          label={quoteDetail.lead_id && !quoteDetail.patient_id ? t.activity_entity_lead : t.contracts_patient}
+                          value={subjectReference(quoteDetail) || t.common_not_set}
                         />
                         <ContractSummaryLine label={t.orders_title} value={quoteDetail.order_number} />
                         <ContractSummaryLine
@@ -3200,11 +3196,7 @@ function useContractsPageContent() {
                         />
                       </div>
                       <div className="space-y-2.5">
-                        <div className="flex items-start justify-between gap-4">
-                          <div>
-                            <h2 className={tokens.text.sectionTitle}><SectionHeading icon={MessageSquare}>{t.finance_quote_printed_notes}</SectionHeading></h2>
-                          </div>
-                        </div>
+                        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={MessageSquare}>{t.finance_quote_printed_notes}</SectionHeading></h2>
                         <div className="rounded-xl border border-border bg-background/60 p-4 text-sm leading-snug text-muted-foreground">
                           {quoteDetail.notes || t.common_not_set}
                         </div>
@@ -3224,62 +3216,19 @@ function useContractsPageContent() {
                     </div>
                   </section>
 
-                  <section>
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={Link2}>{text.linkedData}</SectionHeading></h2>
-                      </div>
-                    </div>
-                    <div className="mt-4 overflow-hidden rounded-xl border border-border bg-card">
-                      {[
-                        {
-                          label: t.contracts_patient,
-                          value: `${quoteDetail.patient_name} · ${quoteDetail.patient_pid}`,
-                          href: `/patients?patient=${quoteDetail.patient_id}`,
-                        },
-                        {
-                          label: text.order,
-                          value: quoteDetail.order_number,
-                          href: `/orders?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`,
-                        },
-                        {
-                          label: text.invoices,
-                          value: text.quoteLinkedInvoicesCard,
-                          href: `/invoices?quote=${quoteDetail.id}&order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`,
-                        },
-                        {
-                          label: text.documents,
-                          value: text.quoteLinkedDocumentsCard,
-                          href: `/documents?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`,
-                        },
-                      ].map((item, index) => (
-                        <button
-                          key={item.label}
-                          type="button"
-                          className={cn(
-                            "group flex w-full items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-orange-50/60",
-                            index > 0 && "border-t border-border/70",
-                          )}
-                          onClick={() => window.open(item.href, "_blank", "noopener,noreferrer")}
-                        >
-                          <span className="w-24 shrink-0 text-xs font-medium text-muted-foreground">{item.label}</span>
-                          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{item.value}</span>
-                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-orange-700">
-                            {text.openLinkedRecord}
-                            <ArrowUpRight className="size-3.5 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                          </span>
-                        </button>
-                      ))}
-                    </div>
+                  <section className={detailCardClassName}>
+                    <h2 className={tokens.text.sectionTitle}><SectionHeading icon={Link2}>{text.linkedData}</SectionHeading></h2>
+                    <LinkedRecordLinks records={[
+                      ...subjectLinks(quoteDetail),
+                      { label: text.order, detail: quoteDetail.order_number, href: `/orders?order=${quoteDetail.order_id}${quotePatientFilter}`, icon: ClipboardList },
+                      { label: text.invoices, href: `/invoices?quote=${quoteDetail.id}&order=${quoteDetail.order_id}${quotePatientFilter}`, icon: ReceiptText },
+                      { label: text.documents, href: `/documents?order=${quoteDetail.order_id}${quotePatientFilter}`, icon: FolderOpen },
+                    ]} />
                   </section>
 
-                  <section>
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={Route}>{text.quoteLifecycle}</SectionHeading></h2>
-                      </div>
-                    </div>
-                    <div className="mt-5 space-y-4">
+                  <section className={detailCardClassName}>
+                    <h2 className={tokens.text.sectionTitle}><SectionHeading icon={Route}>{text.quoteLifecycle}</SectionHeading></h2>
+                    <div className="space-y-4">
                       {quoteStatusError ? <ShellBanner tone="error">{quoteStatusError}</ShellBanner> : null}
                       {quoteSuperseded ? (
                         <ShellBanner tone="warning">
@@ -3377,13 +3326,9 @@ function useContractsPageContent() {
                     </div>
                   </section>
 
-                  <section>
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={ListOrdered}>{text.lineItems}</SectionHeading></h2>
-                      </div>
-                    </div>
-                    <div className="mt-5">
+                  <section className={detailCardClassName}>
+                    <h2 className={tokens.text.sectionTitle}><SectionHeading icon={ListOrdered}>{text.lineItems}</SectionHeading></h2>
+                    <div>
                       <DataTableSurface
                         rows={quoteLineItemRows}
                         columns={quoteLineItemColumns}
@@ -3396,13 +3341,9 @@ function useContractsPageContent() {
                     </div>
                   </section>
 
-                  <section>
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={History}>{text.versionHistory}</SectionHeading></h2>
-                      </div>
-                    </div>
-                    <div className="mt-5 space-y-4">
+                  <section className={detailCardClassName}>
+                    <h2 className={tokens.text.sectionTitle}><SectionHeading icon={History}>{text.versionHistory}</SectionHeading></h2>
+                    <div className="space-y-4">
                       {quoteVersionsError ? <ShellBanner tone="error">{quoteVersionsError}</ShellBanner> : null}
                       <DataTableSurface
                         rows={quoteVersions}

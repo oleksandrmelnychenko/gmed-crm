@@ -1,6 +1,7 @@
 import { memo } from "react";
-import { ArrowUpRight, Link2 } from "lucide-react";
+import { ArrowUpRight, ClipboardList, FolderOpen, Hospital, Link2, UserRound, type LucideIcon } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Section } from "@/components/ui-shell";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
@@ -43,12 +44,14 @@ function AppointmentLinksSection({
     >
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
         <LinkedRecordTile
+          icon={UserRound}
           title={patientLabel}
           description={descriptions.patient}
           onClick={() => onOpenPreview("patient", patientLabel)}
         />
         {detail.order_id && canOpenOrder ? (
           <LinkedRecordTile
+            icon={ClipboardList}
             title={orderLabel}
             description={descriptions.order}
             onClick={() => onOpenPreview("order", orderLabel)}
@@ -56,12 +59,14 @@ function AppointmentLinksSection({
         ) : null}
         {detail.provider_id ? (
           <LinkedRecordTile
+            icon={Hospital}
             title={clinicLabel}
             description={descriptions.clinic}
             onClick={() => onOpenPreview("provider", clinicLabel)}
           />
         ) : null}
         <LinkedRecordTile
+          icon={FolderOpen}
           title={documentsLabel}
           description={descriptions.documents}
           onClick={() => onOpenPreview("documents", documentsLabel)}
@@ -72,10 +77,12 @@ function AppointmentLinksSection({
 }
 
 function LinkedRecordTile({
+  icon,
   title,
   description,
   onClick,
 }: {
+  icon: LucideIcon;
   title: string;
   description: string;
   onClick: () => void;
@@ -83,18 +90,12 @@ function LinkedRecordTile({
   return (
     <button
       type="button"
-      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-border bg-muted/80 p-3.5 pb-14 text-left transition-colors hover:border-input hover:bg-accent/50"
+      className="group grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1.5 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-input focus-visible:outline-2 focus-visible:outline-ring"
       onClick={onClick}
     >
-      <div className="relative z-10 min-w-0">
-        <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
-        <p className="mt-1.5 text-xs leading-tight text-muted-foreground break-words">
-          {description}
-        </p>
-      </div>
-      <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center text-foreground">
-        <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-      </span>
+      <SectionHeading icon={icon}>{title}</SectionHeading>
+      <ArrowUpRight aria-hidden="true" className="mt-0.5 size-4 text-muted-foreground transition-colors group-hover:text-foreground" />
+      <span className="col-span-2 min-w-0 break-words text-xs leading-5 text-muted-foreground">{description}</span>
     </button>
   );
 }

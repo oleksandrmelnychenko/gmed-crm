@@ -164,6 +164,7 @@ async function openMockedAppointment(
         { id: patientId, patient_id: "P-0031", first_name: "Synthetic", last_name: "Patient" },
       ]);
     }
+    if (path === "/providers/taxonomy") return json(route, { nodes: [], leaves: [] });
     if (path === "/providers") {
       return json(route, [
         { id: providerId, name: "Synthetic Clinic", provider_type: "medical" },
@@ -234,6 +235,44 @@ test("the appointment sheet fits a 375 px phone without sideways scrolling", asy
   });
   await page.screenshot({ path: testInfo.outputPath("appointment-sheet-375.png") });
   expect(overflow).toEqual([]);
+});
+
+test("mobile agenda applies the selected period and keeps the patient from the URL", async ({ page }) => {
+  test.setTimeout(coldStartTestTimeout);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await openMockedAppointment(page, berlinToday);
+  const patientUrl = `/appointments?patient=${patientId}`;
+  await page.goto(patientUrl);
+
+  const week = page.getByRole("button", { name: "Diese Woche", exact: true });
+  const today = page.getByRole("button", { name: "Heute", exact: true });
+  await expect(today).toBeVisible(lazyPageLoad);
+  const visit = page.getByRole("button", { name: "Cardiology consultation", exact: true });
+  await expect(visit).toBeVisible();
+  await expect(page.getByText("Fehler beim Laden", { exact: true })).toHaveCount(0);
+  const waitForPeriod = (end: string) => page.waitForRequest((request) => {
+    const { pathname, searchParams } = new URL(request.url());
+    return pathname === "/api/v1/appointments"
+      && searchParams.get("patient_id") === patientId
+      && searchParams.get("date_from") === berlinToday
+      && searchParams.get("date_to") === end;
+  });
+
+  await Promise.all([waitForPeriod(berlinToday), today.click()]);
+  await expect(today).toHaveAttribute("aria-pressed", "true");
+  await Promise.all([waitForPeriod(berlinDate(6)), week.click()]);
+  await expect(week).toHaveAttribute("aria-pressed", "true");
+  await expect(visit).toBeVisible();
+  await expect(today).toHaveAttribute("aria-pressed", "false");
+  await expect(page).toHaveURL(patientUrl);
+
+  await page.goto(`/appointments?provider=${providerId}`);
+  await expect(week).toBeVisible(lazyPageLoad);
+  await page.goBack();
+  await expect(page).toHaveURL(patientUrl);
+  await expect(today).toBeVisible(lazyPageLoad);
+  await today.click();
+  await expect(today).toHaveAttribute("aria-pressed", "true");
 });
 
 test.describe("appointment completion date rule", () => {

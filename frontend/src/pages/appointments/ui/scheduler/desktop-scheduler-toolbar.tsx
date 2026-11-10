@@ -1,3 +1,4 @@
+import { ListOrdered, Search, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { ToolbarField } from "@/components/data-table/toolbar-field";
@@ -11,7 +12,7 @@ import {
 } from "@/pages/appointments/appearance/scheduler-appearance";
 
 type DesktopSchedulerToolbarProps = {
-  searchAriaLabel: string;
+  filtersLabel: string;
   searchPlaceholder: string;
   queueLabel: string;
   patientFilterLabel: string;
@@ -24,7 +25,7 @@ type DesktopSchedulerToolbarProps = {
 };
 
 export function DesktopSchedulerToolbar({
-  searchAriaLabel,
+  filtersLabel,
   searchPlaceholder,
   queueLabel,
   patientFilterLabel,
@@ -45,23 +46,10 @@ export function DesktopSchedulerToolbar({
             size="icon"
             className={appointmentSchedulerToolbarIconButtonClassName}
             onClick={onOpenFilters}
-            aria-label={searchAriaLabel}
+            aria-label={filtersLabel}
+            title={filtersLabel}
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="size-4"
-            >
-              <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-              <path d="M4 4h16v2.172a2 2 0 0 1 -.586 1.414l-4.414 4.414v7l-6 2v-8.5l-4.48 -4.928a2 2 0 0 1 -.52 -1.345v-2.227" />
-            </svg>
+            <SlidersHorizontal aria-hidden="true" className="size-4" />
           </Button>
           <Button
             type="button"
@@ -69,6 +57,7 @@ export function DesktopSchedulerToolbar({
             className={appointmentSchedulerToolbarSearchButtonClassName}
             onClick={onOpenSearch}
           >
+            <Search aria-hidden="true" className="size-3.5" />
             {searchPlaceholder}
           </Button>
           <ToolbarField label={patientFilterLabel}>
@@ -99,6 +88,7 @@ export function DesktopSchedulerToolbar({
             className={appointmentSchedulerToolbarQueueButtonClassName}
             onClick={onOpenQueue}
           >
+            <ListOrdered aria-hidden="true" className="size-3.5" />
             {queueLabel}
           </Button>
         </div>

@@ -1,6 +1,6 @@
 import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, type FormEvent, type ReactNode, type SetStateAction } from "react";
-import { FilePlus2, ReceiptText, NotebookPen, Banknote, ListOrdered, Calculator, AlertCircle, FileText, LoaderCircle } from "lucide-react";
+import { FilePlus2, ReceiptText, NotebookPen, Banknote, BookMarked, ListOrdered, Calculator, AlertCircle, FileText, LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -233,7 +233,9 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
 
                 {form.invoiceType === "advance" && selectedQuote && requiredPrepayment != null ? (
                   <fieldset className="grid gap-2 rounded-xl border border-border bg-card p-3">
-                    <legend className="px-1 text-xs font-medium text-muted-foreground">{de ? "Grundlage der Vorauszahlungsrechnung" : "Основание счёта на предоплату"}</legend>
+                    <legend className="px-1">
+                      <SectionHeading icon={BookMarked}>{de ? "Grundlage der Vorauszahlungsrechnung" : "Основание счёта на предоплату"}</SectionHeading>
+                    </legend>
                     {([
                       ["prepayment", de ? `Erforderliche Vorauszahlung · ${money(requiredPrepayment)}` : `Требуемая предоплата · ${money(requiredPrepayment)}`],
                       ["positions", de ? "Ausgewählte Angebotspositionen" : "Выбранные позиции предложения"],

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ArrowUpRight, Building2, Check, Eye, FileText, Link2, RefreshCw, Search } from "lucide-react";
+import { ArrowUpRight, Building2, Cable, Check, Eye, FileText, FlaskConical, Link2, RefreshCw, Search, Unplug } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -35,15 +36,20 @@ export function DatevWorkspace({ active, demo, onModeChange, onConnection }: {
   ];
   return <div hidden={!active} className="space-y-4" data-testid="datev-workspace">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex flex-wrap items-center gap-2"><Building2 className="size-4 text-muted-foreground" /><span className="text-sm font-medium">{demo ? text.demoCompany : text.systemName}</span><Badge variant="secondary"><Eye className="mr-1 size-3" />{text.readOnly}</Badge></div>
-      <div className="flex rounded-lg border bg-muted/30 p-0.5" aria-label={text.mode}>
-        {[false, true].map((isDemo) => <Button key={String(isDemo)} type="button" variant="ghost" data-workspace-tab size="sm" aria-pressed={demo === isDemo} onClick={() => { setNotice(null); onModeChange(isDemo); }}>{isDemo ? text.demo : text.live}</Button>)}
+      <div className="flex flex-wrap items-center gap-2"><h2><SectionHeading icon={Building2}>{demo ? text.demoCompany : text.systemName}</SectionHeading></h2><Badge variant="secondary"><Eye className="mr-1 size-3" />{text.readOnly}</Badge></div>
+      <div className="flex w-fit max-w-full flex-wrap gap-1 rounded-lg border border-border bg-card p-0.5" role="group" aria-label={text.mode}>
+        {[false, true].map((isDemo) => (
+          <Button key={String(isDemo)} type="button" variant="ghost" data-workspace-tab size="sm"
+            aria-pressed={demo === isDemo} onClick={() => { setNotice(null); onModeChange(isDemo); }}>
+            {isDemo ? <FlaskConical aria-hidden className="size-4" /> : <Cable aria-hidden className="size-4" />}
+            {isDemo ? text.demo : text.live}
+          </Button>
+        ))}
       </div>
     </div>
     {!demo ? <section className="flex min-h-[360px] flex-col items-center justify-center rounded-xl border bg-card px-5 py-12 text-center">
-      <div className="mb-5 flex size-14 items-center justify-center rounded-2xl bg-muted"><Link2 className="size-6 text-muted-foreground" /></div>
       <Badge variant="outline">{lang === "de" ? "Belegabruf nicht verfügbar" : "Получение оригиналов недоступно"}</Badge>
-      <h2 className="mt-3 text-lg font-semibold">{text.disconnectedTitle}</h2>
+      <h3 className="mt-3"><SectionHeading icon={Unplug}>{text.disconnectedTitle}</SectionHeading></h3>
       <p className="mt-2 max-w-lg text-sm leading-6 text-muted-foreground">{text.disconnectedHint}</p>
       <div className="mt-5 flex flex-wrap justify-center gap-2">{onConnection ? <Button type="button" variant="outline" onClick={onConnection}><Link2 className="size-4" />{text.connection}</Button> : null}<Button type="button" onClick={() => onModeChange(true)}><Eye className="size-4" />{text.openDemo}</Button></div>
       {!onConnection ? <p className="mt-4 text-xs text-muted-foreground">{text.adminConnectionHint}</p> : null}

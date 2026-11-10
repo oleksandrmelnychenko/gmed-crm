@@ -234,22 +234,6 @@ export function DesktopCalendarSurface({
     () => appointmentCalendarTitleViews(lang === "de" ? "de" : "ru"),
     [lang],
   );
-  const buttonText = useMemo(
-    () => ({
-      today: dictionary.dash_patients_today,
-      month: dictionary.dash_this_month,
-      week: dictionary.dash_this_week,
-      day: dictionary.appointments_date,
-      list: dictionary.providers_all,
-    }),
-    [
-      dictionary.appointments_date,
-      dictionary.dash_patients_today,
-      dictionary.dash_this_month,
-      dictionary.dash_this_week,
-      dictionary.providers_all,
-    ],
-  );
 
   useEffect(() => {
     if (!isTimeGridView || typeof window === "undefined") return;
@@ -355,7 +339,6 @@ export function DesktopCalendarSurface({
           initialView={calendarView}
           initialDate={calendarDate}
           headerToolbar={headerToolbar}
-          buttonText={buttonText}
           height="auto"
           firstDay={CALENDAR_FIRST_DAY}
           weekNumbers

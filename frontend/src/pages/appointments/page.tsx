@@ -359,8 +359,9 @@ function useStaffAppointmentsPageContent() {
     setPageField("calendarView", value);
   const setCalendarDate = (value: SetStateAction<string>) =>
     setPageField("calendarDate", value);
-  const setFilters = (value: SetStateAction<FiltersState>) =>
-    setPageField("filters", value);
+  const setFilters = useCallback((value: SetStateAction<FiltersState>) => {
+    dispatchPageState(createStaffAppointmentsPageFieldPatch("filters", value));
+  }, []);
   const setOperationalScope = (value: SetStateAction<OperationalScope>) =>
     setPageField("operationalScope", value);
   const setRequestActionBusy = (value: SetStateAction<string>) =>
@@ -1773,7 +1774,7 @@ function useStaffAppointmentsPageContent() {
             searchLabel: t.common_search,
             searchPlaceholder: tr.common_search,
             resetLabel: t.common_reset,
-            todayScopeLabel: t.dash_patients_today,
+            todayScopeLabel: t.appointments_today,
             weekScopeLabel: t.dash_this_week,
             mineScopeLabel: t.uiText.appointments_scope_mine,
             todayAppointments,
@@ -1877,7 +1878,7 @@ function useStaffAppointmentsPageContent() {
             onCancelRequest: handleCancelAppointmentRequest,
           }}
           toolbar={{
-            searchAriaLabel: t.common_search,
+            filtersLabel: appointmentText("appointments_filters"),
             searchPlaceholder: t.common_search.replace(/[.…]+$/u, ""),
             patientFilterLabel: t.orders_patient,
             patientFilterValue: filters.patientId,

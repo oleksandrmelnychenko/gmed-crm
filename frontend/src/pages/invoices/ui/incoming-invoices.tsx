@@ -1,6 +1,6 @@
 import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useState } from "react";
-import { FileInput, HandCoins, Building2, Eye, LoaderCircle, RefreshCw, Search, UserRound } from "lucide-react";
+import { FileInput, HandCoins, Building2, Eye, LoaderCircle, RefreshCw, Search, UserRound, UserRoundCheck } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import { DataTablePager } from "@/components/data-table/data-table-pager";
@@ -224,7 +224,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
           {paymentChoice.status === "received" ? <Banner tone="warning"><div className="flex flex-wrap items-center justify-between gap-3"><span>{tx("Сначала подтвердите реквизиты входящего счёта.", "Prüfen Sie zuerst die Eingangsrechnung.")}</span><Button type="button" size="sm" variant="outline" disabled={paymentBusy} onClick={() => void approvePaymentChoice(paymentChoice)}>{paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{tx("Подтвердить счёт", "Rechnung freigeben")}</Button></div></Banner> : null}
           {!canMarkInvoicePaidByPatient(paymentChoice) ? <Banner tone="warning">{tx("Это расход компании без привязки к пациенту. Его можно оплатить только через GMED.", "Dies ist eine Unternehmensausgabe ohne Patientenzuordnung. Sie kann nur über GMED bezahlt werden.")}</Banner> : null}
           <fieldset className="space-y-2">
-            <legend className="text-xs font-medium text-muted-foreground">{tx("Кто оплатил счёт?", "Wer hat die Rechnung bezahlt?")}</legend>
+            <legend><SectionHeading icon={UserRoundCheck}>{tx("Кто оплатил счёт?", "Wer hat die Rechnung bezahlt?")}</SectionHeading></legend>
             <div className={`grid gap-3 ${canMarkInvoicePaidByPatient(paymentChoice) ? "sm:grid-cols-2" : "sm:grid-cols-1"}`}>
               {canMarkInvoicePaidByPatient(paymentChoice) ? <button type="button" disabled={paymentBusy || paidOnRefused || paymentChoice.status === "received" || paymentChoice.paid_by === "agency"}
                 className="group flex min-h-32 flex-col rounded-lg border border-border/70 bg-card p-3.5 text-left shadow-sm transition-colors hover:border-sky-300 hover:bg-sky-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 dark:hover:border-sky-800 dark:hover:bg-sky-950/20"

@@ -730,15 +730,13 @@ html[data-native-platform] {
 
 .appointments-calendar-shell .fc {
   --fc-border-color: var(--color-border);
-  --fc-button-bg-color: oklch(1 0 0);
+  --fc-button-bg-color: var(--card);
   --fc-button-border-color: var(--color-border);
-  --fc-button-text-color: oklch(0.25 0 0);
+  --fc-button-text-color: var(--foreground);
   --fc-button-hover-bg-color: var(--color-muted);
   --fc-button-hover-border-color: var(--color-border);
-  --fc-button-hover-text-color: oklch(0.17 0 0);
-  --fc-button-active-bg-color: var(--color-muted);
-  --fc-button-active-border-color: oklch(0.80 0 0);
-  --fc-button-active-text-color: oklch(0.17 0 0);
+  --fc-button-active-bg-color: color-mix(in srgb, var(--muted) 65%, var(--card));
+  --fc-button-active-border-color: color-mix(in srgb, var(--border) 88%, var(--foreground));
   --fc-page-bg-color: transparent;
   --fc-event-border-color: transparent;
   --fc-event-text-color: oklch(0.25 0.02 250);
@@ -777,14 +775,9 @@ html[data-native-platform] {
   text-transform: none;
 }
 
-.appointments-calendar-shell .fc .fc-button:focus,
-.appointments-calendar-shell .fc .fc-button:focus-visible,
-.appointments-calendar-shell .fc .fc-button-primary:focus,
-.appointments-calendar-shell .fc .fc-button-primary:focus-visible,
-.appointments-calendar-shell .fc .fc-button-primary:not(:disabled):active:focus,
-.appointments-calendar-shell .fc .fc-button-primary:not(:disabled).fc-button-active:focus {
-  outline: none !important;
-  box-shadow: none !important;
+.appointments-calendar-shell .fc .fc-button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 
 .appointments-calendar-shell .fc .fc-timegrid-slot,
@@ -1518,19 +1511,20 @@ html[data-native-platform] {
   gap: 2px;
 }
 .appointments-calendar-shell .fc .fc-button-group .fc-button {
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   border-radius: 0.4rem;
   margin: 0 !important;
   color: var(--color-muted-foreground);
 }
-.appointments-calendar-shell .fc .fc-button-group .fc-button:hover {
+.appointments-calendar-shell .fc .fc-button-group .fc-button:where(:enabled):hover {
   background: var(--color-muted);
   color: var(--color-foreground);
 }
 .appointments-calendar-shell .fc .fc-button-group .fc-button.fc-button-active {
-  background: color-mix(in oklch, var(--brand) 12%, white);
-  color: var(--brand);
+  background: var(--fc-button-active-bg-color);
+  border-color: var(--fc-button-active-border-color);
+  color: var(--foreground);
   font-weight: 600;
 }
 

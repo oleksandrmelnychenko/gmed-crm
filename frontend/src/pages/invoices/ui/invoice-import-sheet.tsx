@@ -279,8 +279,10 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                 <div className="grid gap-2 sm:grid-cols-2">
                   <Button
                     type="button"
-                    variant={scope === "company" ? "default" : "outline"}
-                    className="h-auto min-h-16 justify-start whitespace-normal px-3 py-2 text-left"
+                    variant="ghost"
+                    data-workspace-tab
+                    aria-pressed={scope === "company"}
+                    className="h-auto min-h-11 justify-start whitespace-normal px-3 py-2 text-left"
                     disabled={saving || Boolean(documentId)}
                     onClick={() => { setScope("company"); setConfirmed(false); }}
                   >
@@ -289,8 +291,10 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                   </Button>
                   <Button
                     type="button"
-                    variant={scope === "patient_order" ? "default" : "outline"}
-                    className="h-auto min-h-16 justify-start whitespace-normal px-3 py-2 text-left"
+                    variant="ghost"
+                    data-workspace-tab
+                    aria-pressed={scope === "patient_order"}
+                    className="h-auto min-h-11 justify-start whitespace-normal px-3 py-2 text-left"
                     disabled={saving || Boolean(documentId)}
                     onClick={() => { setScope("patient_order"); setConfirmed(false); }}
                   >

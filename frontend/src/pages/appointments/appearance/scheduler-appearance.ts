@@ -1,5 +1,3 @@
-import { cn } from "@/lib/utils";
-
 export const appointmentSchedulerToolbarShellClassName =
   "appointments-scheduler-divider relative z-30 w-full border-b border-border/70 bg-card px-3 py-2";
 export const appointmentSchedulerToolbarRowClassName =
@@ -13,13 +11,13 @@ export const appointmentSchedulerToolbarSearchButtonClassName =
 export const appointmentSchedulerToolbarQueueButtonClassName =
   "h-8 shrink-0 rounded-lg px-3";
 export const appointmentMobileAgendaCardClassName =
-  "rounded-lg border border-slate-200/80 bg-slate-50/85 p-4 shadow-sm";
+  "rounded-lg border border-border/70 bg-card p-4";
 export const appointmentMobileAgendaSearchInputClassName =
   "h-10 rounded-xl bg-field";
 export const appointmentMobileAgendaInfoBadgeClassName =
   "rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-[10px] font-semibold text-sky-700";
 export const appointmentMobileAgendaNeutralBadgeClassName =
-  "rounded-full border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600";
+  "rounded-full border border-border bg-muted px-2 py-1 text-[10px] font-semibold text-muted-foreground";
 export const appointmentMobileAgendaWarningBadgeClassName =
   "rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700";
 
@@ -32,13 +30,6 @@ export function appointmentMobileAgendaStatToneClassName(
     case "amber":
       return "bg-amber-100 text-amber-700";
     default:
-      return "bg-slate-100 text-slate-700";
+      return "bg-muted text-muted-foreground";
   }
-}
-
-export function appointmentMobileAgendaQuickScopeClassName(active: boolean) {
-  return cn(
-    "h-8 rounded-full px-3 text-xs",
-    active ? "bg-slate-950 text-white hover:bg-slate-800" : "bg-white/80",
-  );
 }

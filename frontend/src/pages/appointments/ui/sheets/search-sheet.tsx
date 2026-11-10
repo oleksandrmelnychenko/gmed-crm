@@ -137,20 +137,10 @@ function SearchSheet({
           value={filters.appointmentType}
           onChange={(event) => {
             const appointmentType = event.target.value;
-            setFilters((current) => {
-              const keepProvider = providerSelectionFitsAppointmentScope(
-                providers,
-                current.providerId,
-                appointmentType,
-              );
-              return {
-                ...current,
-                appointmentType,
-                providerTaxonomyNodeId: "",
-                providerId: keepProvider ? current.providerId : "",
-                doctorId: keepProvider ? current.doctorId : "",
-              };
-            });
+            setFilters((current) => ({ ...current, appointmentType, providerTaxonomyNodeId: "" }));
+            if (!providerSelectionFitsAppointmentScope(providers, filters.providerId, appointmentType)) {
+              onProviderChange("");
+            }
           }}
           className={selectClass}
         >

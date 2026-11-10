@@ -1059,7 +1059,9 @@ function InterpreterResponseControls({
         {INTERPRETER_RESPONSE_OPTIONS.filter((value) => value !== "pending").map((value) => (
           <Button
             key={value}
-            variant={interpreterResponse === value ? "default" : "outline"}
+            variant="ghost"
+            data-workspace-tab
+            aria-pressed={interpreterResponse === value}
             disabled={
               closed
               || Boolean(busyAction)
@@ -1973,7 +1975,9 @@ function AppointmentCompletionSectionContent({
               <Button
                 key={preset.id}
                 type="button"
-                variant={completionPlan[preset.id] ? "default" : "outline"}
+                variant="ghost"
+                data-workspace-tab
+                aria-pressed={completionPlan[preset.id]}
                 size="sm"
                 onClick={() =>
                   setCompletionPlan((current) => ({

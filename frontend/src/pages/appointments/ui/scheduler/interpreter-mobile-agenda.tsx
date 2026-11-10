@@ -19,7 +19,6 @@ import {
   appointmentMobileAgendaCardClassName,
   appointmentMobileAgendaInfoBadgeClassName,
   appointmentMobileAgendaNeutralBadgeClassName,
-  appointmentMobileAgendaQuickScopeClassName,
   appointmentMobileAgendaSearchInputClassName,
   appointmentMobileAgendaStatToneClassName,
   appointmentMobileAgendaWarningBadgeClassName,
@@ -109,7 +108,7 @@ function StatsCard({
   tone: "sky" | "amber" | "slate";
 }) {
   return (
-    <div className="relative flex h-full min-w-0 flex-col rounded-lg border border-white/90 bg-card/88 p-3 pr-10 backdrop-blur">
+    <div className="relative flex h-full min-w-0 flex-col rounded-lg border border-border/70 bg-card p-3 pr-10">
       <span className="block w-full whitespace-normal break-words text-left text-[11px] font-semibold leading-tight text-muted-foreground">
         {label}
       </span>
@@ -140,9 +139,11 @@ function QuickScopeButton({
   return (
     <Button
       type="button"
-      variant={active ? "default" : "outline"}
+      variant="ghost"
+      data-workspace-tab
+      aria-pressed={active}
       size="sm"
-      className={appointmentMobileAgendaQuickScopeClassName(active)}
+      className="h-8 px-3 text-xs"
       onClick={onClick}
     >
       {children}

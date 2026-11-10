@@ -160,7 +160,9 @@ export function InterpreterSuggestionsPanel({
                     {onSelect ? (
                       <Button
                         type="button"
-                        variant={selected ? "default" : "outline"}
+                        variant="ghost"
+                        data-workspace-tab
+                        aria-pressed={selected}
                         size="sm"
                         className="rounded-lg"
                         onClick={() => onSelect(suggestion.interpreter_id)}
@@ -300,7 +302,9 @@ function PreferenceButtons({
         <Button
           key={preference}
           type="button"
-          variant={activePreference === preference ? "default" : "outline"}
+          variant="ghost"
+          data-workspace-tab
+          aria-pressed={activePreference === preference}
           size="sm"
           className="h-7 rounded-full px-2.5 text-[11px]"
           disabled={disabled}

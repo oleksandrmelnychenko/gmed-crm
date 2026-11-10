@@ -98,7 +98,7 @@ export function AppointmentWorkspaceNav() {
         </StaffLink>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 py-4">
+      <nav aria-label={t.appointments_title} className="flex-1 overflow-y-auto px-3 py-4">
         <div className="space-y-1">
           {items.map((item) => {
             const isActive = currentTab === item.key;
@@ -115,9 +115,11 @@ export function AppointmentWorkspaceNav() {
                 to={to}
                 aria-current={isActive ? "page" : undefined}
                 data-workspace-tab
+                title={item.label}
                 className="group relative flex items-center gap-3 rounded-lg px-3 h-10 text-sm transition-colors"
               >
                 <Icon
+                  aria-hidden="true"
                   className={cn(
                     "shrink-0 size-[18px] transition-colors",
                     isActive
@@ -126,14 +128,14 @@ export function AppointmentWorkspaceNav() {
                   )}
                   strokeWidth={isActive ? 1.85 : 1.7}
                 />
-                <span className="truncate font-medium leading-5">
+                <span className="truncate leading-5">
                   {item.label}
                 </span>
               </StaffLink>
             );
           })}
         </div>
-      </div>
+      </nav>
     </aside>
   );
 }

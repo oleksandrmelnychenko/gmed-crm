@@ -137,14 +137,11 @@ export function useAppointmentRouteHydration({
   // callback: without this the effect would reopen the sheet in a loop.
   const createHandledRef = useRef(false);
 
-  useEffect(() => {
-    const patientParam = searchParams.get("patient") ?? "";
-    const orderParam = searchParams.get("order") ?? "";
-    const providerParam = searchParams.get("provider") ?? "";
-    const doctorParam = searchParams.get("doctor") ?? "";
-    const appointmentParam = searchParams.get("appointment") ?? "";
-    const createParam = searchParams.get("create") ?? "";
+  const patientParam = searchParams.get("patient") ?? "";
+  const providerParam = searchParams.get("provider") ?? "";
+  const doctorParam = providerParam ? (searchParams.get("doctor") ?? "") : "";
 
+  useEffect(() => {
     setFilters((current) => {
       if (
         current.patientId === patientParam &&
@@ -157,9 +154,15 @@ export function useAppointmentRouteHydration({
         ...current,
         patientId: patientParam,
         providerId: providerParam,
-        doctorId: providerParam ? doctorParam : "",
+        doctorId: doctorParam,
       };
     });
+  }, [doctorParam, patientParam, providerParam, setFilters]);
+
+  useEffect(() => {
+    const appointmentParam = searchParams.get("appointment") ?? "";
+    const createParam = searchParams.get("create") ?? "";
+    const orderParam = searchParams.get("order") ?? "";
 
     if (appointmentParam && appointmentParam !== selectedId) {
       openDetailWorkspace(appointmentParam);
@@ -184,9 +187,9 @@ export function useAppointmentRouteHydration({
     detailOpen,
     onOpenCreateFromRoute,
     openDetailWorkspace,
+    patientParam,
     searchParams,
     selectedId,
-    setFilters,
     setSearchParams,
   ]);
 }

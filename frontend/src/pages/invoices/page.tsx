@@ -25,6 +25,8 @@ import {
   Wallet,
   ReceiptText,
   CreditCard,
+  FileBadge2,
+  ClipboardCheck,
   FileMinus,
   WalletCards,
   Undo2,
@@ -3247,11 +3249,11 @@ function useStaffInvoicesPageContent() {
 
                     {(detail.payment_proofs?.length ?? 0) > 0 ? (
                       <div className="space-y-2 rounded-lg border border-sky-200 bg-sky-50/60 p-3">
-                        <div className="text-sm font-semibold text-foreground">
-                          {lang === "de"
-                            ? "Zahlungsnachweise des Patienten"
-                            : "Подтверждения оплаты от пациента"}
-                        </div>
+                        <h3>
+                          <SectionHeading icon={FileBadge2}>
+                            {lang === "de" ? "Zahlungsnachweise des Patienten" : "Подтверждения оплаты от пациента"}
+                          </SectionHeading>
+                        </h3>
                         {detail.payment_proofs?.map((proof) => (
                           <div
                             key={proof.id}
@@ -4386,9 +4388,7 @@ function useStaffInvoicesPageContent() {
                       ) : null}
                       {detail.release_checks?.warnings?.length ? (
                         <div className="mt-4 space-y-1.5" data-testid="invoice-release-checks">
-                          <p className="text-xs font-medium text-muted-foreground">
-                            {text.releaseChecks}
-                          </p>
+                          <h3><SectionHeading icon={ClipboardCheck}>{text.releaseChecks}</SectionHeading></h3>
                           {detail.release_checks.warnings.map((warning) => (
                             <p
                               key={warning.code}

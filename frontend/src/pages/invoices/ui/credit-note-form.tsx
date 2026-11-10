@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { LoaderCircle } from "lucide-react";
+import { useId, useState, type ReactNode } from "react";
+import { ListOrdered, LoaderCircle, Percent } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -76,6 +76,7 @@ export function CreditNoteForm({
   onSubmit,
 }: CreditNoteFormProps) {
   const { t, lang } = useLang();
+  const modeName = useId();
   const [dateRefused, setDateRefused] = useState(false);
   const money = (value: unknown) => formatMoneyAmount(value, currency);
   const rates = creditableVatRates(lines);
@@ -143,19 +144,25 @@ export function CreditNoteForm({
       {byAmount ? (
         <p className="text-sm text-muted-foreground">{t.finance_credit_note_by_amount_hint}</p>
       ) : (
-        <div className="flex flex-wrap gap-2" role="radiogroup">
+        <div className="flex w-fit max-w-full flex-wrap gap-1 rounded-lg border border-border bg-card p-0.5" role="radiogroup" aria-label={t.finance_credit_note_section_title}>
           {(["lines", "vat_rate"] as const).map((mode) => (
-            <Button
+            <label
               key={mode}
-              type="button"
-              size="sm"
-              variant={selection.mode === mode ? "default" : "outline"}
-              role="radio"
-              aria-checked={selection.mode === mode}
-              onClick={() => setMode(mode)}
+              data-workspace-tab
+              data-active={selection.mode === mode ? "" : undefined}
+              className="relative inline-flex min-h-8 cursor-pointer items-center gap-1.5 px-2.5 text-xs font-medium has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-ring"
             >
+              <input
+                type="radio"
+                name={modeName}
+                value={mode}
+                checked={selection.mode === mode}
+                onChange={() => setMode(mode)}
+                className="absolute inset-0 m-0 size-full cursor-pointer opacity-0"
+              />
+              {mode === "lines" ? <ListOrdered aria-hidden className="size-4" /> : <Percent aria-hidden className="size-4" />}
               {mode === "lines" ? t.finance_credit_note_mode_lines : t.finance_credit_note_mode_vat_rate}
-            </Button>
+            </label>
           ))}
         </div>
       )}
