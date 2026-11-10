@@ -2071,7 +2071,8 @@ async fn a_paid_advance_reaches_only_the_final_invoice_of_its_own_quote() {
     let named = &refused["details"]["advances"][0];
     assert_eq!(named["invoice_number"], second_number.as_str(), "{refused}");
     assert_eq!(named["paid_gross"], "214.2", "{refused}");
-    assert_eq!(named["open_gross"], "214.2", "{refused}");
+    // Fully paid: nothing is open on the advance (it is only not deducted yet).
+    assert_eq!(named["open_gross"], "0", "{refused}");
     assert!(named["recipient_name"].is_string(), "{refused}");
     let (status, released) = release(
         &fx,
@@ -2374,4 +2375,74 @@ async fn an_invoice_address_under_another_name_is_a_third_party() {
     let (status, released) =
         release_unidentified(&fx.app, &fx.billing, &invoice_id, json!({})).await;
     assert_eq!(status, StatusCode::OK, "{released}");
+}
+
+/// Verification 2026-11-10 (N-1): the advance went to the patient, the final
+/// invoice goes to the patient under the own name at another address. That is
+/// the same recipient: no `advance_recipient_mismatch` question, and the paid
+/// advance is deducted as for any final invoice of the same person.
+#[tokio::test]
+async fn the_same_person_at_another_address_is_the_same_advance_recipient() {
+    let Some(fx) = fixture("payer-same-person").await else {
+        return;
+    };
+    let patient = seed_patient(&fx.pool, fx.admin_id, &fx.tag, "1990-02-03", true).await;
+    let patient_name = format!("Kind {} Muster", fx.tag);
+    let order = seed_order(&fx.pool, patient, fx.admin_id, &fx.tag).await;
+    let quote = create_quote(&fx.app, &fx.manager, order).await;
+
+    let advance = create_draft(&fx.app, &fx.billing, &quote, "advance").await;
+    let advance_id = advance["id"].as_str().unwrap().to_string();
+    let (status, body) = release(&fx, &fx.billing, &advance_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let advance_total = body["total_gross"].as_str().unwrap().to_string();
+    pay(&fx.app, &fx.billing, &advance_id, &advance_total).await;
+
+    let final_invoice = create_draft(&fx.app, &fx.billing, &quote, "final").await;
+    let final_id = final_invoice["id"].as_str().unwrap().to_string();
+    let (status, body) = set_invoice_payer(
+        &fx.app,
+        &fx.billing,
+        &final_id,
+        json!({
+            "payer_contact_name": patient_name,
+            "payer_role": "invoice_address",
+            "payer_address_street": "Nebenweg 7",
+            "payer_address_zip": "80331",
+            "payer_address_city": "München",
+            "payer_address_country": "DE",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let asks_about_advances =
+        body["release_checks"]["warnings"]
+            .as_array()
+            .is_some_and(|warnings| {
+                warnings
+                    .iter()
+                    .any(|warning| warning["code"] == "advance_recipient_mismatch")
+            });
+    assert!(!asks_about_advances, "{body}");
+
+    let (status, released) = release(&fx, &fx.billing, &final_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{released}");
+    assert_eq!(
+        released["prepayment_applied_amount"], advance_total,
+        "{released}"
+    );
+    let snapshot: Value =
+        sqlx::query_scalar("SELECT recipient_snapshot FROM invoices WHERE id = $1::uuid")
+            .bind(&final_id)
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    let noted = &snapshot["confirmations"]["advance_recipient_mismatch"];
+    assert_eq!(
+        noted["advance_invoice_numbers"],
+        json!([advance_number(&fx.pool, &advance_id).await]),
+        "{snapshot}"
+    );
+    assert_eq!(noted["same_person"], true, "{snapshot}");
+    assert_eq!(noted["by"], Value::Null, "nobody was asked: {snapshot}");
 }

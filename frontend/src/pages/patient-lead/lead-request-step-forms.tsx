@@ -89,6 +89,7 @@ import {
   SaveIndicator,
   SentLockHint,
   StepMissingContext,
+  StepRefusedEntryContext,
   StepFooter,
   UploadedFileList,
   errorBody,
@@ -228,6 +229,20 @@ export function StepFrame({
   // named here, each with the way to it (QA 2026-11-10, findings 8 and 23) — read off the form
   // once the refusal has rendered its marks.
   const blocked = useContext(SaveBlockedContext);
+  // Fields that show an entry the form does not take (a date that does not exist): while there
+  // is one, the step says "not saved" instead of "saved" (verification 2026-11-10).
+  const [refusedEntries, setRefusedEntries] = useState<ReadonlySet<object>>(() => new Set());
+  const reportRefusedEntry = useCallback((key: object, refused: boolean) => {
+    setRefusedEntries((current) => {
+      if (current.has(key) === refused) return current;
+      const next = new Set(current);
+      if (refused) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
+  const shownSaveState: SaveState | undefined =
+    refusedEntries.size > 0 && saveState !== "saving" && !locked ? "error" : saveState;
   const sectionRef = useRef<HTMLElement | null>(null);
   const [invalid, setInvalid] = useState<InvalidField[]>([]);
   useEffect(() => {
@@ -265,6 +280,7 @@ export function StepFrame({
       ) : null}
       <MissingShownContext.Provider value={showMissing}>
         <StepMissingContext.Provider value={stepMissing}>
+          <StepRefusedEntryContext.Provider value={reportRefusedEntry}>
           {open}
           {locked ? (
             <fieldset disabled className="m-0 min-w-0 space-y-3 border-0 p-0" data-testid="lead-request-step-locked">
@@ -274,10 +290,11 @@ export function StepFrame({
           ) : (
             children
           )}
+          </StepRefusedEntryContext.Provider>
         </StepMissingContext.Provider>
       </MissingShownContext.Provider>
       <StepFooter
-        status={saveState ? <SaveIndicator state={saveState} text={text} /> : undefined}
+        status={shownSaveState ? <SaveIndicator state={shownSaveState} text={text} /> : undefined}
       >
         <Button type="button" variant="outline" className="h-9" disabled={!nav.onBack} onClick={() => nav.onBack?.()}>
           <ArrowLeft aria-hidden="true" className="size-3.5" />

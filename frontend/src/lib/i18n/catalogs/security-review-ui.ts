@@ -194,6 +194,11 @@ export const securityReviewUiDe = {
   activity_value_electronic_signature: "Elektronische Signatur",
   activity_value_external_invoice: "Eingangsrechnung",
   activity_value_appointment_request: "Terminanfrage",
+  activity_value_users_workspace: "Benutzerverwaltung",
+  activity_value_parent_billing_role: "Rolle des Elternteils bei der Abrechnung",
+  activity_value_legal_representative: "Gesetzliche Vertretung",
+  activity_value_representative_identity: "Ausweis der vertretenden Person",
+  activity_context_role_legal_representative: "Gesetzliche Vertretung",
 
   // DSGVO export (Art. 15)
   compliance_export_ceo_pm_only:
@@ -415,6 +420,11 @@ export const securityReviewUiRu = {
   activity_value_electronic_signature: "Электронная подпись",
   activity_value_external_invoice: "Входящий счёт",
   activity_value_appointment_request: "Запрос на приём",
+  activity_value_users_workspace: "Управление пользователями",
+  activity_value_parent_billing_role: "Роль родителя в оплате",
+  activity_value_legal_representative: "Законный представитель",
+  activity_value_representative_identity: "Документ представителя",
+  activity_context_role_legal_representative: "Законный представитель",
 
   compliance_export_ceo_pm_only:
     "Экспорт данных (ст. 15) формируют CEO или менеджер пациента. Передайте запрос им.",

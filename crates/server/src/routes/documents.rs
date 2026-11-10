@@ -38647,21 +38647,42 @@ async fn revoke_document_from_patient_portal(
                 .flatten()
         })
         .collect();
-    match sqlx::query(
+    // Stored in the login's language (`crate::patient_notice_language`).
+    let revoked_title = crate::patient_notice_language::Texts::new(
+        "Dokument zurückgezogen",
+        "Документ отозван",
+        "Документ відкликано",
+        "Document withdrawn",
+    );
+    let revoked_body = crate::patient_notice_language::Texts::new(
+        "Ein Dokument ist in Ihrem Portal nicht mehr verfügbar.",
+        "Документ больше не доступен в вашем портале.",
+        "Документ більше не доступний у вашому порталі.",
+        "A document is no longer available in your portal.",
+    );
+    let revoked_notice_sql = format!(
         r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
-           SELECT u.id, 'document_release_revoked', 'Document withdrawn',
-                  'A document is no longer available in your portal.', 'document', $1, $3
+           SELECT u.id, 'document_release_revoked',
+                  {title_sql},
+                  {body_sql},
+                  'document', $1, $3
            FROM users u
            WHERE u.id = ANY($2) AND u.is_active = true AND u.role = 'patient'
            RETURNING id, user_id"#,
-    )
-    .bind(id)
-    .bind(&revoked_login_ids)
-    .bind(json!({
-        "document_name": row.try_get::<String, _>("auto_name").unwrap_or_default(),
-    }))
-    .fetch_all(&state.db)
-    .await
+        title_sql = crate::patient_notice_language::text_sql("$4", "u", "$6::uuid"),
+        body_sql = crate::patient_notice_language::text_sql("$5", "u", "$6::uuid"),
+    );
+    match sqlx::query(&revoked_notice_sql)
+        .bind(id)
+        .bind(&revoked_login_ids)
+        .bind(json!({
+            "document_name": row.try_get::<String, _>("auto_name").unwrap_or_default(),
+        }))
+        .bind(revoked_title.to_json())
+        .bind(revoked_body.to_json())
+        .bind(patient_id)
+        .fetch_all(&state.db)
+        .await
     {
         Ok(notified) => {
             for notice in notified {

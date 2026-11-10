@@ -1296,6 +1296,13 @@ async fn patient_is_told_about_changes_of_the_visits_the_portal_shows() {
     let tag = unique_tag("portal-visit-notices");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    // The stored wording follows the login's own language (one rule for all
+    // patient notices, `patient_notice_language`).
+    sqlx::query("UPDATE users SET preferred_language = 'ru' WHERE id = $1")
+        .bind(patient_user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
     let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
     let provider_id = seed_provider(&pool, &tag).await;
     let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
@@ -1457,6 +1464,20 @@ async fn patient_is_told_about_changes_of_the_visits_the_portal_shows() {
             "time_start": "09:00",
             "time_end": "09:30"
         })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+    assert_eq!(patient_visit_notices(&pool, patient_user_id).await.len(), 4);
+
+    // A visit entered afterwards with a date in the past is already over: it
+    // is not announced as a new visit in the schedule (verification
+    // 2026-11-10).
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(visit_body("2020-03-02", "10:00", "11:00", Value::Null)),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body:?}");

@@ -924,7 +924,9 @@ function useStaffAppointmentsPageContent() {
     ).sort((left, right) =>
       `${left.role}:${left.name}`.localeCompare(`${right.role}:${right.name}`),
     );
-    const interpreterReportReady = !detail?.interpreter_id
+    // A declined booking expects no report: nobody is booked any more.
+    const interpreterReportReady =
+      !detail?.interpreter_id || detail.interpreter_response === "declined"
       ? true
       : detailReport?.approval_status === "approved";
     const canShowBillingHandoffSection =
@@ -1146,6 +1148,7 @@ function useStaffAppointmentsPageContent() {
     activeCalendarQuickActionScope,
     dismissCalendarQuickActionMenu,
     handleCalendarQuickActionScopeChange,
+    openCalendarQuickActionLayer,
   } = useAppointmentCalendarQuickActions({
     appointmentsIndex,
   });
@@ -1916,6 +1919,10 @@ function useStaffAppointmentsPageContent() {
             actionBusy,
             onCalendarQuickActionScopeChange:
               handleCalendarQuickActionScopeChange,
+            // Right click on an event; only for roles that may change a status.
+            onOpenQuickActions: permissions.canManageStatus
+              ? openCalendarQuickActionLayer
+              : undefined,
             onOpenDetail: openDetailSheet,
             onStatusChange: requestStatusChange,
           }}

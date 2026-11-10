@@ -151,6 +151,13 @@ describe("activity log values in words (QA E3-01)", () => {
     expect(activityContextSummary({ language: "ru" }, de)).toBe("Sprache: Russisch");
   });
 
+  it("labels the codes seen raw in the verification of 2026-11-10", () => {
+    expect(activityContextSummary({ source: "users_workspace" }, ru)).toBe("Источник: Управление пользователями");
+    expect(activityContextSummary({ reason: "parent_billing_role" }, ru)).toBe("Причина: Роль родителя в оплате");
+    expect(activityContextSummary({ role: "legal_representative" }, ru)).toBe("Роль: Законный представитель");
+    expect(activityContextSummary({ role: "legal_representative" }, de)).toContain("Gesetzliche Vertretung");
+  });
+
   it("keeps an unknown code as stored", () => {
     expect(activityContextSummary({ source: "some_new_source" }, ru)).toBe("Источник: some_new_source");
   });

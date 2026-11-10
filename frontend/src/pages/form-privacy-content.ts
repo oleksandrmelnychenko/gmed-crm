@@ -315,7 +315,7 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       number: 1,
       title: "Controller and data protection officer",
       blocks: [
-        { kind: "address", lines: ["GMED - Agentur für Patientenbetreuung,", "Heorhii Hudiiev, Albert-Schweitzer-Straße 56", "81735 München", "Deutschland", "E-Mail: contact@gmed-health.com,", "Telefon: +49 151 20943768"] },
+        { kind: "address", lines: ["GMED - Agentur für Patientenbetreuung,", "Heorhii Hudiiev, Albert-Schweitzer-Straße 56", "81735 München", "Germany", "E-mail: contact@gmed-health.com,", "Telephone: +49 151 20943768"] },
         { kind: "paragraph", text: "The controller responsible for the processing of your data is Heorhii Hudiiev, Albert-Schweitzer-Straße 56, 81735 München, Germany, e-mail: datenschutz@gmed-health.com." },
         { kind: "paragraph", text: "This privacy notice applies to our client questionnaire (questionnaire form) and to the handling of your enquiry. If we work together and conclude a contract, we will inform you separately about the data processing in the course of the cooperation. For our website, www.gmed-health.com/legal applies." },
       ],
@@ -372,7 +372,7 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       number: 6,
       title: "Recipients and processors",
       blocks: [
-        { kind: "paragraph", text: "We process your data in our client management system GMED-EDV-System." },
+        { kind: "paragraph", text: "We process your data in our client management system, the GMED IT system (GMED-EDV-System)." },
         { kind: "paragraph", lead: "Processors (Art. 28 GDPR) who work on our instructions:", text: "" },
         { kind: "list", items: [
           { text: "Hosting: Hetzner Online GmbH, Industriestr. 25, 91710 Gunzenhausen, Germany. Our servers are located exclusively in data centres in Germany. A data processing agreement is in place with the provider." },
@@ -461,7 +461,7 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       number: 1,
       title: "Відповідальна особа (контролер) та уповноважений із захисту даних",
       blocks: [
-        { kind: "address", lines: ["GMED - Agentur für Patientenbetreuung,", "Heorhii Hudiiev, Albert-Schweitzer-Straße 56", "81735 München", "Deutschland", "E-Mail: contact@gmed-health.com,", "Telefon: +49 151 20943768"] },
+        { kind: "address", lines: ["GMED - Agentur für Patientenbetreuung,", "Heorhii Hudiiev, Albert-Schweitzer-Straße 56", "81735 München", "Німеччина", "Ел. пошта: contact@gmed-health.com,", "Телефон: +49 151 20943768"] },
         { kind: "paragraph", text: "Відповідальним за обробку Ваших даних є Heorhii Hudiiev, Albert-Schweitzer-Straße 56, 81735 München, Німеччина, e-mail: datenschutz@gmed-health.com." },
         { kind: "paragraph", text: "Ця декларація про захист даних стосується нашого опитування клієнтів (анкети) та опрацювання Вашого запиту. Якщо ми співпрацюватимемо й укладемо договір, ми окремо поінформуємо Вас про обробку даних під час співпраці. Для нашого вебсайту діє www.gmed-health.com/legal." },
       ],
@@ -502,7 +502,7 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       blocks: [
         { kind: "paragraph", text: "Обов’язкові поля позначено у формі. Без обов’язкових відомостей (контактні та ідентифікаційні дані, відомості про отримувача рахунку та особу, яка платить) ми не можемо опрацювати Ваш запит і запропонувати співпрацю. Усі інші відомості є добровільними." },
         { kind: "paragraph", text: "Ваша згода на обробку Ваших відомостей про стан здоров’я є добровільною. Якщо Ви її не надасте або відкличете, ми, на жаль, не зможемо організувати лікування, якщо для цього потрібні медичні дані. Інших несприятливих наслідків для Вас не буде. Про відкликання див. розділ 11. Про передання документів клінікам, лікаркам і лікарям та іншим надавачам медичних послуг у межах співпраці ми поінформуємо Вас окремо." },
-        { kind: "paragraph", text: "Автоматизованих рішень в окремих випадках, включно з профілюванням (ст. 22 GDPR), ми не ухвалюємо. Під час санкційної перевірки рішення також ухвалюють працівники." },
+        { kind: "paragraph", text: "Автоматизованого індивідуального ухвалення рішень, включно з профілюванням (ст. 22 GDPR), ми не застосовуємо. Під час санкційної перевірки рішення також ухвалюють працівники." },
       ],
     },
     {
@@ -518,7 +518,7 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       number: 6,
       title: "Одержувачі та оператори (обробники за дорученням)",
       blocks: [
-        { kind: "paragraph", text: "Ми обробляємо Ваші дані в нашій системі управління клієнтами GMED-EDV-System." },
+        { kind: "paragraph", text: "Ми обробляємо Ваші дані в нашій системі управління клієнтами — ІТ-системі GMED (GMED-EDV-System)." },
         { kind: "paragraph", lead: "Оператори (обробники за дорученням, ст. 28 GDPR), які працюють за нашими вказівками:", text: "" },
         { kind: "list", items: [
           { text: "Хостинг: Hetzner Online GmbH, Industriestr. 25, 91710 Gunzenhausen, Німеччина. Наші сервери розташовані виключно в центрах обробки даних у Німеччині. З постачальником укладено договір про обробку даних за дорученням." },

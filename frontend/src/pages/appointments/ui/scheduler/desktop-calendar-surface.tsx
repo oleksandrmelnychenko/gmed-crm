@@ -13,6 +13,7 @@ import {
   useState,
   type CSSProperties,
   type ComponentProps,
+  type MouseEvent as ReactMouseEvent,
   type RefObject,
 } from "react";
 
@@ -150,12 +151,27 @@ type DesktopCalendarSurfaceProps = {
   onCalendarQuickActionScopeChange: (
     scope: AppointmentRecurringActionScope,
   ) => void;
+  /**
+   * Opens the quick-action menu of an event on a right click. Left out for
+   * roles that cannot change an appointment's status: their right click keeps
+   * the browser's own menu.
+   */
+  onOpenQuickActions?: (
+    event: ReactMouseEvent<HTMLElement>,
+    appointmentId: string,
+  ) => void;
   onOpenDetail: (appointmentId: string) => void;
   onStatusChange: (
     appointmentId: string,
     status: AppointmentStatus,
     recurrenceScope?: AppointmentRecurringActionScope,
   ) => Promise<void> | void;
+};
+
+// The event element carries its appointment id so that one delegated
+// context-menu handler on the calendar shell can find the event.
+const markCalendarEventElement: NonNullable<FullCalendarProps["eventDidMount"]> = (info) => {
+  info.el.dataset.appointmentId = info.event.id;
 };
 
 export function DesktopCalendarSurface({
@@ -178,10 +194,18 @@ export function DesktopCalendarSurface({
   activeCalendarQuickActionScope,
   actionBusy,
   onCalendarQuickActionScopeChange,
+  onOpenQuickActions,
   onOpenDetail,
   onStatusChange,
 }: DesktopCalendarSurfaceProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const handleEventContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!onOpenQuickActions || !(event.target instanceof Element)) return;
+    const appointmentId = event.target
+      .closest<HTMLElement>("[data-appointment-id]")
+      ?.dataset.appointmentId;
+    if (appointmentId) onOpenQuickActions(event, appointmentId);
+  };
   const isTimeGridView = isTimeGridCalendarView(calendarView);
   const eventLayoutKey = useMemo(
     () =>
@@ -327,6 +351,7 @@ export function DesktopCalendarSurface({
         ref={shellRef}
         className="appointments-calendar-shell p-3"
         style={calendarShellStyle}
+        onContextMenu={handleEventContextMenu}
       >
         <FullCalendar
           ref={calendarRef}
@@ -361,6 +386,7 @@ export function DesktopCalendarSurface({
           eventDrop={eventDrop}
           eventResize={eventResize}
           eventContent={eventContent}
+          eventDidMount={markCalendarEventElement}
           datesSet={datesSet}
           events={events}
         />

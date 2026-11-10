@@ -2267,11 +2267,66 @@ const INSERT_PATIENT_PACKAGE_SQL: &str = r#"INSERT INTO patient_service_packages
              )
            RETURNING id"#;
 
+/// Title and text of a subscription notice in every language of the stored
+/// patient notices; `title`/`body` are the English wording of the caller.
+fn subscription_notice_texts(
+    kind: &str,
+    title: &str,
+    body: &str,
+) -> (
+    crate::patient_notice_language::Texts,
+    crate::patient_notice_language::Texts,
+) {
+    use crate::patient_notice_language::Texts;
+    match kind {
+        "subscription_assigned" => (
+            Texts::new("Neues Abonnement", "Новая подписка", "Нова підписка", title),
+            Texts::new(
+                "Ein Abonnement wurde Ihrem Portal hinzugefügt.",
+                "Подписка добавлена в ваш портал.",
+                "Підписку додано до вашого порталу.",
+                body,
+            ),
+        ),
+        "subscription_paused" => (
+            Texts::new(
+                "Abonnement pausiert",
+                "Подписка приостановлена",
+                "Підписку призупинено",
+                title,
+            ),
+            Texts::new(
+                "Ihr Abonnement ist pausiert.",
+                "Ваша подписка приостановлена.",
+                "Вашу підписку призупинено.",
+                body,
+            ),
+        ),
+        "subscription_ended" => (
+            Texts::new(
+                "Abonnement beendet",
+                "Подписка завершена",
+                "Підписку завершено",
+                title,
+            ),
+            Texts::new(
+                "Ihr Abonnement ist beendet.",
+                "Ваша подписка завершена.",
+                "Вашу підписку завершено.",
+                body,
+            ),
+        ),
+        _ => (Texts::same(title), Texts::same(body)),
+    }
+}
+
 /// Tells the patient's active portal logins about their subscription (owner
 /// decision 2026-11-10): assigned, paused, resumed or ended. The portal words
 /// the notice from `kind` and `params.package_name`
 /// (`frontend/src/lib/patient-event-notifications.ts`); `title`/`body` are
-/// the English fallback. Only for a subscription the portal shows.
+/// the fallback, stored in the login's language
+/// (`crate::patient_notice_language`; `title`/`body` are the English
+/// wording). Only for a subscription the portal shows.
 async fn notify_patient_of_subscription(
     state: &AppState,
     patient_id: Uuid,
@@ -2280,9 +2335,13 @@ async fn notify_patient_of_subscription(
     title: &str,
     body: &str,
 ) {
-    let rows = sqlx::query(
+    let (title_texts, body_texts) = subscription_notice_texts(kind, title, body);
+    let insert_sql = format!(
         r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
-           SELECT pa.user_id, $3, $4, $5, 'service_package', $2,
+           SELECT pa.user_id, $3,
+                  {title_sql},
+                  {body_sql},
+                  'service_package', $2,
                   jsonb_build_object(
                       'package_name', (SELECT name FROM service_packages WHERE id = $2)
                   )
@@ -2293,14 +2352,17 @@ async fn notify_patient_of_subscription(
              AND u.is_active = true
              AND u.role = 'patient'
            RETURNING id, user_id"#,
-    )
-    .bind(patient_id)
-    .bind(package_id)
-    .bind(kind)
-    .bind(title)
-    .bind(body)
-    .fetch_all(&state.db)
-    .await;
+        title_sql = crate::patient_notice_language::text_sql("$4", "u", "pa.patient_id"),
+        body_sql = crate::patient_notice_language::text_sql("$5", "u", "pa.patient_id"),
+    );
+    let rows = sqlx::query(&insert_sql)
+        .bind(patient_id)
+        .bind(package_id)
+        .bind(kind)
+        .bind(title_texts.to_json())
+        .bind(body_texts.to_json())
+        .fetch_all(&state.db)
+        .await;
     let rows = match rows {
         Ok(rows) => rows,
         Err(e) => {

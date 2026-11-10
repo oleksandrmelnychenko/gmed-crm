@@ -2,7 +2,7 @@ import { useContext, useEffect, useRef, useState, type FocusEvent, type ReactNod
 
 import { appDateKey } from "@/lib/app-time-zone";
 
-import { AutosaveFlushContext, type AutosaveFlush } from "./lead-request-parts";
+import { AutosaveFlushContext, StepRefusedEntryContext, type AutosaveFlush } from "./lead-request-parts";
 
 // A date field of the cabinet takes complete, allowed dates only: a date that does not exist
 // (31.02.), an unfinished one or one outside the field's range never reaches the form. The field
@@ -115,6 +115,16 @@ export function useDateRefusal(lang: string, value: string, limits: DateLimits =
     return () => { flushers?.delete(flush); };
   }, [flushers]);
   const message = reason !== null && left ? dateRefusalMessage(lang, reason, limits) : undefined;
+  // While the refusal is shown the step does not say "saved": what the field shows is not saved.
+  const reportRefused = useContext(StepRefusedEntryContext);
+  const refusalKey = useRef({});
+  const refusalShown = message !== undefined;
+  useEffect(() => {
+    if (!reportRefused) return;
+    const key = refusalKey.current;
+    reportRefused(key, refusalShown);
+    return () => reportRefused(key, false);
+  }, [reportRefused, refusalShown]);
   const onBlur = (event: FocusEvent<HTMLElement>) => {
     const next = event.relatedTarget;
     if (next instanceof Node && event.currentTarget.contains(next)) return;

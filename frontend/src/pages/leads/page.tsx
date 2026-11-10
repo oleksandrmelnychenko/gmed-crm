@@ -2494,6 +2494,8 @@ function useLeadsPageContent() {
                             variant="outline"
                             size="sm"
                             disabled={
+                              // A read-only role has no form behind it.
+                              !permissions.canEdit ||
                               leadWorkflow.failedResolved ||
                               leadWorkflow.leadConverted
                             }

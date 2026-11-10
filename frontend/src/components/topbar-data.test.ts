@@ -496,6 +496,15 @@ describe("lead retention notifications", () => {
       "The patient withdrew the consent in the portal (health data). Decide on the documents already uploaded.",
     );
     expect(localizedNotificationCopy(revoked, "de").title).toBe("Einwilligung zu Gesundheitsdaten widerrufen");
+    // The notice names the lead when the server sends the name.
+    expect(localizedNotificationCopy(revoked, "ru").body).toBe(
+      "Пациент отозвал согласие в портале. Решите, как действовать дальше.",
+    );
+    const named = { ...revoked, params: { consent: "health_data", lead_name: "Testverif-Sales Alma" } } as Notification;
+    expect(localizedNotificationCopy(named, "ru").body).toBe(
+      "Testverif-Sales Alma: согласие отозвано в портале. Решите, как действовать дальше.",
+    );
+    expect(localizedNotificationCopy(named, "de").body).toContain("Testverif-Sales Alma: Die Einwilligung");
     const minor = retention("lead_portal_minor", "Patient is under 18: issue the parents' access", "");
     expect(localizedNotificationCopy(minor, "ru").title).toBe("Пациенту меньше 18: выдайте доступ родителю");
   });

@@ -6531,13 +6531,26 @@ async fn revoke_consent(
             "inquiry_processing",
         ),
     };
+    // The notice names the lead (verification 2026-11-10: «Пациент отозвал
+    // согласие» said nothing about whose). Last name first, as the leads
+    // list; a lead without a name yet keeps the plain text.
+    let lead_name = sqlx::query_scalar::<_, Option<String>>(
+        r#"SELECT NULLIF(btrim(concat_ws(' ', NULLIF(btrim(last_name), ''), NULLIF(btrim(first_name), ''))), '')
+           FROM leads WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .flatten();
     notify_lead_staff_with(
         &state,
         lead_id,
         "lead_portal_consent_revoked",
         title,
         body,
-        Some(json!({ "consent": consent })),
+        Some(json!({ "consent": consent, "lead_name": lead_name })),
     )
     .await;
     crate::realtime::publish_lead_event(

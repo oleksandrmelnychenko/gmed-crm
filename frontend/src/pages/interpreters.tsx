@@ -239,7 +239,9 @@ function displayValue(value: unknown, fallback = "-") {
 }
 
 function displayNumber(value: unknown, suffix = "") {
-  const textValue = displayValue(value, "0");
+  // "1.25" from the server reads "1,25" in both interface languages.
+  const rawValue = displayValue(value, "0");
+  const textValue = /^-?\d+\.\d+$/.test(rawValue) ? rawValue.replace(".", ",") : rawValue;
   return suffix ? `${textValue}${suffix}` : textValue;
 }
 
@@ -2581,8 +2583,11 @@ export function InterpretersPage() {
                           </span>
                           <span className="mt-1 block text-muted-foreground">
                             {compactDate(item.appointment_date)} ·{" "}
-                            {displayValue(item.patient_code)} · {profileCopy.billing}{" "}
-                            {displayValue(item.billing_status)}
+                            {displayValue(item.patient_code)}
+                            {/* Nothing to say about billing yet: no «бухгалтерия -». */}
+                            {item.billing_status
+                              ? ` · ${profileCopy.billing} ${displayValue(item.billing_status)}`
+                              : null}
                           </span>
                         </div>
                       )}

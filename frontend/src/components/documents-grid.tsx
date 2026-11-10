@@ -526,14 +526,18 @@ export function DocumentsGrid({
           >
             {formatVisibilityLabel(item.visibility, item.has_active_portal_release)}
           </Badge>
+          {/* The second badge stays inside the column: a long label
+              («Финансовые данные») is cut with "…" and shown whole on
+              hover instead of running into the next column. */}
           <Badge
             variant="outline"
+            title={formatSensitivityLabel(item.data_sensitivity)}
             className={cn(
-              "shrink-0 rounded-full text-[10px]",
+              "min-w-0 shrink justify-start overflow-hidden rounded-full text-[10px]",
               sensitivityBadge(item.data_sensitivity),
             )}
           >
-            {formatSensitivityLabel(item.data_sensitivity)}
+            <span className="truncate">{formatSensitivityLabel(item.data_sensitivity)}</span>
           </Badge>
         </div>
       ),

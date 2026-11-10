@@ -328,7 +328,9 @@ export function PatientRecommendationsPage() {
                 {item.patient_decision ? (
                   <PortalInfoRow
                     label={t.portal_recommendations_your_decision}
-                    value={`${recommendationDecisionLabel(item.patient_decision)}${item.appointment_request_status ? ` / ${portalStatusLabel(item.appointment_request_status)}` : ""}`}
+                    // The status after the decision is the visit request's, and says so: «Нужна
+                    // консультация / Отменено» read as if the decision was cancelled.
+                    value={`${recommendationDecisionLabel(item.patient_decision)}${item.appointment_request_status ? ` · ${lang === "de" ? "Terminanfrage" : "Запрос на визит"}: ${portalStatusLabel(item.appointment_request_status)}` : ""}`}
                   />
                 ) : null}
 

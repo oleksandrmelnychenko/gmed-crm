@@ -1092,6 +1092,11 @@ struct RecipientEvaluation {
     /// Released advances of another recipient that this final invoice bills
     /// (same quote, still open).
     mismatched_advances: Vec<MismatchedAdvance>,
+    /// Advances whose recipient record differs only because the same person
+    /// is addressed at another address (the patient, and the patient's own
+    /// name as invoice address): the same recipient, so billing is not asked;
+    /// the release notes their numbers, which is what the settlement reads.
+    same_person_advances: Vec<MismatchedAdvance>,
 }
 
 /// An advance of another recipient that a final invoice would settle: named
@@ -1101,7 +1106,24 @@ struct MismatchedAdvance {
     recipient_name: Option<String>,
     total_gross: Decimal,
     paid_gross: Decimal,
+    /// What the recipient of the advance still owes on it (never the amount
+    /// that is merely not yet deducted in a final invoice).
     open_gross: Decimal,
+}
+
+/// Whether an advance and the final invoice name the same person although
+/// their recipient records differ: the same name on both, and neither of
+/// them a Kostenübernehmer (a third party stays another recipient even under
+/// an equal name).
+fn advance_names_same_person(
+    advance_name: Option<&str>,
+    advance_role: Option<&str>,
+    recipient_name: &str,
+    recipient_role: Option<&str>,
+) -> bool {
+    advance_role != Some(PAYER_ROLE_COST_BEARER)
+        && recipient_role != Some(PAYER_ROLE_COST_BEARER)
+        && advance_name.is_some_and(|name| same_name(name, recipient_name))
 }
 
 impl MismatchedAdvance {
@@ -1293,18 +1315,17 @@ async fn evaluate_recipient(
     // the whole order) and that still ask for something: an advance of
     // another quote or one already credited into another invoice is not
     // settled by it, so billing neither confirms nor stores it (QA D2-03).
-    let mismatched_advances = match (invoice_type.as_str(), order_id) {
+    let other_record_advances = match (invoice_type.as_str(), order_id) {
         ("final", Some(order_id)) => {
             let sql = format!(
                 r#"SELECT advance.invoice_number,
                           advance.recipient_snapshot ->> 'name' AS recipient_name,
+                          advance.payer_role AS advance_payer_role,
                           advance.total_gross, advance.paid_amount,
-                          advance.total_gross - advance.credited_amount
-                              - COALESCE((
-                                  SELECT SUM(allocation.amount_gross)
-                                  FROM invoice_prepayment_allocations allocation
-                                  WHERE allocation.advance_invoice_id = advance.id
-                              ), 0) AS open_gross
+                          GREATEST(
+                              advance.total_gross - advance.credited_amount - advance.paid_amount,
+                              0
+                          ) AS open_gross
                    FROM invoices final_invoice
                    JOIN invoices advance
                      ON advance.order_id = final_invoice.order_id
@@ -1336,18 +1357,42 @@ async fn evaluate_recipient(
                 .await?
                 .into_iter()
                 .map(|row| {
-                    Ok(MismatchedAdvance {
-                        invoice_number: row.try_get("invoice_number")?,
-                        recipient_name: row.try_get("recipient_name")?,
-                        total_gross: row.try_get("total_gross")?,
-                        paid_gross: row.try_get("paid_amount")?,
-                        open_gross: row.try_get("open_gross")?,
-                    })
+                    let advance_role: Option<String> = row.try_get("advance_payer_role")?;
+                    Ok((
+                        MismatchedAdvance {
+                            invoice_number: row.try_get("invoice_number")?,
+                            recipient_name: row.try_get("recipient_name")?,
+                            total_gross: row.try_get("total_gross")?,
+                            paid_gross: row.try_get("paid_amount")?,
+                            open_gross: row.try_get("open_gross")?,
+                        },
+                        advance_role,
+                    ))
                 })
                 .collect::<Result<Vec<_>, sqlx::Error>>()?
         }
         _ => Vec::new(),
     };
+    // The same person at another address is the same recipient (the patient
+    // and the patient's own name as invoice address): no question to billing.
+    let (same_person_advances, mismatched_advances): (Vec<_>, Vec<_>) = other_record_advances
+        .into_iter()
+        .partition(|(advance, advance_role)| {
+            advance_names_same_person(
+                advance.recipient_name.as_deref(),
+                advance_role.as_deref(),
+                &recipient.name,
+                payer_role.as_deref(),
+            )
+        });
+    let same_person_advances: Vec<MismatchedAdvance> = same_person_advances
+        .into_iter()
+        .map(|(advance, _)| advance)
+        .collect();
+    let mismatched_advances: Vec<MismatchedAdvance> = mismatched_advances
+        .into_iter()
+        .map(|(advance, _)| advance)
+        .collect();
     Ok(RecipientEvaluation {
         live,
         recipient,
@@ -1358,6 +1403,7 @@ async fn evaluate_recipient(
         is_party,
         patient_plain_name,
         mismatched_advances,
+        same_person_advances,
     })
 }
 
@@ -1662,13 +1708,34 @@ pub(crate) async fn release_recipient_snapshot(
                 }),
             });
         }
+        // The settlement reads `advance_invoice_numbers`: the confirmed
+        // advances and those of the same person at another address.
+        let mut numbers = mismatched_numbers(&evaluation.mismatched_advances);
+        numbers.extend(mismatched_numbers(&evaluation.same_person_advances));
         confirmed.insert(
             "advance_recipient_mismatch".into(),
             json!({
                 "by": actor_id,
                 "at": now,
-                "advance_invoice_numbers": mismatched_numbers(&evaluation.mismatched_advances),
+                "advance_invoice_numbers": numbers,
                 "advances": mismatched_json(&evaluation.mismatched_advances),
+                "same_person_advance_invoice_numbers":
+                    mismatched_numbers(&evaluation.same_person_advances),
+            }),
+        );
+    } else if !evaluation.same_person_advances.is_empty() {
+        // Nobody was asked: the advances went to the same person at another
+        // address. Their numbers are noted so that the final invoice deducts
+        // them like any advance of its own recipient.
+        confirmed.insert(
+            "advance_recipient_mismatch".into(),
+            json!({
+                "at": now,
+                "same_person": true,
+                "advance_invoice_numbers":
+                    mismatched_numbers(&evaluation.same_person_advances),
+                "same_person_advance_invoice_numbers":
+                    mismatched_numbers(&evaluation.same_person_advances),
             }),
         );
     }
@@ -1846,6 +1913,43 @@ pub(crate) async fn update_invoice_payer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_same_name_at_another_address_is_the_same_advance_recipient() {
+        // The patient, and the patient's own name as invoice address.
+        assert!(advance_names_same_person(
+            Some("Anna Portal"),
+            None,
+            "  anna   PORTAL ",
+            Some(PAYER_ROLE_INVOICE_ADDRESS),
+        ));
+        assert!(advance_names_same_person(
+            Some("Anna Portal"),
+            Some(PAYER_ROLE_CONTRACTING_PARTY),
+            "Anna Portal",
+            None,
+        ));
+        // Another name, no name, or a Kostenübernehmer on either side.
+        assert!(!advance_names_same_person(
+            Some("Beispiel GmbH"),
+            None,
+            "Anna Portal",
+            Some(PAYER_ROLE_INVOICE_ADDRESS),
+        ));
+        assert!(!advance_names_same_person(None, None, "Anna Portal", None));
+        assert!(!advance_names_same_person(
+            Some("Anna Portal"),
+            Some(PAYER_ROLE_COST_BEARER),
+            "Anna Portal",
+            None,
+        ));
+        assert!(!advance_names_same_person(
+            Some("Anna Portal"),
+            None,
+            "Anna Portal",
+            Some(PAYER_ROLE_COST_BEARER),
+        ));
+    }
 
     #[test]
     fn the_organisation_box_of_a_payer_contact_is_kept_with_its_name() {

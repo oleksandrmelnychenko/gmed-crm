@@ -1,6 +1,7 @@
 import { PortalInfoRow as InfoRow, PortalListItem as ListItem, PortalDateChip, PortalSection as Section, PortalSummary } from "./ui/portal-page-layout";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
+  Fragment,
   startTransition,
   useEffect,
   useMemo,
@@ -339,6 +340,10 @@ function usePatientAppointmentsPageContent() {
     () => new Map(appointments.map((item) => [item.id, item])),
     [appointments],
   );
+  const firstPastVisitIndex = useMemo(() => {
+    const today = appDateKey();
+    return appointments.findIndex((item) => item.date < today);
+  }, [appointments]);
   const nextAppointment = useMemo(
     () => {
       let next: PortalAppointmentItem | null = null;
@@ -468,8 +473,17 @@ function usePatientAppointmentsPageContent() {
               </EmptyCell>
             ) : (
               <div className="space-y-3">
-                {appointments.map((item) => (
-                  <ListItem key={item.id} className="space-y-2.5">
+                {appointments.map((item, index) => (
+                  <Fragment key={item.id}>
+                  {/* The list is the server's: today's and coming visits first, in date order, then
+                      the past ones, newest first. The line says where the past ones begin — without
+                      it the list read as out of date order (verification 2026-11-10). */}
+                  {index > 0 && index === firstPastVisitIndex ? (
+                    <p className="pt-1 text-xs font-semibold text-muted-foreground" data-testid="portal-appointments-past-heading">
+                      {lang === "de" ? "Vergangene Termine" : "Прошедшие визиты"}
+                    </p>
+                  ) : null}
+                  <ListItem className="space-y-2.5">
                     <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
                       <h2 className="min-w-0 text-base font-semibold leading-snug text-foreground">{item.title}</h2>
                       <div className="flex flex-wrap items-center gap-1.5">
@@ -491,6 +505,7 @@ function usePatientAppointmentsPageContent() {
                       ) : null}
                     </div>
                   </ListItem>
+                  </Fragment>
                 ))}
               </div>
             )}

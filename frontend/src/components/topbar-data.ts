@@ -229,18 +229,25 @@ export function leadRetentionNotificationCopy(
     const health = item.params?.consent
       ? item.params.consent === "health_data"
       : /health data/i.test(item.body ?? "");
+    // The server names the lead (`params.lead_name`) since 2026-11-10.
+    const leadName =
+      typeof item.params?.lead_name === "string" ? item.params.lead_name.trim() : "";
     return lang === "de"
       ? {
           title: health
             ? "Einwilligung zu Gesundheitsdaten widerrufen"
             : "Einwilligung zur Bearbeitung der Anfrage widerrufen",
-          body: "Der Patient hat die Einwilligung im Portal widerrufen. Bitte über das weitere Vorgehen entscheiden.",
+          body: leadName
+            ? `${leadName}: Die Einwilligung wurde im Portal widerrufen. Bitte über das weitere Vorgehen entscheiden.`
+            : "Der Patient hat die Einwilligung im Portal widerrufen. Bitte über das weitere Vorgehen entscheiden.",
         }
       : {
           title: health
             ? "Отозвано согласие на обработку данных о здоровье"
             : "Отозвано согласие на обработку запроса",
-          body: "Пациент отозвал согласие в портале. Решите, как действовать дальше.",
+          body: leadName
+            ? `${leadName}: согласие отозвано в портале. Решите, как действовать дальше.`
+            : "Пациент отозвал согласие в портале. Решите, как действовать дальше.",
         };
   }
   if (item.kind === "lead_retention_blocked") {

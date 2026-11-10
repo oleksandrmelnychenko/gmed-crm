@@ -397,7 +397,8 @@ function usePatientDashboardPageContent() {
           <>
             <Button
               variant="default"
-              className={tokens.control.primaryButton}
+              // On a phone the label is wider than its half of the row: it wraps instead of being cut off.
+              className={cn(tokens.control.primaryButton, "max-sm:h-auto max-sm:min-h-9 max-sm:whitespace-normal max-sm:py-1.5 max-sm:leading-4")}
               onClick={() => void handleExportData()}
               disabled={exportBusy}
             >
@@ -617,9 +618,13 @@ function usePatientDashboardPageContent() {
                     </StatusBadge>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+                    {/* A recommendation without a due date may still hold until a day:
+                        the block says what its own page says, not "no due date". */}
                     {item.due_at
                       ? <PortalDateChip>{formatPortalDate(item.due_at)}</PortalDateChip>
-                      : t.portal_dashboard_no_due_date}
+                      : item.valid_to
+                        ? <PortalDateChip>{l("portal_recommendation_valid_to").replace("{date}", formatPortalDate(item.valid_to))}</PortalDateChip>
+                        : t.portal_dashboard_no_due_date}
                   </div>
                 </ListItem>
               ))

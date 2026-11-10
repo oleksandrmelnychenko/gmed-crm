@@ -173,6 +173,26 @@ pub struct AppointmentRow {
     pub owner_user_id: Option<Uuid>,
 }
 
+/// SQL condition over an `appointments` row aliased `a`: the visit needs an
+/// interpreter and has none yet — an open medical visit of an order whose
+/// planning says «interpreter required»
+/// (`order_planning_preparation.interpreter_required`, what the order's
+/// planning counts as a missing interpreter). Such a visit belongs to the
+/// interpreter team lead's team context, so the team lead also makes the
+/// FIRST assignment (owner decision 2026-11-10); a visit without that need
+/// stays outside. The appointment list repeats this condition in its own
+/// SQL (`routes/appointments.rs`).
+pub const APPOINTMENT_AWAITS_FIRST_INTERPRETER_SQL: &str = r#"(
+    a.interpreter_id IS NULL
+    AND a.appointment_type = 'medical'
+    AND a.status NOT IN ('cancelled', 'completed')
+    AND EXISTS (
+        SELECT 1 FROM order_planning_preparation interpreter_need
+        WHERE interpreter_need.order_id = a.order_id
+          AND interpreter_need.interpreter_required
+    )
+)"#;
+
 /// Appointment-level check shared by the appointment API, the patient card
 /// and realtime delivery.
 pub async fn can_view_appointment_row(
@@ -190,14 +210,21 @@ pub async fn can_view_appointment_row(
         return Ok(decision);
     }
     // An interpreter report keeps the visit in the team lead's scope even
-    // after the interpreter was taken off the appointment.
+    // after the interpreter was taken off the appointment; a visit that
+    // waits for its first interpreter is in the scope too
+    // ([`APPOINTMENT_AWAITS_FIRST_INTERPRETER_SQL`]).
+    let team_context_sql = format!(
+        r#"SELECT EXISTS(SELECT 1 FROM interpreter_reports WHERE appointment_id = $1)
+                  OR EXISTS(
+                      SELECT 1 FROM appointments a
+                      WHERE a.id = $1 AND {APPOINTMENT_AWAITS_FIRST_INTERPRETER_SQL}
+                  )"#
+    );
     if scope.interpreter_team
-        && sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM interpreter_reports WHERE appointment_id = $1)",
-        )
-        .bind(row.appointment_id)
-        .fetch_one(pool)
-        .await?
+        && sqlx::query_scalar::<_, bool>(&team_context_sql)
+            .bind(row.appointment_id)
+            .fetch_one(pool)
+            .await?
     {
         return Ok(true);
     }

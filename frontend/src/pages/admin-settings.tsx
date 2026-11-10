@@ -530,6 +530,12 @@ function useAdminSettingsPageContent() {
 
   function updateEditValue(key: string, value: string) {
     setEditValues((current) => ({ ...current, [key]: value }));
+    // The message of the last refused save belongs to the value that was
+    // refused: it goes once the field is changed (typing the stored value
+    // back left it next to a disabled "save", verification 2026-11-10).
+    setSheetState((current) =>
+      current.error || current.warning ? { ...current, error: "", warning: "" } : current,
+    );
   }
 
   function hasFieldChanged(key: string): boolean {

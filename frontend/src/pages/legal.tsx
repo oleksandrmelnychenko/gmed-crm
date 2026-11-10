@@ -51,7 +51,7 @@ export function LegalNoticePage() {
     legal_load_error: "The agency contact details could not be loaded.",
     legal_phone: "Telephone", legal_email: "Email", legal_vat_id: "VAT ID", legal_back: "Back to sign in",
   } : noticeLang === "uk" ? {
-    legal_imprint_title: "Правова інформація", legal_privacy_title: "Повідомлення про конфіденційність",
+    legal_imprint_title: "Правова інформація", legal_privacy_title: "Декларація про захист даних",
     legal_load_error: "Не вдалося завантажити контактні дані агентства.",
     legal_phone: "Телефон", legal_email: "Електронна пошта", legal_vat_id: "Номер ПДВ", legal_back: "Назад до входу",
   } : {};

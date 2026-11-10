@@ -270,6 +270,9 @@ export function PatientPrivacyPage() {
           title={t.portal_privacy_new_request}
           icon={Shield}
         >
+          <p className="mb-3 text-sm leading-5 text-muted-foreground" data-testid="portal-privacy-review-hint">
+            {t.portal_privacy_manager_review_hint}
+          </p>
 
           <form onSubmit={handleSubmit} className="space-y-3 [&_label]:font-mono [&_label]:text-xs">
             <Field label={t.portal_privacy_request_type} htmlFor="privacy-type">

@@ -1,6 +1,6 @@
 import { PortalInfoRow as InfoRow, PortalStatCard as StatCard, PortalSection as Section, PortalDateChip } from "./ui/portal-page-layout";
 import { useEffect, useMemo, useState } from "react";
-import { Archive, CalendarClock, CircleCheck, Layers, LoaderCircle, PackageCheck, ReceiptText, RefreshCw } from "lucide-react";
+import { Archive, CalendarClock, CircleCheck, Layers, LoaderCircle, PackageCheck, Pause, ReceiptText, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -38,6 +38,19 @@ const SUBSCRIPTION_REALTIME_EVENTS = [
 
 // «1 активные» (global QA 2026-11-10): the word follows the count.
 const COUNTED_ACTIVE: PluralWords = { ru: ["активная", "активные", "активных"], de: ["aktiv", "aktiv"] };
+const COUNTED_PAUSED: PluralWords = { ru: ["приостановлена", "приостановлены", "приостановлено"], de: ["pausiert", "pausiert"] };
+
+/**
+ * A paused subscription is shown as paused everywhere on the page — count,
+ * section and badge — and never as active (verification 2026-11-10). One that
+ * is already over stays under «Завершённые».
+ */
+const PAUSED_SECTION_TITLE = { ru: "Приостановленные", de: "Pausiert" };
+const PAUSED_BADGE = { ru: "Приостановлена", de: "Pausiert" };
+
+function isPausedSubscription(item: Pick<PortalSubscriptionItem, "status" | "lifecycle">) {
+  return item.status === "paused" && item.lifecycle !== "completed";
+}
 
 /** The state of one subscription; the section titles («Активные») are plural. */
 const LIFECYCLE_BADGE: Record<PortalSubscriptionItem["lifecycle"], { ru: string; de: string }> = {
@@ -117,8 +130,9 @@ export function PatientSubscriptionsPage() {
 
   const grouped = useMemo(
     () => ({
-      active: subscriptions.filter((item) => item.lifecycle === "active"),
-      upcoming: subscriptions.filter((item) => item.lifecycle === "upcoming"),
+      active: subscriptions.filter((item) => item.lifecycle === "active" && !isPausedSubscription(item)),
+      paused: subscriptions.filter(isPausedSubscription),
+      upcoming: subscriptions.filter((item) => item.lifecycle === "upcoming" && !isPausedSubscription(item)),
       completed: subscriptions.filter((item) => item.lifecycle === "completed"),
     }),
     [subscriptions],
@@ -198,13 +212,19 @@ export function PatientSubscriptionsPage() {
           <StatCard
             label={t.portal_subscriptions_total}
             value={String(subscriptions.length)}
-            description={`${grouped.active.length} ${pluralWord(lang, grouped.active.length, COUNTED_ACTIVE)}`}
+            description={[
+              `${grouped.active.length} ${pluralWord(lang, grouped.active.length, COUNTED_ACTIVE)}`,
+              grouped.paused.length > 0
+                ? `${grouped.paused.length} ${pluralWord(lang, grouped.paused.length, COUNTED_PAUSED)}`
+                : "",
+            ].filter(Boolean).join(" · ")}
           />
           <StatCard label={t.portal_subscriptions_included_services} value={String(serviceCount)} />
           <StatCard label={t.portal_subscriptions_payment_attention} value={String(paymentAttentionCount)} />
         </section>
         {([
           [t.portal_subscriptions_active, CircleCheck, grouped.active],
+          [PAUSED_SECTION_TITLE[lang === "de" ? "de" : "ru"], Pause, grouped.paused],
           [t.portal_subscriptions_upcoming, CalendarClock, grouped.upcoming],
           [t.portal_subscriptions_completed, Archive, grouped.completed],
         ] as const).map(([title, icon, items]) => items.length > 0 && (
@@ -220,7 +240,7 @@ export function PatientSubscriptionsPage() {
 }
 
 function SubscriptionCard({ subscription }: { subscription: PortalSubscriptionItem }) {
-  const { formatPortalCurrency, formatPortalDate, portalStatusLabel } = usePortalLabels();
+  const { formatPortalCurrency, formatPortalDate } = usePortalLabels();
   const { lang, t } = useLang();
   const period = subscription.starts_on
     ? `${t.portal_subscriptions_from} ${formatPortalDate(subscription.starts_on)} · ${
@@ -238,7 +258,8 @@ function SubscriptionCard({ subscription }: { subscription: PortalSubscriptionIt
     paid: t.portal_subscriptions_financial_paid,
     overdue: t.portal_subscriptions_financial_overdue,
   }[subscription.financial.status];
-  const lifecycleLabel = LIFECYCLE_BADGE[subscription.lifecycle][lang === "de" ? "de" : "ru"];
+  const paused = isPausedSubscription(subscription);
+  const lifecycleLabel = (paused ? PAUSED_BADGE : LIFECYCLE_BADGE[subscription.lifecycle])[lang === "de" ? "de" : "ru"];
   const balanceValue =
     subscription.financial.balance_disclosure === "visible"
       ? formatPortalCurrency(subscription.financial.balance_due)
@@ -260,14 +281,9 @@ function SubscriptionCard({ subscription }: { subscription: PortalSubscriptionIt
           ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
-          <StatusBadge tone={subscriptionTone(subscription.lifecycle)}>
+          <StatusBadge tone={paused ? "warning" : subscriptionTone(subscription.lifecycle)}>
             {lifecycleLabel}
           </StatusBadge>
-          {subscription.status === "paused" ? (
-            <StatusBadge status={subscription.status}>
-              {portalStatusLabel(subscription.status)}
-            </StatusBadge>
-          ) : null}
         </div>
       </div>
 

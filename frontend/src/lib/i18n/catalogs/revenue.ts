@@ -378,6 +378,33 @@ const LEAD_COUNTRY_WORDS: PluralWords = {
   de: ["Lead-Land", "Lead-Länder"],
 };
 
+// The counted phrases of the reports page follow their count (verification
+// 2026-11-10: «23 отслеживаемых счетов», «42 предложений», «4 клиник / 54 приёмов»).
+const TRACKED_INVOICE_WORDS: PluralWords = {
+  ru: ["отслеживаемый счёт", "отслеживаемых счёта", "отслеживаемых счетов"],
+  de: ["erfasste Rechnung", "erfasste Rechnungen"],
+};
+const QUOTE_WORDS: PluralWords = {
+  ru: ["предложение", "предложения", "предложений"],
+  de: ["Angebot", "Angebote"],
+};
+const CLINIC_WORDS: PluralWords = {
+  ru: ["клиника", "клиники", "клиник"],
+  de: ["Klinik", "Kliniken"],
+};
+const APPOINTMENT_WORDS: PluralWords = {
+  ru: ["приём", "приёма", "приёмов"],
+  de: ["Termin", "Termine"],
+};
+const DOCTOR_WORDS: PluralWords = {
+  ru: ["врач", "врача", "врачей"],
+  de: ["Arzt", "Ärzte"],
+};
+const LINKED_LETTER_WORDS: PluralWords = {
+  ru: ["связанное врачебное письмо", "связанных врачебных письма", "связанных врачебных писем"],
+  de: ["verknüpfter Arztbrief", "verknüpfte Arztbriefe"],
+};
+
 const revenueReportsTextDe = {
         accessTitle: "Berichte",
         accessDescription:
@@ -432,7 +459,7 @@ const revenueReportsTextDe = {
           title: "Abrechnungs-KPI-Scorecard",
           description:
             "Rechnungsdurchsatz, Inkassodisziplin und Zahlerstruktur aus dem aktuellen Abrechnungsmodell.",
-          trackedInvoices: (count: number) => `${count} erfasste Rechnungen`,
+          trackedInvoices: (count: number) => `${count} ${pluralWord("de", count, TRACKED_INVOICE_WORDS)}`,
           invoices30d: "Rechnungen / 30 T.",
           openReceivables: "Offene Forderungen",
           paid14d: "Bezahlt innerhalb von 14 T.",
@@ -466,7 +493,7 @@ const revenueReportsTextDe = {
           pipelineTitle: "Prognose-Pipeline",
           pipelineDescription:
             "Offenes Angebotsvolumen mit einfacher Gewichtung nach Reifegrad und nahem Ablaufdruck.",
-          quotes: (count: number) => `${count} Angebote`,
+          quotes: (count: number) => `${count} ${pluralWord("de", count, QUOTE_WORDS)}`,
           expiring14d: "Läuft aus / 14 T.",
           grossPipeline: "Pipeline brutto",
           weighted: "Gewichtet",
@@ -503,8 +530,8 @@ const revenueReportsTextDe = {
           clinicCapacityDescription:
             "Vorausschauende Kliniklast aus geplanten/bestätigten Terminen und Nachsorgebedarf.",
           clinicCapacityBadge: (clinics: number, appointments: number) =>
-            `${clinics} Kliniken / ${appointments} Termine`,
-          doctors: (count: number) => `${count} Ärzte`,
+            `${clinics} ${pluralWord("de", clinics, CLINIC_WORDS)} / ${appointments} ${pluralWord("de", appointments, APPOINTMENT_WORDS)}`,
+          doctors: (count: number) => `${count} ${pluralWord("de", count, DOCTOR_WORDS)}`,
           followup30d: "Nachsorge / 30 T.",
           patients30d: "Patienten / 30 T.",
           orders30d: "Aufträge / 30 T.",
@@ -575,7 +602,7 @@ const revenueReportsTextDe = {
           experienceBundle: "Erlebnisbündel",
           answeredOpen: (answered: number, open: number) =>
             `${answered} beantwortet · ${open} offen`,
-          linkedArztbrief: (count: number) => `${count} verknüpfte Arztbriefe`,
+          linkedArztbrief: (count: number) => `${count} ${pluralWord("de", count, LINKED_LETTER_WORDS)}`,
           followupOrders: (done: number, total: number) => `${done}/${total} Aufträge`,
           yes: "ja",
           partial: "teilweise",
@@ -674,7 +701,7 @@ const revenueReportsTextRu: RevenueReportsText = {
           title: "Сводка KPI бухгалтерии",
           description:
             "Пропускная способность счетов, платёжная дисциплина и структура плательщиков из текущей модели расчётов.",
-          trackedInvoices: (count: number) => `${count} отслеживаемых счетов`,
+          trackedInvoices: (count: number) => `${count} ${pluralWord("ru", count, TRACKED_INVOICE_WORDS)}`,
           invoices30d: "Счета / 30 дн.",
           openReceivables: "Открытая дебиторка",
           paid14d: "Оплачено за 14 дн.",
@@ -708,7 +735,7 @@ const revenueReportsTextRu: RevenueReportsText = {
           pipelineTitle: "Прогноз воронки",
           pipelineDescription:
             "Объём открытых предложений с простой взвешенной оценкой по зрелости и ближайшему сроку истечения.",
-          quotes: (count: number) => `${count} предложений`,
+          quotes: (count: number) => `${count} ${pluralWord("ru", count, QUOTE_WORDS)}`,
           expiring14d: "Истекает / 14 дн.",
           grossPipeline: "Pipeline брутто",
           weighted: "Взвешено",
@@ -745,8 +772,8 @@ const revenueReportsTextRu: RevenueReportsText = {
           clinicCapacityDescription:
             "Прогноз нагрузки на клиники по запланированным и подтверждённым приёмам, а также спросу на сопровождение.",
           clinicCapacityBadge: (clinics: number, appointments: number) =>
-            `${clinics} клиник / ${appointments} приёмов`,
-          doctors: (count: number) => `${count} врачей`,
+            `${clinics} ${pluralWord("ru", clinics, CLINIC_WORDS)} / ${appointments} ${pluralWord("ru", appointments, APPOINTMENT_WORDS)}`,
+          doctors: (count: number) => `${count} ${pluralWord("ru", count, DOCTOR_WORDS)}`,
           followup30d: "Сопровождение / 30 дн.",
           patients30d: "Пациенты / 30 дн.",
           orders30d: "Заказы / 30 дн.",
@@ -817,7 +844,7 @@ const revenueReportsTextRu: RevenueReportsText = {
           experienceBundle: "Комплекс впечатлений",
           answeredOpen: (answered: number, open: number) =>
             `${answered} отвечено · ${open} открыто`,
-          linkedArztbrief: (count: number) => `${count} связанных врачебных писем`,
+          linkedArztbrief: (count: number) => `${count} ${pluralWord("ru", count, LINKED_LETTER_WORDS)}`,
           followupOrders: (done: number, total: number) => `${done}/${total} заказов`,
           yes: "да",
           partial: "частично",

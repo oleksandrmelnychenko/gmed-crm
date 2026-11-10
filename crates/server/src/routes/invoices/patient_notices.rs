@@ -6,8 +6,9 @@
 //! The invoice's portal switches decide: a hidden invoice — or a credit note
 //! not shown in the portal — notifies nobody, hidden amounts leave the amount
 //! out of the text and of `params`. Title and text are stored in the
-//! patient's language, the one the invoice itself is printed in
-//! (`resolve_invoice_pdf_language`), so the portal shows them as they are;
+//! language every stored patient notice uses (`crate::patient_notice_language`:
+//! the login's language, else the patient's, else English), so the portal
+//! can show them as they are;
 //! `params` carries the facts and the notice links to the invoice
 //! (`entity_type = 'invoice'`). A notice never fails the money action it
 //! follows: an error is logged.
@@ -164,6 +165,26 @@ fn notice_text(
     }
 }
 
+/// Title and text of a notice in every language of the stored patient
+/// notices: `(title, body)`.
+fn notice_texts(
+    notice: PatientInvoiceNotice,
+    number: &str,
+    amount: Option<&str>,
+) -> (
+    crate::patient_notice_language::Texts,
+    crate::patient_notice_language::Texts,
+) {
+    let (title_de, body_de) = notice_text(notice, "de", number, amount);
+    let (title_ru, body_ru) = notice_text(notice, "ru", number, amount);
+    let (title_uk, body_uk) = notice_text(notice, "uk", number, amount);
+    let (title_en, body_en) = notice_text(notice, "en", number, amount);
+    (
+        crate::patient_notice_language::Texts::new(title_de, title_ru, title_uk, title_en),
+        crate::patient_notice_language::Texts::new(body_de, body_ru, body_uk, body_en),
+    )
+}
+
 /// Tells the patient's portal logins about `notice`, unless the invoice (or
 /// the credit note) is hidden from the portal. Called after the commit of the
 /// action; never fails it.
@@ -239,11 +260,10 @@ async fn try_notify_patient(
     };
     let amount_text = amounts_visible
         .then(|| super::format_invoice_pdf_money(&amount_gross.to_string(), &currency));
-    let language = super::resolve_invoice_pdf_language(
-        &row.try_get::<Vec<String>, _>("languages")
-            .unwrap_or_default(),
-    );
-    let (title, body) = notice_text(notice, &language, &number, amount_text.as_deref());
+    // Worded per login by the rule every patient notice follows
+    // (`crate::patient_notice_language`): the login's language, else the
+    // patient's, else English.
+    let (title, body) = notice_texts(notice, &number, amount_text.as_deref());
     let params = if amounts_visible {
         json!({
             "invoice_number": number,
@@ -254,9 +274,12 @@ async fn try_notify_patient(
         json!({ "invoice_number": number })
     };
 
-    let inserted = sqlx::query(
+    let insert_sql = format!(
         r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
-           SELECT DISTINCT u.id, $2::text, $3::text, $4::text, 'invoice'::text, $5::uuid, $6::jsonb
+           SELECT DISTINCT u.id, $2::text,
+                  {title_sql},
+                  {body_sql},
+                  'invoice'::text, $5::uuid, $6::jsonb
            FROM users u
            JOIN patient_assignments pa ON pa.user_id = u.id
            WHERE pa.patient_id = $1
@@ -264,15 +287,18 @@ async fn try_notify_patient(
              AND u.is_active = true
              AND u.role = 'patient'
            RETURNING id, user_id"#,
-    )
-    .bind(patient_id)
-    .bind(notice.kind())
-    .bind(&title)
-    .bind(&body)
-    .bind(invoice_id)
-    .bind(params)
-    .fetch_all(&state.db)
-    .await?;
+        title_sql = crate::patient_notice_language::text_sql("$3", "u", "$1::uuid"),
+        body_sql = crate::patient_notice_language::text_sql("$4", "u", "$1::uuid"),
+    );
+    let inserted = sqlx::query(&insert_sql)
+        .bind(patient_id)
+        .bind(notice.kind())
+        .bind(title.to_json())
+        .bind(body.to_json())
+        .bind(invoice_id)
+        .bind(params)
+        .fetch_all(&state.db)
+        .await?;
     for notification in inserted {
         let (Ok(notification_id), Ok(user_id)) = (
             notification.try_get::<Uuid, _>("id"),
@@ -351,6 +377,14 @@ mod tests {
                     "{language}: {with_amount}"
                 );
             }
+        }
+        // Every language of the shared rule has its wording.
+        let (title, body) = notice_texts(notices[1], "INV-7", Some("40,00 €"));
+        assert_eq!(title.de, "Zahlung eingegangen");
+        assert_eq!(title.ru, "Оплата получена");
+        assert_eq!(title.en, "Payment received");
+        for language in crate::patient_notice_language::LANGUAGES {
+            assert!(body.in_language(language).contains("40,00 €"), "{language}");
         }
         assert_eq!(PatientInvoiceNotice::Issued.kind(), "invoice_issued");
         assert_eq!(notices[2].kind(), "invoice_credit_note_issued");

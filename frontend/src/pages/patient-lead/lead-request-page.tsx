@@ -558,10 +558,20 @@ function LeadRequestView({
   const patientName = [request.personal_data.first_name, request.personal_data.last_name].filter(Boolean).join(" ");
   const latestRequest = useRef(request);
   useLayoutEffect(() => { latestRequest.current = request; }, [request]);
-  const updateRequest = useCallback((next: LeadRequest) => {
+  // The notice of a write refused because the request is already sent (see below).
+  const [sentRefused, setSentRefused] = useState<"fresh" | "seen" | null>(null);
+  const lastSentRefusal = useRef(0);
+  const applyRequest = useCallback((next: LeadRequest) => {
     latestRequest.current = next;
     onChange(next);
   }, [onChange]);
+  // What a step stores after its own successful action (a document added, a consent withdrawn):
+  // the notice of an earlier refused change goes with it (verification 2026-11-10). The answers
+  // that arrive together with the refusal itself keep it.
+  const updateRequest = useCallback((next: LeadRequest) => {
+    if (Date.now() - lastSentRefusal.current > 1500) setSentRefused(null);
+    applyRequest(next);
+  }, [applyRequest]);
   // A part that changes one field (a consent, the payer questionnaire's summary) changes the
   // newest request, never a copy of the render its answer started from.
   const patchRequest = useCallback<RequestPatch>((update) => updateRequest(update(latestRequest.current)), [updateRequest]);
@@ -587,7 +597,8 @@ function LeadRequestView({
     void enqueue(() => fetchMyLeadRequest(leadId))
       .then((fresh) => {
         if (fresh.lead_id === latestRequest.current.lead_id && JSON.stringify(fresh) !== JSON.stringify(latestRequest.current)) {
-          updateRequest(fresh);
+          // A re-read is no action of the lead: it leaves the refusal notice alone.
+          applyRequest(fresh);
         }
       })
       .catch(() => { /* The next focus or event reads it again. */ })
@@ -598,7 +609,7 @@ function LeadRequestView({
           reread("event");
         }
       });
-  }, [enqueue, updateRequest]);
+  }, [enqueue, applyRequest]);
   useEffect(() => {
     const onVisible = () => { if (document.visibilityState === "visible") refreshFromServer("focus"); };
     const onFocus = () => refreshFromServer("focus");
@@ -624,9 +635,7 @@ function LeadRequestView({
   // A write the server refused because the request is already sent (QA 2026-11-10, A-1): the
   // request is read again (the steps then show their sent state), the entry that can never be
   // saved goes from the form, and one sentence says that it was not saved and whom to ask.
-  const [sentRefused, setSentRefused] = useState<"fresh" | "seen" | null>(null);
   const [formEpoch, setFormEpoch] = useState(0);
-  const lastSentRefusal = useRef(0);
   useEffect(() => {
     const onRefused = () => {
       setSentRefused("fresh");

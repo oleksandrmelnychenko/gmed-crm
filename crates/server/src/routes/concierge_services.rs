@@ -13,6 +13,7 @@ use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::money::CommercialRounding;
+use crate::patient_notice_language::Texts as PatientNoticeTexts;
 use crate::routes::invoices::service_reversal;
 use crate::routes::me::resolve_self_patient_id;
 use crate::services::concierge_service_tasks as service_tasks;
@@ -5316,14 +5317,15 @@ async fn update_concierge_service(
     Json(build_service_json_for_actor(&service, &auth)).into_response()
 }
 
-/// The status of a service as the patient reads it, Russian and German.
-fn patient_service_status_labels(status: &str) -> (&'static str, &'static str) {
+/// The status of a service as the patient reads it: German, Russian,
+/// Ukrainian, English.
+fn patient_service_status_labels(status: &str) -> [&'static str; 4] {
     match status {
-        "planned" => ("запланирован", "geplant"),
-        "in_service" => ("в работе", "in Bearbeitung"),
-        "completed" => ("выполнен", "abgeschlossen"),
-        "cancelled" => ("отменён", "storniert"),
-        _ => ("обновлён", "aktualisiert"),
+        "planned" => ["geplant", "запланирован", "заплановано", "planned"],
+        "in_service" => ["in Bearbeitung", "в работе", "в роботі", "in progress"],
+        "completed" => ["abgeschlossen", "выполнен", "виконано", "completed"],
+        "cancelled" => ["storniert", "отменён", "скасовано", "cancelled"],
+        _ => ["aktualisiert", "обновлён", "оновлено", "updated"],
     }
 }
 
@@ -5337,44 +5339,69 @@ fn patient_service_time(value: Option<chrono::DateTime<chrono::Utc>>) -> Option<
 }
 
 /// Title and text of the patient notification about a changed service, in
-/// Russian and German: `[title_ru, body_ru, title_de, body_de]`. The status
-/// leads when both the status and the time changed in one save.
+/// every language of the stored patient notices: `(title, body)`
+/// (`crate::patient_notice_language`). The status leads when both the status
+/// and the time changed in one save.
 fn patient_service_notice_texts(
     title: &str,
     status_changed: bool,
     status: &str,
     starts_at: Option<&str>,
     previous_starts_at: Option<&str>,
-) -> [String; 4] {
+) -> (PatientNoticeTexts, PatientNoticeTexts) {
     if status_changed {
-        let (status_ru, status_de) = patient_service_status_labels(status);
+        let [status_de, status_ru, status_uk, status_en] = patient_service_status_labels(status);
         let when = starts_at
             .map(|value| format!(" · {value}"))
             .unwrap_or_default();
-        return [
-            "Статус сервиса изменён".to_string(),
-            format!("{title}: {status_ru}{when}"),
-            "Status des Services geändert".to_string(),
-            format!("{title}: {status_de}{when}"),
-        ];
+        return (
+            PatientNoticeTexts::new(
+                "Status des Services geändert",
+                "Статус сервиса изменён",
+                "Статус сервісу змінено",
+                "Service status changed",
+            ),
+            PatientNoticeTexts::new(
+                format!("{title}: {status_de}{when}"),
+                format!("{title}: {status_ru}{when}"),
+                format!("{title}: {status_uk}{when}"),
+                format!("{title}: {status_en}{when}"),
+            ),
+        );
     }
-    let (when_ru, when_de) = match (previous_starts_at, starts_at) {
-        (Some(previous), Some(current)) if previous != current => (
-            format!("{previous} → {current}"),
-            format!("{previous} → {current}"),
-        ),
-        (_, Some(current)) => (current.to_string(), current.to_string()),
-        (_, None) => (
-            "время уточняется".to_string(),
+    let when = match (previous_starts_at, starts_at) {
+        (Some(previous), Some(current)) if previous != current => {
+            let moved = format!("{previous} → {current}");
+            [moved.clone(), moved.clone(), moved.clone(), moved]
+        }
+        (_, Some(current)) => [
+            current.to_string(),
+            current.to_string(),
+            current.to_string(),
+            current.to_string(),
+        ],
+        (_, None) => [
             "Zeit wird noch abgestimmt".to_string(),
-        ),
+            "время уточняется".to_string(),
+            "час уточнюється".to_string(),
+            "time to be confirmed".to_string(),
+        ],
     };
-    [
-        "Время сервиса изменено".to_string(),
-        format!("{title}: {when_ru}"),
-        "Zeit des Services geändert".to_string(),
-        format!("{title}: {when_de}"),
-    ]
+    let [when_de, when_ru, when_uk, when_en] = when;
+    (
+        PatientNoticeTexts::new(
+            "Zeit des Services geändert",
+            "Время сервиса изменено",
+            "Час сервісу змінено",
+            "Service time changed",
+        ),
+        PatientNoticeTexts::new(
+            format!("{title}: {when_de}"),
+            format!("{title}: {when_ru}"),
+            format!("{title}: {when_uk}"),
+            format!("{title}: {when_en}"),
+        ),
+    )
 }
 
 /// Tells the patient that the status or the time of a service changed (owner
@@ -5412,7 +5439,7 @@ async fn notify_patient_of_service_change(
     let title = after.try_get::<String, _>("title").unwrap_or_default();
     let starts_text = patient_service_time(starts_after);
     let previous_starts_text = patient_service_time(starts_before);
-    let [title_ru, body_ru, title_de, body_de] = patient_service_notice_texts(
+    let (notice_title, notice_body) = patient_service_notice_texts(
         &title,
         status_changed,
         &status_after,
@@ -5433,12 +5460,12 @@ async fn notify_patient_of_service_change(
         "previous_starts_at": starts_before.map(|value| value.to_rfc3339()),
         "previous_ends_at": ends_before.map(|value| value.to_rfc3339()),
     });
-    let inserted = sqlx::query(
+    let insert_sql = format!(
         r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
            SELECT DISTINCT u.id, $2::text,
-                  CASE WHEN u.preferred_language = 'de' THEN $3::text ELSE $4::text END,
-                  CASE WHEN u.preferred_language = 'de' THEN $5::text ELSE $6::text END,
-                  'concierge_service'::text, cs.id, $7::jsonb
+                  {title_sql},
+                  {body_sql},
+                  'concierge_service'::text, cs.id, $5::jsonb
            FROM concierge_services cs
            LEFT JOIN appointments a ON a.id = cs.appointment_id
            JOIN patient_assignments pa ON pa.patient_id = cs.patient_id
@@ -5448,19 +5475,20 @@ async fn notify_patient_of_service_change(
              AND pa.revoked_at IS NULL
              AND u.is_active = true
              AND u.role = 'patient'
-             AND u.id <> $8
+             AND u.id <> $6
            RETURNING id, user_id"#,
-    )
-    .bind(service_id)
-    .bind(kind)
-    .bind(&title_de)
-    .bind(&title_ru)
-    .bind(&body_de)
-    .bind(&body_ru)
-    .bind(params)
-    .bind(actor_id)
-    .fetch_all(&state.db)
-    .await;
+        title_sql = crate::patient_notice_language::text_sql("$3", "u", "cs.patient_id"),
+        body_sql = crate::patient_notice_language::text_sql("$4", "u", "cs.patient_id"),
+    );
+    let inserted = sqlx::query(&insert_sql)
+        .bind(service_id)
+        .bind(kind)
+        .bind(notice_title.to_json())
+        .bind(notice_body.to_json())
+        .bind(params)
+        .bind(actor_id)
+        .fetch_all(&state.db)
+        .await;
     let rows = match inserted {
         Ok(rows) => rows,
         Err(error) => {

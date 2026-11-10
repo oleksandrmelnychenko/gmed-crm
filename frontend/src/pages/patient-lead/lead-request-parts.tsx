@@ -220,6 +220,13 @@ export type AutosaveFlush = { save: () => Promise<boolean>; version: () => strin
 export const AutosaveFlushContext = createContext<Set<AutosaveFlush> | null>(null);
 
 /**
+ * A field tells its step that it shows an entry the form does not take (a date that does not
+ * exist): the step then does not say "saved" (verification 2026-11-10). `key` names the field,
+ * `refused` is its state now.
+ */
+export const StepRefusedEntryContext = createContext<((key: object, refused: boolean) => void) | null>(null);
+
+/**
  * Changes the newest request: `update` gets the request as it is by then, so a
  * part that stores one field (a consent, a summary) never writes a copy of the
  * render its answer started from over the saves of the other parts.

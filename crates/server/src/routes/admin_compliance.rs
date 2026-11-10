@@ -3644,6 +3644,50 @@ async fn has_open_privacy_request(
     })
 }
 
+/// Title and text of a privacy outcome notice in every language of the
+/// stored patient notices; `title`/`body` are the English wording.
+fn privacy_outcome_notice_texts(
+    kind: &str,
+    title: &str,
+    body: &str,
+) -> (
+    crate::patient_notice_language::Texts,
+    crate::patient_notice_language::Texts,
+) {
+    use crate::patient_notice_language::Texts;
+    match kind {
+        "privacy_request_completed" => (
+            Texts::new(
+                "Datenschutzanfrage erledigt",
+                "Запрос по приватности выполнен",
+                "Запит щодо приватності виконано",
+                title,
+            ),
+            Texts::new(
+                "Ihre Datenschutzanfrage wurde erledigt.",
+                "Ваш запрос по приватности выполнен.",
+                "Ваш запит щодо приватності виконано.",
+                body,
+            ),
+        ),
+        "privacy_request_rejected" => (
+            Texts::new(
+                "Datenschutzanfrage abgelehnt",
+                "Запрос по приватности отклонён",
+                "Запит щодо приватності відхилено",
+                title,
+            ),
+            Texts::new(
+                "Ihre Datenschutzanfrage wurde abgelehnt. Der Grund steht bei der Anfrage.",
+                "Ваш запрос по приватности отклонён. Причина указана в запросе.",
+                "Ваш запит щодо приватності відхилено. Причину вказано в запиті.",
+                body,
+            ),
+        ),
+        _ => (Texts::same(title), Texts::same(body)),
+    }
+}
+
 /// Tells the patient that the privacy request they filed was completed or
 /// refused (owner decision 2026-11-10; global QA: the portal promised «we
 /// will tell you» and nothing arrived). Goes to the requester's portal login
@@ -3660,9 +3704,15 @@ async fn notify_patient_of_privacy_outcome(
     title: &str,
     body: &str,
 ) {
-    let rows = sqlx::query(
+    // Stored in the login's language (`crate::patient_notice_language`);
+    // `title`/`body` are the English wording.
+    let (title_texts, body_texts) = privacy_outcome_notice_texts(kind, title, body);
+    let insert_sql = format!(
         r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
-           SELECT u.id, $2, $3, $4, 'privacy_request', pr.id, $5
+           SELECT u.id, $2,
+                  {title_sql},
+                  {body_sql},
+                  'privacy_request', pr.id, $5
            FROM patient_privacy_requests pr
            JOIN users u
              ON u.is_active = true
@@ -3679,14 +3729,17 @@ async fn notify_patient_of_privacy_outcome(
            WHERE pr.id = $1
              AND pr.source = 'patient_request'
            RETURNING id, user_id"#,
-    )
-    .bind(request_id)
-    .bind(kind)
-    .bind(title)
-    .bind(body)
-    .bind(json!({ "request_type": request_type }))
-    .fetch_all(&state.db)
-    .await;
+        title_sql = crate::patient_notice_language::text_sql("$3", "u", "pr.patient_id"),
+        body_sql = crate::patient_notice_language::text_sql("$4", "u", "pr.patient_id"),
+    );
+    let rows = sqlx::query(&insert_sql)
+        .bind(request_id)
+        .bind(kind)
+        .bind(title_texts.to_json())
+        .bind(body_texts.to_json())
+        .bind(json!({ "request_type": request_type }))
+        .fetch_all(&state.db)
+        .await;
     let rows = match rows {
         Ok(rows) => rows,
         Err(e) => {

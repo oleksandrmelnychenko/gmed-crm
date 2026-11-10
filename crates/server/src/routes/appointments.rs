@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::patient_notice_language::Texts as PatientNoticeTexts;
 use crate::routes::me::resolve_self_patient_id;
 use crate::services::interpreter_booking_links as booking_links;
 use crate::state::AppState;
@@ -2086,6 +2087,17 @@ async fn list_appointments(
                         SELECT 1 FROM interpreter_reports team_report
                         WHERE team_report.appointment_id = a.id
                     )
+                    -- A visit that waits for its first interpreter
+                    -- (access::APPOINTMENT_AWAITS_FIRST_INTERPRETER_SQL).
+                    OR (
+                        a.appointment_type = 'medical'
+                        AND a.status NOT IN ('cancelled', 'completed')
+                        AND EXISTS (
+                            SELECT 1 FROM order_planning_preparation interpreter_need
+                            WHERE interpreter_need.order_id = a.order_id
+                              AND interpreter_need.interpreter_required
+                        )
+                    )
                 ))
              )
            ORDER BY CASE WHEN $17::boolean THEN a.date END ASC,
@@ -2365,6 +2377,17 @@ async fn list_attention_items(
                 OR ($22::boolean AND (
                     a.interpreter_id IS NOT NULL
                     OR latest_report.approval_status IS NOT NULL
+                    -- A visit that waits for its first interpreter
+                    -- (access::APPOINTMENT_AWAITS_FIRST_INTERPRETER_SQL).
+                    OR (
+                        a.appointment_type = 'medical'
+                        AND a.status NOT IN ('cancelled', 'completed')
+                        AND EXISTS (
+                            SELECT 1 FROM order_planning_preparation interpreter_need
+                            WHERE interpreter_need.order_id = a.order_id
+                              AND interpreter_need.interpreter_required
+                        )
+                    )
                 ))
              )
            ORDER BY CASE WHEN $19::boolean THEN a.date END ASC,
@@ -2522,7 +2545,9 @@ async fn list_attention_items(
                         serde_json::json!({ "count": open_communication_count }),
                     );
                 }
+                // A declined booking expects no report from that interpreter.
                 if interpreter_id.is_some()
+                    && interpreter_response.as_deref() != Some("declined")
                     && status != "cancelled"
                     && ((appointment_date < today
                         && latest_report_status.as_deref() != Some("approved"))
@@ -9634,45 +9659,59 @@ fn patient_notice_slot(date: chrono::NaiveDate, time_start: Option<chrono::Naive
     }
 }
 
-/// Title and text of a patient notification about a visit, in Russian and in
-/// German: `[title_ru, body_ru, title_de, body_de]`. The row keeps the
-/// wording of the recipient's language; `kind` and `params` carry the same
-/// facts for a portal that words them itself.
+/// Title and text of a patient notification about a visit, in every language
+/// of the stored patient notices: `(title, body)`. The row keeps the wording
+/// of the recipient's language (`crate::patient_notice_language`); `kind` and
+/// `params` carry the same facts for a portal that words them itself.
 fn patient_appointment_notice_texts(
     notice: PatientAppointmentNotice,
     title: &str,
     slot: &str,
     previous_slot: Option<&str>,
     occurrence_count: usize,
-) -> [String; 4] {
-    let (title_ru, title_de) = match notice {
-        PatientAppointmentNotice::Added => (
-            "Новый приём в вашем расписании",
+) -> (PatientNoticeTexts, PatientNoticeTexts) {
+    let notice_title = match notice {
+        PatientAppointmentNotice::Added => PatientNoticeTexts::new(
             "Neuer Termin in Ihrem Terminplan",
+            "Новый приём в вашем расписании",
+            "Новий візит у вашому розкладі",
+            "New visit in your schedule",
         ),
-        PatientAppointmentNotice::Confirmed => ("Приём подтверждён", "Termin bestätigt"),
-        PatientAppointmentNotice::Rescheduled => ("Приём перенесён", "Termin verschoben"),
-        PatientAppointmentNotice::Cancelled => ("Приём отменён", "Termin abgesagt"),
+        PatientAppointmentNotice::Confirmed => PatientNoticeTexts::new(
+            "Termin bestätigt",
+            "Приём подтверждён",
+            "Візит підтверджено",
+            "Visit confirmed",
+        ),
+        PatientAppointmentNotice::Rescheduled => PatientNoticeTexts::new(
+            "Termin verschoben",
+            "Приём перенесён",
+            "Візит перенесено",
+            "Visit rescheduled",
+        ),
+        PatientAppointmentNotice::Cancelled => PatientNoticeTexts::new(
+            "Termin abgesagt",
+            "Приём отменён",
+            "Візит скасовано",
+            "Visit cancelled",
+        ),
     };
     let when = match previous_slot {
         Some(previous) if previous != slot => format!("{title}: {previous} → {slot}"),
         _ => format!("{title} · {slot}"),
     };
-    let (more_ru, more_de) = if occurrence_count > 1 {
+    let body = if occurrence_count > 1 {
         let more = occurrence_count - 1;
-        (
-            format!(" (и ещё приёмов серии: {more})"),
-            format!(" (und weitere Termine der Serie: {more})"),
+        PatientNoticeTexts::new(
+            format!("{when} (und weitere Termine der Serie: {more})"),
+            format!("{when} (и ещё приёмов серии: {more})"),
+            format!("{when} (і ще візитів серії: {more})"),
+            format!("{when} (and further visits of the series: {more})"),
         )
     } else {
-        (String::new(), String::new())
+        PatientNoticeTexts::new(when.clone(), when.clone(), when.clone(), when)
     };
-    [
-        title_ru.to_string(),
-        format!("{when}{more_ru}"),
-        title_de.to_string(),
-        format!("{when}{more_de}"),
-    ]
+    (notice_title, body)
 }
 
 /// Writes the patient notifications of one change inside the caller's
@@ -9708,9 +9747,13 @@ async fn insert_patient_appointment_notifications(
            WHERE a.id = ANY($1)
              AND a.appointment_type <> 'internal'
              AND a.portal_released_at IS NOT NULL
+             AND ($2::date IS NULL OR a.date >= $2::date)
            ORDER BY a.date, a.time_start NULLS FIRST, a.id"#,
     )
     .bind(&appointment_ids)
+    // A visit entered with a date in the past is not announced as a new
+    // visit in the schedule: it is already over (verification 2026-11-10).
+    .bind((notice == PatientAppointmentNotice::Added).then(crate::app_time::today))
     .fetch_all(&mut **tx)
     .await?;
 
@@ -9731,7 +9774,7 @@ async fn insert_patient_appointment_notifications(
             .and_then(|change| change.previous);
         let slot = patient_notice_slot(*date, *time_start);
         let previous_slot = previous.map(|(date, time)| patient_notice_slot(date, time));
-        let [title_ru, body_ru, title_de, body_de] = patient_appointment_notice_texts(
+        let (notice_title, notice_body) = patient_appointment_notice_texts(
             notice,
             title,
             &slot,
@@ -9750,33 +9793,34 @@ async fn insert_patient_appointment_notifications(
             "deleted": !link_appointment,
         });
         let linked_appointment_id = link_appointment.then_some(*appointment_id);
-        let rows = sqlx::query(
+        let insert_sql = format!(
             r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
                SELECT DISTINCT u.id, $2::text,
-                      CASE WHEN u.preferred_language = 'de' THEN $3::text ELSE $4::text END,
-                      CASE WHEN u.preferred_language = 'de' THEN $5::text ELSE $6::text END,
-                      CASE WHEN $7::uuid IS NOT NULL THEN 'appointment' END,
-                      $7::uuid, $8::jsonb
+                      {title_sql},
+                      {body_sql},
+                      CASE WHEN $5::uuid IS NOT NULL THEN 'appointment' END,
+                      $5::uuid, $6::jsonb
                FROM users u
                JOIN patient_assignments pa ON pa.user_id = u.id
                WHERE pa.patient_id = $1
                  AND pa.revoked_at IS NULL
                  AND u.is_active = true
                  AND u.role = 'patient'
-                 AND u.id <> $9
+                 AND u.id <> $7
                RETURNING id, user_id"#,
-        )
-        .bind(patient_id)
-        .bind(notice.kind())
-        .bind(&title_de)
-        .bind(&title_ru)
-        .bind(&body_de)
-        .bind(&body_ru)
-        .bind(linked_appointment_id)
-        .bind(params)
-        .bind(actor_id)
-        .fetch_all(&mut **tx)
-        .await?;
+            title_sql = crate::patient_notice_language::text_sql("$3", "u", "$1::uuid"),
+            body_sql = crate::patient_notice_language::text_sql("$4", "u", "$1::uuid"),
+        );
+        let rows = sqlx::query(&insert_sql)
+            .bind(patient_id)
+            .bind(notice.kind())
+            .bind(notice_title.to_json())
+            .bind(notice_body.to_json())
+            .bind(linked_appointment_id)
+            .bind(params)
+            .bind(actor_id)
+            .fetch_all(&mut **tx)
+            .await?;
         for row in &rows {
             notifications.push(PendingAppointmentNotification {
                 id: row.try_get("id")?,
@@ -14174,20 +14218,23 @@ mod tests {
         );
         assert_eq!(patient_notice_slot(date, None), "17.12.2026");
 
-        let [title_ru, body_ru, title_de, body_de] = patient_appointment_notice_texts(
+        let (title, body) = patient_appointment_notice_texts(
             PatientAppointmentNotice::Rescheduled,
             "MRT Knie",
             "17.12.2026 14:00",
             Some("15.12.2026 09:00"),
             1,
         );
-        assert_eq!(title_ru, "Приём перенесён");
-        assert_eq!(title_de, "Termin verschoben");
-        assert_eq!(body_ru, "MRT Knie: 15.12.2026 09:00 → 17.12.2026 14:00");
-        assert_eq!(body_de, body_ru);
+        assert_eq!(title.ru, "Приём перенесён");
+        assert_eq!(title.de, "Termin verschoben");
+        assert_eq!(title.uk, "Візит перенесено");
+        assert_eq!(title.en, "Visit rescheduled");
+        assert_eq!(body.ru, "MRT Knie: 15.12.2026 09:00 → 17.12.2026 14:00");
+        assert_eq!(body.de, body.ru);
+        assert_eq!(body.en, body.ru);
 
         // A series change is one notice that says how many visits follow.
-        let [_, body_ru, _, body_de] = patient_appointment_notice_texts(
+        let (_, body) = patient_appointment_notice_texts(
             PatientAppointmentNotice::Cancelled,
             "Physiotherapie",
             "17.12.2026 14:00",
@@ -14195,12 +14242,16 @@ mod tests {
             3,
         );
         assert_eq!(
-            body_ru,
+            body.ru,
             "Physiotherapie · 17.12.2026 14:00 (и ещё приёмов серии: 2)"
         );
         assert_eq!(
-            body_de,
+            body.de,
             "Physiotherapie · 17.12.2026 14:00 (und weitere Termine der Serie: 2)"
+        );
+        assert_eq!(
+            body.en,
+            "Physiotherapie · 17.12.2026 14:00 (and further visits of the series: 2)"
         );
         assert_eq!(
             PatientAppointmentNotice::Added.kind(),

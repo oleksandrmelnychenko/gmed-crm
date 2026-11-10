@@ -93,24 +93,29 @@ export function useAppointmentCalendarQuickActions({
     [],
   );
 
+  // Opened by a right click (context menu) on a calendar event: the tiles
+  // themselves carry no button, so the menu appears at the pointer.
   const openCalendarQuickActionLayer = useCallback(
     (
-      event: ReactMouseEvent<HTMLButtonElement>,
+      event: ReactMouseEvent<HTMLElement>,
       appointmentId: string,
     ) => {
       event.preventDefault();
       event.stopPropagation();
-      const rect = event.currentTarget.getBoundingClientRect();
-      const menuWidth = 220;
+      const menuWidth = 224;
+      const menuHeight = 300;
       dispatchCalendarQuickActions({
         type: "toggle-menu",
         appointmentId,
         menu: {
           appointmentId,
-          top: Math.min(rect.bottom + 8, window.innerHeight - 16),
-          left: Math.min(
-            Math.max(16, rect.right - menuWidth),
-            Math.max(16, window.innerWidth - menuWidth - 16),
+          top: Math.max(
+            16,
+            Math.min(event.clientY + 4, window.innerHeight - menuHeight - 16),
+          ),
+          left: Math.max(
+            16,
+            Math.min(event.clientX, window.innerWidth - menuWidth - 16),
           ),
         },
       });

@@ -26,6 +26,7 @@ pub(crate) mod lead_self_disclosure;
 pub mod mail;
 pub mod money;
 pub(crate) mod order_document_texts;
+pub(crate) mod patient_notice_language;
 pub(crate) mod pdf_logo;
 pub(crate) mod pdf_text;
 pub mod rate_limit;

@@ -1710,8 +1710,53 @@ fn parse_due_at(value: Option<String>) -> Result<Option<DateTime<Utc>>, axum::re
     ))
 }
 
+/// Title and text of a patient notice about a recommendation in every
+/// language of the stored patient notices; `title`/`body` are the English
+/// wording, which the kinds older than 2026-11-10 keep in every language.
+fn patient_notice_texts(
+    kind: &str,
+    title: &str,
+    body: &str,
+) -> (
+    crate::patient_notice_language::Texts,
+    crate::patient_notice_language::Texts,
+) {
+    use crate::patient_notice_language::Texts;
+    match kind {
+        "recommendation_updated" => (
+            Texts::new(
+                "Empfehlung geändert",
+                "Рекомендация изменена",
+                "Рекомендацію змінено",
+                title,
+            ),
+            Texts::new(
+                "Ihr Betreuungsteam hat eine Empfehlung geändert.",
+                "Команда сопровождения изменила рекомендацию.",
+                "Команда супроводу змінила рекомендацію.",
+                body,
+            ),
+        ),
+        "recommendation_withdrawn" => (
+            Texts::new(
+                "Empfehlung zurückgezogen",
+                "Рекомендация отозвана",
+                "Рекомендацію відкликано",
+                title,
+            ),
+            Texts::new(
+                "Ihr Betreuungsteam hat eine Empfehlung zurückgezogen.",
+                "Команда сопровождения отозвала рекомендацию.",
+                "Команда супроводу відкликала рекомендацію.",
+                body,
+            ),
+        ),
+        _ => (Texts::same(title), Texts::same(body)),
+    }
+}
+
 /// The recommendation notices store their facts in `params` (the UI words
-/// them in the viewer's language); `title`/`body` are the English fallback.
+/// them in the viewer's language); `title`/`body` are the fallback.
 async fn notify_patient_users(
     state: &AppState,
     patient_id: Uuid,
@@ -1721,9 +1766,16 @@ async fn notify_patient_users(
     body: &str,
     params: &Value,
 ) {
-    if let Ok(rows) = sqlx::query(
+    // The kinds added on 2026-11-10 are stored in the login's language
+    // (`crate::patient_notice_language`); the older kinds keep their English
+    // wording in every language.
+    let (title_texts, body_texts) = patient_notice_texts(kind, title, body);
+    let insert_sql = format!(
         r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
-           SELECT pa.user_id, $2, $3, $4, 'recommendation', $5, $6
+           SELECT pa.user_id, $2,
+                  {title_sql},
+                  {body_sql},
+                  'recommendation', $5, $6
            FROM patient_assignments pa
            JOIN users u ON u.id = pa.user_id
            WHERE pa.patient_id = $1
@@ -1731,15 +1783,18 @@ async fn notify_patient_users(
              AND u.is_active = true
              AND u.role = 'patient'
            RETURNING id, user_id"#,
-    )
-    .bind(patient_id)
-    .bind(kind)
-    .bind(title)
-    .bind(body)
-    .bind(recommendation_id)
-    .bind(params.clone())
-    .fetch_all(&state.db)
-    .await
+        title_sql = crate::patient_notice_language::text_sql("$3", "u", "pa.patient_id"),
+        body_sql = crate::patient_notice_language::text_sql("$4", "u", "pa.patient_id"),
+    );
+    if let Ok(rows) = sqlx::query(&insert_sql)
+        .bind(patient_id)
+        .bind(kind)
+        .bind(title_texts.to_json())
+        .bind(body_texts.to_json())
+        .bind(recommendation_id)
+        .bind(params.clone())
+        .fetch_all(&state.db)
+        .await
     {
         publish_notification_rows(state, rows).await;
     }

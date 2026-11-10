@@ -675,7 +675,12 @@ function DraftForm({
       <div ref={topRef} className="scroll-mt-4 space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span data-testid="payer-link-step-of">{text.stepOf(position + 1, steps.length)}</span>
-          <SaveIndicator state={saveState} text={text} />
+          {/* A list of beneficial owners the page holds back (a share of 25 % or less) is not saved:
+              the step does not say "saved" while it is on screen (verification 2026-11-10). */}
+          <SaveIndicator
+            state={step === "owners" && saveState !== "saving" && ownersBlocker(form.draft) ? "error" : saveState}
+            text={text}
+          />
         </div>
         <div className="h-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
           <div className="h-full rounded-full bg-[var(--brand)] transition-[width]" style={{ width: `${progress}%` }} />
