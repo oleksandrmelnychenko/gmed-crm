@@ -7,6 +7,7 @@ import {
   fetchLeadRiskAssessment,
   postLeadRiskDecision,
   restartLeadRiskAssessment,
+  acknowledgeUncountedParent,
   withdrawLeadRiskDecision,
 } from "../data/lead-risk-api";
 import type { LeadRiskAssessment, RiskDecisionKind } from "./lead-risk-assessment";
@@ -17,6 +18,7 @@ export type LeadRiskController = {
   confirm: (decisionId: string, reason: string) => Promise<void>;
   withdraw: (decisionId: string, reason: string) => Promise<void>;
   restart: () => Promise<void>;
+  acknowledgeParent: (representativeId: string) => Promise<void>;
   reload: () => Promise<LeadRiskAssessment | null>;
 };
 
@@ -94,6 +96,11 @@ export function useLeadRiskAssessment(leadId: string | null | undefined, version
       restart: async () => {
         if (!leadId) return;
         await restartLeadRiskAssessment(leadId);
+        await reload();
+      },
+      acknowledgeParent: async (representativeId) => {
+        if (!leadId) return;
+        await acknowledgeUncountedParent(leadId, representativeId);
         await reload();
       },
     }),

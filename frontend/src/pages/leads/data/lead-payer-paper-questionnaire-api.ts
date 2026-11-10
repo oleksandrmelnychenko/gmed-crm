@@ -89,6 +89,9 @@ export function createStaffPayerClient(leadId: string): PayerLinkClient {
     saveAnswers: (patch: PayerAnswersPatch) => saveStaffPayerAnswers(leadId, patch),
     uploadIdentityDocument: (file: File) => upload(`${base(leadId)}/identity-document`, file),
     uploadFundsProof: (file: File) => upload(`${base(leadId)}/funds-proof`, file),
+    // Staff file the register extract on the paper path (lead-payer-paper-path).
+    canUploadRegisterExtract: false,
+    uploadRegisterExtract: unavailable,
     recognizeIdentityDocument: (documentId: string) =>
       apiFetch<unknown>(`/documents/${encodeURIComponent(documentId)}/identity-recognition`, { method: "POST" }),
     withdrawDocument: unavailable,

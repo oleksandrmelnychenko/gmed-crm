@@ -88,7 +88,9 @@ describe("amlPrefillFromLeadAnswers", () => {
     // The payer's funds are the payer's statement on the server, not a copy in the form.
     expect(sent).not.toHaveProperty("assetOrigin");
     expect(sent.evidence).toEqual([{ documentId: "payer-proof", filename: "kontoauszug-zahler.pdf" }]);
-    expect(sent.sanctionsLinks).toBe("Angabe des Kostenübernehmers (Viktor Zahler): Geschäftspartner Beispiel GmbH");
+    // The payer's own occupation (owner decision 2026-11-10).
+    expect(sent.contractPartnerInfo).toBe("Zahler/in (Viktor Zahler): Beruf: Lehrer; Branche: Bildung");
+    expect(sent.sanctionsLinks).toBe("Angabe der zahlenden Person (Viktor Zahler): Geschäftspartner Beispiel GmbH");
 
     const draft = amlPrefillFromLeadAnswers({
       identification: null,

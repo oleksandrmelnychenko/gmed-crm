@@ -159,7 +159,18 @@ export type RiskProposal = {
 };
 
 /** `GET /leads/{id}/risk-assessment`. */
+/** A minor's parent who neither pays nor receives the invoices, with a listed country: no trigger, CEO or Sales confirms being aware (owner 2026-11-10). */
+export type UncountedParentNotice = {
+  representative_id: string;
+  name: string;
+  countries: string[];
+  acknowledged_at: string | null;
+  acknowledged_by_name: string | null;
+  can_acknowledge: boolean;
+};
+
 export type LeadRiskAssessment = RiskScore & {
+  uncounted_parents: UncountedParentNotice[];
   representatives?: RepresentativeCountryQuestions[];
   /** Null while the assessment has not started (no cabinet submit, no gated action yet). */
   started_at: string | null;
@@ -343,6 +354,23 @@ function normalizeProposal(value: unknown): RiskProposal | null {
  * The server's answer with every key present; null for anything that is not
  * one (an older server without the route, a proxy page, a test mock).
  */
+function normalizeUncountedParents(value: unknown): UncountedParentNotice[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const raw = record(item);
+    const id = raw ? text(raw.representative_id) : null;
+    if (!raw || !id) return [];
+    return [{
+      representative_id: id,
+      name: text(raw.name) ?? "",
+      countries: Array.isArray(raw.countries) ? raw.countries.filter((code): code is string => typeof code === "string") : [],
+      acknowledged_at: text(raw.acknowledged_at),
+      acknowledged_by_name: text(raw.acknowledged_by_name),
+      can_acknowledge: raw.can_acknowledge === true,
+    }];
+  });
+}
+
 export function normalizeLeadRiskAssessment(value: unknown): LeadRiskAssessment | null {
   const raw = record(value);
   if (!raw) return null;
@@ -372,6 +400,7 @@ export function normalizeLeadRiskAssessment(value: unknown): LeadRiskAssessment 
     follow_up_answered_at: text(raw.follow_up_answered_at),
     follow_up_requested_at: text(raw.follow_up_requested_at),
     review_notice: raw.review_notice === true,
+    uncounted_parents: normalizeUncountedParents(raw.uncounted_parents),
     preview,
     before_submit: raw.before_submit === true,
     decisions: Array.isArray(raw.decisions)

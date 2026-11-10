@@ -13,6 +13,7 @@ const controller: LeadRiskController = {
   confirm: async () => undefined,
   withdraw: async () => undefined,
   restart: async () => undefined,
+  acknowledgeParent: async () => undefined,
   reload: async () => null,
 };
 
@@ -57,6 +58,35 @@ function render(value: ReturnType<typeof assessment>, tx = ru) {
 }
 
 describe("LeadRiskAssessmentPanel", () => {
+  it("shows a non-paying parent with a listed country and who confirmed it (owner 2026-11-10)", () => {
+    const open = render(assessment({
+      uncounted_parents: [
+        { representative_id: "r1", name: "Reza QA", countries: ["IR"], acknowledged_at: null, acknowledged_by_name: null, can_acknowledge: true },
+      ],
+    }));
+    expect(open).toContain("lead-risk-uncounted-parent");
+    expect(open).toContain("Reza QA");
+    expect(open).toContain("не платит и не получает счета");
+    expect(open).toContain("lead-risk-uncounted-parent-acknowledge");
+
+    const waiting = render(assessment({
+      uncounted_parents: [
+        { representative_id: "r1", name: "Reza QA", countries: ["IR"], acknowledged_at: null, acknowledged_by_name: null, can_acknowledge: false },
+      ],
+    }));
+    expect(waiting).not.toContain("lead-risk-uncounted-parent-acknowledge");
+    expect(waiting).toContain("Ждёт подтверждения CEO или Sales");
+
+    const done = render(assessment({
+      uncounted_parents: [
+        { representative_id: "r1", name: "Reza QA", countries: ["IR"], acknowledged_at: "2026-11-10T10:00:00Z", acknowledged_by_name: "Test CEO", can_acknowledge: true },
+      ],
+    }));
+    expect(done).toContain("lead-risk-uncounted-parent-acknowledged");
+    expect(done).toContain("Test CEO");
+    expect(done).not.toContain("lead-risk-uncounted-parent-acknowledge\"");
+  });
+
   it("shows level, points per subject, the triggers, the open blocks and the decisions", () => {
     const html = render(assessment());
     expect(html).toContain("Оценка риска");

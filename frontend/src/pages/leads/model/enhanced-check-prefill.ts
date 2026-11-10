@@ -81,12 +81,26 @@ export function amlPrefillFromLeadAnswers(input: AmlLeadAnswers): AmlLeadPrefill
   const details = input.enhancedDetails ?? null;
   const payer = sentPayer(input.payer);
 
-  const contractPartnerInfo = details
+  const patientInfo = details
     ? joined([
         details.answers.occupation ? `Beruf: ${clean(details.answers.occupation)}` : "",
         details.answers.sector ? `Branche: ${clean(details.answers.sector)}` : "",
       ], "; ")
     : "";
+  // The payer's own occupation from the payer link (owner decision 2026-11-10).
+  const payerInfo = payer
+    ? joined([
+        payer.answers.occupation ? `Beruf: ${clean(payer.answers.occupation)}` : "",
+        payer.answers.industry ? `Branche: ${clean(payer.answers.industry)}` : "",
+      ], "; ")
+    : "";
+  const payerLabel = payer ? payerName(payer) : "";
+  const contractPartnerInfo = payerInfo
+    ? joined([
+        patientInfo ? `Patient/in: ${patientInfo}` : "",
+        `Zahler/in${payerLabel ? ` (${payerLabel})` : ""}: ${payerInfo}`,
+      ], "\n")
+    : patientInfo;
 
   // The proofs of the funds the lead and the payer uploaded.
   const evidence: AssetOriginEvidence[] = [];
@@ -129,7 +143,7 @@ export function amlPrefillFromLeadAnswers(input: AmlLeadAnswers): AmlLeadPrefill
   if (payer?.answers.sanctions_links === true) {
     const name = payerName(payer);
     const text = clean(payer.answers.sanctions_links_details);
-    sanctionsLines.push(`Angabe des Kostenübernehmers${name ? ` (${name})` : ""}: ${text || "Verbindung angegeben, keine Einzelheiten"}`);
+    sanctionsLines.push(`Angabe der zahlenden Person${name ? ` (${name})` : ""}: ${text || "Verbindung angegeben, keine Einzelheiten"}`);
   }
 
   return {

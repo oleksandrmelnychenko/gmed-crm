@@ -339,8 +339,12 @@ pub(crate) fn detect_signature_anchors(pdf: &[u8]) -> Vec<SignatureAnchor> {
                     let named = &caption[..end];
                     let role = if named.contains("Stempel") || named.contains("Auftragnehmer") {
                         "agency"
-                    } else if named.contains("Kosten") {
-                        // The Kostenübernehmer of a cost coverage declaration.
+                    } else if named.contains("Kosten")
+                        || named.contains("Zahler")
+                        || named.contains("ahlende")
+                    {
+                        // The payer: "Kostenübernehmer" on older documents,
+                        // "Zahler/in" / "zahlende Person" since 2026-11-10.
                         "payer"
                     } else if named.contains("Vertreter") {
                         REPRESENTATIVE

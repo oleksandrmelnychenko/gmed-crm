@@ -4395,6 +4395,74 @@ async fn mark_retention_warned(app: &TestApp, leads: &[Uuid]) {
     .unwrap();
 }
 
+/// Owner decision 2026-11-10: a lead that signed any document stays; one
+/// that signed nothing goes. A verified identity scan is not a signature.
+#[tokio::test]
+async fn a_lead_that_signed_a_document_is_never_purged() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pool = &app.suite.pool;
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+    let policy = gmed_server::routes::leads::UnqualifiedLeadRetention {
+        days: 14,
+        effective_at: chrono::Utc::now() - chrono::Duration::days(90),
+    };
+    let signed = insert_unqualified_lead(&app, &format!("{tag}-contract"), 15).await;
+    let verified_id = insert_unqualified_lead(&app, &format!("{tag}-idonly"), 15).await;
+    let (contract, _) =
+        insert_stored_document(&app, Some(signed), None, &format!("contract-{tag}")).await;
+    let (id_scan, _) =
+        insert_stored_document(&app, Some(verified_id), None, &format!("id-{tag}")).await;
+    sqlx::query(
+        "UPDATE documents SET signed_at = now(), compliance_kind = 'framework_contract' WHERE id = $1",
+    )
+    .bind(contract)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE documents SET signed_at = now(), compliance_kind = 'identity' WHERE id = $1",
+    )
+    .bind(id_scan)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let (status, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{signed}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(detail["retention_deadline_at"].is_null(), "{detail}");
+
+    mark_retention_warned(&app, &[signed, verified_id]).await;
+    let report = gmed_server::routes::leads::purge_unqualified_leads(
+        &app.suite.state,
+        policy,
+        chrono::Utc::now(),
+        Some(&[signed, verified_id]),
+    )
+    .await
+    .unwrap();
+    assert_eq!((report.purged, report.errors), (1, 0), "{report:?}");
+    let statuses: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT id, qualification_status FROM leads WHERE id = ANY($1) ORDER BY first_name",
+    )
+    .bind(vec![signed, verified_id])
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    let status_of = |id: Uuid| {
+        statuses
+            .iter()
+            .find(|(lead, _)| *lead == id)
+            .map(|(_, status)| status.clone())
+            .unwrap()
+    };
+    assert_eq!(status_of(signed), "in_progress");
+    assert_eq!(status_of(verified_id), "deleted");
+}
+
 #[tokio::test]
 async fn an_unqualified_lead_without_consent_is_purged_with_everything_it_owns() {
     let Some(app) = test_app().await else {

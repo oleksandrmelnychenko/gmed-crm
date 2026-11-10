@@ -194,7 +194,7 @@ function useAnswersForm({
   };
 }
 
-type UploadKind = "identity" | "funds";
+type UploadKind = "identity" | "extract" | "funds";
 
 /** Uploads and withdrawals of one kind, one file after another. */
 function useUploads({
@@ -238,7 +238,11 @@ function useUploads({
         continue;
       }
       try {
-        const next = await enqueue(() => (kind === "identity" ? client.uploadIdentityDocument(file) : client.uploadFundsProof(file)));
+        const next = await enqueue(() => (kind === "identity"
+          ? client.uploadIdentityDocument(file)
+          : kind === "extract"
+            ? client.uploadRegisterExtract(file)
+            : client.uploadFundsProof(file)));
         onQuestionnaire(next);
       } catch (cause) {
         const error = cause instanceof PayerLinkError ? cause : null;
@@ -449,6 +453,16 @@ function DraftForm({
     onQuestionnaire,
     onFailure: handleFailure,
   });
+  // The register extract joins the identity files once stored (it is one of them).
+  const extractUploads = useUploads({
+    kind: "extract",
+    documents: [],
+    client,
+    enqueue,
+    text,
+    onQuestionnaire,
+    onFailure: handleFailure,
+  });
   const fundsUploads = useUploads({
     kind: "funds",
     documents: questionnaire.funds_proof_documents ?? [],
@@ -516,7 +530,7 @@ function DraftForm({
   }
 
   async function submit() {
-    if (submitting || identityUploads.busy || fundsUploads.busy) return;
+    if (submitting || identityUploads.busy || extractUploads.busy || fundsUploads.busy) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -592,6 +606,7 @@ function DraftForm({
         <IdentityStep
           context={context}
           uploads={identityUploads}
+          extractUploads={client.canUploadRegisterExtract ? extractUploads : undefined}
           extractOnFile={questionnaire.register_extract_on_file === true}
         />
       );
@@ -616,7 +631,7 @@ function DraftForm({
           text={text}
           lang={lang}
           submitting={submitting}
-          uploading={identityUploads.busy || fundsUploads.busy}
+          uploading={identityUploads.busy || extractUploads.busy || fundsUploads.busy}
           error={submitError}
           onGoTo={goTo}
           onSubmit={() => void submit()}

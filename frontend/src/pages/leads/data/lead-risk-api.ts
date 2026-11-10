@@ -51,6 +51,14 @@ export async function withdrawLeadRiskDecision(leadId: string, decisionId: strin
   );
 }
 
+/** `POST …/uncounted-parents/{representative_id}/acknowledge`: the CEO or Sales confirms being aware (owner 2026-11-10). */
+export async function acknowledgeUncountedParent(leadId: string, representativeId: string) {
+  return apiFetch<unknown>(
+    `${base(leadId)}/risk-assessment/uncounted-parents/${encodeURIComponent(representativeId)}/acknowledge`,
+    send("POST", {}),
+  );
+}
+
 /** `POST /leads/{id}/risk-assessment/restart`: a reviewer starts a grandfathered or not-started assessment. */
 export async function restartLeadRiskAssessment(leadId: string) {
   return apiFetch<unknown>(`${base(leadId)}/risk-assessment/restart`, send("POST", {}));

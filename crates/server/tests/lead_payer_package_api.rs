@@ -1106,10 +1106,7 @@ async fn the_payer_signs_four_documents_with_one_qes() {
         ),
         "{text}"
     );
-    assert!(
-        text.contains("Kostenübernehmer/in: Viktor Zahler"),
-        "{text}"
-    );
+    assert!(text.contains("Zahler/in: Viktor Zahler"), "{text}");
     assert!(text.contains("1.500,00 €"), "{text}");
     assert!(text.contains("Gesamtsumme: 1.785,00 €"), "{text}");
     for secret in SECRET_LINES {

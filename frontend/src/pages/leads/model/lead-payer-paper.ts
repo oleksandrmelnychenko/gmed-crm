@@ -106,11 +106,11 @@ export function payerIdentityNotes(fields: PayerIdentityFields): string | null {
  */
 export function payerIdentityDocumentName(payerName: string, fields: PayerIdentityFields, organisation = false): string {
   const name = payerName.trim();
-  if (!organisation) return name ? `Ausweisdokument – Kostenübernehmer/in ${name}` : "Ausweisdokument – Kostenübernehmer/in";
-  const payer = name ? ` – Kostenübernehmer ${name}` : " – Kostenübernehmer";
+  if (!organisation) return name ? `Ausweisdokument – Zahler/in ${name}` : "Ausweisdokument – Zahler/in";
+  const payer = name ? ` – Zahler/in ${name}` : " – Zahler/in";
   if (fields.registerExtract) return `Handelsregisterauszug${payer}`;
   const holder = fields.holder?.trim();
-  return `Ausweisdokument – vertretungsberechtigte Person${holder ? ` ${holder}` : ""}${name ? ` für Kostenübernehmer ${name}` : ""}`;
+  return `Ausweisdokument – vertretungsberechtigte Person${holder ? ` ${holder}` : ""}${name ? ` für Zahler/in ${name}` : ""}`;
 }
 
 /** The multipart body of `POST /documents/upload` for the payer's identity document on the lead. */

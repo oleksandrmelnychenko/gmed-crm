@@ -78,7 +78,7 @@ describe("LeadGwgSheetActions", () => {
     expect(button(existing, "payer")).toContain("Обновить для плательщика");
     const german = render(plan, { lang: "de", documents: [sheet("payer", "doc-2")] });
     expect(button(german, "contract_partner")).toContain("Für Patient/in erstellen");
-    expect(button(german, "payer")).toContain("Für Kostenübernehmer aktualisieren");
+    expect(button(german, "payer")).toContain("Für Zahler/in aktualisieren");
   });
 
   it("offers a paying organisation the sheet for legal entities instead of a note", () => {

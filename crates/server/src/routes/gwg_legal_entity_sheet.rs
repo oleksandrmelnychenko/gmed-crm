@@ -25,10 +25,10 @@ pub(super) const PREVIEW_TITLE: &str = "Dokumentationsbogen juristische Personen
 /// Owner decision 2026-10-22.
 const SUBTITLE: &str = "Freiwillige Anwendung – GMED ist kein Verpflichteter nach § 2 GwG";
 /// Where the payer's own answers come from.
-const STATEMENT_SOURCE: &str = "Angaben des Kostenübernehmers über den eigenen Zugang";
+const STATEMENT_SOURCE: &str = "Angaben der zahlenden Person über den eigenen Zugang";
 /// The same answers from the signed paper Selbstauskunft, entered by GMED.
 const PAPER_STATEMENT_SOURCE: &str =
-    "Befragung des Kostenübernehmers: Selbstauskunft auf Papier, von GMED erfasst";
+    "Befragung der zahlenden Person: Selbstauskunft auf Papier, von GMED erfasst";
 
 /// One paying company, organisation or insurer on the sheet.
 #[derive(Debug, Default, Clone)]
@@ -225,9 +225,9 @@ impl LegalEntitySheet {
 
     fn role(&self) -> &'static str {
         match self.payer_type.as_deref() {
-            Some("insurance") => "Kostenübernehmer (Versicherung)",
-            Some("organisation") => "Kostenübernehmer (Organisation)",
-            _ => "Kostenübernehmer (Unternehmen)",
+            Some("insurance") => "Zahler (Versicherung)",
+            Some("organisation") => "Zahler (Organisation)",
+            _ => "Zahler (Unternehmen)",
         }
     }
 
@@ -370,7 +370,7 @@ pub(super) fn content(sheet: &LegalEntitySheet, today: NaiveDate) -> Vec<SheetIt
     items.push(Line(
         "Quelle der Angaben",
         Some(sheet.statement_measures().unwrap_or_else(|| {
-            "Angaben zum Zahler in der Anfrage; die Angaben des Kostenübernehmers stehen aus"
+            "Angaben zum Zahler in der Anfrage; die Angaben der zahlenden Person stehen aus"
                 .to_string()
         })),
     ));
@@ -482,7 +482,7 @@ pub(super) fn content(sheet: &LegalEntitySheet, today: NaiveDate) -> Vec<SheetIt
     }
     items.push(Check(
         owners.is_empty() && sheet.beneficial_owners_none == Some(true),
-        "Es gibt keine natürliche Person, die mehr als 25 % der Kapital- oder Stimmrechtsanteile hält oder auf vergleichbare Weise Kontrolle ausübt (Angabe des Kostenübernehmers); als fiktive wirtschaftlich Berechtigte gelten die gesetzlichen Vertreter bzw. die Mitglieder des Vertretungsorgans (§ 3 Abs. 2 Satz 5 GwG)."
+        "Es gibt keine natürliche Person, die mehr als 25 % der Kapital- oder Stimmrechtsanteile hält oder auf vergleichbare Weise Kontrolle ausübt (Angabe der zahlenden Person); als fiktive wirtschaftlich Berechtigte gelten die gesetzlichen Vertreter bzw. die Mitglieder des Vertretungsorgans (§ 3 Abs. 2 Satz 5 GwG)."
             .to_string(),
     ));
     items.push(Line(
@@ -518,16 +518,16 @@ pub(super) fn content(sheet: &LegalEntitySheet, today: NaiveDate) -> Vec<SheetIt
         "5. Prüfung der Anwendung von verstärkten Sorgfaltspflichten",
     ));
     items.push(Line(
-        "Politisch exponierte Person unter den vertretungsberechtigten Personen oder wB (Angabe des Kostenübernehmers)",
+        "Politisch exponierte Person unter den vertretungsberechtigten Personen oder wB (Angabe der zahlenden Person)",
         answer(sheet.pep_self, sheet.pep_self_details.as_deref()),
     ));
     items.push(Line(
-        "Familienmitglied oder nahestehende Person einer politisch exponierten Person (Angabe des Kostenübernehmers)",
+        "Familienmitglied oder nahestehende Person einer politisch exponierten Person (Angabe der zahlenden Person)",
         answer(sheet.pep_related, sheet.pep_related_details.as_deref()),
     ));
     items.push(Line("Prüfung durch GMED", Some(sheet.pep_review.line())));
     items.push(Line(
-        "Verbindungen zu sanktionierten Personen oder Unternehmen (Angabe des Kostenübernehmers)",
+        "Verbindungen zu sanktionierten Personen oder Unternehmen (Angabe der zahlenden Person)",
         answer(
             sheet.sanctions_links,
             sheet.sanctions_links_details.as_deref(),
@@ -538,7 +538,7 @@ pub(super) fn content(sheet: &LegalEntitySheet, today: NaiveDate) -> Vec<SheetIt
     // before is printed, never "—" for a question that was not asked.
     if sheet.high_risk_country.is_some() {
         items.push(Line(
-            "Bezug zu einem Drittstaat mit hohem Risiko (Angabe des Kostenübernehmers)",
+            "Bezug zu einem Drittstaat mit hohem Risiko (Angabe der zahlenden Person)",
             answer(
                 sheet.high_risk_country,
                 sheet
@@ -1083,7 +1083,7 @@ mod tests {
     #[test]
     fn the_high_risk_country_line_is_printed_only_for_an_answer_given_before() {
         const LABEL: &str =
-            "Bezug zu einem Drittstaat mit hohem Risiko (Angabe des Kostenübernehmers)";
+            "Bezug zu einem Drittstaat mit hohem Risiko (Angabe der zahlenden Person)";
         // An answer stored before the question was dropped stays visible.
         let items = content(&complete(), day(2026, 10, 22));
         assert_eq!(value(&items, LABEL), Some("nein"));
@@ -1187,22 +1187,20 @@ mod tests {
         assert_eq!(
             value(
                 &items,
-                "Familienmitglied oder nahestehende Person einer politisch exponierten Person (Angabe des Kostenübernehmers)"
+                "Familienmitglied oder nahestehende Person einer politisch exponierten Person (Angabe der zahlenden Person)"
             ),
             Some("ja – Schwager, Bürgermeister")
         );
         assert_eq!(
             value(
                 &items,
-                "Verbindungen zu sanktionierten Personen oder Unternehmen (Angabe des Kostenübernehmers)"
+                "Verbindungen zu sanktionierten Personen oder Unternehmen (Angabe der zahlenden Person)"
             ),
             Some("nein")
         );
         assert_eq!(
             value(&items, "Quelle der Angaben"),
-            Some(
-                "Angaben des Kostenübernehmers über den eigenen Zugang (abgesendet am 20.10.2026)"
-            )
+            Some("Angaben der zahlenden Person über den eigenen Zugang (abgesendet am 20.10.2026)")
         );
         // Entered by staff from the signed paper Selbstauskunft (owner 2026-10-30).
         let paper = LegalEntitySheet {
@@ -1212,7 +1210,7 @@ mod tests {
         assert_eq!(
             paper.statement_measures().as_deref(),
             Some(
-                "Befragung des Kostenübernehmers: Selbstauskunft auf Papier, von GMED erfasst (erfasst am 20.10.2026)"
+                "Befragung der zahlenden Person: Selbstauskunft auf Papier, von GMED erfasst (erfasst am 20.10.2026)"
             )
         );
         // The source of funds only with a required enhanced check.
@@ -1239,7 +1237,7 @@ mod tests {
         assert!(meta.contains(&("Firma / Name", "Beispiel GmbH".to_string())));
         assert!(meta.contains(&(
             "Rolle in der Geschäftsbeziehung",
-            "Kostenübernehmer (Unternehmen)".to_string()
+            "Zahler (Unternehmen)".to_string()
         )));
         assert!(meta.contains(&("Datum", "22.10.2026".to_string())));
         assert!(meta.contains(&(
@@ -1297,7 +1295,7 @@ mod tests {
         assert_eq!(value(&items, "Rechtsform"), Some("—"));
         assert_eq!(
             value(&items, "Quelle der Angaben"),
-            Some("Angaben zum Zahler in der Anfrage; die Angaben des Kostenübernehmers stehen aus")
+            Some("Angaben zum Zahler in der Anfrage; die Angaben der zahlenden Person stehen aus")
         );
 
         // An expired document is named, and its copy is not ticked as valid.
@@ -1395,7 +1393,7 @@ mod tests {
         assert_eq!(
             value(
                 &items,
-                "Familienmitglied oder nahestehende Person einer politisch exponierten Person (Angabe des Kostenübernehmers)"
+                "Familienmitglied oder nahestehende Person einer politisch exponierten Person (Angabe der zahlenden Person)"
             ),
             Some("ja – Schwager, Bürgermeister")
         );

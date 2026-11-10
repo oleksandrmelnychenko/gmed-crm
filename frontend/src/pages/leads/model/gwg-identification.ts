@@ -272,7 +272,7 @@ export function gwgSheetErrorText(error: unknown, tx: Tx): string | null {
 }
 
 const PAYER_SHEET_FIELD_LABELS: Record<string, [string, string]> = {
-  statement_not_submitted: ["плательщик ещё не отправил ответы по своей ссылке", "Angaben des Kostenübernehmers über den eigenen Zugang fehlen"],
+  statement_not_submitted: ["плательщик ещё не отправил ответы по своей ссылке", "Angaben der zahlenden Person über den eigenen Zugang fehlen"],
   not_an_organisation: ["плательщик больше не организация — сформируйте лист заново", "der Zahler ist keine Organisation mehr – Bogen neu erstellen"],
   organisation_name: ["название", "Firma / Name"],
   legal_form: ["правовая форма", "Rechtsform"],

@@ -266,7 +266,7 @@ type InvoicePayer = {
   patient_pid?: string | null;
   /**
    * `contracting_party`; `cost_bearer` for a deliberately different recipient
-   * (Kostenübernehmer); `invoice_address` for the contracting party at another
+   * (Zahler); `invoice_address` for the contracting party at another
    * address (no Kostenübernahme).
    */
   role?: PayerRole | null;

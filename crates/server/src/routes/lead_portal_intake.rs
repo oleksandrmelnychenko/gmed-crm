@@ -8650,7 +8650,7 @@ pub(crate) fn upload_document_meta(
             "financial",
         ),
         UploadKind::RelationshipProof => (
-            "Nachweis der Beziehung zum Kostenübernehmer".to_string(),
+            "Nachweis der Beziehung zur zahlenden Person".to_string(),
             RELATIONSHIP_PROOF_KIND,
             "administrative",
             "internal",

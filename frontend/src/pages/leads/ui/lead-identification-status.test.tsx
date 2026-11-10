@@ -153,7 +153,7 @@ describe("LeadIdentificationStatusView", () => {
       "Qualifizierte Signatur · 05.10.2026",
       "Zahlung vom eigenen Konto ausstehend",
       "Zahlung bestätigen",
-      "Kostenübernehmer",
+      "Zahler/in",
       "Qualifizierte Signatur · 05.10.2026 · Test",
       "Blockiert die Arbeit nicht.",
       "Die Anfrage ist konvertiert",

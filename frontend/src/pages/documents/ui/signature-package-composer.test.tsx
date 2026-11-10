@@ -106,7 +106,7 @@ describe("signature package composer rules", () => {
     expect(rolesForPolicy("flexible")).not.toContain("payer");
     expect(validSigners([payer, agency])).toBe(true);
     const tx = (_ru: string, de: string) => de;
-    expect(signatureErrorText("payer_and_agency_required", tx)).toContain("Kostenübernehmer");
+    expect(signatureErrorText("payer_and_agency_required", tx)).toContain("zahlende Person");
   });
 
   it("suggests every recorded guardian for the patient side", () => {

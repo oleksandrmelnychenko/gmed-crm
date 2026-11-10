@@ -64,7 +64,7 @@ describe("payer paper path (re-check V-A7)", () => {
     expect(form.get("lead_id")).toBe("lead-1");
     expect(form.get("art")).toBe("payer_identity");
     expect(form.get("category")).toBe("identity");
-    expect(form.get("auto_name")).toBe("Ausweisdokument – Kostenübernehmer/in Erika Zahler");
+    expect(form.get("auto_name")).toBe("Ausweisdokument – Zahler/in Erika Zahler");
     expect(form.get("is_medical")).toBe("false");
     expect(form.get("visibility")).toBe("internal");
     expect(form.get("source_person")).toBe("payer");
@@ -73,7 +73,7 @@ describe("payer paper path (re-check V-A7)", () => {
     // Every ID field is optional: no notes without any.
     const bare = payerIdentityUploadForm("lead-1", file, "", EMPTY_PAYER_IDENTITY_FIELDS);
     expect(bare.get("notes")).toBeNull();
-    expect(bare.get("auto_name")).toBe("Ausweisdokument – Kostenübernehmer/in");
+    expect(bare.get("auto_name")).toBe("Ausweisdokument – Zahler/in");
     expect(payerIdentityNotes({ ...EMPTY_PAYER_IDENTITY_FIELDS, number: "X1" })).toBe("Ausweisdokument Nr. X1");
   });
 
@@ -157,12 +157,12 @@ describe("payer paper path (re-check V-A7)", () => {
   it("names an organisation's copy by its contact person or as the register extract, and feeds the ID data", () => {
     const fields = { ...EMPTY_PAYER_IDENTITY_FIELDS, type: "id_card" as const, number: " L01X00T47 ", issuingCountry: "de", validUntil: "2031-01-31", holder: "Vera Vertreter" };
     expect(payerIdentityDocumentName("Beispiel GmbH", fields, true)).toBe(
-      "Ausweisdokument – vertretungsberechtigte Person Vera Vertreter für Kostenübernehmer Beispiel GmbH",
+      "Ausweisdokument – vertretungsberechtigte Person Vera Vertreter für Zahler/in Beispiel GmbH",
     );
     expect(payerIdentityDocumentName("Beispiel GmbH", { ...fields, registerExtract: true }, true)).toBe(
-      "Handelsregisterauszug – Kostenübernehmer Beispiel GmbH",
+      "Handelsregisterauszug – Zahler/in Beispiel GmbH",
     );
-    expect(payerIdentityDocumentName("Erika Zahler", fields)).toBe("Ausweisdokument – Kostenübernehmer/in Erika Zahler");
+    expect(payerIdentityDocumentName("Erika Zahler", fields)).toBe("Ausweisdokument – Zahler/in Erika Zahler");
     // The type and number stay the first part: the GwG sheet reads them from there.
     expect(payerIdentityNotes(fields)).toBe("Personalausweis Nr. L01X00T47, Ausstellungsstaat DE, gültig bis 31.01.2031, Inhaber/in Vera Vertreter");
     expect(payerIdentityAnswersPatch(fields)).toEqual({

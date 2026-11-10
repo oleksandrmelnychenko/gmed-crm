@@ -363,7 +363,7 @@ export function identificationPersons(status: LeadIdentificationStatus, tx: Tx):
   if (!payer || payingParent) return persons;
   persons.push({
     subject: "payer",
-    role: tx("Плательщик", "Kostenübernehmer"),
+    role: tx("Плательщик", "Zahler/in"),
     detail: "",
     person: { qes: payer.qes, own_account_payment: payer.own_account_payment },
     canConfirm: true,

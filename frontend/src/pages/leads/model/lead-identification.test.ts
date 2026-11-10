@@ -309,7 +309,7 @@ describe("identificationPersons", () => {
     const payer = { ...NOTHING, qes: SIGNED };
     expect(identificationPersons(status({ payer: { ...payer, same_person_as: null } }), de)).toEqual([
       { ...line, ...notPaying, subject: "contract_partner", role: "Patient/in", person: NOTHING },
-      { ...line, subject: "payer", role: "Kostenübernehmer", person: payer },
+      { ...line, subject: "payer", role: "Zahler/in", person: payer },
     ]);
   });
 

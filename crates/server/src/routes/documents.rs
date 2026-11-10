@@ -1668,7 +1668,7 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     DocumentTemplateDefinition {
         id: "payer_self_disclosure",
         label: "Selbstauskunft der zahlenden Person",
-        description: "Angaben der zahlenden Person (Kostenübernehmer/in) für die freiwilligen GwG-Sorgfaltsmaßnahmen von GMED, aus ihrem gesendeten Fragebogen; unterschreibt die zahlende Person.",
+        description: "Angaben der zahlenden Person (Zahler/in) für die freiwilligen GwG-Sorgfaltsmaßnahmen von GMED, aus ihrem gesendeten Fragebogen; unterschreibt die zahlende Person.",
         art: "payer_self_disclosure",
         category: "compliance_aml",
         default_auto_name: "Selbstauskunft der zahlenden Person",
@@ -1701,7 +1701,7 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         description: "Ausfertigung des Kostenvoranschlags für die zahlende Person: Leistungsarten und Beträge, ohne Angaben zu Diagnosen oder Behandlungen.",
         art: "payer_cost_estimate",
         category: "finance_payer_cost_estimate",
-        default_auto_name: "Kostenvoranschlag (Ausfertigung Kostenübernehmer/in)",
+        default_auto_name: "Kostenvoranschlag (Ausfertigung Zahler/in)",
         default_status: "active",
         default_visibility: "internal",
         mime_type: "application/pdf",
@@ -3433,7 +3433,7 @@ impl GwgPaymentRoute {
     /// pointed to a section 8 the form does not have).
     fn label(&self) -> &'static str {
         if self.answered_by_payer {
-            "Angaben zum Zahlungsweg (Angaben des Kostenübernehmers)"
+            "Angaben zum Zahlungsweg (Angaben der zahlenden Person)"
         } else {
             "Angaben zum Zahlungsweg (Patientenformular, Abschnitt „Rechnung und Zahlung“)"
         }
@@ -3849,10 +3849,10 @@ fn parse_payer_identity_notes(notes: &str) -> PaperIdentityNotes {
 fn gwg_payer_paper_measures(signed_on: Option<NaiveDate>) -> String {
     match signed_on {
         Some(day) => format!(
-            "Befragung des Kostenübernehmers: Selbstauskunft auf Papier, unterschrieben am {} (Angaben zur Herkunft der Mittel dort)",
+            "Befragung der zahlenden Person: Selbstauskunft auf Papier, unterschrieben am {} (Angaben zur Herkunft der Mittel dort)",
             day.format("%d.%m.%Y")
         ),
-        None => "Befragung des Kostenübernehmers: Selbstauskunft steht aus".to_string(),
+        None => "Befragung der zahlenden Person: Selbstauskunft steht aus".to_string(),
     }
 }
 
@@ -4092,7 +4092,7 @@ async fn load_gwg_identification_sheet(
                 "The payer is not a natural person: this identification sheet is for natural persons only",
             ));
         }
-        sheet.role = "Kostenübernehmer (dritte Person)";
+        sheet.role = "Zahler/in (dritte Person)";
         sheet.first_name = payer.first_name.clone().unwrap_or_default();
         sheet.last_name = payer.last_name.clone().unwrap_or_default();
         sheet.birth_date = payer.date_of_birth;
@@ -4767,11 +4767,11 @@ fn gwg_represented_beneficial_owner(
 
 /// Where the payer's statement of section 3 comes from: the third-party
 /// payer's own link.
-const GWG_PAYER_STATEMENT_SOURCE: &str = "Angaben des Kostenübernehmers über den eigenen Zugang";
+const GWG_PAYER_STATEMENT_SOURCE: &str = "Angaben der zahlenden Person über den eigenen Zugang";
 /// The same answers from the payer's Selbstauskunft signed on paper, entered
 /// by GMED (owner 2026-10-30).
 const GWG_PAYER_PAPER_STATEMENT_SOURCE: &str =
-    "Befragung des Kostenübernehmers: Selbstauskunft auf Papier, von GMED erfasst";
+    "Befragung der zahlenden Person: Selbstauskunft auf Papier, von GMED erfasst";
 /// Section 3 of the sheet of a minor's paying parent who was not asked the
 /// payer's questions (no enhanced check required).
 /// Section 3 of the patient's sheet when the patient pays himself.
@@ -8988,7 +8988,7 @@ fn default_generated_document_name(
         ("lead_self_disclosure", _) => "Patientenformular – Angaben und Erklärungen",
         ("payer_self_disclosure", _) => "Selbstauskunft der zahlenden Person",
         ("patient_payer_statement", _) => "Erklärung zur Kostenübernahme durch Dritte",
-        ("payer_cost_estimate", _) => "Kostenvoranschlag (Ausfertigung Kostenübernehmer/in)",
+        ("payer_cost_estimate", _) => "Kostenvoranschlag (Ausfertigung Zahler/in)",
         ("appointment_confirmation", "en") => "Appointment confirmation",
         ("appointment_confirmation", _) => "Terminbestätigung",
         ("consent_data_release_child" | "consent_data_release_single", "en") => {
@@ -23273,7 +23273,7 @@ fn build_cost_coverage_pdf(
     // estimate.
     let estimated_outlays = estimated_outlays_total(&context.line_items);
     let service_rows = payer_estimate_rows(&context.line_items, &context.service_catalog);
-    if service_rows.is_empty() {
+    if service_rows.is_empty() && estimated_outlays.is_none() {
         // A working note has no place in a legal document (QA 2026-11-01).
         admin_block(
             &mut layout,
@@ -23297,6 +23297,39 @@ fn build_cost_coverage_pdf(
                 ],
                 false,
                 false,
+            );
+        }
+        // The expected outlays the payer carries as well (§ 1), with the
+        // total, as in the payer's copy of the estimate (owner decision
+        // 2026-11-10, QA C-3).
+        let outlays = estimated_outlays.map(format_eur);
+        if let Some(outlays) = outlays.as_deref() {
+            layout.table_row_aligned_middle(
+                &[
+                    (
+                        "Voraussichtliche Auslagen (Durchlaufender Posten)",
+                        TYPE_WIDTH_MM,
+                        PdfCellAlign::Left,
+                    ),
+                    (outlays, TOTAL_WIDTH_MM, PdfCellAlign::Right),
+                ],
+                false,
+                false,
+            );
+        }
+        if let Some(gross) = context
+            .total_gross
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            layout.table_row_aligned_middle(
+                &[
+                    ("Gesamtsumme", TYPE_WIDTH_MM, PdfCellAlign::Left),
+                    (gross, TOTAL_WIDTH_MM, PdfCellAlign::Right),
+                ],
+                true,
+                true,
             );
         }
         let listed = context
@@ -26584,7 +26617,7 @@ fn build_payer_cost_estimate_pdf_with_terms(
         1.0,
     );
     layout.text_block_centered(
-        "Ausfertigung für die zahlende Person (Kostenübernehmer/in)",
+        "Ausfertigung für die zahlende Person (Zahler/in)",
         9.5,
         false,
         TreatmentPlanPdfColor::Muted,
@@ -26638,9 +26671,9 @@ fn build_payer_cost_estimate_pdf_with_terms(
             payer.country.as_deref(),
         );
         let line = match (payer_name.as_deref(), address.is_empty()) {
-            (Some(name), false) => format!("Kostenübernehmer/in: {name}, {address}"),
-            (Some(name), true) => format!("Kostenübernehmer/in: {name}"),
-            (None, _) => format!("Kostenübernehmer/in: {placeholder}"),
+            (Some(name), false) => format!("Zahler/in: {name}, {address}"),
+            (Some(name), true) => format!("Zahler/in: {name}"),
+            (None, _) => format!("Zahler/in: {placeholder}"),
         };
         layout.text_block(
             &line,
@@ -26797,7 +26830,7 @@ fn build_payer_cost_estimate_pdf_with_terms(
                 .and_then(|payer| payer.city.as_deref()),
             date: None,
             name: payer_name.as_deref().unwrap_or(placeholder),
-            role: "Kostenübernehmer/in",
+            role: "Zahler/in",
             anchor: Some("payer"),
         },
         AdminSignatureParty {
@@ -27096,7 +27129,7 @@ fn payer_signature_block(
             place: None,
             date: None,
             name: representative.unwrap_or(signer),
-            role: "Zahlende Person (Kostenübernehmer/in)",
+            role: "Zahlende Person (Zahler/in)",
             anchor: Some("payer"),
         }],
     );
@@ -27178,17 +27211,15 @@ fn build_payer_self_disclosure_pdf(
     // Owner rule 2026-10-19/22: GMED applies the GwG due-diligence measures
     // voluntarily; the heading says so instead of claiming a legal duty.
     // A paying organisation is no "Person" (DEV QA 2026-10-30): the neutral
-    // "Kostenübernehmer" stays, the organisation is named as such.
+    // "Zahler" stays (one payer term outside the contract texts, owner
+    // decision 2026-11-10), the organisation is named as such.
     let (payer_party, payer_party_of) = if organisation {
         (
-            "der zahlenden Organisation (Kostenübernehmer)",
+            "der zahlenden Organisation (Zahler)",
             "der zahlenden Organisation",
         )
     } else {
-        (
-            "der zahlenden Person (Kostenübernehmer/in)",
-            "der zahlenden Person",
-        )
+        ("der zahlenden Person (Zahler/in)", "der zahlenden Person")
     };
     layout.text_block_centered(
         &format!(
@@ -40967,7 +40998,7 @@ mod tests {
         assert_nothing_medical_or_assessed(&text);
         for expected in [
             "Selbstauskunft",
-            "der zahlenden Person (Kostenübernehmer/in) – freiwillige Anwendung der GwG-Sorgfaltsmaßnahmen durch GMED (kein Verpflichteter nach § 2 GwG)",
+            "der zahlenden Person (Zahler/in) – freiwillige Anwendung der GwG-Sorgfaltsmaßnahmen durch GMED (kein Verpflichteter nach § 2 GwG)",
             "Kostenübernahme für Mia Muster",
             "übermittelt am 06.10.2026 um 12:02 über den gesicherten Fragebogen (bestätigte E-Mail: viktor.zahler@example.com)",
             "A-20261006-0001",
@@ -40998,7 +41029,7 @@ mod tests {
             "Ich versichere, dass die vorstehenden Angaben vollständig und richtig sind",
             "teile ich dies GMED unverzüglich mit.",
             "Mir ist bekannt, dass GMED – Agentur für Patientenbetreuung berechtigt ist",
-            "Unterschrift Zahlende Person (Kostenübernehmer/in)",
+            "Unterschrift Zahlende Person (Zahler/in)",
         ] {
             assert!(text.contains(expected), "{expected} missing in {text}");
         }
@@ -41225,7 +41256,7 @@ mod tests {
 
         let context = GeneratedSingleOrderContext {
             language: "de".to_string(),
-            auto_name: "Kostenvoranschlag (Ausfertigung Kostenübernehmer/in)".to_string(),
+            auto_name: "Kostenvoranschlag (Ausfertigung Zahler/in)".to_string(),
             title_override: None,
             patient_pid: "LEAD-PAYER".to_string(),
             party: legal_test_party("DE"),
@@ -41283,8 +41314,8 @@ mod tests {
             "Anlage zur Kostenübernahmeerklärung",
             "KOSTENVORANSCHLAG",
             "ZUM 1. EINZELAUFTRAG",
-            "Ausfertigung für die zahlende Person (Kostenübernehmer/in)",
-            "Kostenübernehmer/in: Viktor Zahler, Ringstraße 9, 1010 Wien, Österreich",
+            "Ausfertigung für die zahlende Person (Zahler/in)",
+            "Zahler/in: Viktor Zahler, Ringstraße 9, 1010 Wien, Österreich",
             "LEISTUNGSART",
             "Leistungen der Agentur",
             "1.500,00 €",
@@ -41296,7 +41327,7 @@ mod tests {
             "Gesamtsumme: 2.192,00 €",
             super::PAYER_COST_ESTIMATE_PRIVACY_SENTENCE,
             "IBAN",
-            "Unterschrift Kostenübernehmer/in",
+            "Unterschrift Zahler/in",
             "Unterschrift, Stempel",
         ] {
             assert!(text.contains(expected), "{expected} missing in {text}");
@@ -42362,7 +42393,7 @@ mod tests {
 
         // The payer's sheet prints it, with the payment route of the payer.
         let sheet = super::GwgIdentificationSheet {
-            role: "Kostenübernehmer (dritte Person)",
+            role: "Zahler/in (dritte Person)",
             first_name: "Zora".to_string(),
             last_name: "Muster".to_string(),
             acts_on_own_account: own.acts_on_own_account,
@@ -42388,7 +42419,7 @@ mod tests {
             text.contains("[X] Der Vertragspartner handelt im eigenen wirtschaftlichen Interesse")
         );
         assert!(text.contains("Zahlung aus eigenen Mitteln"));
-        assert!(text.contains("Angaben zum Zahlungsweg (Angaben des Kostenübernehmers)"));
+        assert!(text.contains("Angaben zum Zahlungsweg (Angaben der zahlenden Person)"));
         assert!(!text.contains("(Patientenformular"));
     }
 
@@ -43560,11 +43591,11 @@ mod tests {
         );
         assert_eq!(
             super::gwg_payer_paper_measures(NaiveDate::from_ymd_opt(2026, 10, 29)),
-            "Befragung des Kostenübernehmers: Selbstauskunft auf Papier, unterschrieben am 29.10.2026 (Angaben zur Herkunft der Mittel dort)"
+            "Befragung der zahlenden Person: Selbstauskunft auf Papier, unterschrieben am 29.10.2026 (Angaben zur Herkunft der Mittel dort)"
         );
         assert_eq!(
             super::gwg_payer_paper_measures(None),
-            "Befragung des Kostenübernehmers: Selbstauskunft steht aus"
+            "Befragung der zahlenden Person: Selbstauskunft steht aus"
         );
     }
 
@@ -45148,6 +45179,11 @@ mod tests {
             "550,00 €",
             "Dolmetscher- und Übersetzungsleistungen",
             "760,00 €",
+            // The expected outlays and the total (owner decision 2026-11-10).
+            "Voraussichtliche Auslagen (Durchlaufender Posten)",
+            "1.200,00 €",
+            "Gesamtsumme",
+            "3.082,80 €",
         ] {
             assert!(
                 coverage_text.contains(expected),

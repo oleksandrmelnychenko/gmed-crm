@@ -69,7 +69,7 @@ function groupLabel(group: BindingGroup, lang: "de" | "ru") {
     document: ["Данные документа", "Dokumentdaten"],
     consents: ["Согласия и получатели данных", "Einwilligungen und Datenempfänger"],
     patient: ["Данные клиента", "Kundendaten"],
-    payer: ["Плательщик", "Kostenübernehmer"],
+    payer: ["Плательщик", "Zahler/in"],
     bank: ["Банковские реквизиты", "Bankverbindung"],
     signatures: ["Подписи", "Unterschriften"],
   };

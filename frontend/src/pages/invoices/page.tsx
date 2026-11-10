@@ -703,7 +703,7 @@ function useStaffInvoicesPageContent() {
       lang === "de" ? "Nur Rechnungsempfänger, es zahlt {name}" : "Только получатель счёта, платит {name}",
     payerRoleCostBearer:
       lang === "de"
-        ? "Abweichender Rechnungsempfänger (Kostenübernehmer)"
+        ? "Abweichender Rechnungsempfänger (Zahler)"
         : "Другой получатель счёта (сторонний плательщик)",
     payerRoleInvoiceAddress:
       lang === "de"
@@ -712,7 +712,7 @@ function useStaffInvoicesPageContent() {
     payerRoleUnset: lang === "de" ? "Bei Ausstellung prüfen" : "Проверить при выпуске",
     payerRoleHint:
       lang === "de"
-        ? "Die Rechnung nennt den Leistungsempfänger. Geht sie an einen Kostenübernehmer, druckt sie den Vertragspartner zusätzlich als Leistungsempfänger. „Rechnungsanschrift“: der Vertragspartner unter einer anderen Anschrift, z. B. aus dem Patientenformular – keine Kostenübernahme."
+        ? "Die Rechnung nennt den Leistungsempfänger. Geht sie an eine zahlende dritte Person, druckt sie den Vertragspartner zusätzlich als Leistungsempfänger. „Rechnungsanschrift“: der Vertragspartner unter einer anderen Anschrift, z. B. aus dem Patientenformular – keine Kostenübernahme."
         : "Счёт называет получателя услуг. Если счёт выставлен стороннему плательщику, в нём дополнительно указывается сторона договора как получатель услуг. «Адрес для счёта»: сторона договора по другому адресу, например из анкеты пациента, — без принятия расходов.",
     recipientEmail: lang === "de" ? "E-Mail für Rechnungen" : "E-mail для счетов",
     recipientVatId: lang === "de" ? "USt-IdNr." : "USt-IdNr. (ИНН НДС)",

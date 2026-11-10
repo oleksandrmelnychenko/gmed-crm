@@ -31,8 +31,8 @@ function sheetButtonLabel(button: GwgSheetButton, exists: boolean, tx: Tx): stri
   }
   if (button.subject === "payer") {
     return exists
-      ? tx("Обновить для плательщика", "Für Kostenübernehmer aktualisieren")
-      : tx("Сформировать для плательщика", "Für Kostenübernehmer erstellen");
+      ? tx("Обновить для плательщика", "Für Zahler/in aktualisieren")
+      : tx("Сформировать для плательщика", "Für Zahler/in erstellen");
   }
   const name = button.personName || tx("представителя", "Vertreter/in");
   return exists

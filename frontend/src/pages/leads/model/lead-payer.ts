@@ -1128,18 +1128,18 @@ function payerIdentityIncompleteLabel(tx: Tx, payerType?: PayerType | null) {
   if (payerType === "person") {
     return tx(
       "Заполните данные плательщика: имя, дату рождения, адрес, гражданство",
-      "Angaben zum Kostenübernehmer ergänzen: Name, Geburtsdatum, Anschrift, Staatsangehörigkeit",
+      "Angaben zur zahlenden Person ergänzen: Name, Geburtsdatum, Anschrift, Staatsangehörigkeit",
     );
   }
   if (payerType) {
     return tx(
       "Заполните данные плательщика: название и юридический адрес",
-      "Angaben zum Kostenübernehmer ergänzen: Name und Sitz (Anschrift)",
+      "Angaben zur zahlenden Person ergänzen: Name und Sitz (Anschrift)",
     );
   }
   return tx(
     "Заполните данные плательщика: имя, дату рождения, адрес, гражданство (для организации — название и юридический адрес)",
-    "Angaben zum Kostenübernehmer ergänzen: Name, Geburtsdatum, Anschrift, Staatsangehörigkeit (bei Organisationen: Name und Sitz)",
+    "Angaben zur zahlenden Person ergänzen: Name, Geburtsdatum, Anschrift, Staatsangehörigkeit (bei Organisationen: Name und Sitz)",
   );
 }
 
@@ -1167,12 +1167,12 @@ export function payerReasonLabel(code: string, tx: Tx, payerType?: PayerType | n
       "Ребёнок не платит сам: выберите родителя / законного представителя или третье лицо",
       "Ein Kind zahlt nicht selbst: Elternteil / gesetzlichen Vertreter oder einen Dritten wählen",
     ),
-    payer_not_informed: tx("Подтвердите, что плательщик проинформирован об обработке его данных", "Bestätigen, dass der Kostenübernehmer über die Verarbeitung seiner Daten informiert wurde"),
+    payer_not_informed: tx("Подтвердите, что плательщик проинформирован об обработке его данных", "Bestätigen, dass die zahlende Person über die Verarbeitung ihrer Daten informiert wurde"),
     payer_not_identified: payerNotIdentifiedText(tx),
     cost_assumption_missing: tx("Создайте заявление о принятии расходов (Kostenübernahmeerklärung)", "Kostenübernahmeerklärung erstellen"),
-    cost_assumption_outdated: tx("Плательщик изменён — создайте новое заявление о принятии расходов", "Kostenübernehmer geändert – neue Kostenübernahmeerklärung erstellen"),
+    cost_assumption_outdated: tx("Плательщик изменён — создайте новое заявление о принятии расходов", "Zahler/in geändert – neue Kostenübernahmeerklärung erstellen"),
     cost_assumption_terms_outdated: tx("Заказ или его условия изменились — создайте заявление о принятии расходов заново", "Auftrag oder Konditionen geändert – Kostenübernahmeerklärung neu erstellen"),
-    cost_assumption_unsigned: tx("Получите подпись плательщика на заявлении о принятии расходов", "Unterschrift des Kostenübernehmers einholen"),
+    cost_assumption_unsigned: tx("Получите подпись плательщика на заявлении о принятии расходов", "Unterschrift der zahlenden Person einholen"),
     client_order_signature_missing: tx("Сначала клиент подписывает заказ", "Zuerst unterschreibt der Kunde den Auftrag"),
   };
   return labels[code] ?? tx("Проверьте данные плательщика", "Angaben zum Zahler prüfen");

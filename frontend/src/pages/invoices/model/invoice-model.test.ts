@@ -295,7 +295,7 @@ describe("invoice payer and recipient", () => {
     });
     const labels = {
       contracting_party: "Rechnungsempfänger ist Vertragspartner",
-      cost_bearer: "Abweichender Rechnungsempfänger (Kostenübernehmer)",
+      cost_bearer: "Abweichender Rechnungsempfänger (Zahler)",
       invoice_address: "Rechnungsanschrift (keine Kostenübernahme)",
     };
     expect(payerRoleLabel("invoice_address", labels, "nicht gesetzt")).toBe(

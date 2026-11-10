@@ -33,7 +33,7 @@ const de = (_ru: string, text: string) => text;
 
 const documents = [
   // Listed out of order: the bundle's order wins.
-  { slot: "cost_estimate", document_id: "doc-4", title: "Kostenvoranschlag (Ausfertigung Kostenübernehmer/in)", version: 1, signed_at: null },
+  { slot: "cost_estimate", document_id: "doc-4", title: "Kostenvoranschlag (Ausfertigung Zahler/in)", version: 1, signed_at: null },
   { slot: "self_disclosure", document_id: "doc-1", title: "Selbstauskunft der zahlenden Person", version: 2, signed_at: null },
   { slot: "cost_coverage", document_id: "doc-2", title: "Kostenübernahmeerklärung", version: 3, signed_at: null },
   { slot: "patient_statement", document_id: "doc-3", title: "Erklärung zur Kostenübernahme durch Dritte", version: 1, signed_at: null },

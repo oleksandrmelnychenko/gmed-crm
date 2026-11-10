@@ -130,6 +130,53 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
     load_inner(conn, lead_id, false).await
 }
 
+/// A minor's parent on file who neither pays nor receives the invoices, so
+/// [`load`] leaves the parent out of the risk triggers (owner 2026-11-02).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UncountedParent {
+    pub id: Uuid,
+    pub name: String,
+    pub citizenships: Vec<String>,
+    pub residences: Vec<String>,
+}
+
+/// The parents [`load`] does not count (a child's representative in a slot
+/// without a billing role). Empty without parents' billing roles (an adult).
+pub async fn uncounted_parents(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<Vec<UncountedParent>, sqlx::Error> {
+    let Some(roles) = crate::routes::lead_parent_billing_role::current_roles(conn, lead_id).await?
+    else {
+        return Ok(Vec::new());
+    };
+    let active = crate::routes::lead_representatives::load(conn, lead_id)
+        .await?
+        .unwrap_or_default();
+    let canonical = crate::services::lead_guardian_identity::load(conn, lead_id).await?;
+    Ok(active
+        .representation
+        .representatives
+        .iter()
+        .filter(|person| person.slot.is_some() && !roles.holds_a_role(person.id))
+        .map(|person| {
+            let identity = canonical
+                .iter()
+                .find(|identity| identity.contact_id == Some(person.id));
+            UncountedParent {
+                id: person.id,
+                name: person.name(),
+                citizenships: identity
+                    .map(|identity| identity.citizenships.clone())
+                    .unwrap_or_else(|| person.extras.citizenships.clone()),
+                residences: identity
+                    .map(|identity| identity.residences.clone())
+                    .unwrap_or_else(|| person.extras.country.clone().into_iter().collect()),
+            }
+        })
+        .collect())
+}
+
 /// [`load`] with the payer's unsent draft as if it were sent: the payer
 /// form's own preview ([`super::store::payer_form_preview`]), never stored.
 /// The cabinet's unsent answers stay pending.

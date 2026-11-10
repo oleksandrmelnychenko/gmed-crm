@@ -749,8 +749,8 @@ const AGENCY_SIGNATURE_BINDING_FIELDS: BindingFieldDef[] = [
 ];
 
 const PAYER_SIGNATURE_BINDING_FIELDS: BindingFieldDef[] = [
-  { key: "payer_sign_place", label: "Kostenübernehmer Unterzeichnungsort", labelRu: "Место подписи плательщика", kind: "text" },
-  { key: "payer_sign_date", label: "Kostenübernehmer Unterzeichnungsdatum", labelRu: "Дата подписи плательщика", kind: "date" },
+  { key: "payer_sign_place", label: "Zahler/in Unterzeichnungsort", labelRu: "Место подписи плательщика", kind: "text" },
+  { key: "payer_sign_date", label: "Zahler/in Unterzeichnungsdatum", labelRu: "Дата подписи плательщика", kind: "date" },
 ];
 
 // Manual "binding socket" fields per generated template id. Field keys match
@@ -776,9 +776,9 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     { key: "treatment_purpose", label: "Behandlungszweck", labelRu: "Цель лечения", kind: "text" },
     { key: "period_from", label: "Zeitraum von", labelRu: "Период с", kind: "date" },
     { key: "period_to", label: "Zeitraum bis", labelRu: "Период до", kind: "date" },
-    { key: "payer_salutation", label: "Kostenübernehmer Anrede", labelRu: "Обращение к плательщику", kind: "text" },
-    { key: "payer_name", label: "Kostenübernehmer (Name)", labelRu: "Имя плательщика", kind: "text" },
-    { key: "payer_birth_date", label: "Kostenübernehmer (geb. am)", labelRu: "Дата рождения плательщика", kind: "date" },
+    { key: "payer_salutation", label: "Zahler/in Anrede", labelRu: "Обращение к плательщику", kind: "text" },
+    { key: "payer_name", label: "Zahler/in (Name)", labelRu: "Имя плательщика", kind: "text" },
+    { key: "payer_birth_date", label: "Zahler/in (geb. am)", labelRu: "Дата рождения плательщика", kind: "date" },
     {
       key: "order_components",
       label: "Bestandteile / Rangfolge",
@@ -824,14 +824,14 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     { key: "order_date", label: "Einzelauftrag vom", labelRu: "Дата отдельного заказа", kind: "date" },
     { key: "contract_date", label: "Rahmenvertrag vom", labelRu: "Дата рамочного договора", kind: "date" },
     { key: "quote_number", label: "Kostenvoranschlag-Nr.", labelRu: "Номер сметы", kind: "text" },
-    { key: "payer_salutation", label: "Kostenübernehmer Anrede", labelRu: "Обращение к плательщику", kind: "text" },
-    { key: "payer_name", label: "Kostenübernehmer (Name)", labelRu: "Имя плательщика", kind: "text" },
-    { key: "payer_birth_date", label: "Kostenübernehmer (geb. am)", labelRu: "Дата рождения плательщика", kind: "date" },
-    { key: "payer_street", label: "Kostenübernehmer Straße", labelRu: "Улица плательщика", kind: "text" },
-    { key: "payer_zip", label: "Kostenübernehmer PLZ", labelRu: "Индекс плательщика", kind: "text" },
-    { key: "payer_city", label: "Kostenübernehmer Ort", labelRu: "Город плательщика", kind: "text" },
-    { key: "payer_country", label: "Kostenübernehmer Land", labelRu: "Страна плательщика", kind: "country" },
-    { key: "payer_email", label: "Kostenübernehmer E-Mail", labelRu: "E-mail плательщика", kind: "text" },
+    { key: "payer_salutation", label: "Zahler/in Anrede", labelRu: "Обращение к плательщику", kind: "text" },
+    { key: "payer_name", label: "Zahler/in (Name)", labelRu: "Имя плательщика", kind: "text" },
+    { key: "payer_birth_date", label: "Zahler/in (geb. am)", labelRu: "Дата рождения плательщика", kind: "date" },
+    { key: "payer_street", label: "Zahler/in Straße", labelRu: "Улица плательщика", kind: "text" },
+    { key: "payer_zip", label: "Zahler/in PLZ", labelRu: "Индекс плательщика", kind: "text" },
+    { key: "payer_city", label: "Zahler/in Ort", labelRu: "Город плательщика", kind: "text" },
+    { key: "payer_country", label: "Zahler/in Land", labelRu: "Страна плательщика", kind: "country" },
+    { key: "payer_email", label: "Zahler/in E-Mail", labelRu: "E-mail плательщика", kind: "text" },
     { key: "bank_holder", label: "Kontoinhaber", labelRu: "Владелец счёта", kind: "text" },
     { key: "bank_name", label: "Bank", labelRu: "Банк", kind: "text" },
     { key: "bank_swift", label: "SWIFT/BIC", kind: "text" },

@@ -26,7 +26,7 @@ export function SignatureSignerFields({ signer, index, disabled, agencyOnly, emb
   const labels: Record<SignerRole, string> = {
     client: tx("Пациент / законный представитель", "Patient/in / gesetzliche Vertretung"),
     minor: tx("Несовершеннолетний пациент (с ~14 лет, по желанию)", "Minderjährige/r Patient/in (ab ca. 14 J., optional)"),
-    payer: tx("Плательщик (принимает расходы)", "Kostenübernehmer"),
+    payer: tx("Плательщик (принимает расходы)", "Zahler/in"),
     agency: tx("Представитель агентства", "Agenturvertretung"),
     other: tx("Другая сторона", "Weitere Partei"),
   };

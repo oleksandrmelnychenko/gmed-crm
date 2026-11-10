@@ -303,10 +303,13 @@ export function DetailsStep({ context, email }: { context: StepContext; email: s
 export function IdentityStep({
   context,
   uploads,
+  extractUploads,
   extractOnFile = false,
 }: {
   context: StepContext;
   uploads: UploadControl;
+  /** An organisation uploads its register extract instead (owner 2026-11-10). */
+  extractUploads?: UploadControl;
   /** GMED holds the organisation's register extract: nothing here is required. */
   extractOnFile?: boolean;
 }) {
@@ -319,6 +322,23 @@ export function IdentityStep({
         <p className="text-sm leading-6 text-muted-foreground" data-testid="payer-link-identity-intro">
           {extractOnFile ? text.identityExtractOnFile : text.identityIntroOrganisation}
         </p>
+      ) : null}
+      {organisation && !extractOnFile && extractUploads ? (
+        <UploadBlock
+          id="payer-link-register-extract"
+          label={text.identityExtractUpload}
+          required={false}
+          hint={text.identityExtractUploadHint}
+          buttonLabel={text.identityExtractUploadButton}
+          documents={extractUploads.documents}
+          busy={extractUploads.busy}
+          errors={extractUploads.errors}
+          disabled={false}
+          text={text}
+          testId="payer-link-register-extract-upload"
+          onFiles={extractUploads.upload}
+          onRemove={extractUploads.remove}
+        />
       ) : null}
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         <Field context={context} field="id_document_type">

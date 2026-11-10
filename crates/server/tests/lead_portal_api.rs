@@ -10559,7 +10559,7 @@ async fn duplicates_are_refused_files_move_between_slots_and_downloads_name_the_
         .unwrap();
     assert_eq!(art, "relationship_proof");
     assert_eq!(category.as_deref(), Some("administrative"));
-    assert_eq!(auto_name, "Nachweis der Beziehung zum Kostenübernehmer");
+    assert_eq!(auto_name, "Nachweis der Beziehung zur zahlenden Person");
     assert_eq!(kind, "relationship_proof");
     assert_eq!(
         audit_count(pool, "lead_portal_upload_moved", document_id).await,

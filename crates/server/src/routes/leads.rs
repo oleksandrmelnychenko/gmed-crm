@@ -12940,7 +12940,26 @@ macro_rules! repeat_patient_consented_sql {
     };
 }
 
+/// A document of the lead (alias `l`) or of its prospect that was signed,
+/// on paper or electronically. Owner decision 2026-11-10: a lead that signed
+/// any document is never deleted by the 14-day rule; one that signed nothing
+/// is (ticks in the cabinet do not count). An identity scan's `signed_at` is
+/// the staff verification and an EDD record is signed by staff only, so
+/// neither counts as the person's signature.
+macro_rules! lead_signed_document_sql {
+    () => {
+        r#"EXISTS (
+        SELECT 1 FROM documents sd
+        WHERE (sd.lead_id = l.id
+               OR (l.prospect_patient_id IS NOT NULL AND sd.patient_id = l.prospect_patient_id))
+          AND sd.signed_at IS NOT NULL
+          AND COALESCE(sd.compliance_kind, '') NOT IN ('identity', 'enhanced_due_diligence')
+    )"#
+    };
+}
+
 /// Which leads the rule covers (alias `l`; `$4` is the anonymisation sentinel).
+/// A lead with a signed document is not covered ([`lead_signed_document_sql`]).
 /// A repeat intake of a patient with a valid signed DSGVO consent is not
 /// covered: the consent is the basis to keep its data (decision 2026-10-11).
 const UNQUALIFIED_LEAD_SUBJECT_SQL: &str = concat!(
@@ -12950,6 +12969,9 @@ const UNQUALIFIED_LEAD_SUBJECT_SQL: &str = concat!(
     AND l.converted_patient_id IS NULL
     AND COALESCE(l.failed_outcome_status, 'none') <> 'delete_anonymized'
     AND l.first_name <> $4
+    AND NOT "#,
+    lead_signed_document_sql!(),
+    r#"
     AND NOT "#,
     repeat_patient_consented_sql!()
 );

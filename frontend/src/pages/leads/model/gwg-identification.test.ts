@@ -377,7 +377,7 @@ describe("refusals of the server to make a sheet", () => {
       "Подтвердить подпись нельзя: не хватает данных организации-плательщика: плательщик ещё не отправил ответы по своей ссылке, правовая форма, документ просрочен — нужен действующий, бенефициары (или ответ «нет лиц с долей более 25 %»), причина оплаты, something new. Эти данные организация-плательщик вносит по своей ссылке, либо их вносит сотрудник с подписанной бумажной анкеты («Анкета плательщика» → «На бумаге» в разделе «Кто платит»); затем сформируйте лист заново.",
     );
     expect(gwgSheetErrorText(incomplete, de)).toContain(
-      "Es fehlen Angaben der zahlenden Organisation: Angaben des Kostenübernehmers über den eigenen Zugang fehlen, Rechtsform, Ausweis abgelaufen",
+      "Es fehlen Angaben der zahlenden Organisation: Angaben der zahlenden Person über den eigenen Zugang fehlen, Rechtsform, Ausweis abgelaufen",
     );
     expect(gwgPayerSheetMissingText(undefined, ru)).toBe(
       "Подтвердить подпись нельзя: не хватает данных организации-плательщика. Эти данные организация-плательщик вносит по своей ссылке, либо их вносит сотрудник с подписанной бумажной анкеты («Анкета плательщика» → «На бумаге» в разделе «Кто платит»); затем сформируйте лист заново.",

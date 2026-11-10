@@ -67,7 +67,7 @@ describe("LeadPayerSignatureFlow", () => {
         demoChecks={["order_signed_patient"]} documents={[]} disabled={false} canGenerate={false} tx={lang === "de" ? de : tx}
         renderDocuments={() => null} onChanged={() => {}} errorText={() => "error"} />);
       expect(html).toContain(lang === "ru" ? "Тестовые подписи зачтены для оформления" : "Testunterschriften für die Aufnahme angerechnet");
-      expect(html).toContain(lang === "ru" ? "Заполните данные плательщика" : "Angaben zum Kostenübernehmer ergänzen");
+      expect(html).toContain(lang === "ru" ? "Заполните данные плательщика" : "Angaben zur zahlenden Person ergänzen");
       expect(html).not.toContain(lang === "ru" ? "Нужна юридически действительная подпись заказа" : "Eine rechtswirksame Auftragsunterschrift ist erforderlich");
       expect(value.client_signed_order).toBe(false);
     });
@@ -109,7 +109,7 @@ describe("LeadPayerSignatureFlow", () => {
       expect(html).toContain(lang === "ru" ? "Заявление о принятии расходов не требуется" : "Kostenübernahmeerklärung nicht erforderlich");
       expect(html).toContain(lang === "ru" ? "GMED: подпись пока недоступна" : "GMED: Unterschrift noch gesperrt");
       expect(html).not.toContain(lang === "ru" ? "Клиент подписал" : "Kunde hat den Auftrag unterzeichnet");
-      expect(html).not.toContain(lang === "ru" ? "Плательщик подписал" : "Kostenübernehmer hat unterschrieben");
+      expect(html).not.toContain(lang === "ru" ? "Плательщик подписал" : "Zahler/in hat unterschrieben");
     });
   }
   it("shows the signing order and why GMED waits", () => {
@@ -685,7 +685,7 @@ describe("LeadPayerDeclarationSection: a minor's parent or legal representative 
     // Not "the third party's details": the parent is to be chosen.
     expect(payerFormMissing({ ...form, representativeId: "" })).toEqual(["payer_representative_missing"]);
     expect(payerReasonLabel("payer_representative_missing", tx)).toBe("Выберите, кто из родителей / законных представителей платит");
-    expect(payerReasonLabel("payer_representative_missing", de)).not.toContain("Kostenübernehmer");
+    expect(payerReasonLabel("payer_representative_missing", de)).not.toContain("Zahler/in");
     // Without a trigger the source of funds is not asked (2026-10-19).
     expect(payerFormMissing({ ...form, sourceOfFunds: "" }, false)).not.toContain("payer_source_of_funds_missing");
     expect(chosenPayerRepresentative({ kind: "representative", representativeId: "rep-ben" }, minorStatus)?.name).toBe("Ben Muster");

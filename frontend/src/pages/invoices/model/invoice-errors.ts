@@ -372,8 +372,8 @@ const CODES: Record<string, Pair> = {
     "Договор за несовершеннолетнего заключает родитель, и счёт получает он. Адресуйте счёт этому родителю или укажите другого плательщика.",
   ],
   recipient_not_contracting_party: [
-    "Der Rechnungsempfänger ist nicht der Vertragspartner. Zahler als abweichenden Rechnungsempfänger (Kostenübernehmer) kennzeichnen oder die Ausstellung bestätigen.",
-    "Получатель счёта не является стороной договора. Отметьте плательщика как стороннего получателя счёта (Kostenübernehmer) или подтвердите выпуск.",
+    "Der Rechnungsempfänger ist nicht der Vertragspartner. Zahler als abweichenden Rechnungsempfänger kennzeichnen oder die Ausstellung bestätigen.",
+    "Получатель счёта не является стороной договора. Отметьте плательщика как стороннего получателя счёта или подтвердите выпуск.",
   ],
   advance_recipient_mismatch: [
     "Anzahlungsrechnungen dieses Auftrags gingen an einen anderen Rechnungsempfänger. Mit der Bestätigung rechnet diese Schlussrechnung genau diese Anzahlungen ab: Gezahltes wird abgezogen, der offene Rest mit einer Gutschrift geschlossen. Spätere Anzahlungen anderer Empfänger bleiben unberührt.",

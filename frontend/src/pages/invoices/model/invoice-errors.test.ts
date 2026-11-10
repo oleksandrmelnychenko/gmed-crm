@@ -136,7 +136,7 @@ describe("localizeInvoiceError", () => {
         "de",
         "x",
       ),
-    ).toContain("Kostenübernehmer");
+    ).toContain("Zahler als abweichenden Rechnungsempfänger");
     expect(
       invoiceReleaseWarningText({ code: "advance_recipient_mismatch" }, "ru"),
     ).toContain("закрывает именно эти авансы");

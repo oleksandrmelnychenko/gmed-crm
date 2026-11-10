@@ -43,6 +43,7 @@ use crate::routes::lead_portal_intake::FieldError;
 use crate::services::identity_document;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
+use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -62,6 +63,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/leads/{lead_id}/risk-assessment/restart",
             post(restart_assessment),
+        )
+        .route(
+            "/leads/{lead_id}/risk-assessment/uncounted-parents/{representative_id}/acknowledge",
+            post(acknowledge_uncounted_parent),
         )
         .route(
             "/leads/{lead_id}/identity-document-data",
@@ -386,9 +391,11 @@ async fn assessment_json(
         .as_ref()
         .map(|assessment| assessment.score)
         .unwrap_or_default();
+    let uncounted_parents = uncounted_parents_json(conn, lead_id, &config, auth).await?;
     let follow_up_requested_at = store::follow_up_requested_at(conn, lead_id).await?;
     Ok(json!({
         "lead_id": lead_id,
+        "uncounted_parents": uncounted_parents,
         "started_at": stored.as_ref().and_then(|assessment| assessment.started_at),
         "status": stored.as_ref().map(|assessment| assessment.status.clone()),
         "level": started.then_some(score.level),
@@ -713,6 +720,138 @@ async fn withdraw_decision(
         false,
     )
     .await
+}
+
+// ----------------------------------------------------------------------------
+// A parent who adds no trigger (owner decision 2026-11-10)
+// ----------------------------------------------------------------------------
+
+/// The listed countries (ISO codes, sorted, unique) of a parent the rule does
+/// not count; empty when none is on a list.
+fn listed_countries(parent: &risk::inputs::UncountedParent, config: &RiskConfig) -> Vec<String> {
+    let mut codes: Vec<String> = parent
+        .citizenships
+        .iter()
+        .chain(parent.residences.iter())
+        .filter(|value| config.list_of(value).is_some())
+        .filter_map(|value| risk::country_value_code(value))
+        .collect();
+    codes.sort();
+    codes.dedup();
+    codes
+}
+
+/// Who may confirm: the CEO (and the CEO's risk reviewers) or Sales.
+fn may_acknowledge(auth: &AuthUser, config: &RiskConfig) -> bool {
+    matches!(auth.role, Role::Ceo | Role::Sales) || store::is_reviewer(auth, config)
+}
+
+/// A minor's parent who neither pays nor receives the invoices and whose
+/// citizenship or residence is on a country list: no trigger fires (owner
+/// 2026-11-02), the wizard shows the parent, and the CEO or Sales confirms
+/// being aware. A confirmation covers the countries it was given for.
+async fn uncounted_parents_json(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    config: &RiskConfig,
+    auth: &AuthUser,
+) -> Result<Vec<Value>, sqlx::Error> {
+    let parents = risk::inputs::uncounted_parents(conn, lead_id).await?;
+    let mut out = Vec::new();
+    for parent in &parents {
+        let countries = listed_countries(parent, config);
+        if countries.is_empty() {
+            continue;
+        }
+        let acknowledged = sqlx::query(
+            r#"SELECT a.acknowledged_at,
+                      u.name AS name
+               FROM lead_uncounted_parent_acknowledgements a
+               LEFT JOIN users u ON u.id = a.acknowledged_by
+               WHERE a.lead_id = $1 AND a.representative_id = $2 AND a.countries = $3
+               ORDER BY a.acknowledged_at DESC
+               LIMIT 1"#,
+        )
+        .bind(lead_id)
+        .bind(parent.id)
+        .bind(&countries)
+        .fetch_optional(&mut *conn)
+        .await?;
+        out.push(json!({
+            "representative_id": parent.id,
+            "name": parent.name,
+            "countries": countries,
+            "acknowledged_at": acknowledged
+                .as_ref()
+                .and_then(|row| row.try_get::<DateTime<Utc>, _>("acknowledged_at").ok()),
+            "acknowledged_by_name": acknowledged
+                .as_ref()
+                .and_then(|row| row.try_get::<Option<String>, _>("name").ok().flatten()),
+            "can_acknowledge": may_acknowledge(auth, config),
+        }));
+    }
+    Ok(out)
+}
+
+/// `POST /leads/{id}/risk-assessment/uncounted-parents/{representative_id}/acknowledge`:
+/// the CEO or Sales confirms being aware of the parent's listed countries.
+async fn acknowledge_uncounted_parent(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((lead_id, representative_id)): Path<(Uuid, Uuid)>,
+) -> Response {
+    if !lead_payer::may_view(&auth) {
+        return forbidden();
+    }
+    if let Err(response) = super::leads::refuse_if_converted(&state.db, lead_id).await {
+        return response;
+    }
+    let result = async {
+        let mut tx = state.db.begin().await?;
+        let config = store::load_config(&mut tx).await?;
+        if !may_acknowledge(&auth, &config) {
+            return Ok(Err(forbidden()));
+        }
+        let parents = risk::inputs::uncounted_parents(&mut tx, lead_id).await?;
+        let Some(countries) = parents
+            .iter()
+            .find(|parent| parent.id == representative_id)
+            .map(|parent| listed_countries(parent, &config))
+            .filter(|countries| !countries.is_empty())
+        else {
+            return Ok(Err(not_found()));
+        };
+        sqlx::query(
+            r#"INSERT INTO lead_uncounted_parent_acknowledgements
+                   (lead_id, representative_id, countries, acknowledged_by)
+               VALUES ($1, $2, $3, $4)"#,
+        )
+        .bind(lead_id)
+        .bind(representative_id)
+        .bind(&countries)
+        .bind(auth.user_id)
+        .execute(&mut *tx)
+        .await?;
+        audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                "lead_uncounted_parent_acknowledged",
+                Some(auth.user_id),
+                "lead",
+                Some(lead_id),
+                json!({ "representative_id": representative_id, "countries": countries }),
+            ),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok::<_, sqlx::Error>(Ok(()))
+    }
+    .await;
+    match result {
+        Ok(Ok(())) => respond_with_assessment(&state, &auth, lead_id, StatusCode::OK).await,
+        Ok(Err(response)) => response,
+        Err(error) => database(error, "acknowledge parent"),
+    }
 }
 
 /// `POST /leads/{id}/risk-assessment/restart` (reviewer): starts a

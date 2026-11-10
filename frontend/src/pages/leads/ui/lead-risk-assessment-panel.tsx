@@ -41,6 +41,7 @@ import {
   riskTriggerStateLabel,
   riskVariantLabel,
   type LeadRiskAssessment,
+  type UncountedParentNotice,
   type RiskBlockState,
   type RiskDecision,
   type RiskDecisionKind,
@@ -210,6 +211,64 @@ function DecisionLine({ decision, tx }: { decision: RiskDecision; tx: Tx }) {
  * reviewer. Before the assessment starts the live preview is shown. Read-only
  * for everybody else. Staff only: the lead and the payer never see any of this.
  */
+function UncountedParentRow({
+  parent,
+  lang,
+  tx,
+  disabled,
+  onAcknowledge,
+}: {
+  parent: UncountedParentNotice;
+  lang: string;
+  tx: Tx;
+  disabled: boolean;
+  onAcknowledge: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const countries = parent.countries.map((code) => countryLabel(code, lang === "de" ? "de" : "ru")).join(", ");
+  return (
+    <div className="space-y-1.5 rounded-lg border border-amber-300/60 bg-amber-50/40 p-3 text-xs leading-5 dark:border-amber-500/30 dark:bg-amber-500/5" data-testid="lead-risk-uncounted-parent">
+      <p className={WARNING_TEXT}>
+        {tx(
+          `${parent.name || "Родитель"}: страна из списка риска (${countries}). Родитель не платит и не получает счета, поэтому риск не повышается.`,
+          `${parent.name || "Elternteil"}: Land einer Risikoliste (${countries}). Der Elternteil zahlt nicht und erhält keine Rechnungen, daher erhöht sich das Risiko nicht.`,
+        )}
+      </p>
+      {parent.acknowledged_at ? (
+        <p className="text-muted-foreground" data-testid="lead-risk-uncounted-parent-acknowledged">
+          {tx("Принято к сведению", "Zur Kenntnis genommen")}: {parent.acknowledged_by_name ?? "—"}, {formatAppDateTime(parent.acknowledged_at)}
+        </p>
+      ) : parent.can_acknowledge ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={disabled || busy}
+          data-testid="lead-risk-uncounted-parent-acknowledge"
+          onClick={async () => {
+            setBusy(true);
+            setError("");
+            try {
+              await onAcknowledge();
+            } catch {
+              setError(tx("Не удалось сохранить. Повторите попытку.", "Speichern fehlgeschlagen. Bitte erneut versuchen."));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden /> : <Check className="size-3.5" aria-hidden />}
+          {tx("Принято к сведению", "Zur Kenntnis genommen")}
+        </Button>
+      ) : (
+        <p className="text-muted-foreground">{tx("Ждёт подтверждения CEO или Sales", "Wartet auf Bestätigung durch CEO oder Sales")}</p>
+      )}
+      {error ? <p className="text-destructive" role="alert">{error}</p> : null}
+    </div>
+  );
+}
+
 export function LeadRiskAssessmentPanel({
   assessment,
   controller,
@@ -403,6 +462,24 @@ export function LeadRiskAssessmentPanel({
                 </dl>
                 {!Object.values(person.fields).some((value) => value !== null && value !== undefined && value !== "") ? <span className="text-xs text-muted-foreground">{tx("Не отвечено", "Nicht beantwortet")}</span> : null}
               </section>
+            ))}
+          </div>
+        ) : null}
+
+        {assessment.uncounted_parents.length > 0 ? (
+          // A parent who neither pays nor receives the invoices adds no
+          // trigger (owner 2026-11-02); the CEO or Sales confirms being aware
+          // of the listed country (owner decision 2026-11-10).
+          <div className="space-y-2" data-testid="lead-risk-uncounted-parents">
+            {assessment.uncounted_parents.map((parent) => (
+              <UncountedParentRow
+                key={parent.representative_id}
+                parent={parent}
+                lang={lang}
+                tx={tx}
+                disabled={disabled}
+                onAcknowledge={() => controller.acknowledgeParent(parent.representative_id)}
+              />
             ))}
           </div>
         ) : null}

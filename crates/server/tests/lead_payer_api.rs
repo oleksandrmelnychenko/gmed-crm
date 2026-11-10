@@ -2700,7 +2700,7 @@ async fn upload_payer_identity(app: &TestApp, bearer: &str, lead_id: Uuid) -> (S
         ("category", "identity".to_string()),
         (
             "auto_name",
-            "Ausweisdokument – Kostenübernehmer/in Erika Zahler".to_string(),
+            "Ausweisdokument – Zahler/in Erika Zahler".to_string(),
         ),
         ("document_direction", "incoming".to_string()),
         ("access_category", "internal".to_string()),

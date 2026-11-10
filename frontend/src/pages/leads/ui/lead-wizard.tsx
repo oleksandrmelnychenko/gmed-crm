@@ -3744,7 +3744,7 @@ export function LeadWizard({
   const payer = useLeadPayerDeclaration(open ? leadId : null);
   // "Kostenübernehmer" only for a real third party; a paying parent or patient is the paying person (owner 2026-10-22).
   const goToPayerLabel = payer.data?.declaration?.payer_kind === "third_party"
-    ? tx("Перейти к плательщику", "Zum Kostenübernehmer")
+    ? tx("Перейти к плательщику", "Zur zahlenden Person")
     : tx("Перейти к плательщику", "Zur zahlenden Person");
   const [payerAutosaveRegistry] = useState(createPayerAutosaveRegistry);
   const registerPayerAutosave = useCallback(
@@ -6344,19 +6344,21 @@ export function LeadWizard({
    * (source of funds, PEP details, sanctions links, proofs of the funds;
    * QA 2026-10-10). What staff typed stays; a failed load changes nothing.
    */
-  async function prefillAmlFromLeadAnswers() {
+  async function prefillAmlFromLeadAnswers(options: { fresh?: boolean } = {}) {
     const targetLeadId = leadId ?? lastPersistedLeadIdRef.current;
     if (!targetLeadId) return;
     let intake: Awaited<ReturnType<typeof fetchLeadPortalIntake>>;
+    const freshPayerLink = options.fresh ? reloadPayerLink() : null;
     try {
       intake = await fetchLeadPortalIntake(targetLeadId);
     } catch {
       intake = null;
     }
+    const payerState = (freshPayerLink ? await freshPayerLink : null) ?? payerLink.data;
     const prefill = amlPrefillFromLeadAnswers({
       identification: intake?.identification_hidden ? null : intake?.identification,
       enhancedDetails: intake?.enhanced_details,
-      payer: payerLink.data?.questionnaire,
+      payer: payerState?.questionnaire,
       countryName: (code) => countryLabel(code, "de"),
     });
     setDraft((current) => current ? {
@@ -6400,7 +6402,11 @@ export function LeadWizard({
     });
     setAmlSheetError("");
     setAmlSheetOpen(true);
-    void prefillAmlFromLeadAnswers();
+    // The payer may have sent the own link while the wizard was open: the
+    // form shows the payer's sent funds and occupation, not a stale empty
+    // choice (QA 2026-11-10 C-2, owner decision 2026-11-10).
+    void reloadPayer();
+    void prefillAmlFromLeadAnswers({ fresh: true });
     void loadAmlReviewers();
   }
 

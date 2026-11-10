@@ -296,6 +296,13 @@ export function createPayerLinkClient(credentials: PayerCredentials) {
       form.append("file", file);
       return writeThenQuestionnaire(`${base}/identity-document`, { method: "POST", form, timeoutMs: UPLOAD_TIMEOUT_MS });
     },
+    /** An organisation's register extract instead of the representative's ID (owner 2026-11-10). */
+    canUploadRegisterExtract: true,
+    uploadRegisterExtract: (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return writeThenQuestionnaire(`${base}/register-extract`, { method: "POST", form, timeoutMs: UPLOAD_TIMEOUT_MS });
+    },
     uploadFundsProof: (file: File) => {
       const form = new FormData();
       form.append("file", file);

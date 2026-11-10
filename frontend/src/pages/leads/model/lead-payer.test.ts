@@ -375,7 +375,7 @@ describe("payer type: person, company, organisation or insurer", () => {
         .toBe("Заполните данные плательщика: название и юридический адрес");
     }
     expect(payerReasonLabel("payer_identity_incomplete", de, "company"))
-      .toBe("Angaben zum Kostenübernehmer ergänzen: Name und Sitz (Anschrift)");
+      .toBe("Angaben zur zahlenden Person ergänzen: Name und Sitz (Anschrift)");
     // Without the type (readiness list, signature gate) the text covers both.
     const neutral = payerReasonLabel("payer_identity_incomplete", tx);
     expect(neutral).toContain("гражданство");

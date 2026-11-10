@@ -517,7 +517,7 @@ export function OrderGroupPanel({
                   {tx("Получатель счёта — сторона договора", "Rechnungsempfänger ist Vertragspartner")}
                 </option>
                 <option value="cost_bearer">
-                  {tx("Другой получатель счёта (сторонний плательщик)", "Abweichender Rechnungsempfänger (Kostenübernehmer)")}
+                  {tx("Другой получатель счёта (сторонний плательщик)", "Abweichender Rechnungsempfänger (Zahler)")}
                 </option>
                 <option value="invoice_address">
                   {tx("Адрес для счёта (без принятия расходов)", "Rechnungsanschrift (keine Kostenübernahme)")}

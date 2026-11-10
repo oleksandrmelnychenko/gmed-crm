@@ -292,6 +292,10 @@ pub fn public_router() -> Router<AppState> {
                 .layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024)),
         )
         .route(
+            "/public/payer-link/register-extract",
+            post(upload_register_extract).layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024)),
+        )
+        .route(
             "/public/payer-link/funds-proof",
             post(upload_funds_proof).layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024)),
         )
@@ -3119,6 +3123,10 @@ fn upload_refusal(context: &LeadContext) -> Option<Response> {
     }
 }
 
+/// The note that marks a payer identity upload as the organisation's register
+/// extract (`register_extract_on_file`, the GwG sheet of a legal entity).
+const REGISTER_EXTRACT_NOTE: &str = "Handelsregisterauszug (vom Zahler über den Link hochgeladen)";
+
 /// A stored payer file, not yet registered.
 struct StoredFile {
     document_id: Uuid,
@@ -3132,6 +3140,7 @@ struct StoredFile {
 /// document of the lead (D6): not medical, internal, named after the payer.
 /// `uploaded_by` is the staff member who sent the link (the document needs a
 /// user) or the paying parent.
+#[allow(clippy::too_many_arguments)]
 async fn store_payer_file(
     state: &AppState,
     lead_id: Uuid,
@@ -3139,6 +3148,7 @@ async fn store_payer_file(
     payer_name: &str,
     uploaded_by: Uuid,
     ursprung: &str,
+    register_extract: bool,
     multipart: &mut Multipart,
 ) -> Result<StoredFile, Response> {
     let (file_name, content_type, data) = intake::read_upload_file(multipart).await?;
@@ -3163,8 +3173,14 @@ async fn store_payer_file(
     }
     // German names, like every document of the lead (QA 2026-10-10).
     let (auto_name, category) = match kind {
+        // An organisation's register extract stands for the representative's
+        // ID (owner 2026-10-30); the organisation uploads it itself on the
+        // link (owner decision 2026-11-10). The note marks it as the extract.
+        UploadKind::PayerIdentity if register_extract => {
+            (format!("Handelsregisterauszug – {payer_name}"), "identity")
+        }
         UploadKind::PayerIdentity => (
-            format!("Ausweisdokument – Kostenübernehmer/in {payer_name}"),
+            format!("Ausweisdokument – Zahler/in {payer_name}"),
             "identity",
         ),
         _ => (
@@ -3189,7 +3205,7 @@ async fn store_payer_file(
         mime_type: &mime_type,
         klinik: None,
         ursprung: Some(ursprung),
-        notes: None,
+        notes: register_extract.then_some(REGISTER_EXTRACT_NOTE),
         document_direction: Some("incoming"),
         document_variant: Some("original"),
         document_language: None,
@@ -4045,7 +4061,18 @@ async fn upload_identity_document(
     headers: HeaderMap,
     multipart: Multipart,
 ) -> Response {
-    link_upload(state, headers, multipart, UploadKind::PayerIdentity).await
+    link_upload(state, headers, multipart, UploadKind::PayerIdentity, false).await
+}
+
+/// `POST /public/payer-link/register-extract`: an organisation payer uploads
+/// its Handelsregisterauszug instead of the representative's ID (owner
+/// decision 2026-11-10). A person payer is refused.
+async fn upload_register_extract(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    multipart: Multipart,
+) -> Response {
+    link_upload(state, headers, multipart, UploadKind::PayerIdentity, true).await
 }
 
 async fn upload_funds_proof(
@@ -4053,7 +4080,14 @@ async fn upload_funds_proof(
     headers: HeaderMap,
     multipart: Multipart,
 ) -> Response {
-    link_upload(state, headers, multipart, UploadKind::PayerFundsProof).await
+    link_upload(
+        state,
+        headers,
+        multipart,
+        UploadKind::PayerFundsProof,
+        false,
+    )
+    .await
 }
 
 /// `POST /public/payer-link/identity-document` and `…/funds-proof`: checked
@@ -4064,6 +4098,7 @@ async fn link_upload(
     headers: HeaderMap,
     mut multipart: Multipart,
     kind: UploadKind,
+    register_extract: bool,
 ) -> Response {
     let (mut tx, link) = match payer_session(&state, &headers).await {
         Ok(found) => found,
@@ -4087,6 +4122,14 @@ async fn link_upload(
         &EnhancedCheck::default(),
         crate::app_time::today(),
     );
+    if register_extract && !built.organisation {
+        return coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "register_extract_organisation_only",
+            "Only an organisation uploads a register extract",
+            json!({}),
+        );
+    }
     let payer_name = built
         .answers
         .display_name(built.organisation)
@@ -4098,6 +4141,7 @@ async fn link_upload(
         &payer_name,
         link.sent_by,
         "payer_link",
+        register_extract,
         &mut multipart,
     )
     .await
@@ -4710,6 +4754,7 @@ async fn cabinet_funds_proof(
         &payer_name,
         auth.user_id,
         "lead_portal",
+        false,
         &mut multipart,
     )
     .await
@@ -5273,6 +5318,7 @@ async fn paper_upload(
         &payer_name,
         auth.user_id,
         "staff_paper_path",
+        false,
         &mut multipart,
     )
     .await

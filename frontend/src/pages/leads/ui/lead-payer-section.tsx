@@ -693,8 +693,8 @@ export function LeadPayerDeclarationSection({
           className={selectClass}
           disabled={readOnly}
           aria-label={organisation
-            ? tx("Страна юридического адреса плательщика", "Sitzland des Kostenübernehmers")
-            : tx("Страна проживания плательщика", "Wohnsitzland des Kostenübernehmers")}
+            ? tx("Страна юридического адреса плательщика", "Sitzland der zahlenden Person")
+            : tx("Страна проживания плательщика", "Wohnsitzland der zahlenden Person")}
           onChange={(value) => patch("country", value ?? "")}
         />
       </PayerField>
@@ -809,7 +809,7 @@ export function LeadPayerDeclarationSection({
               <span className="text-muted-foreground">
                 {form.kind === "representative" || payingParent
                   ? tx("Источник средств родителя / представителя", "Herkunft der Mittel des zahlenden Elternteils / Vertreters")
-                  : tx("Источник средств плательщика", "Herkunft der Mittel des Kostenübernehmers")}
+                  : tx("Источник средств плательщика", "Herkunft der Mittel der zahlenden Person")}
                 {": "}
               </span>
               {payerFunds.sources.map((source) => payerFundsSourceLabel(source, tx)).join(", ") || "—"}
@@ -826,7 +826,7 @@ export function LeadPayerDeclarationSection({
             <PayerField
               label={`${form.kind === "representative" || payingParent
                 ? tx("Источник средств родителя / представителя", "Herkunft der Mittel des zahlenden Elternteils / Vertreters")
-                : tx("Источник средств плательщика", "Herkunft der Mittel des Kostenübernehmers")}${payerStatementOnFile
+                : tx("Источник средств плательщика", "Herkunft der Mittel der zahlenden Person")}${payerStatementOnFile
                 ? ""
                 : tx(" (пока плательщик не ответил)", " (bis zur eigenen Angabe)")}`}
               required={sourceRequired}
@@ -1132,7 +1132,7 @@ export function LeadPayerDeclarationSection({
             <AdminSectionTitle variant="mono">
               {payingParent
                 ? tx("Плательщик — родитель / законный представитель", "Zahler – Elternteil / gesetzlicher Vertreter")
-                : tx("Плательщик (третье лицо)", "Kostenübernehmer (Dritter)")}
+                : tx("Плательщик (третье лицо)", "Zahler/in (dritte Person)")}
             </AdminSectionTitle>
             <div className="wizard-form-grid grid gap-x-3 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
               {typed ? (
@@ -1323,7 +1323,7 @@ export function LeadPayerDeclarationSection({
                 onChange={(checked) => patch("payerInformed", checked)}
                 label={(
                   <>
-                    {tx("Плательщик проинформирован об обработке его данных", "Der Kostenübernehmer wurde über die Verarbeitung seiner Daten informiert")}
+                    {tx("Плательщик проинформирован об обработке его данных", "Die zahlende Person wurde über die Verarbeitung ihrer Daten informiert")}
                     {informedAt && form.payerInformed ? (
                       <StatusChip tone="info" className="ml-2 align-middle"><CalendarDays aria-hidden="true" />{formatAppDateTime(informedAt)}</StatusChip>
                     ) : null}
@@ -1578,7 +1578,7 @@ function SequenceStep({ state, actor, tx }: { state: SignatureStepState; actor: 
     ? state === "done" ? tx("Клиент подписал заказ", "Kunde hat den Auftrag unterzeichnet") : tx("Ожидается подпись клиента", "Unterschrift des Kunden ausstehend")
     : actor === "payer"
       ? state === "not_required" ? tx("Заявление о принятии расходов не требуется", "Kostenübernahmeerklärung nicht erforderlich")
-        : state === "done" ? tx("Плательщик подписал заявление о принятии расходов", "Kostenübernehmer hat unterschrieben") : tx("Ожидается заявление о принятии расходов", "Unterschrift des Kostenübernehmers ausstehend")
+        : state === "done" ? tx("Плательщик подписал заявление о принятии расходов", "Zahler/in hat unterschrieben") : tx("Ожидается заявление о принятии расходов", "Unterschrift der zahlenden Person ausstehend")
       : state === "done" ? tx("GMED подписал заказ", "GMED hat den Auftrag unterzeichnet")
         : state === "blocked" ? tx("GMED: подпись пока недоступна", "GMED: Unterschrift noch gesperrt") : tx("GMED: можно подписывать", "GMED: Unterschrift möglich");
   return <StatusChip data-signature-step={actor} data-step-state={state} className="whitespace-normal" tone={state === "done" ? "success" : "neutral"}>
