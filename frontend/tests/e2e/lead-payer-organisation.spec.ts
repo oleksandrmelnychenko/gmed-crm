@@ -335,13 +335,13 @@ test("a stored company with the lead's consent, in German", async ({ page }, tes
   await expect(section.getByLabel(/^Beziehung – nähere Angabe/)).toHaveCount(0);
   const seat = section.getByRole("group", { name: "Sitz" });
   await expect(seat.getByLabel(/^Straße und Hausnummer/)).toHaveValue("Musterweg 1");
-  await expect(seat.getByRole("combobox", { name: "Sitzland des Kostenübernehmers" })).toContainText("Österreich");
+  await expect(seat.getByRole("combobox", { name: "Sitzland der zahlenden Organisation" })).toContainText("Österreich");
   await expect(section.getByTestId("lead-payer-contact-consent")).toContainText("Einverständnis zur Weitergabe der Kontaktdaten an den Zahler:");
   await expect(section.getByTestId("lead-payer-contact-consent")).toContainText("erteilt");
   await expect(section.getByTestId("lead-payer-contact-consent")).toContainText("05.10.2026 11:30");
   await expect(wizard.getByTestId("gwg-identification-payer-organisation")).toHaveCount(0);
   await expect(sheetActions.getByRole("button", { name: "Für zahlende Organisation erstellen", exact: true })).toBeVisible();
-  await expect(sheetActions.getByRole("button", { name: "Für Kostenübernehmer erstellen", exact: true })).toHaveCount(0);
+  await expect(sheetActions.getByRole("button", { name: "Für Zahler/in erstellen", exact: true })).toHaveCount(0);
   await section.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("lead-payer-company-de-desktop.png"), animations: "disabled" });
 

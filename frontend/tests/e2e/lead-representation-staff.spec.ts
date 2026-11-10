@@ -1685,9 +1685,12 @@ test("staff have a parent's scan read and take the proposed values into the form
   await expect(type).toHaveAttribute("data-state", "differs");
   await expect(type.getByRole("checkbox")).not.toBeChecked();
   await expect(type).toContainText("сейчас в форме: Паспорт");
-  // The parent's birth date differs from the document: named, never changed here.
+  // The parent's birth date differs from the document: named and left to staff,
+  // who may take it into the contact (owner 2026-11-10: the scan fills, not only compares).
   await expect(proposal.getByTestId(`${testId}-recognition-holder-differs`)).toBeVisible();
-  await expect(proposal.getByTestId(`${testId}-recognition-holder-birthDate`).getByRole("checkbox")).toHaveCount(0);
+  const birth = proposal.getByTestId(`${testId}-recognition-holder-birthDate`).getByRole("checkbox");
+  await expect(birth).not.toBeChecked();
+  await birth.check();
 
   await proposal.getByTestId(`${testId}-recognition-apply`).click();
   await expect(form.locator('input[name="id_document_number"]')).toHaveValue("L01X00T47");
@@ -1700,6 +1703,11 @@ test("staff have a parent's scan read and take the proposed values into the form
     id_valid_until: "2031-10-31",
   });
   await expect(panel).toHaveAttribute("data-state", "applied");
+  // The ticked birth date goes into Ben's contact with the next autosave.
+  await expect.poll(() => {
+    const contacts = calls.updates.at(-1)?.trusted_contacts as Json[] | undefined;
+    return contacts?.find((contact) => contact.id === BEN_ID)?.birth_date;
+  }, { timeout: 15_000 }).toBe("1979-03-04");
 });
 
 test("a scan read with a failed check digit ticks nothing, and one without a zone says so", async ({ page }) => {

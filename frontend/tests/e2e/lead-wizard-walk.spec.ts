@@ -218,10 +218,8 @@ test("an autosave sends back every stored field as it was loaded", async ({ page
     city: "Potsdam",
     first_name: "Olga",
     last_name: "Beispiel",
-    middle_name: "Petrovna",
     suffix: "Jr.",
     email: "olga.beispiel@example.com",
-    phone: "+49 30 123456",
     whatsapp_number: "+49 170 1234567",
     date_of_birth: "1980-02-03",
     legal_sex: "female",
@@ -231,11 +229,6 @@ test("an autosave sends back every stored field as it was loaded", async ({ page
     country: "UA",
     citizenships: ["UA", "DE"],
     primary_language: "uk",
-    has_insurance: true,
-    insurance_type: "foreign",
-    insurance_provider: "Allianz",
-    insurance_number: "A-1",
-    insurance_covers_germany: "not_sure",
     primary_concern_text: "Knie",
     services: ["interpreter_support"],
     needs_interpreter: true,
@@ -248,6 +241,11 @@ test("an autosave sends back every stored field as it was loaded", async ({ page
   // The wizard's old "valid until" key is only a fallback for the ID form and is
   // not written back: the document data from the scan are its one place (2026-10-24).
   expect(update.wizard_state).not.toHaveProperty("passport_expiry");
+  // The client's-form answers (insurance, phone, middle name) go out only when
+  // staff changed them: the client may have answered meanwhile (QA 2026-11-10).
+  for (const key of ["middle_name", "phone", "has_insurance", "insurance_type", "insurance_provider", "insurance_number", "insurance_covers_germany"]) {
+    expect(update).not.toHaveProperty(key);
+  }
   // The contacts go out only when staff changed them (the cabinet may add one meanwhile).
   expect(update).not.toHaveProperty("trusted_contacts");
 });

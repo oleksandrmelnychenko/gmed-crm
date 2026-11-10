@@ -693,7 +693,7 @@ export function LeadPayerDeclarationSection({
           className={selectClass}
           disabled={readOnly}
           aria-label={organisation
-            ? tx("Страна юридического адреса плательщика", "Sitzland der zahlenden Person")
+            ? tx("Страна юридического адреса плательщика", "Sitzland der zahlenden Organisation")
             : tx("Страна проживания плательщика", "Wohnsitzland der zahlenden Person")}
           onChange={(value) => patch("country", value ?? "")}
         />

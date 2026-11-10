@@ -101,7 +101,7 @@ const SLOTS = [
   ["self_disclosure", "payer_self_disclosure", "Selbstauskunft der zahlenden Person"],
   ["cost_coverage", "cost_coverage_declaration", "Kostenübernahmeerklärung"],
   ["patient_statement", "patient_payer_statement", "Erklärung zur Kostenübernahme durch Dritte"],
-  ["cost_estimate", "payer_cost_estimate", "Kostenvoranschlag (Ausfertigung Kostenübernehmer/in)"],
+  ["cost_estimate", "payer_cost_estimate", "Kostenvoranschlag (Ausfertigung Zahler/in)"],
 ] as const;
 
 /** The four documents of a package as the documents list carries them. */
@@ -427,7 +427,7 @@ test("staff prepare the four documents and send them; the payer section waits fo
     "Einwilligung zur Weitergabe des Kostenvoranschlags: erteilt am 05.10.2026",
   );
   // The package's own documents are not listed among the wizard's other documents.
-  for (const title of ["Selbstauskunft der zahlenden Person", "Erklärung zur Kostenübernahme durch Dritte", "Kostenvoranschlag (Ausfertigung Kostenübernehmer/in)"]) {
+  for (const title of ["Selbstauskunft der zahlenden Person", "Erklärung zur Kostenübernahme durch Dritte", "Kostenvoranschlag (Ausfertigung Zahler/in)"]) {
     await expect(wizard.getByText(title)).toHaveCount(0);
   }
   await expect(wizard.getByRole("button", { name: "Kostenübernahmeerklärung erstellen" })).toHaveCount(0);

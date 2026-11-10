@@ -1937,8 +1937,8 @@ test.describe("staff smoke flows", () => {
     await dialog.getByLabel("Laufende Nr. des Einzelauftrags").fill("5");
     await dialog.getByLabel("Patient E-Mail").fill("anna.binding@example.test");
     await dialog.getByLabel("Auftragsnummer").fill("EA-BIND-5");
-    await dialog.getByLabel("Kostenübernehmer Anrede").fill("Frau");
-    await dialog.getByLabel("Kostenübernehmer (Name)").fill("Erika Zahlerin");
+    await dialog.getByLabel("Zahler/in Anrede").fill("Frau");
+    await dialog.getByLabel("Zahler/in (Name)").fill("Erika Zahlerin");
     await dialog
       .getByLabel("Bestandteile / Rangfolge")
       .fill("Anlage A: Vorbefunde und Medikationsliste");

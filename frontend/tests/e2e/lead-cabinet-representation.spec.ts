@@ -642,9 +642,8 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await expect
       .poll(() => Object.assign({}, ...calls.persons.slice(2).map((call) => call.body)))
       .toEqual({ street: "Musterstraße 2", country: "DE" });
-    // The identity document's data are entered by GMED from the copy: no such fields.
-    await expect(agent.getByRole("combobox", { name: "Art des Dokuments" })).toHaveCount(0);
-    await expect(page.locator("#lead-request-agent_id_valid_until")).toHaveCount(0);
+    // The representative types the own document data too (owner 2026-11-10).
+    await expect(agent.getByRole("combobox", { name: "Art des Dokuments" })).toHaveCount(1);
     expect(calls.persons.every((call) => call.id === id)).toBe(true);
     expect(request.representation.representatives).toHaveLength(1);
 

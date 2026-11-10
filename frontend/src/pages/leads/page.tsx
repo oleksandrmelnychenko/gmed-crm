@@ -172,6 +172,7 @@ import {
 } from "./model/lead-portal-access";
 import { LeadPortalAccessDetail, PortalCredentialsDialog, type PortalCredentials } from "./ui/lead-portal-access";
 import { LeadConfirmDialog } from "./ui/lead-confirm-dialog";
+import { LeadUncountedParentsNotice } from "./ui/lead-uncounted-parents-notice";
 import { LeadIdentityDocumentsBlock } from "./ui/lead-identity-documents-block";
 import {
   LEAD_PURGED_EVENT,
@@ -2253,6 +2254,9 @@ function useLeadsPageContent() {
                         ))}
                       </ul>
                     )}
+                    {detailIsMinor && !detailIsConverted ? (
+                      <LeadUncountedParentsNotice leadId={detail.id} tx={tx} lang={lang} />
+                    ) : null}
                   </section>
                 ) : null}
               </>

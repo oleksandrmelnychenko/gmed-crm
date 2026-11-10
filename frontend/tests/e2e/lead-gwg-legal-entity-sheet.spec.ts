@@ -251,11 +251,11 @@ test("the preview names the refusal and leads to who pays, in German", async ({ 
   const preview = page.getByRole("dialog", { name: `${sheetName}.pdf` });
   await preview.getByRole("button", { name: "Unterschrift bestätigen" }).click();
   await expect(preview.getByRole("alert")).toContainText(
-    "Die Unterschrift kann nicht bestätigt werden: Es fehlen Angaben der zahlenden Organisation: Angaben des Kostenübernehmers über den eigenen Zugang fehlen, Rechtsform, vertretungsberechtigte Person, Zweck der Zahlung.",
+    "Die Unterschrift kann nicht bestätigt werden: Es fehlen Angaben der zahlenden Organisation: Angaben der zahlenden Person über den eigenen Zugang fehlen, Rechtsform, vertretungsberechtigte Person, Zweck der Zahlung.",
   );
   await page.screenshot({ path: testInfo.outputPath("lead-gwg-legal-entity-preview-refused-de.png"), animations: "disabled" });
   const jump = preview.getByTestId("lead-document-preview-jump");
-  await expect(jump).toHaveText("Zum Kostenübernehmer");
+  await expect(jump).toHaveText("Zur zahlenden Person");
   await jump.click();
   await expect(preview).toHaveCount(0);
   await expect(wizard.getByRole("tab", { name: "Unterlagen", exact: false })).toHaveAttribute("aria-selected", "true");

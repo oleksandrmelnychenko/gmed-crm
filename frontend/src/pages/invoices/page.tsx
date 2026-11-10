@@ -703,7 +703,7 @@ function useStaffInvoicesPageContent() {
       lang === "de" ? "Nur Rechnungsempfänger, es zahlt {name}" : "Только получатель счёта, платит {name}",
     payerRoleCostBearer:
       lang === "de"
-        ? "Abweichender Rechnungsempfänger (Zahler)"
+        ? "Abweichender Rechnungsempfänger (Zahler/in)"
         : "Другой получатель счёта (сторонний плательщик)",
     payerRoleInvoiceAddress:
       lang === "de"

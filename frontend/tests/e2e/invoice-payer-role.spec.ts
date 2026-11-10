@@ -138,7 +138,7 @@ test("the invoice address is offered as a third role choice", async ({ page }) =
   await expect(options).toHaveText([
     "Bei Ausstellung prüfen",
     "Rechnungsempfänger ist Vertragspartner",
-    "Abweichender Rechnungsempfänger (Kostenübernehmer)",
+    "Abweichender Rechnungsempfänger (Zahler/in)",
     "Rechnungsanschrift (keine Kostenübernahme)",
   ]);
   await page.getByRole("option", { name: "Rechnungsanschrift (keine Kostenübernahme)" }).click();

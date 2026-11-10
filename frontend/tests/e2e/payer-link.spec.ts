@@ -53,6 +53,8 @@ type Questionnaire = {
   /** The sources of funds of the payer type, as the server lists them. */
   funds_source_options: string[];
   missing_for_submit: string[];
+  /** The organisation's register extract is on file: it stands for the representative's ID. */
+  register_extract_on_file?: boolean;
   declared_correct_at: string | null;
   submitted_at: string | null;
 };
@@ -323,6 +325,7 @@ async function setup(page: Page, options: Options = {}) {
     patches: [] as Record<string, unknown>[],
     /** Keys of a patch whose value was already stored: the page sends changed keys only. */
     unchanged: [] as string[],
+    extracts: 0,
   };
 
   const recompute = () => {
@@ -351,8 +354,10 @@ async function setup(page: Page, options: Options = {}) {
     } else {
       need("first_name", "last_name", "date_of_birth", "birth_place", "birth_country", "citizenships", "street", "zip", "city", "country");
     }
-    need("id_document_type", "id_document_number", "id_issuing_authority", "id_issuing_country", "id_valid_until");
-    if (q.identity_documents.length === 0) missing.push("id_document_upload");
+    if (!q.register_extract_on_file) {
+      need("id_document_type", "id_document_number", "id_issuing_authority", "id_issuing_country", "id_valid_until");
+      if (q.identity_documents.length === 0) missing.push("id_document_upload");
+    }
     // Every legal entity names its beneficial owners, an insurer need not (QA 2026-10-11 A-36b).
     if ((payerType === "company" || payerType === "organisation") && a.beneficial_owners_none !== true && a.beneficial_owners.length === 0) missing.push("beneficial_owners");
     need("relationship_kind");
@@ -526,6 +531,14 @@ async function setup(page: Page, options: Options = {}) {
       recompute();
       await options.afterAnswersWrite?.(q.answers, patch);
       return route.fulfill({ json: view() });
+    }
+    if (path === "/public/payer-link/register-extract" && method === "POST") {
+      if (!q.privacy.acknowledged_at) return refuse(route, 403, "payer_consent_required");
+      if (payerType === "person") return refuse(route, 422, "register_extract_organisation_only");
+      calls.extracts += 1;
+      q.register_extract_on_file = true;
+      recompute();
+      return route.fulfill({ status: 201, json: view() });
     }
     if ((path === "/public/payer-link/identity-document" || path === "/public/payer-link/funds-proof") && method === "POST") {
       if (!q.privacy.acknowledged_at) return refuse(route, 403, "payer_consent_required");
@@ -1291,6 +1304,31 @@ test.describe("payer link", () => {
     }
     expect(calls.patches.filter((patch) => patch.id_valid_until === "2020-01-01")).toHaveLength(1);
     expect(calls.others).toEqual([]);
+  });
+
+  test("a company uploads its register extract instead of the representative's ID (owner 2026-11-10)", async ({ page }) => {
+    const { q, calls } = await setup(page, {
+      payerType: "company",
+      answers: { ...completeAnswers("company"), id_document_type: null, id_document_number: null, id_issuing_authority: null, id_issuing_country: null, id_valid_until: null },
+      route: completeRoute(),
+    });
+    await signIn(page);
+    await acknowledge(page);
+    await next(page);
+    await expect(stepTitle(page)).toHaveText("Ausweisdokument der vertretungsberechtigten Person");
+    const extract = page.getByTestId("payer-link-register-extract-upload");
+    await expect(extract).toContainText("Handelsregisterauszug (statt Ausweis)");
+    await expect.poll(() => q.missing_for_submit).toContain("id_document_upload");
+    await page.locator("#payer-link-register-extract").setInputFiles({
+      name: "hr-auszug.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("%PDF-1.4 synthetic"),
+    });
+    await expect.poll(() => calls.extracts).toBe(1);
+    // The extract stands for the ID: the upload block goes, the intro says so, nothing of the ID is missing.
+    await expect(extract).toHaveCount(0);
+    await expect(page.getByTestId("payer-link-identity-intro")).toContainText("Die Angaben zum Ausweis sind daher freiwillig");
+    expect(q.missing_for_submit.filter((key) => key.startsWith("id_"))).toEqual([]);
   });
 
   test("a company names its register, its representative and its beneficial owners", async ({ page }) => {

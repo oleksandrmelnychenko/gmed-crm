@@ -192,7 +192,8 @@ export function recognitionHolderRows(
       verified: result.checks.birth_date,
     });
   }
-  if (holder.legal_sex) {
+  // A person without a sex in the form (a representative) gets no row: nothing could take it.
+  if (holder.legal_sex && current.legalSex !== undefined) {
     const now = (current.legalSex ?? "").trim();
     rows.push({
       field: "legalSex",

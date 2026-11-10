@@ -3742,10 +3742,8 @@ export function LeadWizard({
   // documents step and the signing order of the commercial step. It follows
   // every lead refresh (order signatures, documents, readiness).
   const payer = useLeadPayerDeclaration(open ? leadId : null);
-  // "Kostenübernehmer" only for a real third party; a paying parent or patient is the paying person (owner 2026-10-22).
-  const goToPayerLabel = payer.data?.declaration?.payer_kind === "third_party"
-    ? tx("Перейти к плательщику", "Zur zahlenden Person")
-    : tx("Перейти к плательщику", "Zur zahlenden Person");
+  // One payer term everywhere (owner 2026-11-10).
+  const goToPayerLabel = tx("Перейти к плательщику", "Zur zahlenden Person");
   const [payerAutosaveRegistry] = useState(createPayerAutosaveRegistry);
   const registerPayerAutosave = useCallback(
     (flush: () => Promise<boolean>) => payerAutosaveRegistry.register(leadId, flush),
@@ -4747,15 +4745,6 @@ export function LeadWizard({
     [mergeCabinetChanges],
   );
   const step1Portal = useLeadStep1Portal({ leadId, open, onPatientDataChanged: mergePatientStep1 });
-  // The acting representatives' citizenships and residence count for the
-  // enhanced check like the payer's (QA 2026-11-10: T1 fired on a Betreuerin's
-  // Iranian citizenship, the EDD form said «Betroffener Drittstaat —»).
-  const representativeAmlCountries = useMemo(
-    () => (step1Portal.intake?.representation?.representatives ?? [])
-      .filter((person) => person.slot !== null)
-      .flatMap((person) => [...person.citizenships, ...(person.country ? [person.country] : [])]),
-    [step1Portal.intake],
-  );
   // Who entered each part of the client's form: staff's own entries are not the patient's (owner 2026-10-30).
   const portalMarkerKinds = useMemo(() => step1Portal.intake?.marker_kinds ?? {}, [step1Portal.intake]);
   /** The reason the lead wrote in the cabinet (trigger flow 13.1); "" without one or without medical access. */
@@ -4770,6 +4759,21 @@ export function LeadWizard({
   );
   // Trigger flow 2026-10-07: points, level, blocks and staff decisions of the lead's risk assessment.
   const risk = useLeadRiskAssessment(open && step === "documents" ? leadId : null, enhancedCheckVersion);
+  // The acting representatives' citizenships and residence count for the
+  // enhanced check like the payer's (QA 2026-11-10: T1 fired on a Betreuerin's
+  // Iranian citizenship, the EDD form said «Betroffener Drittstaat —»). A
+  // minor's parent who neither pays nor receives the invoices does not count
+  // (owner 2026-11-02): the server lists that parent as uncounted.
+  const uncountedParentIds = useMemo(
+    () => new Set((risk.assessment?.uncounted_parents ?? []).map((parent) => parent.representative_id)),
+    [risk.assessment],
+  );
+  const representativeAmlCountries = useMemo(
+    () => (step1Portal.intake?.representation?.representatives ?? [])
+      .filter((person) => person.slot !== null && !uncountedParentIds.has(person.id))
+      .flatMap((person) => [...person.citizenships, ...(person.country ? [person.country] : [])]),
+    [step1Portal.intake, uncountedParentIds],
+  );
   // A decision or a request of block D lifts the risk hold of the payer link: its panel follows.
   const riskPayerLinkKey = risk.assessment
     ? [risk.assessment.level, risk.assessment.status, risk.assessment.requested_blocks.join("")].join("|")

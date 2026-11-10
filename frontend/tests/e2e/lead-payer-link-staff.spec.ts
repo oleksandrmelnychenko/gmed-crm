@@ -427,7 +427,7 @@ test("staff prepare the invitation, copy it and mail it in the chosen language, 
   await expect(panel.getByRole("button", { name: "UA", exact: true })).toHaveCount(0);
   await panel.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("lead-payer-link-new-de-desktop.png"), animations: "disabled" });
-  const informed = wizard.getByRole("checkbox", { name: /Der Kostenübernehmer wurde über die Verarbeitung seiner Daten informiert/ });
+  const informed = wizard.getByRole("checkbox", { name: /Die zahlende Person wurde über die Verarbeitung ihrer Daten informiert/ });
   await expect(informed).not.toBeChecked();
 
   await prepare.click();

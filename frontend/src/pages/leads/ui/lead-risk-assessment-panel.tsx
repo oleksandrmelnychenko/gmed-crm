@@ -211,7 +211,7 @@ function DecisionLine({ decision, tx }: { decision: RiskDecision; tx: Tx }) {
  * reviewer. Before the assessment starts the live preview is shown. Read-only
  * for everybody else. Staff only: the lead and the payer never see any of this.
  */
-function UncountedParentRow({
+export function UncountedParentRow({
   parent,
   lang,
   tx,

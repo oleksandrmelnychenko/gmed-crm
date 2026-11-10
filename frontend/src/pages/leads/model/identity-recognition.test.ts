@@ -164,4 +164,10 @@ describe("recognitionHolderRows", () => {
       citizenship: "UA",
     });
   });
+
+  it("offers no sex for a person whose form has none (a representative)", () => {
+    const result = normalizeIdentityRecognition(answer())!;
+    const rows = recognitionHolderRows(result, { lastName: "Eriksson", firstName: "Anna", birthDate: "", citizenships: [] }, tx, "ru");
+    expect(rows.map((row) => row.field)).not.toContain("legalSex");
+  });
 });

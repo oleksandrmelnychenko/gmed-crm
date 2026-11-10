@@ -301,7 +301,7 @@ test("a third-party payer gets a line of its own, in German too", async ({ page 
   await expect(patient.line.getByRole("button")).toHaveText("Zurücknehmen");
 
   const payer = row("payer");
-  await expect(payer.line).toContainText("Kostenübernehmer");
+  await expect(payer.line).toContainText("Zahler/in");
   await expect(payer.qes).toHaveText("Qualifizierte Signatur · 05.10.2026 · Test");
   await expect(payer.qes).toHaveAttribute("data-tone", "info");
   await expect(payer.payment).toHaveText("Zahlung vom eigenen Konto ausstehend");
