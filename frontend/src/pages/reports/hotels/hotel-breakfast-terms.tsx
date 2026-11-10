@@ -1,6 +1,6 @@
 import { SectionHeading } from "@/components/ui/section-heading";
 import { useCallback, useEffect, useState } from "react";
-import { Check, Coffee, Pencil } from "lucide-react";
+import { Check, Utensils, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -41,8 +41,8 @@ export function HotelBreakfastTermsEditor({ providerId, role, lang, onDirty, onS
     catch { setSaveError(labels.saveFailed); }
     finally { setBusy(false); }
   }
-  return <section className="overflow-hidden rounded-lg bg-card" data-testid="hotel-breakfast-terms">
-    <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 bg-card px-3 py-2"><h3 className="flex items-center gap-2 text-sm font-semibold"><SectionHeading icon={Coffee}>{labels.title}</SectionHeading></h3>{providerId && editable && !loading && !error && !editing ? <Button size="sm" variant="outline" onClick={() => { setEditing(true); setSaved(false); }}><Pencil className="size-3.5" />{labels.edit}</Button> : null}</header>
+  return <section className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card" data-testid="hotel-breakfast-terms">
+    <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 bg-card px-3 py-2"><h3 className="flex items-center gap-2 text-sm font-semibold"><SectionHeading icon={Utensils}>{labels.title}</SectionHeading></h3>{providerId && editable && !loading && !error && !editing ? <Button size="sm" variant="outline" onClick={() => { setEditing(true); setSaved(false); }}><Pencil className="size-3.5" />{labels.edit}</Button> : null}</header>
     <div className="space-y-2 p-3">
       {!providerId ? <p className="text-xs text-muted-foreground">{labels.link}</p> : loading ? <p role="status" className="text-xs text-muted-foreground">{labels.loading}</p> : error ? <div role="alert" className="text-xs text-destructive">{error}<Button variant="ghost" size="sm" onClick={() => void load()}>{labels.retry}</Button></div> : editing ? <form className="space-y-3" onSubmit={event => { event.preventDefault(); void save(); }}>
         <label className="block space-y-1 text-xs text-muted-foreground">{labels.mode}<NativeComboboxSelect aria-label={labels.mode} disabled={busy} value={draft.mode} onChange={event => { const mode = event.target.value as HotelBreakfastTerms["mode"]; setDraft(current => ({ ...current, mode, price: mode === "extra" ? current.price : "" })); setSaveError(""); }}>{(["unknown", "included", "extra", "unavailable"] as const).map(mode => <option key={mode} value={mode}>{labels[mode]}</option>)}</NativeComboboxSelect></label>

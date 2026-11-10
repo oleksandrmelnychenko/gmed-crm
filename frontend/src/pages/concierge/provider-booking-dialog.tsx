@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Building2, Clock3, AlertCircle, CalendarCheck2, LoaderCircle, Mail, MapPinned, Phone } from "lucide-react";
+import {
+  AlertCircle, BadgeCheck, Building2, CalendarCheck2, ClipboardList, ListChecks,
+  LoaderCircle, Mail, MapPinned, Phone, Send,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -91,6 +94,7 @@ const copy = {
     chooseProvider: "Partner auswählen",
     providerFixed: "Der Service ist mit diesem Partner verknüpft.",
     state: "Buchungsstand",
+    details: "Buchungsdetails",
     requested: "Angefragt",
     confirmed: "Bestätigt",
     alreadyRequested: "Die Buchung ist angefragt – jetzt kann sie bestätigt werden.",
@@ -144,6 +148,7 @@ const copy = {
     chooseProvider: "Выберите партнёра",
     providerFixed: "Сервис уже связан с этим партнёром.",
     state: "Этап брони",
+    details: "Детали бронирования",
     requested: "Запрошено",
     confirmed: "Подтверждено",
     alreadyRequested: "Бронь уже запрошена — теперь её можно подтвердить.",
@@ -440,17 +445,20 @@ export function ConciergeProviderBookingDialog<TService extends BookableConcierg
                     </div>
                   </ConciergeDialogSection>
 
-                  <ConciergeDialogSection title={labels.state} icon={CalendarCheck2}>
-                    <div className="grid grid-cols-2 gap-2" role="group" aria-label={labels.state}>
+                  <ConciergeDialogSection title={labels.state} icon={ListChecks}>
+                    <div className="flex w-fit max-w-full flex-wrap gap-1 rounded-lg border border-border bg-card p-0.5" role="group" aria-label={labels.state}>
                       {(["requested", "confirmed"] as const).map((state) => (
                         <Button
                           key={state}
                           type="button"
-                          variant={bookingState === state ? "default" : "outline"}
+                          size="sm"
+                          variant="ghost"
+                          data-workspace-tab
                           aria-pressed={bookingState === state}
                           disabled={state === "requested" && service.status === "booked"}
                           onClick={() => setBookingState(state)}
                         >
+                          {state === "confirmed" ? <BadgeCheck aria-hidden /> : <Send aria-hidden />}
                           {labels[state]}
                         </Button>
                       ))}
@@ -461,7 +469,7 @@ export function ConciergeProviderBookingDialog<TService extends BookableConcierg
                   </ConciergeDialogSection>
                 </div>
 
-                <ConciergeDialogSection title={labels.title} icon={Clock3}>
+                <ConciergeDialogSection title={labels.details} icon={ClipboardList}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <ConciergeField label={labels.startsAt}>
                       <Input type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} required />

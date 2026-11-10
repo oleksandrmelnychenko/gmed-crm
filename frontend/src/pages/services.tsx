@@ -1,5 +1,6 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
+  Fragment,
   Suspense,
   lazy,
   startTransition,
@@ -14,9 +15,15 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  BedDouble,
+  BusFront,
   CalendarClock,
   CalendarPlus,
+  CarFront,
   ConciergeBell,
+  ContactRound,
+  Crown,
+  Languages,
   NotebookPen,
   UserRoundCheck,
   WalletCards,
@@ -25,9 +32,11 @@ import {
   ListChecks,
   LoaderCircle,
   Pencil,
+  Plane,
   Plus,
   RefreshCw,
   Search,
+  type LucideIcon,
 } from "lucide-react";
 import { StaffLink } from "@/components/staff-link";
 import { localizeTaskNote } from "@/lib/task-labels";
@@ -39,6 +48,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PortalDateChip } from "@/components/ui/portal-date-chip";
+import { SectionHeading } from "@/components/ui/section-heading";
+import { formatPortalTimeWindow } from "@/lib/portal-datetime";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Dialog } from "@/components/ui/dialog";
 import { AdminDialogScaffold, AdminFormSection } from "@/components/admin-dialog-scaffold";
@@ -95,7 +107,6 @@ import { toRfc3339 } from "@/pages/appointments/model/workflow-helpers";
 import {
   conciergeServiceStatusTone,
   formatPortalCurrency,
-  formatPortalDateTime,
   usePortalLabels,
 } from "@/pages/patients/model/portal-shared";
 import { fetchProviderDetail, fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
@@ -249,15 +260,16 @@ const formSelectClassName = shellSelectClassName;
 const providerPickerContainerClassName =
   "sm:grid-cols-[minmax(180px,0.85fr)_minmax(220px,1.15fr)]";
 const formTextareaClassName = cn(shellTextareaClassName, "min-h-24");
-const SERVICE_KIND_OPTIONS = [
-  "hotel",
-  "transfer",
-  "vip_terminal",
-  "flight",
-  "chauffeur",
-  "translation_support",
-  "other",
-];
+const SERVICE_KIND_ICONS: Record<string, LucideIcon | undefined> = {
+  hotel: BedDouble,
+  transfer: BusFront,
+  vip_terminal: Crown,
+  flight: Plane,
+  chauffeur: CarFront,
+  translation_support: Languages,
+  other: ConciergeBell,
+};
+const SERVICE_KIND_OPTIONS = Object.keys(SERVICE_KIND_ICONS);
 
 const SERVICE_STATUS_LABEL_KEYS = {
   planned: "operations_status_planned",
@@ -646,7 +658,12 @@ function buildServiceColumns(t: Translations, lang: Lang): ColumnDef<StaffConcie
       width: 260,
       sortable: true,
       render: (row) => (
-        <span className="truncate text-xs text-foreground">{row.title}</span>
+        <>
+          <span className="hidden truncate text-xs text-foreground sm:block">{row.title}</span>
+          <span className="sm:hidden">
+            <SectionHeading icon={SERVICE_KIND_ICONS[row.service_kind] ?? ConciergeBell}>{row.title}</SectionHeading>
+          </span>
+        </>
       ),
     },
     {
@@ -698,32 +715,22 @@ function buildServiceColumns(t: Translations, lang: Lang): ColumnDef<StaffConcie
       label: t.staff_services_column_schedule,
       accessor: (row) => row.starts_at,
       filterType: "date",
-      width: 400,
+      width: 300,
       sortable: true,
       render: (row) => {
-        const start = row.starts_at ? formatPortalDateTime(row.starts_at) : null;
-        const end = row.ends_at ? formatPortalDateTime(row.ends_at) : null;
-        if (!start && !end) {
-          return <span className="text-xs text-foreground">{t.common_not_set}</span>;
-        }
+        const range = formatPortalTimeWindow(row.starts_at, row.ends_at);
+        if (!range) return <span className="text-xs">{t.common_not_set}</span>;
         return (
-          <div className="flex min-w-0 items-center gap-1">
-            {start ? (
-              <span className="inline-flex shrink-0 rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 font-mono text-[11px] font-medium tabular-nums text-emerald-700">
-                {start}
-              </span>
-            ) : null}
-            {start && end ? (
-              <span aria-hidden className="text-[10px] text-muted-foreground">
-                →
-              </span>
-            ) : null}
-            {end ? (
-              <span className="inline-flex shrink-0 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 font-mono text-[11px] font-medium tabular-nums text-amber-700">
-                {end}
-              </span>
-            ) : null}
-          </div>
+          <PortalDateChip>
+            {!row.starts_at && <>{t.staff_services_form_end}: </>}
+            {!row.ends_at && <>{t.staff_services_form_start}: </>}
+            {range.split(" ").map((part, index) => (
+              <Fragment key={index}>
+                {index > 0 && " "}
+                <span className="whitespace-nowrap">{part}</span>
+              </Fragment>
+            ))}
+          </PortalDateChip>
         );
       },
     },
@@ -1020,7 +1027,7 @@ function createStaffServicesFieldAction<K extends keyof StaffServicesPageState>(
 
 function useStaffServicesPageContent() {
   const { buildServiceColumns, providerServiceOptionLabel } = useLanguageHelpers();
-  const { formatPortalCurrency, formatPortalDateTime } = usePortalLabels();
+  const { formatPortalCurrency } = usePortalLabels();
   const { lang, t } = useLang();
   const { user } = useAuth();
   const [
@@ -1717,8 +1724,8 @@ function useStaffServicesPageContent() {
       ) : null}
 
       <div className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
-        <div className="relative z-30 flex flex-nowrap items-end gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
-          <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
+        <div className="relative z-30 flex flex-wrap items-end gap-2 border-b border-border/70 bg-card px-3 py-2 sm:flex-nowrap sm:gap-1.5 sm:overflow-x-auto">
+          <ToolbarField label={t.common_search} className="min-w-0 flex-[1_1_12rem] sm:min-w-[220px] sm:flex-1 sm:max-w-sm">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -1740,7 +1747,7 @@ function useStaffServicesPageContent() {
             {t.staff_services_mine}
           </label>
 
-          <ToolbarField label={t.services_category}>
+          <ToolbarField label={t.services_category} className="w-full sm:w-auto">
           <ProviderTaxonomyCascadeSelect
             value={taxonomyNodeId}
             nodes={taxonomyNodes}
@@ -1748,8 +1755,8 @@ function useStaffServicesPageContent() {
             mode="any"
             placeholder={t.services_category}
             allLabel={t.services_all_categories}
-            containerClassName="shrink-0"
-            selectClassName="h-8 w-auto min-w-[180px] rounded-md bg-field text-xs"
+            containerClassName="w-full sm:w-auto sm:shrink-0"
+            selectClassName="h-8 w-full min-w-0 rounded-md bg-field text-xs sm:w-auto sm:min-w-[180px]"
             disabled={lookupsLoading && taxonomyNodes.length === 0}
             aria-label={t.services_category}
             onChange={setTaxonomyNodeId}
@@ -1854,6 +1861,7 @@ function useStaffServicesPageContent() {
               frozenColumns.length >= MAX_FROZEN_COLUMNS
             }
             density={density}
+            mobilePrimaryColumnId="title"
             rowId={(row) => row.id}
             activeRowId={selectedServiceId}
             onRowClick={openServiceDetail}
@@ -1866,7 +1874,7 @@ function useStaffServicesPageContent() {
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           {selectedService ? (
             <AdminSheetScaffold
-              icon={ConciergeBell}
+              icon={SERVICE_KIND_ICONS[selectedService.service_kind] ?? ConciergeBell}
               title={selectedService.title}
               description={`${selectedService.patient_name} · ${serviceKindLabel(selectedService.service_kind, t)}`}
               bodyClassName="space-y-3 px-4 py-3"
@@ -1894,7 +1902,7 @@ function useStaffServicesPageContent() {
               ) : null}
               {editMode && editForm ? (
                 <>
-                  <Section icon={ConciergeBell} title={t.staff_services_create_section_service}>
+                  <Section icon={ContactRound} title={t.staff_services_create_section_service}>
                     <div className="grid gap-3 md:grid-cols-2">
                       {canEditProtectedServiceFields ? (
                         <label className="space-y-1.5 text-sm">
@@ -2370,7 +2378,7 @@ function useStaffServicesPageContent() {
                       </Button>
                     ) : null}
                   </div>
-                  <Section icon={ConciergeBell} title={t.staff_services_create_section_service}>
+                  <Section icon={ContactRound} title={t.staff_services_create_section_service}>
                     <div className="grid gap-1.5 md:grid-cols-2">
                       <ServiceMiniMetric label={t.staff_services_column_status} value={serviceStatusLabel(selectedService.status, t)} />
                       <ServiceMiniMetric label={t.staff_services_column_billing} value={billingStatusLabel(selectedService.billing_status, t)} />
@@ -2391,8 +2399,8 @@ function useStaffServicesPageContent() {
 
                   <Section icon={CalendarClock} title={t.staff_services_create_section_schedule}>
                     <div className="grid gap-1">
-                      <ServiceDetailField label={t.staff_services_form_start} value={selectedService.starts_at ? formatPortalDateTime(selectedService.starts_at) : null} />
-                      <ServiceDetailField label={t.staff_services_form_end} value={selectedService.ends_at ? formatPortalDateTime(selectedService.ends_at) : null} />
+                      <ServiceSummaryLine label={t.staff_services_form_start} value={selectedService.starts_at && <PortalDateChip timestamp={selectedService.starts_at} />} />
+                      <ServiceSummaryLine label={t.staff_services_form_end} value={selectedService.ends_at && <PortalDateChip timestamp={selectedService.ends_at} />} />
                     </div>
                   </Section>
 
@@ -2459,7 +2467,7 @@ function useStaffServicesPageContent() {
                   </div>
                 ) : null}
 
-                <AdminFormSection icon={ConciergeBell} title={t.staff_services_create_section_service}>
+                <AdminFormSection icon={ContactRound} title={t.staff_services_create_section_service}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <label className="space-y-1.5 text-sm">
                       <span className="text-xs font-medium text-muted-foreground">

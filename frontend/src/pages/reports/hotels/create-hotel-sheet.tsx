@@ -1,6 +1,6 @@
 import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useState } from "react";
-import { CircleAlert, Hotel, LoaderCircle, Plus, RefreshCw, MapPin, ContactRound, NotebookPen } from "lucide-react";
+import { CircleAlert, HousePlus, IdCard, LoaderCircle, Plus, RefreshCw, MapPin, ContactRound, NotebookPen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -41,15 +41,15 @@ export function CreateHotelSheet({ lang, onClose, onCreated }: { lang: Lang; onC
     finally { setBusy(false); }
   }
   const sections = [
-    { icon: Hotel, title: lang === "ru" ? "Данные гостиницы" : "Hoteldaten", fields: [["name", labels.name, "text"], ["legalName", labels.legal, "text"]] },
+    { icon: IdCard, title: lang === "ru" ? "Данные гостиницы" : "Hoteldaten", fields: [["name", labels.name, "text"], ["legalName", labels.legal, "text"]] },
     { icon: MapPin, title: lang === "ru" ? "Адрес" : "Adresse", fields: [["addressCity", labels.city, "text"], ["addressCountry", labels.country, "text"], ["addressStreet", labels.street, "text"], ["addressZip", labels.zip, "text"]] },
     { icon: ContactRound, title: lang === "ru" ? "Контакты" : "Kontaktdaten", fields: [["phone", labels.phone, "tel"], ["email", labels.email, "email"], ["website", labels.website, "url"]] },
   ] as const;
   // Release the creation form's focus trap before opening the hotel details dialog.
   return <Dialog open={!createdHotel} dirty={dirty} onOpenChange={open => { if (!open && !busy && !createdHotel) onClose(); }} onOpenChangeComplete={open => { if (!open && createdHotel) onCreated(createdHotel); }}><DialogContent className="left-1/2 right-auto top-1/2 bottom-auto flex max-h-[calc(100dvh-16px)] w-[calc(100vw-16px)] -translate-x-1/2 -translate-y-1/2 flex-col gap-0 overflow-hidden rounded-xl border-border/70 bg-card p-0 pb-0 shadow-2xl sm:max-h-[92dvh] sm:w-[calc(100vw-2rem)] sm:max-w-3xl sm:pb-0">
     <DialogHeader className="shrink-0 gap-2 border-b border-border/70 bg-muted/20 px-4 py-3 pr-14">
-      <DialogTitle className="flex items-center gap-2.5"><SectionHeading icon={Hotel}>{labels.add}</SectionHeading></DialogTitle>
-      <DialogDescription className="flex items-center gap-1.5 text-xs"><Hotel className="size-3.5 text-primary" />{labels.type}</DialogDescription>
+      <DialogTitle className="flex items-center gap-2.5"><SectionHeading icon={HousePlus}>{labels.add}</SectionHeading></DialogTitle>
+      <DialogDescription className="text-xs">{labels.type}</DialogDescription>
     </DialogHeader>
     <form className="flex min-h-0 flex-1 flex-col" onSubmit={event => { event.preventDefault(); void save(); }}>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-muted/10 p-3">
