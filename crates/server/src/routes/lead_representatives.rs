@@ -6202,8 +6202,8 @@ mod tests {
         // Without a base every sent key is written.
         let all = staff_details_patch(&json!({ "values": { "country": "de" } })).unwrap();
         assert_eq!(all.text("country"), Some("de"));
-        // Names, contact data and the document are not changed here.
-        for key in ["first_name", "email", "phone", "id_document_number"] {
+        // Contact data and the document are not changed here (the name parts are, owner 2026-11-10).
+        for key in ["email", "phone", "id_document_number"] {
             assert!(
                 staff_details_patch(&json!({ "values": { key: "x" } })).is_err(),
                 "{key}"
