@@ -2988,8 +2988,11 @@ where
            FROM consent_records
            WHERE lead_id = $1
              -- A consent staff recorded for the client counts for every login
-             -- of the request (owner decision 2026-10-29).
-             AND (user_id = $2 OR context ? 'recorded_by_staff')
+             -- of the request (owner decision 2026-10-29); staff filling the
+             -- form see the consent any login of the request gave (QA
+             -- 2026-11-10: the mother's consent showed as missing to staff).
+             AND (user_id = $2 OR context ? 'recorded_by_staff'
+                  OR EXISTS (SELECT 1 FROM users s WHERE s.id = $2 AND s.role <> 'patient'))
              AND consent_type = $3
              AND granted = true
              AND revoked_at IS NULL

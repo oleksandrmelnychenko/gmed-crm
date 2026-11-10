@@ -8453,6 +8453,31 @@ async fn staff_fill_in_the_cabinet_form_and_record_the_consents_given_to_them() 
         view["consents"]["lead_inquiry_processing"]["given_at"].is_null(),
         "{view}"
     );
+    // A consent the client gives in the own login is the request's consent
+    // for staff filling the form too (QA 2026-11-10).
+    let (status, given) = json_request(
+        router,
+        "POST",
+        &format!("{base}/consent"),
+        &patient,
+        Some(consent(None)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{given}");
+    let (_, view) = json_request(router, "GET", &base, &pm, None).await;
+    assert!(
+        view["consents"]["lead_inquiry_processing"]["given_at"].is_string(),
+        "{view}"
+    );
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &format!("{base}/consent/revoke"),
+        &patient,
+        Some(json!({"purpose": "lead_inquiry_processing"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
 
     // The consent form options the client named, recorded by staff with how.
     let choices =

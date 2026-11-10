@@ -294,6 +294,16 @@ describe("the risk assessment of a lead (staff)", () => {
     expect(text).toContain("пациент — кем выдан документ, документ просрочен — нужен действующий");
     expect(text).toContain("«Документ, удостоверяющий личность»");
     expect(representativeDocumentSlot(expired)).toBe("patient");
+    // Only the second parent's validity is missing: one place, no card, no cabinet (QA 2026-11-10).
+    const validity = riskGateErrorText(new ApiRequestError("Unprocessable Entity", {
+      status: 422,
+      code: "Unprocessable Entity",
+      body: { code: "representative_details_incomplete", missing: ["rep2_id_valid_until"] },
+    }), ru) ?? "";
+    expect(validity).toContain("не хватает документов родителей");
+    expect(validity).toContain("шаге «Документы»");
+    expect(validity).not.toContain("кнопка ✎");
+    expect(validity).not.toContain("В кабинете можно запросить");
   });
 
   it("names deputies only from eligible roles", () => {

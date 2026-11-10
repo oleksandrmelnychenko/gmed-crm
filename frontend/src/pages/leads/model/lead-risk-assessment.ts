@@ -1049,6 +1049,11 @@ export function riskGateErrorText(error: unknown, tx: Tx): string | null {
     const base = error.body?.scope === "person" && onlyDocument ? tx(
       "Подтвердить идентификацию нельзя: не хватает документов этого лица.",
       "Die Identifizierung kann nicht bestätigt werden: Unterlagen dieser Person fehlen.",
+    ) : onlyDocument && error.body?.scope !== "person" ? tx(
+      // Only document data or scans: the hint below names the one place; the
+      // parent's card and the cabinet cannot take them (QA 2026-11-10, B F-3).
+      "Перед договором и подписью не хватает документов родителей (законных представителей).",
+      "Vor Vertrag und Unterschrift fehlen Unterlagen der Eltern bzw. gesetzlichen Vertreter.",
     ) : error.body?.scope === "person" ? tx(
       `Перед подтверждением подписи дополните данные этого лица в его карточке: ${representativeCardPlace(error.body?.missing, tx)}.`,
       `Bitte vervollständigen Sie vor der Bestätigung der Unterschrift die Daten dieser Person in ihrer Karte: ${representativeCardPlace(error.body?.missing, tx)}.`,
