@@ -321,6 +321,29 @@ async function uploadComplianceEvidence(
   return upload.body.id as string;
 }
 
+/**
+ * An estimate is accepted by the client's signature on it, never by a click
+ * (owner decision 2026-11-11; `POST /quotes/{id}/status` answers 409
+ * `estimate_signature_required` without a signed estimate document). The
+ * paper path of the UI: the scan of the signed copy becomes the signed
+ * version of the Kostenvoranschlag and the server accepts the quote with it.
+ */
+async function signOrderEstimateOnPaper(pm: Actor, documentId: string, quoteId: string) {
+  const signed = await pm.call("POST", `/documents/${documentId}/paper-signature`, undefined, {
+    multipart: {
+      file: {
+        name: "kostenvoranschlag-unterschrieben.pdf",
+        mimeType: "application/pdf",
+        buffer: TINY_PDF,
+      },
+    },
+  });
+  expect(signed.status, `paper signature of the estimate: ${describeResult(signed)}`).toBe(200);
+  const quote = await pm.ok("GET", `/quotes/${quoteId}`);
+  expect(quote.status, "the signed estimate accepts the quote").toBe("accepted");
+  return signed.body.document_id as string;
+}
+
 type CommercialTemplate =
   | "framework_contract"
   | "single_order"
@@ -534,7 +557,7 @@ async function onboardNewPatient(
   await pm.ok("POST", `/documents/${documents.framework_contract.id}/mark-signed`, {
     compliance_kind: "framework_contract",
   });
-  await pm.ok("POST", `/quotes/${quote.id}/status`, { status: "accepted" });
+  await signOrderEstimateOnPaper(pm, documents.order_cost_estimate.id, quote.id);
 
   const readyLead = await pm.ok("GET", `/leads/${leadId}`);
   expect(
@@ -632,10 +655,12 @@ test.describe("business cycle (live API)", () => {
       expect(lead.qualification_status).toBe("converted");
 
       const documents = await pm.ok("GET", `/documents?patient_id=${onboarded.patientId}`);
-      const templates = (documents as any[])
-        .map((document) => document.generated_template_id)
-        .filter(Boolean)
-        .sort();
+      // The estimate has two versions: the generated PDF and the signed scan.
+      const templates = [
+        ...new Set(
+          (documents as any[]).map((document) => document.generated_template_id).filter(Boolean),
+        ),
+      ].sort();
       expect(templates).toEqual(
         ["cost_estimate", "framework_contract", "order_cost_estimate", "single_order"].sort(),
       );
@@ -753,7 +778,7 @@ async function completeRepeatIntake(
     expect(generated.status, `${templateId}: ${describeResult(generated)}`).toBe(200);
     documents[templateId] = generated.body.id;
   }
-  await pm.ok("POST", `/quotes/${quote.id}/status`, { status: "accepted" });
+  await signOrderEstimateOnPaper(pm, documents.order_cost_estimate, quote.id);
   await pm.ok("POST", `/orders/${input.orderId}/commercial-basis`, {
     signed_patient: true,
     signed_agency: true,
@@ -1850,10 +1875,13 @@ test.describe("business cycle (live API) - rounding", () => {
       wizardGross,
     );
 
-    // Next wizard save re-syncs total_estimated, then the user accepts the quote.
+    // Next wizard save re-syncs total_estimated; the quote still matches the
+    // order. The route checks that before the signature (a mismatch answers
+    // `quote_outdated`), so the only thing missing is the client's signature
+    // on the estimate — an estimate is never accepted by a click alone.
     await pm.ok("POST", `/orders/${order.id}/commercial-basis`, { total_estimated: wizardGross.toFixed(2) });
     const accept = await pm.post(`/quotes/${quote.id}/status`, { status: "accepted" });
-    expect(accept.status, `accepting the quote after a wizard save: ${describeResult(accept)}`).toBe(200);
-    expect(accept.body.status).toBe("accepted");
+    expect(accept.status, `accepting the quote after a wizard save: ${describeResult(accept)}`).toBe(409);
+    expect(accept.body.error).toBe("estimate_signature_required");
   });
 });

@@ -5,6 +5,7 @@ import {
   authenticateApiClient,
   bootstrapAndLogin,
   chooseComboboxOption,
+  recordSignedOrderEstimate,
   setGermanLanguage,
   type LiveApiClient,
 } from "./support/live-helpers";
@@ -75,35 +76,44 @@ async function openWizardStep(wizard: Locator, step: RegExp) {
 
 /**
  * Conversion needs an accepted quote that matches the order services. Seeds
- * built before the quote carried line items leave "Kostenvoranschlag annehmen"
- * open; staff then recalculate the quote from the order and accept it.
+ * built before the quote carried line items leave the estimate open; staff
+ * then recalculate the quote from the order and record the client's
+ * signature on the estimate — the scan of the signed copy accepts the quote
+ * (owner decision 2026-11-11: never one click). Returns the wizard, reopened
+ * when the signature was recorded.
  */
-async function recalculateAndAcceptQuote(page: Page, wizard: Locator, leadId: string) {
+async function recalculateAndAcceptQuote(
+  page: Page,
+  request: APIRequestContext,
+  api: LiveApiClient,
+  wizard: Locator,
+  leadName: string,
+  leadId: string,
+) {
   await openWizardStep(wizard, /^Vertrag & Angebot/);
   const contractStepDone = wizard.getByRole("tab", { name: /^Vertrag & Angebot — erledigt/ });
   if (await contractStepDone.count()) {
-    return;
+    return wizard;
   }
-  const accept = wizard.getByRole("button", { name: /^Kostenvoranschlag annehmen$/ });
   const recalculated = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
       /\/api\/v1\/orders\/[^/]+\/quotes$/.test(new URL(response.url()).pathname),
   );
   await wizard.getByRole("button", { name: /^Neu berechnen$/ }).click();
-  expect((await recalculated).ok()).toBe(true);
-  await expect(accept).toBeEnabled();
-  const accepted = page.waitForResponse(
-    (response) =>
-      response.request().method() === "POST" &&
-      /\/api\/v1\/quotes\/[^/]+\/status$/.test(new URL(response.url()).pathname),
-  );
-  await accept.click();
-  expect((await accepted).ok()).toBe(true);
+  const quoteResponse = await recalculated;
+  expect(quoteResponse.ok()).toBe(true);
+  const orderId = new URL(quoteResponse.url()).pathname.split("/").at(-2)!;
+  // The paper path over the routes of «Kostenvoranschlag auf Papier
+  // unterschrieben»: a stored estimate PDF and the scan of its signed copy.
+  await recordSignedOrderEstimate(request, api, { leadId, orderId });
+  const reopened = await openLeadWizard(page, leadName);
+  await openWizardStep(reopened, /^Vertrag & Angebot/);
   await expect(
-    wizard.getByRole("tab", { name: /^Vertrag & Angebot — erledigt/ }),
+    reopened.getByRole("tab", { name: /^Vertrag & Angebot — erledigt/ }),
     `quote accepted for lead ${leadId}`,
   ).toBeVisible();
+  return reopened;
 }
 
 /** Confirms the review checkbox on the release step and creates the patient. */
@@ -177,9 +187,21 @@ async function openLeadWizard(page: Page, leadName: string) {
   return wizard;
 }
 
-async function openLeadReleaseStep(page: Page, leadName: string, leadId: string) {
-  const wizard = await openLeadWizard(page, leadName);
-  await recalculateAndAcceptQuote(page, wizard, leadId);
+async function openLeadReleaseStep(
+  page: Page,
+  request: APIRequestContext,
+  api: LiveApiClient,
+  leadName: string,
+  leadId: string,
+) {
+  const wizard = await recalculateAndAcceptQuote(
+    page,
+    request,
+    api,
+    await openLeadWizard(page, leadName),
+    leadName,
+    leadId,
+  );
   await openWizardStep(wizard, /^Freigabe/);
   await expect(
     wizard.getByRole("heading", { name: /Patient anlegen|Создание пациента/i }),
@@ -506,13 +528,16 @@ test.describe("lead live workflows", () => {
     );
 
     await saveLeadGateData(page, detailSheet, scenario.leads.blocked.id, "1991-01-01");
-    await declareSelfPayer(
+    const pmApi = await authenticateApiClient(
       request,
-      await authenticateApiClient(request, scenario.credentials.pm.email, scenario.credentials.password),
-      scenario.leads.blocked.id,
+      scenario.credentials.pm.email,
+      scenario.credentials.password,
     );
+    await declareSelfPayer(request, pmApi, scenario.leads.blocked.id);
     const wizard = await openLeadReleaseStep(
       page,
+      request,
+      pmApi,
       scenario.leads.blocked.name,
       scenario.leads.blocked.id,
     );
@@ -664,14 +689,17 @@ test.describe("lead live workflows", () => {
   }) => {
     await setGermanLanguage(page);
     const scenario = await bootstrapAndLogin(page, request, "pm");
-    await declareSelfPayer(
+    const pmApi = await authenticateApiClient(
       request,
-      await authenticateApiClient(request, scenario.credentials.pm.email, scenario.credentials.password),
-      scenario.leads.ready.id,
+      scenario.credentials.pm.email,
+      scenario.credentials.password,
     );
+    await declareSelfPayer(request, pmApi, scenario.leads.ready.id);
 
     const wizard = await openLeadReleaseStep(
       page,
+      request,
+      pmApi,
       scenario.leads.ready.name,
       scenario.leads.ready.id,
     );

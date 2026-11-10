@@ -511,3 +511,52 @@ export async function setGermanLanguage(page: Page) {
     window.localStorage.setItem("gmed_lang", "de");
   });
 }
+
+/**
+ * An estimate (Kostenvoranschlag) is accepted by the client's signature on it,
+ * never by a click (owner decision 2026-11-11; the status route answers 409
+ * `estimate_signature_required`). The paper path of the UI, over its own
+ * routes: the scan of the signed copy becomes the signed version of the
+ * estimate document, and the server accepts the order's quote with it.
+ *
+ * With `orderId` the estimate document is generated first (a lead whose seed
+ * holds no stored PDF); otherwise `documentId` names the generated one.
+ */
+export async function recordSignedOrderEstimate(
+  request: APIRequestContext,
+  api: LiveApiClient,
+  input: { documentId: string } | { leadId: string; orderId: string },
+) {
+  let documentId: string;
+  if ("documentId" in input) {
+    documentId = input.documentId;
+  } else {
+    const generated = await request.post(`${api.backendUrl}/api/v1/documents/generate`, {
+      headers: api.headers,
+      data: {
+        template_id: "order_cost_estimate",
+        lead_id: input.leadId,
+        order_id: input.orderId,
+        language: "de",
+        status: "active",
+      },
+    });
+    expect(generated.ok(), `estimate document: ${await generated.text()}`).toBe(true);
+    documentId = ((await generated.json()) as { id: string }).id;
+  }
+  const signed = await request.post(
+    `${api.backendUrl}/api/v1/documents/${documentId}/paper-signature`,
+    {
+      headers: api.headers,
+      multipart: {
+        file: {
+          name: "kostenvoranschlag-unterschrieben.pdf",
+          mimeType: "application/pdf",
+          buffer: Buffer.from("%PDF-1.4\n% synthetic signed scan\n%%EOF\n"),
+        },
+      },
+    },
+  );
+  expect(signed.ok(), `paper signature of the estimate: ${await signed.text()}`).toBe(true);
+  return ((await signed.json()) as { document_id: string }).document_id;
+}

@@ -12,6 +12,7 @@ import {
   chooseComboboxOption,
   ensureDetailsOpen,
   openDocumentWorkspace,
+  recordSignedOrderEstimate,
   setGermanLanguage,
   type BootstrapScenario,
 } from "./support/live-helpers";
@@ -65,8 +66,9 @@ async function clickTranslationAction(
 
 /**
  * Seeds built before the onboarding quote carried line items leave the "ready"
- * lead blocked by "Quote is not accepted"; recalculate and accept the quote
- * from the order services (what staff do in the wizard) in that case.
+ * lead blocked by "Quote is not accepted"; recalculate the quote from the
+ * order services and record the signed estimate (what staff do in the
+ * wizard: «Kostenvoranschlag auf Papier unterschrieben») in that case.
  */
 async function ensureReadyLeadQuoteAccepted(
   request: APIRequestContext,
@@ -100,11 +102,15 @@ async function ensureReadyLeadQuoteAccepted(
   );
   expect(quoteResponse.ok(), await quoteResponse.text()).toBe(true);
   const quote = (await quoteResponse.json()) as { id: string };
-  const acceptResponse = await request.post(
-    `${api.backendUrl}/api/v1/quotes/${quote.id}/status`,
-    { headers: api.headers, data: { status: "accepted" } },
+  // The estimate is accepted by the client's signature on it, not by a click:
+  // the scan of the signed copy accepts the recalculated quote.
+  await recordSignedOrderEstimate(request, api, { leadId: scenario.leads.ready.id, orderId });
+  const acceptedResponse = await request.get(
+    `${api.backendUrl}/api/v1/quotes/${quote.id}`,
+    { headers: api.headers },
   );
-  expect(acceptResponse.ok(), await acceptResponse.text()).toBe(true);
+  expect(acceptedResponse.ok(), await acceptedResponse.text()).toBe(true);
+  expect(((await acceptedResponse.json()) as { status: string }).status).toBe("accepted");
 }
 
 test.describe("staff live workflows", () => {
