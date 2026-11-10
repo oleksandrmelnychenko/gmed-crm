@@ -774,6 +774,19 @@ async fn lead_order_and_service_are_idempotent_without_creating_patient() {
     assert!(quote["patient_id"].is_null());
     assert_eq!(quote["total_gross"], "297.5");
 
+    // An estimate is accepted by its signature, never by a click alone.
+    let (status, unsigned) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "accepted" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "response: {unsigned}");
+    assert_eq!(unsigned["error"], "estimate_signature_required");
+    support::seed_signed_order_estimate(&pool, Uuid::parse_str(order_id).unwrap()).await;
+
     let (status, accepted) = json_request(
         &app,
         "POST",
@@ -1181,6 +1194,7 @@ async fn billing_can_accept_an_unpaid_quote_but_interpreter_cannot_access_quote(
     assert_eq!(status, StatusCode::CREATED);
     let quote_id = body["id"].as_str().unwrap().to_string();
 
+    support::seed_signed_order_estimate(&pool, Uuid::parse_str(&order_id).unwrap()).await;
     let (status, body) = json_request(
         &app,
         "POST",
@@ -1287,7 +1301,7 @@ async fn quote_is_not_accepted_while_the_estimate_document_is_outdated() {
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let quote_id = body["id"].as_str().unwrap().to_string();
 
-    let insert_estimate = |name: &'static str| {
+    let insert_estimate = |name: &'static str, signed: bool| {
         let pool = pool.clone();
         async move {
             let id = Uuid::new_v4();
@@ -1295,22 +1309,25 @@ async fn quote_is_not_accepted_while_the_estimate_document_is_outdated() {
                 r#"INSERT INTO documents (
                         id, version_root_document_id, patient_id, order_id, auto_name,
                         art, category, status, visibility, is_medical, uploaded_by,
-                        generated_template_id
+                        generated_template_id, signed_at
                    ) VALUES ($1, $1, $2, $3, $4, 'cost_estimate', 'finance', 'active',
-                             'internal', false, $5, 'order_cost_estimate')"#,
+                             'internal', false, $5, 'order_cost_estimate',
+                             CASE WHEN $6 THEN now() END)"#,
             )
             .bind(id)
             .bind(patient_id)
             .bind(order_uuid)
             .bind(name)
             .bind(admin_id)
+            .bind(signed)
             .execute(&pool)
             .await
             .unwrap();
             id
         }
     };
-    let first = insert_estimate("Kostenvoranschlag V01").await;
+    // Signed, yet older than the order's terms: the signature confirms nothing.
+    let first = insert_estimate("Kostenvoranschlag V01", true).await;
     // Staff require a prepayment after the estimate was generated.
     sqlx::query(
         "UPDATE orders SET prepayment_required = true, prepayment_amount = 50.00 WHERE id = $1",
@@ -1346,8 +1363,13 @@ async fn quote_is_not_accepted_while_the_estimate_document_is_outdated() {
         .unwrap();
     assert_eq!(quote_status, "draft");
 
-    // A fresh estimate shows the order's terms again.
-    insert_estimate("Kostenvoranschlag V02").await;
+    // A fresh estimate shows the order's terms again; unsigned, it does not
+    // confirm the quote (owner decision 2026-11-11).
+    insert_estimate("Kostenvoranschlag V02", false).await;
+    let (status, refused) = accept().await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "estimate_signature_required", "{refused}");
+    insert_estimate("Kostenvoranschlag V03", true).await;
     let (status, accepted) = accept().await;
     assert_eq!(status, StatusCode::OK, "{accepted}");
     assert_eq!(accepted["status"], "accepted");
@@ -1723,6 +1745,7 @@ async fn follow_up_quote_below_the_required_prepayment_adds_to_the_order() {
     assert!(order_estimate_is(&pool, &order_id, "725.90").await);
 
     let follow_up_id = follow_up["id"].as_str().unwrap();
+    support::seed_signed_order_estimate(&pool, Uuid::parse_str(&order_id).unwrap()).await;
     let (status, accepted) = json_request(
         &app,
         "POST",
@@ -1923,6 +1946,7 @@ async fn quote_versions_capture_initial_and_status_update_snapshots() {
     assert_eq!(versions[0]["change_reason"], "initial_snapshot");
     assert_eq!(versions[0]["status"], "draft");
 
+    support::seed_signed_order_estimate(&pool, Uuid::parse_str(&order_id).unwrap()).await;
     let (status, body) = json_request(
         &app,
         "POST",

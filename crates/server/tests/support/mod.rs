@@ -265,6 +265,33 @@ pub async fn seed_signed_consent_document(
     document_id
 }
 
+/// A signed Kostenvoranschlag of the order, stored directly: what the status
+/// route needs before a quote may be set to `accepted` (owner decision
+/// 2026-11-11 — an estimate is confirmed by its signature, not by a click).
+#[allow(dead_code)]
+pub async fn seed_signed_order_estimate(pool: &PgPool, order_id: Uuid) -> Uuid {
+    let document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, version_root_document_id, patient_id, lead_id, order_id, auto_name,
+                art, category, status, visibility, is_medical, uploaded_by,
+                generated_template_id, signed_at
+           )
+           SELECT $1, $1, o.patient_id,
+                  CASE WHEN o.patient_id IS NULL THEN o.source_lead_id END,
+                  o.id, 'Kostenvoranschlag (signed)', 'cost_estimate', 'finance', 'active',
+                  'internal', false, (SELECT id FROM users ORDER BY created_at LIMIT 1),
+                  'order_cost_estimate', now()
+           FROM orders o WHERE o.id = $2"#,
+    )
+    .bind(document_id)
+    .bind(order_id)
+    .execute(pool)
+    .await
+    .expect("seed signed order estimate");
+    document_id
+}
+
 /// Records a paper signature (`POST /documents/{id}/paper-signature`) with a
 /// synthetic scan of the signed copy: the proof a generated document needs to
 /// count as signed (owner decisions 2026-10-11). Returns the status and body;

@@ -466,6 +466,36 @@ pub(super) async fn apply_business_effects(
             }
         }
     }
+    // Owner decision 2026-11-11: the client's signature on the
+    // Kostenvoranschlag — electronic, or on paper with the scan — confirms
+    // the estimate; the order's open quote becomes accepted. A quote that no
+    // longer matches the order, or a version older than the order's terms,
+    // confirms nothing: the reason goes into the audit of the signature.
+    if template == Some("order_cost_estimate")
+        && let Some(order_id) = order_id
+        && client_signed
+    {
+        match crate::routes::contracts::accept_quote_of_signed_estimate_tx(
+            tx,
+            order_id,
+            document_id,
+            source.name,
+            source.actor,
+        )
+        .await
+        .map_err(database)?
+        {
+            Ok(Some(quote_id)) => {
+                effects["order_id"] = json!(order_id);
+                effects["accepted_quote_id"] = json!(quote_id);
+            }
+            Ok(None) => {}
+            Err(reason) => {
+                effects["order_id"] = json!(order_id);
+                effects["quote_not_accepted"] = json!(reason);
+            }
+        }
+    }
     Ok(())
 }
 

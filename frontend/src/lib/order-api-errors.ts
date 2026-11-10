@@ -32,6 +32,10 @@ export const ORDER_API_ERROR_KEYS: Record<string, string> = {
   prepayment_exceeds_quote_total: "api_quotes_prepayment_exceeds_total",
   quote_superseded: "api_quotes_superseded",
   quote_outdated: "api_quotes_outdated",
+  // An estimate is accepted by the client's signature on it (owner decision 2026-11-11).
+  estimate_signature_required: "api_quotes_signature_required",
+  quote_expired: "api_quotes_expired",
+  quote_rejected: "api_quotes_rejected",
   quote_without_services: "api_quotes_without_services",
   framework_contract_terminated_locked: "api_contracts_terminated_locked",
   framework_contract_use_terminate: "api_contracts_use_terminate",

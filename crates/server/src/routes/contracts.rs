@@ -1076,6 +1076,182 @@ pub(crate) async fn close_open_order_quotes_for_cancelled_order_tx(
     Ok(closed)
 }
 
+/// The newest order_cost_estimate document of an order as the quote sees it:
+/// whether it is signed and whether its terms are still the order's
+/// (`document_terms_current`). `None` without such a document.
+async fn newest_estimate_document_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    order_id: Uuid,
+) -> Result<Option<(bool, Option<bool>)>, sqlx::Error> {
+    sqlx::query_as::<_, (bool, Option<bool>)>(
+        r#"SELECT d.signed_at IS NOT NULL, document_terms_current(d.id)
+           FROM documents d
+           WHERE d.order_id = $1
+             AND d.generated_template_id = 'order_cost_estimate'
+             AND d.status = 'active'
+             AND d.file_deleted_at IS NULL
+           ORDER BY d.created_at DESC, d.id DESC
+           LIMIT 1"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&mut **tx)
+    .await
+}
+
+/// The open quote of an order that the client's signature on the
+/// Kostenvoranschlag accepts (owner decision 2026-11-11: an estimate is
+/// confirmed by its signature — electronic, or on paper with the scan — and
+/// no longer by a click).
+struct QuoteToAccept {
+    id: Uuid,
+    previous_status: String,
+}
+
+/// `Ok(Ok(Some(_)))`: the order's current quote is open and matches the
+/// order; `Ok(Ok(None))`: nothing to accept (no quote, or accepted already);
+/// `Ok(Err(code))`: the quote cannot be accepted as it stands — the checks of
+/// the status route (`quote_outdated`), and a quote that is closed or past
+/// its validity (`quote_expired`, `quote_rejected`).
+async fn quote_of_signed_estimate_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    order_id: Uuid,
+) -> Result<Result<Option<QuoteToAccept>, &'static str>, sqlx::Error> {
+    lock_open_order_quotes_tx(tx, order_id).await?;
+    let Some(quote) = sqlx::query(
+        r#"SELECT q.id, q.status, q.total_gross, q.line_items, q.valid_until,
+                  COALESCE(order_service_total_gross(o.id), o.total_estimated) AS total_estimated
+           FROM quotes q
+           JOIN orders o ON o.id = q.order_id
+           WHERE q.order_id = $1 AND q.status <> 'superseded'
+           ORDER BY q.created_at DESC, q.id DESC
+           LIMIT 1
+           FOR UPDATE OF q, o"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    else {
+        return Ok(Ok(None));
+    };
+    let previous_status: String = quote.try_get("status")?;
+    match previous_status.as_str() {
+        "accepted" => return Ok(Ok(None)),
+        "expired" => return Ok(Err("quote_expired")),
+        "rejected" => return Ok(Err("quote_rejected")),
+        _ => {}
+    }
+    if quote_validity_passed(
+        quote.try_get::<Option<NaiveDate>, _>("valid_until")?,
+        crate::app_time::today(),
+    ) {
+        return Ok(Err("quote_expired"));
+    }
+    let persisted = load_quote_line_items_from_order_tx(tx, order_id).await?;
+    let current_total = compute_quote_totals(&persisted).total_gross;
+    if persisted.is_empty()
+        || !quote_lines_match_persisted(&quote.try_get::<Value, _>("line_items")?, &persisted)
+        || quote.try_get::<Decimal, _>("total_gross")? != current_total
+        || quote
+            .try_get::<Option<Decimal>, _>("total_estimated")?
+            .is_none_or(|total| total < current_total)
+    {
+        return Ok(Err("quote_outdated"));
+    }
+    Ok(Ok(Some(QuoteToAccept {
+        id: quote.try_get("id")?,
+        previous_status,
+    })))
+}
+
+/// Why the signature of an order's Kostenvoranschlag could not accept the
+/// order's quote right now, if at all: asked before a paper signature is
+/// stored, so that staff recalculate the estimate first instead of holding a
+/// signed document that confirms nothing.
+pub(crate) async fn signed_estimate_quote_blocker_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    order_id: Uuid,
+) -> Result<Option<&'static str>, sqlx::Error> {
+    Ok(quote_of_signed_estimate_tx(tx, order_id).await?.err())
+}
+
+/// The client signed the Kostenvoranschlag `document_id` of the order: the
+/// order's open quote becomes accepted, with a version snapshot and an audit
+/// row, in the transaction that records the signature. Returns the accepted
+/// quote, or the reason nothing was accepted (`Err`), or `Ok(None)` when
+/// there was nothing to accept.
+pub(crate) async fn accept_quote_of_signed_estimate_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    order_id: Uuid,
+    document_id: Uuid,
+    source: &str,
+    actor: Option<Uuid>,
+) -> Result<Result<Option<Uuid>, &'static str>, sqlx::Error> {
+    let quote = match quote_of_signed_estimate_tx(tx, order_id).await? {
+        Ok(Some(quote)) => quote,
+        Ok(None) => return Ok(Ok(None)),
+        Err(code) => return Ok(Err(code)),
+    };
+    // A signature finished on a version made before the order's services,
+    // period or prepayment terms changed confirms terms the order no longer
+    // has (the rule of the paper signature and of the status route).
+    let current: Option<bool> = sqlx::query_scalar("SELECT document_terms_current($1)")
+        .bind(document_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    if current == Some(false) {
+        return Ok(Err("estimate_document_outdated"));
+    }
+    let row = sqlx::query(
+        r#"UPDATE quotes SET status = 'accepted' WHERE id = $1
+           RETURNING quote_number, total_net, total_vat, total_gross, valid_until,
+                     quote_recorded_cash_paid(id) AS paid_amount,
+                     quote_recorded_cash_received_at(id) AS paid_at, line_items, notes"#,
+    )
+    .bind(quote.id)
+    .fetch_one(&mut **tx)
+    .await?;
+    insert_quote_version_snapshot(
+        tx,
+        &QuoteVersionSnapshotInput {
+            quote_id: quote.id,
+            order_id,
+            quote_number: row.try_get("quote_number")?,
+            status: "accepted".to_string(),
+            total_net: row.try_get("total_net")?,
+            total_vat: row.try_get("total_vat")?,
+            total_gross: row.try_get("total_gross")?,
+            valid_until: row.try_get("valid_until")?,
+            paid_amount: row
+                .try_get::<Option<Decimal>, _>("paid_amount")?
+                .unwrap_or(Decimal::ZERO),
+            paid_at: row.try_get("paid_at")?,
+            line_items: row.try_get("line_items")?,
+            notes: row.try_get("notes")?,
+            change_reason: Some("estimate_signed".to_string()),
+            created_by: actor,
+        },
+    )
+    .await?;
+    crate::audit::write_in_transaction(
+        tx,
+        &crate::audit::domain_event(
+            "update_quote_status",
+            actor,
+            "quote",
+            Some(quote.id),
+            serde_json::json!({
+                "previous_status": quote.previous_status,
+                "status": "accepted",
+                "source": source,
+                "signed_document_id": document_id,
+                "order_id": order_id,
+            }),
+        ),
+    )
+    .await?;
+    Ok(Ok(Some(quote.id)))
+}
+
 /// Lock the order's open quotes before the order services are read, in the
 /// same order an invoice from a quote takes its locks (quote, then services).
 /// An invoice racing the new quote then either commits first or finds its
@@ -5099,33 +5275,31 @@ async fn update_quote_status(
         // Kostenvoranschlag; one made before the last change of the order's
         // services, period or prepayment terms shows terms the order no
         // longer has (`document_terms_current`, the rule of the paper
-        // signature). An order without an estimate document is confirmed as
-        // before.
-        let newest_estimate_current = match sqlx::query_scalar::<_, Option<bool>>(
-            r#"SELECT document_terms_current(d.id)
-               FROM documents d
-               WHERE d.order_id = $1
-                 AND d.generated_template_id = 'order_cost_estimate'
-                 AND d.status = 'active'
-                 AND d.file_deleted_at IS NULL
-               ORDER BY d.created_at DESC, d.id DESC
-               LIMIT 1"#,
-        )
-        .bind(order_id)
-        .fetch_optional(&mut *tx)
-        .await
-        {
-            Ok(current) => current.flatten(),
+        // signature).
+        let newest_estimate = match newest_estimate_document_tx(&mut tx, order_id).await {
+            Ok(document) => document,
             Err(error) => {
                 tracing::error!(%error, %quote_id, %order_id, "check estimate document before quote acceptance");
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
             }
         };
-        if newest_estimate_current == Some(false) {
+        if matches!(newest_estimate, Some((_, Some(false)))) {
             return coded_err(
                 StatusCode::CONFLICT,
                 "estimate_document_outdated",
                 "The cost estimate document is outdated; generate a new version first",
+            );
+        }
+        // Owner decision 2026-11-11: an estimate is confirmed by the client's
+        // signature on it — electronic, or on paper with the scan — never by
+        // a click alone. The signature accepts the quote by itself
+        // (`accept_quote_of_signed_estimate_tx`); this route stays for a
+        // quote made anew for a signed, still current estimate.
+        if !matches!(newest_estimate, Some((true, _))) {
+            return coded_err(
+                StatusCode::CONFLICT,
+                "estimate_signature_required",
+                "The cost estimate is accepted by its signature: sign it electronically or upload the scan of the signed copy",
             );
         }
     }

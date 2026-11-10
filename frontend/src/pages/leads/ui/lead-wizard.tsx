@@ -342,6 +342,7 @@ import {
 import { AssetOriginEvidenceField } from "@/pages/documents/ui/asset-origin-evidence-field";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import { ConsentChoiceChangedNote, PaperSignatureConfirmButton } from "@/pages/documents/ui/paper-signature-confirm";
+import { currentEstimateDocument, estimateConfirmationStep } from "../model/estimate-confirmation";
 import { agencyCatalogItemName, agencyServiceLineDisplayName, germanDocumentUnitLabel } from "@/lib/agency-service-labels";
 import { DocumentReviewStatus } from "@/pages/documents/ui/document-review-status";
 import { SignatureDocumentPreview } from "@/pages/documents/ui/signature-document-preview";
@@ -2854,7 +2855,7 @@ function readinessReasonLabel(reason: string, tx: Tx, minor = false) {
     "Order cost estimate document is missing": tx("Создайте смету к заказу", "Kostenvoranschlag zum Einzelauftrag erstellen"),
     "Customer order signature is missing": tx("Получите подпись клиента на заказе", "Unterschrift des Kunden für den Auftrag einholen"),
     "Agency order signature is missing": tx("Подтвердите заказ со стороны агентства", "Auftrag durch die Agentur bestätigen"),
-    "Quote is not accepted": tx("Подтвердите смету", "Kostenvoranschlag annehmen"),
+    "Quote is not accepted": tx("Получите подпись клиента на смете (электронно или скан)", "Unterschrift des Kunden auf dem Kostenvoranschlag einholen (elektronisch oder Scan)"),
     "Cost estimate document is missing": tx("Создайте предварительный расчёт медицинских расходов", "Vorläufige medizinische Kostenkalkulation erstellen"),
     "Preliminary cost calculation document is missing": tx("Создайте предварительный расчёт медицинских расходов", "Vorläufige medizinische Kostenkalkulation erstellen"),
     [COST_ESTIMATE_WORK_TYPES_REASON]: tx("Выберите медицинские виды работ для предварительного расчёта", "Medizinische Leistungsarten für die vorläufige Kostenkalkulation auswählen"),
@@ -5567,6 +5568,13 @@ export function LeadWizard({
     && quoteMatchesCurrentServices(quote, lines, estimate.gross)
   ), [estimate.gross, lines, quote]);
   const acceptedQuote = quote?.status === "accepted" && quoteIsCurrent ? quote : null;
+  // Owner decision 2026-11-11: the estimate is confirmed by the client's
+  // signature on its document (electronic, or on paper with the scan), which
+  // accepts the quote on the server; a click alone no longer does.
+  const estimateDocument = currentEstimateDocument(
+    commercialDocuments.order_cost_estimate.filter((item) => item.is_latest_version && !wizardDocumentIsArchived(item)),
+  );
+  const estimateStep = estimateConfirmationStep(Boolean(acceptedQuote), estimateDocument);
   const quoteTotal = quote ? money(quote.total_gross) : 0;
   const persistedPrepayment = quote ? money(quote.paid_amount) : 0;
   const enteredPrepayment = money(paidAmount);
@@ -5594,7 +5602,7 @@ export function LeadWizard({
       : estimateDocumentOutdated
         ? estimateDocumentOutdatedText(tx)
       : quote.status !== "accepted"
-        ? tx("Смета ожидает подтверждения", "Kostenvoranschlag wartet auf Annahme")
+        ? tx("Смета ожидает подписи клиента", "Kostenvoranschlag wartet auf die Unterschrift des Kunden")
         : serverQuoteAccepted === false
           ? tx("Смета не соответствует текущему заказу — пересчитайте", "Kostenvoranschlag stimmt nicht mit dem aktuellen Auftrag überein — neu berechnen")
         : prepayment && (
@@ -12305,7 +12313,9 @@ ${serviceCommentLines.join("\n")}`
                       </Field>
                     ) : null}
                     {/* Received prepayment is recorded through patient invoices, outside the lead wizard. */}
-                    {!acceptedQuote ? (
+                    {estimateStep === "confirm_signed" ? (
+                      // The signed estimate is there and the quote was made anew
+                      // for it: the server accepts it on the signed document.
                       <div className="flex w-full items-center sm:w-auto">
                         <Button
                           type="button"
@@ -12318,10 +12328,49 @@ ${serviceCommentLines.join("\n")}`
                           {busy === "accept" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
                           {tx("Подтвердить смету", "Kostenvoranschlag annehmen")}
                         </Button>
-
+                      </div>
+                    ) : null}
+                    {estimateStep === "sign" && estimateDocument ? (
+                      <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto" data-testid="lead-wizard-estimate-paper-signature">
+                        <PaperSignatureConfirmButton
+                          documentId={estimateDocument.id}
+                          title={wizardDocumentFilename(estimateDocument)}
+                          lang={lang}
+                          size="sm"
+                          label={tx("Смета подписана на бумаге", "Kostenvoranschlag auf Papier unterschrieben")}
+                          // Off while the server would refuse it: no current quote, or a PDF older than the order.
+                          disabled={isBusy || !quote || !quoteIsCurrent || Boolean(paperSignatureBlocker(estimateDocument))}
+                          errorText={(error) => wizardSignatureErrorText(error, tx)}
+                          errorAction={signatureErrorJump}
+                          onDone={() => {
+                            // The scan accepts the quote on the server: the lead,
+                            // the quotes and the documents are read anew.
+                            if (leadId) {
+                              clearApiCache(`/leads/${leadId}`);
+                              clearApiCache("/quotes");
+                              clearApiCache("/orders");
+                            }
+                            void refreshDocumentsState();
+                            void reload(false, true);
+                          }}
+                        />
                       </div>
                     ) : null}
                   </div>
+                  {estimateStep === "sign" || estimateStep === "needs_document" ? (
+                    <p className="flex items-start gap-2 text-xs leading-5 text-muted-foreground" data-testid="lead-wizard-estimate-signature-hint">
+                      <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+                      {estimateStep === "sign"
+                        ? tx(
+                            "Смета подтверждается подписью клиента: завершённое электронное подписание пакета или скан подписанного экземпляра («Смета подписана на бумаге»).",
+                            "Der Kostenvoranschlag wird durch die Unterschrift des Kunden angenommen: abgeschlossene elektronische Paketunterzeichnung oder Scan des unterschriebenen Exemplars („Kostenvoranschlag auf Papier unterschrieben“).",
+                          )
+                        : tx(
+                            "Сначала создайте документ сметы к заказу: смета подтверждается подписью клиента на нём — электронно или сканом подписанного экземпляра.",
+                            "Erstellen Sie zuerst den Kostenvoranschlag zum Einzelauftrag: Er wird durch die Unterschrift des Kunden darauf angenommen – elektronisch oder per Scan des unterschriebenen Exemplars.",
+                          )}
+                    </p>
+                  ) : null}
 
                   {!acceptedQuote && estimateDocumentOutdated ? (
                     // The amounts may be right: the PDF of the estimate prints the

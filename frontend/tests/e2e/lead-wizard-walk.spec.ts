@@ -148,7 +148,7 @@ test("each commercial blocker of the release list leads to its own field", async
     ["Order needs at least one valid service", "Добавьте в заказ хотя бы одну услугу", "lead-wizard-order-service-select"],
     ["Customer order signature is missing", "Получите подпись клиента на заказе", "lead-wizard-order-signatures"],
     ["Agency order signature is missing", "Подтвердите заказ со стороны агентства", "lead-wizard-order-signatures"],
-    ["Quote is not accepted", "Подтвердите смету", "lead-wizard-quote"],
+    ["Quote is not accepted", "Получите подпись клиента на смете (электронно или скан)", "lead-wizard-quote"],
   ];
   const lead = adultLead({ requested_specialties: ["cardiology"] });
   (lead.readiness as { blocking_reasons: string[] }).blocking_reasons = reasons.map(([reason]) => reason);

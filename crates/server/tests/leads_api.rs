@@ -2762,6 +2762,7 @@ async fn lead_can_convert_with_the_newest_accepted_quote_while_awaiting_prepayme
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{manual_payment}");
+    support::seed_signed_order_estimate(&app.suite.pool, artifacts.order_id).await;
     let (status, accepted) = json_request(
         &app,
         "POST",
@@ -7552,6 +7553,7 @@ async fn repeat_order_document_changes_require_current_documents_before_confirma
         "Old documents cannot be signed as the current order"
     );
     let mut order_document = String::new();
+    let mut estimate_document = String::new();
     for template in ["single_order", "order_cost_estimate"] {
         let payload = json!({"template_id":template,"lead_id":lead,"order_id":order,"language":"de","status":"active","bindings":{"period_from":"1999-01-01","estimate_total":"1 EUR"}});
         let (s, generated) = json_request(
@@ -7660,6 +7662,8 @@ async fn repeat_order_document_changes_require_current_documents_before_confirma
         assert!(s.is_success(), "{b}");
         if template == "single_order" {
             order_document = b["id"].as_str().unwrap().to_string();
+        } else {
+            estimate_document = b["id"].as_str().unwrap().to_string();
         }
     }
     // Concurrent retries of the same prepared estimate produce one current quote.
@@ -7672,7 +7676,9 @@ async fn repeat_order_document_changes_require_current_documents_before_confirma
     assert!(retry.0.is_success(), "{:?}", retry);
     assert_eq!(first.1["id"], retry.1["id"]);
     let quote_id = first.1["id"].as_str().unwrap();
-    let (status, accepted) = json_request(
+    // Owner decision 2026-11-11: the estimate is confirmed by the client's
+    // signature on it, not by a click. Unsigned, the quote stays open …
+    let (status, refused) = json_request(
         &app,
         "POST",
         &format!("/api/v1/quotes/{quote_id}/status"),
@@ -7680,7 +7686,42 @@ async fn repeat_order_document_changes_require_current_documents_before_confirma
         Some(json!({"status":"accepted"})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{accepted}");
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "estimate_signature_required", "{refused}");
+    // … and the scan of the signed copy accepts it, with a version and an
+    // audit row that name the signed document.
+    let (s, b) = support::paper_signature(&app, &pm, &estimate_document).await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    let signed_estimate = Uuid::parse_str(b["document_id"].as_str().unwrap()).unwrap();
+    let quote_uuid = Uuid::parse_str(quote_id).unwrap();
+    let (quote_status, change_reason): (String, Option<String>) = sqlx::query_as(
+        "SELECT q.status, (SELECT v.change_reason FROM quote_versions v WHERE v.quote_id = q.id
+                           ORDER BY v.version_number DESC LIMIT 1)
+         FROM quotes q WHERE q.id = $1",
+    )
+    .bind(quote_uuid)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(quote_status, "accepted");
+    assert_eq!(change_reason.as_deref(), Some("estimate_signed"));
+    let audit_context: Value = sqlx::query_scalar(
+        "SELECT context FROM audit_log WHERE entity_type = 'quote' AND entity_id = $1
+           AND action = 'update_quote_status' ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(quote_uuid)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        audit_context["source"], "paper_signature",
+        "{audit_context}"
+    );
+    assert_eq!(
+        audit_context["signed_document_id"],
+        signed_estimate.to_string(),
+        "{audit_context}"
+    );
     let (s, b) = support::paper_signature(&app, &pm, &order_document).await;
     assert_eq!(s, StatusCode::OK, "{b}");
     let (status, qualified) = json_request(

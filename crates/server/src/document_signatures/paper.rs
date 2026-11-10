@@ -341,7 +341,7 @@ async fn store_signed_version(
     // compares the generated version's age with the last change of the
     // services, the period and the prepayment terms, `>=`-safe like above.
     if template_of(&source).as_deref() == Some("order_cost_estimate")
-        && source.get::<Option<Uuid>, _>("order_id").is_some()
+        && let Some(order_id) = source.get::<Option<Uuid>, _>("order_id")
     {
         let current: Option<bool> = sqlx::query_scalar("SELECT document_terms_current($1)")
             .bind(id)
@@ -350,6 +350,17 @@ async fn store_signed_version(
             .map_err(db_error)?;
         if current == Some(false) {
             return Err(error(StatusCode::CONFLICT, "estimate_document_outdated"));
+        }
+        // The signed estimate confirms the order's quote (owner decision
+        // 2026-11-11). A quote that no longer matches the order's services,
+        // or is closed, would stay unconfirmed under a signed document:
+        // staff recalculate the estimate first.
+        if let Some(code) =
+            crate::routes::contracts::signed_estimate_quote_blocker_tx(&mut tx, order_id)
+                .await
+                .map_err(db_error)?
+        {
+            return Err(error(StatusCode::CONFLICT, code));
         }
     }
     // QA 2026-11-01, W2 N1: a Rahmenvertrag naming a parent who no longer

@@ -4869,14 +4869,14 @@ test.describe("responsive staff workspace", () => {
     await wizard.getByRole("button", { name: "Kostenvoranschlag erstellen" }).click();
     // The new quote shows at once; the wizard stays busy until the lead is reloaded.
     await expect(
-      wizard.getByText("Kostenvoranschlag wartet auf Annahme", { exact: true }),
+      wizard.getByText("Kostenvoranschlag wartet auf die Unterschrift des Kunden", { exact: true }),
     ).toBeVisible();
     const recalculate = wizard.getByRole("button", { name: "Neu berechnen" });
     await expect(recalculate).toBeDisabled();
     releaseQuoteReload();
     await expect(recalculate).toBeEnabled();
     await expect(
-      wizard.getByText("Kostenvoranschlag wartet auf Annahme", { exact: true }),
+      wizard.getByText("Kostenvoranschlag wartet auf die Unterschrift des Kunden", { exact: true }),
     ).toBeVisible();
   });
 });
