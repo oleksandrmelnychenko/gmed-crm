@@ -1185,6 +1185,79 @@ fn invoice_address_names_party(
             .any(|representative| same_name(&representative.name, recipient_name))
 }
 
+/// Whether a recipient in the role [`PAYER_ROLE_CONTRACTING_PARTY`] that is
+/// not the party by its record (`is_party`) is still a person the record
+/// knows as the contracting party (owner 2026-11-10; before, one confirmation
+/// released an invoice to any free-text name in this role):
+///
+/// - the party's own name ([`invoice_address_names_party`]);
+/// - for a minor or a represented patient: a parent or guardian among the
+///   patient's relations;
+/// - a representative of the converted lead while the lead was a minor — the
+///   paying parent the declaration wrote on the order as a free-text contact
+///   before the parents became relations
+///   (`Declaration::representative_payer_record`).
+///
+/// A name that matches none of them is a third party. Old records with a
+/// parent typed by hand and neither relation nor lead behind it get the
+/// third-party check.
+async fn contracting_role_names_party(
+    conn: &mut PgConnection,
+    evaluation: &RecipientEvaluation,
+) -> Result<bool, sqlx::Error> {
+    let name = evaluation.recipient.name.as_str();
+    let party = &evaluation.party;
+    if invoice_address_names_party(name, party, &evaluation.patient_plain_name) {
+        return Ok(true);
+    }
+    let comparable = name
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+    if comparable.is_empty() {
+        return Ok(false);
+    }
+    if party.patient_is_minor || party.kind != PartyKind::Patient {
+        let related = sqlx::query_scalar::<_, bool>(
+            r#"SELECT EXISTS (
+                   SELECT 1
+                   FROM patient_relations relation
+                   LEFT JOIN patients person ON person.id = relation.related_patient_id
+                   WHERE relation.patient_id = $1
+                     AND relation.relation_type IN ('mother', 'father', 'parent', 'guardian')
+                     AND lower(regexp_replace(btrim(COALESCE(
+                             NULLIF(btrim(relation.related_name), ''),
+                             concat_ws(' ', person.first_name, person.last_name)
+                         )), '\s+', ' ', 'g')) = $2
+               )"#,
+        )
+        .bind(party.patient_id)
+        .bind(&comparable)
+        .fetch_one(&mut *conn)
+        .await?;
+        if related {
+            return Ok(true);
+        }
+    }
+    let Some(declared) = lead_payer::patient_declaration(conn, party.patient_id).await? else {
+        return Ok(false);
+    };
+    let on = crate::app_time::date_of(declared.converted_at);
+    Ok(
+        crate::routes::lead_representatives::load_on(conn, declared.lead_id, on)
+            .await?
+            .is_some_and(|loaded| {
+                loaded.representation.minor
+                    && loaded
+                        .representation
+                        .representatives
+                        .iter()
+                        .any(|person| same_name(&person.name(), name))
+            }),
+    )
+}
+
 async fn evaluate_recipient(
     conn: &mut PgConnection,
     invoice_id: Uuid,
@@ -1308,15 +1381,20 @@ async fn later_payer_missing(
     // "Invoice address" is the contracting party at another address. Under
     // any other name it is a third party like a Kostenübernehmer (owner
     // 2026-11-10, QA D-02): the role alone no longer skips the checks.
-    let party_role = |role: Option<&str>| match role {
-        Some(PAYER_ROLE_CONTRACTING_PARTY) => true,
+    // The role «recipient is the contracting party» is no word of honour
+    // either (owner 2026-11-10): it passes only for a name the record knows
+    // as the party — see [`contracting_role_names_party`].
+    if evaluation.is_party || evaluation.recipient.kind == "patient" {
+        return Ok(Vec::new());
+    }
+    let names_party = match evaluation.payer_role.as_deref() {
+        Some(PAYER_ROLE_CONTRACTING_PARTY) => {
+            contracting_role_names_party(conn, evaluation).await?
+        }
         Some(PAYER_ROLE_INVOICE_ADDRESS) => evaluation.invoice_address_names_party(),
         _ => false,
     };
-    if evaluation.is_party
-        || evaluation.recipient.kind == "patient"
-        || party_role(evaluation.payer_role.as_deref())
-    {
+    if names_party {
         return Ok(Vec::new());
     }
     let sql = format!(
@@ -1341,24 +1419,12 @@ async fn later_payer_missing(
         }
         record = inherited.record;
     }
-    if party_role(record.payer_role.as_deref()) {
-        return Ok(Vec::new());
-    }
-    let declared = lead_payer::patient_declaration(conn, patient_id).await?;
-    // The other address the lead's own declaration sends invoices to
-    // (section 7, `invoice_to = other`) was named and screened with the
-    // request, like the payer the declaration names below.
-    if record.payer_role.as_deref() == Some(PAYER_ROLE_INVOICE_ADDRESS)
-        && declared.as_ref().is_some_and(|declared| {
-            declared.declaration.invoice_to.as_deref() == Some(lead_payer::INVOICE_TO_OTHER)
-                && invoice_address_record(&declared.declaration)
-                    .and_then(|address| address.contact_name)
-                    .is_some_and(|name| same_name(&name, &evaluation.recipient.name))
-        })
-    {
-        return Ok(Vec::new());
-    }
-    if let Some(declared) = declared
+    // A third party the lead's declaration names only as the invoice
+    // recipient (section 7, `invoice_to = other`) pays the invoice too
+    // (owner 2026-11-10): no exemption, the papers are needed like for any
+    // third-party payer. Only the payer the declaration names — identified
+    // with the request — passes below.
+    if let Some(declared) = lead_payer::patient_declaration(conn, patient_id).await?
         && declared.declaration.is_third_party()
     {
         let legal_form = lead_payer::payer_legal_form(conn, declared.lead_id).await?;

@@ -1069,10 +1069,13 @@ async fn the_lead_says_where_the_invoice_goes_and_the_order_keeps_its_cost_beare
     assert!(snapshot["service_recipient_name"].is_null(), "{snapshot}");
     assert_eq!(snapshot["confirmations"], json!({}), "{snapshot}");
 
-    // Another name at the other address: still no confirmation (the lead
-    // chose it), but the invoice names the Leistungsempfänger (§ 14 Abs. 4
-    // Nr. 1 UStG). An order of its own: no advance goes beside a final (QA
-    // 2026-11-01, X1 N1).
+    // Another name at the other address: no confirmation (the lead chose
+    // it), and the invoice names the Leistungsempfänger (§ 14 Abs. 4 Nr. 1
+    // UStG). But the recipient the lead named is the one who pays (owner
+    // 2026-11-10): a third party, released only with the signed
+    // Kostenübernahmeerklärung and the identity document — the lead's choice
+    // is no exemption. An order of its own: no advance goes beside a final
+    // (QA 2026-11-01, X1 N1).
     let order = seed_order(&fx.pool, patient, fx.admin_id, &format!("{}-a", fx.tag)).await;
     let quote = create_quote(&fx.app, &fx.manager, order).await;
     set_invoice_to(&fx.pool, lead, Some("other"), Some("Beispiel GmbH")).await;
@@ -1086,6 +1089,11 @@ async fn the_lead_says_where_the_invoice_goes_and_the_order_keeps_its_cost_beare
         company["recipient"]["service_recipient_name"], patient_name,
         "{company}"
     );
+    let (status, refused) =
+        release_unidentified(&fx.app, &fx.billing, &company_id, json!({})).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["error"], "payer_not_identified", "{refused}");
+    assert_eq!(refused["invoice_address_not_party"], true, "{refused}");
     let (status, released) = release(&fx, &fx.billing, &company_id, json!({})).await;
     assert_eq!(status, StatusCode::OK, "{released}");
     let snapshot: Value =
@@ -2325,6 +2333,29 @@ async fn an_invoice_address_under_another_name_is_a_third_party() {
             .await
             .unwrap();
     assert!(still_draft, "the draft stays a draft");
+
+    // «Recipient is the contracting party» over the same foreign name is no
+    // way round either (owner 2026-11-10): no relation of the patient and no
+    // representative of a lead carries that name, so it is a third party —
+    // refused before any confirmation is asked.
+    let (status, body) = set_invoice_payer(
+        &fx.app,
+        &fx.billing,
+        &invoice_id,
+        payer("Zahlmeister Testfirma GmbH", "contracting_party"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(has_warning(&body).is_some(), "{body}");
+    let (status, refused) = release_unidentified(
+        &fx.app,
+        &fx.billing,
+        &invoice_id,
+        json!({ "confirm_recipient_not_party": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["error"], "payer_not_identified", "{refused}");
 
     // The contracting party's own name at the other address (case and
     // spaces aside): no third party, released without those papers.
