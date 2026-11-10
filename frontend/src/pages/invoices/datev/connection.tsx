@@ -1,5 +1,18 @@
 import { useEffect, useState } from "react";
-import { ArrowUpRight, Download, Eye, LoaderCircle, LockKeyhole, Save } from "lucide-react";
+import {
+  ArrowUpRight,
+  Boxes,
+  Building2,
+  Cable,
+  Download,
+  Eye,
+  FileOutput,
+  ListChecks,
+  LoaderCircle,
+  LockKeyhole,
+  Save,
+  Server,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -64,12 +77,12 @@ export function DatevConnectionDetails() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  if (loading) return <DatevSetupSection title={text.connectionStatus}><p role="status" className="flex items-center gap-2 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />{copy.loading}</p></DatevSetupSection>;
-  if (!setup || !draft || error === "loadError") return <DatevSetupSection title={text.connectionStatus}><p role="alert" className="text-xs leading-5 text-destructive">{copy.loadError}</p><Button type="button" variant="outline" size="sm" className="h-8 rounded-md" onClick={reload}>{copy.reload}</Button></DatevSetupSection>;
+  if (loading) return <DatevSetupSection icon={Cable} title={text.connectionStatus}><p role="status" className="flex items-center gap-2 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />{copy.loading}</p></DatevSetupSection>;
+  if (!setup || !draft || error === "loadError") return <DatevSetupSection icon={Cable} title={text.connectionStatus}><p role="alert" className="text-xs leading-5 text-destructive">{copy.loadError}</p><Button type="button" variant="outline" size="sm" className="h-8 rounded-md" onClick={reload}>{copy.reload}</Button></DatevSetupSection>;
   const valid = profileNumbersValid(draft);
 
   return <div className="min-w-0 space-y-3">
-    <DatevSetupSection title={lang === "de" ? "Buchhaltungsprofil" : "Профиль бухгалтерии"} bodyClassName="p-0" action={<Badge variant="secondary"><Eye aria-hidden className="mr-1 size-3" />{lang === "de" ? "Eigene Angaben" : "Указанные сведения"}</Badge>}>
+    <DatevSetupSection icon={Building2} title={lang === "de" ? "Buchhaltungsprofil" : "Профиль бухгалтерии"} bodyClassName="p-0" action={<Badge variant="secondary"><Eye aria-hidden className="mr-1 size-3" />{lang === "de" ? "Eigene Angaben" : "Указанные сведения"}</Badge>}>
       <dl className="grid grid-cols-1 gap-px bg-border/60 sm:grid-cols-2">
         {[[text.company, setup.profile.company_name || text.notSelected], [copy.selectedModules, String(setup.profile.modules.length)]].map(([label, value]) =>
           <div key={label} className="min-w-0 bg-card px-3.5 py-3"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1.5 break-words text-sm font-medium">{value}</dd></div>)}
@@ -78,7 +91,7 @@ export function DatevConnectionDetails() {
     <DatevReadiness profile={setup.profile} dirty={dirty} />
     <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1.65fr)_minmax(18rem,1fr)]">
       <form className="min-w-0 space-y-3" onSubmit={(event) => { event.preventDefault(); event.currentTarget.querySelector<HTMLButtonElement>('button[type="submit"]')?.click(); }}>
-        <DatevSetupSection title={copy.profile} description={copy.profileHint}>
+        <DatevSetupSection icon={Building2} title={copy.profile} description={copy.profileHint}>
           <fieldset disabled={saving} className="grid min-w-0 gap-3 sm:grid-cols-2">
             <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground sm:col-span-2"><span>{copy.companyName}</span><Input className="h-9 bg-field font-normal text-foreground" value={draft.company_name} maxLength={160} onChange={(e) => edit({ company_name: e.target.value })} autoComplete="off" /></label>
             <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground"><span>{copy.consultant}</span><Input className="h-9 bg-field font-normal text-foreground" value={draft.consultant_number} inputMode="numeric" maxLength={7} aria-invalid={!valid} aria-describedby="datev-numbers-hint" onChange={(e) => edit({ consultant_number: e.target.value })} autoComplete="off" /></label>
@@ -87,7 +100,7 @@ export function DatevConnectionDetails() {
             <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground sm:col-span-2"><span>{copy.version}</span><Input className="h-9 bg-field font-normal text-foreground" value={draft.belege_version} placeholder={copy.versionPlaceholder} maxLength={80} onChange={(e) => edit({ belege_version: e.target.value })} /></label>
           </fieldset>
         </DatevSetupSection>
-        <DatevSetupSection title={copy.modules} description={copy.modulesHint} action={<Badge variant="secondary">{draft.modules.length} / {DATEV_MODULES.length}</Badge>}>
+        <DatevSetupSection icon={Boxes} title={copy.modules} description={copy.modulesHint} action={<Badge variant="secondary">{draft.modules.length} / {DATEV_MODULES.length}</Badge>}>
           <fieldset disabled={saving} className="min-w-0 divide-y divide-border/60">
             {DATEV_MODULES.map((id) => <div key={id} className="py-3 first:pt-0 last:pb-0" data-testid={`datev-module-${id}`}>
               <label className="flex cursor-pointer items-start gap-3 text-sm font-medium">
@@ -99,7 +112,7 @@ export function DatevConnectionDetails() {
             </div>)}
           </fieldset>
         </DatevSetupSection>
-        <DatevSetupSection title={copy.exportService} description={copy.exportHint}>
+        <DatevSetupSection icon={FileOutput} title={copy.exportService} description={copy.exportHint}>
           <NativeComboboxSelect id="datev-export-service" aria-label={copy.exportService} disabled={saving} className="h-9 w-full bg-field text-sm font-normal" value={draft.export_service} onChange={(e) => edit({ export_service: e.target.value as DatevProfile["export_service"] })}>
             <option value="unknown">{copy.unknown}</option><option value="not_ordered">{copy.notOrdered}</option><option value="ordered">{copy.ordered}</option>
           </NativeComboboxSelect>
@@ -114,12 +127,12 @@ export function DatevConnectionDetails() {
         </div>
       </form>
       <aside className="min-w-0 space-y-3">
-        <DatevSetupSection title={text.systemName}>
+        <DatevSetupSection icon={Server} title={text.systemName}>
           <DatevActionButton size="sm" className="w-full" title={copy.openPortal} description={operationDescription("portal", lang === "de")} onConfirm={() => { window.open(DATEV_PORTAL, "_blank", "noopener,noreferrer"); }}><ArrowUpRight className="size-4" />{copy.openPortal}</DatevActionButton>
           <p className="text-xs leading-5 text-muted-foreground">{copy.portalHint}</p>
           <p className="text-xs leading-5 text-muted-foreground">{lang === "de" ? "Zugangsdaten, Anmeldung und tatsächliche Zugriffsprüfung befinden sich im Abschnitt DATEV-Zugriff oben." : "Ключи, вход и фактическая проверка прав находятся в разделе «Доступ к DATEV» выше."}</p>
         </DatevSetupSection>
-        <DatevSetupSection title={copy.next}>
+        <DatevSetupSection icon={ListChecks} title={copy.next}>
           <ol className="divide-y divide-border/60">
             {[[copy.accessStep, copy.accessStepHint], [copy.authStep, copy.authStepHint], [copy.originalsStep, copy.originalsStepHint]].map(([title, hint], index) => <li key={title} className="flex gap-2.5 py-3 first:pt-0 last:pb-0"><span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border/60 bg-muted/40 font-mono text-xs text-muted-foreground">{index + 1}</span><div className="min-w-0"><p className="text-sm font-medium">{title}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{hint}</p></div></li>)}
           </ol>

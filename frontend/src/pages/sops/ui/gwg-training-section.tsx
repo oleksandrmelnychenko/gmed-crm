@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 /**
  * "GwG-Unterweisung (§ 6 Abs. 2 GwG)" in "SOP и обучение": the CEO documents
  * the yearly AML instruction and the reliability check per employee; the
@@ -7,7 +8,20 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { AlertTriangle, FileText, History, LoaderCircle, Upload } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarDays,
+  ContactRound,
+  FileText,
+  GraduationCap,
+  History,
+  ListChecks,
+  LoaderCircle,
+  NotebookPen,
+  ShieldCheck,
+  Upload,
+  type LucideIcon,
+} from "lucide-react";
 
 import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
@@ -348,10 +362,10 @@ function Check({
   );
 }
 
-function FormSection({ title, children }: { title: string; children: ReactNode }) {
+function FormSection({ icon, title, children }: { icon: LucideIcon; title: string; children: ReactNode }) {
   return (
     <section className="space-y-3 rounded-lg border border-border/70 bg-card p-4">
-      <h3 className={tokens.text.sectionTitle}>{title}</h3>
+      <h3 className={tokens.text.sectionTitle}><SectionHeading icon={icon}>{title}</SectionHeading></h3>
       {children}
     </section>
   );
@@ -388,7 +402,7 @@ export function GwgTrainingFormFields({
     });
   return (
     <div className="space-y-4">
-      <FormSection title={employee.display_name}>
+      <FormSection icon={ContactRound} title={employee.display_name}>
         <div className="grid gap-3 sm:grid-cols-2">
           <Labeled label={t.sops_gwg_position}>
             <Input
@@ -410,7 +424,7 @@ export function GwgTrainingFormFields({
         </p>
       </FormSection>
 
-      <FormSection title={t.sops_gwg_section_instruction}>
+      <FormSection icon={CalendarDays} title={t.sops_gwg_section_instruction}>
         <Labeled label={t.sops_gwg_instructed_on}>
           <Input
             type="date"
@@ -474,7 +488,7 @@ export function GwgTrainingFormFields({
         </div>
       </FormSection>
 
-      <FormSection title={t.sops_gwg_section_instructions}>
+      <FormSection icon={ListChecks} title={t.sops_gwg_section_instructions}>
         <div className="space-y-2">
           {GWG_INSTRUCTION_CODES.map((code) => (
             <Check
@@ -487,7 +501,7 @@ export function GwgTrainingFormFields({
         </div>
       </FormSection>
 
-      <FormSection title={t.sops_gwg_section_reliability}>
+      <FormSection icon={ShieldCheck} title={t.sops_gwg_section_reliability}>
         <div className="space-y-2">
           <Check
             type="radio"
@@ -540,15 +554,12 @@ export function GwgTrainingFormFields({
   );
 }
 
-function SectionHeader({ title, intro, accessory }: { title: string; intro: string; accessory?: ReactNode }) {
+function SectionHeader({ icon, title, intro, accessory }: { icon: LucideIcon; title: string; intro: string; accessory?: ReactNode }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0 space-y-1">
         <h2 className={tokens.text.sectionTitle}>
-          <span className="inline-flex items-center gap-2">
-            <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />
-            <span>{title}</span>
-          </span>
+          <SectionHeading icon={icon}>{title}</SectionHeading>
         </h2>
         <p className="max-w-3xl text-xs leading-5 text-muted-foreground">{intro}</p>
       </div>
@@ -657,6 +668,7 @@ function GwgTrainingManager() {
       className="space-y-3 rounded-lg border border-border/70 bg-card p-4"
     >
       <SectionHeader
+        icon={GraduationCap}
         title={t.sops_gwg_title}
         intro={t.sops_gwg_intro}
         accessory={
@@ -798,6 +810,7 @@ function GwgOwnTrainingsView() {
       className="space-y-3 rounded-lg border border-border/70 bg-card p-4"
     >
       <SectionHeader
+        icon={NotebookPen}
         title={t.sops_gwg_my_title}
         intro={t.sops_gwg_my_intro}
         accessory={

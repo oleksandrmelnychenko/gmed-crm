@@ -8,11 +8,15 @@ import {
 } from "react";
 import {
   Activity,
-  Database,
-  FileStack,
-  RefreshCcw,
-  UsersRound,
   ChevronRight,
+  Database,
+  FileInput,
+  FileStack,
+  Files,
+  RefreshCcw,
+  ShieldCheck,
+  Table2,
+  UsersRound,
   type LucideIcon,
 } from "lucide-react";
 
@@ -43,10 +47,12 @@ import {
 } from "@/components/ui-shell";
 
 function HealthSection({
+  icon,
   title,
   children,
   actions,
 }: {
+  icon: LucideIcon;
   title: string;
   children: ReactNode;
   actions?: ReactNode;
@@ -54,7 +60,7 @@ function HealthSection({
   return (
     <section className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-3 py-2.5">
-        <AdminSectionTitle>{title}</AdminSectionTitle>
+        <AdminSectionTitle icon={icon}>{title}</AdminSectionTitle>
         {actions}
       </header>
       <div className="min-w-0 space-y-3 p-3">{children}</div>
@@ -587,7 +593,7 @@ function AdminHealthDetailSheet({
         >
           {detailPanel === "database" ? (
             <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3">
-              <AdminSectionTitle>{t.health_section_database}</AdminSectionTitle>
+              <AdminSectionTitle icon={Database}>{t.health_section_database}</AdminSectionTitle>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
                   <div className="font-mono text-[10.5px] text-muted-foreground">
@@ -626,7 +632,7 @@ function AdminHealthDetailSheet({
 
           {detailPanel === "access" ? (
             <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3">
-              <AdminSectionTitle>{t.health_section_access}</AdminSectionTitle>
+              <AdminSectionTitle icon={ShieldCheck}>{t.health_section_access}</AdminSectionTitle>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
                   <div className="font-mono text-[10.5px] text-muted-foreground">
@@ -676,7 +682,7 @@ function AdminHealthDetailSheet({
 
           {detailPanel === "data" ? (
             <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3">
-              <AdminSectionTitle>{t.health_section_data}</AdminSectionTitle>
+              <AdminSectionTitle icon={Files}>{t.health_section_data}</AdminSectionTitle>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
                   <div className="text-xs text-muted-foreground">
@@ -717,8 +723,7 @@ function AdminHealthDetailSheet({
           {detailPanel === "ai" ? (
             <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3">
               <div className="flex items-center gap-2">
-                <AiMark className="size-4 text-foreground" />
-                <AdminSectionTitle>{aiCopy.section}</AdminSectionTitle>
+                <AdminSectionTitle icon={AiMark}>{aiCopy.section}</AdminSectionTitle>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
@@ -1197,6 +1202,7 @@ export function AdminHealthPage() {
           ) : null}
 
           <HealthSection
+            icon={Database}
             title={t.health_section_database}
             actions={
               <Button
@@ -1231,6 +1237,7 @@ export function AdminHealthPage() {
             </div>
 
             <AdminTableCard
+              icon={Table2}
               title={t.health_tables}
               description={t.health_subtitle}
               count={data.database.tables.length}
@@ -1263,6 +1270,7 @@ export function AdminHealthPage() {
           </HealthSection>
 
           <HealthSection
+            icon={ShieldCheck}
             title={t.health_section_access}
             actions={
               <Button
@@ -1301,6 +1309,7 @@ export function AdminHealthPage() {
           </HealthSection>
 
           <HealthSection
+            icon={Files}
             title={t.health_section_data}
             actions={
               <Button
@@ -1339,6 +1348,7 @@ export function AdminHealthPage() {
           </HealthSection>
 
           <HealthSection
+            icon={AiMark}
             title={aiCopy.section}
             actions={
               <Button
@@ -1353,7 +1363,6 @@ export function AdminHealthPage() {
             }
           >
             <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
-              <AiMark className="size-4 text-foreground" />
               <StatusChip
                 tone={healthStatusTone(data.medication_ai.operational_status)}
               >
@@ -1421,7 +1430,7 @@ export function AdminHealthPage() {
             </div>
           </HealthSection>
 
-          <HealthSection title={importCopy.section}>
+          <HealthSection icon={FileInput} title={importCopy.section}>
             <StatusChip
               tone={healthStatusTone(data.clinical_imports.operational_status)}
             >
@@ -1457,7 +1466,7 @@ export function AdminHealthPage() {
       ) : null}
 
       {!loading && !error && !data ? (
-        <HealthSection title={t.health_title}>
+        <HealthSection icon={Activity} title={t.health_title}>
           <EmptyCell>{t.health_subtitle}</EmptyCell>
         </HealthSection>
       ) : null}

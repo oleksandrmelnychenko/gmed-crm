@@ -5,24 +5,28 @@ import {
   useReducer,
   useState,
   type FormEvent,
-  type ReactNode,
   type SetStateAction,
 } from "react";
 import {
   Check,
+  ContactRound,
   Copy,
   Eye,
   EyeOff,
+  Fingerprint,
   KeyRound,
   LogOut,
   Mail,
+  Monitor,
   Pencil,
   Plus,
   RefreshCw,
   Search,
   Unlock,
   UserRoundCheck,
+  UserRoundPlus,
   UserRoundX,
+  UsersRound,
 } from "lucide-react";
 
 import { AdminGuideButton } from "@/components/admin-guide";
@@ -41,7 +45,6 @@ import {
   Banner,
   PageHeader,
   TabLoader,
-  tokens,
 } from "@/components/ui-shell";
 import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
 import { clearApiCache } from "@/lib/api";
@@ -151,23 +154,6 @@ function formatDate(value: string) {
 
 function formatDateTime(value: string) {
   return formatAppDateTime(value) || value.replace("T", " ").slice(0, 16);
-}
-
-function DotTitle({ children }: { children: ReactNode }) {
-  return (
-    <span className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />
-      <span>{children}</span>
-    </span>
-  );
-}
-
-function DotSection({ title, children }: { title: ReactNode; children: ReactNode }) {
-  return (
-    <AdminFormSection title={title}>
-      {children}
-    </AdminFormSection>
-  );
 }
 
 /**
@@ -1120,7 +1106,7 @@ function useAdminUsersPageContent() {
                 )}
               >
                 {createError ? <Banner tone="error">{createError}</Banner> : null}
-                <DotSection title={t.users_create_title}>
+                <AdminFormSection icon={UserRoundPlus} title={t.users_create_title}>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-1.5">
                       <Label className={fieldLabelClass}>{t.users_name}</Label>
@@ -1145,8 +1131,8 @@ function useAdminUsersPageContent() {
                       ))}
                     </NativeComboboxSelect>
                   </div>
-                </DotSection>
-                <DotSection title={t.users_password}>
+                </AdminFormSection>
+                <AdminFormSection icon={KeyRound} title={t.users_password}>
                   <div
                     role="radiogroup"
                     aria-label={t.users_password}
@@ -1264,7 +1250,7 @@ function useAdminUsersPageContent() {
                       {t.users_one_time_password_mode_hint}
                     </p>
                   )}
-                </DotSection>
+                </AdminFormSection>
               </AdminDialogScaffold>
           )}
       </Dialog>
@@ -1314,7 +1300,7 @@ function useAdminUsersPageContent() {
                   copiedLabel={t.users_copied}
                 />
               ) : null}
-              <DotSection title={t.users_title}>
+              <AdminFormSection icon={ContactRound} title={t.users_title}>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5">
                     <Label className={fieldLabelClass}>{t.users_name}</Label>
@@ -1343,8 +1329,8 @@ function useAdminUsersPageContent() {
                     <p className="text-xs text-muted-foreground">{t.users_portal_role_locked}</p>
                   ) : null}
                 </div>
-              </DotSection>
-              <DotSection title={t.users_sessions}>
+              </AdminFormSection>
+              <AdminFormSection icon={Monitor} title={t.users_sessions}>
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                   <dt className="text-muted-foreground">{t.users_last_login}</dt>
                   <dd className="tabular-nums text-foreground">
@@ -1389,8 +1375,8 @@ function useAdminUsersPageContent() {
                     {t.users_revoke_sessions}
                   </Button>
                 </div>
-              </DotSection>
-              <DotSection title={t.uiText.twofactor_admin_reset}>
+              </AdminFormSection>
+              <AdminFormSection icon={Fingerprint} title={t.uiText.twofactor_admin_reset}>
                 <p className="text-xs text-muted-foreground">{t.uiText.twofactor_admin_reset_hint}</p>
                 <Button
                   type="button"
@@ -1401,8 +1387,8 @@ function useAdminUsersPageContent() {
                 >
                   {t.uiText.twofactor_admin_reset}
                 </Button>
-              </DotSection>
-              <DotSection title={t.users_reset_password}>
+              </AdminFormSection>
+              <AdminFormSection icon={KeyRound} title={t.users_reset_password}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-xs text-muted-foreground">{t.users_one_time_password_mode_hint}</p>
                   <Button
@@ -1498,7 +1484,7 @@ function useAdminUsersPageContent() {
                     {t.users_reset_button}
                   </Button>
                 </div>
-              </DotSection>
+              </AdminFormSection>
             </AdminDialogScaffold>
       </Dialog>
 
@@ -1556,7 +1542,8 @@ function useAdminUsersPageContent() {
 
       {!loading && !error ? (
         <AdminTableCard
-          title={<DotTitle>{t.users_title}</DotTitle>}
+          title={t.users_title}
+          icon={UsersRound}
           description={t.users_subtitle}
           count={filtered.length}
           className="overflow-hidden"

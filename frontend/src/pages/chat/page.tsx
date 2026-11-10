@@ -1269,7 +1269,7 @@ function useChatPageContent() {
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b px-3 py-2">
-          <h2 className="flex items-center gap-2 text-base font-semibold">{user?.role === "patient" ? <SectionHeading icon={MessageSquare}>{t.chat_title}</SectionHeading> : t.chat_title}</h2>
+          <h2 className="flex items-center gap-2 text-base font-semibold"><SectionHeading icon={MessageSquare}>{t.chat_title}</SectionHeading></h2>
           <button
             onClick={() => {
               setShowNewChat(!showNewChat);

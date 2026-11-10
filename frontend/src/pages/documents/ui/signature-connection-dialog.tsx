@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { Check, ExternalLink, KeyRound, LoaderCircle, Pencil, ShieldCheck } from "lucide-react";
+import {
+  Check,
+  ExternalLink,
+  FileSignature,
+  KeyRound,
+  LoaderCircle,
+  LogIn,
+  Pencil,
+  ShieldCheck,
+  type LucideIcon,
+} from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -11,11 +21,11 @@ import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { checkSignatureConnection, disconnectSignatureConnection, fetchSignatureConnection, saveSignatureConnection, type SignatureConnection } from "../data/document-signature-api";
 
-function ConnectionSection({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+function ConnectionSection({ icon, title, action, children }: { icon: LucideIcon; title: string; action?: ReactNode; children: ReactNode }) {
   return (
     <section className="min-w-0 overflow-hidden rounded-lg border border-border/70 bg-card">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-muted/20 px-3.5 py-2.5">
-        <AdminSectionTitle>{title}</AdminSectionTitle>
+        <AdminSectionTitle icon={icon}>{title}</AdminSectionTitle>
         {action}
       </div>
       {children}
@@ -108,7 +118,7 @@ export function SignatureConnectionForm({ canConfigure, onChanged, onDirtyChange
   return (
     <div className="grid min-w-0 gap-3">
       {!loading && !connection?.configured ? (
-      <ConnectionSection title={tx("Вход в кабинет Skribble", "Bei Skribble anmelden")}>
+      <ConnectionSection icon={LogIn} title={tx("Вход в кабинет Skribble", "Bei Skribble anmelden")}>
         <div className="flex flex-col items-start gap-3 p-3.5 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs leading-5 text-muted-foreground">{tx("Откройте немецкий кабинет сервиса в отдельном окне.", "Öffnen Sie das deutsche Skribble-Konto in einem separaten Fenster.")}</p>
           {portalLink}
@@ -116,12 +126,12 @@ export function SignatureConnectionForm({ canConfigure, onChanged, onDirtyChange
       </ConnectionSection>
       ) : null}
       {canConfigure && loading ? (
-        <ConnectionSection title={tx("Подключение Skribble", "Skribble-Verbindung")}>
+        <ConnectionSection icon={FileSignature} title={tx("Подключение Skribble", "Skribble-Verbindung")}>
           <p role="status" className="flex items-center gap-2 p-3.5 text-xs text-muted-foreground"><LoaderCircle aria-hidden="true" className="size-4 animate-spin" />{tx("Загрузка подключения…", "Verbindung wird geladen…")}</p>
         </ConnectionSection>
       ) : canConfigure && connection?.configured && !editing ? (
         <ConnectionSection
-          title={tx("Подключение Skribble", "Skribble-Verbindung")}
+          icon={FileSignature} title={tx("Подключение Skribble", "Skribble-Verbindung")}
           action={<Badge variant="outline" className="gap-1 rounded-full border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"><Check aria-hidden="true" className="size-3" />{tx("Подключено", "Verbunden")}</Badge>}
         >
           <div className="space-y-4 p-3.5">
@@ -158,7 +168,7 @@ export function SignatureConnectionForm({ canConfigure, onChanged, onDirtyChange
       ) : canConfigure ? (
         <form onSubmit={save}>
           <ConnectionSection
-            title={connection?.configured ? tx("Изменить подключение", "Verbindung ändern") : tx("Подключение GMED", "GMED anbinden")}
+            icon={KeyRound} title={connection?.configured ? tx("Изменить подключение", "Verbindung ändern") : tx("Подключение GMED", "GMED anbinden")}
           >
             <div className="space-y-3 p-3.5">
               <p className="text-xs leading-5 text-muted-foreground">{connection?.configured

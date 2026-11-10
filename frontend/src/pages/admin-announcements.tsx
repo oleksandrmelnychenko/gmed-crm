@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useReducer, type FormEvent, type SetStateAction } from "react";
-import { Plus, RefreshCcw } from "lucide-react";
+import {
+  Megaphone,
+  Plus,
+  RefreshCcw,
+  SquarePen,
+} from "lucide-react";
 
 import { AdminGuideButton } from "@/components/admin-guide";
 import {
@@ -221,7 +226,7 @@ function AdminAnnouncementCreateSheet({
             {createError ? <Banner tone="error">{createError}</Banner> : null}
 
             <section className={cn("space-y-3 rounded-xl p-3.5", tokens.surface.softCard)}>
-              <AdminSectionTitle>{t.ann_new}</AdminSectionTitle>
+              <AdminSectionTitle icon={SquarePen}>{t.ann_new}</AdminSectionTitle>
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label={`${t.field_name} *`} htmlFor="announcement-title">
                   <Input
@@ -344,6 +349,7 @@ function AdminAnnouncementsTable({
 
   return (
     <AdminTableCard
+      icon={Megaphone}
       title={t.ann_title}
       description={t.ann_subtitle}
       count={items.length}

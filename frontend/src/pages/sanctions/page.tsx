@@ -5,7 +5,19 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
-import { ExternalLink, Gauge, Globe2, ListChecks, Search, ShieldAlert, ShieldCheck } from "lucide-react";
+import {
+  ContactRound,
+  ExternalLink,
+  Gauge,
+  Globe2,
+  HeartPulse,
+  ListChecks,
+  ListFilter,
+  Search,
+  ShieldAlert,
+  ShieldCheck,
+  UserRoundPlus,
+} from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
 import { AdminGuideButton } from "@/components/admin-guide";
@@ -214,7 +226,7 @@ export function HitCard({
 
       <div className="grid gap-3 rounded-xl bg-muted p-3 lg:grid-cols-2">
         <section className="min-w-0 space-y-3 rounded-lg border border-border/50 bg-card p-3">
-          <AdminSectionTitle>{t.sanctions_our_person}</AdminSectionTitle>
+          <AdminSectionTitle icon={ContactRound}>{t.sanctions_our_person}</AdminSectionTitle>
           <SubjectDetails subject={subject} bank={bank} t={t} lang={lang} />
           {changed ? (
             <div className="space-y-2 border-t border-border/60 pt-2 text-xs text-muted-foreground">
@@ -224,7 +236,7 @@ export function HitCard({
           ) : null}
         </section>
         <section className="min-w-0 space-y-3 rounded-lg border border-border/50 bg-card p-3">
-          <AdminSectionTitle>
+          <AdminSectionTitle icon={ListFilter}>
             {t.sanctions_list_entry}
             {entry.subject_type === "entity" ? ` · ${t.sanctions_field_entity}` : ""}
           </AdminSectionTitle>
@@ -540,13 +552,13 @@ function CountriesTab() {
       ) : null}
       {leads.length > 0 ? (
         <section className="space-y-2" aria-label={t.sanctions_country_leads}>
-          <AdminSectionTitle>{t.sanctions_country_leads}</AdminSectionTitle>
+          <AdminSectionTitle icon={UserRoundPlus}>{t.sanctions_country_leads}</AdminSectionTitle>
           <ul className="space-y-2">{leads.map(renderItem)}</ul>
         </section>
       ) : null}
       {patients.length > 0 ? (
         <section className="space-y-2" aria-label={t.sanctions_country_patients}>
-          <AdminSectionTitle>{t.sanctions_country_patients}</AdminSectionTitle>
+          <AdminSectionTitle icon={HeartPulse}>{t.sanctions_country_patients}</AdminSectionTitle>
           <p className="text-xs text-muted-foreground">{t.sanctions_country_patients_hint}</p>
           <ul className="space-y-2">{patients.map(renderItem)}</ul>
         </section>

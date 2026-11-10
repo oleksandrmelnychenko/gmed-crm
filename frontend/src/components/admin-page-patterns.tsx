@@ -182,12 +182,14 @@ export function AdminInlineMetric({
 
 export function AdminTableCard({
   title,
+  icon,
   count,
   accessory,
   children,
   className,
 }: {
   title?: ReactNode;
+  icon?: LucideIcon;
   description?: ReactNode;
   count?: ReactNode;
   accessory?: ReactNode;
@@ -202,7 +204,7 @@ export function AdminTableCard({
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             {title !== undefined ? (
               <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-                {title}
+                {icon ? <SectionHeading icon={icon}>{title}</SectionHeading> : title}
               </h3>
             ) : null}
             {count !== undefined ? <CountBadge>{count}</CountBadge> : null}
@@ -217,12 +219,14 @@ export function AdminTableCard({
 
 export function AdminSectionTitle({
   children,
+  icon,
   className,
   variant = "default",
 }: {
   children: ReactNode;
   className?: string;
   variant?: "default" | "mono";
+  icon?: LucideIcon;
 }) {
   return (
     <h3
@@ -232,7 +236,7 @@ export function AdminSectionTitle({
         className,
       )}
     >
-      <SectionHeading>{children}</SectionHeading>
+      <SectionHeading icon={icon}>{children}</SectionHeading>
     </h3>
   );
 }

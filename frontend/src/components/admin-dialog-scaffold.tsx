@@ -1,3 +1,4 @@
+import { type LucideIcon } from "lucide-react";
 import type { FormEvent, ReactNode } from "react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
@@ -50,14 +51,15 @@ export function AdminDialogScaffold({
   );
 }
 
-export function AdminFormSection({ title, children, className }: {
+export function AdminFormSection({ icon, title, children, className }: {
   title: ReactNode;
+  icon?: LucideIcon;
   children: ReactNode;
   className?: string;
 }) {
   return (
     <section className={cn("min-w-0 space-y-2.5 rounded-xl border border-border/50 bg-card p-3", className)}>
-      <AdminSectionTitle>{title}</AdminSectionTitle>
+      <AdminSectionTitle icon={icon}>{title}</AdminSectionTitle>
       {children}
     </section>
   );

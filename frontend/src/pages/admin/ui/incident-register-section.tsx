@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ChevronDown } from "lucide-react";
+import {
+  ChevronDown,
+  ShieldAlert,
+} from "lucide-react";
 
 import { StatusChip } from "@/components/ui/status-chip";
 import { ComplianceSection } from "@/pages/admin/ui/compliance-section";
@@ -151,7 +154,7 @@ export function IncidentRegisterSection({
   };
 
   return (
-    <ComplianceSection title={l("incidents_title")}>
+    <ComplianceSection icon={ShieldAlert} title={l("incidents_title")}>
       <p className="text-xs text-muted-foreground">{l("incidents_intro")}</p>
       {error ? <Banner tone="error">{error}</Banner> : null}
       {notice ? <p className="text-sm text-emerald-700">{notice}</p> : null}

@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
@@ -669,7 +670,7 @@ export function InternalNotesPage() {
                 <section className="mx-4 mt-4 mb-4 overflow-hidden rounded-lg border border-border/70 bg-card sm:mx-5 sm:mb-5">
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-3.5 py-2.5">
                     <div>
-                      <h2 className="flex items-center gap-2 text-[13px] font-semibold"><span className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />{labels.attachments}</h2>
+                      <h2 className="flex items-center gap-2 text-[13px] font-semibold"><SectionHeading icon={Paperclip}>{labels.attachments}</SectionHeading></h2>
                       <p className="mt-0.5 text-xs text-muted-foreground">{labels.allowedFiles}</p>
                     </div>
                     <input

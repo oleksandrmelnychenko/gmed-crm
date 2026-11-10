@@ -39,7 +39,7 @@ export function SignatureDefaultsSettings() {
   const add = () => setDraft(current => [...current, { first_name: "", last_name: "", email: "", role: "agency" }]);
   return <section className="min-w-0 overflow-hidden rounded-lg border border-border/70 bg-card">
     <div className="flex items-center justify-between gap-2 border-b border-border/60 bg-muted/20 px-3.5 py-2.5">
-      <AdminSectionTitle>{tx("Представители GMED", "GMED-Vertretungen")}</AdminSectionTitle><UsersRound aria-hidden="true" className="size-4 text-muted-foreground" />
+      <AdminSectionTitle icon={UsersRound}>{tx("Представители GMED", "GMED-Vertretungen")}</AdminSectionTitle>
     </div>
     <form onSubmit={event => void save(event)}>
       <div className="space-y-3 p-3.5">

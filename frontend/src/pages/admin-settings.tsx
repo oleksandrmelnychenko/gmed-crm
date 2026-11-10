@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import {
   useCallback,
   useEffect,
@@ -9,14 +10,17 @@ import {
 import {
   BellRing,
   Building2,
+  Fingerprint,
   KeyRound,
-  Pencil,
   LoaderCircle,
+  Monitor,
+  Pencil,
+  Receipt,
   RefreshCcw,
   ScrollText,
   ShieldCheck,
+  SlidersHorizontal,
   UserRoundCheck,
-  Receipt,
 } from "lucide-react";
 
 import { AdminGuideButton } from "@/components/admin-guide";
@@ -981,12 +985,10 @@ function useAdminSettingsPageContent() {
               <TabsContent value="configuration" className="mt-0">
                 <div className="grid items-stretch gap-2.5 md:grid-cols-2 2xl:grid-cols-3">
                   {SETTINGS_GROUPS.map((group) => {
-                    const GroupIcon = group.icon;
                     return (
                       <section key={group.id} aria-labelledby={`settings-group-${group.id}`} className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-card">
                         <header className="flex min-w-0 items-center gap-2 border-b border-border px-3 py-2">
-                          <GroupIcon aria-hidden="true" className="size-[18px] shrink-0 text-foreground" />
-                          <h2 id={`settings-group-${group.id}`} className="min-w-0 flex-1 text-sm font-semibold leading-5">{tr[group.titleKey] ?? group.id}</h2>
+                          <h2 id={`settings-group-${group.id}`} className="min-w-0 flex-1 text-sm font-semibold leading-5"><SectionHeading icon={group.icon}>{tr[group.titleKey] ?? group.id}</SectionHeading></h2>
                           <InfoHint label={tr[group.titleKey] ?? group.id}>{tr[group.descriptionKey]}</InfoHint>
                         </header>
                         <div className="flex flex-1 flex-col px-3 py-2">
@@ -1020,9 +1022,7 @@ function useAdminSettingsPageContent() {
               emptyState={<EmptyCell>{t.mfa_no_pending}</EmptyCell>}
               toolbarStart={
                 <>
-                  <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
-                    {t.mfa_pending_logins}
-                  </span>
+                  <SectionHeading icon={Fingerprint}>{t.mfa_pending_logins}</SectionHeading>
                   <CountBadge>{pending.length}</CountBadge>
                   <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
                 </>
@@ -1041,9 +1041,7 @@ function useAdminSettingsPageContent() {
               emptyState={<EmptyCell>{t.settings_no_sessions}</EmptyCell>}
               toolbarStart={
                 <>
-                  <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
-                    {t.settings_active_sessions}
-                  </span>
+                  <SectionHeading icon={Monitor}>{t.settings_active_sessions}</SectionHeading>
                   <CountBadge>{sessions.length}</CountBadge>
                   <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
                   <Button
@@ -1122,7 +1120,7 @@ function useAdminSettingsPageContent() {
               <>
                 {changedFieldLabels.length > 0 ? <StatusChip tone="warning">{t.common_edit}: {changedFieldLabels.join(" · ")}</StatusChip> : null}
 
-                <AdminFormSection title={t.admin_system_fields} className="space-y-2 p-3">
+                <AdminFormSection icon={SlidersHorizontal} title={t.admin_system_fields} className="space-y-2 p-3">
                   <div className={cn("grid gap-x-3 gap-y-2.5", selectedGroup.fields.length > 3 && "sm:grid-cols-2")}>
                     {selectedGroup.fields.map((field) => {
                       const changed = hasFieldChanged(field.key);

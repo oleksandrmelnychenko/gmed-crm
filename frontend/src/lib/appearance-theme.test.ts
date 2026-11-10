@@ -39,14 +39,18 @@ describe("portable appearance themes", () => {
     JSON.stringify({ ...custom, colors: { background: "url(https://example.com)" } }),
     JSON.stringify({ ...custom, colors: { unknown: "#ffffff" } }),
     JSON.stringify({ ...custom, colors: { background: "#fff" } }),
-    JSON.stringify({ ...custom, colors: { text: "#ffffff" } }),
-    JSON.stringify({ ...custom, colors: { primary: "#ffffff" } }),
-    JSON.stringify({ ...custom, colors: { rowSelected: "#333333" } }),
-    JSON.stringify({ ...custom, colors: { focus: "#ffffff" } }),
     `{"version":1,"id":"custom","name":"Custom","colors":{"__proto__":"#ffffff"}}`,
     " ".repeat(MAX_THEME_JSON_LENGTH + 1),
-  ])("rejects malformed, executable, unknown or unreadable input %#", (input) => {
+  ])("rejects malformed, executable, or unknown input %#", (input) => {
     expect(() => parseAppearanceTheme(input)).toThrow();
+  });
+
+  it("preserves low-contrast colours and dark surfaces when a stored theme is reopened", () => {
+    const colors = { text: "#ffffff", primary: "#ffffff", focus: "#ffffff", surface: "#222222", rowSelected: "#333333" };
+    const theme = parseAppearanceTheme(JSON.stringify({ ...custom, colors }));
+    expect(theme.colors).toMatchObject(colors);
+    const preferences = addAppearanceTheme(EMPTY_APPEARANCE, theme);
+    expect(parseAppearancePreferences(JSON.stringify(preferences))).toEqual(preferences);
   });
 
   it("round-trips an exported custom palette", () => {
@@ -91,7 +95,6 @@ describe("contrast levels apart from the theme", () => {
   it.each(BUILTIN_THEMES)("soften $name step by step and keep text readable", (theme) => {
     const soft = withContrast(theme, "soft"), softer = withContrast(theme, "softer");
     expect(withContrast(theme, "standard")).toBe(theme);
-    // The validator keeps text and secondary text at 4.5:1 and focus at 3:1.
     for (const variant of [soft, softer]) expect(parseAppearanceTheme(JSON.stringify(variant))).toEqual(variant);
     for (const key of ["inputBorder", "border"] as const) {
       const ratios = [theme, soft, softer].map((item) => contrastRatio(item.colors[key], item.colors.surface));

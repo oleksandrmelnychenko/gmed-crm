@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, type CSSProperties, type ReactNode } from "react";
 
 import { CommandPalette } from "@/components/command-palette";
-import { ContrastMeter } from "@/components/contrast-meter";
 import { Toaster } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth";
 import { DEFAULT_THEME, themeCssVariables, withContrast, withControls } from "@/lib/appearance-theme";
@@ -114,7 +113,6 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
         </div>
       </div>
       <CommandPalette />
-      {themeScope && !leadPortal ? <ContrastMeter /> : null}
       <Toaster />
     </div>
   );

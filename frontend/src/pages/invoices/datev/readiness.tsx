@@ -1,4 +1,11 @@
-import { ArrowUpRight, CheckCircle2, Circle, FileCheck2, LockKeyhole } from "lucide-react";
+import {
+  ArrowUpRight,
+  CheckCircle2,
+  Circle,
+  FileCheck2,
+  ListChecks,
+  LockKeyhole,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -18,6 +25,7 @@ export function DatevReadiness({ profile, dirty }: { profile: DatevProfile; dirt
     export: "Уточнён статус заказа Export Rechnungswesen",
   };
   return <DatevSetupSection
+    icon={ListChecks}
     title={de ? "Vorbereitung der Verbindung" : "Подготовка подключения"}
     data-testid="datev-readiness"
     action={<>

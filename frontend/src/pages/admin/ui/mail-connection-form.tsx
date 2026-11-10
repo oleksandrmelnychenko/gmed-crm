@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { Check, ExternalLink, KeyRound, LoaderCircle, Mail, Pencil, Send } from "lucide-react";
+import {
+  Check,
+  ExternalLink,
+  KeyRound,
+  LoaderCircle,
+  Mail,
+  Pencil,
+  Send,
+  Settings2,
+  type LucideIcon,
+} from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
@@ -59,11 +69,11 @@ function errorCode(reason: unknown): string | null {
   return typeof body?.code === "string" ? body.code : null;
 }
 
-function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+function Section({ icon, title, action, children }: { icon: LucideIcon; title: string; action?: ReactNode; children: ReactNode }) {
   return (
     <section className="min-w-0 overflow-hidden rounded-lg border border-border/70 bg-card" data-testid="mail-connection">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-muted/20 px-3.5 py-2.5">
-        <AdminSectionTitle>{title}</AdminSectionTitle>
+        <AdminSectionTitle icon={icon}>{title}</AdminSectionTitle>
         {action}
       </div>
       {children}
@@ -213,7 +223,7 @@ export function MailConnectionForm({ canConfigure }: { canConfigure: boolean }) 
   }
   if (loading) {
     return (
-      <Section title={title}>
+      <Section icon={Mail} title={title}>
         <p role="status" className="flex items-center gap-2 p-3.5 text-xs text-muted-foreground">
           <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
           {tx("Загрузка подключения…", "Verbindung wird geladen…")}
@@ -225,7 +235,7 @@ export function MailConnectionForm({ canConfigure }: { canConfigure: boolean }) 
   if (connection?.configured && !editing) {
     return (
       <Section
-        title={title}
+        icon={Mail} title={title}
         action={
           <Badge variant="outline" className="gap-1 rounded-full border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
             <Check aria-hidden="true" className="size-3" />
@@ -311,7 +321,7 @@ export function MailConnectionForm({ canConfigure }: { canConfigure: boolean }) 
 
   return (
     <form onSubmit={save}>
-      <Section title={connection?.configured ? tx("Изменить подключение", "Verbindung ändern") : title}>
+      <Section icon={Settings2} title={connection?.configured ? tx("Изменить подключение", "Verbindung ändern") : title}>
         <div className="space-y-3 p-3.5">
           <p className="text-xs leading-5 text-muted-foreground">
             {connection?.source === "disconnected"

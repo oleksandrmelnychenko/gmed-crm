@@ -1,3 +1,4 @@
+import { FileSignature } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { StatusChip, type StatusChipTone } from "@/components/ui/status-chip";
@@ -272,6 +273,7 @@ export function PatientConsentsSection({
 
   return (
     <ComplianceSection
+      icon={FileSignature}
       title={l("consents_title")}
       accessory={patientLabel ? (
         <div

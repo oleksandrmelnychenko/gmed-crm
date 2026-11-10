@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import {
   startTransition,
   useCallback,
@@ -9,7 +10,10 @@ import {
 import {
   Activity,
   Database,
+  FileText,
+  History,
   KeyRound,
+  ListTree,
   RefreshCcw,
   Search,
   Settings2,
@@ -839,18 +843,7 @@ function AdminActivityDetailSheet({
         {selectedActivity ? (
           <>
             <section className="min-w-0 space-y-3 rounded-xl border border-border/60 bg-card p-3">
-              <h3
-                className={cn(
-                  tokens.text.sectionTitle,
-                  "inline-flex items-center gap-2",
-                )}
-              >
-                <span
-                  aria-hidden
-                  className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]"
-                />
-                <span>{t.activity_details}</span>
-              </h3>
+              <h3><SectionHeading icon={FileText}>{t.activity_details}</SectionHeading></h3>
 
               <div className="grid min-w-0 gap-2.5 sm:grid-cols-2">
                 <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
@@ -900,18 +893,7 @@ function AdminActivityDetailSheet({
             </section>
 
             <section className="min-w-0 space-y-3 rounded-xl border border-border/60 bg-card p-3">
-              <h3
-                className={cn(
-                  tokens.text.sectionTitle,
-                  "inline-flex items-center gap-2",
-                )}
-              >
-                <span
-                  aria-hidden
-                  className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]"
-                />
-                <span>{t.activity_details}</span>
-              </h3>
+              <h3><SectionHeading icon={ListTree}>{t.activity_details}</SectionHeading></h3>
               <ActivityContextDetails
                 context={selectedActivity.context}
                 t={t}
@@ -1573,11 +1555,7 @@ export function AdminActivityPage() {
           {!loading && !error ? (
             <div className="min-w-0 space-y-3">
               <div className="flex items-center gap-2 text-[13px] font-semibold">
-                <span
-                  aria-hidden
-                  className="size-1.5 rounded-full bg-[var(--dot,var(--primary))]"
-                />
-                {t.activity_title}
+                <h2><SectionHeading icon={History}>{t.activity_title}</SectionHeading></h2>
                 <StatusChip className="font-mono">{countLabel}</StatusChip>
               </div>
               {activities.length === 0 ? (

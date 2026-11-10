@@ -10,6 +10,10 @@ import {
 } from "react";
 import {
   Download,
+  FileDown,
+  FileLock2,
+  History,
+  ListChecks,
   RefreshCcw,
   ShieldAlert,
 } from "lucide-react";
@@ -1152,6 +1156,7 @@ function useAdminCompliancePageContent() {
       {actionError ? <Banner tone="error">{actionError}</Banner> : null}
 
       <ComplianceSection
+            icon={FileLock2}
             title={t.compliance_privacy_requests_title}
             accessory={(
               <div
@@ -1233,6 +1238,7 @@ function useAdminCompliancePageContent() {
             )}
 
             <AdminTableCard
+              icon={History}
               title={
                 activePatientId
                   ? uiText("privacy_history_of", lang, { patient: activePatientLabel })
@@ -1265,7 +1271,7 @@ function useAdminCompliancePageContent() {
             </AdminTableCard>
           </ComplianceSection>
 
-          <ComplianceSection title={t.compliance_export}>
+          <ComplianceSection icon={FileDown} title={t.compliance_export}>
             {canExportPatientData(user?.role) ? (
               // The export is of the patient loaded above, never of a second
               // picker that could name someone else (QA B3-02).
@@ -1308,7 +1314,7 @@ function useAdminCompliancePageContent() {
             ) : null}
           </ComplianceSection>
 
-          <ComplianceSection title={t.compliance_privacy_review_queue} accessory={<StatusChip>{privacyQueue.length}</StatusChip>}>
+          <ComplianceSection icon={ListChecks} title={t.compliance_privacy_review_queue} accessory={<StatusChip>{privacyQueue.length}</StatusChip>}>
             <div className="flex flex-wrap gap-2">
               <StatusChip tone={privacyCounters.requested ? "warning" : "neutral"}>{t.compliance_stat_requested}: {privacyCounters.requested}</StatusChip>
               <StatusChip tone={privacyCounters.retentionHold ? "warning" : "neutral"}>{t.compliance_stat_hold}: {privacyCounters.retentionHold}</StatusChip>
@@ -1352,7 +1358,7 @@ function useAdminCompliancePageContent() {
                 description={privacySheetPatient?.label ?? ""}
               >
                 <section className="space-y-3 rounded-xl border border-border bg-card p-4">
-                  <AdminSectionTitle>{t.compliance_privacy_requests_title}</AdminSectionTitle>
+                  <AdminSectionTitle icon={FileLock2}>{t.compliance_privacy_requests_title}</AdminSectionTitle>
                   {/* The dialog names the patient the request is filed for (QA B3-02). */}
                   <div
                     className="rounded-lg border border-border/60 bg-card px-3 py-2"
@@ -1432,7 +1438,7 @@ function useAdminCompliancePageContent() {
                   )}
                 >
                   <section className="space-y-3 rounded-xl border border-border bg-card p-4">
-                    <AdminSectionTitle>{t.compliance_privacy_review_queue}</AdminSectionTitle>
+                    <AdminSectionTitle icon={ListChecks}>{t.compliance_privacy_review_queue}</AdminSectionTitle>
                     <div className="flex flex-wrap items-center gap-2">
                       <StatusChip tone={privacyStatusTone(reviewSheetRecord.status)}>
                         {privacyRecordStatusLabel(reviewSheetRecord, t, lang)}

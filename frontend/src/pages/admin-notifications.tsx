@@ -11,11 +11,13 @@ import {
 import {
   BellRing,
   CheckCheck,
+  Info,
   LoaderCircle,
   Plus,
   RefreshCcw,
   Search,
   Send,
+  SlidersHorizontal,
   Webhook,
   X,
 } from "lucide-react";
@@ -555,7 +557,7 @@ function useAdminNotificationsPageContent() {
         <section className="min-w-0 space-y-3">
           <div className="space-y-3 rounded-xl border border-border/70 bg-card p-3 shadow-xs">
             <div className="flex items-center justify-between gap-3">
-              <AdminSectionTitle>{t.common_registry}</AdminSectionTitle>
+              <AdminSectionTitle icon={BellRing}>{t.common_registry}</AdminSectionTitle>
               <StatusChip>{filteredChannels.length}</StatusChip>
             </div>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_minmax(180px,240px)_minmax(180px,240px)_auto] xl:items-end">
@@ -632,7 +634,7 @@ function useAdminNotificationsPageContent() {
             >
               {formError ? <Banner tone="error">{formError}</Banner> : null}
 
-              <AdminFormSection title={t.activity_details}>
+              <AdminFormSection icon={Info} title={t.activity_details}>
                 <div className="grid gap-3 md:grid-cols-2">
                   <Field label={`${t.notif_name} *`} htmlFor="channel-name">
                     <Input
@@ -656,7 +658,7 @@ function useAdminNotificationsPageContent() {
                 </div>
 
               </AdminFormSection>
-              <AdminFormSection title={t.notif_config}>
+              <AdminFormSection icon={SlidersHorizontal} title={t.notif_config}>
                 <Field label={t.notif_config} htmlFor="channel-config">
                   <textarea
                     id="channel-config"
@@ -715,7 +717,7 @@ function useAdminNotificationsPageContent() {
           >
             {selectedChannel ? (
               <>
-                <AdminFormSection title={t.activity_details}>
+                <AdminFormSection icon={Info} title={t.activity_details}>
                   <div className="flex flex-wrap items-center gap-1.5">
                     <StatusChip
                       tone={channelTypeTone(selectedChannel.channel_type)}
@@ -743,7 +745,7 @@ function useAdminNotificationsPageContent() {
                   </div>
                 </AdminFormSection>
 
-                <AdminFormSection title={t.notif_config}>
+                <AdminFormSection icon={SlidersHorizontal} title={t.notif_config}>
                   <pre className="whitespace-pre-wrap break-all rounded-lg border border-border/50 bg-muted/50 p-3 font-mono text-xs leading-6 text-muted-foreground">
                     {prettyNotificationConfig(selectedChannel.config)}
                   </pre>

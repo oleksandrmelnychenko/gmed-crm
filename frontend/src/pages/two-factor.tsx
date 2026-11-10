@@ -19,7 +19,7 @@ export function fetchTotpStatus() {
 }
 
 function TwoFactorContent({ embedded, title, children }: { embedded: boolean; title: string; children: ReactNode }) {
-  return embedded ? <div className="space-y-3">{children}</div> : <Section title={title}>{children}</Section>;
+  return embedded ? <div className="space-y-3">{children}</div> : <Section icon={ShieldCheck} title={title}>{children}</Section>;
 }
 
 /**

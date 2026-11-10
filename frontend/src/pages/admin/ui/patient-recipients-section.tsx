@@ -1,3 +1,4 @@
+import { Share2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { StatusChip } from "@/components/ui/status-chip";
@@ -53,7 +54,7 @@ export function PatientRecipientsSection({ patientId }: { patientId: string }) {
   if (!patientId) return null;
 
   return (
-    <ComplianceSection title={l("recipients_title")}>
+    <ComplianceSection icon={Share2} title={l("recipients_title")}>
       <p className="text-xs text-muted-foreground">{l("recipients_intro")}</p>
       {error ? <Banner tone="error">{error}</Banner> : null}
       <div className="space-y-2" data-testid="patient-recipients">

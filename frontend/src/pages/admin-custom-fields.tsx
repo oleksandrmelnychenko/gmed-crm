@@ -6,7 +6,13 @@ import {
   type FormEvent,
   type SetStateAction,
 } from "react";
-import { Plus, RefreshCcw, X } from "lucide-react";
+import {
+  ListFilter,
+  ListPlus,
+  Plus,
+  RefreshCcw,
+  X,
+} from "lucide-react";
 
 import { AdminGuideButton } from "@/components/admin-guide";
 import {
@@ -252,7 +258,7 @@ function AdminCustomFieldCreateSheet({
           >
             {createError ? <Banner tone="error">{createError}</Banner> : null}
             <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3.5">
-              <AdminSectionTitle>{t.cf_new}</AdminSectionTitle>
+              <AdminSectionTitle icon={ListPlus}>{t.cf_new}</AdminSectionTitle>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_entity_type}</Label>
@@ -380,6 +386,7 @@ function AdminCustomFieldsTable({
 }: AdminCustomFieldsTableProps) {
   return (
     <AdminTableCard
+      icon={ListFilter}
       title={t.common_registry}
       description={t.cf_title}
       count={activeFields.length}

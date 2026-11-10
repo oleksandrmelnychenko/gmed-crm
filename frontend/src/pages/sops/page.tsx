@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import {
   useCallback,
   useEffect,
@@ -8,9 +9,17 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  BookOpen,
+  FileText,
+  Library,
+  ListChecks,
+  ListTodo,
   LoaderCircle,
   Plus,
   RefreshCw,
+  Scan,
+  Target,
+  type LucideIcon,
 } from "lucide-react";
 
 import {
@@ -100,15 +109,6 @@ const SOP_APPROVAL_ROLE_LABEL_KEYS = {
   patient_manager: "sops_approval_role_patient_manager",
 } as const satisfies Partial<Record<string, TranslationKey>>;
 
-function titleWithDot(title: ReactNode) {
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />
-      <span>{title}</span>
-    </span>
-  );
-}
-
 function EmptyState({
   title,
   description,
@@ -165,10 +165,12 @@ function SummaryLine({ label, value }: { label: string; value: ReactNode }) {
 }
 
 function DetailSection({
+  icon,
   title,
   accessory,
   children,
 }: {
+  icon: LucideIcon;
   title: ReactNode;
   accessory?: ReactNode;
   children: ReactNode;
@@ -176,7 +178,7 @@ function DetailSection({
   return (
     <section className="rounded-lg border border-border/70 bg-card p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
+        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={icon}>{title}</SectionHeading></h2>
         {accessory ? <div className="shrink-0">{accessory}</div> : null}
       </div>
       <div className="mt-5">{children}</div>
@@ -875,7 +877,7 @@ function useSopsPageContent() {
 
         {canReviewQueue ? (
           <AdminTableCard
-            title={titleWithDot(text.queueTitle)}
+            icon={ListChecks} title={text.queueTitle}
             description={text.queueDescription}
             count={visibleQueue.length}
             accessory={
@@ -920,7 +922,7 @@ function useSopsPageContent() {
 
         <section className="grid min-w-0 grid-cols-1 gap-3 2xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)]">
           <AdminTableCard
-            title={titleWithDot(text.libraryTitle)}
+            icon={Library} title={text.libraryTitle}
             description={text.libraryDescription}
             count={visibleItems.length}
             accessory={
@@ -1009,7 +1011,7 @@ function useSopsPageContent() {
 
           <div className="min-w-0 space-y-3">
             <AdminTableCard
-              title={titleWithDot(text.targetingModelTitle)}
+              icon={Target} title={text.targetingModelTitle}
               description={text.targetingModelDescription}
             >
               <div className="flex flex-wrap gap-2 p-3.5">
@@ -1026,7 +1028,7 @@ function useSopsPageContent() {
             </AdminTableCard>
 
             <AdminTableCard
-              title={titleWithDot(text.scopeTitle)}
+              icon={Scan} title={text.scopeTitle}
               description={text.scopeDescription}
             >
               <div className="p-3.5 text-sm text-muted-foreground">
@@ -1109,7 +1111,7 @@ function useSopsPageContent() {
                   </div>
                 </section>
 
-                <DetailSection title={text.detailOverview}>
+                <DetailSection icon={FileText} title={text.detailOverview}>
                   <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
                     <SummaryLine label={text.columns.revision} value={selectedItem.revision_no} />
                     <SummaryLine label={text.columns.updated} value={formatDate(selectedItem.updated_at, t)} />
@@ -1123,6 +1125,7 @@ function useSopsPageContent() {
                 </DetailSection>
 
                 <DetailSection
+                  icon={Target}
                   title={text.detailTargeting}
                   accessory={
                     <Badge variant="outline" className="rounded-full">
@@ -1143,7 +1146,7 @@ function useSopsPageContent() {
                   </div>
                 </DetailSection>
 
-                <DetailSection title={text.detailBody}>
+                <DetailSection icon={BookOpen} title={text.detailBody}>
                   <div className="space-y-4">
                     {selectedItem.summary ? (
                       <p className="rounded-xl border border-border/50 bg-muted/20 p-4 text-sm leading-6 text-muted-foreground">
@@ -1156,7 +1159,7 @@ function useSopsPageContent() {
                   </div>
                 </DetailSection>
 
-                <DetailSection title={text.detailActions}>
+                <DetailSection icon={ListTodo} title={text.detailActions}>
                   <div className="flex flex-wrap gap-2">
                     {selectedItem.can_edit ? (
                       <Button
@@ -1231,7 +1234,7 @@ function useSopsPageContent() {
             >
               {formError ? <ShellBanner tone="error">{formError}</ShellBanner> : null}
               <div className="space-y-4 rounded-xl">
-                <DetailSection title={text.detailOverview}>
+                <DetailSection icon={FileText} title={text.detailOverview}>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label={text.formTitle} htmlFor="sop-form-title">
                       <Input
@@ -1275,7 +1278,7 @@ function useSopsPageContent() {
                   </div>
                 </DetailSection>
 
-                <DetailSection title={text.detailBody}>
+                <DetailSection icon={BookOpen} title={text.detailBody}>
                   <Field label={text.formBody} htmlFor="sop-form-body">
                     <textarea
                       id="sop-form-body"
@@ -1290,6 +1293,7 @@ function useSopsPageContent() {
                 </DetailSection>
 
                 <DetailSection
+                  icon={Target}
                   title={text.detailTargeting}
                   accessory={
                     <Badge variant="outline" className="rounded-full">
@@ -1415,7 +1419,7 @@ function useSopsPageContent() {
             >
               {reviewError ? <ShellBanner tone="error">{reviewError}</ShellBanner> : null}
               {reviewItem ? (
-                <AdminTableCard title={titleWithDot(text.detailOverview)}>
+                <AdminTableCard icon={FileText} title={text.detailOverview}>
                   <div className="grid gap-2.5 p-3.5">
                     <DetailField label={text.columns.title} value={reviewItem.title} />
                     <DetailField label={text.columns.author} value={reviewItem.created_by_name || roleLabel(reviewItem.created_by_role)} />

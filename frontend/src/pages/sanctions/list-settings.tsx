@@ -3,7 +3,14 @@
  * countries. Available on the dedicated sanctions page.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ExternalLink, LoaderCircle, RefreshCcw, ShieldCheck, Upload } from "lucide-react";
+import {
+  ExternalLink,
+  GlobeLock,
+  LoaderCircle,
+  RefreshCcw,
+  ShieldCheck,
+  Upload,
+} from "lucide-react";
 
 import { CitizenshipMultiSelect, normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
@@ -93,12 +100,7 @@ export function SanctionsListSettings({ className }: { className?: string }) {
     <section className={cn("space-y-4", className)} data-testid="sanctions-list-settings">
       <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border/50 bg-card p-4">
         <div className="min-w-0 space-y-1">
-          <AdminSectionTitle>
-            <span className="inline-flex items-center gap-1.5">
-              <ShieldCheck className="size-4" aria-hidden />
-              {t.sanctions_list_title}
-            </span>
-          </AdminSectionTitle>
+          <AdminSectionTitle icon={ShieldCheck}>{t.sanctions_list_title}</AdminSectionTitle>
           <p className="text-xs text-muted-foreground">{t.sanctions_list_source}</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -193,7 +195,7 @@ export function SanctionsListSettings({ className }: { className?: string }) {
 
       <div className="space-y-3 rounded-xl border border-border/50 bg-card p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <AdminSectionTitle>
+          <AdminSectionTitle icon={GlobeLock}>
             {t.sanctions_blocked_countries}
             <span className="ml-2 text-xs font-normal text-muted-foreground">{" "}{savedBlocked.length}</span>
           </AdminSectionTitle>

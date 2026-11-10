@@ -10,8 +10,10 @@ import {
   Check,
   Eye,
   EyeOff,
+  KeyRound,
   LoaderCircle,
   Lock,
+  NotebookPen,
   RefreshCcw,
   RotateCcw,
   Zap,
@@ -683,7 +685,7 @@ function useAdminAccessPageContent() {
               <>
                 <section className={cn("space-y-2.5 rounded-xl p-3.5", tokens.surface.softCard)}>
                   <div className="space-y-1">
-                    <AdminSectionTitle>{t.admin_system_permissions}</AdminSectionTitle>
+                    <AdminSectionTitle icon={KeyRound}>{t.admin_system_permissions}</AdminSectionTitle>
                     <p className="text-[11px] text-muted-foreground">
                       {t.admin_system_access_cycle_hint}
                     </p>
@@ -758,7 +760,7 @@ function useAdminAccessPageContent() {
                 </section>
 
                 <section className={cn("space-y-1.5 rounded-xl p-3.5", tokens.surface.softCard)}>
-                  <AdminSectionTitle>{t.access_audit_note}</AdminSectionTitle>
+                  <AdminSectionTitle icon={NotebookPen}>{t.access_audit_note}</AdminSectionTitle>
                   <p className="text-xs text-muted-foreground">{selectedFieldAuditNote}</p>
                 </section>
               </>

@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, LoaderCircle, RotateCcw, Square, Trash2, Upload } from "lucide-react";
+import {
+  Download,
+  FileCheck2,
+  LoaderCircle,
+  RotateCcw,
+  Square,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ApiRequestError } from "@/lib/api";
@@ -89,7 +97,7 @@ export function DatevDocumentChecks() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  return <DatevSetupSection id="datev-document-checks" title={copy.title} description={copy.hint} className="scroll-mt-5" data-testid="datev-document-checks">
+  return <DatevSetupSection id="datev-document-checks" icon={FileCheck2} title={copy.title} description={copy.hint} className="scroll-mt-5" data-testid="datev-document-checks">
     {!canStaffPath("/invoices") ? <p className="text-sm text-muted-foreground">{copy.noAccess}</p> : <>
       <div className="flex flex-wrap items-center gap-2">
         <input ref={input} type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.xml" aria-label={copy.input} className="sr-only" disabled={running || rows.length >= MAX_CHECK_FILES} onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ""; choose(files); }} />

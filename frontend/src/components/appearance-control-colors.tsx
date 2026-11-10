@@ -3,7 +3,7 @@ import { ChartColumn, CircleDot, ListFilter, MousePointer2, Palette, RotateCcw, 
 
 import { Button } from "@/components/ui/button";
 import { useLang } from "@/lib/i18n";
-import { contrastRatio, withContrast, type ControlColor, type ControlColors, type ThemeColors } from "@/lib/appearance-theme";
+import { withContrast, type ControlColor, type ControlColors, type ThemeColors } from "@/lib/appearance-theme";
 import { useAppearanceTheme } from "@/lib/use-appearance-theme";
 import { cn } from "@/lib/utils";
 
@@ -20,10 +20,10 @@ const GROUPS: readonly { id: Group; keys: readonly ControlColor[] }[] = [
 
 type Labels = Record<ControlColor, string>;
 const TEXT: Record<"ru" | "de" | "en" | "uk", {
-  title: string; reset: string; resetAll: string; need: string; groups: Record<Group, string>; labels: Labels;
+  title: string; reset: string; resetAll: string; groups: Record<Group, string>; labels: Labels;
 }> = {
   ru: {
-    title: "Свои цвета", reset: "Сбросить", resetAll: "Сбросить все", need: "нужно",
+    title: "Свои цвета", reset: "Сбросить", resetAll: "Сбросить все",
     groups: { base: "Основа", actions: "Кнопки и фокус", fields: "Поля и списки", tables: "Таблицы", dots: "Точки и счётчики", states: "Ошибки, графики, затемнение" },
     labels: {
       background: "Фон страницы", surface: "Карточки и панели", sidebar: "Боковое меню", muted: "Приглушённый фон", accent: "Активный пункт меню",
@@ -34,7 +34,7 @@ const TEXT: Record<"ru" | "de" | "en" | "uk", {
     },
   },
   de: {
-    title: "Eigene Farben", reset: "Zurücksetzen", resetAll: "Alle zurücksetzen", need: "nötig",
+    title: "Eigene Farben", reset: "Zurücksetzen", resetAll: "Alle zurücksetzen",
     groups: { base: "Grundlage", actions: "Schaltflächen und Fokus", fields: "Felder und Listen", tables: "Tabellen", dots: "Punkte und Zähler", states: "Fehler, Diagramme, Abdunklung" },
     labels: {
       background: "Seitenhintergrund", surface: "Karten und Panels", sidebar: "Seitenmenü", muted: "Gedämpfter Hintergrund", accent: "Aktiver Menüpunkt",
@@ -45,7 +45,7 @@ const TEXT: Record<"ru" | "de" | "en" | "uk", {
     },
   },
   en: {
-    title: "Own colours", reset: "Reset", resetAll: "Reset all", need: "needs",
+    title: "Own colours", reset: "Reset", resetAll: "Reset all",
     groups: { base: "Base", actions: "Buttons and focus", fields: "Fields and lists", tables: "Tables", dots: "Dots and counters", states: "Errors, charts, backdrop" },
     labels: {
       background: "Page background", surface: "Cards and panels", sidebar: "Side menu", muted: "Muted background", accent: "Active menu item",
@@ -56,7 +56,7 @@ const TEXT: Record<"ru" | "de" | "en" | "uk", {
     },
   },
   uk: {
-    title: "Власні кольори", reset: "Скинути", resetAll: "Скинути все", need: "потрібно",
+    title: "Власні кольори", reset: "Скинути", resetAll: "Скинути все",
     groups: { base: "Основа", actions: "Кнопки й фокус", fields: "Поля та списки", tables: "Таблиці", dots: "Пімпочки та лічильники", states: "Помилки, графіки, затемнення" },
     labels: {
       background: "Фон сторінки", surface: "Картки й панелі", sidebar: "Бічне меню", muted: "Приглушений фон", accent: "Активний пункт меню",
@@ -89,28 +89,6 @@ function effectiveColor(colors: ThemeColors, key: ControlColor): string {
   }
 }
 
-/** The pair each colour is judged against and its WCAG minimum; borders and row tints carry none. */
-function check(colors: ThemeColors, key: ControlColor): { ratio: number; required: number | null } {
-  const value = (name: ControlColor) => effectiveColor(colors, name);
-  const pair = (first: string, second: string, required: number | null) => ({ ratio: contrastRatio(first, second), required });
-  switch (key) {
-    case "text": return pair(colors.text, colors.surface, 4.5);
-    case "textMuted": return pair(colors.textMuted, colors.surface, 4.5);
-    case "border": return pair(colors.border, colors.surface, null);
-    case "primary": case "primaryText": return pair(colors.primaryText, colors.primary, 4.5);
-    case "focus": return pair(colors.focus, colors.surface, 3);
-    case "inputBorder": return pair(colors.inputBorder, value("field"), 3);
-    case "placeholder": return pair(value("placeholder"), value("field"), 4.5);
-    case "headingMarker": return pair(colors.headingMarker, colors.surface, 3);
-    case "dot": return pair(value("dot"), colors.surface, 3);
-    case "badge": case "badgeText": return pair(value("badgeText"), value("badge"), 4.5);
-    case "danger": return pair(value("danger"), colors.surface, 4.5);
-    case "chart1": case "chart2": case "chart3": case "chart4": case "chart5": return pair(value(key), colors.surface, null);
-    case "overlay": case "shadow": return pair(value(key), colors.surface, null);
-    default: return pair(colors.text, value(key), 4.5);
-  }
-}
-
 export function AppearanceControlColors({ onError }: { onError: (cause: unknown) => void }) {
   const { lang } = useLang();
   const text = TEXT[lang as keyof typeof TEXT] ?? TEXT.en;
@@ -132,8 +110,6 @@ export function AppearanceControlColors({ onError }: { onError: (cause: unknown)
             <div className="space-y-0.5">
               {group.keys.map((key) => {
                 const value = effectiveColor(colors, key);
-                const { ratio, required } = check(colors, key);
-                const low = required !== null && ratio < required;
                 const own = controls?.[key] !== undefined;
                 const id = `control-color-${key}`;
                 return (
@@ -142,8 +118,8 @@ export function AppearanceControlColors({ onError }: { onError: (cause: unknown)
                       className="size-7 shrink-0 cursor-pointer rounded border border-input bg-field p-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" />
                     <label htmlFor={id} className="min-w-0 flex-1">
                       <span className={cn("block break-words text-xs leading-4", own && "font-medium")}>{text.labels[key]}</span>
-                      <span className={cn("block break-words font-mono text-[11px] leading-4", low ? "text-destructive" : "text-muted-foreground")}>
-                        {value} · {ratio.toFixed(2)}:1{low ? ` · ${text.need} ${required}:1` : ""}
+                      <span className="block break-words font-mono text-[11px] leading-4 text-muted-foreground">
+                        {value}
                       </span>
                     </label>
                     {own ? (

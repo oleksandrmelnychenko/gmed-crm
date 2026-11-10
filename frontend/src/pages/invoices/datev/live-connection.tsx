@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Link2, RefreshCw, Unplug } from "lucide-react";
+import {
+  Download,
+  History,
+  Link2,
+  Plug,
+  RefreshCw,
+  Unplug,
+} from "lucide-react";
 import { DatevReadResult } from "./read-result";
 import { DatevActionButton } from "./action-button";
 import { fetchDatevSetup, type DatevProfile } from "./setup-api";
@@ -102,7 +109,7 @@ export function DatevLiveConnection({ canAdmin = true }: { canAdmin?: boolean } 
     if (value.mode !== connection?.mode || value.consultant_number !== Number(profile?.consultant_number) || value.client_number !== Number(profile?.client_number)) throw new ApiRequestError("DATEV company mismatch", { code: "datev_client_mismatch" });
   }
   return <div className="min-w-0 space-y-3" data-testid="datev-live-connection">
-    <DatevSetupSection title={t.title} description={t.hint} action={<Badge variant="outline">{!ready ? error ? t.unavailable : t.loading : requiresReconnect ? t.reconnect : stateLabels[connection?.status ?? "not_configured"] ?? t.reconnect}</Badge>}>
+    <DatevSetupSection icon={Plug} title={t.title} description={t.hint} action={<Badge variant="outline">{!ready ? error ? t.unavailable : t.loading : requiresReconnect ? t.reconnect : stateLabels[connection?.status ?? "not_configured"] ?? t.reconnect}</Badge>}>
       {error ? <p role="alert" className="break-words text-sm text-destructive">{error}</p> : null}
       {notice ? <p role="status" className="text-sm">{notice}</p> : null}
       {callbackResult && ready ? <p className="text-sm">{callbackResult === "connected" && connection?.status === "connected" ? t.callbackOk : t.callbackFailed}</p> : null}
@@ -148,7 +155,7 @@ export function DatevLiveConnection({ canAdmin = true }: { canAdmin?: boolean } 
         {access.clients.map((company) => <div key={company.id} className="space-y-2"><p className="text-sm font-medium">{company.name}</p><p className="text-xs">Beraternummer: {company.consultant_number} · Mandantennummer: {company.client_number}</p><ul className="space-y-1 text-sm">{company.services.map((service, index) => <li key={`${service.name}-${index}`}>{service.name}</li>)}</ul>{company.services.length === 0 ? <p className="text-sm">{t.noServices}</p> : null}</div>)}
       </section> : null}
     </DatevSetupSection>
-    {canStaffPath("/invoices") ? <DatevSetupSection title={t.readTitle} description={t.readHint}>
+    {canStaffPath("/invoices") ? <DatevSetupSection icon={Download} title={t.readTitle} description={t.readHint}>
       <p className="text-xs leading-5 text-muted-foreground">{t.originals}</p>
       <div className="grid items-end gap-3 sm:grid-cols-3">
         <label className="space-y-1 text-xs">{t.kind}<select aria-label={t.kind} className={selectClass} disabled={busy} value={kind} onChange={(e) => { setKind(e.target.value as ReadKind); setResult(null); }}>{Object.entries(kinds).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
@@ -161,7 +168,7 @@ export function DatevLiveConnection({ canAdmin = true }: { canAdmin?: boolean } 
       {result ? <DatevReadResult key={result.retrieved_at} result={result} disabled={blocked} de={de} /> : null}
     </DatevSetupSection>
     : null}
-    <DatevSetupSection title={t.history}>
+    <DatevSetupSection icon={History} title={t.history}>
       {historyError ? <p role="alert" className="text-sm text-destructive">{t.historyError}</p> : events.length === 0 ? <p className="text-xs text-muted-foreground">{t.noHistory}</p> : <ul className="space-y-2">{events.map((item, index) => <li key={`${item.created_at}-${index}`} className="flex flex-wrap justify-between gap-2 border-b border-border/50 pb-2 text-xs"><span>{date(item.created_at)} · {kinds[item.operation as ReadKind] ?? ({ configure: t.save, authorize: t.connect, check: t.check, disconnect: t.disconnect }[item.operation] ?? item.operation)}</span><span>{["success", "saved", "connected", "disconnected"].includes(item.outcome) ? t.success : item.outcome === "started" ? t.started : item.outcome === "disconnected_unconfirmed" ? t.revoking : `${t.failed}: ${liveError(item.outcome, de)}`}{item.record_count ? ` · ${item.record_count}` : ""}</span></li>)}</ul>}
     </DatevSetupSection>
   </div>;

@@ -4,7 +4,15 @@
  * level-2 blocks, reviewers) and the review queue. Trigger flow 2026-10-07.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import {
+  Calculator,
+  ClipboardList,
+  Globe,
+  LoaderCircle,
+  MapPin,
+  SlidersHorizontal,
+  UserCheck,
+} from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { StaffLink } from "@/components/staff-link";
@@ -102,7 +110,7 @@ function ReviewQueue({ rows, tx }: { rows: RiskReviewRow[]; tx: (ru: string, de:
   return (
     <section className={cn("space-y-3 rounded-xl p-4", tokens.surface.card)} data-testid="risk-review-queue">
       <div className="space-y-1">
-        <AdminSectionTitle>{t.risk_queue_title}</AdminSectionTitle>
+        <AdminSectionTitle icon={ClipboardList}>{t.risk_queue_title}</AdminSectionTitle>
         <p className="text-xs text-muted-foreground">{t.risk_queue_hint}</p>
       </div>
       {rows.length === 0 ? (
@@ -234,7 +242,7 @@ export function RiskSettingsTab() {
         <section className="space-y-4" data-testid="risk-config">
           <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border/50 bg-card p-4">
             <div className="min-w-0 space-y-1">
-              <AdminSectionTitle>{t.risk_config_title}</AdminSectionTitle>
+              <AdminSectionTitle icon={SlidersHorizontal}>{t.risk_config_title}</AdminSectionTitle>
               <p className="text-xs leading-5 text-muted-foreground">{t.risk_config_hint}</p>
             </div>
             <span className="rounded-full border border-border/50 bg-muted/40 px-2 py-1 font-mono text-xs text-muted-foreground" data-testid="risk-config-version">
@@ -244,7 +252,7 @@ export function RiskSettingsTab() {
 
           <div className="grid gap-3 md:grid-cols-2">
             <div className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-4" data-testid="risk-list-1">
-              <AdminSectionTitle>{t.risk_list_1}</AdminSectionTitle>
+              <AdminSectionTitle icon={Globe}>{t.risk_list_1}</AdminSectionTitle>
               <CitizenshipMultiSelect
                 value={config.list_1}
                 onChange={(next) => setConfig((current) => (current ? withListMove(current, "list_1", next) : current))}
@@ -253,7 +261,7 @@ export function RiskSettingsTab() {
               />
             </div>
             <div className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-4" data-testid="risk-list-2">
-              <AdminSectionTitle>{t.risk_list_2}</AdminSectionTitle>
+              <AdminSectionTitle icon={MapPin}>{t.risk_list_2}</AdminSectionTitle>
               <CitizenshipMultiSelect
                 value={config.list_2}
                 onChange={(next) => setConfig((current) => (current ? withListMove(current, "list_2", next) : current))}
@@ -265,7 +273,7 @@ export function RiskSettingsTab() {
           <p className="text-xs text-muted-foreground">{t.risk_lists_hint}</p>
 
           <div className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-4">
-            <AdminSectionTitle>{t.risk_points}</AdminSectionTitle>
+            <AdminSectionTitle icon={Calculator}>{t.risk_points}</AdminSectionTitle>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[30rem] text-left text-sm" data-testid="risk-points">
                 <tbody>
@@ -341,7 +349,7 @@ export function RiskSettingsTab() {
           </label>
 
           <div className="space-y-3 rounded-xl border border-border/50 bg-card p-4" data-testid="risk-reviewers">
-            <AdminSectionTitle>{t.risk_reviewers}</AdminSectionTitle>
+            <AdminSectionTitle icon={UserCheck}>{t.risk_reviewers}</AdminSectionTitle>
             <p className="text-xs leading-5 text-muted-foreground">{t.risk_reviewers_hint}</p>
             {reviewerCounts ? (
               <p className="text-xs leading-5 text-foreground" data-testid="risk-reviewers-count">

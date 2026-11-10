@@ -1,3 +1,5 @@
+import { AdminDialogScaffold } from "@/components/admin-dialog-scaffold";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   cloneElement,
@@ -19,23 +21,38 @@ import { createPortal, flushSync } from "react-dom";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowUpRight,
+  Blocks,
   CalendarClock,
   ChevronDown,
   CircleAlert,
+  ContactRound,
   Download,
+  Eye,
+  FilePenLine,
   FileText,
+  FileUp,
+  FolderInput,
   FolderPlus,
   Languages,
+  LayoutTemplate,
+  ListChecks,
+  ListTree,
   LoaderCircle,
+  MessageSquare,
   MoreHorizontal,
+  NotebookPen,
   RefreshCw,
   RotateCcw,
   Search,
+  Send,
   Share2,
   SlidersHorizontal,
+  TextQuote,
   Trash2,
   Undo2,
+  Upload,
   X,
+  type LucideIcon,
 } from "lucide-react";
 
 import {
@@ -1016,16 +1033,16 @@ function StaffDocumentsPage({
       lang === "ru" ? "Загрузить входящие документы" : "Eingehende Dokumente hochladen",
     intakeUploadDescription:
       lang === "ru"
-        ? "Добавьте несколько файлов сразу. Пациент, заказ, прием и категория указываются позже при ручной проверке."
-        : "Fügen Sie mehrere Dateien gleichzeitig hinzu. Patient, Auftrag, Termin und Kategorie werden später bei der manuellen Prüfung zugeordnet.",
+        ? "Пациента, заказ, приём и категорию можно указать после загрузки."
+        : "Patient, Auftrag, Termin und Kategorie können Sie nach dem Hochladen zuordnen.",
     intakeDropTitle:
       lang === "ru"
         ? "Перетащите документы сюда"
         : "Dokumente hierher ziehen",
     intakeDropHint:
       lang === "ru"
-        ? "или выберите несколько файлов · до 25 МБ каждый"
-        : "oder mehrere Dateien auswählen · jeweils bis 25 MB",
+        ? "Можно выбрать несколько файлов, до 25 МБ каждый."
+        : "Mehrere Dateien möglich, bis zu 25 MB pro Datei.",
     intakeBrowse:
       lang === "ru" ? "Выбрать файлы" : "Dateien auswählen",
     intakeNoFiles:
@@ -1129,6 +1146,7 @@ function StaffDocumentsPage({
   >([]);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const intakeFileInput = useRef<HTMLInputElement>(null);
   const [intakeUploadOpen, setIntakeUploadOpen] = useState(false);
   const [intakeUploadItems, setIntakeUploadItems] = useState<IntakeUploadItem[]>([]);
   const [intakeUploadBusy, setIntakeUploadBusy] = useState(false);
@@ -3883,7 +3901,7 @@ function StaffDocumentsPage({
         }}
       >
         <DialogContent
-          className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(88vh,52rem)] sm:w-[min(96vw,84rem)] sm:max-w-[84rem]"
+          className="flex h-[90dvh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:pb-0 sm:h-[min(88dvh,52rem)] sm:w-[min(96vw,84rem)] sm:max-w-[84rem]"
           showCloseButton={false}
         >
           <form
@@ -3911,7 +3929,7 @@ function StaffDocumentsPage({
                   <Banner tone="error">{generateError}</Banner>
                 ) : null}
 
-                <DocumentSheetSection title={t.documents_section_template}>
+                <DocumentSheetSection icon={LayoutTemplate} title={t.documents_section_template}>
                   <div className="space-y-4">
                     {selectedTemplate ? (
                       <div className="border-y border-border bg-muted/30 px-4 py-3 text-sm text-foreground">
@@ -4036,7 +4054,7 @@ function StaffDocumentsPage({
                   </div>
                 </DocumentSheetSection>
 
-                <DocumentSheetSection title={t.documents_section_context}>
+                <DocumentSheetSection icon={ContactRound} title={t.documents_section_context}>
                   <div className="grid gap-4 md:grid-cols-2">
               <Field label={t.orders_patient} required>
                 <NativeComboboxSelect
@@ -4144,7 +4162,7 @@ function StaffDocumentsPage({
                   </div>
                 </DocumentSheetSection>
 
-                <DocumentSheetSection title={t.documents_section_parameters}>
+                <DocumentSheetSection icon={SlidersHorizontal} title={t.documents_section_parameters}>
                   <div className="grid gap-4 md:grid-cols-2">
               {!selectedTemplateUsesDesignedRenderer ? (
                 <>
@@ -4447,6 +4465,7 @@ function StaffDocumentsPage({
                 </DocumentSheetSection>
                 {selectedTemplateBindingFields.length > 0 ? (
                   <DocumentSheetSection
+                    icon={FilePenLine}
                     title={
                       selectedTemplate?.id === "privacy_consents"
                         ? metaText.legalConsents
@@ -4472,7 +4491,7 @@ function StaffDocumentsPage({
                   </DocumentSheetSection>
                 ) : null}
                 {availableTemplateBlocks.length > 0 ? (
-                  <DocumentSheetSection title={t.documents_text_blocks}>
+                  <DocumentSheetSection icon={Blocks} title={t.documents_text_blocks}>
                     <div className="space-y-4">
                       <p className="text-xs text-muted-foreground">
                         {t.documents_text_blocks_hint}
@@ -4523,7 +4542,7 @@ function StaffDocumentsPage({
                 ) : null}
 
                 {selectedTemplateUsesDesignedRenderer ? (
-                  <DocumentSheetSection title={t.documents_section_additional}>
+                  <DocumentSheetSection icon={NotebookPen} title={t.documents_section_additional}>
                     <Field label={t.documents_internal_note}>
                       <textarea
                         value={generateForm.notes}
@@ -4539,7 +4558,7 @@ function StaffDocumentsPage({
                     </Field>
                   </DocumentSheetSection>
                 ) : (
-                <DocumentSheetSection title={t.documents_section_text_notes}>
+                <DocumentSheetSection icon={TextQuote} title={t.documents_section_text_notes}>
                   <div className="grid gap-4 md:grid-cols-2">
                     <Field label={t.documents_introduction}>
                       <textarea
@@ -4626,7 +4645,7 @@ function StaffDocumentsPage({
                 )}
               </div>
             </div>
-            <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border bg-background px-5 py-4 sm:flex-row sm:justify-end">
+            <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border bg-card px-5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:flex-row sm:justify-end">
               <Button
                 type="button"
                 variant="outline"
@@ -4669,129 +4688,13 @@ function StaffDocumentsPage({
             }
           }}
         >
-          <DialogContent className="flex max-h-[88vh] w-[94vw] max-w-3xl flex-col overflow-hidden rounded-xl p-0">
-            <DialogHeader className="border-b border-border/70 px-6 py-5">
-              <DialogTitle>{metaText.intakeUploadTitle}</DialogTitle>
-              <DialogDescription>
-                {metaText.intakeUploadDescription}
-              </DialogDescription>
-            </DialogHeader>
-            <form
-              onSubmit={handleIntakeBatchUpload}
-              className="flex min-h-0 flex-1 flex-col"
-            >
-              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
-                {intakeUploadError ? (
-                  <Banner tone="error">{intakeUploadError}</Banner>
-                ) : null}
-                <div
-                  className={cn(
-                    "flex min-h-44 flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-8 text-center transition-colors motion-reduce:transition-none",
-                    intakeDragActive
-                      ? "border-[var(--brand)] bg-[var(--brand)]/5"
-                      : "border-border bg-muted/20",
-                    intakeUploadBusy && "pointer-events-none opacity-60",
-                  )}
-                  onDragEnter={(event) => {
-                    event.preventDefault();
-                    setIntakeDragActive(true);
-                  }}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDragLeave={(event) => {
-                    if (event.currentTarget.contains(event.relatedTarget as Node)) return;
-                    setIntakeDragActive(false);
-                  }}
-                  onDrop={handleIntakeDrop}
-                >
-                  <FolderPlus className="mb-3 size-8 text-[var(--brand)]" />
-                  <p className="text-sm font-semibold text-foreground">
-                    {metaText.intakeDropTitle}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {metaText.intakeDropHint}
-                  </p>
-                  <Input
-                    id="intake-document-files"
-                    type="file"
-                    multiple
-                    disabled={intakeUploadBusy}
-                    className="sr-only"
-                    onChange={(event) => {
-                      if (event.target.files) addIntakeUploadFiles(event.target.files);
-                      event.target.value = "";
-                    }}
-                  />
-                  <label
-                    htmlFor="intake-document-files"
-                    className="mt-4 inline-flex h-8 cursor-pointer items-center justify-center rounded-lg border border-input bg-background px-3 text-xs font-medium text-foreground shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
-                  >
-                    {metaText.intakeBrowse}
-                  </label>
-                </div>
-
-                {intakeUploadItems.length > 0 ? (
-                  <div className="overflow-hidden rounded-xl border border-border/70">
-                    {intakeUploadItems.map((item) => {
-                      const statusLabel =
-                        item.status === "queued"
-                          ? metaText.intakeQueued
-                          : item.status === "uploading"
-                            ? metaText.intakeUploading
-                            : item.status === "uploaded"
-                              ? metaText.intakeUploaded
-                              : metaText.intakeUploadFailed;
-                      return (
-                        <div
-                          key={item.id}
-                          className="flex items-start gap-3 border-b border-border/60 px-4 py-3 last:border-b-0"
-                        >
-                          <FileText className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium text-foreground">
-                              {item.file.name}
-                            </p>
-                            <p className="mt-0.5 text-xs text-muted-foreground">
-                              {formatFileSize(item.file.size)}
-                              {item.error ? ` · ${item.error}` : ""}
-                            </p>
-                          </div>
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "shrink-0 rounded-full text-[10px]",
-                              item.status === "uploaded" && "border-emerald-200 bg-emerald-50 text-emerald-700",
-                              item.status === "uploading" && "border-blue-200 bg-blue-50 text-blue-700",
-                              item.status === "error" && "border-destructive/30 bg-destructive/5 text-destructive",
-                            )}
-                          >
-                            {item.status === "uploading" ? (
-                              <LoaderCircle className="mr-1 size-3 animate-spin" />
-                            ) : null}
-                            {statusLabel}
-                          </Badge>
-                          {item.status !== "uploading" && item.status !== "uploaded" ? (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              className="shrink-0 rounded-md"
-                              aria-label={t.common_delete}
-                              onClick={() =>
-                                setIntakeUploadItems((current) =>
-                                  current.filter((candidate) => candidate.id !== item.id),
-                                )
-                              }
-                            >
-                              <X className="size-3.5" />
-                            </Button>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : null}
-              </div>
-              <DialogFooter className="border-t border-border/70 px-6 py-4">
+          <AdminDialogScaffold
+            title={<SectionHeading icon={FolderInput}>{metaText.intakeUploadTitle}</SectionHeading>}
+            description={metaText.intakeUploadDescription}
+            onSubmit={handleIntakeBatchUpload}
+            maxWidthClassName="sm:max-w-lg"
+            footer={
+              <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-3">
                 <Button
                   type="button"
                   variant="outline"
@@ -4820,9 +4723,117 @@ function StaffDocumentsPage({
                     intakeUploadItems.filter((item) => item.status !== "uploaded").length,
                   )}
                 </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
+              </div>
+            }
+          >
+            {intakeUploadError ? (
+              <Banner tone="error">{intakeUploadError}</Banner>
+            ) : null}
+            <div
+              className={cn(
+                "flex flex-col items-center justify-center rounded-lg border border-dashed px-4 py-5 text-center transition-colors motion-reduce:transition-none",
+                intakeDragActive
+                  ? "border-ring bg-accent"
+                  : "border-input bg-card",
+                intakeUploadBusy && "pointer-events-none opacity-60",
+              )}
+              onDragEnter={(event) => {
+                event.preventDefault();
+                setIntakeDragActive(true);
+              }}
+              onDragOver={(event) => event.preventDefault()}
+              onDragLeave={(event) => {
+                if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+                setIntakeDragActive(false);
+              }}
+              onDrop={handleIntakeDrop}
+            >
+              <Upload aria-hidden="true" className="mb-2 size-5 text-muted-foreground" />
+              <p className="text-sm font-semibold text-foreground">
+                {metaText.intakeDropTitle}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {metaText.intakeDropHint}
+              </p>
+              <Input
+                ref={intakeFileInput}
+                id="intake-document-files"
+                type="file"
+                multiple
+                disabled={intakeUploadBusy}
+                hidden
+                onChange={(event) => {
+                  if (event.target.files) addIntakeUploadFiles(event.target.files);
+                  event.target.value = "";
+                }}
+              />
+              <Button type="button" variant="outline" size="sm" className="mt-3" disabled={intakeUploadBusy} onClick={() => intakeFileInput.current?.click()}>
+                {metaText.intakeBrowse}
+              </Button>
+            </div>
+
+            {intakeUploadItems.length > 0 ? (
+              <div className="overflow-hidden rounded-lg border border-border bg-card">
+                {intakeUploadItems.map((item) => {
+                  const statusLabel =
+                    item.status === "queued"
+                      ? metaText.intakeQueued
+                      : item.status === "uploading"
+                        ? metaText.intakeUploading
+                        : item.status === "uploaded"
+                          ? metaText.intakeUploaded
+                          : metaText.intakeUploadFailed;
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex items-start gap-3 border-b border-border/60 px-4 py-3 last:border-b-0"
+                    >
+                      <FileText className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-foreground">
+                          {item.file.name}
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {formatFileSize(item.file.size)}
+                          {item.error ? ` · ${item.error}` : ""}
+                        </p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "shrink-0 rounded-full text-[10px]",
+                          item.status === "uploaded" && "border-emerald-200 bg-emerald-50 text-emerald-700",
+                          item.status === "uploading" && "border-blue-200 bg-blue-50 text-blue-700",
+                          item.status === "error" && "border-destructive/30 bg-destructive/5 text-destructive",
+                        )}
+                      >
+                        {item.status === "uploading" ? (
+                          <LoaderCircle className="mr-1 size-3 animate-spin" />
+                        ) : null}
+                        {statusLabel}
+                      </Badge>
+                      {item.status !== "uploading" && item.status !== "uploaded" ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="shrink-0 rounded-md"
+                          aria-label={t.common_delete}
+                          onClick={() =>
+                            setIntakeUploadItems((current) =>
+                              current.filter((candidate) => candidate.id !== item.id),
+                            )
+                          }
+                        >
+                          <X className="size-3.5" />
+                        </Button>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </AdminDialogScaffold>
         </Dialog>
       ) : null}
 
@@ -4854,7 +4865,7 @@ function StaffDocumentsPage({
                   </Banner>
                 ) : null}
 
-                <DocumentSheetSection title={t.documents_section_file}>
+                <DocumentSheetSection icon={FileUp} title={t.documents_section_file}>
                   <div className="grid gap-4 md:grid-cols-2">
                     <Field label={t.documents_section_file} required>
                       <FilePicker
@@ -4877,7 +4888,7 @@ function StaffDocumentsPage({
                   </div>
                 </DocumentSheetSection>
 
-                <DocumentSheetSection title={t.documents_section_context}>
+                <DocumentSheetSection icon={ContactRound} title={t.documents_section_context}>
                   <div className="grid gap-4 md:grid-cols-2">
                     <Field label={t.orders_patient}>
                       <NativeComboboxSelect
@@ -4946,7 +4957,7 @@ function StaffDocumentsPage({
                   </div>
                 </DocumentSheetSection>
 
-                <DocumentSheetSection title={t.documents_section_document}>
+                <DocumentSheetSection icon={FileText} title={t.documents_section_document}>
                   <div className="grid gap-4 md:grid-cols-2">
                     <Field label={t.operations_document_type}>
                       <NativeComboboxSelect
@@ -5268,7 +5279,7 @@ function StaffDocumentsPage({
                   </label>
                 </DocumentSheetSection>
 
-                <DocumentSheetSection title={t.documents_section_additional}>
+                <DocumentSheetSection icon={NotebookPen} title={t.documents_section_additional}>
                   <Field label={t.patients_notes}>
                     <textarea
                       value={uploadForm.notes}
@@ -5314,7 +5325,7 @@ function StaffDocumentsPage({
               )}
             >
               {translationError ? <Banner tone="error">{translationError}</Banner> : null}
-              <DocumentSheetSection title={t.documents_request_translation}>
+              <DocumentSheetSection icon={Languages} title={t.documents_request_translation}>
                 <Field label={t.patients_languages} required>
                   <NativeComboboxSelect
                     value={translationForm.requestedLanguage}
@@ -5385,7 +5396,7 @@ function StaffDocumentsPage({
                   </div>
                 ) : null}
 
-                <DocumentSheetSection title={t.documents_section_recipient}>
+                <DocumentSheetSection icon={Send} title={t.documents_section_recipient}>
                   <div className="space-y-4">
                     <div className="inline-flex flex-wrap gap-1 rounded-xl border border-border bg-muted/25 p-1">
                       <Button
@@ -5526,7 +5537,7 @@ function StaffDocumentsPage({
                   </div>
                 </DocumentSheetSection>
 
-                <DocumentSheetSection title={t.documents_section_message}>
+                <DocumentSheetSection icon={MessageSquare} title={t.documents_section_message}>
                   <Field
                     label={t.documents_share_message}
                     required={shareForm.targetType === "provider"}
@@ -5545,7 +5556,7 @@ function StaffDocumentsPage({
                   </Field>
                 </DocumentSheetSection>
 
-                <DocumentSheetSection title={t.documents_section_confirmation}>
+                <DocumentSheetSection icon={ListChecks} title={t.documents_section_confirmation}>
                   <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
                     <input
                       type="checkbox"
@@ -5626,7 +5637,7 @@ function StaffDocumentsPage({
                 ) : null}
                 {saveError ? <Banner tone="error">{saveError}</Banner> : null}
                 <div className="space-y-4 rounded-xl">
-                  <DocumentSheetSection title={t.documents_section_metadata}>
+                  <DocumentSheetSection icon={ListTree} title={t.documents_section_metadata}>
                     <div className="grid gap-4 md:grid-cols-2">
                   <Field label={t.orders_patient}>
                     <NativeComboboxSelect
@@ -5714,7 +5725,7 @@ function StaffDocumentsPage({
                     />
                   ) : null}
 
-                  <DocumentSheetSection title={t.documents_section_document}>
+                  <DocumentSheetSection icon={FileText} title={t.documents_section_document}>
                     <div className="grid gap-4 md:grid-cols-2">
                   <Field label={t.documents_filename} required>
                     <Input
@@ -5778,7 +5789,7 @@ function StaffDocumentsPage({
                     </div>
                   </DocumentSheetSection>
 
-                  <DocumentSheetSection title={t.documents_section_status_visibility}>
+                  <DocumentSheetSection icon={Eye} title={t.documents_section_status_visibility}>
                     <div className="grid gap-4 md:grid-cols-2">
                   <Field label={t.users_status}>
                     <NativeComboboxSelect
@@ -6106,7 +6117,7 @@ function StaffDocumentsPage({
                     </label>
                   </DocumentSheetSection>
 
-                  <DocumentSheetSection title={t.documents_section_additional}>
+                  <DocumentSheetSection icon={NotebookPen} title={t.documents_section_additional}>
                     <Field label={t.patients_notes}>
                       <textarea
                         value={editForm.notes}
@@ -8875,15 +8886,17 @@ function ShareProviderContextPanel({
 }
 
 function DocumentSheetSection({
+  icon,
   title,
   children,
 }: {
+  icon: LucideIcon;
   title: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section className="rounded-lg border border-border bg-card p-5">
-      <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
+      <h2 className={tokens.text.sectionTitle}><SectionHeading icon={icon}>{title}</SectionHeading></h2>
       <div className="mt-5">{children}</div>
     </section>
   );
@@ -8935,15 +8948,6 @@ function DocumentProviderCombobox({
         </option>
       ))}
     </NativeComboboxSelect>
-  );
-}
-
-function titleWithDot(title: ReactNode) {
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />
-      <span>{title}</span>
-    </span>
   );
 }
 

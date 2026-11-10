@@ -77,7 +77,7 @@ export const BUILTIN_THEMES: readonly AppearanceTheme[] = [DEFAULT_THEME, {
 
 export const MAX_THEME_JSON_LENGTH = 16_384;
 export const MAX_CUSTOM_THEMES = 30;
-export type ThemeErrorCode = "invalid-json" | "invalid-theme" | "invalid-color" | "low-contrast" | "reserved-id" | "theme-limit";
+export type ThemeErrorCode = "invalid-json" | "invalid-theme" | "invalid-color" | "reserved-id" | "theme-limit";
 export class ThemeValidationError extends Error {
   code: ThemeErrorCode;
   detail: string;
@@ -126,21 +126,6 @@ export function parseAppearanceTheme(json: string): AppearanceTheme {
     }
     colors[key as keyof ThemeColors] = color.toLowerCase();
   }
-  // The palette is currently light-only. Semantic status chips keep their own colours.
-  // Validate the backgrounds on which normal/secondary UI text actually appears.
-  for (const foreground of ["text", "textMuted"] as const) {
-    for (const background of TEXT_BACKGROUNDS) {
-      if (contrastRatio(colors[foreground], colors[background]) < 4.5) {
-        throw new ThemeValidationError("low-contrast", `${foreground} / ${background}`);
-      }
-    }
-  }
-  if (contrastRatio(colors.primaryText, colors.primary) < 4.5) throw new ThemeValidationError("low-contrast", "primaryText / primary");
-  for (const background of ["background", "surface", "field", "sidebar"] as const) {
-    if (contrastRatio(colors.focus, colors[background]) < 3) throw new ThemeValidationError("low-contrast", `focus / ${background} (3:1)`);
-  }
-  // Fixed semantic status styles and existing light controls require light surfaces.
-  if (luminance(colors.surface) < 0.5 || luminance(colors.background) < 0.5) throw new ThemeValidationError("invalid-theme");
   return { version: 1, id: value.id, name: value.name.trim(), colors };
 }
 

@@ -8,14 +8,20 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  ChartNoAxesCombined,
   Globe,
+  History,
   LoaderCircle,
+  LogIn,
+  Network,
   Plus,
   RefreshCcw,
   ShieldAlert,
   ShieldCheck,
   ShieldX,
+  UsersRound,
   Waypoints,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 
@@ -64,6 +70,7 @@ import {
 } from "@/pages/admin/data/admin-api";
 
 function SecuritySection({
+  icon,
   id,
   title,
   description,
@@ -71,6 +78,7 @@ function SecuritySection({
   actions,
   children,
 }: {
+  icon: LucideIcon;
   id?: string;
   title: string;
   description?: string;
@@ -86,7 +94,7 @@ function SecuritySection({
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 px-3 py-2.5">
         <div className="min-w-0 space-y-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <AdminSectionTitle>{title}</AdminSectionTitle>
+            <AdminSectionTitle icon={icon}>{title}</AdminSectionTitle>
             {count != null ? (
               <StatusChip className="font-mono tabular-nums">
                 {count}
@@ -1046,6 +1054,7 @@ function useAdminSecurityPageContent() {
             </div>
 
             <SecuritySection
+              icon={Wrench}
               title={t.security_maintenance}
               actions={
                 <Button
@@ -1082,7 +1091,7 @@ function useAdminSecurityPageContent() {
 
             <div className="min-w-0 space-y-3">
               <div className="space-y-1 px-1">
-                <AdminSectionTitle>
+                <AdminSectionTitle icon={ChartNoAxesCombined}>
                   {t.security_audit_analytics}
                 </AdminSectionTitle>
                 <p className="max-w-4xl text-xs leading-5 text-muted-foreground">
@@ -1137,6 +1146,7 @@ function useAdminSecurityPageContent() {
                 />
               </div>
               <SecuritySection
+                icon={History}
                 title={t.security_audit_recent}
                 count={suspiciousEvents.length}
               >
@@ -1167,6 +1177,7 @@ function useAdminSecurityPageContent() {
                 )}
               </SecuritySection>
               <SecuritySection
+                icon={UsersRound}
                 title={t.security_audit_top_readers}
                 count={auditAnalytics?.top_sensitive_readers.length ?? 0}
               >
@@ -1190,6 +1201,7 @@ function useAdminSecurityPageContent() {
             </div>
 
             <SecuritySection
+              icon={Network}
               title={t.security_ip_whitelist}
               description={t.security_ip_add_hint}
               count={ips.length}
@@ -1232,6 +1244,7 @@ function useAdminSecurityPageContent() {
             </SecuritySection>
 
             <SecuritySection
+              icon={LogIn}
               title={t.security_login_history}
               description={t.security_login_history_scope}
               count={geo.length}
@@ -1321,7 +1334,7 @@ function useAdminSecurityPageContent() {
         </Banner>
         <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <AdminSectionTitle>{t.security_maintenance}</AdminSectionTitle>
+            <AdminSectionTitle icon={Wrench}>{t.security_maintenance}</AdminSectionTitle>
             <StatusChip tone={maintEnabled ? "warning" : "success"}>
               {maintEnabled ? t.common_active : t.common_inactive}
             </StatusChip>
@@ -1375,7 +1388,7 @@ function useAdminSecurityPageContent() {
       >
         {ipError ? <Banner tone="error">{ipError}</Banner> : null}
         <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3">
-          <AdminSectionTitle>{t.security_ip_whitelist}</AdminSectionTitle>
+          <AdminSectionTitle icon={Network}>{t.security_ip_whitelist}</AdminSectionTitle>
           <Field label={t.security_ip_cidr} htmlFor="whitelist-cidr">
             <Input
               id="whitelist-cidr"
