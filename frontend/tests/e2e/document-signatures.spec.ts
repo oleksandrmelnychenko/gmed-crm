@@ -3,6 +3,22 @@ import { readFileSync, readdirSync } from "node:fs";
 
 const previewPdf = readFileSync(new URL("./fixtures/signature-preview.pdf", import.meta.url));
 
+test("document title moves between the staff top bar and the mobile document header", async ({ page }) => {
+  await prepare(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`/documents/${documentId}`);
+
+  const title = { name: document.auto_name, level: 1, exact: true };
+  const topbar = page.locator("#topbar-page-slot");
+  const card = page.locator("header").filter({ has: page.getByText(document.original_filename, { exact: true }) });
+  await expect(topbar.getByRole("heading", title)).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(card.getByRole("heading", title)).toBeVisible();
+  await expect(page.getByRole("heading", title)).toHaveCount(1);
+  await expect(card.getByRole("button", { name: /Elektronische Unterschrift/ })).toBeInViewport();
+});
+
 test("document upload offers searchable localized types and automatic classification", async ({ page }) => {
   await prepare(page);
   await page.addInitScript(() => localStorage.setItem("gmed_lang", "ru"));

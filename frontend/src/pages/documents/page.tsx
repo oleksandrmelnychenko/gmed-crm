@@ -6446,6 +6446,7 @@ function StaffDocumentsPage({
       />
 
       {(() => {
+        const documentTitle = detail ? localizeDocumentCode(detail.auto_name, l) : "";
         const detailContent = (
             <DocumentDetailState
               busy={detailBusy}
@@ -6459,16 +6460,31 @@ function StaffDocumentsPage({
             >
               {detail ? (
               <div className={cn("space-y-3", !embedDetailOnly && "pt-3")}>
-                <section className="py-1">
-                  <div className="grid grid-cols-[20px_minmax(0,1fr)] items-start gap-x-2 gap-y-2">
-                    <div className="flex size-5 items-center justify-center text-foreground">
-                      <FileText className="size-5" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="min-w-0 break-words text-lg font-semibold leading-6 tracking-tight text-foreground">
-                          {localizeDocumentCode(detail.auto_name, l)}
-                        </h2>
+                <header className="@container rounded-xl border border-border bg-card px-4 py-3">
+                  <div className="flex flex-col gap-x-6 gap-y-3 @5xl:flex-row @5xl:items-center @5xl:justify-between">
+                    <div className="flex min-w-0 flex-col gap-1.5 @5xl:flex-1">
+                      <PageHeader
+                        title={
+                          <span className="flex min-w-0 max-w-full items-start gap-2 lg:items-center" title={documentTitle}>
+                            <FileText aria-hidden="true" className="mt-0.5 size-4 shrink-0 lg:mt-0" />
+                            <span className="min-w-0 wrap-anywhere whitespace-normal lg:truncate">{documentTitle}</span>
+                          </span>
+                        }
+                      />
+                      {detail.original_filename ? (
+                        <p className="max-w-full wrap-anywhere text-sm font-medium text-foreground">{detail.original_filename}</p>
+                      ) : null}
+                      <div className="flex min-w-0 max-w-full flex-wrap items-baseline gap-x-3 gap-y-1 text-xs leading-5 text-muted-foreground">
+                        <span className="min-w-0 wrap-anywhere">{[detail.mime_type, formatFileSize(detail.file_size)].filter(Boolean).join(" · ")}</span>
+                        <span className="min-w-0 wrap-anywhere font-mono tabular-nums">
+                          {detail.document_number
+                            ? `${formatBusinessDocumentNumber(detail.document_number)} · `
+                            : ""}
+                          {text.versionOf(detail.version_number, detail.version_count)}
+                          {detail.is_latest_version ? ` · ${text.current}` : ` · ${text.historical}`}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <StatusBadge tone={documentStatusTone(detail.status)}>
                           {formatDocumentStatusLabel(detail.status, t)}
                         </StatusBadge>
@@ -6483,32 +6499,12 @@ function StaffDocumentsPage({
                           {formatSensitivityLabel(detail.data_sensitivity, lang)}
                         </StatusBadge>
                       </div>
-                      <div className="mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
-                      <p className="min-w-0 break-words text-xs leading-5 text-muted-foreground">
-                        {[
-                          detail.original_filename,
-                          detail.mime_type,
-                          formatFileSize(detail.file_size),
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </p>
-                      <p className="text-[11px] font-mono tabular-nums text-muted-foreground">
-                        {detail.document_number
-                          ? `${formatBusinessDocumentNumber(detail.document_number)} · `
-                          : ""}
-                        {text.versionOf(detail.version_number, detail.version_count)}
-                        {detail.is_latest_version
-                          ? ` · ${text.current}`
-                          : ` · ${text.historical}`}
-                      </p>
-                      </div>
                     </div>
-                    <div className="col-span-2 flex min-w-0 flex-wrap items-center gap-1.5 sm:col-start-2 sm:col-span-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-1.5 @5xl:max-w-[60%] @5xl:justify-end">
                       {canUpdateTranslation && detail.translation_source_document_id ? (
                         <Button
                           type="button"
-                          variant="default"
+                          variant="outline"
                           size="sm"
                           className="shrink-0"
                           onClick={() =>
@@ -6533,7 +6529,7 @@ function StaffDocumentsPage({
                       {canUpdateTranslation && detail.has_stored_file ? (
                         <Button
                           type="button"
-                          variant="default"
+                          variant="outline"
                           size="sm"
                           className="shrink-0"
                           onClick={() =>
@@ -6559,11 +6555,11 @@ function StaffDocumentsPage({
                       detail.status !== "archived" ? (
                         <Button
                           type="button"
-                          variant="default"
+                          variant="outline"
                           size="sm"
                           onClick={() => void openReplacementTemplate(detail)}
                         >
-                          <FileText className="size-3.5" />
+                          <FileUp className="size-3.5" />
                           {text.newVersion}
                         </Button>
                       ) : null}
@@ -6572,7 +6568,7 @@ function StaffDocumentsPage({
                         detail.mime_type?.startsWith("application/pdf")) ? (
                         <Button
                           type="button"
-                          variant="default"
+                          variant="outline"
                           size="sm"
                           disabled={documentPreviewBusy}
                           onClick={() => void handleOpenPreview()}
@@ -6580,7 +6576,7 @@ function StaffDocumentsPage({
                           {documentPreviewBusy ? (
                             <LoaderCircle className="size-3.5 animate-spin" />
                           ) : (
-                            <FileText className="size-3.5" />
+                            <Eye className="size-3.5" />
                           )}
                           {documentPreviewBusy ? t.common_loading : t.documents_preview}
                         </Button>
@@ -6617,19 +6613,20 @@ function StaffDocumentsPage({
                       {canManage && editForm ? (
                         <Button
                           type="button"
+                          variant="outline"
                           size="sm"
                           onClick={() => {
                             setSaveError("");
                             setMetadataEditOpen(true);
                           }}
                         >
-                          <FileText className="size-3.5" />
+                          <FilePenLine className="size-3.5" />
                           {l("documents_text")}
                         </Button>
                       ) : null}
                     </div>
                   </div>
-                </section>
+                </header>
 
                 {!detail.has_stored_file && detail.file_deleted_at ? (
                   <Banner tone="warning">
