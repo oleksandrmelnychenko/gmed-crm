@@ -292,6 +292,98 @@ async fn patient_can_submit_feedback_and_pm_gets_summary() {
     assert_eq!(notification_count, 1);
 }
 
+/// Global QA 2026-11-10: the survey took a cancelled visit and a visit still
+/// ahead, and stored an interpreter score for a visit without an interpreter.
+#[tokio::test]
+async fn only_a_visit_that_took_place_can_be_rated() {
+    let Some(ctx) = test_context().await else {
+        return;
+    };
+    let app = ctx.router();
+    let pool = ctx.pool();
+    let admin_id = ctx.admin_id();
+
+    let tag = unique_tag("feedback-visit-rule");
+    let patient_user_id = seed_user(pool, &tag, "patient").await;
+    let patient_id = seed_patient(pool, admin_id, &tag).await;
+    seed_patient_assignment(pool, patient_id, patient_user_id, admin_id).await;
+    let patient_auth = auth_header_for(patient_user_id, "patient");
+
+    let mut visits = Vec::new();
+    for (title, date, status) in [
+        ("Cancelled", "2026-05-10", "cancelled"),
+        ("Ahead", "2999-01-01", "confirmed"),
+        ("Held", "2026-05-11", "confirmed"),
+    ] {
+        let id: Uuid = sqlx::query_scalar(
+            r#"INSERT INTO appointments (
+                    patient_id, appointment_type, title, date, status, created_by
+               ) VALUES ($1, 'medical', $2, $3::date, $4, $5)
+               RETURNING id"#,
+        )
+        .bind(patient_id)
+        .bind(format!("{title} {tag}"))
+        .bind(date)
+        .bind(status)
+        .bind(admin_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        visits.push(id);
+    }
+
+    for refused in &visits[..2] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            "/api/v1/me/feedback",
+            &patient_auth,
+            Some(json!({ "appointment_id": refused, "overall_score": 2, "nps_score": 3 })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["error"], "feedback_visit_not_held");
+    }
+
+    // The visit that took place: only the chosen scales are stored, and the
+    // interpreter score of a visit without an interpreter is dropped.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/feedback",
+        &patient_auth,
+        Some(json!({
+            "appointment_id": visits[2],
+            "overall_score": 2,
+            "interpreter_score": 5,
+            "nps_score": 3
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    let (status, history) =
+        json_request(&app, "GET", "/api/v1/me/feedback", &patient_auth, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = history.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["overall_score"], 2);
+    for empty in [
+        "patient_manager_score",
+        "interpreter_score",
+        "concierge_score",
+        "treatment_score",
+        "doctor_score",
+        "organization_score",
+        "service_score",
+        "infrastructure_score",
+        "price_value_score",
+        "treatment_success",
+    ] {
+        assert!(items[0][empty].is_null(), "{empty}: {}", items[0][empty]);
+    }
+}
+
 #[tokio::test]
 async fn billing_sales_and_interpreter_cannot_open_feedback_workspace() {
     let Some(ctx) = test_context().await else {

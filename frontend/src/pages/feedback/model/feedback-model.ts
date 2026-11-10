@@ -47,26 +47,90 @@ export function formatFeedbackPercent(value: number | null | undefined, lang: La
 export const scoreOptions = ["1", "2", "3", "4", "5"];
 export const npsOptions = Array.from({ length: 11 }, (_, index) => String(index));
 
+/**
+ * Nothing is rated until the person chooses: an untouched scale is stored as
+ * empty, not as the best score (global QA 2026-11-10).
+ */
 export function blankFeedbackForm(): FeedbackFormState {
   return {
     appointmentId: "",
-    overallScore: "5",
-    patientManagerScore: "5",
-    interpreterScore: "5",
-    conciergeScore: "5",
-    treatmentScore: "5",
-    doctorScore: "5",
-    organizationScore: "5",
-    serviceScore: "5",
-    infrastructureScore: "5",
-    priceValueScore: "5",
-    treatmentSuccess: "yes",
+    overallScore: "",
+    patientManagerScore: "",
+    interpreterScore: "",
+    conciergeScore: "",
+    treatmentScore: "",
+    doctorScore: "",
+    organizationScore: "",
+    serviceScore: "",
+    infrastructureScore: "",
+    priceValueScore: "",
+    treatmentSuccess: "",
     complicationReported: false,
-    npsScore: "10",
+    npsScore: "",
     comments: "",
     improvementNotes: "",
     internalNote: "",
   };
+}
+
+/** A chosen score as a number, an untouched scale as null. */
+export function feedbackScoreValue(value: string): number | null {
+  if (value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * The two scales every survey needs (the server stores them as mandatory):
+ * the overall score and the recommendation score. Returns the first one still
+ * missing, or null when the form can be sent.
+ */
+export function missingRequiredFeedbackScore(
+  form: Pick<FeedbackFormState, "overallScore" | "npsScore">,
+): "overall" | "nps" | null {
+  if (feedbackScoreValue(form.overallScore) === null) return "overall";
+  if (feedbackScoreValue(form.npsScore) === null) return "nps";
+  return null;
+}
+
+/** The scores of the form as the server takes them: empty scales as null. */
+export function feedbackScoresPayload(form: FeedbackFormState, options: { withInterpreter: boolean }) {
+  return {
+    overall_score: feedbackScoreValue(form.overallScore),
+    patient_manager_score: feedbackScoreValue(form.patientManagerScore),
+    interpreter_score: options.withInterpreter ? feedbackScoreValue(form.interpreterScore) : null,
+    concierge_score: feedbackScoreValue(form.conciergeScore),
+    treatment_score: feedbackScoreValue(form.treatmentScore),
+    doctor_score: feedbackScoreValue(form.doctorScore),
+    organization_score: feedbackScoreValue(form.organizationScore),
+    service_score: feedbackScoreValue(form.serviceScore),
+    infrastructure_score: feedbackScoreValue(form.infrastructureScore),
+    price_value_score: feedbackScoreValue(form.priceValueScore),
+    treatment_success: form.treatmentSuccess || null,
+    nps_score: feedbackScoreValue(form.npsScore),
+  };
+}
+
+type RateableVisit = {
+  status: string;
+  date: string;
+  time_start?: string | null;
+  time_end?: string | null;
+};
+
+/**
+ * Whether a visit can be rated: it was not cancelled and it is over. A visit
+ * the team marked completed took place; otherwise its end (else its start,
+ * else its day) lies behind `now` ("YYYY-MM-DDTHH:mm", Berlin wall clock).
+ * Mirrors `appointment_took_place` of the server.
+ */
+export function isRateableVisit(visit: RateableVisit, now: string): boolean {
+  if (visit.status === "cancelled") return false;
+  if (visit.status === "completed") return true;
+  if (!visit.date) return false;
+  const time = visit.time_end || visit.time_start;
+  if (time) return `${visit.date}T${time.slice(0, 5)}` <= now.slice(0, 16);
+  return visit.date < now.slice(0, 10);
 }
 
 export function roleCanCaptureFeedback(actor?: Actor) {

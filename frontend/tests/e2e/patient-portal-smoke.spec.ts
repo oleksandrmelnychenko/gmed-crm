@@ -957,7 +957,12 @@ test.describe("patient portal smoke flows", () => {
     );
 
     await page.goto("/documents");
-    await expect(page.getByText("Es fehlt noch 1 Pflichtdokument.", { exact: true })).toBeVisible();
+    // The consent is not counted as a document the patient still owes
+    // (global QA 2026-11-10): the passport is there, so nothing of theirs is missing.
+    await expect(page.getByText("Es fehlt noch 1 Pflichtdokument.", { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("portal-documents-consents-pending")).toContainText(
+      "Ihre Unterlagen sind vollständig",
+    );
     // GMED sends the consent for signing; the upload form is not offered for it.
     await expect(page.getByTestId("portal-documents-consent-hint")).toContainText(
       "schickt Ihnen GMED zur Unterschrift",
@@ -1087,8 +1092,8 @@ test.describe("patient portal smoke flows", () => {
       .filter({ hasText: /Termin anfragen|Request a visit/i });
     await expect(requestSheet).toBeVisible();
 
-    await pickerValueInput(requestSheet, /Bevorzugt ab|Preferred from/i).fill("2026-05-10");
-    await pickerValueInput(requestSheet, /Bevorzugt bis|Preferred to/i).fill("2026-05-12");
+    await pickerValueInput(requestSheet, /Bevorzugt ab|Preferred from/i).fill("2031-05-10");
+    await pickerValueInput(requestSheet, /Bevorzugt bis|Preferred to/i).fill("2031-05-12");
     await requestSheet
       .getByLabel(/Fachgebiet oder Thema|Specialty or topic/i)
       .fill("Cardiology follow-up");
@@ -1103,13 +1108,13 @@ test.describe("patient portal smoke flows", () => {
       .fill("Morning slots preferred.");
     await requestSheet
       .getByRole("button", {
-        name: /Terminanfrage senden|Отправить запрос на запись|Send appointment request/i,
+        name: /Terminanfrage senden|Отправить запрос на визит|Send appointment request/i,
       })
       .click();
 
     await expect(
       page.getByText(
-        /Terminanfrage wurde an das Betreuungsteam gesendet|Запрос на запись отправлен команде сопровождения|Appointment request sent to the care team/i,
+        /Terminanfrage wurde an das Betreuungsteam gesendet|Запрос на визит отправлен команде сопровождения|Appointment request sent to the care team/i,
       ),
     ).toBeVisible();
 
@@ -1135,8 +1140,8 @@ test.describe("patient portal smoke flows", () => {
     // One key at a time with pauses: the field's timers run between keys, which
     // used to wipe day and month while the year was typed ("TT.MM.2026").
     for (const [label, digits, shown] of [
-      [/Bevorzugt ab/i, "26102026", "26.10.2026"],
-      [/Bevorzugt bis/i, "30102026", "30.10.2026"],
+      [/Bevorzugt ab/i, "26102031", "26.10.2031"],
+      [/Bevorzugt bis/i, "30102031", "30.10.2031"],
     ] as const) {
       await requestSheet.getByRole("group", { name: label }).getByRole("spinbutton").first().click();
       await page.keyboard.type(digits, { delay: 120 });
@@ -1149,20 +1154,20 @@ test.describe("patient portal smoke flows", () => {
     );
     await requestSheet
       .getByRole("button", {
-        name: /Terminanfrage senden|Отправить запрос на запись|Send appointment request/i,
+        name: /Terminanfrage senden|Отправить запрос на визит|Send appointment request/i,
       })
       .click();
     const payload = JSON.parse((await submitted).postData() ?? "{}") as {
       preferred_date_from?: string;
       preferred_date_to?: string;
     };
-    expect(payload.preferred_date_from).toBe("2026-10-26");
-    expect(payload.preferred_date_to).toBe("2026-10-30");
+    expect(payload.preferred_date_from).toBe("2031-10-26");
+    expect(payload.preferred_date_to).toBe("2031-10-30");
 
     // The history shows the whole preferred range, not only the start.
     const requestCard = page.locator("article").filter({ hasText: "Kontrolle nach dem Eingriff (Tastatur)." });
-    await expect(requestCard).toContainText("26.10.2026");
-    await expect(requestCard).toContainText("30.10.2026");
+    await expect(requestCard).toContainText("26.10.2031");
+    await expect(requestCard).toContainText("30.10.2031");
   });
 
   test("patient can request and cancel an additional service", async ({ page }) => {
@@ -1272,6 +1277,31 @@ test.describe("patient portal smoke flows", () => {
 
     const form = page.locator("form").first();
     await chooseComboboxOption(page, form.getByRole("combobox").first(), /Clinic follow-up/i);
+    // No scale is pre-set (global QA 2026-11-10): without the two mandatory
+    // scores nothing is sent and the form says which ones are missing.
+    const feedbackPosts: Array<Record<string, unknown>> = [];
+    page.on("request", (request) => {
+      if (request.method() === "POST" && request.url().endsWith("/me/feedback")) {
+        feedbackPosts.push(JSON.parse(request.postData() ?? "{}") as Record<string, unknown>);
+      }
+    });
+    await form
+      .getByRole("button", {
+        name: /Feedback senden|Отправить отзыв|Submit feedback/i,
+      })
+      .click();
+    await expect(page.getByText(/Bitte wählen Sie die Gesamtbewertung und die NPS-Bewertung/)).toBeVisible();
+    expect(feedbackPosts).toHaveLength(0);
+    await form.getByRole("button", { name: "Gesamt: 4", exact: true }).click();
+    await form.getByRole("button", { name: "NPS 0–10: 9", exact: true }).click();
+    // A chosen optional score can be taken back by pressing it again.
+    const doctorScore = form.getByRole("button", { name: "Ärzte: 5", exact: true });
+    if (await doctorScore.count()) {
+      await doctorScore.click();
+      await expect(doctorScore).toHaveAttribute("aria-pressed", "true");
+      await doctorScore.click();
+      await expect(doctorScore).toHaveAttribute("aria-pressed", "false");
+    }
     await form
       .getByPlaceholder(/Was ist gut gelaufen\?|What worked well\?/i)
       .fill("The doctor explained the next steps clearly.");
@@ -1291,6 +1321,16 @@ test.describe("patient portal smoke flows", () => {
         /Feedback wurde gesendet\. Vielen Dank\.|Отзыв отправлен\. Спасибо\.|Feedback submitted\. Thank you\./i,
       ),
     ).toBeVisible();
+    // Only the chosen scores are sent; an untouched scale stays empty.
+    expect(feedbackPosts).toHaveLength(1);
+    expect(feedbackPosts[0]).toMatchObject({
+      overall_score: 4,
+      nps_score: 9,
+      doctor_score: null,
+      interpreter_score: null,
+      concierge_score: null,
+      treatment_success: null,
+    });
     await expect(
       page.getByText(/Abgegebene Rückmeldungen|Submitted feedback/i),
     ).toBeVisible();

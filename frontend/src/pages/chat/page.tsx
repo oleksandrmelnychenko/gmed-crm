@@ -1475,8 +1475,9 @@ function useChatPageContent() {
                       {t.chat_server_encryption_label}
                     </span>
                   </p>
+                  {/* The viewer's own connection to the chat, not the other person's presence. */}
                   <p className="truncate text-[10px] text-muted-foreground" aria-live="polite"
-                    title={connectionStatus !== "connected" ? t.chat_connection_polling : undefined}>
+                    title={connectionStatus !== "connected" ? t.chat_connection_polling : t.uiText.chat_connection_own_hint}>
                     {connectionStatus === "connected"
                       ? t.chat_connection_connected
                       : connectionStatus === "reconnecting"

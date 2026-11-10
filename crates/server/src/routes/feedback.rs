@@ -731,12 +731,17 @@ async fn create_feedback_record(
 ) -> Result<axum::response::Response, axum::response::Response> {
     validate_feedback_scores(&body)?;
 
+    // The patient's own survey rates only a visit that took place, and no
+    // interpreter where the visit had none (global QA 2026-11-10). Staff
+    // record what the patient told them; their form offers the same visits.
+    let patient_survey = source == "patient_portal";
     let context = resolve_feedback_context(
         state,
         patient_id,
         body.appointment_id,
         body.provider_id,
         body.doctor_id,
+        patient_survey,
     )
     .await?;
 
@@ -773,6 +778,13 @@ async fn create_feedback_record(
         None
     };
     let submitted_at = Utc::now();
+    // A visit without an interpreter has no interpreter to rate.
+    let interpreter_score =
+        if patient_survey && context.appointment_id.is_some() && context.interpreter_id.is_none() {
+            None
+        } else {
+            body.interpreter_score
+        };
 
     let inserted = sqlx::query(
         r#"INSERT INTO patient_feedback_forms (
@@ -806,7 +818,7 @@ async fn create_feedback_record(
     .bind(source)
     .bind(body.overall_score)
     .bind(body.patient_manager_score)
-    .bind(body.interpreter_score)
+    .bind(interpreter_score)
     .bind(body.concierge_score)
     .bind(body.treatment_score)
     .bind(body.doctor_score)
@@ -939,6 +951,7 @@ async fn resolve_feedback_context(
     appointment_id: Option<Uuid>,
     requested_provider_id: Option<Uuid>,
     requested_doctor_id: Option<Uuid>,
+    require_held_visit: bool,
 ) -> Result<ResolvedFeedbackContext, axum::response::Response> {
     let mut provider_id = requested_provider_id;
     let mut doctor_id = requested_doctor_id;
@@ -946,7 +959,8 @@ async fn resolve_feedback_context(
 
     if let Some(value) = appointment_id {
         let row = sqlx::query(
-            r#"SELECT patient_id, provider_id, doctor_id, interpreter_id
+            r#"SELECT patient_id, provider_id, doctor_id, interpreter_id,
+                      status, date, time_start, time_end
                FROM appointments
                WHERE id = $1"#,
         )
@@ -969,6 +983,26 @@ async fn resolve_feedback_context(
             return Err(err(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "Appointment does not belong to the selected patient",
+            ));
+        }
+
+        // Only a visit that took place is rated: not a cancelled one and not
+        // one still ahead (global QA 2026-11-10).
+        if require_held_visit
+            && !appointment_took_place(
+                &row.try_get::<String, _>("status").unwrap_or_default(),
+                row.try_get::<chrono::NaiveDate, _>("date").ok(),
+                row.try_get::<Option<chrono::NaiveTime>, _>("time_start")
+                    .unwrap_or_default(),
+                row.try_get::<Option<chrono::NaiveTime>, _>("time_end")
+                    .unwrap_or_default(),
+                crate::app_time::local(Utc::now()).naive_local(),
+            )
+        {
+            return Err(coded_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "feedback_visit_not_held",
+                "Only a visit that took place can be rated",
             ));
         }
 
@@ -1606,6 +1640,31 @@ fn validate_optional_score_1_5(
     Ok(())
 }
 
+/// Whether a visit can be rated: it was not cancelled and it is over. A visit
+/// staff marked completed took place; otherwise its end (else its start, else
+/// its day) lies behind `now`, the German wall-clock time.
+fn appointment_took_place(
+    status: &str,
+    date: Option<chrono::NaiveDate>,
+    time_start: Option<chrono::NaiveTime>,
+    time_end: Option<chrono::NaiveTime>,
+    now: chrono::NaiveDateTime,
+) -> bool {
+    if status == "cancelled" {
+        return false;
+    }
+    if status == "completed" {
+        return true;
+    }
+    let Some(date) = date else {
+        return false;
+    };
+    match time_end.or(time_start) {
+        Some(time) => date.and_time(time) <= now,
+        None => date < now.date(),
+    }
+}
+
 fn normalize_optional(value: Option<&str>) -> Option<String> {
     value
         .map(str::trim)
@@ -1662,4 +1721,100 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         })),
     )
         .into_response()
+}
+
+/// A refusal the portal shows in its own language (`lib/care-api-errors.ts`).
+fn coded_err(status: StatusCode, code: &str, message: &str) -> axum::response::Response {
+    (status, Json(json!({ "error": code, "message": message }))).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::appointment_took_place;
+    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+
+    fn at(value: &str) -> NaiveDateTime {
+        NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M").unwrap()
+    }
+
+    fn day(value: &str) -> Option<NaiveDate> {
+        NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()
+    }
+
+    fn time(value: &str) -> Option<NaiveTime> {
+        NaiveTime::parse_from_str(value, "%H:%M").ok()
+    }
+
+    #[test]
+    fn only_a_visit_that_took_place_is_rated() {
+        let now = at("2026-11-10T16:15");
+        // Ended this morning, ended this minute, an earlier day without a time.
+        assert!(appointment_took_place(
+            "confirmed",
+            day("2026-11-10"),
+            time("09:00"),
+            time("10:00"),
+            now
+        ));
+        assert!(appointment_took_place(
+            "planned",
+            day("2026-11-10"),
+            time("15:00"),
+            time("16:15"),
+            now
+        ));
+        assert!(appointment_took_place(
+            "planned",
+            day("2026-11-09"),
+            None,
+            None,
+            now
+        ));
+        // Marked completed by staff.
+        assert!(appointment_took_place(
+            "completed",
+            day("2026-11-10"),
+            None,
+            None,
+            now
+        ));
+        // Still running, later today, today without a time, a future day.
+        assert!(!appointment_took_place(
+            "in_progress",
+            day("2026-11-10"),
+            time("16:00"),
+            time("17:00"),
+            now
+        ));
+        assert!(!appointment_took_place(
+            "confirmed",
+            day("2026-11-10"),
+            time("18:00"),
+            None,
+            now
+        ));
+        assert!(!appointment_took_place(
+            "planned",
+            day("2026-11-10"),
+            None,
+            None,
+            now
+        ));
+        assert!(!appointment_took_place(
+            "confirmed",
+            day("2026-12-08"),
+            time("09:00"),
+            time("10:00"),
+            now
+        ));
+        // A cancelled visit never, whatever its date.
+        assert!(!appointment_took_place(
+            "cancelled",
+            day("2026-11-01"),
+            time("09:00"),
+            time("10:00"),
+            now
+        ));
+        assert!(!appointment_took_place("planned", None, None, None, now));
+    }
 }

@@ -15,6 +15,7 @@ import { financeBalancesRu } from "./catalogs/finance-balances";
 import { gwgTrainingRu } from "./catalogs/gwg-training";
 import { operationsRu } from "./catalogs/operations";
 import { patientsPortalRu } from "./catalogs/patients-portal";
+import { portalQaUiRu } from "./catalogs/portal-qa-ui";
 import { personnelRu } from "./catalogs/personnel";
 import { revenueRu } from "./catalogs/revenue";
 import { sanctionsRu } from "./catalogs/sanctions";
@@ -32,6 +33,7 @@ export const ru = {
     ...legalStatusUiRu,
     ...securityReviewUiRu,
     ...patientRecordUiRu,
+    ...portalQaUiRu,
     ...careUiRu,
     ...ordersRound3UiRu,
   },

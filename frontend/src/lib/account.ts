@@ -103,6 +103,7 @@ export function isPasswordChangeRequiredError(error: unknown): boolean {
 }
 
 export type ProfileFormErrorKey =
+  | "account_profile_error_name_required"
   | "account_profile_error_name"
   | "account_profile_error_phone";
 
@@ -110,7 +111,9 @@ const PHONE_PATTERN = /^[0-9+\s\-()/]+$/;
 
 export function validateProfileForm(input: { name: string; phone: string }): ProfileFormErrorKey | null {
   const name = input.name.trim();
-  if (!name || name.length > PROFILE_NAME_MAX) return "account_profile_error_name";
+  // An empty name is asked for as such, not as "at most 200 characters".
+  if (!name) return "account_profile_error_name_required";
+  if (name.length > PROFILE_NAME_MAX) return "account_profile_error_name";
   const phone = input.phone.trim();
   if (phone && (phone.length > PROFILE_PHONE_MAX || !PHONE_PATTERN.test(phone))) {
     return "account_profile_error_phone";

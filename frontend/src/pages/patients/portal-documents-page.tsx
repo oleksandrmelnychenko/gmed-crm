@@ -42,10 +42,21 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { formatPluralCount, useLang, useLanguageBound } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { localizeRequiredDocumentLabel } from "@/lib/required-document-labels";
-import { missingDocumentHints } from "./model/portal-required-documents";
+import { portalRequiredDocumentProgress } from "./model/portal-required-documents";
+import {
+  PORTAL_TRANSLATION_LANGUAGE_KEYS,
+  PORTAL_TRANSLATION_LANGUAGES,
+  portalTranslationDefaultLanguage,
+} from "./model/portal-translation-languages";
+import {
+  PORTAL_UPLOAD_ACCEPT,
+  PORTAL_UPLOAD_PROBLEM_KEYS,
+  portalUploadProblem,
+} from "./model/portal-upload-types";
 import {
   confirmPortalDocument,
   fetchPortalDocumentsWorkspace,
@@ -198,6 +209,10 @@ function usePatientDocumentsPageContent() {
   } = usePortalLabels();
   const { portalDocumentSourceLabel, portalDocumentValueLabel } = useLanguageHelpers();
   const { lang, t } = useLang();
+  const { user } = useAuth();
+  // A translation is usually wanted into the patient's own language (owner
+  // decision 2026-11-10): the dialog starts with it.
+  const ownTranslationLanguage = portalTranslationDefaultLanguage(user?.preferred_language, lang);
   const uploadFileInputRef = useRef<HTMLInputElement>(null);
   // Every read of the documents workspace takes a number; only the newest
   // answer is shown. A list request that started before an upload and answers
@@ -234,8 +249,8 @@ function usePatientDocumentsPageContent() {
     version,
   } = documentsState;
   const l = useCallback((key: string) => t.uiText[key] ?? key, [t]);
-  const missingHints = missingDocumentHints(
-    (documentAlerts?.missing_documents ?? []).map((item) => item.key),
+  const requiredProgress = portalRequiredDocumentProgress(
+    documentAlerts ?? { required_documents: [], missing_documents: [] },
   );
 
   useRealtimeSubscription(PORTAL_DOCUMENT_REALTIME_EVENTS, () => {
@@ -309,6 +324,13 @@ function usePatientDocumentsPageContent() {
     event.preventDefault();
     if (!uploadFile) {
       dispatchDocumentsState({ uploadError: t.portal_documents_choose_a_file_first });
+      return;
+    }
+    // Documents only: a program, a script or an empty file is not sent at all
+    // (the server refuses them too).
+    const problem = portalUploadProblem(uploadFile);
+    if (problem) {
+      dispatchDocumentsState({ uploadError: l(PORTAL_UPLOAD_PROBLEM_KEYS[problem]) });
       return;
     }
 
@@ -423,7 +445,7 @@ function usePatientDocumentsPageContent() {
   function openTranslationDialog(item: PortalDocumentItem) {
     dispatchDocumentsState({
       translationDocument: item,
-      translationLanguage: "de",
+      translationLanguage: ownTranslationLanguage,
       translationNote: "",
       translationError: "",
     });
@@ -516,54 +538,76 @@ function usePatientDocumentsPageContent() {
           icon={ClipboardCheck} title={t.portal_documents_required_documents}
           className="p-3 sm:p-3"
           accessory={
-            <CountBadge>
-              {t.portal_documents_fulfilled}: {documentAlerts.required_documents.filter((item) => item.fulfilled).length}/
-              {documentAlerts.configured_rule_count}
-            </CountBadge>
+            // Only what the patient uploads is counted; a consent GMED sends
+            // for signing is named apart (global QA 2026-11-10).
+            requiredProgress.ownTotal > 0 ? (
+              <CountBadge>
+                {t.portal_documents_fulfilled}: {requiredProgress.ownFulfilled}/{requiredProgress.ownTotal}
+              </CountBadge>
+            ) : undefined
           }
         >
-          {documentAlerts.document_pack_complete ? (
+          {documentAlerts.document_pack_complete || documentAlerts.missing_documents.length === 0 ? (
             <PortalComplete>{t.portal_documents_your_minimum_document_pack_is_complete}</PortalComplete>
+          ) : requiredProgress.ownMissing.length === 0 ? (
+            <div className="space-y-2" data-testid="portal-documents-consents-pending">
+              <PortalComplete>{l("portal_documents_own_complete_consents_pending")}</PortalComplete>
+              <p className="text-sm text-muted-foreground" data-testid="portal-documents-consent-hint">
+                {l("portal_documents_consent_sent_by_gmed")}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                {requiredProgress.consentsMissing.map((item) => (
+                  <StatusBadge key={item.key} tone="neutral">
+                    {localizeRequiredDocumentLabel(item.key, item.label, l)}
+                  </StatusBadge>
+                ))}
+              </div>
+            </div>
           ) : (
             <Banner tone="warning" withIcon>
               <div className="space-y-3">
                 <div>
                   <p className="font-semibold">
-                    {formatPluralCount(lang, documentAlerts.missing_count, {
+                    {formatPluralCount(lang, requiredProgress.ownMissing.length, {
                       one: t.portal_documents_missing_required_document_one,
                       few: t.portal_documents_missing_required_document_many,
                       many: t.portal_documents_missing_required_document_many,
                     })}
                   </p>
-                  {missingHints.upload || !missingHints.consent ? (
-                    <p className="mt-1 text-sm">
-                      {t.portal_documents_use_the_upload_form_below_to_send_the_missing_items_to_your_care}
-                    </p>
-                  ) : null}
-                  {missingHints.consent ? (
-                    // A consent is signed, not uploaded: GMED sends it.
-                    <p className="mt-1 text-sm" data-testid="portal-documents-consent-hint">
-                      {l("portal_documents_consent_sent_by_gmed")}
-                    </p>
+                  <p className="mt-1 text-sm">
+                    {t.portal_documents_use_the_upload_form_below_to_send_the_missing_items_to_your_care}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {requiredProgress.ownMissing.map((item) => (
+                    <StatusBadge key={item.key} tone="warning">
+                      {localizeRequiredDocumentLabel(item.key, item.label, l)}
+                    </StatusBadge>
+                  ))}
+                  {requiredProgress.ownMissing.some((item) => isIdentityRuleKey(item.key)) ? (
+                    <Button
+                      type="button"
+                      className="h-8 rounded-lg"
+                      onClick={startIdentityUpload}
+                    >
+                      <IdCard className="size-4" />
+                      {t.portal_documents_upload_identity_document}
+                    </Button>
                   ) : null}
                 </div>
-                {documentAlerts.missing_count > 0 ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    {documentAlerts.missing_documents.map((item) => (
-                      <StatusBadge key={item.key} tone="warning">
-                        {localizeRequiredDocumentLabel(item.key, item.label, l)}
-                      </StatusBadge>
-                    ))}
-                    {documentAlerts.missing_documents.some((item) => isIdentityRuleKey(item.key)) ? (
-                      <Button
-                        type="button"
-                        className="h-8 rounded-lg"
-                        onClick={startIdentityUpload}
-                      >
-                        <IdCard className="size-4" />
-                        {t.portal_documents_upload_identity_document}
-                      </Button>
-                    ) : null}
+                {requiredProgress.consentsMissing.length > 0 ? (
+                  // A consent is signed, not uploaded: GMED sends it.
+                  <div className="space-y-1.5">
+                    <p className="text-sm" data-testid="portal-documents-consent-hint">
+                      {l("portal_documents_consent_sent_by_gmed")}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {requiredProgress.consentsMissing.map((item) => (
+                        <StatusBadge key={item.key} tone="neutral">
+                          {localizeRequiredDocumentLabel(item.key, item.label, l)}
+                        </StatusBadge>
+                      ))}
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -766,8 +810,21 @@ function usePatientDocumentsPageContent() {
                   ref={uploadFileInputRef}
                   id="portal-document-upload-file"
                   selected={uploadFile}
-                  onChange={(event) => dispatchDocumentsState({ uploadFile: event.target.files?.[0] ?? null })}
+                  accept={PORTAL_UPLOAD_ACCEPT}
+                  onChange={(event) => {
+                    // A chosen file answers "choose a file first"; a file that
+                    // cannot be sent is named at once, not after "Send".
+                    const file = event.target.files?.[0] ?? null;
+                    const problem = file ? portalUploadProblem(file) : null;
+                    dispatchDocumentsState({
+                      uploadFile: file,
+                      uploadError: problem ? l(PORTAL_UPLOAD_PROBLEM_KEYS[problem]) : "",
+                    });
+                  }}
                 />
+                <span className="font-sans text-xs font-normal text-muted-foreground">
+                  {l("portal_upload_types_hint")}
+                </span>
               </Field>
               <Field label={t.portal_documents_note} htmlFor="portal-document-upload-note">
                 <textarea
@@ -874,7 +931,11 @@ function usePatientDocumentsPageContent() {
                 onChange={(event) => dispatchDocumentsState({ translationLanguage: event.target.value })}
                 className={selectClass}
               >
-                <option value="de">{t.portal_documents_german}</option>
+                {PORTAL_TRANSLATION_LANGUAGES.map((language) => (
+                  <option key={language} value={language}>
+                    {l(PORTAL_TRANSLATION_LANGUAGE_KEYS[language])}
+                  </option>
+                ))}
               </NativeComboboxSelect>
             </Field>
             <Field label={t.portal_documents_note} htmlFor="portal-translation-note">

@@ -101,6 +101,57 @@ struct RecommendationDecisionRequest {
 #[derive(Deserialize, Default)]
 struct RecommendationAppointmentRequest {
     note: Option<String>,
+    /// The cabinet's language (`ru`, `de`): the request text the patient
+    /// re-reads in the portal is written in it. German without it.
+    language: Option<String>,
+}
+
+/// The recommendation type as the portal names it, for the «specialty or
+/// topic» of the visit request made from a recommendation.
+fn recommendation_type_label(kind: &str, russian: bool) -> &'static str {
+    match (kind, russian) {
+        ("consultation", true) => "Консультация",
+        ("consultation", false) => "Konsultation",
+        ("lab_test", true) => "Лабораторный анализ",
+        ("lab_test", false) => "Laboranalyse",
+        ("imaging", true) => "Визуализация",
+        ("imaging", false) => "Bildgebung",
+        ("document", true) => "Документ",
+        ("document", false) => "Dokument",
+        ("medication_review", true) => "Проверка назначений",
+        ("medication_review", false) => "Medikationsprüfung",
+        ("other", true) => "Другое",
+        ("other", false) => "Sonstiges",
+        (_, true) => "Контрольный визит",
+        (_, false) => "Kontrolltermin",
+    }
+}
+
+/// Reason, notes and topic of the visit request made from a recommendation,
+/// in the cabinet's language (global QA 2026-11-10: a Russian cabinet showed
+/// «Empfehlung: …» and the topic «follow up»).
+fn recommendation_request_texts(
+    title: &str,
+    recommendation_type: &str,
+    note: Option<&str>,
+    russian: bool,
+) -> (String, String, &'static str) {
+    let reason = if russian {
+        format!("Рекомендация: {title}")
+    } else {
+        format!("Empfehlung: {title}")
+    };
+    let notes = match (note, russian) {
+        (Some(value), true) => format!("Примечание: {value}"),
+        (Some(value), false) => format!("Anmerkung: {value}"),
+        (None, true) => "Создано из рекомендации в портале пациента.".to_string(),
+        (None, false) => "Aus einer Empfehlung im Patientenportal erstellt.".to_string(),
+    };
+    (
+        reason,
+        notes,
+        recommendation_type_label(recommendation_type, russian),
+    )
 }
 
 async fn list_patient_recommendations(
@@ -885,12 +936,14 @@ async fn create_my_recommendation_appointment_request(
         .try_get::<Option<Uuid>, _>("source_order_id")
         .unwrap_or_default();
     let note = normalize_optional_text(body.note.as_deref());
-    // The patient reads these in the portal (QA 2026-11-01, Y3 BUG-6).
-    let request_reason = format!("Empfehlung: {title}");
-    let request_notes = note
+    // The patient reads these in the portal (QA 2026-11-01, Y3 BUG-6), so they
+    // follow the cabinet's language.
+    let russian = body
+        .language
         .as_deref()
-        .map(|value| format!("Anmerkung: {value}"))
-        .unwrap_or_else(|| "Aus einer Empfehlung im Patientenportal erstellt.".to_string());
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("ru"));
+    let (request_reason, request_notes, request_topic) =
+        recommendation_request_texts(&title, &recommendation_type, note.as_deref(), russian);
 
     let request_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO patient_appointment_requests (
@@ -907,7 +960,7 @@ async fn create_my_recommendation_appointment_request(
     .bind(auth.user_id)
     .bind(source_order_id)
     .bind(source_doctor_id)
-    .bind(recommendation_type.replace('_', " "))
+    .bind(request_topic)
     .bind(&request_reason)
     .bind(&request_notes)
     .fetch_one(&state.db)
@@ -1813,6 +1866,36 @@ pub fn spawn_recommendation_reminder_scheduler(state: AppState) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod request_text_tests {
+    use super::recommendation_request_texts;
+
+    #[test]
+    fn the_visit_request_of_a_recommendation_follows_the_cabinet_language() {
+        assert_eq!(
+            recommendation_request_texts("Контрольная ЭКГ", "follow_up", None, true),
+            (
+                "Рекомендация: Контрольная ЭКГ".to_string(),
+                "Создано из рекомендации в портале пациента.".to_string(),
+                "Контрольный визит",
+            )
+        );
+        assert_eq!(
+            recommendation_request_texts("Labor", "lab_test", Some("nüchtern"), false),
+            (
+                "Empfehlung: Labor".to_string(),
+                "Anmerkung: nüchtern".to_string(),
+                "Laboranalyse",
+            )
+        );
+        // An unknown type reads as a follow-up visit, never as a raw code.
+        assert_eq!(
+            recommendation_request_texts("X", "something_new", None, false).2,
+            "Kontrolltermin"
+        );
+    }
 }
 
 #[cfg(test)]

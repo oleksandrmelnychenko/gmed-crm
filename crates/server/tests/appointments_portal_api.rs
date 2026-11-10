@@ -190,8 +190,8 @@ async fn patient_can_create_appointment_request_and_pm_can_review_queue() {
         &patient_bearer,
         Some(json!({
             "appointment_type": "medical",
-            "preferred_date_from": "2026-05-10",
-            "preferred_date_to": "2026-05-12",
+            "preferred_date_from": "2099-05-10",
+            "preferred_date_to": "2099-05-12",
             "preferred_time_of_day": "morning",
             "specialty": "Cardiology",
             "reason": "Need follow-up diagnostics"
@@ -260,7 +260,7 @@ async fn patient_can_create_appointment_request_and_pm_can_review_queue() {
         &patient_bearer,
         Some(json!({
             "appointment_type": "medical",
-            "preferred_date_from": "2026-05-20",
+            "preferred_date_from": "2099-05-20",
             "reason": "Second request"
         })),
     )
@@ -291,6 +291,62 @@ async fn patient_can_create_appointment_request_and_pm_can_review_queue() {
     .await
     .unwrap();
     assert_eq!(patient_notifications, 1);
+}
+
+/// Global QA 2026-11-10: a request for 01.01.2020 was accepted, and an end
+/// before the start came back as an English sentence. Both are refused with a
+/// code the portal translates.
+#[tokio::test]
+async fn appointment_request_refuses_past_and_inverted_dates() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("portal-request-dates");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+
+    for (from, to, code) in [
+        (
+            Some("2020-01-01"),
+            Some("2020-01-02"),
+            "appointment_request_date_in_past",
+        ),
+        (Some("2020-01-01"), None, "appointment_request_date_in_past"),
+        (None, Some("2020-01-02"), "appointment_request_date_in_past"),
+        (
+            Some("2099-05-12"),
+            Some("2099-05-10"),
+            "appointment_request_dates_inverted",
+        ),
+    ] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            "/api/v1/me/appointment-requests",
+            &patient_bearer,
+            Some(json!({
+                "appointment_type": "medical",
+                "preferred_date_from": from,
+                "preferred_date_to": to,
+                "reason": "Synthetic request"
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["error"], code, "{from:?} – {to:?}");
+    }
+
+    let stored: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM patient_appointment_requests WHERE patient_id = $1",
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, 0);
 }
 
 #[tokio::test]
@@ -545,7 +601,7 @@ async fn approved_request_can_be_converted_and_patient_sees_schedule() {
             "appointment_type": "medical",
             "care_path_kind": "control",
             "order_id": order_id,
-            "preferred_date_from": "2026-05-20",
+            "preferred_date_from": "2099-05-20",
             "preferred_time_of_day": "afternoon",
             "reason": "Need specialist consultation"
         })),
@@ -776,8 +832,8 @@ async fn rejected_request_stays_in_patient_history_and_never_creates_appointment
         &patient_bearer,
         Some(json!({
             "appointment_type": "medical",
-            "preferred_date_from": "2026-06-03",
-            "preferred_date_to": "2026-06-05",
+            "preferred_date_from": "2099-06-03",
+            "preferred_date_to": "2099-06-05",
             "preferred_time_of_day": "morning",
             "specialty": "Neurology",
             "reason": "Need a specialist but dates are flexible"

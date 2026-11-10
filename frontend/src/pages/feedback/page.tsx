@@ -58,6 +58,7 @@ import {
   toneForStatus,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
+import { berlinNowNaive } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import {
   formatEnumLabelFromKeys,
@@ -90,10 +91,13 @@ import {
   blankFeedbackForm,
   canReviewStaffFeedback,
   canViewStaffFeedback,
+  feedbackScoresPayload,
   formatFeedbackCount,
   formatFeedbackDecimal,
   formatFeedbackPercent,
   formatRatingCount,
+  isRateableVisit,
+  missingRequiredFeedbackScore,
   npsOptions,
   patientLabel,
   roleCanCaptureFeedback,
@@ -395,19 +399,26 @@ function appointmentOptionLabel(item: PatientAppointmentOption) {
     .join(" - ");
 }
 
+/** The select value of a scale nobody rated (the select needs a non-empty value). */
+const SCORE_NOT_RATED = "__none__";
+
 function scoreField(
   label: string,
   value: string,
   onChange: (value: string) => void,
   options: string[],
+  notRatedLabel: string,
 ) {
   return (
     <Field label={label}>
       <NativeComboboxSelect
-        value={value}
-        onChange={(event) => onChange(event.target.value || value)}
+        value={value || SCORE_NOT_RATED}
+        onChange={(event) =>
+          onChange(!event.target.value || event.target.value === SCORE_NOT_RATED ? "" : event.target.value)
+        }
         className={selectClassName}
       >
+        <option value={SCORE_NOT_RATED}>{notRatedLabel}</option>
         {options.map((option) => (
           <option key={option} value={option}>
             {option}
@@ -427,80 +438,102 @@ function ScoreGrid({
   form: FeedbackFormState;
   setForm: SetFeedbackForm;
 }) {
+  // Nothing is pre-set: staff record what the patient said, an unasked scale
+  // stays "not rated". The overall score and NPS are mandatory.
+  const notRated = t.feedback_not_rated;
+  const required = (label: string) => `${label} *`;
   return (
     <div className="grid gap-3 md:grid-cols-2">
       {scoreField(
-        t.feedback_overall,
+        required(t.feedback_overall),
         form.overallScore,
         (value) => setForm((current) => ({ ...current, overallScore: value })),
         scoreOptions,
+        notRated,
       )}
       {scoreField(
-        `${t.uiText.feedback_nps_label} 0-10`,
+        required(`${t.uiText.feedback_nps_label} 0-10`),
         form.npsScore,
         (value) => setForm((current) => ({ ...current, npsScore: value })),
         npsOptions,
+        notRated,
       )}
       {scoreField(
         t.feedback_patient_manager,
         form.patientManagerScore,
         (value) => setForm((current) => ({ ...current, patientManagerScore: value })),
         scoreOptions,
+        notRated,
       )}
       {scoreField(
         t.feedback_interpreter,
         form.interpreterScore,
         (value) => setForm((current) => ({ ...current, interpreterScore: value })),
         scoreOptions,
+        notRated,
       )}
-      {scoreField(t.feedback_concierge, form.conciergeScore, (value) => setForm((current) => ({ ...current, conciergeScore: value })), scoreOptions)}
+      {scoreField(
+        t.feedback_concierge,
+        form.conciergeScore,
+        (value) => setForm((current) => ({ ...current, conciergeScore: value })),
+        scoreOptions,
+        notRated,
+      )}
       {scoreField(
         t.feedback_treatment_quality,
         form.treatmentScore,
         (value) => setForm((current) => ({ ...current, treatmentScore: value })),
         scoreOptions,
+        notRated,
       )}
       {scoreField(
         t.feedback_doctors,
         form.doctorScore,
         (value) => setForm((current) => ({ ...current, doctorScore: value })),
         scoreOptions,
+        notRated,
       )}
       {scoreField(
         t.feedback_organization,
         form.organizationScore,
         (value) => setForm((current) => ({ ...current, organizationScore: value })),
         scoreOptions,
+        notRated,
       )}
       {scoreField(
         t.feedback_service_quality,
         form.serviceScore,
         (value) => setForm((current) => ({ ...current, serviceScore: value })),
         scoreOptions,
+        notRated,
       )}
       {scoreField(
         t.feedback_infrastructure_ambience,
         form.infrastructureScore,
         (value) => setForm((current) => ({ ...current, infrastructureScore: value })),
         scoreOptions,
+        notRated,
       )}
       {scoreField(
         t.feedback_price_value,
         form.priceValueScore,
         (value) => setForm((current) => ({ ...current, priceValueScore: value })),
         scoreOptions,
+        notRated,
       )}
       <Field label={t.feedback_treatment_success}>
         <NativeComboboxSelect
-          value={form.treatmentSuccess}
+          value={form.treatmentSuccess || SCORE_NOT_RATED}
           onChange={(event) =>
             setForm((current) => ({
               ...current,
-              treatmentSuccess: event.target.value || current.treatmentSuccess,
+              treatmentSuccess:
+                !event.target.value || event.target.value === SCORE_NOT_RATED ? "" : event.target.value,
             }))
           }
           className={selectClassName}
         >
+          <option value={SCORE_NOT_RATED}>{notRated}</option>
           <option value="yes">{t.feedback_treatment_success_yes}</option>
           <option value="partial">{t.feedback_treatment_success_partial}</option>
           <option value="no">{t.feedback_treatment_success_no}</option>
@@ -521,17 +554,26 @@ function ScoreGrid({
   );
 }
 
+/**
+ * A scale of the patient's survey. Nothing is chosen until the patient
+ * presses a score; pressing the chosen score again clears it.
+ */
 function PatientRatingScale({
   label,
   value,
   options,
   onChange,
+  notChosenLabel,
+  requiredLabel,
   prominent = false,
 }: {
   label: string;
   value: string;
   options: string[];
   onChange: (value: string) => void;
+  notChosenLabel: string;
+  /** Set for a scale the survey cannot be sent without. */
+  requiredLabel?: string;
   prominent?: boolean;
 }) {
   const isNpsScale = options.length > 5;
@@ -541,9 +583,19 @@ function PatientRatingScale({
       className="portal-rating-scale min-w-0 py-2"
     >
       <div className="mb-2 flex items-center justify-between gap-3">
-        <span className={cn("text-sm text-foreground", prominent ? "font-semibold" : "font-medium")}>{prominent ? titleWithDot(label, isNpsScale ? BarChart3 : Star) : label}</span>
-        <span className="text-sm font-semibold tabular-nums text-foreground">
-          {value}
+        <span className={cn("text-sm text-foreground", prominent ? "font-semibold" : "font-medium")}>
+          {prominent ? titleWithDot(label, isNpsScale ? BarChart3 : Star) : label}
+          {requiredLabel ? (
+            <span className="text-destructive" title={requiredLabel} aria-label={requiredLabel}> *</span>
+          ) : null}
+        </span>
+        <span
+          className={cn(
+            "text-sm tabular-nums",
+            value ? "font-semibold text-foreground" : "text-muted-foreground",
+          )}
+        >
+          {value || notChosenLabel}
         </span>
       </div>
       <div
@@ -566,7 +618,7 @@ function PatientRatingScale({
                   ? "border-primary bg-primary text-primary-foreground"
                   : "border-border bg-card text-foreground hover:border-ring hover:bg-muted",
               )}
-              onClick={() => onChange(option)}
+              onClick={() => onChange(selected ? "" : option)}
             >
               {option}
             </button>
@@ -581,22 +633,29 @@ function PatientScoreGrid({
   t,
   form,
   setForm,
+  withInterpreter,
 }: {
   t: Translations;
   form: FeedbackFormState;
   setForm: SetFeedbackForm;
+  /** False for a visit without an interpreter: there is nobody to rate. */
+  withInterpreter: boolean;
 }) {
-  const detailedScores = [
-    [t.feedback_patient_manager, "patientManagerScore"],
-    [t.feedback_interpreter, "interpreterScore"],
-    [t.feedback_concierge, "conciergeScore"],
-    [t.feedback_treatment_quality, "treatmentScore"],
-    [t.feedback_doctors, "doctorScore"],
-    [t.feedback_organization, "organizationScore"],
-    [t.feedback_service_quality, "serviceScore"],
-    [t.feedback_infrastructure_ambience, "infrastructureScore"],
-    [t.feedback_price_value, "priceValueScore"],
-  ] as const;
+  const notChosen = t.uiText.feedback_score_not_chosen;
+  const requiredLabel = t.uiText.feedback_required_scale;
+  const detailedScores = (
+    [
+      [t.feedback_patient_manager, "patientManagerScore"],
+      [t.feedback_interpreter, "interpreterScore"],
+      [t.feedback_concierge, "conciergeScore"],
+      [t.feedback_treatment_quality, "treatmentScore"],
+      [t.feedback_doctors, "doctorScore"],
+      [t.feedback_organization, "organizationScore"],
+      [t.feedback_service_quality, "serviceScore"],
+      [t.feedback_infrastructure_ambience, "infrastructureScore"],
+      [t.feedback_price_value, "priceValueScore"],
+    ] as const
+  ).filter(([, field]) => withInterpreter || field !== "interpreterScore");
 
   return (
     <div className="space-y-3">
@@ -606,6 +665,8 @@ function PatientScoreGrid({
           label={t.feedback_overall}
           value={form.overallScore}
           options={scoreOptions}
+          notChosenLabel={notChosen}
+          requiredLabel={requiredLabel}
           onChange={(value) =>
             setForm((current) => ({ ...current, overallScore: value }))
           }
@@ -615,6 +676,8 @@ function PatientScoreGrid({
           label={`${t.uiText.feedback_nps_label} 0–10`}
           value={form.npsScore}
           options={npsOptions}
+          notChosenLabel={notChosen}
+          requiredLabel={requiredLabel}
           onChange={(value) =>
             setForm((current) => ({ ...current, npsScore: value }))
           }
@@ -622,9 +685,10 @@ function PatientScoreGrid({
       </div>
 
       <section className="portal-detailed-ratings rounded-xl border border-border/70 bg-card p-3">
-        <h3 className="mb-3 text-sm font-semibold text-foreground">
+        <h3 className="mb-1 text-sm font-semibold text-foreground">
           {titleWithDot(t.feedback_scores, Star)}
         </h3>
+        <p className="mb-3 text-xs text-muted-foreground">{t.uiText.feedback_optional_scores_hint}</p>
         <div className="grid gap-3 lg:grid-cols-2">
           {detailedScores.map(([label, field]) => (
             <PatientRatingScale
@@ -632,6 +696,7 @@ function PatientScoreGrid({
               label={label}
               value={form[field]}
               options={scoreOptions}
+              notChosenLabel={notChosen}
               onChange={(value) =>
                 setForm((current) => ({ ...current, [field]: value }))
               }
@@ -661,7 +726,8 @@ function PatientScoreGrid({
               onClick={() =>
                 setForm((current) => ({
                   ...current,
-                  treatmentSuccess: option,
+                  // Pressing the chosen answer again leaves the question open.
+                  treatmentSuccess: current.treatmentSuccess === option ? "" : option,
                 }))
               }
             >
@@ -847,6 +913,8 @@ type PatientFeedbackContentProps = {
   refreshing: boolean;
   submitting: boolean;
   submitDisabled: boolean;
+  /** The chosen visit had an interpreter (always true for a general feedback). */
+  withInterpreter: boolean;
   t: ReturnType<typeof useLang>["t"];
   setActiveFeedbackId: Dispatch<SetStateAction<string>>;
   setForm: SetFeedbackForm;
@@ -867,6 +935,7 @@ function PatientFeedbackContent({
   refreshing,
   submitting,
   submitDisabled,
+  withInterpreter,
   t,
   setActiveFeedbackId,
   setForm,
@@ -928,9 +997,10 @@ function PatientFeedbackContent({
                   ))}
                 </NativeComboboxSelect>
               </Field>
+              <p className="mt-1.5 text-xs text-muted-foreground">{t.uiText.feedback_rateable_visits_hint}</p>
             </div>
 
-            <PatientScoreGrid t={t} form={form} setForm={setForm} />
+            <PatientScoreGrid t={t} form={form} setForm={setForm} withInterpreter={withInterpreter} />
 
             <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3">
               <FeedbackFormNotes t={t} form={form} setForm={setForm} />
@@ -1123,10 +1193,23 @@ function PatientFeedbackWorkspace() {
     [feedback],
   );
 
-  const availableAppointments = useMemo(
-    () => appointments.filter((item) => !ratedAppointmentIds.has(item.id)),
-    [appointments, ratedAppointmentIds],
+  // Only visits that took place and are not rated yet: a cancelled visit or
+  // one still ahead cannot be rated (global QA 2026-11-10; the server refuses
+  // them too).
+  const availableAppointments = useMemo(() => {
+    const now = berlinNowNaive();
+    return appointments.filter(
+      (item) => !ratedAppointmentIds.has(item.id) && isRateableVisit(item, now),
+    );
+  }, [appointments, ratedAppointmentIds]);
+
+  // A visit without an interpreter has nobody to rate; a general feedback and
+  // a visit of an older server answer (no flag) keep the scale.
+  const selectedAppointment = useMemo(
+    () => availableAppointments.find((item) => item.id === form.appointmentId) ?? null,
+    [availableAppointments, form.appointmentId],
   );
+  const withInterpreter = selectedAppointment?.has_interpreter !== false;
 
   const averageOverall = useMemo(() => {
     if (feedback.length === 0) return null;
@@ -1196,6 +1279,11 @@ function PatientFeedbackWorkspace() {
     // The blank form is valid: an untouched one after a success, or a second
     // click before the next render, would send the feedback twice (QA 2026-11-01).
     if (submitInFlight.current || form === sentForm) return;
+    // Nothing is pre-set, so the two mandatory scales are asked for by name.
+    if (missingRequiredFeedbackScore(form)) {
+      dispatchPatientState({ error: t.uiText.feedback_required_scores_missing, notice: "" });
+      return;
+    }
     submitInFlight.current = true;
     dispatchPatientState({
       submitting: true,
@@ -1206,19 +1294,8 @@ function PatientFeedbackWorkspace() {
     try {
       await submitPatientFeedback({
         appointment_id: form.appointmentId || null,
-        overall_score: Number(form.overallScore),
-        patient_manager_score: Number(form.patientManagerScore),
-        interpreter_score: Number(form.interpreterScore),
-        concierge_score: Number(form.conciergeScore),
-        treatment_score: Number(form.treatmentScore),
-        doctor_score: Number(form.doctorScore),
-        organization_score: Number(form.organizationScore),
-        service_score: Number(form.serviceScore),
-        infrastructure_score: Number(form.infrastructureScore),
-        price_value_score: Number(form.priceValueScore),
-        treatment_success: form.treatmentSuccess || null,
+        ...feedbackScoresPayload(form, { withInterpreter }),
         complication_reported: form.complicationReported,
-        nps_score: Number(form.npsScore),
         comments: form.comments.trim() || null,
         improvement_notes: form.improvementNotes.trim() || null,
       });
@@ -1270,6 +1347,7 @@ function PatientFeedbackWorkspace() {
       setVersion={setVersion}
       onSubmit={handleSubmit}
       submitDisabled={form === sentForm}
+      withInterpreter={withInterpreter}
     />
   );
 }
@@ -1748,6 +1826,10 @@ function useStaffFeedbackWorkspaceContent() {
       dispatchStaffState({ error: t.feedback_select_patient_error });
       return;
     }
+    if (missingRequiredFeedbackScore(form)) {
+      dispatchStaffState({ error: t.uiText.feedback_required_scores_missing, notice: "" });
+      return;
+    }
 
     dispatchStaffState({
       submitting: true,
@@ -1759,19 +1841,9 @@ function useStaffFeedbackWorkspaceContent() {
       await captureStaffFeedback({
         patient_id: selectedPatientId,
         appointment_id: form.appointmentId || null,
-        overall_score: Number(form.overallScore),
-        patient_manager_score: Number(form.patientManagerScore),
-        interpreter_score: Number(form.interpreterScore),
-        concierge_score: Number(form.conciergeScore),
-        treatment_score: Number(form.treatmentScore),
-        doctor_score: Number(form.doctorScore),
-        organization_score: Number(form.organizationScore),
-        service_score: Number(form.serviceScore),
-        infrastructure_score: Number(form.infrastructureScore),
-        price_value_score: Number(form.priceValueScore),
-        treatment_success: form.treatmentSuccess || null,
+        // The server drops the interpreter score of a visit without one.
+        ...feedbackScoresPayload(form, { withInterpreter: true }),
         complication_reported: form.complicationReported,
-        nps_score: Number(form.npsScore),
         comments: form.comments.trim() || null,
         improvement_notes: form.improvementNotes.trim() || null,
         internal_note: form.internalNote.trim() || null,
@@ -1848,6 +1920,9 @@ function useStaffFeedbackWorkspaceContent() {
 
   const capturePatientError =
     captureOpen && error === feedbackSelectPatientError ? error : "";
+  // Staff record feedback for a visit that took place, like the patient does.
+  const captureNow = berlinNowNaive();
+  const rateableAppointments = patientAppointments.filter((item) => isRateableVisit(item, captureNow));
 
   return (
     <div className="space-y-3">
@@ -2101,7 +2176,7 @@ function useStaffFeedbackWorkspaceContent() {
                         <option value="__general__">
                           {t.feedback_general_feedback}
                         </option>
-                        {patientAppointments.map((item) => (
+                        {rateableAppointments.map((item) => (
                           <option key={item.id} value={item.id}>
                             {appointmentOptionLabel(item)}
                           </option>
@@ -2110,6 +2185,9 @@ function useStaffFeedbackWorkspaceContent() {
                     </Field>
                   </div>
                 </FormSection>
+
+                {/* The page banner lies behind the sheet on a narrow screen. */}
+                {error && !capturePatientError ? <Banner tone="error">{error}</Banner> : null}
 
                 <FormSection title={t.feedback_scores}>
                   <ScoreGrid t={t} form={form} setForm={setForm} />

@@ -53,4 +53,25 @@ describe("portal appointment visibility", () => {
       ),
     ).toBe(false);
   });
+
+  it("drops a visit of today once it is over (global QA 2026-11-10)", () => {
+    // 09:00–10:00: ahead in the morning, over in the afternoon.
+    expect(isUpcomingPortalAppointment(appointment, "2026-07-17T08:30:00")).toBe(true);
+    expect(isUpcomingPortalAppointment(appointment, "2026-07-17T09:30:00")).toBe(true);
+    expect(isUpcomingPortalAppointment(appointment, "2026-07-17T10:00:00")).toBe(false);
+    expect(isUpcomingPortalAppointment(appointment, "2026-07-17T16:15:00")).toBe(false);
+    // Without an end the start decides; without any time the day counts.
+    expect(
+      isUpcomingPortalAppointment({ ...appointment, time_end: null }, "2026-07-17T09:01:00"),
+    ).toBe(false);
+    expect(
+      isUpcomingPortalAppointment({ ...appointment, time_start: null, time_end: null }, "2026-07-17T23:00:00"),
+    ).toBe(true);
+    // A running visit stays; other days follow the date alone.
+    expect(
+      isUpcomingPortalAppointment({ ...appointment, status: "in_progress" }, "2026-07-17T16:15:00"),
+    ).toBe(true);
+    expect(isUpcomingPortalAppointment(appointment, "2026-07-16T23:59:00")).toBe(true);
+    expect(isUpcomingPortalAppointment(appointment, "2026-07-18T00:01:00")).toBe(false);
+  });
 });

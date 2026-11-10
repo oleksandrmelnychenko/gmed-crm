@@ -36,6 +36,16 @@ const SUBSCRIPTION_REALTIME_EVENTS = [
   "invoice.prepayment_released",
 ] as const;
 
+// «1 активные» (global QA 2026-11-10): the word follows the count.
+const COUNTED_ACTIVE: PluralWords = { ru: ["активная", "активные", "активных"], de: ["aktiv", "aktiv"] };
+
+/** The state of one subscription; the section titles («Активные») are plural. */
+const LIFECYCLE_BADGE: Record<PortalSubscriptionItem["lifecycle"], { ru: string; de: string }> = {
+  active: { ru: "Активна", de: "Aktiv" },
+  upcoming: { ru: "Предстоит", de: "Bevorstehend" },
+  completed: { ru: "Завершена", de: "Abgeschlossen" },
+};
+
 function financialTone(status: PortalSubscriptionFinancial["status"]): StatusTone {
   if (status === "paid") return "success";
   if (status === "overdue") return "error";
@@ -61,7 +71,7 @@ function quantity(value: string) {
 }
 
 export function PatientSubscriptionsPage() {
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const { staffGo } = useStaffNavigate();
   const [subscriptions, setSubscriptions] = useState<PortalSubscriptionItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -179,7 +189,11 @@ export function PatientSubscriptionsPage() {
         </Section>
       ) : <>
         <section className="grid gap-3 md:grid-cols-3">
-          <StatCard label={t.portal_subscriptions_total} value={String(subscriptions.length)} />
+          <StatCard
+            label={t.portal_subscriptions_total}
+            value={String(subscriptions.length)}
+            description={`${grouped.active.length} ${pluralWord(lang, grouped.active.length, COUNTED_ACTIVE)}`}
+          />
           <StatCard label={t.portal_subscriptions_included_services} value={String(serviceCount)} />
           <StatCard label={t.portal_subscriptions_payment_attention} value={String(paymentAttentionCount)} />
         </section>
@@ -201,7 +215,7 @@ export function PatientSubscriptionsPage() {
 
 function SubscriptionCard({ subscription }: { subscription: PortalSubscriptionItem }) {
   const { formatPortalCurrency, formatPortalDate, portalStatusLabel } = usePortalLabels();
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const period = subscription.starts_on
     ? `${t.portal_subscriptions_from} ${formatPortalDate(subscription.starts_on)} · ${
         subscription.ends_on
@@ -218,11 +232,7 @@ function SubscriptionCard({ subscription }: { subscription: PortalSubscriptionIt
     paid: t.portal_subscriptions_financial_paid,
     overdue: t.portal_subscriptions_financial_overdue,
   }[subscription.financial.status];
-  const lifecycleLabel = {
-    active: t.portal_subscriptions_active,
-    upcoming: t.portal_subscriptions_upcoming,
-    completed: t.portal_subscriptions_completed,
-  }[subscription.lifecycle];
+  const lifecycleLabel = LIFECYCLE_BADGE[subscription.lifecycle][lang === "de" ? "de" : "ru"];
   const balanceValue =
     subscription.financial.balance_disclosure === "visible"
       ? formatPortalCurrency(subscription.financial.balance_due)
@@ -387,7 +397,7 @@ function UsageMetric({ label, value }: { label: string; value: string }) {
 // «1 поездок» (QA 2026-11-01, X3 NEW-6): the word follows the count.
 const COUNTED_TRIPS: PluralWords = { ru: ["поездка", "поездки", "поездок"], de: ["Fahrt", "Fahrten"] };
 const COUNTED_NIGHTS: PluralWords = { ru: ["ночь", "ночи", "ночей"], de: ["Nacht", "Nächte"] };
-const COUNTED_APPOINTMENTS: PluralWords = { ru: ["приём", "приёма", "приёмов"], de: ["Termin", "Termine"] };
+const COUNTED_APPOINTMENTS: PluralWords = { ru: ["визит", "визита", "визитов"], de: ["Termin", "Termine"] };
 
 function subscriptionUnitLabel(
   rawUnit: string,

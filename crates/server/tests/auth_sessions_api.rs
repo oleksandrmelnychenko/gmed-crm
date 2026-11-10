@@ -1458,6 +1458,78 @@ async fn totp_enrolment_adds_a_second_step_to_login_and_refuses_replayed_codes()
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
+/// Owner decision 2026-10-19: the second factor stays for patients. A portal
+/// login starts, confirms and removes the own authenticator app (global QA
+/// 2026-11-10: the set-up answered 403 for the role).
+#[tokio::test]
+async fn a_patient_sets_up_and_removes_the_own_second_factor() {
+    let Some((app, pool)) = test_context().await else {
+        return;
+    };
+    let email = format!("totp-patient-{}@example.com", Uuid::new_v4().simple());
+    let user_id = seed_user_with_password_and_flags(
+        &pool,
+        &email,
+        "patient",
+        "Str0ng!Passw0rd",
+        true,
+        false,
+        None,
+    )
+    .await;
+    let patient = format!(
+        "Bearer {}",
+        jwt::issue_access_token(TEST_SECRET, user_id, "patient", Uuid::new_v4())
+            .expect("issue jwt")
+    );
+
+    let (status, body) = json_request(&app, "GET", "/api/v1/me/totp", Some(&patient), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["enrolled"], false);
+    assert_eq!(body["required"], false, "optional for a patient");
+
+    let (status, setup) =
+        json_request(&app, "POST", "/api/v1/me/totp/setup", Some(&patient), None).await;
+    assert_eq!(status, StatusCode::OK, "{setup}");
+    let secret = base32_decode(setup["secret"].as_str().expect("secret"));
+
+    let now = u64::try_from(Utc::now().timestamp()).unwrap();
+    let code = |offset_steps: u64| {
+        format!(
+            "{:06}",
+            gmed_server::auth::totp::code_at_step(
+                &secret,
+                gmed_server::auth::totp::step_for(now) + offset_steps
+            )
+        )
+    };
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/totp/confirm",
+        Some(&patient),
+        Some(json!({ "code": code(0) })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, body) = json_request(&app, "GET", "/api/v1/me/totp", Some(&patient), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["enrolled"], true);
+
+    // The code of the enrolment cannot be replayed; the next one removes the factor.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/totp/disable",
+        Some(&patient),
+        Some(json!({ "code": code(1) })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["enrolled"], false);
+}
+
 /// Owner decision 2026-10-11 (QA E-17): the CEO, the IT admin and the Patient
 /// Manager sign in with a second factor. Without one the session reaches only
 /// the two-factor setup; the enrolment and a refresh open the workspace.

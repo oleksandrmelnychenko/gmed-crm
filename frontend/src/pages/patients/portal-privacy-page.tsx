@@ -1,7 +1,7 @@
 import { PortalInfoRow as InfoRow, PortalListItem as ListItem, PortalSection as Section, PortalDateChip } from "./ui/portal-page-layout";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { startTransition, useEffect, useMemo, useReducer, type FormEvent } from "react";
-import { History, LoaderCircle, RefreshCw, Shield } from "lucide-react";
+import { Download, History, LoaderCircle, RefreshCw, Shield } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +23,7 @@ import { uiText, useLang, useLanguageBound } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   createPortalPrivacyRequest,
+  downloadPatientPortalExport,
   fetchPortalPrivacyRequests,
 } from "@/pages/patients/data/portal-api";
 import {
@@ -50,6 +51,17 @@ function waitsForOpenBusiness(item: Pick<PortalPrivacyRequest, "status" | "hold_
   return item.status === "retention_hold" && item.hold_reason === "open_business";
 }
 
+/**
+ * A completed request for a copy of the data (Art. 15) or for a
+ * machine-readable copy (Art. 20): the patient fetches it with the export.
+ */
+function completedDataCopy(item: Pick<PortalPrivacyRequest, "status" | "request_type">) {
+  return (
+    ["completed", "executed"].includes(item.status) &&
+    ["access", "portability"].includes(item.request_type)
+  );
+}
+
 function privacyStatusBadgeTone(status: string): StatusTone {
   if (status === "executed" || status === "completed") return "success";
   if (status === "rejected") return "error";
@@ -70,6 +82,8 @@ interface PatientPrivacyState {
   loading: boolean;
   refreshing: boolean;
   submitting: boolean;
+  /** The data export started from a completed request for a copy. */
+  exportBusy: boolean;
   notice: string;
   error: string;
   version: number;
@@ -86,6 +100,7 @@ const INITIAL_PATIENT_PRIVACY_STATE: PatientPrivacyState = {
   loading: true,
   refreshing: false,
   submitting: false,
+  exportBusy: false,
   notice: "",
   error: "",
   version: 0,
@@ -122,6 +137,7 @@ export function PatientPrivacyPage() {
   );
   const {
     error,
+    exportBusy,
     loading,
     notice,
     reason,
@@ -200,6 +216,19 @@ export function PatientPrivacyPage() {
         error: err instanceof Error ? err.message : t.portal_privacy_failed_to_submit_request,
         submitting: false,
       });
+    }
+  }
+
+  async function handleExport() {
+    dispatchPrivacyState({ exportBusy: true, error: "" });
+    try {
+      await downloadPatientPortalExport();
+    } catch (err) {
+      dispatchPrivacyState({
+        error: err instanceof Error ? err.message : t.portal_dashboard_failed_to_export_patient_data,
+      });
+    } finally {
+      dispatchPrivacyState({ exportBusy: false });
     }
   }
 
@@ -316,6 +345,26 @@ export function PatientPrivacyPage() {
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_executed} value={<PortalDateChip timestamp={item.executed_at} />} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_source} value={privacyRequestSourceLabel(item.source)} />
                   </div>
+
+                  {completedDataCopy(item) ? (
+                    // A completed request for a copy carries no file: the copy
+                    // is the export, offered right here (global QA 2026-11-10).
+                    <div
+                      className={cn("flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm text-foreground", tokens.surface.mutedCard)}
+                      data-testid="privacy-data-copy-hint"
+                    >
+                      <p className="min-w-0 flex-1 basis-56">{uiText("portal_privacy_data_copy_hint", lang)}</p>
+                      <Button
+                        type="button"
+                        className="h-auto min-h-8 max-w-full whitespace-normal rounded-lg"
+                        disabled={exportBusy}
+                        onClick={() => void handleExport()}
+                      >
+                        {exportBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}
+                        {t.portal_dashboard_export_my_data}
+                      </Button>
+                    </div>
+                  ) : null}
 
                   {item.reason ? (
                     <div className={cn("rounded-lg px-3 py-2 text-sm text-muted-foreground", tokens.surface.mutedCard)}>

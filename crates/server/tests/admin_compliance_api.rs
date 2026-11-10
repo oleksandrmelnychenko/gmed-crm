@@ -1583,6 +1583,8 @@ async fn access_request_is_fulfilled_manually_and_records_the_art_12_steps() {
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
     let pm = auth_header_for(pm_id, "patient_manager");
+    let portal_user = seed_user(&pool, &format!("{tag}-portal"), "patient").await;
+    seed_patient_assignment(&pool, patient_id, portal_user, admin_id).await;
 
     let (status, body) = json_request(
         &app,
@@ -1643,6 +1645,19 @@ async fn access_request_is_fulfilled_manually_and_records_the_art_12_steps() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["execution"]["mode"], "manual_fulfilment");
+
+    // The patient's portal login is told that the request is done (owner
+    // decision 2026-11-10); the manager who handled it gets no such notice.
+    let notified: Vec<(Uuid, Option<String>)> = sqlx::query_as(
+        r#"SELECT user_id, params->>'request_type'
+           FROM user_notifications
+           WHERE kind = 'privacy_request_completed' AND entity_id = $1::uuid"#,
+    )
+    .bind(&request_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(notified, vec![(portal_user, Some("access".to_string()))]);
 
     let still_active: bool = sqlx::query_scalar("SELECT is_active FROM patients WHERE id = $1")
         .bind(patient_id)

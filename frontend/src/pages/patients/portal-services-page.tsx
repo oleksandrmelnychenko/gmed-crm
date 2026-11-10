@@ -34,7 +34,7 @@ import {
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { berlinLocalInputToIso } from "@/lib/app-time-zone";
-import { useLang, type Lang } from "@/lib/i18n";
+import { uiText, useLang, type Lang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { localizeTaskNote } from "@/lib/task-labels";
 import {
@@ -413,6 +413,12 @@ export function PatientServicesPage() {
   );
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // Said in the portal's language before sending; the server refuses the
+    // same with a code (global QA 2026-11-10: "ends_at must be later …").
+    if (form.startsAt && form.endsAt && form.endsAt <= form.startsAt) {
+      dispatchPageState({ requestError: uiText("api_portal_service_period_inverted", lang), notice: "" });
+      return;
+    }
     dispatchPageState({
       requestBusy: true,
       requestError: "",

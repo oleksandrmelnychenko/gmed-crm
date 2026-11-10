@@ -326,12 +326,19 @@ fn translation_request_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
     })
 }
 
+/// The target languages a patient may ask for in the portal (owner decision
+/// 2026-11-10): the patient's own language — Russian, Ukrainian, English or
+/// Spanish — and German for a document that came in another language. The
+/// staff workspace accepts all of them (`documents.rs`,
+/// `normalize_translation_source_language`); machine translation covers DE,
+/// EN, RU and UK, a Spanish request is translated by hand.
 fn normalize_language(value: &str) -> Option<&'static str> {
     match value.trim().to_lowercase().as_str() {
         "de" | "deu" | "ger" | "german" | "deutsch" => Some("de"),
         "en" | "eng" | "english" => Some("en"),
         "uk" | "ua" | "ukr" | "ukrainian" => Some("uk"),
         "ru" | "rus" | "russian" => Some("ru"),
+        "es" | "spa" | "spanish" | "español" => Some("es"),
         _ => None,
     }
 }
@@ -409,4 +416,26 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_language;
+
+    #[test]
+    fn the_portal_takes_the_patients_languages_and_german() {
+        for (input, code) in [
+            ("ru", "ru"),
+            ("UK", "uk"),
+            ("ua", "uk"),
+            ("en", "en"),
+            ("es", "es"),
+            (" Spanish ", "es"),
+            ("de", "de"),
+        ] {
+            assert_eq!(normalize_language(input), Some(code), "{input}");
+        }
+        assert_eq!(normalize_language("fr"), None);
+        assert_eq!(normalize_language(""), None);
+    }
 }

@@ -166,6 +166,44 @@ fn canonical_passive_mime(declared_mime: Option<&str>) -> Option<String> {
     .then_some(mime)
 }
 
+/// Whether the content starts like a program: a Windows executable (`MZ`
+/// header, which always carries zero bytes), an ELF binary or a script with
+/// a shebang line.
+fn looks_executable(bytes: &[u8]) -> bool {
+    let head = &bytes[..bytes.len().min(64)];
+    (head.starts_with(b"MZ") && head.contains(&0))
+        || head.starts_with(b"\x7fELF")
+        || head.starts_with(b"#!")
+}
+
+/// Whether a patient may send this file through the portal. The portal takes
+/// documents only — the same types as a chat attachment
+/// (`routes::messages::e2e_attachment_mime_type`,
+/// `frontend/src/pages/chat/model/attachments.ts`) — and never a program,
+/// whatever its name says.
+pub fn is_portal_upload_type(file_name: Option<&str>, bytes: &[u8]) -> bool {
+    matches!(
+        extension_from_name(file_name).as_deref(),
+        Some(
+            "pdf"
+                | "png"
+                | "jpg"
+                | "jpeg"
+                | "gif"
+                | "webp"
+                | "heic"
+                | "heif"
+                | "txt"
+                | "csv"
+                | "doc"
+                | "docx"
+                | "xls"
+                | "xlsx"
+                | "dcm"
+        )
+    ) && !looks_executable(bytes)
+}
+
 pub fn validate_upload_magic_bytes(
     file_name: Option<&str>,
     declared_mime: Option<&str>,
@@ -199,7 +237,52 @@ pub fn validate_upload_magic_bytes(
 
 #[cfg(test)]
 mod tests {
-    use super::validate_upload_magic_bytes;
+    use super::{is_portal_upload_type, validate_upload_magic_bytes};
+
+    #[test]
+    fn portal_takes_documents_and_no_programs() {
+        for name in [
+            "befund.pdf",
+            "Reisepass.JPG",
+            "scan.heic",
+            "labor.xlsx",
+            "brief.docx",
+            "notiz.txt",
+            "mrt.dcm",
+        ] {
+            assert!(is_portal_upload_type(Some(name), b"content"), "{name}");
+        }
+        for name in [
+            "qa-b-test.exe",
+            "qa-b-second.bat.exe",
+            "qa-b-script.sh",
+            "setup.msi",
+            "page.html",
+            "archive.zip",
+            "no-extension",
+        ] {
+            assert!(!is_portal_upload_type(Some(name), b"content"), "{name}");
+        }
+        assert!(!is_portal_upload_type(None, b"content"));
+        // A program under a document name.
+        assert!(!is_portal_upload_type(
+            Some("befund.txt"),
+            b"MZ\x90\x00\x03\x00\x00\x00"
+        ));
+        assert!(!is_portal_upload_type(
+            Some("befund.txt"),
+            b"\x7fELF\x02\x01"
+        ));
+        assert!(!is_portal_upload_type(
+            Some("befund.txt"),
+            b"#!/bin/sh\nrm -rf /"
+        ));
+        // A text that merely starts with the letters MZ stays a text.
+        assert!(is_portal_upload_type(
+            Some("befund.txt"),
+            b"MZ-Befund vom 10.11.2026"
+        ));
+    }
 
     #[test]
     fn rejects_active_content_by_mime_extension_and_content() {

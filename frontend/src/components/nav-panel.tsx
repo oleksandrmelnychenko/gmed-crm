@@ -103,8 +103,12 @@ export function NavPanel() {
   // A parent whose access to every request ended sees the cabinet's notice alone, without the
   // locked entries of the patient portal (QA 2026-10-24, B-2/D-4).
   const leadPortalClosed = useLeadPortalClosed(isLeadPortal ? user?.id : null);
+  // The patient's "Chat" entry counts unread answers like the staff one
+  // (global QA 2026-11-10); the lead cabinet and a portal without an open
+  // chat (no subscription, person not chosen yet) have no chat to count.
+  const patientChatOpen = isPatientPortal && !isLeadPortal && subscribed && !needsPatientSelection;
   const counters = useNavCounters(
-    Boolean(user) && !isPatientPortal,
+    Boolean(user) && (!isPatientPortal || patientChatOpen),
     Boolean(user && !isPatientPortal && canAccessStaffRoute(user.role, "/leads", user.capabilities)),
   );
   // One entry for the patient portal to come opens the dialog that lists it (owner 2026-10-26, C1):
@@ -170,6 +174,7 @@ export function NavPanel() {
             tr={tr}
             translations={t}
             collapsed={collapsed}
+            counters={patientChatOpen ? { chat: counters.chatUnread } : undefined}
             onNavigate={closeOnCompactViewport}
             lockedLabel={shellText?.locked ?? (lang === "de" ? "Gesperrt" : "Закрыто")}
             onLocked={(id, label) => {

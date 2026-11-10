@@ -1075,7 +1075,7 @@ async fn portal_request(app: &axum::Router, patient_bearer: &str, care_path_kind
         Some(json!({
             "appointment_type": "medical",
             "care_path_kind": care_path_kind,
-            "preferred_date_from": "2026-11-10",
+            "preferred_date_from": "2099-11-10",
             "reason": "Synthetic request",
         })),
     )

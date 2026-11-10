@@ -42,7 +42,7 @@ export const careUiDe = {
 } as const satisfies Record<string, string>;
 
 export const careUiRu = {
-  "api_appointment_request_open_exists": "Запрос на запись этого типа уже открыт. Дождитесь ответа команды или отзовите открытый запрос.",
+  "api_appointment_request_open_exists": "Запрос на визит этого типа уже открыт. Дождитесь ответа команды или отзовите открытый запрос.",
   "api_appointment_request_date_or_reason_required": "Укажите желаемую дату или причину визита.",
   "api_recommendation_period_inverted": "Окончание срока действия раньше его начала.",
   "api_reminder_target_inactive": "Напоминание можно назначить только активному сотруднику.",

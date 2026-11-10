@@ -58,7 +58,9 @@ describe("validateProfileForm", () => {
   it("requires a name and a plausible phone", () => {
     expect(validateProfileForm({ name: "Anna", phone: "" })).toBeNull();
     expect(validateProfileForm({ name: "Anna", phone: "+49 (30) 123-45/67" })).toBeNull();
-    expect(validateProfileForm({ name: "   ", phone: "" })).toBe("account_profile_error_name");
+    // An empty name has its own message (QA 2026-11-10: "at most 200 characters" for an empty field).
+    expect(validateProfileForm({ name: "   ", phone: "" })).toBe("account_profile_error_name_required");
+    expect(validateProfileForm({ name: "", phone: "" })).toBe("account_profile_error_name_required");
     expect(validateProfileForm({ name: "a".repeat(201), phone: "" })).toBe("account_profile_error_name");
     expect(validateProfileForm({ name: "Anna", phone: "call me" })).toBe("account_profile_error_phone");
     expect(validateProfileForm({ name: "Anna", phone: "1".repeat(41) })).toBe("account_profile_error_phone");

@@ -160,8 +160,22 @@ async fn start_enrolment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
+    // A patient sets up the own second factor like staff do (owner decision
+    // 2026-10-19: password change and 2FA stay for patients). A login that
+    // reaches only a request (lead cabinet) keeps profile and language: its
+    // account page offers no second factor (owner decision 2026-10-05).
     if auth.role == Role::Patient {
-        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+        match super::lead_portal_intake::is_lead_only_login(&state.db, auth.user_id).await {
+            Ok(false) => {}
+            Ok(true) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+            Err(e) => {
+                tracing::error!(error = %e, "totp enrolment portal mode");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to start enrolment",
+                );
+            }
+        }
     }
     // A confirmed factor is replaced only after a code from the old device
     // (disable first); an unconfirmed attempt can simply start over.

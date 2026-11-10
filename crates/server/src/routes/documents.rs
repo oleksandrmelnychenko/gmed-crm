@@ -35256,6 +35256,16 @@ async fn download_my_uploaded_document(
     document_attachment_response(&mime_type, disposition, data)
 }
 
+/// A refusal of the patient's own upload with a code the portal shows in its
+/// language (`frontend/src/lib/care-api-errors.ts`).
+fn portal_upload_refusal(
+    status: StatusCode,
+    code: &str,
+    message: &str,
+) -> axum::response::Response {
+    (status, Json(json!({ "error": code, "message": message }))).into_response()
+}
+
 async fn upload_my_document(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -35325,12 +35335,34 @@ async fn upload_my_document(
 
     let data = match file_data {
         Some(data) if !data.is_empty() => data,
-        _ => return err(StatusCode::BAD_REQUEST, "No file uploaded"),
+        _ => {
+            return portal_upload_refusal(
+                StatusCode::BAD_REQUEST,
+                "portal_upload_no_file",
+                "No file uploaded",
+            );
+        }
     };
+    // The portal takes documents only, the same types as a chat attachment:
+    // an executable or a script is refused whatever the scanner says (global
+    // QA 2026-11-10: `.exe` and `.sh` were stored).
+    if !crate::file_sniff::is_portal_upload_type(file_name.as_deref(), &data) {
+        return portal_upload_refusal(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "portal_upload_type_not_allowed",
+            "This file type is not accepted in the portal",
+        );
+    }
     match validate_upload_magic_bytes(file_name.as_deref(), Some(mime_type.as_str()), &data) {
         Ok(Some(validated_mime)) => mime_type = validated_mime,
         Ok(None) => {}
-        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        Err(message) => {
+            return portal_upload_refusal(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "portal_upload_content_mismatch",
+                message,
+            );
+        }
     }
     match scan_upload_bytes(file_name.as_deref(), &data).await {
         Ok(FileScanOutcome::Clean) => {}

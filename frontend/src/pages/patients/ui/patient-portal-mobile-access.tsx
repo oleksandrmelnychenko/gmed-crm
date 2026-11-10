@@ -142,7 +142,7 @@ export function PatientPortalMobileAccess() {
           ?? workspace.notifications[0];
         if (!notification) return;
         // The device notification carries the same RU/DE wording as the portal.
-        const text = localizedNotificationCopy(notification, lang === "de" ? "de" : "ru");
+        const text = localizedNotificationCopy(notification, lang === "de" ? "de" : "ru", "patient");
         await showPortalNotification(
           text.title || "GMED",
           text.body || "",

@@ -25,6 +25,9 @@ async function submitPortalFeedback(
   await page
     .getByPlaceholder(/Was sollte das Team verbessern\?|What should the team improve\?/i)
     .fill(improvement);
+  // No scale is pre-set: the two mandatory scores are chosen by hand.
+  await page.getByRole("button", { name: "Gesamt: 5", exact: true }).click();
+  await page.getByRole("button", { name: "NPS 0–10: 10", exact: true }).click();
   await page.getByRole("button", { name: /Feedback senden|Submit feedback/i }).click();
 }
 

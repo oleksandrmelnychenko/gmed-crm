@@ -15,6 +15,7 @@ import { financeBalancesDe } from "./catalogs/finance-balances";
 import { gwgTrainingDe } from "./catalogs/gwg-training";
 import { operationsDe } from "./catalogs/operations";
 import { patientsPortalDe } from "./catalogs/patients-portal";
+import { portalQaUiDe } from "./catalogs/portal-qa-ui";
 import { personnelDe } from "./catalogs/personnel";
 import { revenueDe } from "./catalogs/revenue";
 import { sanctionsDe } from "./catalogs/sanctions";
@@ -32,6 +33,7 @@ export const de = {
     ...legalStatusUiDe,
     ...securityReviewUiDe,
     ...patientRecordUiDe,
+    ...portalQaUiDe,
     ...careUiDe,
     ...ordersRound3UiDe,
   },

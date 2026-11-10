@@ -25,7 +25,7 @@ import {
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { appDateKeyOf, formatAppDate } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
-import { useLang, useLanguageBound } from "@/lib/i18n";
+import { uiText, useLang, useLanguageBound } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { appointmentRequestStands } from "@/pages/patients/model/portal-shared";
 import {
@@ -56,6 +56,8 @@ interface PatientRecommendationsState {
   loading: boolean;
   refreshing: boolean;
   busyId: string | null;
+  /** The recommendation whose decline waits for the patient's "yes". */
+  confirmDeclineId: string | null;
   error: string;
   notice: string;
   version: number;
@@ -70,10 +72,40 @@ const INITIAL_PATIENT_RECOMMENDATIONS_STATE: PatientRecommendationsState = {
   loading: true,
   refreshing: false,
   busyId: null,
+  confirmDeclineId: null,
   error: "",
   notice: "",
   version: 0,
 };
+
+/**
+ * "Recommended on …" and "valid until …" of a recommendation as one line,
+ * empty when staff set neither (global QA 2026-11-10: the card showed no
+ * date although a validity was set).
+ */
+function recommendationPeriodParts(
+  item: Pick<PortalRecommendationItem, "recommended_on" | "valid_from" | "valid_to">,
+  formatDate: (value?: string | null) => string,
+  text: (key: string, values?: Record<string, string>) => string,
+): string[] {
+  const parts: string[] = [];
+  if (item.recommended_on) {
+    parts.push(text("portal_recommendation_recommended_on", { date: formatDate(item.recommended_on) }));
+  }
+  if (item.valid_from && item.valid_to) {
+    parts.push(
+      text("portal_recommendation_valid_period", {
+        from: formatDate(item.valid_from),
+        to: formatDate(item.valid_to),
+      }),
+    );
+  } else if (item.valid_to) {
+    parts.push(text("portal_recommendation_valid_to", { date: formatDate(item.valid_to) }));
+  } else if (item.valid_from) {
+    parts.push(text("portal_recommendation_valid_from", { date: formatDate(item.valid_from) }));
+  }
+  return parts;
+}
 
 function patientRecommendationsReducer(
   current: PatientRecommendationsState,
@@ -94,13 +126,15 @@ export function PatientRecommendationsPage() {
     recommendationTypeLabel,
   } = usePortalLabels();
   const { user } = useAuth();
-  const { t } = useLang();
+  const { lang, t } = useLang();
+  const text = (key: string, values?: Record<string, string>) => uiText(key, lang, values);
   const [recommendationsState, dispatchRecommendationsState] = useReducer(
     patientRecommendationsReducer,
     INITIAL_PATIENT_RECOMMENDATIONS_STATE,
   );
   const {
     busyId,
+    confirmDeclineId,
     error,
     loading,
     notice,
@@ -174,6 +208,7 @@ export function PatientRecommendationsPage() {
 
     dispatchRecommendationsState({
       busyId: `${recommendationId}:${decision}`,
+      confirmDeclineId: null,
       error: "",
       notice: "",
     });
@@ -184,7 +219,8 @@ export function PatientRecommendationsPage() {
           ? t.portal_recommendations_appointment_request_created
           : t.portal_recommendations_decision_saved;
       if (decision === "schedule") {
-        await requestRecommendationAppointment(recommendationId, {});
+        // The request text the patient re-reads is written in the cabinet's language.
+        await requestRecommendationAppointment(recommendationId, { language: lang });
       } else {
         await decidePortalRecommendation(recommendationId, { decision });
       }
@@ -247,6 +283,11 @@ export function PatientRecommendationsPage() {
             const recommendationId = item.recommendation_id || item.id;
             const disabled = busyId?.startsWith(`${recommendationId}:`) ?? false;
             const isClosed = ["completed", "declined", "cancelled", "superseded"].includes(item.status);
+            const periodParts = recommendationPeriodParts(item, formatPortalDate, text);
+            // The patient's own decline can be taken back: asking for a
+            // consultation puts the recommendation back to "active".
+            const declinedByPatient = item.status === "declined" && item.patient_decision === "declined";
+            const confirmingDecline = confirmDeclineId === recommendationId;
 
             return (
               <PortalListItem key={recommendationId} className="space-y-2">
@@ -271,6 +312,12 @@ export function PatientRecommendationsPage() {
                     <PortalDateChip>{t.portal_recommendations_due} {formatPortalDate(item.due_at)}</PortalDateChip>
                   ) : null}
                 </div>
+
+                {periodParts.length > 0 ? (
+                  <p className="text-xs text-muted-foreground" data-testid="portal-recommendation-period">
+                    {periodParts.join(" · ")}
+                  </p>
+                ) : null}
 
                 {item.description ? (
                   <div className="border-l-2 border-border pl-3 text-sm leading-5 text-foreground whitespace-pre-wrap">
@@ -310,10 +357,67 @@ export function PatientRecommendationsPage() {
                     />
                     <ActionButton
                       busy={busyId === `${recommendationId}:declined`}
-                      disabled={disabled}
+                      disabled={disabled || confirmingDecline}
                       icon={<XCircle className="size-4" />}
                       label={t.portal_recommendations_decline}
-                      onClick={() => void handleDecision(recommendationId, "declined")}
+                      onClick={() => dispatchRecommendationsState({ confirmDeclineId: recommendationId })}
+                    />
+                  </div>
+                ) : null}
+
+                {!isClosed && confirmingDecline ? (
+                  // A decline closes the card and withdraws its visit request:
+                  // it is asked for once more (global QA 2026-11-10).
+                  <div
+                    role="alertdialog"
+                    aria-label={text("portal_recommendation_decline_confirm_title")}
+                    className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5"
+                    data-testid="portal-recommendation-decline-confirm"
+                  >
+                    <p className="text-sm font-semibold text-foreground">
+                      {text("portal_recommendation_decline_confirm_title")}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {text("portal_recommendation_decline_confirm_body")}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        className="h-8 rounded-lg px-3 text-xs"
+                        disabled={disabled}
+                        onClick={() => void handleDecision(recommendationId, "declined")}
+                      >
+                        {busyId === `${recommendationId}:declined` ? <LoaderCircle className="size-4 animate-spin" /> : <XCircle className="size-4" />}
+                        {text("portal_recommendation_decline_confirm_yes")}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 rounded-lg px-3 text-xs"
+                        disabled={disabled}
+                        onClick={() => dispatchRecommendationsState({ confirmDeclineId: null })}
+                      >
+                        {text("portal_recommendation_decline_confirm_no")}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {declinedByPatient ? (
+                  <div
+                    className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2"
+                    data-testid="portal-recommendation-declined-note"
+                  >
+                    <p className="min-w-0 flex-1 basis-56 text-sm text-muted-foreground">
+                      {text("portal_recommendation_declined_note")}
+                    </p>
+                    <ActionButton
+                      busy={busyId === `${recommendationId}:need_consultation`}
+                      disabled={disabled}
+                      icon={<MessageCircle className="size-4" />}
+                      label={t.portal_recommendations_need_consultation}
+                      onClick={() => void handleDecision(recommendationId, "need_consultation")}
                     />
                   </div>
                 ) : null}

@@ -25,6 +25,7 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { patientEventFamily } from "@/lib/patient-event-notifications";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
@@ -91,7 +92,11 @@ function notificationCategory(item: Notification, lang: "de" | "ru") {
     feedback: ["Feedback", "Отзыв"],
     message_peer: ["Nachricht", "Сообщение"],
   };
-  const label = labels[item.entity_type ?? ""];
+  // A notice of a new entity type (or none) carries the label of its
+  // family: a visit, a service, an invoice.
+  const family = patientEventFamily(item);
+  const familyType = family === "appointment" ? "appointment" : family === "service" ? "concierge_service" : family === "money" ? "invoice" : "";
+  const label = labels[item.entity_type ?? ""] ?? labels[familyType];
   return label ? label[lang === "de" ? 0 : 1] : lang === "de" ? "Portal" : "Портал";
 }
 
@@ -254,7 +259,7 @@ export function PatientNotificationsPage() {
             {visibleNotifications.map((item) => {
               const href = notificationHrefForRole(item, "patient");
               // Server notifications are worded in the portal language.
-              const text = localizedNotificationCopy(item, portalLang);
+              const text = localizedNotificationCopy(item, portalLang, "patient");
               return (
                 <article
                   key={item.id}

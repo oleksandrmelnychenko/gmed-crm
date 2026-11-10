@@ -5,6 +5,7 @@ import { formatMoneyAmount } from "@/lib/money";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import { formatUiText, t as translationsFor, uiText, useLanguageBound } from "@/lib/i18n";
 import { notificationCopyFromFacts } from "@/lib/notification-copy";
+import { patientEventHref, patientEventNotificationCopy } from "@/lib/patient-event-notifications";
 import { localizeTaskTitle } from "@/lib/task-labels";
 
 export interface Notification {
@@ -25,6 +26,8 @@ export interface Notification {
 export function localizedNotificationCopy(
   item: Notification,
   lang: "ru" | "de",
+  /** The viewer's role: the patient's portal words visit, service and money notices itself. */
+  viewerRole?: string,
 ): Pick<Notification, "title" | "body"> {
   if (item.kind === "order_payment_status") {
     try {
@@ -108,6 +111,13 @@ export function localizedNotificationCopy(
   // appointments, signatures, documents, chat, SOP, ...): code + facts.
   const factsCopy = notificationCopyFromFacts(item, lang);
   if (factsCopy) return factsCopy;
+  // The patient's notices about a visit, a service, a payment or an invoice
+  // (owner decision 2026-11-10): placed by the words of their code, so a new
+  // code of these families reads in the portal's language too.
+  if (viewerRole === "patient") {
+    const patientCopy = patientEventNotificationCopy(item, lang);
+    if (patientCopy) return patientCopy;
+  }
   // An unknown kind (or a text that matches no known template): as stored.
   return { title: item.title, body: item.body };
 }
@@ -783,10 +793,8 @@ export async function fetchOldestNewLead() {
 }
 
 export function notificationHrefForRole(item: Notification, role: string) {
-  if (!item.entity_type) return null;
-
   if (role === "patient") {
-    switch (item.entity_type) {
+    switch (item.entity_type ?? "") {
       case "message_peer":
         return item.entity_id ? `/chat?peer=${item.entity_id}` : "/chat";
       case "appointment":
@@ -809,9 +817,12 @@ export function notificationHrefForRole(item: Notification, role: string) {
       case "feedback":
         return "/feedback";
       default:
-        return null;
+        // A notice of a new entity type or without one opens the page of its
+        // family: visit → visits, service → services, payment → invoices.
+        return patientEventHref(item);
     }
   }
+  if (!item.entity_type) return null;
 
   // The daily deadline digest opens the DSGVO register (requests, consents,
   // incidents are all reachable from there).

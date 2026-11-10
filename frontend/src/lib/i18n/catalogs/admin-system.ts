@@ -603,7 +603,7 @@ export const adminSystemRu: AdminSystemTranslations = {
   chat_no_message_matches: "В загруженной истории совпадений нет.",
   chat_load_older: "Загрузить предыдущие сообщения",
   chat_connection_connecting: "Подключение…",
-  chat_connection_connected: "В сети",
+  chat_connection_connected: "Соединение установлено",
   chat_connection_reconnecting: "Переподключение…",
   chat_connection_offline: "Нет соединения",
   chat_secure_attachment_unscanned:

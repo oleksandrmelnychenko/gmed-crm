@@ -1481,7 +1481,7 @@ test.describe("chat secure flows", () => {
     await page.getByRole("button", { name: /Dr Secure Peer/i }).click();
 
     await expect.poll(() => connectionCount).toBeGreaterThanOrEqual(2);
-    await expect(page.getByText(/Verbunden|В сети/i)).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(/Verbunden|Соединение установлено/i)).toBeVisible({ timeout: 5_000 });
   });
 
   test("staff can send an attachment with a caption", async ({

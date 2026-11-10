@@ -2824,7 +2824,7 @@ export const extractedUiRu = {
   "appointments_closed_without_completion": "Закрыто без выполнения",
   "portal_request_withdraw": "Отозвать запрос",
   "portal_request_withdraw_confirm": "Точно отозвать?",
-  "portal_request_withdrawn_notice": "Запрос на приём отозван.",
+  "portal_request_withdrawn_notice": "Запрос на визит отозван.",
   "portal_request_withdraw_failed": "Не удалось отозвать запрос.",
   "portal_request_cancelled_reason": "Причина отмены",
   "appointments_request_cancel": "Отменить запрос",

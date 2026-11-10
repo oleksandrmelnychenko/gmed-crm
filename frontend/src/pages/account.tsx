@@ -18,6 +18,7 @@ import {
   validateProfileForm,
   type AccountProfile,
   type AccountSession,
+  type ProfileFormErrorKey,
   type ProfileLanguage,
 } from "@/lib/account";
 import { apiFetch, clearApiCache } from "@/lib/api";
@@ -26,6 +27,7 @@ import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { isLeadPortalUser } from "@/lib/staff-route-access";
+import { publishLeadCabinetLang, storeLeadCabinetLang } from "@/pages/patient-lead/lead-cabinet-language";
 import { TwoFactorSection } from "@/pages/two-factor";
 
 function useUiText() {
@@ -84,19 +86,38 @@ export function AccountPage() {
   );
 }
 
+/** The four languages of the lead cabinet, each named in itself. */
+const LEAD_CABINET_LANGUAGE_OPTIONS: readonly { value: ProfileLanguage; label: string }[] = [
+  { value: "de", label: "Deutsch" },
+  { value: "en", label: "English" },
+  { value: "uk", label: "Українська" },
+  { value: "ru", label: "Русский" },
+];
+
 function ProfileSection() {
   const { l, lang, setLangFromProfile } = useProfileLanguage();
   const { user, refreshUser } = useAuth();
   const portalUser = user?.role === "patient";
+  // The lead cabinet speaks DE, EN, UA and RU: its account offers the same
+  // four, not the console's two (QA 2026-11-10).
+  const leadCabinet = isLeadPortalUser(user);
   const [profile, setProfile] = useState<AccountProfile | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [language, setLanguage] = useState<Lang>(lang);
+  // What the select was set to since the page showed `lang`: a switch of the
+  // interface language elsewhere (the header) makes the select follow it
+  // again instead of naming the language saved earlier (QA 2026-11-10).
+  const [picked, setPicked] = useState<{ value: ProfileLanguage; under: Lang } | null>(null);
   // A UA/EN language from the lead cabinet is kept unless the select is used.
   const [keptLanguage, setKeptLanguage] = useState<ProfileLanguage | null>(null);
   const [busy, setBusy] = useState(false);
+  // Messages are kept as keys and worded when shown, so a saved language
+  // switch does not leave "saved" in the language before it.
+  const [problem, setProblem] = useState<ProfileFormErrorKey | "">("");
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [saved, setSaved] = useState(false);
+  const pickedLanguage = picked && picked.under === lang ? picked.value : null;
+  const language: ProfileLanguage = pickedLanguage ?? (leadCabinet ? keptLanguage : null) ?? lang;
 
   useEffect(() => {
     let cancelled = false;
@@ -106,11 +127,7 @@ function ProfileSection() {
         setProfile(loaded);
         setName(loaded.name ?? "");
         setPhone(loaded.phone ?? "");
-        if (isConsoleLang(loaded.preferred_language)) {
-          setLanguage(loaded.preferred_language);
-        } else {
-          setKeptLanguage(loaded.preferred_language ?? null);
-        }
+        setKeptLanguage(isConsoleLang(loaded.preferred_language) ? null : loaded.preferred_language ?? null);
       })
       .catch((cause) => {
         if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
@@ -118,7 +135,6 @@ function ProfileSection() {
     return () => {
       cancelled = true;
     };
-    // The saved language seeds the select once; later toggles come from the select itself.
   }, []);
 
   // The name can change behind the user's back (a lead renamed by staff): the
@@ -136,23 +152,33 @@ function ProfileSection() {
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
-    setNotice("");
-    const problem = validateProfileForm({ name, phone });
-    if (problem) {
-      setError(l(problem));
-      return;
-    }
+    setSaved(false);
+    const formProblem = validateProfileForm({ name, phone });
+    setProblem(formProblem ?? "");
+    if (formProblem) return;
     setBusy(true);
     try {
-      const saved = await apiFetch<AccountProfile>("/me/profile", {
+      const stored = await apiFetch<AccountProfile>("/me/profile", {
         method: "PUT",
-        body: JSON.stringify({ name: name.trim(), phone: phone.trim(), preferred_language: keptLanguage ?? language }),
+        body: JSON.stringify({
+          name: name.trim(),
+          phone: phone.trim(),
+          // The select as shown; an untouched UA/EN of a former lead is kept.
+          preferred_language: pickedLanguage ?? keptLanguage ?? lang,
+        }),
       });
-      setProfile(saved);
-      setLangFromProfile(saved.preferred_language);
+      setProfile(stored);
+      setPicked(null);
+      setKeptLanguage(isConsoleLang(stored.preferred_language) ? null : stored.preferred_language ?? null);
+      setLangFromProfile(stored.preferred_language);
+      // The cabinet around the page follows the language chosen here.
+      if (leadCabinet && user?.id && stored.preferred_language) {
+        storeLeadCabinetLang(user.id, stored.preferred_language);
+        publishLeadCabinetLang(user.id, stored.preferred_language);
+      }
       clearApiCache();
       await refreshUser().catch(() => null);
-      setNotice(l("account_profile_saved"));
+      setSaved(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -163,8 +189,8 @@ function ProfileSection() {
   return (
     <AccountSection title={l("account_profile_title")} icon={UserRound}>
       <form className="space-y-3" onSubmit={(event) => void submit(event)} data-testid="account-profile-form">
-        {error ? <Banner tone="error">{error}</Banner> : null}
-        {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
+        {problem || error ? <Banner tone="error">{problem ? l(problem) : error}</Banner> : null}
+        {saved ? <SuccessBanner>{l("account_profile_saved")}</SuccessBanner> : null}
         <div className={`grid gap-3 rounded-lg border border-border bg-muted/30 p-3${portalUser ? "" : " sm:grid-cols-2"}`}>
           <Field label={l("account_profile_email")} htmlFor="account-email">
             <Input id="account-email" value={profile?.email ?? ""} readOnly className="h-9 rounded-lg border-border bg-muted/40 px-3 text-foreground" />
@@ -203,13 +229,19 @@ function ProfileSection() {
             <SelectField
               aria-label={l("account_profile_language")}
               value={language}
-              options={[
-                { value: "ru", label: l("account_language_ru") },
-                { value: "de", label: l("account_language_de") },
-              ]}
+              options={
+                leadCabinet
+                  ? LEAD_CABINET_LANGUAGE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))
+                  : [
+                      { value: "ru", label: l("account_language_ru") },
+                      { value: "de", label: l("account_language_de") },
+                    ]
+              }
               onValueChange={(value) => {
+                const next = LEAD_CABINET_LANGUAGE_OPTIONS.find((option) => option.value === value)?.value;
+                if (!next || (!leadCabinet && !isConsoleLang(next))) return;
                 setKeptLanguage(null);
-                setLanguage(value === "de" ? "de" : "ru");
+                setPicked({ value: next, under: lang });
               }}
             />
           </Field>

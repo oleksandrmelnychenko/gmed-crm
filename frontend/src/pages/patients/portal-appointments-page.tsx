@@ -44,6 +44,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
+import { appDateKey } from "@/lib/app-time-zone";
 import { formatPluralCount, uiText, useLang, useLanguageBound } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import {
@@ -55,8 +56,10 @@ import {
   appointmentRequestStatusTone,
   appointmentStatusTone,
   followupStatusTone,
+  PORTAL_REQUEST_DATE_PROBLEM_KEYS,
   portalPreferredDateRange,
   portalOrderPhaseLabel as sharedPortalOrderPhaseLabel,
+  portalRequestDateProblem,
   usePortalLabels,
 } from "@/pages/patients/model/portal-shared";
 import { isUpcomingPortalAppointment } from "@/pages/appointments/model/portal-appointment-visibility";
@@ -319,6 +322,16 @@ function usePatientAppointmentsPageContent() {
     () => requests.filter((item) => !["rejected", "converted", "cancelled"].includes(item.status)),
     [requests],
   );
+  // A cancelled visit stays in the list with its status but is not counted
+  // as scheduled (global QA 2026-11-10).
+  const scheduledCount = useMemo(
+    () => appointments.filter((item) => item.status !== "cancelled").length,
+    [appointments],
+  );
+  const appointmentsById = useMemo(
+    () => new Map(appointments.map((item) => [item.id, item])),
+    [appointments],
+  );
   const nextAppointment = useMemo(
     () => {
       let next: PortalAppointmentItem | null = null;
@@ -339,6 +352,18 @@ function usePatientAppointmentsPageContent() {
 
   async function handleSubmitRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // Said in the portal's language before sending; the server refuses the
+    // same with a code (global QA 2026-11-10: past dates were accepted, an
+    // inverted period came back as an English sentence).
+    const dateProblem = portalRequestDateProblem(
+      requestForm.preferredDateFrom,
+      requestForm.preferredDateTo,
+      appDateKey(),
+    );
+    if (dateProblem) {
+      dispatchPageState({ requestError: uiText(PORTAL_REQUEST_DATE_PROBLEM_KEYS[dateProblem], lang) });
+      return;
+    }
     dispatchPageState({
       requestBusy: true,
       requestError: "",
@@ -420,7 +445,7 @@ function usePatientAppointmentsPageContent() {
         <section className="space-y-3">
           <Section
             icon={CalendarDays} title={t.portal_appointments_scheduled_visits}
-            accessory={appointments.length > 0 ? <CountBadge>{appointments.length}</CountBadge> : undefined}
+            accessory={scheduledCount > 0 ? <CountBadge>{scheduledCount}</CountBadge> : undefined}
           >
 
             {appointments.length === 0 ? (
@@ -573,21 +598,41 @@ function usePatientAppointmentsPageContent() {
                     item.preferred_date_from,
                     item.preferred_date_to,
                   );
+                  // The visit made from the request was cancelled later: the
+                  // card no longer says "scheduled as …".
+                  const convertedVisitCancelled =
+                    Boolean(item.converted_appointment_id) &&
+                    appointmentsById.get(item.converted_appointment_id ?? "")?.status === "cancelled";
+                  // What the patient wrote, to read again (global QA 2026-11-10).
+                  const writtenDetails = [
+                    { label: t.portal_appointments_specialty_or_topic, value: item.specialty },
+                    { label: t.portal_appointments_location_preference, value: item.location },
+                    { label: t.portal_appointments_reason, value: item.reason },
+                    { label: t.portal_appointments_additional_note, value: item.notes },
+                  ].filter((detail) => detail.value?.trim());
                   return (
                     <ListItem key={item.id} className="space-y-2">
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-foreground">
-                            {appointmentTypeLabel(item.appointment_type)} {t.portal_appointments_request}
+                            {item.appointment_type === "non_medical"
+                              ? uiText("portal_appointment_request_title_non_medical", lang)
+                              : uiText("portal_appointment_request_title_medical", lang)}
                           </p>
                           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                             <span>{appointmentCarePathKindLabel(item.care_path_kind)}</span>
                             <span>{t.portal_appointments_requested} <PortalDateChip timestamp={item.requested_at} /></span>
                           </div>
                         </div>
-                        <StatusBadge status={item.status} className={appointmentRequestStatusTone(item.status)}>
-                          {portalStatusLabel(item.status)}
-                        </StatusBadge>
+                        {convertedVisitCancelled ? (
+                          <StatusBadge status="cancelled" className={appointmentRequestStatusTone("cancelled")}>
+                            {uiText("portal_request_visit_cancelled_badge", lang)}
+                          </StatusBadge>
+                        ) : (
+                          <StatusBadge status={item.status} className={appointmentRequestStatusTone(item.status)}>
+                            {portalStatusLabel(item.status)}
+                          </StatusBadge>
+                        )}
                       </div>
                       <div className="grid gap-2 sm:grid-cols-2">
                         <InfoRow
@@ -607,7 +652,16 @@ function usePatientAppointmentsPageContent() {
                           value={appointmentTimeOfDayLabel(item.preferred_time_of_day)}
                         />
                       </div>
-                      {item.reason ? <p className="text-sm text-muted-foreground">{item.reason}</p> : null}
+                      {writtenDetails.length > 0 ? (
+                        <dl className="grid gap-x-4 gap-y-1.5 text-sm sm:grid-cols-2" data-testid="portal-request-written-details">
+                          {writtenDetails.map((detail) => (
+                            <div key={detail.label} className="min-w-0">
+                              <dt className="text-xs text-muted-foreground">{detail.label}</dt>
+                              <dd className="whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]">{detail.value}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                      ) : null}
                       {item.review_note ? (
                         <div className={cn("rounded-lg px-3 py-2 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
                           {t.portal_appointments_review_note}: {item.review_note}
@@ -631,7 +685,17 @@ function usePatientAppointmentsPageContent() {
                           onError={(message) => dispatchPageState({ error: message })}
                         />
                       ) : null}
-                      {item.converted_appointment_id ? (
+                      {item.converted_appointment_id && convertedVisitCancelled ? (
+                        <div
+                          className={cn("rounded-lg px-3 py-2 text-sm text-muted-foreground", tokens.surface.mutedCard)}
+                          data-testid="portal-request-visit-cancelled"
+                        >
+                          {uiText("portal_request_visit_cancelled_note", lang, {
+                            title: item.converted_appointment_title || t.portal_appointments_appointment,
+                            date: formatPortalDate(item.converted_appointment_date),
+                          })}
+                        </div>
+                      ) : item.converted_appointment_id ? (
                         <SuccessBanner>
                           {t.portal_appointments_scheduled_as} {item.converted_appointment_title || t.portal_appointments_appointment} {t.portal_appointments_on} {formatPortalDate(item.converted_appointment_date)}
                         </SuccessBanner>

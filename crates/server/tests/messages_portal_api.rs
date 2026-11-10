@@ -374,6 +374,12 @@ async fn patient_can_message_assigned_staff_and_exchange_file() {
             .all(|item| item["id"] != sales_id.to_string()),
         "unassigned sales user must not appear in patient-portal peers"
     );
+    // Name and role only: no staff e-mail address reaches the patient
+    // (global QA 2026-11-10).
+    assert!(
+        peer_rows.iter().all(|item| item["email"] == ""),
+        "the patient gets no staff e-mail address: {peers}"
+    );
 
     let (status, body) = json_request(
         &app,

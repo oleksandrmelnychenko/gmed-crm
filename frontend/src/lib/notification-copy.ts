@@ -129,9 +129,9 @@ const FIXED_COPY: Record<string, { title: Texts; body: Texts | null }> = {
   // The order's plan was released to the patient's portal
   // (crates/server/src/routes/appointments.rs, owner decision 2026-11-02).
   appointment_plan_released: {
-    title: { ru: "Ваш план приёмов готов", de: "Ihr Terminplan ist verfügbar" },
+    title: { ru: "Ваш план визитов готов", de: "Ihr Terminplan ist verfügbar" },
     body: {
-      ru: "Приёмы теперь видны в портале пациента.",
+      ru: "Визиты теперь видны в портале пациента.",
       de: "Ihre Termine sind jetzt im Patientenportal sichtbar.",
     },
   },
@@ -418,6 +418,46 @@ function privacyRequest(item: NotificationFacts, lang: Lang): NotificationCopy |
   };
 }
 
+/**
+ * The patient is told that the privacy request they filed was completed or
+ * refused (crates/server/src/routes/admin_compliance.rs,
+ * `notify_patient_of_privacy_outcome`; owner decision 2026-11-10). A data
+ * copy is not attached: the patient downloads it with «Export my data».
+ */
+function privacyOutcome(item: NotificationFacts, lang: Lang): NotificationCopy {
+  const tr = translationsFor(lang);
+  const code = text(item, "request_type");
+  const label = code ? tr[`portal_privacy_request_${code}` as keyof Translations] : null;
+  const type = typeof label === "string" ? label : null;
+  if (item.kind === "privacy_request_rejected") {
+    return {
+      title: pick({ ru: "Запрос по приватности отклонён", de: "Datenschutzanfrage abgelehnt" }, lang),
+      body: type
+        ? fill({
+            ru: "Запрос «{type}» отклонён. Причина указана на странице «Запросы по приватности».",
+            de: "Ihre Anfrage „{type}“ wurde abgelehnt. Die Begründung steht auf der Seite „Datenschutzanfragen“.",
+          }, lang, { type })
+        : pick({
+            ru: "Ваш запрос отклонён. Причина указана на странице «Запросы по приватности».",
+            de: "Ihre Anfrage wurde abgelehnt. Die Begründung steht auf der Seite „Datenschutzanfragen“.",
+          }, lang),
+    };
+  }
+  const done = type
+    ? fill({ ru: "Запрос «{type}» выполнен.", de: "Ihre Anfrage „{type}“ wurde erledigt." }, lang, { type })
+    : pick({ ru: "Ваш запрос выполнен.", de: "Ihre Anfrage wurde erledigt." }, lang);
+  const copyHint = code === "access" || code === "portability"
+    ? pick({
+        ru: " Копию ваших данных можно скачать в любой момент: «Экспортировать мои данные» на главной странице портала.",
+        de: " Eine Kopie Ihrer Daten können Sie jederzeit herunterladen: „Meine Daten exportieren“ auf der Startseite des Portals.",
+      }, lang)
+    : "";
+  return {
+    title: pick({ ru: "Запрос по приватности выполнен", de: "Datenschutzanfrage erledigt" }, lang),
+    body: `${done}${copyHint}`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Appointments
 // ---------------------------------------------------------------------------
@@ -439,23 +479,23 @@ function appointmentRequest(item: NotificationFacts, lang: Lang): NotificationCo
 
 const APPOINTMENT_REQUEST_UPDATES: Record<string, { title: Texts; body: Texts }> = {
   approved: {
-    title: { ru: "Запрос на приём одобрен", de: "Terminanfrage angenommen" },
+    title: { ru: "Запрос на визит одобрен", de: "Terminanfrage angenommen" },
     body: {
       ru: "Ваш запрос одобрен и ждёт планирования.",
       de: "Ihre Anfrage wurde angenommen und wird jetzt geplant.",
     },
   },
   rejected: {
-    title: { ru: "Запрос на приём отклонён", de: "Terminanfrage abgelehnt" },
+    title: { ru: "Запрос на визит отклонён", de: "Terminanfrage abgelehnt" },
     body: { ru: "Ваш запрос рассмотрен и отклонён.", de: "Ihre Anfrage wurde geprüft und abgelehnt." },
   },
   cancelled: {
-    title: { ru: "Запрос на приём отменён", de: "Terminanfrage storniert" },
+    title: { ru: "Запрос на визит отменён", de: "Terminanfrage storniert" },
     body: { ru: "Ваш запрос отменён.", de: "Ihre Anfrage wurde storniert." },
   },
   converted: {
-    title: { ru: "Приём запланирован", de: "Termin geplant" },
-    body: { ru: "По вашему запросу назначен приём.", de: "Zu Ihrer Anfrage wurde ein Termin geplant." },
+    title: { ru: "Визит запланирован", de: "Termin geplant" },
+    body: { ru: "По вашему запросу назначен визит.", de: "Zu Ihrer Anfrage wurde ein Termin geplant." },
   },
 };
 
@@ -846,6 +886,9 @@ export function notificationCopyFromFacts(
       return securityIncident(item, lang);
     case "privacy_request":
       return privacyRequest(item, lang);
+    case "privacy_request_completed":
+    case "privacy_request_rejected":
+      return privacyOutcome(item, lang);
     case "appointment_request":
       return appointmentRequest(item, lang);
     case "appointment_request_update":

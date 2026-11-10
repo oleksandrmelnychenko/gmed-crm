@@ -971,7 +971,7 @@ function NotificationPanel({
             </div>
           ) : (
             notifs.map((n) => {
-              const copy = localizedNotificationCopy(n, lang);
+              const copy = localizedNotificationCopy(n, lang, staffRole);
               return (
                 <button
                 key={n.id}

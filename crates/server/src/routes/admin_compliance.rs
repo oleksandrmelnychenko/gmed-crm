@@ -1722,8 +1722,10 @@ fn build_patient_export_zip(
         PatientExportAudience::StaffHandler => {
             "DSGVO Art. 15 export bundle\r\n\r\nThis archive contains the structured patient export in patient-export.json\r\nand the stored files of the patient in the documents folder.\r\n"
         }
+        // The patient reads the portal in German or Russian; the note is
+        // written in both and in English (global QA 2026-11-10: English only).
         PatientExportAudience::PatientPortal => {
-            "DSGVO Art. 15 export bundle\r\n\r\nThis archive contains your data from the patient portal in patient-export.json,\r\nand in the documents folder the documents released to you and your own uploads.\r\nA complete copy can be requested from GMED.\r\n"
+            "Datenexport nach Art. 15 DSGVO\r\n\r\nDieses Archiv enthält Ihre Daten aus dem Patientenportal in patient-export.json\r\nund im Ordner documents die für Sie freigegebenen Dokumente und Ihre eigenen Uploads.\r\nEine vollständige Kopie können Sie bei GMED anfordern.\r\n\r\nЭкспорт данных по ст. 15 DSGVO\r\n\r\nВ архиве — ваши данные из портала пациента в файле patient-export.json,\r\nа в папке documents — открытые для вас документы и ваши собственные загрузки.\r\nПолную копию можно запросить у GMED.\r\n\r\nDSGVO Art. 15 export bundle\r\n\r\nThis archive contains your data from the patient portal in patient-export.json,\r\nand in the documents folder the documents released to you and your own uploads.\r\nA complete copy can be requested from GMED.\r\n"
         }
     });
     if !documents.skipped.is_empty() {
@@ -2929,6 +2931,20 @@ async fn review_privacy_request(
     )
     .await;
 
+    // Art. 12 Abs. 4 DSGVO: the patient learns that the request was refused;
+    // the reason is shown with the request on the privacy page.
+    if next_status == "rejected" {
+        notify_patient_of_privacy_outcome(
+            &state,
+            request.id,
+            &request.request_type,
+            "privacy_request_rejected",
+            "Privacy request rejected",
+            "Your privacy request was rejected. The reason is shown with the request.",
+        )
+        .await;
+    }
+
     match fetch_privacy_request_payload(&state, request_id).await {
         Ok(payload) => Json(payload).into_response(),
         Err(response) => response,
@@ -3628,6 +3644,78 @@ async fn has_open_privacy_request(
     })
 }
 
+/// Tells the patient that the privacy request they filed was completed or
+/// refused (owner decision 2026-11-10; global QA: the portal promised «we
+/// will tell you» and nothing arrived). Goes to the requester's portal login
+/// and the patient's other active portal logins; a request staff or the
+/// retention sweep raised (`admin_intake`, `legal_hold`) notifies nobody.
+/// The portal words the notice from `kind` and `params.request_type`
+/// (`frontend/src/lib/notification-copy.ts`); `title`/`body` are the English
+/// fallback. It names no reason: the refusal's reason is on the privacy page.
+async fn notify_patient_of_privacy_outcome(
+    state: &AppState,
+    request_id: Uuid,
+    request_type: &str,
+    kind: &str,
+    title: &str,
+    body: &str,
+) {
+    let rows = sqlx::query(
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+           SELECT u.id, $2, $3, $4, 'privacy_request', pr.id, $5
+           FROM patient_privacy_requests pr
+           JOIN users u
+             ON u.is_active = true
+            AND u.role = 'patient'
+            AND (
+                u.id = pr.requested_by
+                OR EXISTS (
+                    SELECT 1 FROM patient_assignments pa
+                    WHERE pa.user_id = u.id
+                      AND pa.patient_id = pr.patient_id
+                      AND pa.revoked_at IS NULL
+                )
+            )
+           WHERE pr.id = $1
+             AND pr.source = 'patient_request'
+           RETURNING id, user_id"#,
+    )
+    .bind(request_id)
+    .bind(kind)
+    .bind(title)
+    .bind(body)
+    .bind(json!({ "request_type": request_type }))
+    .fetch_all(&state.db)
+    .await;
+    let rows = match rows {
+        Ok(rows) => rows,
+        Err(e) => {
+            // The decision itself is stored; the audit records it.
+            tracing::error!(error = %e, request_id = %request_id, kind, "notify patient of privacy outcome");
+            return;
+        }
+    };
+    for row in rows {
+        let notification_id = row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil());
+        let user_id = row
+            .try_get::<Uuid, _>("user_id")
+            .unwrap_or_else(|_| Uuid::nil());
+        if notification_id != Uuid::nil() && user_id != Uuid::nil() {
+            crate::realtime::publish_notification_event(
+                state,
+                user_id,
+                "notification.created",
+                Some(notification_id),
+                json!({
+                    "entity_type": "privacy_request",
+                    "entity_id": request_id,
+                }),
+            )
+            .await;
+        }
+    }
+}
+
 async fn complete_privacy_request_execution(
     state: &AppState,
     patient_id: Uuid,
@@ -3708,6 +3796,19 @@ async fn complete_privacy_request_execution(
     {
         // The erasure itself is done; the audit below records it.
         tracing::error!(error = %e, request_id = %request_id, "notify erasure requester");
+    }
+    // Every other request the patient filed: told that it is done. A data
+    // copy is fetched by the patient («Export my data»); the portal says so.
+    if request_type != "erasure" {
+        notify_patient_of_privacy_outcome(
+            state,
+            request_id,
+            request_type,
+            "privacy_request_completed",
+            "Privacy request completed",
+            "Your privacy request has been completed.",
+        )
+        .await;
     }
 
     state.audit_sender.try_send(audit::domain_event(

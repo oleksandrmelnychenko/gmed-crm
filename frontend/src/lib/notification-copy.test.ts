@@ -166,7 +166,7 @@ describe("notifications in the viewer's language (QA A-23, E-16, E-33)", () => {
         notice("appointment_request_update", "Appointment request cancelled", "Your appointment request was cancelled. Reason: Doppelt"),
         "ru",
       ),
-    ).toEqual({ title: "Запрос на приём отменён", body: "Ваш запрос отменён. Причина: Doppelt" });
+    ).toEqual({ title: "Запрос на визит отменён", body: "Ваш запрос отменён. Причина: Doppelt" });
     expect(
       notificationCopyFromFacts(
         notice("appointment_request_update", "Appointment request scheduled", "x", { status: "converted" }),

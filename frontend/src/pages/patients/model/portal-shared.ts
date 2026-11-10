@@ -392,6 +392,10 @@ export type PortalRecommendationItem = {
   source_order_id: string | null;
   source_order_number: string | null;
   due_at: string | null;
+  /** The day the recommendation was given and how long it holds ("YYYY-MM-DD"). */
+  recommended_on?: string | null;
+  valid_from?: string | null;
+  valid_to?: string | null;
   priority: string;
   status: string;
   portal_visible: boolean;
@@ -464,6 +468,8 @@ export type PortalAppointmentItem = {
   category: string | null;
   provider_name: string | null;
   doctor_name: string | null;
+  /** An interpreter was booked for the visit (the survey asks about one only then). */
+  has_interpreter?: boolean;
   created_at: string;
 };
 
@@ -965,6 +971,30 @@ export function portalPreferredDateRange(
   return { kind: "from", value: start };
 }
 
+export type PortalRequestDateProblem = "inverted" | "past";
+
+/**
+ * Why the preferred dates of an appointment request cannot be sent: the end
+ * lies before the start, or a date lies before `today` ("YYYY-MM-DD", the
+ * German calendar day). The server refuses the same
+ * (`appointment_request_dates_inverted`, `appointment_request_date_in_past`).
+ */
+export function portalRequestDateProblem(
+  from: string | null | undefined,
+  to: string | null | undefined,
+  today: string,
+): PortalRequestDateProblem | null {
+  if (from && to && to < from) return "inverted";
+  if ((from && from < today) || (to && to < today)) return "past";
+  return null;
+}
+
+/** The `uiText` keys of the messages (the texts of the server codes). */
+export const PORTAL_REQUEST_DATE_PROBLEM_KEYS: Record<PortalRequestDateProblem, string> = {
+  inverted: "api_appointment_request_dates_inverted",
+  past: "api_appointment_request_date_in_past",
+};
+
 export function formatPortalFileSize(value?: number | null) {
   if (!value || value <= 0) return portalNotSetLabel();
   if (value < 1024) return `${value} B`;
@@ -1044,9 +1074,10 @@ export function feedbackStatusTone(status: string) {
   return "border-amber-200 bg-amber-50 text-amber-700";
 }
 
+/** One decimal with a decimal comma ("4,5"), as on the staff feedback page. */
 export function formatPortalAverage(value?: number | null) {
   if (typeof value !== "number" || Number.isNaN(value)) return portalNotSetLabel();
-  return value.toFixed(1);
+  return value.toFixed(1).replace(".", ",");
 }
 
 export function npsBandLabel(value: number) {

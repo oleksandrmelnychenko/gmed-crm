@@ -614,10 +614,15 @@ async fn create_my_concierge_service(
     if let (Some(starts_at), Some(ends_at)) = (starts_at.as_ref(), ends_at.as_ref())
         && ends_at <= starts_at
     {
-        return err(
+        // Coded: the portal shows it in its own language (global QA 2026-11-10).
+        return (
             StatusCode::UNPROCESSABLE_ENTITY,
-            "ends_at must be later than starts_at",
-        );
+            Json(serde_json::json!({
+                "error": "portal_service_period_inverted",
+                "message": "ends_at must be later than starts_at"
+            })),
+        )
+            .into_response();
     }
 
     let currency = body.currency.unwrap_or_else(|| "EUR".to_string());

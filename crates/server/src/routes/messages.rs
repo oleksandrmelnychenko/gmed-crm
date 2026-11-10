@@ -1179,7 +1179,12 @@ async fn list_conversations(
                 data.push(serde_json::json!({
                     "user_id": peer_id,
                     "name": r.try_get::<String, _>("name").unwrap_or_default(),
-                    "email": r.try_get::<String, _>("email").unwrap_or_default(),
+                    // A patient gets the name and role of the team, no staff address.
+                    "email": if auth.role == Role::Patient {
+                        String::new()
+                    } else {
+                        r.try_get::<String, _>("email").unwrap_or_default()
+                    },
                     "role": role_name,
                     "last_message": last_msg,
                     "is_e2e": is_e2e,
@@ -3756,9 +3761,11 @@ async fn load_allowed_peer_rows(
     search_pattern: &str,
 ) -> Result<Vec<sqlx::postgres::PgRow>, axum::response::Response> {
     if auth.role == Role::Patient {
+        // The patient sees the name and role of the team: a staff e-mail
+        // address is neither sent nor searched (global QA 2026-11-10).
         return sqlx::query(
             r#"SELECT DISTINCT
-                    u.id, u.name, u.email, u.role,
+                    u.id, u.name, ''::text AS email, u.role,
                     CASE WHEN u.role IN ('ceo', 'ceo_assistant') THEN 0 ELSE 1 END AS role_sort
                FROM users u
                LEFT JOIN patient_assignments pa
@@ -3777,7 +3784,7 @@ async fn load_allowed_peer_rows(
                     'concierge'
                  )
                  AND pa.id IS NOT NULL
-                 AND ($3::text = '%%' OR u.name ILIKE $3 OR u.email ILIKE $3)
+                 AND ($3::text = '%%' OR u.name ILIKE $3)
                ORDER BY role_sort, u.name"#,
         )
         .bind(resolve_self_patient_id(state, auth).await?)

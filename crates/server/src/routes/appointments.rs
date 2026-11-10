@@ -522,6 +522,8 @@ fn build_patient_appointment_json(row: &sqlx::postgres::PgRow) -> serde_json::Va
         "category": row.try_get::<Option<String>, _>("category").unwrap_or_default(),
         "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
         "doctor_name": row.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
+        // The satisfaction survey asks about the interpreter only for a visit that had one.
+        "has_interpreter": row.try_get::<bool, _>("has_interpreter").unwrap_or(false),
         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
     })
 }
@@ -633,6 +635,7 @@ async fn list_my_appointments(
         r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type,
                   a.care_path_kind, a.followup_milestone,
                   a.status, a.location, a.category, a.created_at,
+                  (a.interpreter_id IS NOT NULL) AS has_interpreter,
                   provider.name AS provider_name,
                   doctor.name AS doctor_name
            FROM appointments a
@@ -775,12 +778,25 @@ async fn create_my_appointment_request(
         }
     };
 
+    // Coded: the portal shows both refusals in its own language (global QA 2026-11-10).
     if let (Some(from), Some(to)) = (preferred_date_from, preferred_date_to)
         && to < from
     {
-        return err(
+        return coded_err(
             StatusCode::UNPROCESSABLE_ENTITY,
+            "appointment_request_dates_inverted",
             "preferred_date_to must be on or after preferred_date_from",
+        );
+    }
+    // A visit is asked for today or later (German calendar day).
+    let today = crate::app_time::today();
+    if preferred_date_from.is_some_and(|date| date < today)
+        || preferred_date_to.is_some_and(|date| date < today)
+    {
+        return coded_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "appointment_request_date_in_past",
+            "Preferred dates must not lie in the past",
         );
     }
 

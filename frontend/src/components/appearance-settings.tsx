@@ -126,7 +126,13 @@ export function AppearanceSettings() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={exportTheme}><Download />{text.export}</Button>
-          <Button size="sm" variant="ghost" onClick={() => select(DEFAULT_THEME.id)}>{text.reset}</Button>
+          <Button size="sm" variant="ghost" onClick={async () => {
+            // The GMED look again: the built-in palette without the person's
+            // own colours, which win over every theme (QA 2026-11-10: the
+            // page kept the own background after "Restore GMED").
+            try { await save(p => ({ ...p, selectedId: DEFAULT_THEME.id, controls: undefined })); setNotice({ error: false, message: text.saved }); }
+            catch (cause) { fail(cause); }
+          }}>{text.reset}</Button>
           {!BUILTIN_THEMES.some((item) => item.id === theme.id) ? <Button size="sm" variant="ghost" onClick={async () => {
             try { await save(p => ({ ...p, selectedId: DEFAULT_THEME.id, themes: p.themes.filter((item) => item.id !== theme.id) })); setNotice(null); } catch (cause) { fail(cause); }
           }}>{text.remove}</Button> : null}

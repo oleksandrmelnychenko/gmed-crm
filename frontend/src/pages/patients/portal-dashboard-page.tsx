@@ -67,7 +67,7 @@ import type {
 } from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
 import { PatientPortalMobileAccess } from "@/pages/patients/ui/patient-portal-mobile-access";
-import { missingDocumentHints } from "@/pages/patients/model/portal-required-documents";
+import { portalRequiredDocumentProgress } from "@/pages/patients/model/portal-required-documents";
 import { portalServiceContext } from "./model/portal-service-context";
 
 const PATIENT_DASHBOARD_REALTIME_EVENTS = [
@@ -109,6 +109,21 @@ const PATIENT_DASHBOARD_REALTIME_EVENTS = [
   "order.followup_flow_updated",
   "order.external_invoice_overdue",
 ] as const;
+
+/** Billing may hide the amounts of an invoice from the patient. */
+function invoiceAmountsVisible(invoice: PortalInvoiceItem) {
+  return invoice.portal_visibility?.amounts_visible_to_patient ?? true;
+}
+
+/**
+ * Whether an invoice is still open. With hidden amounts the balance is not
+ * sent, so the status decides — the tile "My invoices" lost its number and
+ * the card read "Open: not set" (global QA 2026-11-10).
+ */
+function isOpenInvoice(invoice: PortalInvoiceItem) {
+  if (invoiceAmountsVisible(invoice)) return Number(invoice.balance_due ?? 0) > 0;
+  return ["sent", "partially_paid", "overdue"].includes(invoice.display_status ?? invoice.status);
+}
 
 function nextActionPriorityRank(priority?: string | null) {
   switch (priority) {
@@ -299,7 +314,7 @@ function usePatientDashboardPageContent() {
     [appointments],
   );
   const openInvoiceCount = useMemo(
-    () => invoices.filter((item) => Number(item.balance_due ?? 0) > 0).length,
+    () => invoices.filter((item) => isOpenInvoice(item)).length,
     [invoices],
   );
   const openServiceRequests = useMemo(
@@ -331,6 +346,11 @@ function usePatientDashboardPageContent() {
     }
     return Array.from(counts.entries()).slice(0, 3);
   }, [nextActions]);
+  // What the patient uploads apart from the consents GMED sends for signing.
+  const requiredDocuments = useMemo(
+    () => (documentAlerts ? portalRequiredDocumentProgress(documentAlerts) : null),
+    [documentAlerts],
+  );
   const recentRecommendations = useMemo(() => recommendations.slice(0, 4), [recommendations]);
   const recentRequests = useMemo(() => requests.slice(0, 4), [requests]);
 
@@ -431,12 +451,34 @@ function usePatientDashboardPageContent() {
         ))}
       </nav>
       {documentAlerts && documentAlerts.configured_rule_count > 0 ? (
-        documentAlerts.document_pack_complete ? (
+        documentAlerts.document_pack_complete || documentAlerts.missing_documents.length === 0 ? (
           <div className="portal-document-complete flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 px-4 py-3">
             <PortalComplete>{t.portal_dashboard_your_minimum_document_pack_is_complete}</PortalComplete>
             <a href="/documents" className="text-sm font-medium text-primary hover:underline">{t.portal_dashboard_open_documents}</a>
           </div>
-        ) : (
+        ) : requiredDocuments && requiredDocuments.ownMissing.length === 0 ? (
+          // Only consents are open: nothing of the patient's is missing, GMED
+          // sends them for signing (QA 2026-10-12 B2-13, global QA 2026-11-10).
+          <div
+            className="portal-document-complete flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border/60 px-4 py-3"
+            data-testid="portal-dashboard-consents-pending"
+          >
+            <div className="min-w-0 space-y-1.5">
+              <PortalComplete>{l("portal_documents_own_complete_consents_pending")}</PortalComplete>
+              <p className={tokens.text.muted} data-testid="portal-dashboard-consent-hint">
+                {l("portal_documents_consent_sent_by_gmed")}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {requiredDocuments.consentsMissing.map((item) => (
+                  <StatusBadge key={item.key} tone="neutral">
+                    {localizeRequiredDocumentLabel(item.key, item.label, l)}
+                  </StatusBadge>
+                ))}
+              </div>
+            </div>
+            <a href="/documents" className="text-sm font-medium text-primary hover:underline">{t.portal_dashboard_open_documents}</a>
+          </div>
+        ) : requiredDocuments ? (
           <Banner tone="warning" withIcon>
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div>
@@ -444,51 +486,41 @@ function usePatientDashboardPageContent() {
                   {t.portal_dashboard_required_documents}
                 </p>
                 <p className="mt-2 text-sm font-semibold text-foreground">
-                  {formatPluralCount(lang, documentAlerts.missing_count, {
+                  {formatPluralCount(lang, requiredDocuments.ownMissing.length, {
                     one: t.portal_dashboard_missing_required_document_one,
                     few: t.portal_dashboard_missing_required_document_many,
                     many: t.portal_dashboard_missing_required_document_many,
                   })}
                 </p>
-                {(() => {
-                  // A missing consent is signed, not uploaded: the card says
-                  // so, as the documents page does (QA 2026-10-12 B2-13).
-                  const hints = missingDocumentHints(
-                    documentAlerts.missing_documents.map((item) => item.key),
-                  );
-                  return (
-                    <>
-                      {hints.upload || !hints.consent ? (
-                        <p className={cn("mt-1", tokens.text.muted)}>
-                          {t.portal_dashboard_upload_the_missing_items_in_the_portal_so_your_care_team_can_con}
-                        </p>
-                      ) : null}
-                      {hints.consent ? (
-                        <p
-                          className={cn("mt-1", tokens.text.muted)}
-                          data-testid="portal-dashboard-consent-hint"
-                        >
-                          {l("portal_documents_consent_sent_by_gmed")}
-                        </p>
-                      ) : null}
-                    </>
-                  );
-                })()}
-                {documentAlerts.missing_count > 0 ? (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {documentAlerts.missing_documents.map((item) => (
-                      <StatusBadge key={item.key} tone="warning">
-                        {localizeRequiredDocumentLabel(item.key, item.label, l)}
-                      </StatusBadge>
-                    ))}
+                <p className={cn("mt-1", tokens.text.muted)}>
+                  {t.portal_dashboard_upload_the_missing_items_in_the_portal_so_your_care_team_can_con}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {requiredDocuments.ownMissing.map((item) => (
+                    <StatusBadge key={item.key} tone="warning">
+                      {localizeRequiredDocumentLabel(item.key, item.label, l)}
+                    </StatusBadge>
+                  ))}
+                </div>
+                {requiredDocuments.consentsMissing.length > 0 ? (
+                  // A consent is signed, not uploaded: named apart, not counted as missing.
+                  <div className="mt-3 space-y-1.5">
+                    <p className={tokens.text.muted} data-testid="portal-dashboard-consent-hint">
+                      {l("portal_documents_consent_sent_by_gmed")}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {requiredDocuments.consentsMissing.map((item) => (
+                        <StatusBadge key={item.key} tone="neutral">
+                          {localizeRequiredDocumentLabel(item.key, item.label, l)}
+                        </StatusBadge>
+                      ))}
+                    </div>
                   </div>
                 ) : null}
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <CountBadge>
-                  {t.portal_dashboard_fulfilled}:{" "}
-                  {documentAlerts.required_documents.filter((item) => item.fulfilled).length}/
-                  {documentAlerts.configured_rule_count}
+                  {t.portal_dashboard_fulfilled}: {requiredDocuments.ownFulfilled}/{requiredDocuments.ownTotal}
                 </CountBadge>
                 <a href="/documents">
                   <Button variant="default" className={tokens.control.primaryButton}>
@@ -498,7 +530,7 @@ function usePatientDashboardPageContent() {
               </div>
             </div>
           </Banner>
-        )
+        ) : null
       ) : null}
 
       <section className={cn("grid items-start gap-3", recentRecommendations.length > 0 && "lg:grid-cols-2")}>
@@ -698,8 +730,11 @@ function usePatientDashboardPageContent() {
                       {portalStatusLabel(item.status)}
                     </StatusBadge>
                   </div>
-                  <div className="mt-2"><StatusChip tone={Number(item.balance_due) > 0 ? "warning" : "success"}>
-                    {t.portal_dashboard_open}: {formatPortalCurrency(item.balance_due)}
+                  <div className="mt-2"><StatusChip tone={isOpenInvoice(item) ? "warning" : "success"}>
+                    {t.portal_dashboard_open}:{" "}
+                    {invoiceAmountsVisible(item)
+                      ? formatPortalCurrency(item.balance_due, item.currency)
+                      : t.portal_invoices_hidden}
                   </StatusChip></div>
                 </ListItem>
               ))

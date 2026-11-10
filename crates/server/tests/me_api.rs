@@ -569,6 +569,30 @@ async fn the_patients_own_export_holds_what_the_login_sees_in_the_portal() {
         uploads.push(body["id"].as_str().unwrap().to_string());
     }
 
+    // The portal takes documents only (global QA 2026-11-10: `.exe` and `.sh`
+    // were stored and shown to staff).
+    for (file_name, bytes) in [
+        ("qa-test.exe", b"MZ\x90\x00synthetic".as_slice()),
+        ("qa-script.sh", b"#!/bin/sh\necho synthetic".as_slice()),
+        ("befund.txt", b"#!/bin/sh\necho synthetic".as_slice()),
+    ] {
+        let (status, body) = multipart_upload(
+            &app,
+            "/api/v1/me/documents/upload",
+            &mother_bearer,
+            &[("upload_kind", "general".to_string())],
+            file_name,
+            "application/octet-stream",
+            bytes,
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(
+            body["error"], "portal_upload_type_not_allowed",
+            "{file_name}"
+        );
+    }
+
     // Released by mistake, they are still closed.
     for (art, category) in [
         ("enhanced_due_diligence", "compliance_aml"),

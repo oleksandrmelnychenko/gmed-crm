@@ -128,7 +128,20 @@ async fn load_appointment_actions(
              -- Only the plan released to the patient (owner decision 2026-11-02).
              AND portal_released_at IS NOT NULL
              AND status IN ('planned', 'confirmed', 'in_progress')
-             AND date >= current_date
+             -- A visit of today is ahead until its end (else its start) has
+             -- passed; a running one and one without a time stay for the day
+             -- (global QA 2026-11-10; sessions run in German time).
+             AND (
+                 date > current_date
+                 OR (
+                     date = current_date
+                     AND (
+                         status = 'in_progress'
+                         OR COALESCE(time_end, time_start) IS NULL
+                         OR COALESCE(time_end, time_start) > localtime
+                     )
+                 )
+             )
            ORDER BY date ASC, time_start ASC NULLS LAST
            LIMIT 5"#,
     )
