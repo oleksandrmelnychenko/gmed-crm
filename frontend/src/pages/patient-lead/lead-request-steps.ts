@@ -230,6 +230,32 @@ export function stepMissingCount(
 }
 
 /**
+ * What a step still misses, as "Next" judges it: its missing keys in the order of the form, and
+ * in the first step the consent (`inquiry_consent`, at the end of that step) while the request
+ * was never sent.
+ */
+export function stepMissingKeys(
+  request: Pick<LeadRequest, "progress" | "follow_up" | "consents"> & Partial<Pick<LeadRequest, "submitted_at">>,
+  step: StepId,
+  missing: Record<StepId, string[]> = missingByStep(request),
+): string[] {
+  return step === "person" && inquiryConsentMissing(request) ? [...missing[step], "inquiry_consent"] : [...missing[step]];
+}
+
+/**
+ * Whether "Next" stays on the step because of what is missing (owner 2026-10-09: the first press
+ * with something missing shows the list and stays, the next press goes on). `warned` is what the
+ * last held press showed during this visit of the step, null without one. The press goes on only
+ * when everything still missing was on that list: a field that became required since (another
+ * answer opened it), a step opened again or a page loaded again is shown first, like the first
+ * time — the same on every press, however often "Next" was pressed before (owner report 2026-11-11).
+ */
+export function nextHeldByMissing(keys: readonly string[], warned: ReadonlySet<string> | null): boolean {
+  if (keys.length === 0) return false;
+  return !warned || keys.some((key) => !warned.has(key));
+}
+
+/**
  * Whether step "documents" was touched: the server requires nothing there
  * before the contract (the consent, the reason and the files are voluntary),
  * so the step counts as filled in only once the person gave the health

@@ -8,9 +8,11 @@ import {
   hasBaseFormInput,
   initialStep,
   missingByStep,
+  nextHeldByMissing,
   refusedIdentityUploadKeys,
   stepDone,
   stepMissingCount,
+  stepMissingKeys,
   stepOfField,
   visibleSteps,
 } from "./lead-request-steps";
@@ -211,6 +213,43 @@ describe("lead cabinet steps", () => {
     // "Send" is done once sent and unchanged.
     expect(stepDone(open, "send")).toBe(true);
     expect(stepDone({ ...open, changed_since_submit: true }, "send")).toBe(false);
+  });
+
+  it("lists what \"Next\" judges a step by: its keys in form order, the consent last in the first step", () => {
+    const open = request({
+      progress: { filled: 0, total: 0, missing_for_submit: ["city", "legal_sex", "payer_kind", "id_document_upload"] },
+      consents: { lead_inquiry_processing: { type: "lead_inquiry_processing", version: "1", texts: {}, given_at: null } },
+    });
+    expect(stepMissingKeys(open, "person")).toEqual(["legal_sex", "city", "inquiry_consent"]);
+    expect(stepMissingKeys(open, "identity")).toEqual(["id_document_upload"]);
+    expect(stepMissingKeys(open, "billing")).toEqual(["payer_kind"]);
+    expect(stepMissingKeys(open, "documents")).toEqual([]);
+    // Like the badge: the consent only while the request was never sent.
+    expect(stepMissingKeys({ ...open, submitted_at: "2026-10-07T09:00:00Z" }, "person")).toEqual(["legal_sex", "city"]);
+    expect(stepMissingKeys(open, "person")).toHaveLength(stepMissingCount(open, "person"));
+    // The follow-up's keys carry their block.
+    const followed = request({ follow_up: followUp({ before_submit: true, blocks: ["A"], missing: { A: ["funds_source"] } }) });
+    expect(stepMissingKeys(followed, "follow_up")).toEqual(["A:funds_source"]);
+  });
+
+  it("holds \"Next\" for what is missing the same way on every press (owner report 2026-11-11)", () => {
+    // Nothing missing never holds.
+    expect(nextHeldByMissing([], null)).toBe(false);
+    expect(nextHeldByMissing([], new Set(["legal_sex"]))).toBe(false);
+    // The first press of a visit holds, whatever was shown on an earlier visit (null: none in this one).
+    expect(nextHeldByMissing(["legal_sex"], null)).toBe(true);
+    // The press after the list goes on while everything missing was on it — also when less is missing now.
+    const shown = new Set(["legal_sex", "city", "inquiry_consent"]);
+    expect(nextHeldByMissing(["legal_sex", "city", "inquiry_consent"], shown)).toBe(false);
+    expect(nextHeldByMissing(["legal_sex"], shown)).toBe(false);
+    // A field that became required since holds again, also on the third or tenth press.
+    expect(nextHeldByMissing(["legal_sex", "under_guardianship"], shown)).toBe(true);
+    expect(nextHeldByMissing(["under_guardianship"], new Set<string>())).toBe(true);
+    // An empty value of any kind is the same key: a select, a date, a list, an upload.
+    for (const key of ["legal_sex", "date_of_birth", "citizenships", "id_document_upload", "payer_contact_consent"]) {
+      expect(nextHeldByMissing([key], null)).toBe(true);
+      expect(nextHeldByMissing([key], new Set([key]))).toBe(false);
+    }
   });
 
   it("opens a request where its person has something to do", () => {

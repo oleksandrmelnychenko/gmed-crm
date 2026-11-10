@@ -848,23 +848,36 @@ for (const status of [422, 503]) {
     await page.getByTestId("payer-link-summary-funds").getByRole("button").click();
     await page.getByTestId("payer-link-step-funds").getByRole("textbox", { name: /Beruf/ }).fill("Neue Tätigkeit");
     await expect.poll(() => calls.patches.some((patch) => patch.occupation === "Neue Tätigkeit")).toBe(true);
-    await next(page);
-    await next(page);
-    await next(page);
-    await page.getByTestId("payer-link-confirm").check();
-    await page.getByTestId("payer-link-submit").click();
-    await expect(page.getByTestId("payer-link-step-summary").getByRole("alert")).toHaveText("Nicht gespeichert");
-    expect(calls.payer.filter((call) => call.path.endsWith("/submit"))).toHaveLength(0);
-    expect(q.answers.occupation).toBe("Ingenieur");
-
-    writeFailure.status = null;
     if (status === 422) {
-      await page.getByTestId("payer-link-summary-funds").getByRole("button").click();
-      await page.getByTestId("payer-link-step-funds").getByRole("textbox", { name: /Beruf/ }).fill("Korrigierte Tätigkeit");
+      // An entry the server refuses holds "Weiter" on its step, on every press, with the cursor
+      // in the field (owner report 2026-11-11): it never reaches the summary unsaved.
+      const occupation = page.getByTestId("payer-link-step-funds").getByRole("textbox", { name: /Beruf/ });
+      for (let press = 1; press <= 3; press += 1) {
+        await page.getByTestId("payer-link-step-title").click();
+        await next(page);
+        await expect(page.getByTestId("payer-link-form")).toHaveAttribute("data-step", "funds");
+        await expect(page.getByTestId("payer-link-notice")).toHaveText("Nicht gespeichert");
+        await expect(occupation).toHaveAttribute("aria-invalid", "true");
+        await expect(occupation).toBeFocused();
+        await expect(occupation).toBeInViewport();
+      }
+      expect(q.answers.occupation).toBe("Ingenieur");
+      writeFailure.status = null;
+      await occupation.fill("Korrigierte Tätigkeit");
       await next(page);
       await next(page);
       await next(page);
       await page.getByTestId("payer-link-confirm").check();
+    } else {
+      await next(page);
+      await next(page);
+      await next(page);
+      await page.getByTestId("payer-link-confirm").check();
+      await page.getByTestId("payer-link-submit").click();
+      await expect(page.getByTestId("payer-link-step-summary").getByRole("alert")).toHaveText("Nicht gespeichert");
+      expect(calls.payer.filter((call) => call.path.endsWith("/submit"))).toHaveLength(0);
+      expect(q.answers.occupation).toBe("Ingenieur");
+      writeFailure.status = null;
     }
     // A transient failure retries the same unsaved draft without requiring another edit.
     await page.getByTestId("payer-link-submit").click();
@@ -1551,6 +1564,11 @@ test.describe("payer link", () => {
     await expect(stepTitle(page)).toHaveText("Beziehung und Herkunft der Mittel");
     await expect(page.getByTestId("payer-link-step-missing")).toContainText("Bitte noch ergänzen:");
     await expect(page.getByTestId("payer-link-step-missing")).toContainText("Nachweis der Herkunft der Mittel");
+    // The held press itself leads to the first missing field of the step (owner 2026-11-11).
+    const firstMissing = page.getByTestId("payer-link-missing-item").first();
+    const heldFocus = await page.evaluate(() => document.activeElement?.closest("[data-testid]")?.getAttribute("data-testid") ?? document.activeElement?.id ?? "");
+    expect(heldFocus, `focus after the held press (first missing: ${await firstMissing.textContent()})`).not.toBe("payer-link-next");
+    await expect(page.locator(":focus")).toBeInViewport();
     // Each missing item leads to its field: the hidden upload's button gets the focus.
     await page.getByTestId("payer-link-missing-item").filter({ hasText: "Nachweis der Herkunft der Mittel" }).click();
     await expect(page.getByTestId("payer-link-funds-upload").locator("button").first()).toBeFocused();

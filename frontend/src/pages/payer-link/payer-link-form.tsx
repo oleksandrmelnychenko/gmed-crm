@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { payerPhoneAcceptable } from "@/lib/payer-phone";
 import { MAX_UPLOAD_BYTES } from "@/pages/patient-lead/lead-request-model";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "@/pages/patient-lead/lead-request-autosave";
+import { revealCabinetTarget } from "@/pages/patient-lead/lead-request-field-target";
+import { nextHeldByMissing } from "@/pages/patient-lead/lead-request-steps";
 
 import { PayerLinkError, type PayerLinkClient, type PayerQuestionnaire, type PayerSignaturePackage } from "./payer-link-api";
 import {
@@ -389,6 +391,9 @@ function DraftForm({
   // Sent, or the session or the link is gone: the last autosave must not write any more.
   const closedRef = useRef(false);
   const advancingRef = useRef(false);
+  const formRef = useRef<HTMLFieldSetElement | null>(null);
+  // What the last held press of "next" listed as missing, for the step on screen.
+  const warnedRef = useRef<{ step: PayerStep; keys: ReadonlySet<string> } | null>(null);
 
   const linkProblem = useCallback(
     (problem: LinkProblem) => {
@@ -521,6 +526,7 @@ function DraftForm({
     setNotice(null);
     setSubmitError(null);
     setOwnersHeld(false);
+    warnedRef.current = null;
     setStep(next);
     // Staff may have filed the register extract while this page stayed open: the
     // step and the summary then ask less (QA 2026-11-01).
@@ -609,12 +615,27 @@ function DraftForm({
       // The list counts what is saved: the answer typed just before the press is
       // saved first, or that press only saved it (QA 2026-11-01). Without one there is
       // nothing to wait for: uploads share the queue, and a batch must not freeze the button.
-      if (consented && form.hasUnsaved()) await form.flush();
-      const open = missingByStep(questionnaireRef.current.missing_for_submit ?? [], payerType, steps).some(
-        (group) => group.step === step && group.keys.length > 0,
-      );
-      if (consented && open && !missingShown) {
+      if (consented && form.hasUnsaved() && !(await form.flush())) {
+        // An entry of this step was not taken (an e-mail or a phone number the server refused):
+        // the step stays and leads to it. Before, "next" went on and the entry stayed unsaved
+        // until the summary (owner report 2026-11-11). An entry refused on another step does
+        // not hold this one: there is nothing here to put right.
+        const refused = await afterRender(() => formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]') ?? null);
+        if (refused) {
+          setNotice(text.notSaved);
+          revealCabinetTarget({ element: refused, field: true });
+          return;
+        }
+      }
+      const open = missingByStep(questionnaireRef.current.missing_for_submit ?? [], payerType, steps).find((group) => group.step === step)?.keys ?? [];
+      // Like the lead cabinet: the first press with something missing shows the list, leads to
+      // the first field and stays; the next press goes on, unless something is missing that
+      // the list of that press did not name. A step opened again starts anew.
+      const warned = warnedRef.current?.step === step ? warnedRef.current.keys : null;
+      if (consented && nextHeldByMissing(open, warned)) {
+        warnedRef.current = { step, keys: new Set(open) };
         setMissingShownSteps((current) => new Set(current).add(step));
+        void afterRender(() => open.some((key) => revealPayerField(key)));
         return;
       }
       goTo(following);
@@ -671,7 +692,7 @@ function DraftForm({
   }
 
   return (
-    <fieldset disabled={submitting} aria-busy={submitting} className="min-w-0 space-y-5 border-0 p-0" data-testid="payer-link-form" data-step={step}>
+    <fieldset ref={formRef} disabled={submitting} aria-busy={submitting} className="min-w-0 space-y-5 border-0 p-0" data-testid="payer-link-form" data-step={step}>
       <div ref={topRef} className="scroll-mt-4 space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span data-testid="payer-link-step-of">{text.stepOf(position + 1, steps.length)}</span>
@@ -771,18 +792,22 @@ function revealOwnerProblem(blocker: OwnersBlocker, owners: readonly OwnerDraft[
   return true;
 }
 
-function revealPayerField(key: string) {
+/** Leads to the field of a missing key: scrolled into view, the cursor in it. False when the step does not show it. */
+function revealPayerField(key: string): boolean {
   const id = UPLOAD_IDS[key] ?? `payer-link-${key}`;
   const label = document.getElementById(`${id}-label`);
   const target = document.getElementById(id) ?? label;
-  if (!target) return;
-  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-  (label ?? target).scrollIntoView({ block: "center", behavior: reduced ? "auto" : "smooth" });
-  // An upload's input is hidden: its button gets the focus; a group's label its first choice.
-  const focusable = target instanceof HTMLInputElement && target.type === "file"
-    ? target.parentElement?.querySelector<HTMLElement>("button")
-    : target.matches("input, select, textarea, button, [tabindex]")
-      ? target
-      : target.parentElement?.querySelector<HTMLElement>("input, select, textarea, button");
-  focusable?.focus({ preventScroll: true });
+  if (!target) return false;
+  // An upload's input is hidden: its button gets the focus; a group's label its first choice;
+  // a date field its day (`revealCabinetTarget` knows them).
+  const own = target.matches("input, select, textarea, button, [tabindex]") && !(target instanceof HTMLInputElement && target.type === "file");
+  revealCabinetTarget({ element: own ? target : target.parentElement ?? target, field: true });
+  return true;
+}
+
+/** Runs once the press has rendered what it changed (the list, a field's objection). */
+function afterRender<Result>(task: () => Result): Promise<Result> {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve(task())));
+  });
 }

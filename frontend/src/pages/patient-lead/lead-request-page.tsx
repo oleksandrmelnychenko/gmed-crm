@@ -58,7 +58,7 @@ import {
   type RequestPatch,
   type RequestQueue,
 } from "./lead-request-parts";
-import { findCabinetTarget, revealCabinetTarget, type CabinetTarget } from "./lead-request-field-target";
+import { findCabinetTarget, firstCabinetTarget, firstProblemIn, revealCabinetTarget, type CabinetTarget } from "./lead-request-field-target";
 import { SendStep } from "./lead-request-send-step";
 import {
   BillingStep,
@@ -74,8 +74,10 @@ import {
   initialStep,
   inquiryConsentMissing,
   missingByStep,
+  nextHeldByMissing,
   stepDone,
   stepMissingCount,
+  stepMissingKeys,
   visibleSteps,
   type StepId,
 } from "./lead-request-steps";
@@ -713,6 +715,41 @@ function LeadRequestView({
     return () => window.cancelAnimationFrame(frame);
   }, [pendingTarget]);
 
+  // A step that "Next" (or a tab, Back, Forward) could not leave takes the person to what holds
+  // it (owner 2026-11-11): the first field still missing, or the entry that could not be saved —
+  // scrolled into view with the cursor in it. Looked up once the press has rendered its marks
+  // (the message of a refused date, the server's refusal of a field): read at once, the first
+  // press found nothing and only the second one led to the field.
+  const [pendingHold, setPendingHold] = useState<{ missing: readonly string[] } | { problem: true } | null>(null);
+  const requiredMessage = text.required;
+  useEffect(() => {
+    if (!pendingHold) return;
+    let frame = 0;
+    let tries = 0;
+    const reveal = () => {
+      const root = stepRef.current;
+      const found = "missing" in pendingHold
+        ? firstCabinetTarget(pendingHold.missing, root ?? document)
+        : firstProblemIn(root, requiredMessage);
+      if (found) {
+        revealCabinetTarget(found);
+        return;
+      }
+      if (++tries < 20) {
+        frame = window.requestAnimationFrame(reveal);
+        return;
+      }
+      // Nothing on the step is marked (the connection failed): the notice above the card says so.
+      if ("problem" in pendingHold) {
+        document.querySelector('[data-testid="lead-request-save-blocked"]')?.scrollIntoView?.({ block: "nearest" });
+      }
+    };
+    frame = window.requestAnimationFrame(() => { frame = window.requestAnimationFrame(reveal); });
+    return () => window.cancelAnimationFrame(frame);
+  }, [pendingHold, requiredMessage]);
+  // What the last held press of "Next" listed as missing, for the step on screen (see `nextHeldByMissing`).
+  const warned = useRef<{ step: StepId; keys: ReadonlySet<string> } | null>(null);
+
   const staffMode = useCabinetStaffMode();
   const go = useCallback((next: StepId, validateCurrent = false, target?: CabinetTarget) => {
     if (validateCurrent) setNextPressed(true);
@@ -722,6 +759,19 @@ function LeadRequestView({
       return;
     }
     void switchAfterSave(request.lead_id, () => {
+      // All sections have now saved: the fresh answer says what the step still misses. The first
+      // press with something missing shows the list, leads to the first field and stays; the
+      // next press goes on (owner 2026-10-09) — unless something is missing that the list of
+      // that press did not name.
+      if (validateCurrent) {
+        const keys = stepMissingKeys(latestRequest.current, step);
+        if (nextHeldByMissing(keys, warned.current?.step === step ? warned.current.keys : null)) {
+          warned.current = { step, keys: new Set(keys) };
+          showMissingOf(step);
+          setPendingHold({ missing: keys });
+          return;
+        }
+      }
       // Without the consent to process the request Next never leaves the first
       // step — not only the first time (owner 2026-10-29). Staff filling in the
       // form cannot give it and go on.
@@ -743,12 +793,8 @@ function LeadRequestView({
           return;
         }
       }
-      // All sections have now saved. The pre-save render can still list fields
-      // the user just completed, especially in Insurance & Invoice.
-      if (validateCurrent && !missingShownSteps.has(step) && stepMissingCount(latestRequest.current, step) > 0) {
-        showMissingOf(step);
-        return;
-      }
+      // The step is left: opened again, its first "Next" shows what is missing again.
+      if (next !== step) warned.current = null;
       setChosenStep(next);
       // The notice of a refused change stays for the step that opens now, then goes.
       setSentRefused((current) => (current === "fresh" ? "seen" : null));
@@ -780,11 +826,9 @@ function LeadRequestView({
       if (validateCurrent) showMissingOf(step);
       // The step stays because an entry could not be saved: show that entry (its
       // message), not only the banner above the card, which may be out of sight.
-      const problem = stepRef.current?.querySelector<HTMLElement>('[aria-invalid="true"], [role="alert"]');
-      if (problem) revealCabinetTarget({ element: problem, field: true });
-      else window.requestAnimationFrame(() => document.querySelector('[data-testid="lead-request-save-blocked"]')?.scrollIntoView?.({ block: "nearest" }));
+      setPendingHold({ problem: true });
     });
-  }, [switchAfterSave, request.lead_id, setSearchParams, syncAddress, missingShownSteps, step, showMissingOf, staffMode]);
+  }, [switchAfterSave, request.lead_id, setSearchParams, syncAddress, step, showMissingOf, staffMode]);
 
   // Browser Back / Forward: the step on screen follows the address, saved first like any step
   // change. The entry before the first step change names no step: the request's own first step.
@@ -796,11 +840,13 @@ function LeadRequestView({
     const target = addressStep ? visibleSteps(current).find((id) => id === addressStep) : initialStep(current);
     if (!target || target === chosenStepRef.current) return;
     void switchAfterSave(current.lead_id, () => {
+      warned.current = null;
       setChosenStep(target);
       setSentRefused((notice) => (notice === "fresh" ? "seen" : null));
       if (target === "send") setSendOpened(true);
     }, () => {
-      // An entry could not be saved: the step stays, and the address names it again.
+      // An entry could not be saved: the step stays with that entry shown, and the address names it again.
+      setPendingHold({ problem: true });
       setSearchParams((params) => {
         const next = new URLSearchParams(params);
         next.set("lead", current.lead_id);

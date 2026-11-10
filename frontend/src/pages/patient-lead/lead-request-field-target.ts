@@ -170,17 +170,92 @@ export function findCabinetTarget(target: CabinetTarget, root: ParentNode = docu
  */
 export function revealCabinetTarget({ element, field }: FoundCabinetTarget) {
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-  element.scrollIntoView?.({ block: field ? "center" : "start", behavior: reduced ? "auto" : "smooth" });
+  const control = field ? focusControlOf(element) : null;
+  // An element without a box of its own (the hidden input of a date field, a `contents`
+  // wrapper) cannot be scrolled to: its control, or the field around it, is.
+  const hidden = !hasBox(element) || (element.matches("input, select, textarea") && !takesFocus(element));
+  const shown = hidden ? control ?? fieldBoxOf(element) ?? element : element;
+  const scroll = () => shown.scrollIntoView?.({ block: field ? "center" : "start", behavior: reduced ? "auto" : "smooth" });
+  control?.focus({ preventScroll: true });
+  scroll();
   if (!field) return;
-  const controls = element.matches(FOCUSABLE) ? [element] : Array.from(element.querySelectorAll<HTMLElement>(FOCUSABLE));
-  // A file input hides behind its button (`sr-only`): the button takes the cursor, so the
-  // person sees where the link led (QA 2026-10-24, A-5).
-  const visible = controls.find(
-    (control) => !control.classList.contains("sr-only") && !(control instanceof HTMLInputElement && control.type === "file"),
+  // A date field that takes the focus hands it on to its day a moment later, and that stops a
+  // scroll under way (the field then stayed where it was): the scroll starts again then.
+  if (control) {
+    const again = () => { if (shown.isConnected) scroll(); };
+    document.addEventListener("focusin", again);
+    window.setTimeout(() => document.removeEventListener("focusin", again), 400);
+  }
+  shown.classList.add(...RING);
+  window.setTimeout(() => shown.classList.remove(...RING), 1600);
+}
+
+/** Whether the element is laid out (not `display: contents` or `none`, not a hidden input without size). */
+function hasBox(element: HTMLElement): boolean {
+  const rect = element.getBoundingClientRect();
+  return element.getClientRects().length > 0 && (rect.width > 1 || rect.height > 1);
+}
+
+/** Whether the cursor can be put into the control: not hidden from the keyboard or from assistive technology. */
+function takesFocus(control: HTMLElement): boolean {
+  return control.tabIndex >= 0 && control.getAttribute("aria-hidden") !== "true";
+}
+
+/** The box of the field an element belongs to: the label's parent, as `LabeledField` builds it. */
+function fieldBoxOf(element: HTMLElement): HTMLElement | null {
+  for (let box = element.parentElement; box; box = box.parentElement) {
+    if (box.hasAttribute("data-cabinet-section")) return null;
+    if (box.querySelector(":scope > label, :scope > div > label, :scope > [data-cabinet-field-label]") && hasBox(box)) return box;
+  }
+  return null;
+}
+
+/**
+ * The control of a field that takes the cursor: the field itself, else its first control on
+ * screen — the day of a date field (its input is hidden), the button of a select or of an
+ * upload (the file input hides behind it, QA 2026-10-24, A-5), the box of a consent.
+ */
+export function focusControlOf(element: HTMLElement): HTMLElement | null {
+  if (element.matches(FOCUSABLE) && takesFocus(element)) return element;
+  const pick = (scope: HTMLElement) => {
+    const controls = Array.from(scope.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(takesFocus);
+    return (
+      controls.find((control) => !control.classList.contains("sr-only") && !(control instanceof HTMLInputElement && control.type === "file")) ??
+      controls[0] ??
+      null
+    );
+  };
+  const inside = pick(element);
+  if (inside) return inside;
+  // The element is the hidden part of a control (a date field's input) or a message below it.
+  const box = fieldBoxOf(element);
+  return box ? pick(box) : null;
+}
+
+/** The first of the keys whose field (or section) is on screen, in the order given. */
+export function firstCabinetTarget(fields: readonly string[], root: ParentNode = document): FoundCabinetTarget | null {
+  let section: FoundCabinetTarget | null = null;
+  for (const field of fields) {
+    const found = findCabinetTarget({ field }, root);
+    if (found?.field) return found;
+    section ??= found;
+  }
+  return section;
+}
+
+/**
+ * What holds a step whose entry could not be saved: the first field marked as not taken, else
+ * the first message of a field (other than "required", which holds nobody). Null when the step
+ * marks nothing (the connection failed).
+ */
+export function firstProblemIn(root: ParentNode | null, requiredMessage = ""): FoundCabinetTarget | null {
+  if (!root) return null;
+  const marked = root.querySelector<HTMLElement>('[aria-invalid="true"], [data-cabinet-invalid="true"]');
+  if (marked) return { element: marked, field: true };
+  const message = Array.from(root.querySelectorAll<HTMLElement>('[role="alert"]')).find(
+    (alert) => (alert.textContent ?? "").trim() !== requiredMessage,
   );
-  (visible ?? controls[0])?.focus({ preventScroll: true });
-  element.classList.add(...RING);
-  window.setTimeout(() => element.classList.remove(...RING), 1600);
+  return message ? { element: message, field: true } : null;
 }
 
 /** A field of the step whose entry was not taken, with the name its label gives it. */
