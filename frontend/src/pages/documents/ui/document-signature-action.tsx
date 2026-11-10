@@ -83,12 +83,12 @@ export function DocumentSignatureAction({ documentId, scope, title, showRequestD
       <TriggerIcon aria-hidden="true" className="size-4" />{!iconOnly && (showRequestDetails ? requestAction : presentation.label)}
     </Button>
     <Dialog open={open} onOpenChange={changeOpen} dirty={dirty}>
-      <DialogContent className="grid h-[min(940px,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 sm:pb-0 sm:h-[min(92dvh,940px)] sm:w-[96vw] sm:max-w-[1480px]" onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => {
+      <DialogContent className="grid h-[min(940px,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 sm:pb-0 sm:h-[min(92dvh,940px)] sm:w-[96vw] sm:max-w-[1480px]" onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => {
         if (["Enter", " ", "ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) event.stopPropagation();
       }}>
         <DialogHeader className="border-b border-border/70 px-5 py-4 pr-14">
           <DialogTitle><SectionHeading icon={PenTool}>{label}</SectionHeading></DialogTitle>
-          <DialogDescription className="break-words text-xs">{title}</DialogDescription>
+          <DialogDescription className="wrap-anywhere text-xs">{title}</DialogDescription>
         </DialogHeader>
           {open ? <SignatureWorkspace key={documentId ?? `${scope?.patientId}:${scope?.orderId}:${scope?.leadId}`} documentId={documentId} scope={scope} title={title} onDirtyChange={setDirty} onSent={finishSend} onDone={() => { changed.current = true; }} /> : null}
       </DialogContent>
@@ -167,7 +167,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange, o
     ? [{ id: selectedId, title: selectedTitle, kind: "signing" }, ...signingMembers, ...reviewAttachments]
     : [];
   const hasPackage = signingMembers.length > 0 || reviewAttachments.length > 0;
-  return <div className="grid min-h-0 overflow-y-auto lg:grid-cols-[minmax(0,1.1fr)_minmax(26rem,0.9fr)] lg:overflow-hidden">
+  return <div className="grid min-h-0 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1.1fr)_minmax(26rem,0.9fr)] lg:overflow-hidden">
     <section aria-label={tx("Документ для подписи", "Dokument zur Unterschrift")} className="flex min-h-[28rem] min-w-0 flex-col border-b border-border/70 bg-muted/15 lg:min-h-0 lg:border-r lg:border-b-0">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border/60 bg-card px-4 py-3">
         <AdminSectionTitle icon={ScanText}>{relatedPreview?.kind === "review" ? tx("Приложение для ознакомления", "Anlage zur Kenntnisnahme") : relatedPreview?.kind === "signing" ? tx("Документ пакета на подпись", "Dokument des Signaturpakets") : displayedResult ? `${displayedResult.test_mode ? "TEST · " : ""}${tx("Подписанный PDF", "Signiertes PDF")}` : packageDocuments.length > 1 ? `${tx("Пакет на подпись", "Signaturpaket")} · ${packageDocuments.length} PDF` : tx("Документ для подписи", "Dokument zur Unterschrift")}</AdminSectionTitle>

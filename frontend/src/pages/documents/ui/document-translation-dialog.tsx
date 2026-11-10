@@ -1,6 +1,6 @@
 import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useRef, useState } from "react";
-import { Download, Languages, LoaderCircle } from "lucide-react";
+import { Download, History, Languages, LoaderCircle, ScanText, TextCursorInput } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -259,7 +259,7 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
           <div className="flex min-w-0 flex-wrap items-start justify-between gap-3 pr-14">
             <div className="min-w-0">
               <DialogTitle><SectionHeading icon={Languages}>{editing ? tx("Редактировать перевод", "Übersetzung bearbeiten") : tx("Перевод документа", "Dokument übersetzen")}</SectionHeading></DialogTitle>
-              <DialogDescription className="truncate">{title}</DialogDescription>
+              <DialogDescription className="wrap-anywhere">{title}</DialogDescription>
             </div>
           </div>
         </DialogHeader>
@@ -356,7 +356,7 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
               </p>
             ) : null}
             <div className="flex min-h-[200px] flex-1 flex-col gap-1 text-xs font-medium">
-              <span>{tx("Перевод (можно редактировать)", "Übersetzung (bearbeitbar)")}</span>
+              <h3><SectionHeading icon={TextCursorInput}>{tx("Перевод (можно редактировать)", "Übersetzung (bearbeitbar)")}</SectionHeading></h3>
               <RichMarkupEditor
                 value={translatedText}
                 onChange={setTranslatedText}
@@ -380,14 +380,12 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
             </div>
             {sourceText ? (
               <details className="text-xs">
-                <summary className="cursor-pointer font-medium">{tx("Распознанный исходный текст", "Erkannter Ausgangstext")}</summary>
+                <summary className="cursor-pointer"><SectionHeading icon={ScanText}>{tx("Распознанный исходный текст", "Erkannter Ausgangstext")}</SectionHeading></summary>
                 <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted p-3 font-sans text-xs leading-5">{sourceText}</pre>
               </details>
             ) : null}
             <section className="space-y-2 border-t border-border/70 pt-3">
-              <h4 className="text-xs font-semibold text-muted-foreground">
-                {tx("Переводы этого документа", "Übersetzungen dieses Dokuments")}
-              </h4>
+              <h3><SectionHeading icon={History}>{tx("Переводы этого документа", "Übersetzungen dieses Dokuments")}</SectionHeading></h3>
               {translations.length === 0 ? (
                 <p className="text-xs text-muted-foreground">{tx("Переводов пока нет.", "Noch keine Übersetzungen.")}</p>
               ) : (

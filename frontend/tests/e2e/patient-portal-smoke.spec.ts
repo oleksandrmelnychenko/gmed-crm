@@ -674,6 +674,22 @@ test.describe("patient portal smoke flows", () => {
     await expect(page.getByRole("heading", { level: 1 })).toContainText(/Anna Portal|Patient/i);
   });
 
+  test("patient document categories and translation dialog keep the selected document in context", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/documents");
+    const categories = page.getByRole("group", { name: "Kategorie", exact: true });
+    await categories.getByRole("button", { name: "Übersetzungen" }).click();
+    await expect(categories.getByRole("button", { pressed: true })).toHaveAccessibleName("Übersetzungen");
+    await expect(page.getByRole("heading", { name: "Released discharge note" })).toHaveCount(0);
+    await categories.getByRole("button", { name: /^Alle\b/ }).click();
+    await page.getByRole("button", { name: "Übersetzung anfragen", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Übersetzung anfragen" });
+    await expect(dialog).toHaveAccessibleDescription("Released discharge note");
+    await expect(dialog.getByRole("heading").locator('[data-slot="heading-marker"]')).toBeVisible();
+    await dialog.getByRole("button", { name: "Abbrechen" }).click();
+    await expect(dialog).toHaveCount(0);
+  });
+
   test("patient can open dashboard, documents and invoices", async ({ page }) => {
     await expect(page.getByText("Released discharge note")).toBeVisible();
     await expect(page.getByText("INV-PORTAL-1")).toBeVisible();

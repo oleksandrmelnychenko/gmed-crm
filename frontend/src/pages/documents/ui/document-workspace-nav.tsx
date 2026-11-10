@@ -8,6 +8,7 @@ import { matchPath, useLocation } from "react-router-dom";
 
 import { StaffLink } from "@/components/staff-link";
 import { buttonVariants } from "@/components/ui/button";
+import { HeadingMarker } from "@/components/ui/section-heading";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -61,7 +62,7 @@ export function DocumentWorkspaceNav({
     <nav
       data-workspace-tabs="documents"
       aria-label={t.nav_documents}
-      className="mx-auto flex w-fit max-w-full items-center justify-start gap-1 overflow-x-auto p-1"
+      className="mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-1 rounded-xl border border-border/60 bg-card p-1.5"
     >
       {items.map((item) => {
         const isActive = currentKey === item.key;
@@ -78,11 +79,12 @@ export function DocumentWorkspaceNav({
                 size: "sm",
                 variant: "ghost",
               }),
-              "h-8 min-w-fit rounded-lg px-3 text-[13px] font-medium",
+              "h-auto min-h-8 min-w-0 max-w-full rounded-lg px-2.5 py-1.5 text-[13px] font-medium",
             )}
           >
-            <Icon className="size-4 shrink-0" strokeWidth={1.8} />
-            <span className="whitespace-nowrap">{item.label}</span>
+            <Icon aria-hidden="true" className="size-4 shrink-0" strokeWidth={1.8} />
+            <span className="min-w-0 whitespace-normal">{item.label}</span>
+            {isActive && <HeadingMarker />}
           </StaffLink>
         );
       })}

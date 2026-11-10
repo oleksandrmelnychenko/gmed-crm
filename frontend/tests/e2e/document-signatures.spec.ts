@@ -3,6 +3,39 @@ import { readFileSync, readdirSync } from "node:fs";
 
 const previewPdf = readFileSync(new URL("./fixtures/signature-preview.pdf", import.meta.url));
 
+test("document queue navigation and translation status filters stay usable on a phone", async ({ page }) => {
+  await prepare(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/documents/intake");
+  const nav = page.getByRole("navigation", { name: "Dokumente", exact: true });
+  const current = nav.locator('a[aria-current="page"]');
+  await expect(current).toHaveAccessibleName("Dokumenten-Inbox");
+  await page.getByRole("button", { name: "Hochladen", exact: true }).click();
+  const upload = page.getByRole("dialog", { name: "Eingehende Dokumente hochladen" });
+  await expect(upload.getByRole("heading").locator('[data-slot="heading-marker"]')).toBeVisible();
+  await upload.getByRole("button", { name: "Schließen", exact: true }).first().click();
+  await expect(upload).toHaveCount(0);
+
+  await nav.getByRole("link", { name: "Übersetzungsanfragen" }).click();
+  await expect(current).toHaveAccessibleName("Übersetzungsanfragen");
+  const filters = page.getByRole("group", { name: "Status", exact: true });
+  await expect(filters.getByRole("button", { pressed: true })).toHaveAccessibleName("Offen");
+  for (const [label, statuses] of [
+    ["Abgeschlossen", "completed"],
+    ["Abgebrochen", "cancelled"],
+    ["Alle Status", "pending,in_progress,completed,cancelled"],
+  ]) {
+    const response = page.waitForResponse(result => {
+      const request = new URL(result.url());
+      return request.pathname.endsWith("/documents/translation-requests") && request.searchParams.get("status") === statuses;
+    });
+    await filters.getByRole("button", { name: label }).click();
+    await response;
+    await expect(filters.getByRole("button", { pressed: true })).toHaveAccessibleName(label);
+    await expect(page.getByText("Keine Ergebnisse", { exact: true }).filter({ visible: true })).toBeVisible();
+  }
+});
+
 test("document title moves between the staff top bar and the mobile document header", async ({ page }) => {
   await prepare(page);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -336,6 +369,9 @@ for (const lang of ["ru", "de"] as const) {
   test(`individual signer states distinguish readiness, sequence and errors in ${lang}`, async ({ page }, testInfo) => {
     const fixture = await prepare(page);
     await page.addInitScript(value => localStorage.setItem("gmed_lang", value), lang);
+    await page.route(`**/api/v1/documents/${documentId}`, route => route.fulfill({ json: {
+      ...document, original_filename: "Kostenvoranschlag_zum_Einzelauftrag_Erika_Mustermann_10.11.2026.pdf",
+    } }));
     const tx = (ru: string, de: string) => lang === "de" ? de : ru;
     const signers = [
       { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" },
@@ -366,6 +402,14 @@ for (const lang of ["ru", "de"] as const) {
     await expect(dialog.getByText(tx("Приглашение отправлено на E-Mail.", "Die Einladung wurde per E-Mail versendet."), { exact: false })).toHaveCount(0);
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
+    const requestCard = dialog.locator('[data-signature-request="sequence-fixture"]');
+    await expect.poll(() => requestCard.evaluate(card => {
+      const modal = card.closest('[role="dialog"]')!;
+      const bounds = modal.getBoundingClientRect();
+      const request = card.getBoundingClientRect();
+      return bounds.width <= window.innerWidth && modal.scrollWidth <= modal.clientWidth + 1
+        && request.left >= bounds.left - 1 && request.right <= bounds.right + 1;
+    })).toBe(true);
     await dialog.screenshot({ path: testInfo.outputPath(`signer-sequence-${lang}-mobile.png`) });
     const refresh = dialog.getByRole("button", { name: tx("Проверить статус", "Status prüfen"), exact: true });
     for (const [providerStatus, uiStatus, label] of [

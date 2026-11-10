@@ -245,11 +245,14 @@ describe("signature request members", () => {
       { document_id: "order", position: 1, page_start: 3, page_count: 1, result_document_id: "bundle", accessible: false, title: null, template: null, version: null },
       { document_id: "consent", position: 2, page_start: 4, page_count: 3, result_document_id: "bundle", accessible: true, title: "Einwilligung", template: "privacy_consents", version: 1 },
     ],
-    attachments: [{ document_id: "info", stage: "sent", title: "Datenschutzinformation" }],
+    attachments: [
+      { document_id: "info", stage: "sent", title: "Datenschutzinformation" },
+      { document_id: "restricted", stage: "sent", title: null },
+    ],
   };
 
   it("lists every document with its pages and marks the current one", () => {
-    const markup = renderToStaticMarkup(<SignatureRequestMembers request={request} documentId="consent" />);
+    const markup = renderToStaticMarkup(<SignatureRequestMembers request={request} documentId="consent" onPreview={() => {}} />);
     expect(markup).toContain("Paket aus 3 Dokumenten");
     // One row per document: number, title and version, then the chips.
     const rows = [...markup.matchAll(/<li[^>]*data-signature-member="([^"]+)"[^>]*>(.*?)<\/li>/g)]
@@ -261,8 +264,13 @@ describe("signature request members", () => {
     ]);
     // Every document is printed in the foreground colour, not only the current one.
     expect(markup).not.toMatch(/<li[^>]*class="[^"]*text-muted-foreground/);
-    const attachments = /<p[^>]*data-signature-attachments[^>]*>(.*?)<\/p>/.exec(markup)?.[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    expect(attachments).toBe("Zur Kenntnisnahme Datenschutzinformation");
+    const attachments = /<section[^>]*data-signature-attachments[^>]*>(.*?)<\/section>/.exec(markup)?.[1] ?? "";
+    const attachmentRows = [...attachments.matchAll(/<li\b[^>]*>(.*?)<\/li>/g)].map(match => match[1]);
+    expect(attachmentRows).toHaveLength(2);
+    expect(attachmentRows[0]).toContain('data-signature-attachment-open="info"');
+    expect(attachmentRows[0]).toContain("Datenschutzinformation");
+    expect(attachmentRows[1]).toContain("Dokument ohne Zugriff");
+    expect(attachmentRows[1]).not.toContain("<button");
     expect(markup).toContain("nicht aufgeteilt");
   });
 

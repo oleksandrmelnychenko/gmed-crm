@@ -1,6 +1,8 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Download, Eye, FileSignature, LoaderCircle, Info, Mail, Pencil, Plus, Send, ShieldCheck, Trash2, Inbox, FileClock, ServerCog, MailPlus, PencilLine, Briefcase, Users } from "lucide-react";
+import { Download, Eye, Files, FileSignature, FileText, LoaderCircle, Info, Mail, Paperclip, Pencil, Plus, Send, ShieldCheck, Trash2, Inbox, FileClock, ServerCog, MailPlus, PencilLine, Briefcase, Users } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
+import { PortalDateChip } from "@/components/ui/portal-date-chip";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { StatusChip } from "@/components/ui/status-chip";
 import { Badge } from "@/components/ui/badge";
@@ -151,7 +153,7 @@ export type PackagePreviewSelection = { documents: { id: string; title: string }
 
 /** The documents a request covers, in bundle order with their pages, and its
  * read-only attachments. Documents the viewer may not open stay anonymous. */
-const OPEN_LINK = "rounded-sm text-left underline decoration-border underline-offset-2 hover:decoration-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]";
+const OPEN_LINK = "min-w-0 max-w-full wrap-anywhere rounded-sm text-left underline decoration-border underline-offset-2 hover:decoration-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
 export function SignatureRequestMembers({ request, documentId, onPreview }: { request: SignatureRequest; documentId: string; onPreview?: (id: string, kind: "signing" | "review") => void }) {
   const { lang } = useLang();
@@ -159,39 +161,42 @@ export function SignatureRequestMembers({ request, documentId, onPreview }: { re
   const members = request.members ?? [];
   const packaged = request.is_package && members.length > 1;
   return <>
-    {packaged ? <div className="space-y-1.5 rounded-lg border border-border/60 bg-muted/15 px-3 py-2.5" data-signature-members>
-      <p className="text-xs font-medium text-foreground">{tx(`Пакет из ${members.length} документов — один подписанный PDF`, `Paket aus ${members.length} Dokumenten – eine signierte PDF`)}</p>
-      <ol className="divide-y divide-border/50 text-xs">
+    {packaged ? <section className="min-w-0 space-y-1.5" data-signature-members>
+      <h4><SectionHeading icon={Files}>{tx(`Пакет из ${members.length} документов — один подписанный PDF`, `Paket aus ${members.length} Dokumenten – eine signierte PDF`)}</SectionHeading></h4>
+      <ol className="grid grid-cols-[max-content_minmax(0,1fr)_max-content] gap-x-2 divide-y divide-border/60 text-xs leading-5">
         {members.map(member => {
           const current = member.document_id === documentId;
           const pages = pageRange(member.page_start, member.page_count, tx);
-          return <li key={member.document_id} data-signature-member={member.document_id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-1.5 text-foreground">
-            <span className={current ? "min-w-0 break-words font-semibold" : "min-w-0 break-words"}>
-              <span className="mr-1 font-mono text-muted-foreground">{member.position + 1}.</span>{" "}
+          const title = member.accessible ? `${member.title ?? ""}${member.version ? ` · v${member.version}` : ""}` : tx("Документ без доступа", "Dokument ohne Zugriff");
+          return <li key={member.document_id} data-signature-member={member.document_id} className="col-span-full grid grid-cols-subgrid items-start py-1.5 text-foreground">
+            <span className="text-right tabular-nums text-muted-foreground">{member.position + 1}. </span>
+            <div className="min-w-0 space-y-1">
               {member.accessible && onPreview
                 ? <button type="button" data-signature-member-open={member.document_id} className={OPEN_LINK} title={tx("Показать этот документ", "Dieses Dokument anzeigen")}
-                    onClick={() => onPreview(member.document_id, "signing")}>{`${member.title ?? ""}${member.version ? ` · v${member.version}` : ""}`}</button>
-                : member.accessible ? `${member.title ?? ""}${member.version ? ` · v${member.version}` : ""}` : tx("Документ без доступа", "Dokument ohne Zugriff")}
-            </span>
-            <span className="flex shrink-0 flex-wrap items-center gap-1.5">
-              {current ? <StatusBadge tone="info">{tx("этот документ", "dieses Dokument")}</StatusBadge> : null}
-              {pages ? <Badge variant="outline" className="rounded-full font-mono text-[10px] text-foreground">{pages}</Badge> : null}
-            </span>
+                    onClick={() => onPreview(member.document_id, "signing")}>{title}</button>
+                : <span className="wrap-anywhere">{title}</span>}
+              {current && <div><StatusBadge tone="info">{tx("этот документ", "dieses Dokument")}</StatusBadge></div>}
+            </div>
+            {pages && <Badge variant="outline" className="justify-self-end whitespace-nowrap rounded-full font-sans text-[11px] tabular-nums text-muted-foreground">{pages}</Badge>}
           </li>;
         })}
       </ol>
       {request.result_document_id ? <p className="text-[11px] leading-5 text-foreground">{tx("Подписанный оригинал — общий PDF пакета; документ не разделяется, иначе подпись теряет силу.", "Das signierte Original ist die gemeinsame PDF des Pakets; sie wird nicht aufgeteilt, sonst verliert die Signatur ihre Wirkung.")}</p> : null}
-    </div> : null}
-    {request.attachments?.length ? <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-foreground" data-signature-attachments>
-      <StatusBadge tone="neutral" className="text-foreground">{tx("Для ознакомления", "Zur Kenntnisnahme")}</StatusBadge>
-      <span className="min-w-0 break-words">{request.attachments.map((attachment, index) => <span key={attachment.document_id}>
-        {index > 0 ? ", " : null}
-        {attachment.title && onPreview
-          ? <button type="button" data-signature-attachment-open={attachment.document_id} className={OPEN_LINK} title={tx("Показать этот документ", "Dieses Dokument anzeigen")}
-              onClick={() => onPreview(attachment.document_id, "review")}>{attachment.title}</button>
-          : attachment.title ?? tx("документ без доступа", "Dokument ohne Zugriff")}
-      </span>)}</span>
-    </p> : null}
+    </section> : null}
+    {request.attachments?.length ? <section className="min-w-0 space-y-1.5" data-signature-attachments>
+      <h4><SectionHeading icon={Paperclip}>{tx("Для ознакомления", "Zur Kenntnisnahme")}</SectionHeading></h4>
+      <ul className="divide-y divide-border/60 text-xs leading-5">
+        {request.attachments.map(attachment => (
+          <li key={attachment.document_id} className="flex min-w-0 items-start gap-2 py-1.5">
+            <FileText aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+            {attachment.title && onPreview
+              ? <button type="button" data-signature-attachment-open={attachment.document_id} className={OPEN_LINK} title={tx("Показать этот документ", "Dieses Dokument anzeigen")}
+                  onClick={() => onPreview(attachment.document_id, "review")}>{attachment.title}</button>
+              : <span className="min-w-0 wrap-anywhere">{attachment.title ?? tx("документ без доступа", "Dokument ohne Zugriff")}</span>}
+          </li>
+        ))}
+      </ul>
+    </section> : null}
   </>;
 }
 
@@ -482,17 +487,17 @@ export function DocumentSignaturePanel({ documentId, onDone, onSent, onDirtyChan
 
           {state.requests.map((request, index) => {
             return <section key={request.id} ref={request.id === submittedRequestId ? submittedCardRef : undefined} aria-label={index === 0 ? tx("Текущий запрос подписи", "Aktuelle Signaturanfrage") : tx("Предыдущий запрос подписи", "Frühere Signaturanfrage")} className="rounded-xl border border-border/70 bg-card shadow-xs" data-signature-request={request.id}>
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
-              <div className="space-y-1">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2.5">
+              <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
                 <AdminSectionTitle icon={index === 0 ? Inbox : FileClock}>{index === 0 ? tx("Текущий запрос", "Aktuelle Anfrage") : tx("Предыдущий запрос", "Frühere Anfrage")}</AdminSectionTitle>
-                <time dateTime={request.created_at} className="block font-mono text-[11px] text-foreground">{formatAppDateTime(request.created_at)}</time>
+                <PortalDateChip timestamp={request.created_at} />
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
                 {request.level ? <StatusBadge tone="neutral">{request.test_mode ? "DEMO" : request.level}</StatusBadge> : null}
-                <StatusBadge tone={requestTone(request.status)}>{request.test_mode ? "TEST · " : ""}{tx(...statuses[request.status])}</StatusBadge>
+                <StatusBadge className="h-auto min-h-5 max-w-full whitespace-normal" tone={requestTone(request.status)}>{request.test_mode ? "TEST · " : ""}{tx(...statuses[request.status])}</StatusBadge>
               </div>
             </div>
-            <div className="space-y-2 p-4">
+            <div className="min-w-0 space-y-3 p-3">
               <SignatureRequestMembers request={request} documentId={documentId} onPreview={onPreviewRelated} />
               {request.expires_at || request.invitation_note ? <p className="text-xs text-foreground">{request.expires_at ? `${tx("Подписать до", "Unterschreiben bis")} ${formatAppDate(request.expires_at)}` : ""}{request.expires_at && request.invitation_note ? " · " : ""}{request.invitation_note ?? ""}</p> : null}
               {refreshCheck?.id === request.id ? <div role="status" className="text-xs leading-5 text-foreground">

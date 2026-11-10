@@ -1,5 +1,5 @@
 import { portalFilterClass } from "@/components/ui/portal-tab-style";
-import { SectionHeading } from "@/components/ui/section-heading";
+import { HeadingMarker, SectionHeading } from "@/components/ui/section-heading";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { startTransition, useCallback, useEffect, useMemo, useReducer, useRef, type FormEvent } from "react";
 import {
@@ -10,6 +10,7 @@ import {
   FileText,
   FileUp,
   FlaskConical,
+  FolderOpen,
   IdCard,
   Languages,
   LoaderCircle,
@@ -640,6 +641,7 @@ function usePatientDocumentsPageContent() {
               >
                 <CategoryIcon aria-hidden="true" className="size-4 shrink-0" />
                 <span>{label}</span>
+                {activeCategory === tab.key && <HeadingMarker />}
                 {count > 0 ? <span className={cn("rounded-full px-1.5 font-mono text-[11px] leading-5", activeCategory === tab.key ? "bg-foreground/8 text-foreground" : "bg-muted text-muted-foreground")}>{count}</span> : null}
               </button>
             );
@@ -650,7 +652,7 @@ function usePatientDocumentsPageContent() {
       <section className="space-y-3">
         <section className="space-y-3">
           <Section
-            icon={Files}
+            icon={FolderOpen}
             title={t.portal_documents_released_to_me}
             className="p-3 sm:p-3"
             accessory={visibleDocuments.length > 0 ? <CountBadge>{visibleDocuments.length}</CountBadge> : undefined}
@@ -764,6 +766,7 @@ function usePatientDocumentsPageContent() {
             });
           }}>
             <AdminDialogScaffold
+              icon={FileUp}
               title={t.portal_documents_upload_documents}
               description={t.portal_documents_send_files_to_the_care_team_payment_proofs_stay_internal_and_can}
               bodyClassName="bg-card [&_label]:font-mono [&_label]:text-xs"
@@ -908,6 +911,7 @@ function usePatientDocumentsPageContent() {
         }}
       >
         <AdminDialogScaffold
+          icon={Languages}
           title={t.portal_documents_request_translation}
           description={<span className="[overflow-wrap:anywhere]">{translationDocument?.auto_name ?? t.portal_documents_select_document}</span>}
           maxWidthClassName="sm:max-w-lg"

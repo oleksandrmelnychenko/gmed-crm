@@ -1,5 +1,5 @@
 import { portalTabTone } from "@/components/ui/portal-tab-style";
-import { SectionHeading } from "@/components/ui/section-heading";
+import { HeadingMarker, SectionHeading } from "@/components/ui/section-heading";
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   Check,
@@ -982,6 +982,7 @@ function StepNavBar({
               <span className="min-w-0 break-words max-sm:sr-only">
                 {text.steps[id]}
               </span>
+              {selected && <span className="hidden self-start pt-[5px] sm:flex"><HeadingMarker /></span>}
               <span aria-hidden="true" data-step-state={done ? "complete" : "pending"} className="request-step-state">
                 {done ? <Check className="size-2.5" strokeWidth={3} /> : null}
               </span>
@@ -1008,8 +1009,9 @@ function StepNavBar({
         })}
       </div>
       {/* On a phone only the icons are visible: the current step is named below them. */}
-      <p className="mt-2 text-xs text-muted-foreground sm:hidden" data-testid="lead-request-step-title">
-        {text.stepOf(position + 1, steps.length)} · <span className="font-semibold text-foreground">{text.steps[current]}</span>
+      <p className="mt-2 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground sm:hidden" data-testid="lead-request-step-title">
+        {text.stepOf(position + 1, steps.length)} ·{" "}
+        <SectionHeading icon={STEP_ICONS[current]}>{text.steps[current]}</SectionHeading>
       </p>
     </nav>
   );

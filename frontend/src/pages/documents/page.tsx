@@ -1,5 +1,5 @@
 import { AdminDialogScaffold } from "@/components/admin-dialog-scaffold";
-import { SectionHeading } from "@/components/ui/section-heading";
+import { HeadingMarker, SectionHeading } from "@/components/ui/section-heading";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   cloneElement,
@@ -21,6 +21,11 @@ import { createPortal, flushSync } from "react-dom";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
   History,
+  Inbox,
+  ListFilter,
+  ListTodo,
+  CircleCheck,
+  CircleX,
   ScanText,
   Tags,
   Link2,
@@ -290,6 +295,7 @@ const documentFilterControlClassName =
 const textareaClassName = shellTextareaClass;
 const DEFAULT_GENERATE_TEMPLATE_ID = "patient_sticker_compact";
 const documentSectionClassName = "border-0 bg-transparent p-0 shadow-none";
+const documentPageActionClassName = "h-8 gap-1.5 rounded-lg max-lg:h-auto max-lg:whitespace-normal max-lg:py-1.5";
 const MAX_DOCUMENT_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 type IntakeUploadStatus = "queued" | "uploading" | "uploaded" | "error";
@@ -3381,18 +3387,16 @@ function StaffDocumentsPage({
         <>
       <PageHeader
         title={
-          isTranslationRequestsRoute
-            ? t.documents_translation_requests
-            : isIntakeRoute
-              ? t.documents_intake_queue
-              : t.documents_title
+          <SectionHeading icon={isTranslationRequestsRoute ? Languages : isIntakeRoute ? Inbox : FileText}>
+            {isTranslationRequestsRoute ? t.documents_translation_requests : isIntakeRoute ? t.documents_intake_queue : t.documents_title}
+          </SectionHeading>
         }
         actions={
           <>
             <Button
               variant="outline"
               size="sm"
-              className="h-8 rounded-lg gap-1.5"
+              className={documentPageActionClassName}
               onClick={refresh}
             >
               <RefreshCw className="size-3.5" />
@@ -3402,7 +3406,7 @@ function StaffDocumentsPage({
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 rounded-lg gap-1.5"
+                className={documentPageActionClassName}
                 onClick={() => {
 	                  setGenerateForm((current) => ({
 	                    ...current,
@@ -3421,7 +3425,7 @@ function StaffDocumentsPage({
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 rounded-lg gap-1.5"
+                className={documentPageActionClassName}
                 onClick={() => setTemplateImportOpen(true)}
               >
                 <FileUp className="size-3.5" />
@@ -3431,7 +3435,7 @@ function StaffDocumentsPage({
             {canUpload ? (
               <Button
                 size="sm"
-                className="h-8 rounded-lg gap-1.5"
+                className={documentPageActionClassName}
                 onClick={() => {
                   if (isIntakeRoute && canManage) {
                     setIntakeUploadItems([]);
@@ -3458,22 +3462,8 @@ function StaffDocumentsPage({
         </Banner>
       ) : null}
 
-      {isIntakeRoute &&
-      canManageIntake &&
-      (isIntakeRoute || intakeBusy || intakeError || intakeQueue.length > 0) ? (
-        <DocumentSection
-          className={documentSectionClassName}
-          title={
-            <span>
-              {t.documents_intake_queue}
-              <span className="ml-2 font-normal text-muted-foreground">
-                · {user?.role === "teamlead_interpreter"
-                  ? t.documents_intake_interpreter_hint
-                  : t.documents_intake_general_hint}
-              </span>
-            </span>
-          }
-        >
+      {isIntakeRoute && canManageIntake ? (
+        <DocumentSection className={documentSectionClassName}>
           {intakeError ? <Banner tone="error">{intakeError}</Banner> : null}
           <DocumentIntakeQueueTable
             actionId={intakeActionId}
@@ -3495,32 +3485,37 @@ function StaffDocumentsPage({
         </DocumentSection>
       ) : null}
 
-      {isTranslationRequestsRoute &&
-      canViewQueue &&
-      (isTranslationRequestsRoute || translationQueueBusy || translationQueueError || translationQueue.length > 0) ? (
+      {isTranslationRequestsRoute && canViewQueue ? (
         <DocumentSection className={documentSectionClassName}>
           {translationQueueError ? <Banner tone="error">{translationQueueError}</Banner> : null}
-          <div className="mb-2 flex items-center justify-end rounded-xl border border-border bg-card p-3">
-            <NativeComboboxSelect
-              aria-label={t.users_status}
-              data-readonly="exempt"
-              value={translationQueueStatus}
-              onChange={(event) =>
-                setTranslationQueueStatus(event.target.value as TranslationQueueStatusFilter)
-              }
-              className={cn(selectClassName, "h-8 w-auto bg-field text-[13px]")}
-            >
-              <option value="open">{t.documents_translation_queue_open}</option>
-              <option value="completed">{t.documents_translation_completed}</option>
-              <option value="cancelled">{t.documents_translation_cancelled}</option>
-              <option value="all">{t.documents_translation_queue_all}</option>
-            </NativeComboboxSelect>
+          <div role="group" aria-label={t.users_status} className="grid grid-cols-2 gap-1 rounded-xl border border-border/60 bg-card p-1.5 sm:flex sm:w-fit sm:max-w-full sm:flex-wrap">
+            {([
+              ["open", t.documents_translation_queue_open, ListTodo],
+              ["completed", t.documents_translation_completed, CircleCheck],
+              ["cancelled", t.documents_translation_cancelled, CircleX],
+              ["all", t.documents_translation_queue_all, ListFilter],
+            ] as const).map(([status, label, Icon]) => (
+              <Button
+                key={status}
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="min-h-9 rounded-lg sm:min-h-8"
+                data-workspace-tab
+                data-readonly="exempt"
+                aria-pressed={translationQueueStatus === status}
+                onClick={() => setTranslationQueueStatus(status)}
+              >
+                <Icon aria-hidden="true" />{label}
+                {translationQueueStatus === status && <HeadingMarker />}
+              </Button>
+            ))}
           </div>
           <DocumentTranslationRequestsTable
             canUpdateTranslation={canUpdateTranslation}
             canTakeOverAssigned={user?.role !== "interpreter"}
             currentUserId={user?.id ?? null}
-            emptyText={t.documents_translation_queue_empty}
+            emptyText={translationQueueStatus === "open" ? t.documents_translation_queue_empty : t.common_no_results}
             l={l}
             loading={translationQueueBusy}
             onOpenDocument={openDocument}
@@ -6184,9 +6179,9 @@ function StaffDocumentsPage({
               <aside className="hidden min-h-0 min-w-0 flex-col bg-muted md:flex">
                 <div className="flex items-center justify-between gap-3 border-b border-border/70 bg-background py-3 pl-4 pr-14">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-foreground">
+                    <h3 className="wrap-anywhere"><SectionHeading icon={FileSearch}>
                       {detail?.original_filename ?? detail?.auto_name ?? t.documents_preview}
-                    </p>
+                    </SectionHeading></h3>
                     <p className="truncate text-xs text-muted-foreground">
                       {editPreview?.contentType ?? detail?.mime_type ?? ""}
                     </p>
@@ -8930,7 +8925,6 @@ function DocumentSection({
   children,
   className,
 }: {
-  title?: ReactNode;
   accessory?: ReactNode;
   children: ReactNode;
   className?: string;
