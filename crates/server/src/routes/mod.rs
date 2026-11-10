@@ -28,6 +28,7 @@ pub mod email_check;
 pub mod feedback;
 pub mod health;
 pub mod hotel_statistics;
+pub mod identity_recognition;
 pub mod internal_notes;
 pub mod interpreter_patient_history;
 pub mod interpreters;
@@ -140,6 +141,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(lead_identification::router())
         .merge(lead_enhanced_check::router())
         .merge(lead_risk::router())
+        .merge(identity_recognition::router())
         .merge(orders::router())
         .merge(order_intakes::router())
         .merge(patient_financials::router())

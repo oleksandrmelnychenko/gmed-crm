@@ -46,6 +46,8 @@ export type UploadControl = {
   errors: readonly string[];
   upload: (files: File[]) => void;
   remove: (documentId: string) => void;
+  /** Reads the machine readable zone of an uploaded identity copy (the server's raw answer); identity copies only. */
+  recognize?: (documentId: string) => Promise<unknown>;
 };
 
 export const fieldId = (field: string) => `payer-link-${field}`;

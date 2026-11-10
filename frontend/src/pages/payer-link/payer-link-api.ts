@@ -301,6 +301,13 @@ export function createPayerLinkClient(credentials: PayerCredentials) {
       form.append("file", file);
       return writeThenQuestionnaire(`${base}/funds-proof`, { method: "POST", form, timeoutMs: UPLOAD_TIMEOUT_MS });
     },
+    /** The machine readable zone of an own identity copy, read on the server as a proposal; nothing is stored. */
+    recognizeIdentityDocument: (documentId: string): Promise<unknown> =>
+      call(credentials, `${base}/documents/${encodeURIComponent(documentId)}/identity-recognition`, {
+        method: "POST",
+        withSession: true,
+        timeoutMs: UPLOAD_TIMEOUT_MS,
+      }),
     withdrawDocument: (documentId: string) =>
       writeThenQuestionnaire(`${base}/documents/${encodeURIComponent(documentId)}`, { method: "DELETE" }),
     submit: () => writeThenQuestionnaire(`${base}/submit`, { method: "POST", json: { declared_correct: true } }),

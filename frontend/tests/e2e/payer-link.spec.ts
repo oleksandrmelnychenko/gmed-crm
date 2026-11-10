@@ -538,6 +538,27 @@ async function setup(page: Page, options: Options = {}) {
       recompute();
       return route.fulfill({ status: 201, json: view() });
     }
+    // The server reads the zone of an own identity copy: here it says what the
+    // form holds, except a later expiry date (synthetic values).
+    const recognition = /^\/public\/payer-link\/documents\/([^/]+)\/identity-recognition$/.exec(path);
+    if (recognition && method === "POST") {
+      if (!q.identity_documents.some((item) => item.id === decodeURIComponent(recognition[1]))) return refuse(route, 404, "not_found");
+      return route.fulfill({
+        json: {
+          status: "verified",
+          format: "TD3",
+          checks: { document_number: true, birth_date: true, valid_until: true, composite: true },
+          names_truncated: false,
+          document: {
+            id_document_type: q.answers.id_document_type,
+            id_document_number: q.answers.id_document_number,
+            id_issuing_country: q.answers.id_issuing_country,
+            id_valid_until: "2031-03-05",
+          },
+          holder: { last_name: "Zahler", first_name: "Viktor", date_of_birth: "1970-01-02", legal_sex: "male", citizenship: "AT" },
+        },
+      });
+    }
     const removal = /^\/public\/payer-link\/documents\/([^/]+)$/.exec(path);
     if (removal && method === "DELETE") {
       const id = decodeURIComponent(removal[1]);
@@ -1181,6 +1202,25 @@ test.describe("payer link", () => {
     });
     await expect(page.getByTestId("payer-link-identity-upload")).toContainText("pass.pdf");
     expect(q.identity_documents.map((item) => item.file_name)).toEqual(["pass.pdf"]);
+    // The copy is read as a proposal: equal values have no box, a different
+    // one is never ticked by itself, and nothing changes before «übernehmen».
+    await page.getByTestId("payer-link-recognition-run").click();
+    const proposal = page.getByTestId("payer-link-recognition-proposal");
+    await expect(proposal).toHaveAttribute("data-status", "verified");
+    await expect(proposal.getByTestId("payer-link-recognition-id_document_number")).toHaveAttribute("data-state", "same");
+    const readExpiry = proposal.getByTestId("payer-link-recognition-id_valid_until");
+    await expect(readExpiry).toHaveAttribute("data-state", "differs");
+    await expect(readExpiry).toContainText("05.03.2031");
+    await expect(readExpiry).toContainText("im Formular: 04.03.2031");
+    await expect(readExpiry.getByRole("checkbox")).not.toBeChecked();
+    await expect(page.getByTestId("payer-link-recognition-apply")).toBeDisabled();
+    expect(q.answers.id_valid_until).toBe("2031-03-04");
+    await readExpiry.getByRole("checkbox").check();
+    await page.getByTestId("payer-link-recognition-apply").click();
+    await expect.poll(() => q.answers.id_valid_until).toBe("2031-03-05");
+    // Back to the date the rest of this walk expects.
+    await setDatePickerValue(page.locator("#payer-link-id_valid_until"), "2031-03-04");
+    await expect.poll(() => q.answers.id_valid_until).toBe("2031-03-04");
     await next(page);
 
     // 5 Relationship and funds (no step 4 for a person).

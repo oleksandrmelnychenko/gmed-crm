@@ -514,6 +514,7 @@ const ACTIONS: Record<string, Pair> = {
 
   // Documents, translations, signatures, chat
   download_document: ["Документ скачан", "Dokument heruntergeladen"],
+  identity_document_recognized: ["Скан документа распознан", "Ausweisscan gelesen"],
   upload_document: ["Документ загружен", "Dokument hochgeladen"],
   store_document: ["Документ сохранён", "Dokument gespeichert"],
   patient_portal_upload_document: ["Пациент загрузил документ в портал", "Patient hat ein Dokument im Portal hochgeladen"],

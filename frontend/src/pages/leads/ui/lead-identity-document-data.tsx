@@ -39,8 +39,10 @@ import {
   type IdentityDocumentStatus,
 } from "../model/lead-identity-document-data";
 import { idDocumentTypeLabel, representativeName, representativeRoleLabel } from "../model/lead-gwg-statements";
+import type { RecognitionHolderCurrent, RecognitionHolderPatch } from "../model/identity-recognition";
 import type { Tx } from "../model/lead-payer";
 import type { LeadStaffIdDataMarks } from "../model/lead-risk-intake";
+import { LeadIdentityRecognition } from "./lead-identity-recognition";
 import { LeadRepresentativeUploads } from "./lead-representative-uploads";
 import { PARENT_ROLE_CHIP_CLASS } from "./trusted-contact-role";
 
@@ -151,6 +153,9 @@ export function LeadIdentityDocumentDataForm({
   birthDate = null,
   scanCount = null,
   confirmationPending = false,
+  scanIds,
+  holder,
+  onApplyHolder,
 }: {
   source: IdentityDocumentSource | null | undefined;
   /** The wizard's old "passport valid until", read only while nothing is stored in the new place. */
@@ -168,6 +173,12 @@ export function LeadIdentityDocumentDataForm({
   scanCount?: number | null;
   /** The data are complete but nobody confirmed the scan yet (owner 2026-10-30: «пише за документ хоча він є»). */
   confirmationPending?: boolean;
+  /** The ids of this person's scans: with them the form offers «Распознать со скана». */
+  scanIds?: readonly string[];
+  /** The person's data, compared with what the document says. */
+  holder?: RecognitionHolderCurrent;
+  /** Takes the person's data staff ticked in the proposal; without it they are only compared. */
+  onApplyHolder?: (patch: RecognitionHolderPatch) => void;
 }) {
   const fieldId = useId();
   const savedKey = JSON.stringify(identityDocumentDraft(source, fallbackValidUntil));
@@ -385,6 +396,22 @@ export function LeadIdentityDocumentDataForm({
             "Ein Schritt fehlt: Klicken Sie beim Scan oben auf «Dokument bestätigen» – sonst gilt der Ausweis nicht als geprüft.",
           )}
         </p>
+      ) : null}
+      {scanIds && scanIds.length > 0 ? (
+        <LeadIdentityRecognition
+          scanIds={scanIds}
+          draft={draft}
+          onApply={(next) => {
+            for (const field of Object.keys(next) as IdentityDocumentField[]) touch(field)();
+            patch(next);
+          }}
+          holder={holder}
+          onApplyHolder={onApplyHolder}
+          tx={tx}
+          lang={lang}
+          disabled={disabled}
+          testId={`${testId}-recognition`}
+        />
       ) : null}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <FormField label={tx("Вид документа", "Art des Dokuments")} error={fieldError("type")} errorId={errorId("type")} onBlur={touch("type")}>
@@ -633,6 +660,13 @@ function RepresentativeForm({
           today={today}
           birthDate={person.date_of_birth}
           scanCount={person.identity_documents.length}
+          scanIds={person.identity_documents.map((file) => file.id)}
+          holder={{
+            lastName: person.last_name,
+            firstName: person.first_name,
+            birthDate: person.date_of_birth,
+            citizenships: person.citizenships,
+          }}
           testId={`lead-representative-id-data-${person.id}`}
           save={async (input, options) => {
             const stored = await saveRepresentativeIdentityDocumentData(leadId, person.id, input, options);
@@ -662,6 +696,8 @@ export function LeadIdentityDocumentData({
   patientScanIds = null,
   patientBirthDate = null,
   patientScanConfirmed = null,
+  patientHolder,
+  onApplyPatientHolder,
   representativeFiles,
   today = appDateKey(),
   onSaved,
@@ -689,6 +725,10 @@ export function LeadIdentityDocumentData({
   patientBirthDate?: string | null;
   /** The server's `identity_document_verified`: false while a scan waits for «Подтвердить документ»; null when unknown. */
   patientScanConfirmed?: boolean | null;
+  /** The patient's own data in the form, compared with what the scan says. */
+  patientHolder?: RecognitionHolderCurrent;
+  /** Takes the patient's data staff ticked in the scan's proposal (the wizard's fields). */
+  onApplyPatientHolder?: (patch: RecognitionHolderPatch) => void;
   /** A representative's own uploads of a kind, under that person's card. */
   representativeFiles?: (person: LeadRepresentative, kind: RepresentativeUploadKind) => ReactNode;
   today?: string;
@@ -732,6 +772,9 @@ export function LeadIdentityDocumentData({
         birthDate={patientBirthDate}
         scanCount={patientScanCount}
         confirmationPending={patientScanConfirmed === false && (patientScanCount ?? 0) > 0}
+        scanIds={[...cabinetScans.map((file) => file.id), ...(patientScanIds ?? [])]}
+        holder={patientHolder}
+        onApplyHolder={onApplyPatientHolder}
         testId="lead-id-data"
         save={async (input, options) => {
           const stored = await saveLeadIdentityDocumentData(leadId, input, options);

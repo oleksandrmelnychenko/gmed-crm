@@ -11021,6 +11021,24 @@ ${serviceCommentLines.join("\n")}`
                       patientScanIds={wizardDocuments.identity.map((document) => document.id)}
                       patientBirthDate={draft.birthDate || null}
                       patientScanConfirmed={readinessChecks.get("identity_document_verified") ?? null}
+                      patientHolder={{
+                        lastName: draft.lastName,
+                        firstName: draft.firstName,
+                        birthDate: draft.birthDate,
+                        legalSex: draft.legalSex,
+                        citizenships: draft.citizenships,
+                      }}
+                      // What staff ticked in the scan's proposal goes into the
+                      // wizard's own fields and is stored with the lead as usual.
+                      onApplyPatientHolder={(next) => {
+                        if (next.lastName) patch("lastName", next.lastName);
+                        if (next.firstName) patch("firstName", next.firstName);
+                        if (next.birthDate) patch("birthDate", next.birthDate);
+                        if (next.legalSex) patch("legalSex", next.legalSex);
+                        if (next.citizenship && !draft.citizenships.includes(next.citizenship)) {
+                          handleAmlCountryChange({ citizenships: [...draft.citizenships, next.citizenship] });
+                        }
+                      }}
                       representativeFiles={representativeFileRows}
                       onSaved={() => {
                         void reloadStep1PortalState();

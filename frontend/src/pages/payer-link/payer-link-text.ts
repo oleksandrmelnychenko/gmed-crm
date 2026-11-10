@@ -136,6 +136,24 @@ export type PayerLinkText = {
   idDocumentTypes: Record<IdDocumentType, string>;
   identityFiles: string;
   identityUploadButton: string;
+  /** «Read the data from the scan»: the proposal of the machine readable zone. */
+  recognition: {
+    run: string;
+    again: string;
+    hint: string;
+    running: string;
+    notFound: string;
+    failed: string;
+    title: string;
+    verified: string;
+    unverified: string;
+    same: string;
+    current: string;
+    authorityHint: string;
+    apply: string;
+    dismiss: string;
+    applied: string;
+  };
   uploadHint: string;
   uploading: string;
   removeDocument: string;
@@ -400,6 +418,23 @@ const de: PayerLinkText = {
   idDocumentTypes: { passport: "Reisepass", id_card: "Personalausweis", residence_permit: "Aufenthaltstitel" },
   identityFiles: "Foto oder Scan des Ausweises",
   identityUploadButton: "Foto oder Scan hochladen",
+  recognition: {
+    run: "Daten aus dem Scan lesen",
+    again: "Erneut lesen",
+    hint: "Liest die maschinenlesbare Zone des Ausweises und schlägt die Werte vor. Nichts wird ohne Ihre Bestätigung übernommen.",
+    running: "Die maschinenlesbare Zone wird gelesen…",
+    notFound: "Auf dem Scan wurde keine maschinenlesbare Zone gefunden. Bitte geben Sie die Daten manuell ein. Am besten lesbar ist ein gerader Scan der ganzen Datenseite ohne Reflexionen.",
+    failed: "Das Dokument konnte nicht gelesen werden. Bitte geben Sie die Daten manuell ein.",
+    title: "Aus dem Scan gelesen",
+    verified: "Prüfziffern stimmen",
+    unverified: "Der Scan wurde fehlerhaft gelesen (Prüfziffern stimmen nicht). Die Werte können falsch sein: Bitte vergleichen Sie jeden Wert mit dem Dokument, bevor Sie ihn übernehmen.",
+    same: "stimmt überein",
+    current: "im Formular",
+    authorityHint: "Ausstellende Behörde und Ausstellungsdatum stehen nicht in der maschinenlesbaren Zone – bitte selbst eintragen.",
+    apply: "Angekreuztes übernehmen",
+    dismiss: "Ausblenden",
+    applied: "Übernommen. Bitte prüfen Sie die Felder und ergänzen Sie die Behörde.",
+  },
   uploadHint: "PDF, JPG oder PNG, bis 25 MB pro Datei.",
   uploading: "Wird hochgeladen…",
   removeDocument: "Entfernen",
@@ -705,6 +740,23 @@ const en: PayerLinkText = {
   idDocumentTypes: { passport: "Passport", id_card: "Identity card", residence_permit: "Residence permit" },
   identityFiles: "Photo or scan of the identity document",
   identityUploadButton: "Upload a photo or scan",
+  recognition: {
+    run: "Read the data from the scan",
+    again: "Read again",
+    hint: "Reads the machine-readable zone of the document and proposes the values. Nothing is taken over without your confirmation.",
+    running: "Reading the machine-readable zone…",
+    notFound: "No machine-readable zone was found on the scan. Please enter the data by hand. A straight scan of the whole data page without glare reads best.",
+    failed: "The document could not be read. Please enter the data by hand.",
+    title: "Read from the scan",
+    verified: "Check digits match",
+    unverified: "The scan was read with errors (check digits do not match). The values may be wrong: please compare each one with the document before you take it over.",
+    same: "matches",
+    current: "in the form",
+    authorityHint: "The issuing authority and the date of issue are not in the machine-readable zone – please enter them yourself.",
+    apply: "Take over the ticked values",
+    dismiss: "Hide",
+    applied: "Taken over. Please check the fields and add the issuing authority.",
+  },
   uploadHint: "PDF, JPG or PNG, up to 25 MB per file.",
   uploading: "Uploading…",
   removeDocument: "Remove",
@@ -1013,6 +1065,23 @@ const uk: PayerLinkText = {
   },
   identityFiles: "Фото або скан документа",
   identityUploadButton: "Завантажити фото або скан",
+  recognition: {
+    run: "Розпізнати дані зі скану",
+    again: "Розпізнати ще раз",
+    hint: "Читає машинозчитувану зону документа і пропонує значення. Нічого не підставляється без вашого підтвердження.",
+    running: "Читаємо машинозчитувану зону документа…",
+    notFound: "Машинозчитувану зону на скані не знайдено. Введіть дані вручну. Найкраще читається рівний скан сторінки з фото повністю, без відблисків.",
+    failed: "Не вдалося розпізнати документ. Введіть дані вручну.",
+    title: "Розпізнано зі скану",
+    verified: "Контрольні цифри зійшлися",
+    unverified: "Скан прочитано з помилками (контрольні цифри не зійшлися). Значення можуть бути хибними: звірте кожне з документом, перш ніж підставляти.",
+    same: "те саме значення",
+    current: "зараз у формі",
+    authorityHint: "«Ким видано» і дати видачі в машинозчитуваній зоні немає — внесіть їх самостійно.",
+    apply: "Підставити позначене",
+    dismiss: "Сховати",
+    applied: "Підставлено. Перевірте поля і додайте, ким видано документ.",
+  },
   uploadHint: "PDF, JPG або PNG, до 25 МБ на файл.",
   uploading: "Завантажується…",
   removeDocument: "Видалити",
@@ -1320,6 +1389,23 @@ const ru: PayerLinkText = {
   },
   identityFiles: "Фото или скан документа",
   identityUploadButton: "Загрузить фото или скан",
+  recognition: {
+    run: "Распознать данные со скана",
+    again: "Распознать ещё раз",
+    hint: "Читает машиночитаемую зону документа и предлагает значения. Ничего не подставляется без вашего подтверждения.",
+    running: "Читаем машиночитаемую зону документа…",
+    notFound: "Машиночитаемая зона на скане не найдена. Введите данные вручную. Лучше всего читается ровный скан страницы с фото целиком, без бликов.",
+    failed: "Не удалось распознать документ. Введите данные вручную.",
+    title: "Распознано со скана",
+    verified: "Контрольные цифры совпали",
+    unverified: "Скан прочитан с ошибками (контрольные цифры не совпали). Значения могут быть неверными: сверьте каждое с документом, прежде чем подставлять.",
+    same: "совпадает",
+    current: "сейчас в форме",
+    authorityHint: "«Кем выдан» и даты выдачи в машиночитаемой зоне нет — внесите их сами.",
+    apply: "Подставить отмеченное",
+    dismiss: "Скрыть",
+    applied: "Подставлено. Проверьте поля и укажите, кем выдан документ.",
+  },
   uploadHint: "PDF, JPG или PNG, до 25 МБ на файл.",
   uploading: "Загружается…",
   removeDocument: "Удалить",

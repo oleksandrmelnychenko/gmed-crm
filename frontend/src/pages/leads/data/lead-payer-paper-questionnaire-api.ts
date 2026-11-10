@@ -89,6 +89,8 @@ export function createStaffPayerClient(leadId: string): PayerLinkClient {
     saveAnswers: (patch: PayerAnswersPatch) => saveStaffPayerAnswers(leadId, patch),
     uploadIdentityDocument: (file: File) => upload(`${base(leadId)}/identity-document`, file),
     uploadFundsProof: (file: File) => upload(`${base(leadId)}/funds-proof`, file),
+    recognizeIdentityDocument: (documentId: string) =>
+      apiFetch<unknown>(`/documents/${encodeURIComponent(documentId)}/identity-recognition`, { method: "POST" }),
     withdrawDocument: unavailable,
     submit: () => call(`${base(leadId)}/submit`, { method: "POST", body: JSON.stringify({ declared_correct: true }) }),
   } as PayerLinkClient;

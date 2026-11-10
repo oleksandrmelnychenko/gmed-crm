@@ -6124,7 +6124,7 @@ fn parse_document_ocr_max_concurrency(value: Option<&str>) -> usize {
         .unwrap_or(DEFAULT_DOCUMENT_OCR_MAX_CONCURRENCY)
 }
 
-fn document_ocr_semaphore() -> &'static tokio::sync::Semaphore {
+pub(crate) fn document_ocr_semaphore() -> &'static tokio::sync::Semaphore {
     DOCUMENT_OCR_SEMAPHORE.get_or_init(|| {
         let configured = std::env::var("DOCUMENT_OCR_MAX_CONCURRENCY").ok();
         tokio::sync::Semaphore::new(parse_document_ocr_max_concurrency(configured.as_deref()))
@@ -6161,7 +6161,7 @@ fn tesseract_input_extension(original_filename: Option<&str>) -> &'static str {
     }
 }
 
-fn create_private_ocr_temp_file(path: &FsPath) -> std::io::Result<()> {
+pub(crate) fn create_private_ocr_temp_file(path: &FsPath) -> std::io::Result<()> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -34808,15 +34808,27 @@ async fn concierge_expense_receipt_access(
     }))
 }
 
-async fn download_document(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path(id): Path<Uuid>,
-) -> axum::response::Response {
+/// A staff copy of a stored document: the row, the opened bytes and how the
+/// file is named.
+pub(crate) struct StaffDocumentCopy {
+    pub(crate) row: sqlx::postgres::PgRow,
+    pub(crate) data: Vec<u8>,
+    pub(crate) mime_type: String,
+    pub(crate) filename: String,
+}
+
+/// Everything `GET /documents/{id}/download` checks before a file goes out,
+/// and the file. Whoever reads a file for staff another way (the reading of
+/// an identity scan) goes through the same checks.
+pub(crate) async fn load_staff_document_copy(
+    state: &AppState,
+    auth: &AuthUser,
+    id: Uuid,
+) -> Result<StaffDocumentCopy, axum::response::Response> {
     // Sales opens the identity scans of a lead it uploads and corrects (owner
     // 2026-10-24): only this route, only a lead's documents (checked below),
     // and the data-class policy keeps medical and financial files closed.
-    if let Err(resp) = auth.require_any_role(&[
+    auth.require_any_role(&[
         Role::Ceo,
         Role::CeoAssistant,
         Role::PatientManager,
@@ -34825,18 +34837,16 @@ async fn download_document(
         Role::Concierge,
         Role::Billing,
         Role::Sales,
-    ]) {
-        return resp;
-    }
+    ])?;
 
-    let assignment_set = match load_assignment_set(&state, &auth).await {
+    let assignment_set = match load_assignment_set(state, auth).await {
         Ok(value) => value,
-        Err(resp) => return resp,
+        Err(resp) => return Err(resp),
     };
-    let row = match fetch_document_row(&state, id, auth.user_id).await {
+    let row = match fetch_document_row(state, id, auth.user_id).await {
         Ok(Some(row)) => row,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
-        Err(resp) => return resp,
+        Ok(None) => return Err(err(StatusCode::NOT_FOUND, "Document not found")),
+        Err(resp) => return Err(resp),
     };
     // Sales has no documents workspace: it reaches a file only through a
     // lead (the scans of the lead, its parents and representatives).
@@ -34846,34 +34856,29 @@ async fn download_document(
             .unwrap_or_default()
             .is_none()
     {
-        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+        return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
     }
 
-    let receipt_access = match concierge_expense_receipt_access(&state, &auth, id).await {
+    let receipt_access = match concierge_expense_receipt_access(state, auth, id).await {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return Err(response),
     };
     let is_medical = row.try_get::<bool, _>("is_medical").unwrap_or(false);
     let baseline_view =
-        receipt_access.unwrap_or_else(|| can_view_document_row(&auth, &row, &assignment_set));
-    let view_access = match resolve_document_explicit_access(
-        &state,
-        &auth,
-        id,
-        AccessCapability::View,
-        is_medical,
-    )
-    .await
-    {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    if !document_access_allowed(&auth, &row, baseline_view, view_access) {
-        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+        receipt_access.unwrap_or_else(|| can_view_document_row(auth, &row, &assignment_set));
+    let view_access =
+        match resolve_document_explicit_access(state, auth, id, AccessCapability::View, is_medical)
+            .await
+        {
+            Ok(value) => value,
+            Err(response) => return Err(response),
+        };
+    if !document_access_allowed(auth, &row, baseline_view, view_access) {
+        return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
     }
     let download_access = match resolve_document_explicit_access(
-        &state,
-        &auth,
+        state,
+        auth,
         id,
         AccessCapability::Download,
         is_medical,
@@ -34881,10 +34886,10 @@ async fn download_document(
     .await
     {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return Err(response),
     };
-    if !document_access_allowed(&auth, &row, baseline_view, download_access) {
-        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    if !document_access_allowed(auth, &row, baseline_view, download_access) {
+        return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
     }
 
     let Some(storage_key) = row
@@ -34896,9 +34901,9 @@ async fn download_document(
             .unwrap_or_default()
             .is_some()
         {
-            return err(StatusCode::GONE, "Document file was deleted");
+            return Err(err(StatusCode::GONE, "Document file was deleted"));
         }
-        return err(StatusCode::NOT_FOUND, "Document file is not stored");
+        return Err(err(StatusCode::NOT_FOUND, "Document file is not stored"));
     };
     let mime_type = row
         .try_get::<Option<String>, _>("mime_type")
@@ -34922,9 +34927,36 @@ async fn download_document(
     .await
     {
         Ok(data) => data,
-        Err(_) => return err(StatusCode::NOT_FOUND, "Document file not found on disk"),
+        Err(_) => {
+            return Err(err(
+                StatusCode::NOT_FOUND,
+                "Document file not found on disk",
+            ));
+        }
     };
 
+    Ok(StaffDocumentCopy {
+        row,
+        data,
+        mime_type,
+        filename,
+    })
+}
+
+async fn download_document(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+) -> axum::response::Response {
+    let StaffDocumentCopy {
+        row,
+        data,
+        mime_type,
+        filename,
+    } = match load_staff_document_copy(&state, &auth, id).await {
+        Ok(copy) => copy,
+        Err(response) => return response,
+    };
     let disposition = crate::content_disposition::attachment(&filename);
 
     // Who took a copy of a patient file is part of the disclosure record, so it

@@ -216,6 +216,8 @@ type Mock = {
   benPartialId?: boolean;
   /** How long the mocked server takes for a document data save. */
   idSaveDelayMs?: number;
+  /** What the server reads from a scan (`POST /documents/{id}/identity-recognition`), by document id; no zone otherwise. */
+  recognition?: Record<string, Json>;
   /** The portal state asked right after the first document save answers this late. */
   staleIntakeMs?: number;
   /** Whose login an address is (`POST …/contact-email-check`), by the lower-cased address. */
@@ -300,6 +302,8 @@ async function mount(page: Page, mock: Mock) {
     idSaves: [] as Array<{ id: string; body: Json }>,
     /** Bodies of the document data saves of the patient. */
     patientIdSaves: [] as Json[],
+    /** The scans staff had read (`POST /documents/{id}/identity-recognition`). */
+    recognitions: [] as string[],
     /** Bodies of the staff saves of a representative's address and birth data. */
     detailSaves: [] as Array<{ id: string; body: { values: Json; base: Json } }>,
     /** Bodies of the login checks of a typed contact e-mail. */
@@ -360,6 +364,12 @@ async function mount(page: Page, mock: Mock) {
         }),
       };
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ representation: state.representation }) });
+      return;
+    }
+    const recognition = path.match(/^\/documents\/([^/]+)\/identity-recognition$/);
+    if (recognition && method === "POST") {
+      calls.recognitions.push(recognition[1]);
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(mock.recognition?.[recognition[1]] ?? { status: "not_found" }) });
       return;
     }
     if (idData && method === "PUT") {
@@ -1638,4 +1648,91 @@ test("one wrong field never holds back the other document data", async ({ page }
   await expect.poll(() => saves().at(-1)?.id_document_number).toBe("AB123456");
   await expect(form.getByTestId(`${testId}-saved`)).toBeVisible();
   await expect(form.getByTestId(`${testId}-unsaved`)).toHaveCount(0);
+});
+
+test("staff have a parent's scan read and take the proposed values into the form", async ({ page }) => {
+  // Synthetic values: what the zone of Ben's ID card would say.
+  const read = {
+    status: "verified",
+    format: "TD1",
+    checks: { document_number: true, birth_date: true, valid_until: true, composite: true },
+    names_truncated: false,
+    document: { id_document_type: "id_card", id_document_number: "L01X00T47", id_issuing_country: "DE", id_valid_until: "2031-10-31" },
+    holder: { last_name: benPerson.last_name, first_name: benPerson.first_name, date_of_birth: "1979-03-04", legal_sex: "male", citizenship: "DE" },
+  };
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const { wizard, calls } = await mount(page, { lang: "ru", benPartialId: true, recognition: { "doc-ben-id": read } });
+  const testId = `lead-representative-id-data-${BEN_ID}`;
+  const form = wizard.getByTestId(testId);
+  const card = form.locator("xpath=ancestor::details[1]");
+  if (!(await card.evaluate((node) => (node as HTMLDetailsElement).open))) await card.locator("summary").click();
+  const panel = form.getByTestId(`${testId}-recognition`);
+  // The form already holds a type and dates: nothing is read before staff ask.
+  await expect(panel.getByTestId(`${testId}-recognition-run`)).toHaveText("Распознать со скана");
+  expect(calls.recognitions).toEqual([]);
+  await panel.getByTestId(`${testId}-recognition-run`).click();
+  const proposal = panel.getByTestId(`${testId}-recognition-proposal`);
+  await expect(proposal).toHaveAttribute("data-status", "verified");
+  expect(calls.recognitions).toEqual(["doc-ben-id"]);
+  // Nothing reached the form or the server yet.
+  await expect(form.locator('input[name="id_document_number"]')).toHaveValue("");
+  expect(calls.idSaves).toEqual([]);
+  // Empty fields are ticked, an equal one has no box, a different one is left to staff.
+  await expect(proposal.getByTestId(`${testId}-recognition-document-number`).getByRole("checkbox")).toBeChecked();
+  await expect(proposal.getByTestId(`${testId}-recognition-document-country`).getByRole("checkbox")).toBeChecked();
+  await expect(proposal.getByTestId(`${testId}-recognition-document-validUntil`)).toHaveAttribute("data-state", "same");
+  const type = proposal.getByTestId(`${testId}-recognition-document-type`);
+  await expect(type).toHaveAttribute("data-state", "differs");
+  await expect(type.getByRole("checkbox")).not.toBeChecked();
+  await expect(type).toContainText("сейчас в форме: Паспорт");
+  // The parent's birth date differs from the document: named, never changed here.
+  await expect(proposal.getByTestId(`${testId}-recognition-holder-differs`)).toBeVisible();
+  await expect(proposal.getByTestId(`${testId}-recognition-holder-birthDate`).getByRole("checkbox")).toHaveCount(0);
+
+  await proposal.getByTestId(`${testId}-recognition-apply`).click();
+  await expect(form.locator('input[name="id_document_number"]')).toHaveValue("L01X00T47");
+  await expect(form.getByRole("combobox", { name: "Страна выдачи" })).toContainText("Германия");
+  // The form's own save stores them; the type staff did not tick stays.
+  await expect.poll(() => calls.idSaves.at(-1)?.body).toMatchObject({
+    id_document_type: "passport",
+    id_document_number: "L01X00T47",
+    id_issuing_country: "DE",
+    id_valid_until: "2031-10-31",
+  });
+  await expect(panel).toHaveAttribute("data-state", "applied");
+});
+
+test("a scan read with a failed check digit ticks nothing, and one without a zone says so", async ({ page }) => {
+  const read = {
+    status: "unverified",
+    format: "TD3",
+    checks: { document_number: false, birth_date: true, valid_until: true, composite: false },
+    names_truncated: false,
+    document: { id_document_type: "passport", id_document_number: "C01X00T47", id_issuing_country: "DE", id_valid_until: "2031-10-31" },
+    holder: { last_name: benPerson.last_name, first_name: benPerson.first_name, date_of_birth: benPerson.date_of_birth, legal_sex: "male", citizenship: "DE" },
+  };
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const { wizard, calls } = await mount(page, { lang: "ru", benPartialId: true, recognition: { "doc-ben-id": read } });
+  const testId = `lead-representative-id-data-${BEN_ID}`;
+  const form = wizard.getByTestId(testId);
+  const card = form.locator("xpath=ancestor::details[1]");
+  if (!(await card.evaluate((node) => (node as HTMLDetailsElement).open))) await card.locator("summary").click();
+  const panel = form.getByTestId(`${testId}-recognition`);
+  await panel.getByTestId(`${testId}-recognition-run`).click();
+  const proposal = panel.getByTestId(`${testId}-recognition-proposal`);
+  await expect(proposal).toHaveAttribute("data-status", "unverified");
+  await expect(proposal.getByTestId(`${testId}-recognition-unverified`)).toContainText("номер документа");
+  await expect(proposal.getByTestId(`${testId}-recognition-document-number`).getByRole("checkbox")).not.toBeChecked();
+  await expect(proposal.getByTestId(`${testId}-recognition-document-country`).getByRole("checkbox")).not.toBeChecked();
+  await expect(proposal.getByTestId(`${testId}-recognition-apply`)).toBeDisabled();
+  expect(calls.idSaves).toEqual([]);
+
+  // Anna's scan has no zone: the form says so and stays as it is.
+  const annaTestId = `lead-representative-id-data-${ANNA_ID}`;
+  const annaForm = wizard.getByTestId(annaTestId);
+  const annaCard = annaForm.locator("xpath=ancestor::details[1]");
+  if (!(await annaCard.evaluate((node) => (node as HTMLDetailsElement).open))) await annaCard.locator("summary").click();
+  await annaForm.getByTestId(`${annaTestId}-recognition-run`).click();
+  await expect(annaForm.getByTestId(`${annaTestId}-recognition-not-found`)).toBeVisible();
+  expect(calls.idSaves).toEqual([]);
 });

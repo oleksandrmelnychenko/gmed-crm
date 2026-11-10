@@ -30,6 +30,7 @@ import {
   withLegalAnswer,
 } from "./payer-link-model";
 import { RequiredMark, UploadBlock, YesNoSelect } from "./payer-link-parts";
+import { PayerIdentityRecognition } from "./payer-link-recognition";
 import type { PayerLinkText } from "./payer-link-text";
 
 // Steps 1–3 and 7 of the payer page (contract phase 3a, 5.1); steps 4–6 are
@@ -355,6 +356,8 @@ export function IdentityStep({
         onFiles={uploads.upload}
         onRemove={uploads.remove}
       />
+      {/* The copy is read on the server; the values are a proposal the payer confirms. */}
+      <PayerIdentityRecognition context={context} uploads={uploads} />
     </div>
   );
 }

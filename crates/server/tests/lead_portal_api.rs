@@ -2512,6 +2512,28 @@ async fn the_identity_document_needs_the_request_consent_and_is_not_a_medical_do
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    // Whoever opens the scan may have its machine readable zone read. The
+    // test file has no zone, and a host may lack the OCR tools: the server
+    // says which, and never refuses Sales.
+    let recognition = format!("/api/v1/documents/{document_id}/identity-recognition");
+    let (status, body) =
+        json_request(router, "POST", &recognition, &app.staff("sales"), None).await;
+    let read_nothing = status == StatusCode::OK && body == json!({ "status": "not_found" });
+    let no_tools = matches!(
+        status,
+        StatusCode::SERVICE_UNAVAILABLE | StatusCode::BAD_GATEWAY
+    ) && matches!(
+        body["code"].as_str(),
+        Some("recognition_unavailable" | "recognition_failed")
+    );
+    assert!(read_nothing || no_tools, "{status} {body}");
+    assert_eq!(
+        audit_count(pool, "identity_document_recognized", document_id).await,
+        i64::from(read_nothing)
+    );
+    // The lead's own login has no such route.
+    let (status, body) = json_request(router, "POST", &recognition, &patient, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
     let (_, intake) = json_request(
         router,
         "GET",
@@ -2522,6 +2544,18 @@ async fn the_identity_document_needs_the_request_consent_and_is_not_a_medical_do
     .await;
     assert_eq!(intake["uploads"].as_array().unwrap().len(), 1, "{intake}");
     assert_ne!(intake["uploads"][0]["document_id"], json!(document_id));
+    // A medical file is never read as an identity document.
+    let medical_id = intake["uploads"][0]["document_id"].as_str().unwrap();
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/documents/{medical_id}/identity-recognition"),
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "not_an_identity_document", "{body}");
     let (_, list) = json_request(
         router,
         "GET",

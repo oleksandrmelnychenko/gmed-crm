@@ -299,6 +299,10 @@ pub fn public_router() -> Router<AppState> {
             "/public/payer-link/documents/{document_id}",
             delete(withdraw_upload),
         )
+        .route(
+            "/public/payer-link/documents/{document_id}/identity-recognition",
+            post(recognize_upload),
+        )
         .route("/public/payer-link/submit", post(submit))
         .layer(middleware::from_fn(payer_link_guard))
 }
@@ -4129,6 +4133,114 @@ async fn link_upload(
     }
     publish(&state, None, link.lead_id, Some("payer")).await;
     questionnaire_response(&state, link.lead_id, Viewer::Payer, StatusCode::CREATED).await
+}
+
+/// `POST /public/payer-link/documents/{document_id}/identity-recognition`:
+/// the machine readable zone of an identity copy the payer uploaded through
+/// this link, as a proposal for the payer's own form. The file is read on
+/// this server and nothing is stored; the payer confirms or corrects the
+/// values. Recorded without any value of the document.
+async fn recognize_upload(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(document_id): Path<Uuid>,
+) -> Response {
+    let (mut tx, link) = match payer_session(&state, &headers).await {
+        Ok(found) => found,
+        Err(response) => return response,
+    };
+    let upload = match sqlx::query(
+        r#"SELECT d.storage_key, d.mime_type
+           FROM lead_portal_uploads u
+           JOIN documents d ON d.id = u.document_id
+           WHERE u.document_id = $1
+             AND u.lead_id = $2
+             AND u.access_kind = 'payer'
+             AND u.kind = 'payer_identity'
+             AND u.withdrawn_at IS NULL
+             AND d.file_deleted_at IS NULL"#,
+    )
+    .bind(document_id)
+    .bind(link.lead_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(found) => found,
+        Err(error) => return intake::internal(error, "load payer upload"),
+    };
+    let writer = link_writer(&state, &link, &headers);
+    // The session renewal is kept; the reading itself holds no transaction.
+    if let Err(error) = tx.commit().await {
+        return intake::internal(error, "commit payer session");
+    }
+    let storage_key = upload.as_ref().and_then(|row| {
+        row.try_get::<Option<String>, _>("storage_key")
+            .ok()
+            .flatten()
+    });
+    let Some(storage_key) = storage_key else {
+        return coded(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "Document not found",
+            json!({}),
+        );
+    };
+    let mime_type = upload
+        .as_ref()
+        .and_then(|row| row.try_get::<Option<String>, _>("mime_type").ok().flatten());
+    let data = match crate::routes::documents::read_document_storage_bytes(
+        document_id,
+        &storage_key,
+        mime_type.as_deref(),
+        None,
+        None,
+    )
+    .await
+    {
+        Ok(data) => data,
+        Err(_) => {
+            return coded(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "Document not found",
+                json!({}),
+            );
+        }
+    };
+    let found = match crate::services::identity_recognition::recognize(
+        &data,
+        crate::app_time::today(),
+    )
+    .await
+    {
+        Ok(found) => found,
+        Err(reason) => {
+            tracing::warn!(document_id = %document_id, ?reason, "payer identity recognition failed");
+            return super::identity_recognition::recognition_error_response(reason);
+        }
+    };
+    let event = writer.event(
+        "identity_document_recognized",
+        "document",
+        document_id,
+        json!({
+            "lead_id": link.lead_id,
+            "outcome": super::identity_recognition::recognition_status(found.as_ref()),
+        }),
+    );
+    let recorded = async {
+        let mut conn = state.db.acquire().await?;
+        audit::write_in_transaction(&mut conn, &event).await
+    }
+    .await;
+    if let Err(error) = recorded {
+        return intake::internal(error, "record payer identity recognition");
+    }
+    Json(super::identity_recognition::recognition_json(
+        found.as_ref(),
+    ))
+    .into_response()
 }
 
 /// `DELETE /public/payer-link/documents/{document_id}`: a file of the payer's

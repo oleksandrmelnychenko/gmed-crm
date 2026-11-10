@@ -1322,6 +1322,44 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
         .as_str()
         .unwrap()
         .to_string();
+    // The payer has the own identity copy read (a proposal for the form,
+    // nothing stored). The test file has no machine readable zone and a host
+    // may lack the OCR tools: the server says which. A proof of funds is no
+    // identity copy, and without the session nothing is read.
+    let identity_copy = body["identity_documents"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let recognition =
+        format!("/api/v1/public/payer-link/documents/{identity_copy}/identity-recognition");
+    let (status, read) = as_payer(&app, "POST", &recognition, &headers, None).await;
+    let read_nothing = status == StatusCode::OK && read == json!({ "status": "not_found" });
+    let no_tools = matches!(
+        status,
+        StatusCode::SERVICE_UNAVAILABLE | StatusCode::BAD_GATEWAY
+    ) && matches!(
+        read["code"].as_str(),
+        Some("recognition_unavailable" | "recognition_failed")
+    );
+    assert!(read_nothing || no_tools, "{status} {read}");
+    let (status, read) = as_payer(
+        &app,
+        "POST",
+        &format!("/api/v1/public/payer-link/documents/{first_proof}/identity-recognition"),
+        &headers,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{read}");
+    let (status, read) = as_payer(
+        &app,
+        "POST",
+        &recognition,
+        &[("X-Payer-Link", token.as_str())],
+        None,
+    )
+    .await;
+    assert!(status.is_client_error(), "{status} {read}");
     let (status, body) = as_payer(
         &app,
         "DELETE",

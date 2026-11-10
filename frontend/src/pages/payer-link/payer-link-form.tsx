@@ -277,7 +277,18 @@ function useUploads({
     }
   }
 
-  return { documents, busy, errors, upload: (files) => void upload(files), remove: (id) => void remove(id) };
+  return {
+    documents,
+    busy,
+    errors,
+    upload: (files) => void upload(files),
+    remove: (id) => void remove(id),
+    // Reading a copy changes nothing on the server, so it runs beside the queue.
+    recognize:
+      kind === "identity" && typeof client.recognizeIdentityDocument === "function"
+        ? (id) => client.recognizeIdentityDocument(id)
+        : undefined,
+  };
 }
 
 /** The first step with something missing (after the privacy step), else the summary. */
