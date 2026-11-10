@@ -26,7 +26,18 @@ RUN --mount=type=cache,target=/root/.npm npm ci --legacy-peer-deps
 
 COPY . .
 
-RUN npm run build
+# Default: the full build with the type check (`tsc -b && vite build`). CI and
+# the release workflow never set this argument, so their images keep it.
+# Only the DEV compose file sets it to "true": the image then runs just the
+# bundler. Types are checked before the push (`npm run typecheck`) and again in
+# CI, and `tsc -b` emits nothing (noEmit), so the bundle is the same.
+ARG GMED_FRONTEND_SKIP_TYPECHECK=false
+
+RUN case "$GMED_FRONTEND_SKIP_TYPECHECK" in \
+      false) npm run build ;; \
+      true) npm run build:bundle ;; \
+      *) echo "GMED_FRONTEND_SKIP_TYPECHECK must be true or false" >&2; exit 1 ;; \
+    esac
 
 FROM nginx:1.30-alpine AS runtime
 

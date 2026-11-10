@@ -18,6 +18,22 @@ RUN python -m app.build_mt_models --output /out \
     && rm -rf /root/.cache/huggingface
 COPY MT_MODELS_NOTICE /out/NOTICE
 
+# Argos EN->DE model (build stage only), unpacked by the installer alone so a
+# change in the application code does not repeat it. The archive is optional in
+# the context: the bracket pattern matches it when present and nothing
+# otherwise (pyproject.toml keeps the COPY valid); without it the installer
+# downloads the pinned archive. The SHA-256 is verified either way.
+FROM python:3.12-slim AS translation-model
+
+WORKDIR /build
+COPY app/install_translation_model.py ./app/
+COPY pyproject.toml translation-model.argosmode[l] /build-input/
+RUN if [ -f /build-input/translation-model.argosmodel ]; then \
+      python -m app.install_translation_model --archive /build-input/translation-model.argosmodel --destination /out; \
+    else \
+      python -m app.install_translation_model --destination /out; \
+    fi
+
 FROM python:3.12-slim
 
 ARG DEBIAN_SECURITY_REFRESH=local
@@ -42,20 +58,19 @@ RUN echo "security-refresh=${DEBIAN_SECURITY_REFRESH}" >/dev/null \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY pyproject.toml ./
-COPY app ./app
-COPY rules ./rules
-RUN pip install --no-cache-dir \
-    --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/ \
-    ".[paddle,translation]"
 
-RUN --mount=type=bind,target=/build-input,readonly \
-    if [ -f /build-input/translation-model.argosmodel ]; then \
-      python -m app.install_translation_model --archive /build-input/translation-model.argosmodel; \
-    else \
-      python -m app.install_translation_model; \
-    fi \
-    && python -c "from app.translation_runtime import translate_payload; from pathlib import Path; result = translate_payload({'text': 'No evidence of pneumonia.', 'candidates': {}}, Path('models/translate-en_de-1_3')); assert result['text']"
+# Layer order: everything slow (dependencies, OCR and translation models) comes
+# before the application code, so a code change repeats only the quick steps
+# at the end.
+#
+# Dependencies depend on pyproject.toml alone. The project itself is installed
+# here from an empty placeholder package and installed again below from the
+# real code.
+COPY pyproject.toml ./
+RUN mkdir app && : > app/__init__.py \
+    && pip install --no-cache-dir \
+       --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/ \
+       ".[paddle,translation]"
 
 ENV PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=1 \
     PADDLE_PDX_MODEL_SOURCE=bos
@@ -63,6 +78,10 @@ ENV PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=1 \
 # Fail the image build if the exact production pipeline or its model cache is
 # unavailable. Then move the preloaded cache to the unprivileged runtime user,
 # so runtime OCR never needs root or outbound internet.
+# The pipeline is built by app/extraction.py (model names and options live
+# there), which imports nothing else from the application at module level, so
+# only a change in that one file repeats the model download.
+COPY app/extraction.py ./app/
 RUN python -c "from app.extraction import _get_paddle_ocr; _get_paddle_ocr()"
 RUN test -d /root/.paddlex \
     && addgroup --system --gid "${GMED_RUNTIME_GID}" gmed \
@@ -70,10 +89,21 @@ RUN test -d /root/.paddlex \
     && mv /root/.paddlex /home/gmed/.paddlex \
     && chown -R gmed:gmed /home/gmed/.paddlex
 
+COPY --from=translation-model /out /app/models
+COPY --from=mt-models /out /app/mt-models
+
+# Application code. Reinstall the project without its dependencies so the
+# installed copy of `app` is the real code, as with a single install.
+COPY app ./app
+COPY rules ./rules
+RUN rm -rf build ./*.egg-info \
+    && pip install --no-cache-dir --no-deps --force-reinstall .
+
+RUN python -c "from app.translation_runtime import translate_payload; from pathlib import Path; result = translate_payload({'text': 'No evidence of pneumonia.', 'candidates': {}}, Path('models/translate-en_de-1_3')); assert result['text']"
+
 # Offline translation service (second compose service, same image):
 #   python -m uvicorn app.mt_api:app --host 0.0.0.0 --port 8092
 # Fail the build if a converted model is missing or numbers are not preserved.
-COPY --from=mt-models /out /app/mt-models
 RUN python -c "from pathlib import Path; from app.mt_engine import MTEngine, CTranslate2Backend, MODELS; backend = CTranslate2Backend(Path('/app/mt-models'), max_loaded=1, threads=2); missing = [key for key in MODELS if not backend.available(key)]; assert not missing, missing; result = MTEngine(backend).translate('Kontrolle am 18.03.2026 bei Anna Beispiel.', 'de', 'ru', ['Anna Beispiel']); assert '18.03.2026' in result.text and 'Anna Beispiel' in result.text, result"
 
 # Build contexts can come from restrictive workstation/deployment umasks.

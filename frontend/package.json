@@ -12,6 +12,7 @@
     "dev": "vite",
     "typecheck": "tsc -b",
     "build": "tsc -b && vite build",
+    "build:bundle": "vite build",
     "build:mobile": "tsc -b && vite build --mode mobile",
     "build:mobile:release": "tsc -b && vite build --mode mobile-production",
     "mobile:sync": "npm run build:mobile && cap sync",

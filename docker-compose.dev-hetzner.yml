@@ -29,6 +29,9 @@ services:
         VITE_RELEASE_CHANNEL: "dev"
         VITE_BUILD_NUMBER: "${VITE_BUILD_NUMBER:-}"
         VITE_BUILD_TIMESTAMP: "${VITE_BUILD_TIMESTAMP:-}"
+        # DEV image only: bundle without `tsc -b` (most of the build time). Types
+        # are checked before the push and in CI; release images keep the check.
+        GMED_FRONTEND_SKIP_TYPECHECK: "true"
 
   backend:
     build:
