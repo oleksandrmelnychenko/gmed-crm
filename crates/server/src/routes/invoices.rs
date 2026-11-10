@@ -41,6 +41,7 @@ mod dunning_blocks;
 mod dunning_letters;
 mod ledger_text;
 pub(crate) mod line_comments;
+mod patient_notices;
 pub mod payer;
 pub(crate) mod rebilling_waivers;
 mod release;
@@ -740,12 +741,14 @@ struct InvoicePdfContext {
     patient_title: Option<String>,
     /// Rechnungsempfänger: the payer when one is set, the patient otherwise.
     recipient: document::InvoiceRecipient,
-    /// Leistungszeitraum (first and last service day).
+    /// Leistungszeitraum (first and last service day); of the rendered
+    /// services only when the invoice also bills services still ahead.
     service_period: Option<(NaiveDate, NaiveDate)>,
-    /// Without a service period: the invoice bills services not rendered
-    /// yet (printed as such, § 14 Abs. 4 Nr. 6 UStG); otherwise the service
-    /// date is the invoice date.
-    service_not_rendered: bool,
+    /// The invoice bills services not rendered yet (§ 14 Abs. 4 Nr. 6 UStG):
+    /// all of them — printed in place of the service date — or some, printed
+    /// next to the period of the rendered ones. Without either and without a
+    /// period the service date is the invoice date.
+    services_not_rendered: document::ServicesNotRendered,
     order_number: String,
     quote_number: Option<String>,
     language: String,
@@ -2946,6 +2949,12 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         (_, "service_not_rendered") => {
             "Leistung noch nicht erbracht (Abrechnung vor Leistungserbringung)"
         }
+        // Next to the date of the rendered services: the services the same
+        // invoice bills ahead of their delivery.
+        ("uk", "service_remaining") => "Решта послуг",
+        ("ru", "service_remaining") => "Остальные услуги",
+        ("en", "service_remaining") => "Other services",
+        (_, "service_remaining") => "Übrige Leistungen",
         ("uk", "service_date_is_invoice_date") => "відповідає даті рахунку",
         ("ru", "service_date_is_invoice_date") => "соответствует дате счёта",
         ("en", "service_date_is_invoice_date") => "same as the invoice date",
@@ -5501,15 +5510,16 @@ async fn load_invoice_pdf_context_on(
     let languages = row
         .try_get::<Vec<String>, _>("languages")
         .unwrap_or_default();
-    let service_period = document::load_invoice_service_period(
+    // One answer for the printed invoice, the e-invoice and the warning
+    // before the release (QA 2026-11-10, D-01).
+    let (service_period, services_not_rendered) = document::load_invoice_service_timing(
         conn,
+        &row.try_get::<String, _>("invoice_type").unwrap_or_default(),
         row.try_get::<Option<Uuid>, _>("order_id")
             .unwrap_or_default(),
         &line_items,
     )
     .await?;
-    let service_not_rendered = service_period.is_none()
-        && document::bills_services_not_rendered(conn, &line_items).await?;
     let deducted_advances = document::load_deducted_advances(conn, invoice_id).await?;
     // A draft previews the recipient its release will freeze: the
     // Leistungsempfänger line, the declared e-mail and tax numbers.
@@ -5603,7 +5613,7 @@ async fn load_invoice_pdf_context_on(
             .filter(|value| !value.is_empty()),
         recipient,
         service_period,
-        service_not_rendered,
+        services_not_rendered,
         order_number: row
             .try_get::<Option<String>, _>("order_number")
             .unwrap_or_default()
@@ -5931,26 +5941,41 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
             format_invoice_pdf_date(context.due_date),
         ),
     ];
-    if let Some(period) = context.service_period {
-        let (label, value) = format_invoice_pdf_service_period(language, period);
-        meta_cells.push((label, value));
-    } else if context.invoice_type != "advance" {
-        // § 14 Abs. 4 Nr. 6 UStG: never without the time of supply. Services
-        // not rendered yet are named as such (UStAE 14.5 Abs. 17); otherwise
-        // the service date is the invoice date (QA D-11). An advance invoice
-        // is titled as a prepayment request already.
+    // § 14 Abs. 4 Nr. 6 UStG: never without the time of supply. An advance
+    // invoice is titled as a prepayment request already.
+    let settlement = context.invoice_type != "advance";
+    let not_rendered = if settlement {
+        context.services_not_rendered
+    } else {
+        document::ServicesNotRendered::None
+    };
+    if not_rendered == document::ServicesNotRendered::All {
+        // No service is rendered: the invoice says so and claims no date
+        // (UStAE 14.5 Abs. 17), whatever appointments are planned.
         meta_cells.push((
             invoice_pdf_label(language, "service_date"),
-            invoice_pdf_label(
-                language,
-                if context.service_not_rendered {
-                    "service_not_rendered"
-                } else {
-                    "service_date_is_invoice_date"
-                },
-            )
-            .to_string(),
+            invoice_pdf_label(language, "service_not_rendered").to_string(),
         ));
+    } else {
+        if let Some(period) = context.service_period {
+            let (label, value) = format_invoice_pdf_service_period(language, period);
+            meta_cells.push((label, value));
+        } else if settlement {
+            // Without dated services the service date is the invoice date
+            // (QA D-11).
+            meta_cells.push((
+                invoice_pdf_label(language, "service_date"),
+                invoice_pdf_label(language, "service_date_is_invoice_date").to_string(),
+            ));
+        }
+        // Rendered and planned services on one invoice: the date above is
+        // the one of the rendered services, the others are named here.
+        if not_rendered == document::ServicesNotRendered::Some {
+            meta_cells.push((
+                invoice_pdf_label(language, "service_remaining"),
+                invoice_pdf_label(language, "service_not_rendered").to_string(),
+            ));
+        }
     }
     // Addressed to someone other than the contracting party (e.g. a
     // Kostenübernehmer): the invoice still names the Leistungsempfänger.
@@ -9786,6 +9811,13 @@ async fn create_invoice_payment(
         }),
     )
     .await;
+    // The patient learns that the money arrived (owner 2026-11-10).
+    patient_notices::notify_patient(
+        &state,
+        invoice_id,
+        patient_notices::PatientInvoiceNotice::PaymentRecorded { amount_gross },
+    )
+    .await;
 
     match load_invoice_detail(&state, invoice_id, &auth).await {
         Ok(Some(invoice)) => (
@@ -10980,6 +11012,17 @@ impl IssuedCreditNote {
                 "amount_gross": decimal_to_string(self.gross),
                 "patient_id": self.patient_id,
             }),
+        )
+        .await;
+        // A credit note shown in the portal is told to the patient (owner
+        // 2026-11-10); a hidden one and a hidden invoice notify nobody.
+        patient_notices::notify_patient(
+            state,
+            self.invoice_id,
+            patient_notices::PatientInvoiceNotice::CreditNoteIssued {
+                credit_note_id: self.id,
+                amount_gross: self.gross,
+            },
         )
         .await;
     }
@@ -12608,6 +12651,22 @@ fn einvoice_prepayment_note(
     ))
 }
 
+/// What the printed invoice says about services billed ahead of their
+/// delivery (§ 14 Abs. 4 Nr. 6 UStG), as the e-invoice note: EN 16931 has a
+/// delivery date and an invoicing period, but no field for "not rendered
+/// yet". German, like the other notes of the XML.
+fn einvoice_service_note(not_rendered: document::ServicesNotRendered) -> Option<String> {
+    let statement = invoice_pdf_label("de", "service_not_rendered");
+    match not_rendered {
+        document::ServicesNotRendered::None => None,
+        document::ServicesNotRendered::All => Some(statement.to_string()),
+        document::ServicesNotRendered::Some => Some(format!(
+            "{}: {statement}",
+            invoice_pdf_label("de", "service_remaining")
+        )),
+    }
+}
+
 /// Invoice data for the ZUGFeRD XML, read from the same rows the PDF uses.
 async fn load_einvoice(
     conn: &mut sqlx::PgConnection,
@@ -12655,8 +12714,11 @@ async fn load_einvoice(
     let line_items = row
         .try_get::<Value, _>("line_items")
         .unwrap_or_else(|_| json!([]));
-    // Service period and deducted advances as printed on the invoice.
-    let service_period = document::load_invoice_service_period(conn, order_id, &line_items).await?;
+    // Service period, services billed ahead and deducted advances as printed
+    // on the invoice.
+    let invoice_type = row.try_get::<String, _>("invoice_type").unwrap_or_default();
+    let (service_period, services_not_rendered) =
+        document::load_invoice_service_timing(conn, &invoice_type, order_id, &line_items).await?;
     let deducted_advances = document::load_deducted_advances(conn, invoice_id).await?;
     let currency = row
         .try_get::<String, _>("currency")
@@ -12749,10 +12811,11 @@ async fn load_einvoice(
 
     Ok(Some(zugferd::EInvoice {
         number: row.try_get("invoice_number").unwrap_or_default(),
-        invoice_type: row.try_get("invoice_type").unwrap_or_default(),
+        invoice_type,
         issue_date: invoice_document_date(issued_at),
         due_date: row.try_get("due_date").unwrap_or_default(),
         service_period,
+        service_note: einvoice_service_note(services_not_rendered),
         currency,
         order_number: optional("order_number"),
         note: optional("notes").filter(|_| !third_party_payer),
@@ -14979,6 +15042,16 @@ async fn update_invoice_status(
                 }),
             )
             .await;
+            // The issued invoice is in the portal now: its patient is told
+            // (owner 2026-11-10), unless the invoice is hidden from the portal.
+            if releasing {
+                patient_notices::notify_patient(
+                    &state,
+                    invoice_id,
+                    patient_notices::PatientInvoiceNotice::Issued,
+                )
+                .await;
+            }
 
             match load_invoice_detail(&state, invoice_id, &auth).await {
                 Ok(Some(invoice)) => Json(invoice).into_response(),
@@ -15040,7 +15113,7 @@ mod tests {
                 ..Default::default()
             },
             service_period: None,
-            service_not_rendered: false,
+            services_not_rendered: document::ServicesNotRendered::None,
             order_number: "ORD-UNIT-1".to_string(),
             quote_number: Some("Q-UNIT-1".to_string()),
             language: "ru".to_string(),
@@ -15322,14 +15395,93 @@ mod tests {
         assert!(text.contains("Leistungsdatum"), "{text}");
         assert!(text.contains("entspricht dem Rechnungsdatum"), "{text}");
 
-        context.service_not_rendered = true;
+        context.services_not_rendered = document::ServicesNotRendered::All;
         let text = pdf_text(&context);
         assert!(text.contains("Leistung noch nicht erbracht"), "{text}");
+        assert!(!text.contains("entspricht dem Rechnungsdatum"), "{text}");
+        assert!(!text.contains("Übrige Leistungen"), "{text}");
 
         // The advance invoice is a prepayment request by its title.
         context.invoice_type = "advance".to_string();
         let text = pdf_text(&context);
         assert!(!text.contains("Leistungsdatum"), "{text}");
+        assert!(!text.contains("noch nicht erbracht"), "{text}");
+    }
+
+    /// QA 2026-11-10, D-01: the release check announced "Leistung noch nicht
+    /// erbracht" and the invoice printed a date taken from planned
+    /// appointments. No rendered service: no date at all. Rendered and
+    /// planned services together: the date of the rendered ones and the
+    /// statement next to it.
+    #[test]
+    fn services_billed_ahead_are_stated_whatever_dates_are_known() {
+        // Days in the past, so they never equal the invoice date of the run.
+        let day = |day| NaiveDate::from_ymd_opt(2026, 3, day).unwrap();
+        let mut context = sample_context();
+        context.language = "de".to_string();
+
+        // A period handed in with "none rendered" is never printed.
+        context.service_period = Some((day(10), day(28)));
+        context.services_not_rendered = document::ServicesNotRendered::All;
+        let text = pdf_text(&context);
+        assert!(text.contains("Leistungsdatum"), "{text}");
+        assert!(text.contains("Leistung noch nicht erbracht"), "{text}");
+        for absent in ["Leistungszeitraum", "10.03.2026", "28.03.2026"] {
+            assert!(!text.contains(absent), "{absent}: {text}");
+        }
+
+        // Mixed: the day of the rendered service stays, the rest is named.
+        context.service_period = Some((day(10), day(10)));
+        context.services_not_rendered = document::ServicesNotRendered::Some;
+        let text = pdf_text(&context);
+        assert!(text.contains("Leistungsdatum"), "{text}");
+        assert!(text.contains("10.03.2026"), "{text}");
+        assert!(text.contains("Übrige Leistungen"), "{text}");
+        assert!(text.contains("Leistung noch nicht erbracht"), "{text}");
+
+        // Mixed without a dated rendered service: the invoice date dates
+        // them, the statement stays.
+        context.service_period = None;
+        let text = pdf_text(&context);
+        assert!(text.contains("entspricht dem Rechnungsdatum"), "{text}");
+        assert!(text.contains("Übrige Leistungen"), "{text}");
+        assert!(text.contains("Leistung noch nicht erbracht"), "{text}");
+
+        // The same statement in the patient's languages.
+        for (language, label, statement) in [
+            ("ru", "Остальные услуги", "услуги ещё не оказаны"),
+            ("uk", "Решта послуг", "послуги ще не надано"),
+            ("en", "Other services", "not yet rendered"),
+        ] {
+            context.language = language.to_string();
+            let text = pdf_text(&context);
+            assert!(text.contains(label), "{language}: {text}");
+            assert!(text.contains(statement), "{language}: {text}");
+        }
+
+        // Everything rendered: neither the statement nor the extra cell.
+        context.language = "de".to_string();
+        context.service_period = Some((day(10), day(10)));
+        context.services_not_rendered = document::ServicesNotRendered::None;
+        let text = pdf_text(&context);
+        assert!(!text.contains("noch nicht erbracht"), "{text}");
+        assert!(!text.contains("Übrige Leistungen"), "{text}");
+
+        // The e-invoice note says what the printed invoice says.
+        assert_eq!(
+            super::einvoice_service_note(document::ServicesNotRendered::None),
+            None
+        );
+        assert_eq!(
+            super::einvoice_service_note(document::ServicesNotRendered::All).as_deref(),
+            Some("Leistung noch nicht erbracht (Abrechnung vor Leistungserbringung)")
+        );
+        assert_eq!(
+            super::einvoice_service_note(document::ServicesNotRendered::Some).as_deref(),
+            Some(
+                "Übrige Leistungen: Leistung noch nicht erbracht (Abrechnung vor Leistungserbringung)"
+            )
+        );
     }
 
     /// The advance invoice of the QA walkthrough (order A-20260928-0005): a

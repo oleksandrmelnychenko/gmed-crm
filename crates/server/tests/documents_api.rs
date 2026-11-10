@@ -5162,6 +5162,123 @@ async fn concierge_and_billing_are_refused_consent_documents_but_billing_keeps_i
     assert_eq!(status, StatusCode::OK, "CEO: {body}");
 }
 
+/// Owner decision 2026-11-10 (QA D-15): the evidence of where a lead's or a
+/// payer's money comes from is GwG evidence, although it is filed under
+/// "finance". Billing neither lists, opens nor downloads it; the identity
+/// scan stays open to Billing (owner decision 2026-10-06) and the CEO keeps
+/// everything.
+#[tokio::test]
+async fn billing_is_refused_the_proofs_of_the_source_of_funds_but_keeps_id_scans() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("funds-proof-access");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    // Uploaded as plain identity scans, then filed as the proofs the lead's
+    // cabinet, the payer's link and the due-diligence form store.
+    let mut uploaded = Vec::new();
+    for name in ["self", "payer", "staff", "passport"] {
+        let (status, body) = multipart_upload(
+            &app,
+            "/api/v1/documents/upload",
+            &admin_bearer,
+            &[
+                ("patient_id", patient_id.to_string()),
+                ("auto_name", format!("Nachweis {name} {tag}")),
+                ("art", "passport_scan".to_string()),
+                ("category", "identity".to_string()),
+                ("status", "active".to_string()),
+                ("visibility", "internal".to_string()),
+                ("is_medical", "false".to_string()),
+            ],
+            &format!("{name}-{tag}.pdf"),
+            "application/pdf",
+            b"%PDF-funds-proof-access%",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        uploaded.push(Uuid::parse_str(body["id"].as_str().unwrap()).unwrap());
+    }
+    let passport_id = uploaded[3];
+    let proofs = [
+        (uploaded[0], "self_funds_proof"),
+        (uploaded[1], "payer_funds_proof"),
+        (uploaded[2], "aml_asset_origin_evidence"),
+    ];
+    for (document_id, art) in proofs {
+        sqlx::query("UPDATE documents SET art = $2, category = 'finance' WHERE id = $1")
+            .bind(document_id)
+            .bind(art)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let bearer = auth_header_for(billing_id, "billing");
+    for path in [
+        format!("/api/v1/patients/{patient_id}/documents"),
+        format!("/api/v1/documents?patient_id={patient_id}"),
+    ] {
+        let (status, body) = json_request(&app, "GET", &path, &bearer, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
+        let listed = listed_ids(&body);
+        for (document_id, art) in proofs {
+            assert!(
+                !listed.contains(&document_id.to_string()),
+                "billing lists {art} in {path}: {body}"
+            );
+        }
+        assert!(listed.contains(&passport_id.to_string()), "{path}: {body}");
+    }
+    for (document_id, art) in proofs {
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{document_id}"),
+            &bearer,
+            None,
+        )
+        .await;
+        assert!(
+            matches!(status, StatusCode::FORBIDDEN | StatusCode::NOT_FOUND),
+            "billing opens {art}: {status} {body}"
+        );
+        let (status, _) = bytes_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{document_id}/download"),
+            &bearer,
+        )
+        .await;
+        assert!(
+            matches!(status, StatusCode::FORBIDDEN | StatusCode::NOT_FOUND),
+            "billing downloads {art}: {status}"
+        );
+
+        // The CEO keeps the evidence.
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{document_id}"),
+            &admin_bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "CEO on {art}: {body}");
+    }
+    let (status, _) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{passport_id}/download"),
+        &bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "billing ID scan download");
+}
+
 /// The translation of a consent document is a consent document too (owner
 /// decision 2026-10-11): Concierge and Billing neither list, open nor
 /// download it, in any of its versions; the translation of another document

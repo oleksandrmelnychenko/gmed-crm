@@ -312,6 +312,8 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                         const available = invoiceLineQuantityAvailable(line, form.invoiceType);
                         const quantity = Number(form.lineQuantities[String(index)]);
                         const invalid = selected && (!Number.isFinite(quantity) || quantity <= 0 || quantity > available);
+                        // One spelling for the limit: decimal comma, as in the catalogue and on the invoice.
+                        const availableText = available.toLocaleString("de-DE", { maximumFractionDigits: 4 });
                         const name = agencyServiceNameLabel(undefined, line.description, t);
                         const notes = line.notes?.trim();
                         return (
@@ -344,7 +346,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                                   value={form.lineQuantities[String(index)] ?? ""}
                                   className={cn(inputClass, "h-8 text-right tabular-nums", final && "border-transparent bg-transparent shadow-none")}
                                   onChange={(event) => onFormChange((current) => ({ ...current, lineQuantities: { ...current.lineQuantities, [String(index)]: event.target.value } }))} />
-                                <span className="block">{availableLabel}: {available.toLocaleString("de-DE", { maximumFractionDigits: 4 })}</span>
+                                <span className="block">{availableLabel}: {availableText}</span>
                               </label>
                               <div className="min-w-24 text-right">
                                 <p className="mb-1 text-xs text-muted-foreground">{de ? "Brutto" : "Сумма с НДС"}</p>
@@ -362,7 +364,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                               </label>
                             ) : null}
                             {available <= 0 ? <p className="col-start-2 text-xs text-muted-foreground sm:col-span-3">{de ? "Bereits vollständig abgerechnet" : "Уже выставлено полностью"}</p> : null}
-                            {invalid ? <p role="alert" className="col-start-2 text-xs text-destructive sm:col-span-3">{de ? `Menge muss größer als 0 und höchstens ${available} sein.` : `Количество должно быть больше 0 и не больше ${available}.`}</p> : null}
+                            {invalid ? <p role="alert" className="col-start-2 text-xs text-destructive sm:col-span-3">{de ? `Menge muss größer als 0 und höchstens ${availableText} sein.` : `Количество должно быть больше 0 и не больше ${availableText}.`}</p> : null}
                           </div>
                         );
                       })}

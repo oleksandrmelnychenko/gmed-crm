@@ -63,6 +63,9 @@ pub(crate) const PAYER_ROLE_COST_BEARER: &str = "cost_bearer";
 /// another address", phase 2): not a Kostenübernehmer — no Schuldbeitritt, no
 /// Kostenübernahmeerklärung, no confirmation at release, never written on an
 /// order by the declaration, and left out of the documents' payer fallback.
+/// Only under the party's own name: another name at that address is a third
+/// party and is identified like one before the release (owner 2026-11-10,
+/// [`later_payer_missing`]).
 pub(crate) const PAYER_ROLE_INVOICE_ADDRESS: &str = "invoice_address";
 
 /// One payer as stored on an order or invoice.
@@ -1083,6 +1086,9 @@ struct RecipientEvaluation {
     minor_recipient: bool,
     /// The recipient is the contracting party.
     is_party: bool,
+    /// The patient's first and last name without the academic title the
+    /// party's name carries.
+    patient_plain_name: String,
     /// Released advances of another recipient that this final invoice bills
     /// (same quote, still open).
     mismatched_advances: Vec<MismatchedAdvance>,
@@ -1145,6 +1151,38 @@ impl RecipientEvaluation {
             Some(self.party.debtor_name())
         }
     }
+
+    /// Whether a recipient in the role [`PAYER_ROLE_INVOICE_ADDRESS`] is what
+    /// the role says — the contracting party at another address: it carries
+    /// the party's name ([`recipient_is_named_party`]), the patient's name
+    /// without the title when the patient contracts, or the name of one of
+    /// the legal representatives (compared as [`party_relation_of_contact`]
+    /// does). Any other name at that address is a third party.
+    fn invoice_address_names_party(&self) -> bool {
+        invoice_address_names_party(&self.recipient.name, &self.party, &self.patient_plain_name)
+    }
+
+    /// The release was refused, or will be, only because the "invoice
+    /// address" carries another name than the contracting party.
+    fn invoice_address_of_third_party(&self) -> bool {
+        self.payer_role.as_deref() == Some(PAYER_ROLE_INVOICE_ADDRESS)
+            && !self.is_party
+            && !self.invoice_address_names_party()
+    }
+}
+
+fn invoice_address_names_party(
+    recipient_name: &str,
+    party: &ContractingParty,
+    patient_plain_name: &str,
+) -> bool {
+    recipient_is_named_party(Some(recipient_name), party)
+        || (party.kind != PartyKind::LegalRepresentatives
+            && same_name(recipient_name, patient_plain_name))
+        || party
+            .representatives
+            .iter()
+            .any(|representative| same_name(&representative.name, recipient_name))
 }
 
 async fn evaluate_recipient(
@@ -1153,7 +1191,8 @@ async fn evaluate_recipient(
 ) -> Result<RecipientEvaluation, sqlx::Error> {
     let row = sqlx::query(
         r#"SELECT invoice.patient_id, invoice.order_id, invoice.invoice_type, invoice.payer_role,
-                  patient.birth_date
+                  patient.birth_date,
+                  btrim(concat_ws(' ', patient.first_name, patient.last_name)) AS patient_plain_name
            FROM invoices invoice
            JOIN patients patient ON patient.id = invoice.patient_id
            WHERE invoice.id = $1"#,
@@ -1166,6 +1205,9 @@ async fn evaluate_recipient(
     let invoice_type = row.try_get::<String, _>("invoice_type")?;
     let payer_role = row.try_get::<Option<String>, _>("payer_role")?;
     let birth_date = row.try_get::<Option<NaiveDate>, _>("birth_date")?;
+    let patient_plain_name = row
+        .try_get::<Option<String>, _>("patient_plain_name")?
+        .unwrap_or_default();
 
     let live = document::resolve_live_recipient(conn, invoice_id).await?;
     let recipient = document::InvoiceRecipient::from_json(&live, false);
@@ -1241,6 +1283,7 @@ async fn evaluate_recipient(
         payer_role,
         minor_recipient,
         is_party,
+        patient_plain_name,
         mismatched_advances,
     })
 }
@@ -1262,12 +1305,17 @@ async fn later_payer_missing(
     invoice_id: Uuid,
     evaluation: &RecipientEvaluation,
 ) -> Result<Vec<&'static str>, sqlx::Error> {
+    // "Invoice address" is the contracting party at another address. Under
+    // any other name it is a third party like a Kostenübernehmer (owner
+    // 2026-11-10, QA D-02): the role alone no longer skips the checks.
+    let party_role = |role: Option<&str>| match role {
+        Some(PAYER_ROLE_CONTRACTING_PARTY) => true,
+        Some(PAYER_ROLE_INVOICE_ADDRESS) => evaluation.invoice_address_names_party(),
+        _ => false,
+    };
     if evaluation.is_party
         || evaluation.recipient.kind == "patient"
-        || matches!(
-            evaluation.payer_role.as_deref(),
-            Some(PAYER_ROLE_CONTRACTING_PARTY | PAYER_ROLE_INVOICE_ADDRESS)
-        )
+        || party_role(evaluation.payer_role.as_deref())
     {
         return Ok(Vec::new());
     }
@@ -1293,13 +1341,24 @@ async fn later_payer_missing(
         }
         record = inherited.record;
     }
-    if matches!(
-        record.payer_role.as_deref(),
-        Some(PAYER_ROLE_CONTRACTING_PARTY | PAYER_ROLE_INVOICE_ADDRESS)
-    ) {
+    if party_role(record.payer_role.as_deref()) {
         return Ok(Vec::new());
     }
-    if let Some(declared) = lead_payer::patient_declaration(conn, patient_id).await?
+    let declared = lead_payer::patient_declaration(conn, patient_id).await?;
+    // The other address the lead's own declaration sends invoices to
+    // (section 7, `invoice_to = other`) was named and screened with the
+    // request, like the payer the declaration names below.
+    if record.payer_role.as_deref() == Some(PAYER_ROLE_INVOICE_ADDRESS)
+        && declared.as_ref().is_some_and(|declared| {
+            declared.declaration.invoice_to.as_deref() == Some(lead_payer::INVOICE_TO_OTHER)
+                && invoice_address_record(&declared.declaration)
+                    .and_then(|address| address.contact_name)
+                    .is_some_and(|name| same_name(&name, &evaluation.recipient.name))
+        })
+    {
+        return Ok(Vec::new());
+    }
+    if let Some(declared) = declared
         && declared.declaration.is_third_party()
     {
         let legal_form = lead_payer::payer_legal_form(conn, declared.lead_id).await?;
@@ -1395,7 +1454,14 @@ pub(crate) async fn draft_release_checks(
     }
     let payer_missing = later_payer_missing(conn, invoice_id, &evaluation).await?;
     if !payer_missing.is_empty() {
-        warnings.push(json!({ "code": PAYER_NOT_IDENTIFIED, "missing": payer_missing }));
+        warnings.push(json!({
+            "code": PAYER_NOT_IDENTIFIED,
+            "missing": payer_missing,
+            // "Invoice address" under another name than the party's: the
+            // page names the party, so billing can correct the name.
+            "invoice_address_not_party": evaluation.invoice_address_of_third_party(),
+            "contracting_party_name": evaluation.party.debtor_name(),
+        }));
     }
     if evaluation.minor_recipient {
         warnings.push(json!({ "code": "minor_patient_recipient" }));
@@ -1412,17 +1478,29 @@ pub(crate) async fn draft_release_checks(
     }
     // A settlement invoice for services not rendered yet: allowed, printed as
     // "Leistung noch nicht erbracht" (§ 14 Abs. 4 Nr. 6 UStG); billing sees it
-    // before releasing (QA D-11). No confirmation is needed.
-    let (invoice_type, line_items) = sqlx::query_as::<_, (String, Value)>(
-        "SELECT invoice_type, line_items FROM invoices WHERE id = $1",
+    // before releasing (QA D-11). No confirmation is needed. The printed
+    // invoice reads the same answer (`load_invoice_service_timing`), so the
+    // warning never promises a text the document does not carry.
+    let (invoice_type, order_id, line_items) = sqlx::query_as::<_, (String, Option<Uuid>, Value)>(
+        "SELECT invoice_type, order_id, line_items FROM invoices WHERE id = $1",
     )
     .bind(invoice_id)
     .fetch_one(&mut *conn)
     .await?;
-    if invoice_type != "advance"
-        && super::document::bills_services_not_rendered(conn, &line_items).await?
-    {
-        warnings.push(json!({ "code": "services_not_delivered" }));
+    let (_, not_rendered) =
+        super::document::load_invoice_service_timing(conn, &invoice_type, order_id, &line_items)
+            .await?;
+    if not_rendered.any() {
+        warnings.push(json!({
+            "code": "services_not_delivered",
+            // `all`: no service date is printed; `some`: the period of the
+            // rendered services stays and the statement is added.
+            "scope": if not_rendered == super::document::ServicesNotRendered::All {
+                "all"
+            } else {
+                "some"
+            },
+        }));
     }
     Ok(json!({
         "warnings": warnings,
@@ -1462,7 +1540,12 @@ pub(crate) async fn release_recipient_snapshot(
         return Err(ReleaseRecipientBlock::Refused {
             code: PAYER_NOT_IDENTIFIED,
             message: "A third party pays: the signed cost coverage declaration and the payer's identity document are needed first",
-            details: json!({ "missing": payer_missing, "recipient_name": evaluation.recipient.name }),
+            details: json!({
+                "missing": payer_missing,
+                "recipient_name": evaluation.recipient.name,
+                "invoice_address_not_party": evaluation.invoice_address_of_third_party(),
+                "contracting_party_name": evaluation.party.debtor_name(),
+            }),
         });
     }
     let now = Utc::now().to_rfc3339();

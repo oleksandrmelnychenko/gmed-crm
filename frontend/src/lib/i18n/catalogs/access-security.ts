@@ -27,6 +27,9 @@ export interface AccessSecurityTranslations {
   settings_bic_invalid_bank_code: string;
   settings_bic_invalid_country: string;
   settings_bic_invalid_location: string;
+  settings_vat_id_invalid: string;
+  settings_vat_id_invalid_german: string;
+  settings_tax_number_invalid: string;
   activity_context_redacted: string;
   activity_portal_actor: string;
 }
@@ -66,6 +69,12 @@ export const accessSecurityRu: AccessSecurityTranslations = {
   settings_bic_invalid_country: "BIC неверен: символы 5–6 (код страны) должны быть буквами, например DE.",
   settings_bic_invalid_location:
     "BIC неверен: место и филиал (символы 7–11) могут содержать только буквы и цифры.",
+  settings_vat_id_invalid:
+    "USt-IdNr. указан неверно: нужен код страны ЕС и номер, например DE123456789.",
+  settings_vat_id_invalid_german:
+    "USt-IdNr. указан неверно: для Германии это DE и ровно 9 цифр, например DE123456789.",
+  settings_tax_number_invalid:
+    "Steuernummer указан неверно: 10 или 11 цифр в записи налоговой инспекции, например 143/123/12345, либо 13 цифр единого федерального формата.",
   activity_context_redacted:
     "Скрыто: данные пациентов, лидов, финансов и проверок видит только CEO",
   activity_portal_actor: "Вход пациента или лида",
@@ -108,6 +117,12 @@ export const accessSecurityDe: AccessSecurityTranslations = {
     "Die BIC ist ungültig: Zeichen 5–6 (Ländercode) müssen Buchstaben sein, zum Beispiel DE.",
   settings_bic_invalid_location:
     "Die BIC ist ungültig: Ort und Filiale (Zeichen 7–11) dürfen nur Buchstaben und Ziffern enthalten.",
+  settings_vat_id_invalid:
+    "Die USt-IdNr. ist ungültig: EU-Ländercode und Nummer, zum Beispiel DE123456789.",
+  settings_vat_id_invalid_german:
+    "Die USt-IdNr. ist ungültig: für Deutschland DE und genau 9 Ziffern, zum Beispiel DE123456789.",
+  settings_tax_number_invalid:
+    "Die Steuernummer ist ungültig: 10 oder 11 Ziffern in der Schreibweise des Finanzamts, zum Beispiel 143/123/12345, oder die 13 Ziffern des bundeseinheitlichen Formats.",
   activity_context_redacted:
     "Ausgeblendet: Patienten-, Lead-, Finanz- und Prüfdaten sieht nur der CEO",
   activity_portal_actor: "Patienten- oder Lead-Zugang",

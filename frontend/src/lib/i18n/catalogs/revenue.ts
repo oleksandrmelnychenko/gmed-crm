@@ -1705,7 +1705,7 @@ export const revenueDe: RevenueTranslations = {
   revenue_invoice_status_paid: "Bezahlt",
   revenue_invoice_status_overdue: "Überfällig",
   revenue_invoice_status_cancelled: "Storniert",
-  revenue_invoice_status_credited: "Storniert",
+  revenue_invoice_status_credited: "Gutgeschrieben",
   revenue_invoices_storno_title: "Stornorechnung",
   revenue_invoices_storno_description: "Die Rechnung wurde nach der Ausstellung storniert. Die Stornorechnung mit eigener Nummer hebt sie vollständig auf; beide Dokumente bleiben archiviert.",
   revenue_invoices_storno_download: "Stornorechnung (PDF)",

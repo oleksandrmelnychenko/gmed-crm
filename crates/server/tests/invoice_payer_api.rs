@@ -2242,3 +2242,105 @@ async fn a_third_party_added_after_the_conversion_is_identified_before_the_relea
     let (status, released) = release(&fx, &fx.billing, &invoice_id, json!({})).await;
     assert_eq!(status, StatusCode::OK, "{released}");
 }
+
+/// Owner 2026-11-10 (QA D-02): "invoice address" is the contracting party at
+/// another address. Billing may not turn a refused third party into an
+/// "invoice address" to skip the Kostenübernahmeerklärung and the identity
+/// document: under another name the release stays refused. Under the
+/// party's own name it goes through without those papers.
+#[tokio::test]
+async fn an_invoice_address_under_another_name_is_a_third_party() {
+    let Some(fx) = fixture("payer-address-name").await else {
+        return;
+    };
+    let patient = seed_patient(&fx.pool, fx.admin_id, &fx.tag, "1990-02-03", true).await;
+    let patient_name = format!("Kind {} Muster", fx.tag);
+    let order = seed_order(&fx.pool, patient, fx.admin_id, &fx.tag).await;
+    let quote = create_quote(&fx.app, &fx.manager, order).await;
+    let draft = create_draft(&fx.app, &fx.billing, &quote, "final").await;
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    let payer = |name: &str, role: &str| {
+        json!({
+            "payer_contact_name": name,
+            "payer_role": role,
+            "payer_address_street": "Musterweg 5",
+            "payer_address_zip": "80331",
+            "payer_address_city": "München",
+            "payer_address_country": "DE",
+        })
+    };
+    let has_warning = |detail: &Value| {
+        detail["release_checks"]["warnings"]
+            .as_array()
+            .and_then(|warnings| {
+                warnings
+                    .iter()
+                    .find(|warning| warning["code"] == "payer_not_identified")
+                    .cloned()
+            })
+    };
+
+    // A company as third-party payer: refused, as before.
+    let (status, body) = set_invoice_payer(
+        &fx.app,
+        &fx.billing,
+        &invoice_id,
+        payer("Zahlmeister Testfirma GmbH", "cost_bearer"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, refused) =
+        release_unidentified(&fx.app, &fx.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["error"], "payer_not_identified", "{refused}");
+    assert_eq!(refused["invoice_address_not_party"], false, "{refused}");
+
+    // The same company as "invoice address": still refused, with the same
+    // code and the same missing papers; the page learns why.
+    let (status, body) = set_invoice_payer(
+        &fx.app,
+        &fx.billing,
+        &invoice_id,
+        payer("Zahlmeister Testfirma GmbH", "invoice_address"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let warning = has_warning(&body).unwrap_or_else(|| panic!("no warning: {body}"));
+    assert_eq!(warning["invoice_address_not_party"], true, "{warning}");
+    assert_eq!(warning["contracting_party_name"], patient_name, "{warning}");
+    let (status, refused) =
+        release_unidentified(&fx.app, &fx.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["error"], "payer_not_identified", "{refused}");
+    assert_eq!(
+        refused["missing"],
+        json!(["cost_coverage_signed", "payer_identity_document"]),
+        "{refused}"
+    );
+    assert_eq!(refused["invoice_address_not_party"], true, "{refused}");
+    let still_draft: bool =
+        sqlx::query_scalar("SELECT released_at IS NULL FROM invoices WHERE id = $1::uuid")
+            .bind(&invoice_id)
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert!(still_draft, "the draft stays a draft");
+
+    // The contracting party's own name at the other address (case and
+    // spaces aside): no third party, released without those papers.
+    let (status, body) = set_invoice_payer(
+        &fx.app,
+        &fx.billing,
+        &invoice_id,
+        payer(
+            &format!("  {}  ", patient_name.to_uppercase()),
+            "invoice_address",
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(has_warning(&body).is_none(), "{body}");
+    let (status, released) =
+        release_unidentified(&fx.app, &fx.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{released}");
+}

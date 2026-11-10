@@ -244,7 +244,14 @@ export type PortalAccountStatementItem = {
   prepayment_applied?: string | null;
   prepayment_allocated?: string | null;
   prepayment_available?: string | null;
+  /** Open amount net of the credit below: what is left to transfer. */
   amount_due?: string | null;
+  /** What the document itself still asks for — the open amount Billing and the invoice list show. */
+  invoice_balance_due?: string | null;
+  /** Paid advance not applied yet that is set against this row. */
+  advance_credit?: string | null;
+  /** Overpayment on other invoices that is set against this row. */
+  credit_applied?: string | null;
   due_date?: string | null;
 };
 
@@ -253,16 +260,38 @@ export type PortalAccountStatementItem = {
  * asks for, or for a paid advance its money not used yet. An unpaid advance
  * invoice asks for its amount (QA D-50: it showed 0,00 while the summary
  * asked for 1.000,00).
+ *
+ * One invoice has one open amount (QA 2026-11-10, D-03): the row shows the
+ * document's own open amount, the same figure as the invoice list, the
+ * invoice sheet and Billing. Credit that is not applied yet — a paid advance,
+ * an overpayment on another invoice — is named beside it (`afterCredit`)
+ * instead of being silently taken off.
  */
 export function portalStatementOpenAmount(item: PortalAccountStatementItem): {
   kind: "due" | "available";
   amount: string;
+  afterCredit?: { advance: number; overpayment: number; toPay: string };
 } {
-  const due = Number(item.amount_due ?? 0);
-  if (item.kind === "prepayment" && !(due > 0)) {
+  const toPay = item.amount_due ?? "0";
+  const open = item.invoice_balance_due ?? toPay;
+  if (item.kind === "prepayment" && !(Number(open) > 0)) {
     return { kind: "available", amount: item.prepayment_available ?? "0" };
   }
-  return { kind: "due", amount: item.amount_due ?? "0" };
+  const advance = Number(item.advance_credit ?? 0);
+  const overpayment = Number(item.credit_applied ?? 0);
+  if (advance + overpayment > 0 && Number(open) - Number(toPay) > 0.004) {
+    return { kind: "due", amount: open, afterCredit: { advance, overpayment, toPay } };
+  }
+  return { kind: "due", amount: open };
+}
+
+/** The words for credit set against an open amount: an advance, an overpayment, or both. */
+export function statementCreditWords(advance: number, overpayment: number, lang: string) {
+  if (advance > 0 && overpayment > 0) {
+    return lang === "de" ? "Vorauszahlung und Guthaben" : "предоплаты и переплаты";
+  }
+  if (advance > 0) return lang === "de" ? "Vorauszahlung" : "предоплаты";
+  return lang === "de" ? "Guthaben" : "переплаты";
 }
 
 export type PortalAccountMovement = {

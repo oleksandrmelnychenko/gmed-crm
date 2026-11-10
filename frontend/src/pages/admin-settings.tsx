@@ -99,6 +99,10 @@ export function describeSettingError(error: unknown, t: Translations): string {
   if (message.startsWith("BIC country code")) return t.settings_bic_invalid_country;
   if (message.startsWith("BIC location")) return t.settings_bic_invalid_location;
   if (message.startsWith("BIC")) return t.settings_bic_invalid;
+  // The agency's own tax registration, printed on every invoice (QA 2026-11-10, D-06).
+  if (message.startsWith("VAT ID of Germany")) return t.settings_vat_id_invalid_german;
+  if (message.startsWith("VAT ID")) return t.settings_vat_id_invalid;
+  if (message.startsWith("Tax number")) return t.settings_tax_number_invalid;
   return message || t.common_error;
 }
 

@@ -380,32 +380,138 @@ pub(super) async fn load_invoice_service_period(
         .zip(supplier_days.iter().max().copied()))
 }
 
+/// An order service (alias `service`) that was neither delivered nor approved
+/// yet: still planned, or invoiced ahead of its delivery.
+const SERVICE_NOT_RENDERED_SQL: &str = r#"(
+    service.status = 'planned'
+    OR (service.status = 'invoiced'
+        AND service.delivered_at IS NULL
+        AND service.approved_at IS NULL)
+)"#;
+
+/// How many of the order services an invoice bills were not rendered yet
+/// (§ 14 Abs. 4 Nr. 6 UStG, UStAE 14.5 Abs. 17). The warning before the
+/// release, the printed invoice and the e-invoice all read this one answer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ServicesNotRendered {
+    /// Every billed order service is delivered or approved.
+    #[default]
+    None,
+    /// Some are rendered: their period is printed, the others are named as
+    /// not rendered yet.
+    Some,
+    /// None is rendered: the invoice says so and claims no service date.
+    All,
+}
+
+impl ServicesNotRendered {
+    pub(crate) fn any(self) -> bool {
+        self != Self::None
+    }
+}
+
 /// Whether the invoice bills order services that were neither delivered nor
-/// approved yet (a final invoice ahead of the treatment).
-pub(crate) async fn bills_services_not_rendered(
+/// approved yet (a settlement invoice ahead of the treatment), and whether it
+/// bills rendered ones next to them.
+async fn services_not_rendered(
     conn: &mut PgConnection,
     line_items: &Value,
-) -> Result<bool, sqlx::Error> {
+) -> Result<ServicesNotRendered, sqlx::Error> {
     let source_line_ids = super::extract_source_line_ids(line_items);
     if source_line_ids.is_empty() {
-        return Ok(false);
+        return Ok(ServicesNotRendered::None);
     }
-    sqlx::query_scalar::<_, bool>(
-        r#"SELECT EXISTS (
-               SELECT 1
+    let sql = format!(
+        r#"SELECT COUNT(*) FILTER (WHERE {SERVICE_NOT_RENDERED_SQL}) AS not_rendered,
+                  COUNT(*) FILTER (
+                      WHERE service.status <> 'cancelled'
+                        AND NOT {SERVICE_NOT_RENDERED_SQL}
+                  ) AS rendered
+           FROM order_leistungen service
+           WHERE service.id = ANY($1)"#
+    );
+    let row = sqlx::query(&sql)
+        .bind(&source_line_ids)
+        .fetch_one(&mut *conn)
+        .await?;
+    let not_rendered = row.try_get::<i64, _>("not_rendered")?;
+    let rendered = row.try_get::<i64, _>("rendered")?;
+    Ok(if not_rendered == 0 {
+        ServicesNotRendered::None
+    } else if rendered == 0 {
+        ServicesNotRendered::All
+    } else {
+        ServicesNotRendered::Some
+    })
+}
+
+/// First and last service day of the billed order services that are rendered
+/// (delivered or approved). The planned ones give no date: neither their own
+/// appointment nor the order's other appointments.
+async fn load_rendered_service_period(
+    conn: &mut PgConnection,
+    line_items: &Value,
+) -> Result<Option<(NaiveDate, NaiveDate)>, sqlx::Error> {
+    let source_line_ids = super::extract_source_line_ids(line_items);
+    if source_line_ids.is_empty() {
+        return Ok(None);
+    }
+    let sql = format!(
+        r#"SELECT min(service_day) AS first_day, max(service_day) AS last_day
+           FROM (
+               SELECT COALESCE(
+                          appointment.date,
+                          (service.delivered_at AT TIME ZONE 'Europe/Berlin')::date
+                      ) AS service_day
                FROM order_leistungen service
+               LEFT JOIN appointments appointment
+                      ON appointment.id = service.source_medical_appointment_id
+                     AND appointment.status <> 'cancelled'
                WHERE service.id = ANY($1)
-                 AND (
-                      service.status = 'planned'
-                      OR (service.status = 'invoiced'
-                          AND service.delivered_at IS NULL
-                          AND service.approved_at IS NULL)
-                 )
-           )"#,
-    )
-    .bind(&source_line_ids)
-    .fetch_one(conn)
-    .await
+                 AND service.status <> 'cancelled'
+                 AND NOT {SERVICE_NOT_RENDERED_SQL}
+           ) days"#
+    );
+    let row = sqlx::query(&sql)
+        .bind(&source_line_ids)
+        .fetch_one(&mut *conn)
+        .await?;
+    Ok(row
+        .try_get::<Option<NaiveDate>, _>("first_day")
+        .unwrap_or_default()
+        .zip(
+            row.try_get::<Option<NaiveDate>, _>("last_day")
+                .unwrap_or_default(),
+        ))
+}
+
+/// The time of supply an invoice states (§ 14 Abs. 4 Nr. 6 UStG): the period
+/// of its services and whether it bills services still ahead.
+///
+/// A settlement invoice (interim or final) that bills a service neither
+/// delivered nor approved says so. When none of its services is rendered it
+/// claims no date at all — not from planned appointments either; when some
+/// are, the period is the one of the rendered services. An advance invoice is
+/// a prepayment request by its title and keeps the period of the order.
+pub(super) async fn load_invoice_service_timing(
+    conn: &mut PgConnection,
+    invoice_type: &str,
+    order_id: Option<Uuid>,
+    line_items: &Value,
+) -> Result<(Option<(NaiveDate, NaiveDate)>, ServicesNotRendered), sqlx::Error> {
+    let not_rendered = if invoice_type == "advance" {
+        ServicesNotRendered::None
+    } else {
+        services_not_rendered(conn, line_items).await?
+    };
+    let period = match not_rendered {
+        ServicesNotRendered::None => {
+            load_invoice_service_period(conn, order_id, line_items).await?
+        }
+        ServicesNotRendered::Some => load_rendered_service_period(conn, line_items).await?,
+        ServicesNotRendered::All => None,
+    };
+    Ok((period, not_rendered))
 }
 
 /// How a VAT breakdown row is taxed.

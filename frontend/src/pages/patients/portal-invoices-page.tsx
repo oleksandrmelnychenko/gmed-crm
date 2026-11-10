@@ -57,6 +57,7 @@ import {
   downloadPortalDunningLetter,
   openPortalInvoicePdf,
   portalStatementOpenAmount,
+  statementCreditWords,
   usePortalLabels,
 } from "@/pages/patients/model/portal-shared";
 import type {
@@ -95,6 +96,8 @@ function portalPaymentMethodLabel(method: string, lang: string) {
     cheque: ["Scheck", "Чек"],
     other: ["Sonstige", "Другое"],
     legacy_import: ["Übernommener Bestand", "Перенесённый остаток"],
+    // Credit moved between two invoices of the patient (QA 2026-11-10, D-10).
+    credit_transfer: ["Guthabenumbuchung zwischen Rechnungen", "Перенос переплаты между счетами"],
   };
   const label = labels[method];
   if (!label) return method;
@@ -447,6 +450,27 @@ function usePatientInvoicesPageContent() {
   }
 
   const partlyHiddenLabel = lang === "de" ? "Teilweise ausgeblendet" : "Часть данных скрыта";
+  // "1.036,53 € open; after the overpayment of 30,00 €: 1.006,53 € to pay."
+  const statementAfterCreditText = (afterCredit: { advance: number; overpayment: number; toPay: string }) => {
+    const credit = formatPortalCurrency(afterCredit.advance + afterCredit.overpayment, accountStatement?.currency);
+    const toPay = formatPortalCurrency(afterCredit.toPay, accountStatement?.currency);
+    const words = statementCreditWords(afterCredit.advance, afterCredit.overpayment, lang);
+    return lang === "de"
+      ? `nach Abzug von ${words} ${credit}: ${toPay} zu zahlen`
+      : `с учётом ${words} ${credit}: к оплате ${toPay}`;
+  };
+  // Under the sum of the open amounts: what is left once the credit that is
+  // not applied yet is set against them (same figure as the statement block).
+  const outstandingAfterCredit = (() => {
+    const summary = accountStatement?.summary;
+    if (!summary || summary.total_due == null) return undefined;
+    const credit = Number(summary.invoice_due ?? 0) - Number(summary.total_due);
+    if (!(credit > 0.004)) return undefined;
+    const toPay = formatPortalCurrency(summary.total_due, accountStatement?.currency);
+    return lang === "de"
+      ? `Nach Vorauszahlung und Guthaben: ${toPay}`
+      : `С учётом предоплаты и переплаты: ${toPay}`;
+  })();
 
   return (
     <div className="w-full min-w-0 space-y-3">
@@ -478,7 +502,11 @@ function usePatientInvoicesPageContent() {
 
       <section className="grid gap-3 md:grid-cols-3">
         <StatCard label={t.portal_invoices_visible_invoices} value={String(invoices.length)} />
-        <StatCard label={t.portal_invoices_outstanding_balance} value={hiddenAmountCount > 0 ? t.portal_invoices_partly_hidden : totalBalance} />
+        <StatCard
+          label={t.portal_invoices_outstanding_balance}
+          value={hiddenAmountCount > 0 ? t.portal_invoices_partly_hidden : totalBalance}
+          description={hiddenAmountCount > 0 ? undefined : outstandingAfterCredit}
+        />
         <StatCard label={t.portal_invoices_missing_payment_proof} value={String(proofPendingCount)} description={overdueCount > 0 ? formatPortalCountLabel(t.portal_invoices_overdue_count, overdueCount) : undefined} />
       </section>
 
@@ -503,7 +531,7 @@ function usePatientInvoicesPageContent() {
             </div>
           }
         >
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <InfoRow
               className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
               label={lang === "de" ? "Kontosaldo" : "Сальдо взаиморасчётов"}
@@ -525,8 +553,13 @@ function usePatientInvoicesPageContent() {
               [lang === "de" ? "Rechnungen gesamt" : "Всего по счетам", accountStatement.summary.invoiced_gross],
               [lang === "de" ? "Bezahlt" : "Оплачено", accountStatement.summary.cash_paid],
               [lang === "de" ? "Vorauszahlung verrechnet" : "Зачтено предоплат", accountStatement.summary.prepayment_applied],
+              // One figure per thing (QA 2026-11-10, D-03): what the invoices
+              // still ask for, the credit not applied yet, and what is left
+              // to transfer once that credit is set against them.
+              [lang === "de" ? "Offen laut Rechnungen" : "Открыто по счетам", accountStatement.summary.invoice_due],
               [lang === "de" ? "Vorauszahlung verfügbar" : "Доступно предоплаты", accountStatement.summary.available_prepayment],
-              [lang === "de" ? "Noch zu zahlen" : "Требуется доплатить", accountStatement.summary.total_due],
+              [lang === "de" ? "Guthaben (noch nicht verrechnet)" : "Переплата (ещё не зачтена)", accountStatement.summary.credit_balance ?? "0"],
+              [lang === "de" ? "Noch zu zahlen nach Vorauszahlung und Guthaben" : "К оплате с учётом предоплаты и переплаты", accountStatement.summary.total_due],
             ].map(([label, value]) => (
               <InfoRow
                 key={label}
@@ -590,7 +623,7 @@ function usePatientInvoicesPageContent() {
                   <th className="px-4 py-3">{lang === "de" ? "Status" : "Статус"}</th>
                   <th className="px-4 py-3 text-right">{lang === "de" ? "Gesamt" : "Всего"}</th>
                   <th className="px-4 py-3 text-right">{lang === "de" ? "Bezahlt / verrechnet" : "Оплачено / зачтено"}</th>
-                  <th className="px-4 py-3 text-right">{lang === "de" ? "Offen / verfügbar" : "К доплате / доступно"}</th>
+                  <th className="px-4 py-3 text-right">{lang === "de" ? "Offen / verfügbar" : "Открыто / доступно"}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
@@ -604,6 +637,7 @@ function usePatientInvoicesPageContent() {
                       ? lang === "de" ? "Vorauszahlung" : "Предоплата"
                       : lang === "de" ? "Rechnung" : "Счёт";
                   const hidden = t.portal_invoices_hidden;
+                  const openAmount = portalStatementOpenAmount(item);
                   return (
                     <tr key={`table:${item.kind}:${item.id}`} className="bg-card transition-colors hover:bg-muted/25">
                       <td className="px-4 py-3">
@@ -623,7 +657,12 @@ function usePatientInvoicesPageContent() {
                         {isCreditAdjustment ? "—" : item.amounts_visible ? formatPortalCurrency(Number(item.cash_paid ?? 0) + Number(item.prepayment_applied ?? 0), accountStatement.currency) : hidden}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right font-mono font-semibold tabular-nums text-foreground">
-                        {isCreditAdjustment ? "—" : item.amounts_visible ? formatPortalCurrency(portalStatementOpenAmount(item).amount, accountStatement.currency) : hidden}
+                        {isCreditAdjustment ? "—" : item.amounts_visible ? formatPortalCurrency(openAmount.amount, accountStatement.currency) : hidden}
+                        {!isCreditAdjustment && item.amounts_visible && openAmount.afterCredit ? (
+                          <div className="mt-0.5 whitespace-normal text-[11px] font-normal leading-4 text-muted-foreground" data-testid="portal-statement-after-credit">
+                            {statementAfterCreditText(openAmount.afterCredit)}
+                          </div>
+                        ) : null}
                       </td>
                     </tr>
                   );
@@ -634,6 +673,7 @@ function usePatientInvoicesPageContent() {
           <div className="mt-4 space-y-2 md:hidden">
             {accountStatement.items.map((item) => {
               const isCreditAdjustment = item.kind === "credit_note" || item.kind === "credit_note_reversal";
+              const openAmount = portalStatementOpenAmount(item);
               return (
               <ListItem key={`${item.kind}:${item.id}`} className="space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -674,10 +714,13 @@ function usePatientInvoicesPageContent() {
                   /> : null}
                   {!isCreditAdjustment ? <InfoRow
                     className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
-                    label={portalStatementOpenAmount(item).kind === "available" ? (lang === "de" ? "Noch verfügbar" : "Ещё доступно") : (lang === "de" ? "Noch zu zahlen" : "Требуется доплатить")}
-                    value={item.amounts_visible ? formatPortalCurrency(portalStatementOpenAmount(item).amount, accountStatement.currency) : t.portal_invoices_hidden}
+                    label={openAmount.kind === "available" ? (lang === "de" ? "Noch verfügbar" : "Ещё доступно") : (lang === "de" ? "Offen" : "Открыто")}
+                    value={item.amounts_visible ? formatPortalCurrency(openAmount.amount, accountStatement.currency) : t.portal_invoices_hidden}
                   /> : null}
                 </div>
+                {!isCreditAdjustment && item.amounts_visible && openAmount.afterCredit ? (
+                  <div className="text-xs text-muted-foreground">{statementAfterCreditText(openAmount.afterCredit)}</div>
+                ) : null}
               </ListItem>
               );
             })}
@@ -908,7 +951,15 @@ function usePatientInvoicesPageContent() {
                     {invoiceAmountsVisible(detail) && Number(detail.prepayment_applied_amount ?? 0) > 0 ? (
                       <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={lang === "de" ? "Angerechnete Vorauszahlung" : "Зачтённая предоплата"} value={`−${formatPortalCurrency(detail.prepayment_applied_amount, detail.currency)}`} />
                     ) : null}
+                    {/* Payments, including credit moved here from another invoice: without
+                        this row the lines above do not add up to the open balance (QA D-10). */}
+                    {invoiceAmountsVisible(detail) && Number(detail.paid_amount ?? 0) > 0 ? (
+                      <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={lang === "de" ? "Bezahlt" : "Оплачено"} value={`−${formatPortalCurrency(detail.paid_amount, detail.currency)}`} />
+                    ) : null}
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_open_balance} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.balance_due, detail.currency) : t.portal_invoices_hidden} />
+                    {invoiceAmountsVisible(detail) && Number(detail.credit_balance ?? 0) > 0 ? (
+                      <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={lang === "de" ? "Guthaben auf dieser Rechnung (noch nicht verrechnet)" : "Переплата по этому счёту (ещё не зачтена)"} value={formatPortalCurrency(detail.credit_balance, detail.currency)} />
+                    ) : null}
                     {invoiceAmountsVisible(detail) && Number(detail.advance_credit_available ?? 0) > 0 ? (
                       <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.finance_invoice_amount_to_pay} value={formatPortalCurrency(detail.amount_to_pay, detail.currency)} />
                     ) : null}
@@ -995,7 +1046,9 @@ function usePatientInvoicesPageContent() {
                                   <span>
                                     {isReversal
                                       ? t.portal_invoices_payment_reversal
-                                      : t.portal_invoices_payment_received}
+                                      : payment.payment_method === "credit_transfer"
+                                        ? lang === "de" ? "Guthaben einer anderen Rechnung angerechnet" : "Зачтена переплата с другого счёта"
+                                        : t.portal_invoices_payment_received}
                                   </span>
                                   {payment.is_reversed ? (
                                     <StatusBadge tone="neutral">
@@ -1053,9 +1106,13 @@ function usePatientInvoicesPageContent() {
                             <div>
                               <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
                                 <span>
-                                  {isReversal
-                                    ? lang === "de" ? "Rückzahlungsstorno" : "Сторно возврата"
-                                    : lang === "de" ? "Rückzahlung ausgeführt" : "Возврат выполнен"}
+                                  {refund.payment_method === "credit_transfer"
+                                    ? isReversal
+                                      ? lang === "de" ? "Umbuchung des Guthabens storniert" : "Перенос переплаты отменён"
+                                      : lang === "de" ? "Guthaben auf eine andere Rechnung umgebucht" : "Переплата перенесена на другой счёт"
+                                    : isReversal
+                                      ? lang === "de" ? "Rückzahlungsstorno" : "Сторно возврата"
+                                      : lang === "de" ? "Rückzahlung ausgeführt" : "Возврат выполнен"}
                                 </span>
                                 {refund.is_reversed ? (
                                   <StatusBadge tone="neutral">

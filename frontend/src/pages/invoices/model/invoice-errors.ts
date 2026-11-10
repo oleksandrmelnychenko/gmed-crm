@@ -352,8 +352,10 @@ const CODES: Record<string, Pair> = {
   // § 14 Abs. 4 Nr. 2 UStG: GMED's Steuernummer or USt-IdNr. must be on the invoice.
   // Also for credit notes, their reversals and cancellation documents (QA D2-09).
   issuer_tax_registration_missing: [
-    "Die Rechnung oder Rechnungskorrektur kann nicht ausgestellt werden: Steuernummer und USt-IdNr. der GMED fehlen. Bitte in den Systemeinstellungen (Administration → Systemeinstellungen) eintragen lassen; Entwürfe bleiben erhalten, es wurde nichts gebucht.",
-    "Счёт или документ корректировки нельзя выпустить: не указаны Steuernummer и USt-IdNr. GMED. Их нужно заполнить в «Системных настройках» (Администрирование → Системные настройки); черновики сохранены, ничего не проведено.",
+    // Billing has no settings menu: the hint names who fills them, like the
+    // banner of the page (QA 2026-11-10, D-09).
+    "Die Rechnung oder Rechnungskorrektur kann nicht ausgestellt werden: Steuernummer und USt-IdNr. der GMED fehlen. Eintragen kann sie nur der CEO (Systemeinstellungen → „Agenturprofil für Dokumente“); Entwürfe bleiben erhalten, es wurde nichts gebucht.",
+    "Счёт или документ корректировки нельзя выпустить: не указаны Steuernummer и USt-IdNr. GMED. Заполнить их может только CEO («Системные настройки» → «Профиль агентства для документов»); черновики сохранены, ничего не проведено.",
   ],
   recipient_address_incomplete: [
     "Für die Ausstellung fehlen Name oder vollständige Anschrift des Rechnungsempfängers (Straße, PLZ, Ort, Land).",
@@ -468,17 +470,64 @@ function errorCode(error: unknown) {
 
 /** Text of a release check shown on a draft (`release_checks.warnings`). */
 export function invoiceReleaseWarningText(
-  warning: { code: string; missing?: string[]; advances?: unknown },
+  warning: {
+    code: string;
+    missing?: string[];
+    advances?: unknown;
+    scope?: string;
+    invoice_address_not_party?: boolean;
+    contracting_party_name?: string | null;
+  },
   lang: string,
 ) {
   return localizeInvoiceError(
     {
       code: warning.code,
-      body: { error: warning.code, missing: warning.missing, advances: warning.advances },
+      body: {
+        error: warning.code,
+        missing: warning.missing,
+        advances: warning.advances,
+        scope: warning.scope,
+        invoice_address_not_party: warning.invoice_address_not_party,
+        contracting_party_name: warning.contracting_party_name,
+      },
     },
     lang,
     warning.code,
   );
+}
+
+/**
+ * Why an "invoice address" is refused like a third-party payer (owner
+ * 2026-11-10, QA D-02): the role means the contracting party at another
+ * address, and the recipient carries another name.
+ */
+function invoiceAddressNotPartyText(body: Record<string, unknown> | null, lang: string) {
+  if (body?.invoice_address_not_party !== true) return "";
+  const party =
+    typeof body.contracting_party_name === "string" ? body.contracting_party_name.trim() : "";
+  if (lang === "de") {
+    return ` „Rechnungsanschrift (keine Kostenübernahme)“ gilt nur für den Vertragspartner selbst${party ? ` (${party})` : ""} unter einer anderen Anschrift. Ein anderer Name ist ein Dritter: Namen korrigieren oder die Unterlagen wie für eine zahlende dritte Person hinterlegen.`;
+  }
+  return ` «Адрес для счёта (без принятия расходов)» — это сама сторона договора${party ? ` (${party})` : ""} по другому адресу. Другое имя считается третьим лицом: исправьте имя или приложите документы, как для стороннего плательщика.`;
+}
+
+/**
+ * What the invoice will print about services billed ahead of their delivery
+ * (the same condition as the document, QA 2026-11-10, D-01).
+ */
+function servicesNotDeliveredText(body: Record<string, unknown> | null, lang: string) {
+  if (body?.scope === "some") {
+    return lang === "de"
+      ? "Die Rechnung enthält erbrachte und noch nicht erbrachte Leistungen. Auf der Rechnung steht das Datum der erbrachten Leistungen und zusätzlich „Übrige Leistungen: Leistung noch nicht erbracht (Abrechnung vor Leistungserbringung)“."
+      : "В счёте есть оказанные и ещё не оказанные услуги. В счёте будет указана дата оказанных услуг и дополнительно «Übrige Leistungen: Leistung noch nicht erbracht (Abrechnung vor Leistungserbringung)» — остальные услуги ещё не оказаны.";
+  }
+  if (body?.scope === "all") {
+    return lang === "de"
+      ? "Keine Leistung dieser Rechnung ist erbracht. Auf der Rechnung steht statt eines Leistungsdatums „Leistung noch nicht erbracht (Abrechnung vor Leistungserbringung)“."
+      : "Ни одна услуга этого счёта ещё не оказана. Вместо даты оказания услуг в счёте будет указано «Leistung noch nicht erbracht (Abrechnung vor Leistungserbringung)» — услуги ещё не оказаны.";
+  }
+  return "";
 }
 
 /** `DD.MM.YYYY` of an ISO date (`YYYY-MM-DD`), else the value. */
@@ -569,6 +618,12 @@ export function localizeInvoiceError(error: unknown, lang: string, fallback: str
     const text = lang === "de" ? coded[0] : coded[1];
     if (errorCode(error) === "advance_recipient_mismatch") {
       return `${text}${mismatchedAdvancesText(errorBody(error), lang)}`;
+    }
+    if (errorCode(error) === "payer_not_identified") {
+      return `${text}${invoiceAddressNotPartyText(errorBody(error), lang)}`;
+    }
+    if (errorCode(error) === "services_not_delivered") {
+      return servicesNotDeliveredText(errorBody(error), lang) || text;
     }
     const missing = errorBody(error)?.missing;
     if (Array.isArray(missing) && missing.length > 0) {

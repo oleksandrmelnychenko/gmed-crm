@@ -6385,6 +6385,287 @@ async fn invoice_recipient_is_the_payer_in_pdf_and_einvoice() {
     assert!(text.contains("03.09.2026"), "{text}");
 }
 
+/// QA 2026-11-10, D-01: the release check announced "Leistung noch nicht
+/// erbracht" and the issued invoice printed a service date taken from the
+/// order's planned appointments. One condition for the warning, the printed
+/// invoice and the e-invoice: an interim or final invoice that bills a service
+/// neither delivered nor approved says so; without a rendered service it
+/// claims no date, with one it keeps that service's date.
+#[tokio::test]
+async fn an_invoice_for_services_not_rendered_says_so_as_its_release_check_does() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("invoice-not-rendered");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    sqlx::query(
+        r#"UPDATE patients
+           SET address_street = 'Hauptstraße 1', address_zip = '80331',
+               address_city = 'München', address_country = 'Deutschland'
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    seed_agency_invoice_settings(&pool, admin_id).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let warning_scope = |detail: &Value| {
+        detail["release_checks"]["warnings"]
+            .as_array()
+            .and_then(|warnings| {
+                warnings
+                    .iter()
+                    .find(|warning| warning["code"] == "services_not_delivered")
+            })
+            .map(|warning| warning["scope"].as_str().unwrap_or_default().to_string())
+    };
+
+    // Every service still planned, and an appointment of the order ahead:
+    // the old code dated the invoice by that appointment.
+    let planned_order = seed_order(&pool, patient_id, admin_id, &format!("{tag}-a")).await;
+    seed_order_leistung(&pool, planned_order, "Geplante Leistung", 100.0, "planned").await;
+    sqlx::query(
+        r#"INSERT INTO appointments (
+               patient_id, order_id, appointment_type, title, date, status, created_by
+           ) VALUES ($1, $2, 'non_medical', 'Geplanter Termin', '2027-03-15', 'planned', $3)"#,
+    )
+    .bind(patient_id)
+    .bind(planned_order)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let quote = create_quote(&app, &pm_bearer, planned_order).await;
+    let (status, draft) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", quote["id"].as_str().unwrap()),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "final" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let planned_invoice = draft["id"].as_str().unwrap().to_string();
+    assert_eq!(warning_scope(&draft).as_deref(), Some("all"), "{draft}");
+    release_invoice(&app, &billing_bearer, &planned_invoice).await;
+    let (status, _, bytes) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{planned_invoice}/pdf"),
+        &billing_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(text.contains("Leistung noch nicht erbracht"), "{text}");
+    assert!(!text.contains("15.03.2027"), "{text}");
+    assert!(!text.contains("Leistungszeitraum"), "{text}");
+    let (status, _, xml) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{planned_invoice}/zugferd.xml"),
+        &billing_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&xml));
+    let xml = String::from_utf8(xml).unwrap();
+    assert!(
+        xml.contains("Leistung noch nicht erbracht (Abrechnung vor Leistungserbringung)"),
+        "{xml}"
+    );
+    assert!(!xml.contains("20270315"), "{xml}");
+    assert!(!xml.contains("BillingSpecifiedPeriod"), "{xml}");
+
+    // One service delivered, one planned: the delivered day stays and the
+    // statement is added.
+    let mixed_order = seed_order(&pool, patient_id, admin_id, &format!("{tag}-b")).await;
+    let delivered =
+        seed_order_leistung(&pool, mixed_order, "Dolmetscherstunde", 100.0, "approved").await;
+    sqlx::query("UPDATE order_leistungen SET delivered_at = '2026-09-03T10:00:00Z' WHERE id = $1")
+        .bind(delivered)
+        .execute(&pool)
+        .await
+        .unwrap();
+    seed_order_leistung(&pool, mixed_order, "Geplante Leistung", 50.0, "planned").await;
+    let quote = create_quote(&app, &pm_bearer, mixed_order).await;
+    let (status, draft) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{}/invoices", quote["id"].as_str().unwrap()),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "final" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let mixed_invoice = draft["id"].as_str().unwrap().to_string();
+    assert_eq!(warning_scope(&draft).as_deref(), Some("some"), "{draft}");
+    release_invoice(&app, &billing_bearer, &mixed_invoice).await;
+    let (status, _, bytes) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{mixed_invoice}/pdf"),
+        &billing_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(text.contains("Leistungsdatum"), "{text}");
+    assert!(text.contains("03.09.2026"), "{text}");
+    assert!(text.contains("Übrige Leistungen"), "{text}");
+    assert!(text.contains("Leistung noch nicht erbracht"), "{text}");
+}
+
+/// Owner 2026-11-10: the patient is told when an invoice is issued and when
+/// a payment is recorded on it — in the portal, linked to the invoice, with
+/// the amount unless amounts are hidden; a hidden invoice notifies nobody.
+#[tokio::test]
+async fn the_patient_is_told_about_an_issued_invoice_and_a_recorded_payment() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("invoice-patient-notice");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    sqlx::query(
+        r#"UPDATE patients
+           SET address_street = 'Hauptstraße 1', address_zip = '80331',
+               address_city = 'München', address_country = 'Deutschland'
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    seed_agency_invoice_settings(&pool, admin_id).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let notices = |invoice_id: String, kind: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_as::<_, (String, Option<String>)>(
+                r#"SELECT title, body FROM user_notifications
+                   WHERE user_id = $1 AND kind = $2
+                     AND entity_type = 'invoice' AND entity_id = $3::uuid
+                   ORDER BY created_at"#,
+            )
+            .bind(patient_user_id)
+            .bind(kind)
+            .bind(invoice_id)
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+        }
+    };
+
+    let mut invoices = Vec::new();
+    for suffix in ["shown", "amounts-hidden", "hidden"] {
+        let order_id = seed_order(&pool, patient_id, admin_id, &format!("{tag}-{suffix}")).await;
+        let service_id =
+            seed_order_leistung(&pool, order_id, "Dolmetscherstunde", 100.0, "approved").await;
+        sqlx::query(
+            "UPDATE order_leistungen SET delivered_at = '2026-09-03T10:00:00Z' WHERE id = $1",
+        )
+        .bind(service_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let quote = create_quote(&app, &pm_bearer, order_id).await;
+        let (status, draft) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/quotes/{}/invoices", quote["id"].as_str().unwrap()),
+            &billing_bearer,
+            Some(json!({ "invoice_type": "final" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{draft}");
+        invoices.push(draft["id"].as_str().unwrap().to_string());
+    }
+    let (shown, amounts_hidden, hidden) = (
+        invoices[0].clone(),
+        invoices[1].clone(),
+        invoices[2].clone(),
+    );
+    sqlx::query("UPDATE invoices SET hide_amounts_from_patient = true WHERE id = $1::uuid")
+        .bind(&amounts_hidden)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE invoices SET portal_visible = false WHERE id = $1::uuid")
+        .bind(&hidden)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // A draft tells nobody.
+    assert!(notices(shown.clone(), "invoice_issued").await.is_empty());
+
+    for invoice_id in [&shown, &amounts_hidden, &hidden] {
+        let released = release_invoice(&app, &billing_bearer, invoice_id).await;
+        let (status, payment) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/invoices/{invoice_id}/payments"),
+            &billing_bearer,
+            Some(json!({
+                "request_id": Uuid::new_v4(),
+                "amount_gross": "40",
+                "payment_method": "bank_transfer",
+                "payment_reference": "NOTICE",
+                "received_on": gmed_server::app_time::today().to_string(),
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{released} {payment}");
+    }
+
+    let number: String =
+        sqlx::query_scalar("SELECT invoice_number FROM invoices WHERE id = $1::uuid")
+            .bind(&shown)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let issued = notices(shown.clone(), "invoice_issued").await;
+    assert_eq!(issued.len(), 1, "{issued:?}");
+    assert!(issued[0].0.contains(&number), "{issued:?}");
+    assert!(
+        issued[0].1.as_deref().unwrap_or_default().contains('€'),
+        "{issued:?}"
+    );
+    let paid = notices(shown.clone(), "invoice_payment_recorded").await;
+    assert_eq!(paid.len(), 1, "{paid:?}");
+    let body = paid[0].1.clone().unwrap_or_default();
+    assert!(body.contains("40,00") && body.contains(&number), "{body}");
+
+    // Hidden amounts: the notices come without any amount.
+    for kind in ["invoice_issued", "invoice_payment_recorded"] {
+        let rows = notices(amounts_hidden.clone(), kind).await;
+        assert_eq!(rows.len(), 1, "{kind}: {rows:?}");
+        let body = rows[0].1.clone().unwrap_or_default();
+        assert!(
+            !body.contains('€') && !body.contains("40,00"),
+            "{kind}: {body}"
+        );
+    }
+    // An invoice hidden from the portal notifies nobody.
+    for kind in ["invoice_issued", "invoice_payment_recorded"] {
+        assert!(notices(hidden.clone(), kind).await.is_empty(), "{kind}");
+    }
+}
+
 fn document_source(headers: &axum::http::HeaderMap) -> &str {
     headers
         .get("x-gmed-invoice-document")

@@ -336,6 +336,11 @@ export type InvoiceReleaseWarning = {
   advance_invoice_numbers?: (string | null)[];
   /** The advances of another recipient this final invoice settles (QA D2-03). */
   advances?: InvoiceMismatchedAdvance[];
+  /** `services_not_delivered`: `all` services are still ahead, or only `some`. */
+  scope?: "all" | "some" | string;
+  /** `payer_not_identified`: an "invoice address" under another name than the contracting party. */
+  invoice_address_not_party?: boolean;
+  contracting_party_name?: string | null;
 };
 
 /** An open advance of another recipient that a final invoice will settle. */

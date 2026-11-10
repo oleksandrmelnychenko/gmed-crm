@@ -309,7 +309,14 @@ export type PatientAccountStatementItem = {
   /** Part of a supplier cost GMED bears instead of re-billing it. */
   waived_receivable?: string | null;
   provider_liability?: string | null;
+  /** Open amount net of unapplied advances and overpayments: what is left to transfer. */
   amount_due?: string | null;
+  /** What the document itself still asks for — the open amount of the invoice list. */
+  invoice_balance_due?: string | null;
+  /** Paid advance not applied yet that is set against this row. */
+  advance_credit?: string | null;
+  /** Overpayment on other invoices that is set against this row. */
+  credit_applied?: string | null;
   quantity?: string | null;
   invoiced_quantity?: string | null;
   currency?: string | null;

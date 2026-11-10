@@ -174,6 +174,11 @@ import {
 import { OrderResignAction } from "./ui/order-resign-action";
 import { skipPassiveOrderRefresh } from "./model/order-realtime";
 import { billingSourceLabel } from "./model/billing-source";
+import {
+  leistungUnitPriceProblem,
+  leistungVatRateProblem,
+  localizeLeistungServerError,
+} from "./model/leistung-form-errors";
 import { priceVersionDisplayName } from "./model/order-service-presentation";
 import {
   canCancelLeistung,
@@ -3012,12 +3017,16 @@ function useOrdersPageContent() {
       setLeistungError(l("orders_error_quantity_positive"));
       return;
     }
-    if (!leistungForm.unitPrice.trim() || !Number.isFinite(unitPrice) || unitPrice < 0) {
-      setLeistungError(l("orders_error_unit_price_numeric"));
+    // Each refusal names its own rule: a negative price or a third decimal
+    // is not "must be a number" (QA 2026-11-10, D-08).
+    const unitPriceProblem = leistungUnitPriceProblem(leistungForm.unitPrice, lang);
+    if (unitPriceProblem) {
+      setLeistungError(unitPriceProblem);
       return;
     }
-    if (!Number.isFinite(vatRate) || vatRate < 0) {
-      setLeistungError(l("orders_error_vat_numeric"));
+    const vatRateProblem = leistungVatRateProblem(leistungForm.vatRate, lang);
+    if (vatRateProblem) {
+      setLeistungError(vatRateProblem);
       return;
     }
     if (!plannedCost) {
@@ -3052,8 +3061,11 @@ function useOrdersPageContent() {
       resetLeistungDialog(false);
       triggerReload();
     } catch (error) {
+      // The server's refusals of a service line in the UI language (QA D-07).
       setLeistungError(
-        error instanceof Error ? error.message : l("orders_error_add_leistung"),
+        error instanceof Error
+          ? localizeLeistungServerError(error.message, lang)
+          : l("orders_error_add_leistung"),
       );
     } finally {
       setLeistungSaving(false);
@@ -9175,6 +9187,7 @@ function useOrdersPageContent() {
                                 ))
                           )
                         : null;
+                      setLeistungError(null);
                       setLeistungForm((current) => ({
                         ...current,
                         agencyServiceId,

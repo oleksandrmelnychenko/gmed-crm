@@ -19,6 +19,7 @@ import {
   type PaymentCorrectionForm,
 } from "../model/payment-correction";
 import type { InvoicePaymentTransaction } from "../model/types";
+import { GuardedDateInput } from "./guarded-date-input";
 
 type PaymentEditFormProps = {
   lang: string;
@@ -72,6 +73,7 @@ export function PaymentEditForm({
     payerName: payment.payer_name ?? "",
   }));
   const [form, setForm] = useState<PaymentCorrectionForm>(initialForm);
+  const [dateRefused, setDateRefused] = useState(false);
   const problem = paymentCorrectionProblem(form, payment);
   const overpayment = paymentCorrectionOverpayment(form, maxAmount);
   const set = (patch: Partial<PaymentCorrectionForm>) => {
@@ -112,8 +114,8 @@ export function PaymentEditForm({
           </NativeComboboxSelect>
         </Field>
         <Field label={de ? "Eingangsdatum" : "Дата поступления"}>
-          <Input
-            type="date"
+          <GuardedDateInput
+            onRefusedChange={setDateRefused}
             max={appDateKey()}
             value={form.receivedOn}
             onChange={(event) => set({ receivedOn: event.target.value })}
@@ -162,7 +164,7 @@ export function PaymentEditForm({
         </Button>
         <Button
           type="button"
-          disabled={busy || problem !== null}
+          disabled={busy || problem !== null || dateRefused}
           onClick={() => onSubmit(buildPaymentCorrectionPayload(form, maxAmount))}
         >
           {busy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}

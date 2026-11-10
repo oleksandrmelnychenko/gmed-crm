@@ -232,8 +232,9 @@ pub async fn update_setting(
         "agency_bank_name" => validate_string_setting(value, 160, true, "Agency bank name")?,
         "agency_bank_swift" => validate_bic_setting(value)?,
         "agency_bank_iban" => validate_iban_setting(value)?,
-        "agency_vat_id" => validate_string_setting(value, 32, true, "Agency VAT ID")?,
-        "agency_tax_number" => validate_string_setting(value, 32, true, "Agency tax number")?,
+        "agency_vat_id" | "agency_tax_number" => {
+            validate_tax_registration_setting(pool, key, value).await?
+        }
         "agency_country_code" => validate_string_setting(value, 2, false, "Agency country code")?,
         "required_patient_documents" => validate_required_patient_documents_setting(value)?,
         crate::document_signatures::retention::DELETION_ENABLED_SETTING => match value.trim() {
@@ -419,6 +420,110 @@ pub fn normalize_bic(value: &str) -> Result<String, &'static str> {
         return Err(BIC_LOCATION_ERROR);
     }
     Ok(compact)
+}
+
+/// The USt-IdNr. is not a country prefix of an EU member state followed by
+/// that state's number.
+pub const VAT_ID_FORMAT_ERROR: &str =
+    "VAT ID must be an EU country code followed by its number, for example DE123456789";
+/// A German USt-IdNr. is `DE` and nine digits.
+pub const VAT_ID_GERMAN_ERROR: &str = "VAT ID of Germany must be DE followed by 9 digits";
+/// The Steuernummer has none of the German forms.
+pub const TAX_NUMBER_FORMAT_ERROR: &str = "Tax number must be a German Steuernummer: 10 or 11 digits as the tax office writes it (for example 143/123/12345) or the 13 digits of the federal form";
+
+/// Country prefixes of the EU VAT identification numbers (VIES): the member
+/// states — Greece as `EL` — and Northern Ireland as `XI`.
+const VAT_ID_COUNTRIES: &[&str] = &[
+    "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "EL", "ES", "FI", "FR", "HR", "HU", "IE", "IT",
+    "LT", "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK", "XI",
+];
+
+/// Validates a USt-IdNr.: the country prefix of an EU member state and its
+/// number — for Germany exactly nine digits, for the other states 2 to 12
+/// letters and digits with at least one digit (the widest national pattern).
+/// Spaces, dots and dashes are allowed for readability; the value is stored
+/// compact and upper case, as invoices and the e-invoice print it. The check
+/// digit is not verified.
+pub fn normalize_vat_id(value: &str) -> Result<String, &'static str> {
+    let compact: String = value
+        .chars()
+        .filter(|ch| !ch.is_whitespace() && !matches!(ch, '.' | '-'))
+        .map(|ch| ch.to_ascii_uppercase())
+        .collect();
+    if !compact.is_ascii() || compact.len() < 4 {
+        return Err(VAT_ID_FORMAT_ERROR);
+    }
+    let (country, number) = compact.split_at(2);
+    if !VAT_ID_COUNTRIES.contains(&country) {
+        return Err(VAT_ID_FORMAT_ERROR);
+    }
+    if country == "DE" {
+        if number.len() != 9 || !number.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(VAT_ID_GERMAN_ERROR);
+        }
+        return Ok(compact);
+    }
+    if number.len() > 12
+        || !number.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        || !number.bytes().any(|byte| byte.is_ascii_digit())
+    {
+        return Err(VAT_ID_FORMAT_ERROR);
+    }
+    Ok(compact)
+}
+
+/// Validates a German Steuernummer: digits, grouped with slashes or spaces as
+/// the tax office writes it — 10 or 11 digits in the forms of the federal
+/// states (`143/123/12345`, `21/815/08150`, `93815/08152`) or the 13 digits of
+/// the federal form (`9143012312345`). Stored as entered, with single spaces.
+pub fn normalize_tax_number(value: &str) -> Result<String, &'static str> {
+    let cleaned = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let digits = cleaned.chars().filter(char::is_ascii_digit).count();
+    let well_formed = cleaned
+        .chars()
+        .all(|ch| ch.is_ascii_digit() || ch == '/' || ch == ' ')
+        && cleaned.starts_with(|ch: char| ch.is_ascii_digit())
+        && cleaned.ends_with(|ch: char| ch.is_ascii_digit())
+        && !cleaned.contains("//");
+    if !well_formed || !matches!(digits, 10 | 11 | 13) {
+        return Err(TAX_NUMBER_FORMAT_ERROR);
+    }
+    Ok(cleaned)
+}
+
+/// GMED's own USt-IdNr. or Steuernummer, printed on every invoice and written
+/// into the e-invoice (§ 14 Abs. 4 Nr. 2 UStG): empty, or in its format (QA
+/// 2026-11-10, D-06 and E F-3 — any text was stored and unlocked invoicing).
+/// Only a change is validated: the value already stored may be saved again as
+/// it is, so an older entry does not block the settings form.
+async fn validate_tax_registration_setting(
+    pool: &PgPool,
+    key: &str,
+    value: &str,
+) -> Result<Value, UpdateError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(Value::String(String::new()));
+    }
+    let stored = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT value #>> '{}' FROM system_settings WHERE key = $1",
+    )
+    .bind(key)
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| UpdateError::Db(error.to_string()))?
+    .flatten();
+    if stored.as_deref().map(str::trim) == Some(trimmed) {
+        return Ok(Value::String(trimmed.to_string()));
+    }
+    let normalized = if key == "agency_vat_id" {
+        normalize_vat_id(trimmed)
+    } else {
+        normalize_tax_number(trimmed)
+    };
+    normalized
+        .map(Value::String)
+        .map_err(|message| UpdateError::InvalidValue(message.into()))
 }
 
 fn validate_iban_setting(value: &str) -> Result<Value, UpdateError> {
@@ -829,6 +934,87 @@ mod tests {
         // QA R3-04: eleven characters, but a digit in the country part.
         assert_eq!(normalize_bic("COBA1EFFXXX"), Err(super::BIC_COUNTRY_ERROR));
         assert_eq!(normalize_bic("COBADE-FXXX"), Err(super::BIC_LOCATION_ERROR));
+    }
+
+    /// QA 2026-11-10 (D-06, E F-3): "XX12" was stored as the agency's
+    /// USt-IdNr. and unlocked invoicing.
+    #[test]
+    fn vat_id_is_an_eu_country_prefix_with_its_number() {
+        assert_eq!(
+            super::normalize_vat_id("DE999999999").unwrap(),
+            "DE999999999"
+        );
+        assert_eq!(
+            super::normalize_vat_id(" de 123.456.789 ").unwrap(),
+            "DE123456789"
+        );
+        assert_eq!(
+            super::normalize_vat_id("ATU12345678").unwrap(),
+            "ATU12345678"
+        );
+        assert_eq!(
+            super::normalize_vat_id("NL 123456789B01").unwrap(),
+            "NL123456789B01"
+        );
+        assert_eq!(
+            super::normalize_vat_id("EL123456789").unwrap(),
+            "EL123456789"
+        );
+        for (invalid, error) in [
+            ("XX12", super::VAT_ID_FORMAT_ERROR),
+            ("abc", super::VAT_ID_FORMAT_ERROR),
+            ("123456789", super::VAT_ID_FORMAT_ERROR),
+            ("DE", super::VAT_ID_FORMAT_ERROR),
+            ("DE12345678", super::VAT_ID_GERMAN_ERROR),
+            ("DE1234567890", super::VAT_ID_GERMAN_ERROR),
+            ("DE12345678A", super::VAT_ID_GERMAN_ERROR),
+            ("ATUABCDEFGH", super::VAT_ID_FORMAT_ERROR),
+            ("FR1234567890123", super::VAT_ID_FORMAT_ERROR),
+            ("DÉ123456789", super::VAT_ID_FORMAT_ERROR),
+            ("GR123456789", super::VAT_ID_FORMAT_ERROR),
+        ] {
+            assert_eq!(super::normalize_vat_id(invalid), Err(error), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn tax_number_has_a_german_form() {
+        for valid in [
+            "143/999/00001",
+            "143/123/12345",
+            "21/815/08150",
+            "133/8150/8159",
+            "93815/08152",
+            "013 815 08153",
+            "9143012312345",
+        ] {
+            assert_eq!(
+                super::normalize_tax_number(valid).unwrap(),
+                valid,
+                "{valid}"
+            );
+        }
+        assert_eq!(
+            super::normalize_tax_number("  143 / 999 /  00001 ").unwrap(),
+            "143 / 999 / 00001"
+        );
+        for invalid in [
+            "abc",
+            "XX12",
+            "123",
+            "143/999/000",
+            "143/999/000012",
+            "143-999-00001",
+            "/143/999/00001",
+            "143//999/00001",
+            "DE999999999",
+        ] {
+            assert_eq!(
+                super::normalize_tax_number(invalid),
+                Err(super::TAX_NUMBER_FORMAT_ERROR),
+                "{invalid}"
+            );
+        }
     }
 
     #[test]

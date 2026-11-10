@@ -6,6 +6,7 @@ import { DataTablePager } from "@/components/data-table/data-table-pager";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { GuardedDateInput } from "./guarded-date-input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { StaffLink } from "@/components/staff-link";
@@ -52,6 +53,8 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [paidOn, setPaidOn] = useState(() => appDateKey());
+  // The date field shows a day it did not take (a future one): no payment is booked with the old date.
+  const [paidOnRefused, setPaidOnRefused] = useState(false);
   const [accounts, setAccounts] = useState<CompanyFinancialAccount[]>([]);
   const [opening, setOpening] = useState<string | null>(null);
   useFinanceAutoRefresh(() => setRefresh((value) => value + 1), busy);
@@ -215,7 +218,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
         {paymentChoice ? <div className="space-y-4 p-4 sm:p-5">
           <label className="block space-y-1.5 text-xs font-medium text-muted-foreground">
             <span>{tx("Дата оплаты", "Zahlungsdatum")}</span>
-            <Input className="h-9 rounded-md bg-background text-sm text-foreground" type="date" max={appDateKey()} value={paidOn} disabled={paymentBusy} onChange={(event) => setPaidOn(event.target.value)} />
+            <GuardedDateInput className="h-9 rounded-md bg-background text-sm text-foreground" max={appDateKey()} value={paidOn} disabled={paymentBusy} onRefusedChange={setPaidOnRefused} onChange={(event) => setPaidOn(event.target.value)} />
           </label>
           {paymentError ? <Banner tone="error">{paymentError}</Banner> : null}
           {paymentChoice.status === "received" ? <Banner tone="warning"><div className="flex flex-wrap items-center justify-between gap-3"><span>{tx("Сначала подтвердите реквизиты входящего счёта.", "Prüfen Sie zuerst die Eingangsrechnung.")}</span><Button type="button" size="sm" variant="outline" disabled={paymentBusy} onClick={() => void approvePaymentChoice(paymentChoice)}>{paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{tx("Подтвердить счёт", "Rechnung freigeben")}</Button></div></Banner> : null}
@@ -223,14 +226,14 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
           <fieldset className="space-y-2">
             <legend className="text-xs font-medium text-muted-foreground">{tx("Кто оплатил счёт?", "Wer hat die Rechnung bezahlt?")}</legend>
             <div className={`grid gap-3 ${canMarkInvoicePaidByPatient(paymentChoice) ? "sm:grid-cols-2" : "sm:grid-cols-1"}`}>
-              {canMarkInvoicePaidByPatient(paymentChoice) ? <button type="button" disabled={paymentBusy || paymentChoice.status === "received" || paymentChoice.paid_by === "agency"}
+              {canMarkInvoicePaidByPatient(paymentChoice) ? <button type="button" disabled={paymentBusy || paidOnRefused || paymentChoice.status === "received" || paymentChoice.paid_by === "agency"}
                 className="group flex min-h-32 flex-col rounded-lg border border-border/70 bg-card p-3.5 text-left shadow-sm transition-colors hover:border-sky-300 hover:bg-sky-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 dark:hover:border-sky-800 dark:hover:bg-sky-950/20"
                 onClick={() => void updatePatientPayment(paymentChoice, paymentChoice.paid_by !== "patient")}>
                 <span className="mb-3 flex items-center text-foreground"><UserRound className="size-5" /></span>
                 <span className="block text-sm font-semibold text-foreground">{paymentChoice.paid_by === "patient" ? tx("Снова не оплачен", "Wieder unbezahlt") : tx("Пациент оплатил сам", "Patient hat selbst bezahlt")}</span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">{tx("Движение денег GMED не создаётся.", "Es wird keine GMED-Geldbewegung erstellt.")}</span>
               </button> : null}
-              <button type="button" disabled={paymentBusy || paymentChoice.paid_by === "patient" || ["received", "expected"].includes(paymentChoice.status)}
+              <button type="button" disabled={paymentBusy || paidOnRefused || paymentChoice.paid_by === "patient" || ["received", "expected"].includes(paymentChoice.status)}
                 className="group flex min-h-32 flex-col rounded-lg border border-border/70 bg-card p-3.5 text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => { setPaymentError(null); setPendingSettlement(paymentChoice); setPaymentChoice(null); }}>
                 <span className="mb-3 flex items-center text-foreground"><Building2 className="size-5" /></span>

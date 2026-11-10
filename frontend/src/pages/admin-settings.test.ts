@@ -33,3 +33,26 @@ describe("refused BIC names the wrong part (QA R3-04)", () => {
     ).toBe(de.settings_bic_invalid_location);
   });
 });
+
+describe("refused tax registration of the agency (QA 2026-11-10, D-06)", () => {
+  it("explains the format instead of showing the server's English text", () => {
+    expect(
+      describeSettingError(
+        refused("VAT ID must be an EU country code followed by its number, for example DE123456789"),
+        ru,
+      ),
+    ).toBe(ru.settings_vat_id_invalid);
+    expect(
+      describeSettingError(refused("VAT ID of Germany must be DE followed by 9 digits"), de),
+    ).toBe(de.settings_vat_id_invalid_german);
+    expect(
+      describeSettingError(
+        refused(
+          "Tax number must be a German Steuernummer: 10 or 11 digits as the tax office writes it (for example 143/123/12345) or the 13 digits of the federal form",
+        ),
+        ru,
+      ),
+    ).toBe(ru.settings_tax_number_invalid);
+    expect(ru.settings_tax_number_invalid).toContain("143/123/12345");
+  });
+});

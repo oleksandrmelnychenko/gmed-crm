@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { useReadOnly } from "@/components/read-only-scope";
 import { ApiRequestError } from "@/lib/api";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useDatevText } from "./text";
@@ -38,6 +39,9 @@ export function DatevConnectionDetails() {
   const [loadKey, setLoadKey] = useState(0);
   const [error, setError] = useState<"loadError" | "saveError" | "conflict" | null>(null);
   const [saved, setSaved] = useState(false);
+  // "View only" (Billing): the module boxes are plain checkboxes, which the
+  // read-only scope does not lock by itself (QA 2026-11-10, D-13).
+  const readOnly = useReadOnly();
   const dirty = !!setup && !!draft && JSON.stringify(setup.profile) !== JSON.stringify(draft);
 
   useEffect(() => {
@@ -101,9 +105,9 @@ export function DatevConnectionDetails() {
           </fieldset>
         </DatevSetupSection>
         <DatevSetupSection icon={Boxes} title={copy.modules} description={copy.modulesHint} action={<Badge variant="secondary">{draft.modules.length} / {DATEV_MODULES.length}</Badge>}>
-          <fieldset disabled={saving} className="min-w-0 divide-y divide-border/60">
+          <fieldset disabled={saving || readOnly} className="min-w-0 divide-y divide-border/60">
             {DATEV_MODULES.map((id) => <div key={id} className="py-3 first:pt-0 last:pb-0" data-testid={`datev-module-${id}`}>
-              <label className="flex cursor-pointer items-start gap-3 text-sm font-medium">
+              <label className={`flex items-start gap-3 text-sm font-medium ${readOnly ? "cursor-default" : "cursor-pointer"}`}>
                 <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-primary" checked={draft.modules.includes(id)} onChange={(e) => edit({ modules: DATEV_MODULES.filter((module) => module === id ? e.target.checked : draft.modules.includes(module)) })} />
                 <span className="min-w-0 break-words">{DATEV_MODULE_NAMES[id]}</span>
               </label>

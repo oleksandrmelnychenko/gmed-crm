@@ -32,6 +32,7 @@ import {
 } from "../model/overpayment";
 import { formatDate } from "../model/invoice-model";
 import { invoiceConfirmationField, localizeInvoiceError } from "../model/invoice-errors";
+import { GuardedDateInput } from "./guarded-date-input";
 
 function Field({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
   return (
@@ -83,6 +84,7 @@ export function CreditBalancePanel({
   const [targetId, setTargetId] = useState("");
   const [amountGross, setAmountGross] = useState("");
   const [transferredOn, setTransferredOn] = useState(() => appDateKey());
+  const [dateRefused, setDateRefused] = useState(false);
   const [note, setNote] = useState("");
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);
@@ -137,7 +139,7 @@ export function CreditBalancePanel({
   }
 
   async function submit() {
-    if (problem || !target) return;
+    if (problem || !target || dateRefused) return;
     await send({
       request_id: requestId,
       target_invoice_id: target.invoice_id,
@@ -210,8 +212,8 @@ export function CreditBalancePanel({
               />
             </Field>
             <Field label={t.finance_credit_transfer_date}>
-              <Input
-                type="date"
+              <GuardedDateInput
+                onRefusedChange={setDateRefused}
                 max={appDateKey()}
                 value={transferredOn}
                 onChange={(event) => setTransferredOn(event.target.value)}
@@ -225,7 +227,7 @@ export function CreditBalancePanel({
               <span className="text-sm text-rose-700" aria-live="polite">
                 {problem && amountGross ? t[PROBLEM_KEYS[problem]] : null}
               </span>
-              <Button type="button" disabled={busy || problem !== null || !transferredOn} onClick={() => void submit()}>
+              <Button type="button" disabled={busy || problem !== null || !transferredOn || dateRefused} onClick={() => void submit()}>
                 {busy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
                 {t.finance_credit_transfer_submit}
               </Button>

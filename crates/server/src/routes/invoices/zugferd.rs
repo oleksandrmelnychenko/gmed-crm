@@ -64,6 +64,9 @@ pub(super) struct EInvoice {
     pub due_date: Option<NaiveDate>,
     /// First and last service day, as printed on the invoice.
     pub service_period: Option<(NaiveDate, NaiveDate)>,
+    /// The printed statement that services are billed ahead of their
+    /// delivery (§ 14 Abs. 4 Nr. 6 UStG), written as a note.
+    pub service_note: Option<String>,
     pub currency: String,
     pub order_number: Option<String>,
     pub note: Option<String>,
@@ -351,7 +354,11 @@ pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
         escape(invoice.number.trim()),
         date(invoice.issue_date)
     ));
-    for note in [&invoice.note, &invoice.prepayment_note] {
+    for note in [
+        &invoice.note,
+        &invoice.service_note,
+        &invoice.prepayment_note,
+    ] {
         if let Some(note) = text(note) {
             xml.push_str(&format!(
                 "<ram:IncludedNote><ram:Content>{}</ram:Content></ram:IncludedNote>",
@@ -744,6 +751,7 @@ mod tests {
                 NaiveDate::from_ymd_opt(2026, 9, 15).unwrap(),
                 NaiveDate::from_ymd_opt(2026, 9, 15).unwrap(),
             )),
+            service_note: None,
             currency: "EUR".to_string(),
             order_number: Some("ORD-1".to_string()),
             note: Some("Danke & bis bald <GMed>".to_string()),
@@ -1141,6 +1149,30 @@ mod tests {
         assert!(xml.contains("<ram:ApplicableHeaderTradeDelivery/>"));
         assert!(!xml.contains("BillingSpecifiedPeriod"));
         assert!(!xml.contains("InvoiceReferencedDocument"));
+    }
+
+    /// Services billed ahead of their delivery (§ 14 Abs. 4 Nr. 6 UStG): the
+    /// XML carries the statement of the printed invoice as a note and, when
+    /// no service is rendered, no delivery date at all.
+    #[test]
+    fn services_billed_ahead_are_stated_in_a_note() {
+        let mut invoice = sample_exempt_only();
+        invoice.note = None;
+        invoice.service_note =
+            Some("Leistung noch nicht erbracht (Abrechnung vor Leistungserbringung)".to_string());
+        let xml = build_cii_xml(&invoice);
+        assert!(xml.contains(concat!(
+            "<ram:IncludedNote><ram:Content>",
+            "Leistung noch nicht erbracht (Abrechnung vor Leistungserbringung)",
+            "</ram:Content></ram:IncludedNote></rsm:ExchangedDocument>"
+        )));
+        assert!(xml.contains("<ram:ApplicableHeaderTradeDelivery/>"));
+        assert!(!xml.contains("BillingSpecifiedPeriod"));
+        assert!(!xml.contains("ActualDeliverySupplyChainEvent"));
+
+        // Without the statement there is no such note.
+        invoice.service_note = None;
+        assert!(!build_cii_xml(&invoice).contains("noch nicht erbracht"));
     }
 
     #[test]

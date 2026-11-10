@@ -275,6 +275,68 @@ async fn agency_bank_account_is_validated() {
     assert_eq!(stored, "DE89 3704 0044 0532 0130 00");
 }
 
+/// QA 2026-11-10 (D-06, E F-3): the agency's USt-IdNr. and Steuernummer are
+/// printed on every invoice; any text was stored. A change is validated, the
+/// value already stored may be saved again as it is.
+#[tokio::test]
+async fn agency_tax_registration_is_validated_on_change() {
+    let Some(app) = test_context().await else {
+        return;
+    };
+    let ceo = auth_header_for("ceo", app.suite.admin_id);
+    let save = |key: &'static str, value: &'static str| {
+        let (app, ceo) = (&app, ceo.clone());
+        async move {
+            json_request(
+                app,
+                "POST",
+                &format!("/api/v1/admin/settings/{key}"),
+                &ceo,
+                Some(json!({ "value": value })),
+            )
+            .await
+        }
+    };
+    let stored = |key: &'static str| {
+        let pool = app.suite.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Option<String>>(
+                "SELECT value #>> '{}' FROM system_settings WHERE key = $1",
+            )
+            .bind(key)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .unwrap_or_default()
+        }
+    };
+    let before_vat = stored("agency_vat_id").await;
+    let before_tax = stored("agency_tax_number").await;
+
+    for (key, value) in [
+        ("agency_vat_id", "XX12"),
+        ("agency_vat_id", "DE12345"),
+        ("agency_tax_number", "abc"),
+        ("agency_tax_number", "143/999"),
+    ] {
+        let (status, body) = save(key, value).await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{key}={value}: {body}"
+        );
+    }
+    assert_eq!(stored("agency_vat_id").await, before_vat);
+    assert_eq!(stored("agency_tax_number").await, before_tax);
+
+    // The suite's synthetic Steuernummer in its usual form is accepted. The
+    // other tests of this file read both settings, so nothing else is
+    // written here; the formats are covered by the unit tests of `settings`.
+    let (status, body) = save("agency_tax_number", "143/999/00001").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(stored("agency_tax_number").await, "143/999/00001");
+}
+
 #[tokio::test]
 async fn settings_update_requires_it_admin() {
     let Some(app) = test_app().await else { return };

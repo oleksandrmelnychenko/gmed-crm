@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ import {
 } from "../model/credit-note";
 import type { InvoiceCreditNoteDraft } from "../model/invoice-detail-drafts";
 import type { InvoiceCreditableLine, InvoiceCreditNoteTransaction } from "../model/types";
+import { GuardedDateInput } from "./guarded-date-input";
 
 function Field({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
   return (
@@ -74,7 +75,8 @@ export function CreditNoteForm({
   busy,
   onSubmit,
 }: CreditNoteFormProps) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const [dateRefused, setDateRefused] = useState(false);
   const money = (value: unknown) => formatMoneyAmount(value, currency);
   const rates = creditableVatRates(lines);
   const openLines = (lines ?? []).filter((line) => Number(line.remaining_gross) > 0);
@@ -101,6 +103,21 @@ export function CreditNoteForm({
   const errorText = showError
     ? t[ERROR_KEYS[preview.error!]].replace("{amount}", money(limit ?? 0))
     : "";
+  // The button never stays grey without a word (QA 2026-11-10, D-12): what
+  // is still missing is said next to it, like in the credit-transfer form.
+  const missingHint = showError
+    ? ""
+    : preview.error === "nothing_selected"
+      ? t.finance_credit_note_error_nothing_selected
+      : preview.error === "invalid_amount"
+        ? lang === "de" ? "Bitte den Betrag der Gutschrift angeben." : "Укажите сумму кредит-ноты."
+        : preview.error
+          ? t[ERROR_KEYS[preview.error]].replace("{amount}", money(limit ?? 0))
+          : !draft.reason.trim()
+            ? lang === "de" ? "Bitte den Grund der Gutschrift angeben." : "Укажите причину кредит-ноты."
+            : !draft.issuedOn
+              ? lang === "de" ? "Bitte das Datum der Gutschrift angeben." : "Укажите дату кредит-ноты."
+              : "";
 
   // Nothing the server would accept (QA D2-01): say why instead of offering
   // the lines' remaining amounts.
@@ -281,8 +298,8 @@ export function CreditNoteForm({
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Field label={t.finance_credit_note_date}>
-          <Input
-            type="date"
+          <GuardedDateInput
+            onRefusedChange={setDateRefused}
             min={minDate}
             max={appDateKey()}
             value={draft.issuedOn}
@@ -316,10 +333,13 @@ export function CreditNoteForm({
               .replace("{vat}", money(preview.vat))
               .replace("{gross}", money(preview.gross))
           ) : null}
+          {missingHint ? (
+            <span className="block text-rose-700" data-testid="credit-note-missing-hint">{missingHint}</span>
+          ) : null}
         </div>
         <Button
           type="button"
-          disabled={busy || Boolean(preview.error) || !draft.reason.trim() || !draft.issuedOn}
+          disabled={busy || Boolean(preview.error) || !draft.reason.trim() || !draft.issuedOn || dateRefused}
           onClick={onSubmit}
         >
           {busy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}

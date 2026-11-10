@@ -66,8 +66,14 @@ describe("localizeInvoiceError", () => {
       new Error("GMED's tax number or VAT ID is missing; set it in the system settings before releasing invoices"),
       { code: "issuer_tax_registration_missing", body: { error: "issuer_tax_registration_missing" } },
     );
-    expect(localizeInvoiceError(error, "ru", "Ошибка")).toContain("Системных настройках");
-    expect(localizeInvoiceError(error, "de", "Fehler")).toContain("Systemeinstellungen");
+    // Billing has no settings menu: the hint says who fills them (QA 2026-11-10, D-09).
+    const ru = localizeInvoiceError(error, "ru", "Ошибка");
+    expect(ru).toContain("Заполнить их может только CEO");
+    expect(ru).toContain("Профиль агентства для документов");
+    expect(ru).not.toContain("Администрирование →");
+    const de = localizeInvoiceError(error, "de", "Fehler");
+    expect(de).toContain("nur der CEO");
+    expect(de).toContain("Systemeinstellungen");
     expect(
       invoiceReleaseWarningText({ code: "issuer_tax_registration_missing" }, "ru"),
     ).toContain("Steuernummer");
@@ -147,6 +153,38 @@ describe("localizeInvoiceError", () => {
     expect(
       invoiceReleaseWarningText({ code: "payer_not_identified", missing: ["cost_coverage_signed"] }, "ru"),
     ).toContain("Kostenübernahmeerklärung");
+    // QA 2026-11-10, D-01: the warning says what the invoice will print.
+    expect(
+      invoiceReleaseWarningText({ code: "services_not_delivered", scope: "all" }, "ru"),
+    ).toContain("Вместо даты оказания услуг");
+    const mixed = invoiceReleaseWarningText({ code: "services_not_delivered", scope: "some" }, "de");
+    expect(mixed).toContain("Datum der erbrachten Leistungen");
+    expect(mixed).toContain("Leistung noch nicht erbracht (Abrechnung vor Leistungserbringung)");
+    // Owner 2026-11-10 (QA D-02): an "invoice address" under another name is a third party.
+    const address = invoiceReleaseWarningText(
+      {
+        code: "payer_not_identified",
+        missing: ["cost_coverage_signed", "payer_identity_document"],
+        invoice_address_not_party: true,
+        contracting_party_name: "Anna Portal",
+      },
+      "ru",
+    );
+    expect(address).toContain("Kostenübernahmeerklärung");
+    expect(address).toContain("сама сторона договора (Anna Portal)");
+    expect(
+      localizeInvoiceError(
+        {
+          code: "payer_not_identified",
+          body: { error: "payer_not_identified", invoice_address_not_party: true, contracting_party_name: "Anna Portal" },
+        },
+        "de",
+        "x",
+      ),
+    ).toContain("Vertragspartner selbst (Anna Portal)");
+    expect(
+      invoiceReleaseWarningText({ code: "payer_not_identified", invoice_address_not_party: false }, "de"),
+    ).not.toContain("Rechnungsanschrift");
     expect(
       invoiceReleaseWarningText({ code: "recipient_not_contracting" }, "de"),
     ).toContain("Elternteil");

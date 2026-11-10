@@ -209,6 +209,7 @@ import {
   invoiceReleaseWarningText,
   localizeInvoiceError,
 } from "./model/invoice-errors";
+import { GuardedDateInput } from "./ui/guarded-date-input";
 import { DunningBlockPanel, StornoDocumentCard } from "./ui/invoice-corrections-panel";
 import type {
   AccountingEntry,
@@ -714,6 +715,15 @@ function useStaffInvoicesPageContent() {
       lang === "de"
         ? "Die Rechnung nennt den Leistungsempfänger. Geht sie an eine zahlende dritte Person, druckt sie den Vertragspartner zusätzlich als Leistungsempfänger. „Rechnungsanschrift“: der Vertragspartner unter einer anderen Anschrift, z. B. aus dem Patientenformular – keine Kostenübernahme."
         : "Счёт называет получателя услуг. Если счёт выставлен стороннему плательщику, в нём дополнительно указывается сторона договора как получатель услуг. «Адрес для счёта»: сторона договора по другому адресу, например из анкеты пациента, — без принятия расходов.",
+    // Owner 2026-11-10 (QA D-02): another name at that address is a third party.
+    payerRoleInvoiceAddressHint:
+      lang === "de"
+        ? "„Rechnungsanschrift“ ist der Vertragspartner selbst ({party}) unter einer anderen Anschrift. Steht dort ein anderer Name, verlangt die Ausstellung dieselben Unterlagen wie für eine zahlende dritte Person: die unterschriebene Kostenübernahmeerklärung und den Ausweis (bei einer Organisation den Registerauszug)."
+        : "«Адрес для счёта» — это сама сторона договора ({party}) по другому адресу. Если указано другое имя, для выпуска счёта потребуются те же документы, что и для стороннего плательщика: подписанная Kostenübernahmeerklärung и удостоверение личности (для организации — выписка из реестра).",
+    payerNameRequired:
+      lang === "de"
+        ? "Bitte angeben, wer die Rechnung erhält: einen Angehörigen, einen Patienten (Patientennummer) oder einen Namen. Soll der Patient selbst die Rechnung erhalten, die Auswahl „Rechnungsempfänger“ auf „Bei Ausstellung prüfen“ zurücksetzen."
+        : "Укажите, кто получает счёт: родственника, пациента (номер пациента) или имя. Если счёт получает сам пациент, верните в поле «Получатель счёта» значение «Проверить при выпуске».",
     recipientEmail: lang === "de" ? "E-Mail für Rechnungen" : "E-mail для счетов",
     recipientVatId: lang === "de" ? "USt-IdNr." : "USt-IdNr. (ИНН НДС)",
     recipientTaxNumber: lang === "de" ? "Steuernummer" : "Steuernummer (налоговый номер)",
@@ -1053,6 +1063,13 @@ function useStaffInvoicesPageContent() {
   const paymentForm = paymentDraft.draft;
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  // The payment or refund date field shows a date it did not take (a future
+  // day): nothing is recorded until it is corrected (QA 2026-11-10, D-05).
+  const [paymentDateRefused, setPaymentDateRefused] = useState(false);
+  const [refundDateRefused, setRefundDateRefused] = useState(false);
+  // Cancelling an issued invoice asks once more before the Storno document
+  // is made (QA 2026-11-10, D-13).
+  const [stornoConfirmOpen, setStornoConfirmOpen] = useState(false);
   const [reversingPaymentId, setReversingPaymentId] = useState("");
   const [editingPaymentId, setEditingPaymentId] = useState("");
   const [paymentCorrectionDirty, setPaymentCorrectionDirty] = useState(false);
@@ -1770,6 +1787,11 @@ function useStaffInvoicesPageContent() {
     refunds: InvoiceRefundTransaction[],
   ) => {
     setStatusForm(invoiceToStatusForm(data));
+    // A refusal belongs to the invoice and attempt it was given for: it
+    // appeared in the status dialog of the next invoice (QA 2026-11-10, D-11).
+    setStatusError(null);
+    setStatusConfirmation(null);
+    setStornoConfirmOpen(false);
     setVisibilityForm(invoiceToVisibilityForm(data));
     setPayerForm(invoiceToPayerForm(data));
     setDunningForm({ note: "" });
@@ -2035,7 +2057,7 @@ function useStaffInvoicesPageContent() {
   }
 
   async function handleRecordPayment() {
-    if (!detail || !(parseMoneyInput(paymentForm.amountGross) > 0)) return;
+    if (!detail || paymentDateRefused || !(parseMoneyInput(paymentForm.amountGross) > 0)) return;
     setPaymentBusy(true);
     setPaymentError(null);
     try {
@@ -2224,6 +2246,31 @@ function useStaffInvoicesPageContent() {
   const statusNotesLocked = Boolean(detail && isInvoiceReleased(detail));
   const visibilityDirty = Boolean(detail && hasFormChanges(visibilityForm, invoiceToVisibilityForm(detail)));
   const payerDirty = Boolean(detail && hasFormChanges(payerForm, invoiceToPayerForm(detail)));
+  // An issued invoice is cancelled with a Storno document that cannot be taken back.
+  const stornoNeedsConfirmation = Boolean(
+    detail && isInvoiceReleased(detail) && detail.status !== "cancelled" && statusForm.status === "cancelled",
+  );
+  // Why «record refund» is not available, said next to the button like in
+  // the credit-transfer form (QA 2026-11-10, D-12).
+  const refundProblem = (() => {
+    if (!detail || refundForm.amountGross.trim() === "") return null;
+    const amount = parseMoneyInput(refundForm.amountGross);
+    const available = Number(detail.refundable_cash_amount ?? 0);
+    if (!(amount > 0)) {
+      return lang === "de"
+        ? "Der Erstattungsbetrag muss größer als null sein."
+        : "Сумма возврата должна быть больше нуля.";
+    }
+    if (amount > available) {
+      return lang === "de"
+        ? `Der Betrag übersteigt das erstattbare Guthaben (${formatMoney(available, detail.currency)}).`
+        : `Сумма больше доступной к возврату переплаты (${formatMoney(available, detail.currency)}).`;
+    }
+    if (!refundForm.reason.trim()) {
+      return lang === "de" ? "Bitte den Grund der Erstattung angeben." : "Укажите причину возврата.";
+    }
+    return null;
+  })();
   // The positions are fixed with the release; until then their remarks can be typed.
   const lineCommentsEditable = Boolean(
     detail && access.canCreate && detail.status === "draft" && !isInvoiceReleased(detail),
@@ -2303,6 +2350,17 @@ function useStaffInvoicesPageContent() {
   async function handleSavePayer() {
     if (!payerDirty || payerBusy) return;
     if (!selectedInvoiceId) return;
+    // A role without anybody named is dropped by the server: the dialog
+    // closed as if it had been saved (QA 2026-11-10, D-13).
+    if (
+      payerForm.payerRole &&
+      !payerForm.payerPatientRelationId &&
+      !payerForm.payerPatientPid.trim() &&
+      !payerForm.contactName.trim()
+    ) {
+      setPayerError(text.payerNameRequired);
+      return;
+    }
     if (payerForm.contactEmail.trim() && !isValidEmailAddress(payerForm.contactEmail)) {
       setPayerError(t.login_error_email_invalid);
       return;
@@ -3057,7 +3115,12 @@ function useStaffInvoicesPageContent() {
                       variant="outline"
                       size="icon"
                       className="size-8 rounded-lg"
-                      onClick={() => setStatusDialogOpen(true)}
+                      onClick={() => {
+                        setStatusError(null);
+                        setStatusConfirmation(null);
+                        setStornoConfirmOpen(false);
+                        setStatusDialogOpen(true);
+                      }}
                       disabled={!access.canManage}
                       aria-label={t.common_edit}
                     >
@@ -3240,8 +3303,9 @@ function useStaffInvoicesPageContent() {
                           </NativeComboboxSelect>
                         </Field>
                         <Field label={text.paymentDate}>
-                          <Input
-                            type="date"
+                          <GuardedDateInput
+                            key={`payment-date:${detail.id}`}
+                            onRefusedChange={setPaymentDateRefused}
                             max={appDateKey()}
                             value={paymentForm.receivedOn}
                             onChange={(event) =>
@@ -3328,6 +3392,7 @@ function useStaffInvoicesPageContent() {
                             type="button"
                             disabled={
                               paymentBusy ||
+                              paymentDateRefused ||
                               !(parseMoneyInput(paymentForm.amountGross) > 0) ||
                               !paymentForm.receivedOn ||
                               // An overpayment is booked only when confirmed for this amount (R4-6).
@@ -3714,8 +3779,9 @@ function useStaffInvoicesPageContent() {
                           </NativeComboboxSelect>
                         </Field>
                         <Field label={text.refundDate}>
-                          <Input
-                            type="date"
+                          <GuardedDateInput
+                            key={`refund-date:${detail.id}`}
+                            onRefusedChange={setRefundDateRefused}
                             min={appDateKeyOf(detail.issued_at)}
                             max={appDateKey()}
                             value={refundForm.refundedOn}
@@ -3764,11 +3830,17 @@ function useStaffInvoicesPageContent() {
                             className={shellInputClassName}
                           />
                         </Field>
-                        <div className="flex items-end lg:justify-end">
+                        <div className="flex flex-col items-end justify-end gap-1.5">
+                          {refundProblem ? (
+                            <p className="text-right text-xs text-rose-700" aria-live="polite" data-testid="refund-problem">
+                              {refundProblem}
+                            </p>
+                          ) : null}
                           <Button
                             type="button"
                             disabled={
                               refundBusy ||
+                              refundDateRefused ||
                               !(parseMoneyInput(refundForm.amountGross) > 0) ||
                               parseMoneyInput(refundForm.amountGross) >
                                 Number(detail.refundable_cash_amount ?? 0) ||
@@ -4904,6 +4976,41 @@ function useStaffInvoicesPageContent() {
             </DialogHeader>
             <div className="space-y-4 rounded-xl p-4">
               {statusError ? <ShellBanner tone="error">{statusError}</ShellBanner> : null}
+              {stornoConfirmOpen && stornoNeedsConfirmation ? (
+                <div
+                  role="alert"
+                  className="space-y-3 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-100"
+                  data-testid="invoice-storno-confirmation"
+                >
+                  <p>
+                    {lang === "de"
+                      ? `Rechnung ${detail?.invoice_number ?? ""} wirklich stornieren? Es wird eine Stornorechnung mit eigener Nummer ausgestellt; die Stornierung lässt sich nicht zurücknehmen.`
+                      : `Отменить счёт ${detail?.invoice_number ?? ""}? Будет выпущен документ сторно с собственным номером; отмену нельзя отозвать.`}
+                  </p>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={statusBusy}
+                      onClick={() => setStornoConfirmOpen(false)}
+                    >
+                      {lang === "de" ? "Nicht stornieren" : "Не отменять"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      disabled={statusBusy}
+                      data-testid="invoice-storno-confirm"
+                      onClick={() => {
+                        setStornoConfirmOpen(false);
+                        void handleSaveStatus();
+                      }}
+                    >
+                      {lang === "de" ? "Ja, Rechnung stornieren" : "Да, отменить счёт"}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
               {statusConfirmation ? (
                 <div
                   role="alert"
@@ -4932,12 +5039,13 @@ function useStaffInvoicesPageContent() {
                 <Field label={t.users_status}>
                   <NativeComboboxSelect
                     value={statusForm.status}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      setStornoConfirmOpen(false);
                       setStatusForm((current) => ({
                         ...current,
                         status: event.target.value as InvoiceStatus,
-                      }))
-                    }
+                      }));
+                    }}
                     className={selectClassName}
                     disabled={!access.canManage}
                   >
@@ -5016,8 +5124,17 @@ function useStaffInvoicesPageContent() {
               <div className="flex justify-end">
                 <Button
                   type="button"
-                  disabled={statusBusy || !access.canManage || !statusDirty || Boolean(statusFormProblem)}
-                  onClick={() => void handleSaveStatus()}
+                  disabled={
+                    statusBusy || !access.canManage || !statusDirty || Boolean(statusFormProblem)
+                    || (stornoConfirmOpen && stornoNeedsConfirmation)
+                  }
+                  onClick={() => {
+                    if (stornoNeedsConfirmation) {
+                      setStornoConfirmOpen(true);
+                      return;
+                    }
+                    void handleSaveStatus();
+                  }}
                 >
                   {statusBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
                   {text.saveInvoice}
@@ -5199,6 +5316,18 @@ function useStaffInvoicesPageContent() {
                     <option value="invoice_address">{text.payerRoleInvoiceAddress}</option>
                   </NativeComboboxSelect>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">{text.payerRoleHint}</p>
+                  {payerForm.payerRole === "invoice_address" ? (
+                    <p
+                      className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-200"
+                      data-testid="payer-invoice-address-hint"
+                    >
+                      {text.payerRoleInvoiceAddressHint.replace(
+                        "{party}",
+                        detail?.release_checks?.contracting_party?.debtor_name?.trim()
+                          || (lang === "de" ? "Patient/in bzw. vertragschließender Elternteil" : "пациент или заключивший договор родитель"),
+                      )}
+                    </p>
+                  ) : null}
                 </Field>
                 <Field label={t.revenue_invoices_contact_name}>
                   <Input

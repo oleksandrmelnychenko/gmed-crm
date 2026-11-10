@@ -2008,13 +2008,20 @@ function usePatientInvoicesTabContent({
       },
       {
         id: "amount_due",
-        label: lang === "de" ? "Noch zu zahlen" : "Требуется доплатить",
-        accessor: (item) => moneyNumeric(item.amount_due),
+        // The document's own open amount, as the invoice list and Billing show
+        // it; what is left after unapplied advances and overpayments stands
+        // below it (QA 2026-11-10, D-03: one invoice, one open amount).
+        label: lang === "de" ? "Offen" : "Открыто",
+        accessor: (item) => moneyNumeric(item.invoice_balance_due ?? item.amount_due),
         sortable: true,
         filterType: "number",
-        width: 155,
+        width: 175,
         render: (item) => {
-          const due = moneyNumeric(item.amount_due);
+          const open = item.invoice_balance_due ?? item.amount_due;
+          const due = moneyNumeric(open);
+          const credit = moneyNumeric(item.advance_credit) + moneyNumeric(item.credit_applied);
+          const netted = credit > 0 && due - moneyNumeric(item.amount_due) > 0.004;
+          const currency = item.currency ?? accountStatement?.currency;
           return (
             <span
               className={cn(
@@ -2022,9 +2029,14 @@ function usePatientInvoicesTabContent({
                 due > 0 ? "text-amber-700" : "text-foreground",
               )}
             >
-              {item.amount_due != null
-                ? formatMoney(item.amount_due, item.currency ?? accountStatement?.currency)
-                : "—"}
+              {open != null ? formatMoney(open, currency) : "—"}
+              {netted ? (
+                <span className="block font-sans text-[11px] font-normal leading-4 text-muted-foreground">
+                  {lang === "de"
+                    ? `nach Anzahlungen und Guthaben: ${formatMoney(item.amount_due, currency)}`
+                    : `с учётом авансов и переплат: ${formatMoney(item.amount_due, currency)}`}
+                </span>
+              ) : null}
             </span>
           );
         },

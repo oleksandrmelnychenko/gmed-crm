@@ -5730,6 +5730,44 @@ mod gwg_identity_copy_tests {
         ));
         assert!(!gwg_identity_copy_closed_to_role(Role::Concierge, None));
     }
+
+    /// Owner 2026-11-10 (QA D-15): Billing has no GwG data, so no proof of
+    /// the source of funds either; its identity scans stay open.
+    #[test]
+    fn billing_does_not_open_the_proofs_of_the_source_of_funds() {
+        use super::funds_evidence_closed_to_role;
+        for art in [
+            "self_funds_proof",
+            "payer_funds_proof",
+            "aml_asset_origin_evidence",
+            " self_funds_proof ",
+        ] {
+            assert!(
+                funds_evidence_closed_to_role(Role::Billing, Some(art)),
+                "{art}"
+            );
+            for role in [
+                Role::Ceo,
+                Role::PatientManager,
+                Role::CeoAssistant,
+                Role::Sales,
+            ] {
+                assert!(!funds_evidence_closed_to_role(role, Some(art)), "{art}");
+            }
+        }
+        for art in [
+            "passport_scan",
+            "identity",
+            "payer_identity",
+            "invoice_document",
+        ] {
+            assert!(
+                !funds_evidence_closed_to_role(Role::Billing, Some(art)),
+                "{art}"
+            );
+        }
+        assert!(!funds_evidence_closed_to_role(Role::Billing, None));
+    }
 }
 
 #[cfg(test)]
@@ -14962,14 +15000,24 @@ fn is_gwg_statement_row(row: &sqlx::postgres::PgRow) -> bool {
 /// Patient Manager and CEO Assistant keep their access; Billing keeps the
 /// identity document scans (owner decision 2026-10-06).
 pub(crate) fn consent_document_closed_to_role(role: Role, row: &sqlx::postgres::PgRow) -> bool {
+    let art = row.try_get::<Option<String>, _>("art").unwrap_or_default();
     (matches!(role, Role::Concierge | Role::Billing)
         && (is_consent_document_row(row) || is_gwg_statement_row(row)))
-        || gwg_identity_copy_closed_to_role(
-            role,
-            row.try_get::<Option<String>, _>("art")
-                .unwrap_or_default()
-                .as_deref(),
-        )
+        || gwg_identity_copy_closed_to_role(role, art.as_deref())
+        || funds_evidence_closed_to_role(role, art.as_deref())
+}
+
+/// The evidence of where a lead's or a payer's money comes from
+/// ([`AML_ASSET_ORIGIN_EVIDENCE_ARTS`]: the lead's own proof, the payer's
+/// proof, staff's upload in the due-diligence form) is GwG evidence, although
+/// it is filed under "finance". Billing has no GwG data: it neither lists,
+/// opens nor downloads these papers (owner 2026-11-10, QA D-15). The identity
+/// scans stay open to Billing (owner 2026-10-06).
+pub(crate) fn funds_evidence_closed_to_role(role: Role, art: Option<&str>) -> bool {
+    role == Role::Billing
+        && art
+            .map(str::trim)
+            .is_some_and(|art| AML_ASSET_ORIGIN_EVIDENCE_ARTS.contains(&art))
 }
 
 /// The identity copies of the payer and of a representative are GwG evidence
