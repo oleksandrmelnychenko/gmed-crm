@@ -2969,7 +2969,7 @@ test.describe("lead wizard UX", () => {
   test("wizard footer keeps navigation visible on mobile and supports keyboard tabs", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/leads");
-    await page.getByText("Ready Lead", { exact: true }).click();
+    await page.getByText("Lead Ready", { exact: true }).click();
     const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
     const footer = wizard.locator("footer");
     const masterTab = wizard.locator('[data-step="master_data"]');
@@ -3006,7 +3006,7 @@ test.describe("lead wizard UX", () => {
   test("wizard footer retries failed autosave without losing entered data", async ({ page }) => {
     const leadId = "00000000-0000-0000-0000-000000000902";
     await page.goto("/leads");
-    await page.getByRole("row").filter({ hasText: "Ready Lead" }).click();
+    await page.getByRole("row").filter({ hasText: "Lead Ready" }).click();
     const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
     await wizard.locator('[data-step="master_data"]').click();
     const footer = wizard.locator("footer");
@@ -3030,7 +3030,7 @@ test.describe("lead wizard UX", () => {
     await expect(footer.getByRole("alert")).toHaveCount(0);
     await wizard.getByRole("button", { name: "Schließen", exact: true }).click();
     await expect(wizard).toBeHidden();
-    await page.getByRole("table").getByText("Ready Lead", { exact: true }).click();
+    await page.getByRole("table").getByText("Lead Ready", { exact: true }).click();
     await wizard.locator('[data-step="master_data"]').click();
     await expect(firstName).toHaveValue("Retry Ready");
   });
@@ -3095,13 +3095,13 @@ test.describe("lead onboarding wizard", () => {
   }) => {
     await page.goto("/leads");
     const table = page.getByRole("table");
-    await expect(table.getByText("Blocked Lead")).toBeVisible();
-    await expect(table.getByText("Ready Lead")).toBeVisible();
+    await expect(table.getByText("Lead Blocked")).toBeVisible();
+    await expect(table.getByText("Lead Ready")).toBeVisible();
     // Repeat-intake and days-in-status columns now sit before it, so address the column by id.
     await expect(table.locator('[role="columnheader"][data-column-id="received_at"]')).toContainText("Eingegangen");
     const receivedAtCell = page
       .getByRole("row")
-      .filter({ hasText: "Ready Lead" })
+      .filter({ hasText: "Lead Ready" })
       .locator('[role="cell"][data-column-id="received_at"]');
     await expect(receivedAtCell).toContainText(/02\.04\.2026/);
     await expect(receivedAtCell).toContainText(/\d{2}:\d{2}/);
@@ -3116,7 +3116,7 @@ test.describe("lead onboarding wizard", () => {
     const leadId = "00000000-0000-0000-0000-000000000902";
     await page.goto("/leads");
 
-    const readyRow = page.getByRole("row").filter({ hasText: "Ready Lead" });
+    const readyRow = page.getByRole("row").filter({ hasText: "Lead Ready" });
     await readyRow.click();
 
     const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
@@ -3180,7 +3180,7 @@ test.describe("lead onboarding wizard", () => {
   test("wizard header archives a lead that does not belong to the service", async ({ page }) => {
     const leadId = "00000000-0000-0000-0000-000000000902";
     await page.goto("/leads");
-    await page.getByRole("row").filter({ hasText: "Ready Lead" }).click();
+    await page.getByRole("row").filter({ hasText: "Lead Ready" }).click();
 
     const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
     await wizard.getByRole("button", { name: "Lead archivieren" }).click();
@@ -3207,7 +3207,7 @@ test.describe("lead onboarding wizard", () => {
     const leadId = "00000000-0000-0000-0000-000000000901";
     await page.goto("/leads");
 
-    const intakeRow = page.getByRole("row").filter({ hasText: "Blocked Lead" });
+    const intakeRow = page.getByRole("row").filter({ hasText: "Lead Blocked" });
     await intakeRow.click();
     const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
     await expect(wizard).toBeVisible();
@@ -3240,7 +3240,7 @@ test.describe("lead onboarding wizard", () => {
 
     try {
       await page.goto("/leads");
-      await page.getByRole("row").filter({ hasText: "Ready Lead" }).click();
+      await page.getByRole("row").filter({ hasText: "Lead Ready" }).click();
 
       const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
       await expect(wizard).toBeVisible();
@@ -3440,7 +3440,7 @@ test.describe("lead onboarding wizard", () => {
 
     await page.goto("/leads");
     await page.getByRole("button", { name: "Sprache wechseln" }).click();
-    await page.getByRole("row").filter({ hasText: "Ready Lead" }).click();
+    await page.getByRole("row").filter({ hasText: "Lead Ready" }).click();
     const russianWizard = page.getByRole("dialog", { name: "Оформление обращения" });
     await expect(russianWizard).toBeVisible();
     await russianWizard.getByRole("tab", { name: "Создание пациента" }).click();
@@ -4059,7 +4059,7 @@ test.describe("lead onboarding wizard", () => {
 
     await wizard.getByRole("button", { name: "Schließen" }).click();
     await expect(wizard).toBeHidden();
-    await page.getByRole("row").filter({ hasText: "Ready Lead" }).click();
+    await page.getByRole("row").filter({ hasText: "Lead Ready" }).click();
     const reopenedWizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
     await reopenedWizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" })
       .getByRole("tab", { name: /Medizinische Merkmale/i })
@@ -4073,7 +4073,7 @@ test.describe("lead onboarding wizard", () => {
   test("wizard uses clear Russian copy across all stages", async ({ page }) => {
     await page.goto("/leads");
     await page.getByRole("button", { name: "Sprache wechseln" }).click();
-    await page.getByRole("row").filter({ hasText: "Ready Lead" }).click();
+    await page.getByRole("row").filter({ hasText: "Lead Ready" }).click();
 
     const wizard = page.getByRole("dialog", { name: "Оформление обращения" });
     const navigation = wizard.getByRole("navigation", { name: "Этапы оформления" });
@@ -4408,7 +4408,7 @@ test.describe("responsive staff workspace", () => {
     const leadId = "00000000-0000-0000-0000-000000000902";
     await page.goto("/leads");
     // At phone width the leads list renders as cards rather than table rows.
-    const readyLeadCell = page.getByText("Ready Lead", { exact: true }).filter({ visible: true });
+    const readyLeadCell = page.getByText("Lead Ready", { exact: true }).filter({ visible: true });
     await readyLeadCell.click();
 
     const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });

@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { deletedLeadLabel, isAnonymizedLead, leadDisplayName, leadSortName } from "./lead-display-name";
+import { deletedLeadLabel, isAnonymizedLead, leadDisplayName, leadListName, leadSortName } from "./lead-display-name";
+
+describe("leadListName", () => {
+  // Owner 2026-11-10: the list shows the last name first, as it sorts.
+  it("puts the last name first in a row of the list", () => {
+    const tx = (text: string) => text;
+    expect(leadListName({ first_name: "Anna", last_name: "MusterA" }, tx)).toBe("MusterA Anna");
+    expect(leadListName({ first_name: "Anna", last_name: "" }, tx)).toBe("Anna");
+    expect(leadListName({ first_name: "Deleted", last_name: "Lead", qualification_status: "deleted" }, tx)).toBe("Удалённый лид");
+  });
+});
 
 const ru = (text: string) => text;
 const de = (_ru: string, text: string) => text;

@@ -41,6 +41,14 @@ export function leadDisplayName(lead: NamedLead, tx: Tx): string {
 }
 
 /**
+ * The name in a row of the leads list (owner 2026-11-10): the last name
+ * first, «Фамилия Имя», so the column reads in the order it sorts by.
+ */
+export function leadListName(lead: NamedLead, tx: Tx): string {
+  return leadSortName(lead, tx);
+}
+
+/**
  * The value the «Лиды» column sorts by (QA 2026-10-25, N-4): last name, then
  * first name, so a locale compare orders the list like a register.
  */

@@ -183,7 +183,7 @@ import {
   leadPurgedTitle,
   purgedLeadIds,
 } from "./model/lead-time-events";
-import { deletedLeadLabel, isAnonymizedLead, leadDisplayName, leadSortName } from "./model/lead-display-name";
+import { deletedLeadLabel, isAnonymizedLead, leadDisplayName, leadListName, leadSortName } from "./model/lead-display-name";
 import {
   LEAD_FAILURE_REASONS,
   LEAD_FAILURE_REASON_MAX_LENGTH,
@@ -784,7 +784,8 @@ function useLeadsPageContent() {
       {
         id: "lead",
         label: t.leads_title,
-        accessor: (row) => leadDisplayName(row, tx),
+        // Last name first, as the column sorts (owner 2026-11-10).
+        accessor: (row) => leadListName(row, tx),
         // Last name, then first name (QA 2026-10-25, N-4).
         sortAccessor: (row) => leadSortName(row, tx),
         filterType: "text",
@@ -809,7 +810,7 @@ function useLeadsPageContent() {
                 />
               ) : null}
               <span className="truncate text-[13px] font-medium text-foreground">
-                {leadDisplayName(row, tx)}
+                {leadListName(row, tx)}
               </span>
               {row.portal_account ? (
                 <span
