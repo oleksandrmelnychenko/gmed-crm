@@ -759,6 +759,8 @@ async function setup(
     if (path === "/me/profile") {
       return route.fulfill({ json: { id: "lead-user", email: "anna.muster@example.com", name: "Anna Muster", role: "patient", phone: null, preferred_language: accountLanguage } });
     }
+    // The saved theme belongs to the account: a lead login may read and save it.
+    if (path === "/me/appearance") return route.fulfill({ json: [] });
     if (mode === "lead" && (path.startsWith("/me/") || path.startsWith("/notifications"))) {
       // The server closes the rest of the portal to a lead login.
       calls.blocked.push(path);

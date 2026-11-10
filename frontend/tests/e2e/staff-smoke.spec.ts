@@ -3410,8 +3410,8 @@ test.describe("lead onboarding wizard", () => {
     await expect(wizard.getByText("Daten gespeichert", { exact: true })).toBeVisible();
     await wizard.getByRole("button", { name: "Schließen", exact: true }).click();
     await expect(wizard).toBeHidden();
-    await expect(page.getByRole("table").getByText("Neue Person", { exact: true })).toBeVisible();
-    await page.getByRole("table").getByText("Neue Person", { exact: true }).click();
+    await expect(page.getByRole("table").getByText("Person Neue", { exact: true })).toBeVisible();
+    await page.getByRole("table").getByText("Person Neue", { exact: true }).click();
     await expect(wizard).toBeVisible();
     await wizard.locator('[data-step="master_data"]').click();
     await expect(wizard.locator("#lead-wizard-first-name")).toHaveValue("Neue");

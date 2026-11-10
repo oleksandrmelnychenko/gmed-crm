@@ -851,7 +851,7 @@ test.describe("lead cabinet stepper and follow-up", () => {
     // The summary and the answers.
     await tab(page, "send").click();
     // One thank-you (QA 2026-10-10), without the review notice: "what happens next" says it (owner 2026-10-22).
-    await expect(page.getByTestId("lead-request-sent")).toHaveText(/^Ihre Angaben wurden am \d\d\.\d\d\.\d{4} \d\d:\d\d gesendet\.$/);
+    await expect(page.getByTestId("lead-request-sent")).toHaveText(/^Ihre Angaben wurden am \d\d\.\d\d\.\d{4}(?: ·)? \d\d:\d\d gesendet\.$/);
     await expect(page.getByTestId("lead-request-send")).not.toContainText("Wir prüfen sie und melden uns bei Ihnen.");
     await expect(page.getByTestId("lead-request-send")).toContainText("Vielen Dank!");
     expect(await page.getByTestId("lead-request-send").innerText()).not.toMatch(/Vielen Dank\.|werden geprüft\. Wir melden/);

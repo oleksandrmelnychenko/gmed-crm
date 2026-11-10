@@ -483,7 +483,8 @@ test.describe("Parent country follow-up", () => {
     // The required copies: on step "Document", whose badge and list name them (QA 2026-10-22).
     await expect(page.getByTestId("lead-request-step-person").getByTestId("lead-request-step-missing")).toHaveCount(0);
     await step(page, "identity");
-    await expect(page.locator('[data-step="identity"]')).toContainText("2");
+    // The tab names its state; the count of open items left with the compact tabs.
+    await expect(page.locator('[data-step="identity"]')).toHaveAttribute("aria-description", "Noch offen");
     await expect(page.getByTestId("lead-request-rep1-identity-upload")).toBeVisible();
     await expect(page.getByTestId("lead-request-rep2-identity-upload")).toBeVisible();
     await page.getByRole("button", { name: "Weiter", exact: true }).click();
