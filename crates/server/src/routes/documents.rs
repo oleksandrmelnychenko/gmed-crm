@@ -38438,6 +38438,56 @@ async fn revoke_document_from_patient_portal(
         return revoke_failed(e);
     }
 
+    // The patient's logins that could open the document are told that it is
+    // no longer in the portal (owner decision 2026-11-10); the portal words
+    // the notice from `kind` and `params.document_name`.
+    let revoked_login_ids: Vec<Uuid> = revoked_rows
+        .iter()
+        .filter_map(|row| {
+            row.try_get::<Option<Uuid>, _>("shared_with_user_id")
+                .ok()
+                .flatten()
+        })
+        .collect();
+    match sqlx::query(
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+           SELECT u.id, 'document_release_revoked', 'Document withdrawn',
+                  'A document is no longer available in your portal.', 'document', $1, $3
+           FROM users u
+           WHERE u.id = ANY($2) AND u.is_active = true AND u.role = 'patient'
+           RETURNING id, user_id"#,
+    )
+    .bind(id)
+    .bind(&revoked_login_ids)
+    .bind(json!({
+        "document_name": row.try_get::<String, _>("auto_name").unwrap_or_default(),
+    }))
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(notified) => {
+            for notice in notified {
+                if let (Ok(notification_id), Ok(user_id)) = (
+                    notice.try_get::<Uuid, _>("id"),
+                    notice.try_get::<Uuid, _>("user_id"),
+                ) {
+                    crate::realtime::publish_notification_event(
+                        &state,
+                        user_id,
+                        "notification.created",
+                        Some(notification_id),
+                        json!({ "entity_type": "document", "entity_id": id }),
+                    )
+                    .await;
+                }
+            }
+        }
+        // The release is revoked; the audit records it.
+        Err(e) => {
+            tracing::error!(error = %e, document_id = %id, "notify patient of revoked document")
+        }
+    }
+
     crate::realtime::publish_document_event(
         &state,
         Some(auth.user_id),

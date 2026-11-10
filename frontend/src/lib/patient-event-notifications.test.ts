@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 import { localizedNotificationCopy, notificationHrefForRole, type Notification } from "@/components/topbar-data";
 
 import { notificationCopyFromFacts } from "./notification-copy";
-import { patientEventFamily, patientEventNotificationCopy } from "./patient-event-notifications";
+import {
+  FIXED_PATIENT_NOTICE_KINDS,
+  patientEventFamily,
+  patientEventNotificationCopy,
+} from "./patient-event-notifications";
 
 function notice(
   kind: string,
@@ -113,6 +117,51 @@ describe("patient notices about visits, services and money (owner decision 2026-
     expect(notificationHrefForRole(notice("appointment_moved", null, null), "patient")).toBe("/appointments");
     expect(notificationHrefForRole(notice("privacy_request_completed", "privacy_request", null), "patient")).toBe("/privacy");
     expect(notificationHrefForRole(notice("privacy_erasure_completed", null, null), "patient")).toBeNull();
+  });
+});
+
+describe("documents, recommendations and subscriptions (owner decision 2026-11-10)", () => {
+  it("words every fixed code in Russian and German", () => {
+    expect(FIXED_PATIENT_NOTICE_KINDS.sort()).toEqual([
+      "document_release_revoked",
+      "recommendation_updated",
+      "recommendation_withdrawn",
+      "subscription_assigned",
+      "subscription_ended",
+      "subscription_paused",
+      "subscription_resumed",
+    ]);
+    for (const kind of FIXED_PATIENT_NOTICE_KINDS) {
+      const item = notice(kind, null, null);
+      const ru = patientEventNotificationCopy(item, "ru");
+      const de = patientEventNotificationCopy(item, "de");
+      expect(ru?.title, kind).toMatch(/[А-Яа-я]/);
+      expect(ru?.body, kind).toMatch(/[А-Яа-я]/);
+      expect(de?.title, kind).not.toMatch(/[А-Яа-я]/);
+      expect(de?.title, kind).not.toBe("English fallback title");
+    }
+  });
+
+  it("names the document, the recommendation or the subscription", () => {
+    expect(
+      patientEventNotificationCopy(notice("document_release_revoked", "document", { document_name: "Befund MRT" }), "ru"),
+    ).toEqual({ title: "Документ отозван", body: "Befund MRT. Документ больше не доступен в портале." });
+    expect(
+      patientEventNotificationCopy(notice("recommendation_withdrawn", "recommendation", { title: "ЭКГ" }), "de")?.body,
+    ).toBe("ЭКГ. Ihr Betreuungsteam hat die Empfehlung zurückgezogen.");
+    expect(
+      patientEventNotificationCopy(notice("subscription_paused", "service_package", { package_name: "GMED One" }), "ru")?.title,
+    ).toBe("Подписка приостановлена");
+  });
+
+  it("opens the documents, recommendations or subscriptions page and stays out of staff notices", () => {
+    expect(notificationHrefForRole(notice("document_release_revoked", "document", null), "patient")).toBe("/documents");
+    expect(notificationHrefForRole(notice("recommendation_updated", "recommendation", null), "patient")).toBe("/recommendations");
+    expect(notificationHrefForRole(notice("subscription_ended", "service_package", null), "patient")).toBe("/subscriptions");
+    expect(localizedNotificationCopy(notice("subscription_ended", "service_package", null), "ru", "patient").title)
+      .toBe("Подписка завершена");
+    expect(localizedNotificationCopy(notice("subscription_ended", "service_package", null), "ru", "ceo").title)
+      .toBe("English fallback title");
   });
 });
 

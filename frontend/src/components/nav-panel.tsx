@@ -23,7 +23,12 @@ import {
 import { cn } from "@/lib/utils";
 import { LeadPortalPlanDialog } from "@/components/lead-portal-plan-dialog";
 import { PortalSubscriptionLock } from "@/components/portal-subscription-lock";
-import { hasPortalSubscription, isBasicPortalRoute } from "@/lib/portal-subscription";
+import {
+  hasPortalSubscription,
+  isBasicPortalRoute,
+  isPausedPortalRoute,
+  isPortalSubscriptionPaused,
+} from "@/lib/portal-subscription";
 import { usePortalPatientId } from "@/lib/portal-patient-context";
 import { useLocalStorage } from "@/components/data-table/use-local-storage";
 
@@ -93,6 +98,8 @@ export function NavPanel() {
   const logoutLabel = shellText?.signOut ?? tr.nav_logout;
   const patientId = usePortalPatientId(user?.id);
   const subscribed = hasPortalSubscription(user, patientId);
+  // A paused subscription keeps agreed visits, the subscriptions page and the chat.
+  const subscriptionPaused = isPortalSubscriptionPaused(user ?? null, patientId);
   // An ambiguous family login first opens the patient chooser in the shell;
   // no service module mounts until a person is selected.
   const needsPatientSelection = (user?.patients?.length ?? 0) > 1
@@ -106,7 +113,7 @@ export function NavPanel() {
   // The patient's "Chat" entry counts unread answers like the staff one
   // (global QA 2026-11-10); the lead cabinet and a portal without an open
   // chat (no subscription, person not chosen yet) have no chat to count.
-  const patientChatOpen = isPatientPortal && !isLeadPortal && subscribed && !needsPatientSelection;
+  const patientChatOpen = isPatientPortal && !isLeadPortal && (subscribed || subscriptionPaused) && !needsPatientSelection;
   const counters = useNavCounters(
     Boolean(user) && (!isPatientPortal || patientChatOpen),
     Boolean(user && !isPatientPortal && canAccessStaffRoute(user.role, "/leads", user.capabilities)),
@@ -121,7 +128,7 @@ export function NavPanel() {
           ...listLeadPortalNavItems().filter((item) => item.id === "account" || item.id === "legal").map(toPatientNavItem),
         ].map(withShellLabel)
       : listPatientPortalNavItems({ leadRequests: Boolean(user?.lead_portal?.requests) })
-        .map((item) => ({ ...toPatientNavItem(item), locked: !needsPatientSelection && !subscribed && !isBasicPortalRoute(item.to) }))
+        .map((item) => ({ ...toPatientNavItem(item), locked: !needsPatientSelection && !subscribed && !isBasicPortalRoute(item.to) && !(subscriptionPaused && isPausedPortalRoute(item.to)) }))
     : [];
   const staffNavBySection =
     user && user.role !== "patient"
@@ -222,7 +229,7 @@ export function NavPanel() {
       features={lockedModule.id === LEAD_PORTAL_AFTER_REQUEST ? leadPortalFeatureLabels(cabinetLang) : undefined}
       onClose={() => setLockedModule(null)}
     /> : null}
-    {!isLeadPortal && lockedModule ? <PortalSubscriptionLock label={lockedModule.label} onClose={() => setLockedModule(null)} /> : null}
+    {!isLeadPortal && lockedModule ? <PortalSubscriptionLock paused={subscriptionPaused} label={lockedModule.label} onClose={() => setLockedModule(null)} /> : null}
     </>
   );
 }

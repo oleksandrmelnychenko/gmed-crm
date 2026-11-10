@@ -256,3 +256,88 @@ async fn a_family_login_cannot_share_a_subscription_between_patient_contexts() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+/// Owner decision 2026-11-10: a paused subscription closes new actions but
+/// neither hides what is agreed nor cuts the contact. The patient reads the
+/// own visits and subscriptions and chats; a new request stays refused.
+#[tokio::test]
+async fn a_paused_subscription_keeps_agreed_visits_and_the_chat_open() {
+    let Some(ctx) = support::suite_context(SECRET).await else {
+        return;
+    };
+    let pool = &ctx.pool;
+    let patient_id = patient(pool, ctx.admin_id).await;
+    let user_id = user(pool).await;
+    assign(pool, patient_id, user_id, ctx.admin_id, "manual").await;
+    let token = bearer(user_id, "patient");
+    let (assigned, _order) = subscription(pool, patient_id, ctx.admin_id).await;
+    sqlx::query("UPDATE patient_service_packages SET status='paused' WHERE id=$1")
+        .bind(assigned)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let (status, me) = request(&ctx.app, &token, "/me", Some(patient_id)).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    let linked = &me["patients"][0];
+    assert_eq!(linked["has_active_subscription"], false, "{me}");
+    assert_eq!(linked["subscription_paused"], true, "{me}");
+
+    for path in [
+        "/me/appointments",
+        "/me/appointment-requests",
+        "/me/subscriptions",
+        "/messages/conversations",
+        "/messages/allowed-peers",
+        "/messages/unread-total",
+        "/notifications",
+    ] {
+        let (status, body) = request(&ctx.app, &token, path, Some(patient_id)).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
+    }
+    for path in ["/me/recommendations", "/me/concierge-services"] {
+        let (status, body) = request(&ctx.app, &token, path, Some(patient_id)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
+        assert_eq!(body["error"], "subscription_required");
+    }
+
+    // A new appointment request is a new action: refused.
+    let response = ctx
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/me/appointment-requests")
+                .header("Authorization", &token)
+                .header("X-Patient-Id", patient_id.to_string())
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "appointment_type": "medical",
+                        "reason": "Synthetic request"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let body: Value = serde_json::from_slice(&body).unwrap_or(json!(null));
+    assert_eq!(body["error"], "subscription_required");
+
+    // Without the pause (cancelled) the same read routes close again.
+    sqlx::query("UPDATE patient_service_packages SET status='cancelled' WHERE id=$1")
+        .bind(assigned)
+        .execute(pool)
+        .await
+        .unwrap();
+    for path in ["/me/appointments", "/messages/conversations"] {
+        let (status, body) = request(&ctx.app, &token, path, Some(patient_id)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
+    }
+}

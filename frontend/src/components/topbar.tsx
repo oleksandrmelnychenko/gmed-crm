@@ -14,7 +14,7 @@ import {
   Users,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { hasPortalSubscription } from "@/lib/portal-subscription";
+import { hasPortalSubscription, isPortalSubscriptionPaused } from "@/lib/portal-subscription";
 import { usePortalPatientId } from "@/lib/portal-patient-context";
 import { clearApiCache } from "@/lib/api";
 import { useNavState } from "@/lib/nav-state";
@@ -175,7 +175,9 @@ export function Topbar() {
   const leadShell = leadCabinet ? leadShellText(cabinetLang) : null;
   const portalName = leadShell?.portalName ?? t.portal_dashboard_patient_portal;
   const portalPatientId = usePortalPatientId(user?.id);
-  const notificationsLocked = leadCabinet || !hasPortalSubscription(user, portalPatientId);
+  // A paused subscription keeps the notifications (and the chat they point to).
+  const notificationsLocked = leadCabinet
+    || (!hasPortalSubscription(user, portalPatientId) && !isPortalSubscriptionPaused(user ?? null, portalPatientId));
   const showLeadShortcut = Boolean(
     user && !isPatientPortal && canAccessStaffRoute(user.role, "/leads", user.capabilities),
   );

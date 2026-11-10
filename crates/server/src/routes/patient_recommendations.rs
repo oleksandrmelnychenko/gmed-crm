@@ -626,7 +626,24 @@ async fn update_patient_recommendation(
     .await;
 
     match load_recommendation_row(&state, recommendation_id).await {
-        Ok(Some(row)) => Json(recommendation_json(&row)).into_response(),
+        Ok(Some(row)) => {
+            // One notice per save, and only for what the patient can see
+            // (owner decision 2026-11-10).
+            if let Some((kind, title, body)) = patient_change_notice(&current, &row) {
+                let recommendation_title = row.try_get::<String, _>("title").unwrap_or_default();
+                notify_patient_users(
+                    &state,
+                    patient_id,
+                    recommendation_id,
+                    kind,
+                    title,
+                    body,
+                    &json!({ "title": recommendation_title }),
+                )
+                .await;
+            }
+            Json(recommendation_json(&row)).into_response()
+        }
         Ok(None) => err(StatusCode::NOT_FOUND, "Recommendation not found"),
         Err(resp) => resp,
     }
@@ -654,15 +671,16 @@ async fn delete_patient_recommendation(
         return resp;
     }
 
-    let result = match sqlx::query(
-        "DELETE FROM patient_recommendations WHERE id = $1 AND patient_id = $2",
+    let deleted = match sqlx::query(
+        "DELETE FROM patient_recommendations WHERE id = $1 AND patient_id = $2
+         RETURNING title, portal_visible",
     )
     .bind(recommendation_id)
     .bind(patient_id)
-    .execute(&state.db)
+    .fetch_optional(&state.db)
     .await
     {
-        Ok(result) => result,
+        Ok(deleted) => deleted,
         Err(e) => {
             tracing::error!(error = %e, patient_id = %patient_id, recommendation_id = %recommendation_id, "delete recommendation");
             return err(
@@ -672,8 +690,25 @@ async fn delete_patient_recommendation(
         }
     };
 
-    if result.rows_affected() == 0 {
+    let Some(deleted) = deleted else {
         return err(StatusCode::NOT_FOUND, "Recommendation not found");
+    };
+    // A recommendation the patient saw in the portal is gone: told once.
+    if deleted
+        .try_get::<bool, _>("portal_visible")
+        .unwrap_or(false)
+    {
+        let recommendation_title = deleted.try_get::<String, _>("title").unwrap_or_default();
+        notify_patient_users(
+            &state,
+            patient_id,
+            recommendation_id,
+            "recommendation_withdrawn",
+            "Recommendation withdrawn",
+            "A recommendation was withdrawn by your care team.",
+            &json!({ "title": recommendation_title }),
+        )
+        .await;
     }
 
     state.audit_sender.try_send(audit::domain_event(
@@ -1270,6 +1305,63 @@ async fn load_portal_recommendation_row(
             "Failed to load recommendation",
         )
     })
+}
+
+/// What a staff save means for the patient's portal, as the notice to send
+/// (`kind`, English fallback title and body), or `None` when the patient sees
+/// no difference: an internal note, the outcome tracking, the priority or a
+/// change to a recommendation that is not in the portal.
+fn patient_change_notice(
+    before: &sqlx::postgres::PgRow,
+    after: &sqlx::postgres::PgRow,
+) -> Option<(&'static str, &'static str, &'static str)> {
+    const WITHDRAWN: (&str, &str, &str) = (
+        "recommendation_withdrawn",
+        "Recommendation withdrawn",
+        "A recommendation was withdrawn by your care team.",
+    );
+    let visible =
+        |row: &sqlx::postgres::PgRow| row.try_get::<bool, _>("portal_visible").unwrap_or(false);
+    let status =
+        |row: &sqlx::postgres::PgRow| row.try_get::<String, _>("status").unwrap_or_default();
+    let text = |row: &sqlx::postgres::PgRow, column: &str| {
+        row.try_get::<Option<String>, _>(column).unwrap_or_default()
+    };
+    let due = |row: &sqlx::postgres::PgRow| {
+        row.try_get::<Option<DateTime<Utc>>, _>("due_at")
+            .unwrap_or_default()
+    };
+
+    match (visible(before), visible(after)) {
+        (false, false) => None,
+        (false, true) => Some((
+            "recommendation",
+            "New recommendation",
+            "A recommendation is available in your portal.",
+        )),
+        (true, false) => Some(WITHDRAWN),
+        (true, true) => {
+            let now = status(after);
+            if matches!(now.as_str(), "cancelled" | "superseded") && status(before) != now {
+                return Some(WITHDRAWN);
+            }
+            let changed = [
+                "title",
+                "description",
+                "recommendation_type",
+                "valid_from",
+                "valid_to",
+            ]
+            .iter()
+            .any(|column| text(before, column) != text(after, column))
+                || due(before) != due(after);
+            changed.then_some((
+                "recommendation_updated",
+                "Recommendation changed",
+                "Your care team changed a recommendation.",
+            ))
+        }
+    }
 }
 
 /// Staff-only fields of a recommendation: the internal note, the staff's

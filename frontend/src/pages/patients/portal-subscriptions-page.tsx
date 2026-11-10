@@ -13,7 +13,7 @@ import {
   type StatusTone,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { useLang, type Lang } from "@/lib/i18n";
+import { uiText, useLang, type Lang } from "@/lib/i18n";
 import { pluralWord, type PluralWords } from "@/lib/i18n/plural";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -182,6 +182,12 @@ export function PatientSubscriptionsPage() {
       />
 
       {error ? <Banner tone="error">{error}</Banner> : null}
+      {subscriptions.some((item) => item.status === "paused") ? (
+        // Said in plain words on the page that stays open during a pause.
+        <Banner tone="warning" withIcon>
+          <span data-testid="portal-subscriptions-paused">{uiText("portal_paused_subscriptions_note", lang)}</span>
+        </Banner>
+      ) : null}
 
       {subscriptions.length === 0 ? (
         <Section title={t.portal_subscriptions_title} icon={Layers}>

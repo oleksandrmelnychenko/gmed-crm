@@ -18,7 +18,12 @@ import { resolveWorkspaceRailKind } from "./workspace-rail-resolver";
 import { TwoFactorReminder } from "@/components/two-factor-reminder";
 import { clearApiCache } from "@/lib/api";
 import { selectPortalPatient, usePortalPatientId } from "@/lib/portal-patient-context";
-import { hasPortalSubscription, isBasicPortalRoute } from "@/lib/portal-subscription";
+import {
+  hasPortalSubscription,
+  isBasicPortalRoute,
+  isPausedPortalRoute,
+  isPortalSubscriptionPaused,
+} from "@/lib/portal-subscription";
 import { PortalSubscriptionLock } from "@/components/portal-subscription-lock";
 
 export function AuthenticatedAppShell() {
@@ -78,8 +83,11 @@ function AuthenticatedAppShellContent() {
     (path) => location.pathname === path || location.pathname.startsWith(`${path}/`),
   );
   const needsPatient = !accountPage && patients.length > 1 && !patients.some((patient) => patient.id === patientId);
+  // A pause keeps the agreed visits, the subscriptions page and the chat open.
+  const subscriptionPaused = isPortalSubscriptionPaused(user ?? null, patientId);
   const subscriptionLocked = user?.role === "patient" && !isLeadPortalUser(user)
-    && !hasPortalSubscription(user, patientId) && !isBasicPortalRoute(location.pathname);
+    && !hasPortalSubscription(user, patientId) && !isBasicPortalRoute(location.pathname)
+    && !(subscriptionPaused && isPausedPortalRoute(location.pathname));
 
   if (
     user &&
@@ -128,7 +136,7 @@ function AuthenticatedAppShellContent() {
         <p className="p-6 text-muted-foreground">
           {lang === "de" ? "Wählen Sie, für wen Sie das Portal öffnen möchten." : "Выберите, для кого открыть кабинет."}
         </p>
-      ) : subscriptionLocked ? (refreshingPick ? null : <PortalSubscriptionLock />) : <Outlet />}
+      ) : subscriptionLocked ? (refreshingPick ? null : <PortalSubscriptionLock paused={subscriptionPaused} />) : <Outlet />}
     </AppShellFrame>
   );
 }

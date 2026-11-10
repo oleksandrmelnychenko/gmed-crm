@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-export type PortalPatient = { id: string; name: string; patient_number: string; access_kind?: "self" | "guardian"; has_active_subscription?: boolean };
+export type PortalPatient = { id: string; name: string; patient_number: string; access_kind?: "self" | "guardian"; has_active_subscription?: boolean; /** Staff paused the subscription: new actions closed, agreed visits and the chat stay. */ subscription_paused?: boolean };
 type Selection = { userId: string; patientId: string };
 const STORAGE_KEY = "gmed-portal-patient";
 const listeners = new Set<() => void>();

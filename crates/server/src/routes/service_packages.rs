@@ -2267,6 +2267,64 @@ const INSERT_PATIENT_PACKAGE_SQL: &str = r#"INSERT INTO patient_service_packages
              )
            RETURNING id"#;
 
+/// Tells the patient's active portal logins about their subscription (owner
+/// decision 2026-11-10): assigned, paused, resumed or ended. The portal words
+/// the notice from `kind` and `params.package_name`
+/// (`frontend/src/lib/patient-event-notifications.ts`); `title`/`body` are
+/// the English fallback. Only for a subscription the portal shows.
+async fn notify_patient_of_subscription(
+    state: &AppState,
+    patient_id: Uuid,
+    package_id: Uuid,
+    kind: &str,
+    title: &str,
+    body: &str,
+) {
+    let rows = sqlx::query(
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+           SELECT pa.user_id, $3, $4, $5, 'service_package', $2,
+                  jsonb_build_object(
+                      'package_name', (SELECT name FROM service_packages WHERE id = $2)
+                  )
+           FROM patient_assignments pa
+           JOIN users u ON u.id = pa.user_id
+           WHERE pa.patient_id = $1
+             AND pa.revoked_at IS NULL
+             AND u.is_active = true
+             AND u.role = 'patient'
+           RETURNING id, user_id"#,
+    )
+    .bind(patient_id)
+    .bind(package_id)
+    .bind(kind)
+    .bind(title)
+    .bind(body)
+    .fetch_all(&state.db)
+    .await;
+    let rows = match rows {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, kind, "notify patient of subscription");
+            return;
+        }
+    };
+    for row in rows {
+        if let (Ok(notification_id), Ok(user_id)) = (
+            row.try_get::<Uuid, _>("id"),
+            row.try_get::<Uuid, _>("user_id"),
+        ) {
+            crate::realtime::publish_notification_event(
+                state,
+                user_id,
+                "notification.created",
+                Some(notification_id),
+                serde_json::json!({ "entity_type": "service_package", "entity_id": package_id }),
+            )
+            .await;
+        }
+    }
+}
+
 async fn assign_patient_service_package(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -2318,6 +2376,22 @@ async fn assign_patient_service_package(
         }
     }
 
+    // The patient is told about a subscription the portal shows: an active
+    // one as assigned, one that starts paused as paused; a draft is not shown.
+    let patient_notice = match (body.portal_visible.unwrap_or(true), status.as_str()) {
+        (true, "active") => Some((
+            "subscription_assigned",
+            "Subscription assigned",
+            "A subscription was added to your portal.",
+        )),
+        (true, "paused") => Some((
+            "subscription_paused",
+            "Subscription paused",
+            "Your subscription is paused.",
+        )),
+        _ => None,
+    };
+
     match sqlx::query(INSERT_PATIENT_PACKAGE_SQL)
         .bind(patient_id)
         .bind(body.order_id)
@@ -2350,6 +2424,17 @@ async fn assign_patient_service_package(
                 }),
             )
             .await;
+            if let Some((kind, title, text)) = patient_notice {
+                notify_patient_of_subscription(
+                    &state,
+                    patient_id,
+                    body.package_id,
+                    kind,
+                    title,
+                    text,
+                )
+                .await;
+            }
             Json(serde_json::json!({
                 "id": patient_service_package_id,
                 "patient_id": patient_id,
@@ -3191,8 +3276,9 @@ async fn set_order_subscription(
         }
     }
 
-    // `false`: the order is closed. Read under the row lock.
-    let result: Result<bool, sqlx::Error> = async {
+    // `None`: the order is closed. Read under the row lock. Otherwise whether
+    // the tariff changed and which packages it replaced.
+    let result: Result<Option<(bool, Vec<Uuid>)>, sqlx::Error> = async {
         let mut tx = state.db.begin().await?;
         let status: String =
             sqlx::query_scalar("SELECT status FROM orders WHERE id = $1 FOR UPDATE")
@@ -3200,7 +3286,7 @@ async fn set_order_subscription(
                 .fetch_one(&mut *tx)
                 .await?;
         if matches!(status.as_str(), "completed" | "cancelled") {
-            return Ok(false);
+            return Ok(None);
         }
         let current = sqlx::query_scalar::<_, Uuid>(
             r#"SELECT package_id FROM patient_service_packages
@@ -3215,7 +3301,7 @@ async fn set_order_subscription(
             && current[0] == package_id
         {
             tx.commit().await?;
-            return Ok(true);
+            return Ok(Some((false, current)));
         }
         sqlx::query(
             r#"UPDATE patient_service_packages
@@ -3261,18 +3347,42 @@ async fn set_order_subscription(
         )
         .await?;
         tx.commit().await?;
-        Ok(true)
+        Ok(Some((true, current)))
     }
     .await;
-    match result {
-        Ok(true) => {}
-        Ok(false) => return crate::routes::orders::order_closed_for_new_services(),
+    let (changed, replaced) = match result {
+        Ok(Some(outcome)) => outcome,
+        Ok(None) => return crate::routes::orders::order_closed_for_new_services(),
         Err(error) => {
             tracing::error!(%error, %order_id, "set order subscription");
             return err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to set the tariff",
             );
+        }
+    };
+    // One notice per save: the new tariff, or the end of the one taken away.
+    if changed {
+        if let Some(package_id) = body.package_id {
+            notify_patient_of_subscription(
+                &state,
+                patient_id,
+                package_id,
+                "subscription_assigned",
+                "Subscription assigned",
+                "A subscription was added to your portal.",
+            )
+            .await;
+        } else if let Some(package_id) = replaced.first().copied() {
+            notify_patient_of_subscription(
+                &state,
+                patient_id,
+                package_id,
+                "subscription_ended",
+                "Subscription ended",
+                "Your subscription has ended.",
+            )
+            .await;
         }
     }
     crate::realtime::publish_patient_event(

@@ -45,6 +45,9 @@ import {
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { appDateKey } from "@/lib/app-time-zone";
+import { useAuth } from "@/lib/auth";
+import { usePortalPatientId } from "@/lib/portal-patient-context";
+import { isPortalSubscriptionPaused } from "@/lib/portal-subscription";
 import { formatPluralCount, uiText, useLang, useLanguageBound } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import {
@@ -219,6 +222,10 @@ function usePatientAppointmentsPageContent() {
   } = usePortalLabels();
   const { portalOrderPhaseLabel } = useLanguageHelpers();
   const { lang, t } = useLang();
+  const { user } = useAuth();
+  // A paused subscription shows what is agreed, read-only: no new request
+  // and no change to an open one (owner decision 2026-11-10).
+  const subscriptionPaused = isPortalSubscriptionPaused(user ?? null, usePortalPatientId(user?.id));
   const [pageState, dispatchPageState] = useReducer(
     patientAppointmentsReducer,
     undefined,
@@ -414,7 +421,8 @@ function usePatientAppointmentsPageContent() {
   return (
     <TabShell className="mt-0 w-full min-w-0 max-w-none space-y-3">
       <PageHeader
-        pageAction={<Button onClick={() => setRequestSheetOpen(true)}><Plus className="size-4" />{t.portal_appointments_send_appointment_request}</Button>}
+        // A paused subscription keeps the agreed visits readable; new requests are closed.
+        pageAction={subscriptionPaused ? undefined : <Button onClick={() => setRequestSheetOpen(true)}><Plus className="size-4" />{t.portal_appointments_send_appointment_request}</Button>}
         title={t.portal_appointments_my_appointments}
         description={t.portal_appointments_review_scheduled_visits_and_send_new_appointment_requests_for_th}
         actions={
@@ -434,6 +442,12 @@ function usePatientAppointmentsPageContent() {
 
       {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
+
+      {subscriptionPaused ? (
+        <Banner tone="warning" withIcon>
+          <span data-testid="portal-appointments-paused">{uiText("portal_paused_appointments_note", lang)}</span>
+        </Banner>
+      ) : null}
 
       <PortalSummary items={[
         { label: t.portal_appointments_upcoming_visits, value: upcomingAppointments.length, visible: upcomingAppointments.length > 0 },
@@ -672,7 +686,7 @@ function usePatientAppointmentsPageContent() {
                           {uiText("portal_request_cancelled_reason", lang)}: {item.cancellation_reason}
                         </div>
                       ) : null}
-                      {item.status === "requested" || item.status === "approved" ? (
+                      {!subscriptionPaused && (item.status === "requested" || item.status === "approved") ? (
                         <WithdrawRequestButton
                           requestId={item.id}
                           onWithdrawn={() => {

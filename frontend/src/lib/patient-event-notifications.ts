@@ -181,11 +181,91 @@ function moneyCopy(item: PatientEventNotice, lang: Lang): PatientEventCopy {
   return { title: pick(heading, lang), body: facts || item.body };
 }
 
+// ---------------------------------------------------------------------------
+// Documents, recommendations, subscriptions (exact codes of the server)
+// ---------------------------------------------------------------------------
+
+/**
+ * Notices with a fixed code: a released document was withdrawn
+ * (`documents.rs`), a recommendation was changed or withdrawn
+ * (`patient_recommendations.rs`), a subscription was assigned, paused,
+ * resumed or ended (`service_packages.rs`). `fact` is the name the notice
+ * carries in `params`.
+ */
+const FIXED_PATIENT_NOTICES: Record<string, { title: Texts; body: Texts; fact: string }> = {
+  document_release_revoked: {
+    title: { ru: "Документ отозван", de: "Dokument zurückgezogen" },
+    body: {
+      ru: "Документ больше не доступен в портале.",
+      de: "Das Dokument ist im Portal nicht mehr verfügbar.",
+    },
+    fact: "document_name",
+  },
+  recommendation_updated: {
+    title: { ru: "Рекомендация изменена", de: "Empfehlung geändert" },
+    body: {
+      ru: "Команда сопровождения изменила рекомендацию. Откройте её, чтобы увидеть актуальный текст и срок действия.",
+      de: "Ihr Betreuungsteam hat die Empfehlung geändert. Öffnen Sie sie, um den aktuellen Text und die Gültigkeit zu sehen.",
+    },
+    fact: "title",
+  },
+  recommendation_withdrawn: {
+    title: { ru: "Рекомендация отозвана", de: "Empfehlung zurückgezogen" },
+    body: {
+      ru: "Команда сопровождения отозвала рекомендацию.",
+      de: "Ihr Betreuungsteam hat die Empfehlung zurückgezogen.",
+    },
+    fact: "title",
+  },
+  subscription_assigned: {
+    title: { ru: "Новая подписка", de: "Neues Abonnement" },
+    body: {
+      ru: "Подписка добавлена в ваш портал.",
+      de: "Das Abonnement wurde Ihrem Portal hinzugefügt.",
+    },
+    fact: "package_name",
+  },
+  subscription_paused: {
+    title: { ru: "Подписка приостановлена", de: "Abonnement pausiert" },
+    body: {
+      ru: "Новые запросы закрыты до возобновления; согласованные визиты и чат с менеджером остаются доступными.",
+      de: "Neue Anfragen sind bis zur Fortsetzung geschlossen; vereinbarte Termine und der Chat mit Ihrem Manager bleiben verfügbar.",
+    },
+    fact: "package_name",
+  },
+  subscription_resumed: {
+    title: { ru: "Подписка возобновлена", de: "Abonnement fortgesetzt" },
+    body: { ru: "Все разделы портала снова доступны.", de: "Alle Bereiche des Portals sind wieder verfügbar." },
+    fact: "package_name",
+  },
+  subscription_ended: {
+    title: { ru: "Подписка завершена", de: "Abonnement beendet" },
+    body: {
+      ru: "Документы, счета и аккаунт остаются доступными.",
+      de: "Dokumente, Rechnungen und Ihr Konto bleiben verfügbar.",
+    },
+    fact: "package_name",
+  },
+};
+
+/** The codes above, for the report and the tests. */
+export const FIXED_PATIENT_NOTICE_KINDS = Object.keys(FIXED_PATIENT_NOTICES);
+
+function fixedNoticeCopy(item: PatientEventNotice, lang: Lang): PatientEventCopy | null {
+  const notice = FIXED_PATIENT_NOTICES[item.kind];
+  if (!notice) return null;
+  const name = fact(item, notice.fact);
+  const body = pick(notice.body, lang);
+  return { title: pick(notice.title, lang), body: name ? `${name}. ${body}` : body };
+}
+
 /**
  * The portal wording of a visit, service or money notice, or null for a code
  * outside these families (the caller shows the stored text then).
  */
 export function patientEventNotificationCopy(item: PatientEventNotice, lang: Lang): PatientEventCopy | null {
+  const fixed = fixedNoticeCopy(item, lang);
+  if (fixed) return fixed;
   switch (patientEventFamily(item)) {
     case "appointment":
       return appointmentCopy(item, lang);

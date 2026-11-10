@@ -3,7 +3,7 @@
 use axum::{
     Json,
     extract::{Request, State},
-    http::StatusCode,
+    http::{Method, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -23,12 +23,31 @@ pub(crate) const ACTIVE_SUBSCRIPTION_SQL: &str = "EXISTS(
       AND (subscription.ends_on IS NULL OR subscription.ends_on >= (now() AT TIME ZONE 'Europe/Berlin')::date)
 )";
 
+/// A subscription staff paused (owner decision 2026-11-10): new actions are
+/// closed, but what is already agreed stays readable and the chat with the
+/// manager stays open. `p` is the patient alias, as above.
+pub(crate) const PAUSED_SUBSCRIPTION_SQL: &str = "EXISTS(
+    SELECT 1 FROM patient_service_packages subscription
+    JOIN orders subscription_order ON subscription_order.id = subscription.order_id
+      AND subscription_order.patient_id = subscription.patient_id
+    WHERE subscription.patient_id = p.id AND subscription.status = 'paused'
+      AND subscription.portal_visible = true AND subscription_order.status <> 'cancelled'
+)";
+
 pub(crate) async fn has_active_subscription(
     state: &AppState,
     patient_id: Uuid,
 ) -> Result<bool, Response> {
+    subscription_matches(state, patient_id, ACTIVE_SUBSCRIPTION_SQL).await
+}
+
+async fn subscription_matches(
+    state: &AppState,
+    patient_id: Uuid,
+    condition: &str,
+) -> Result<bool, Response> {
     sqlx::query_scalar::<_, bool>(&format!(
-        "SELECT {ACTIVE_SUBSCRIPTION_SQL} FROM patients p WHERE p.id = $1"
+        "SELECT {condition} FROM patients p WHERE p.id = $1"
     ))
     .bind(patient_id)
     .fetch_optional(&state.db)
@@ -50,6 +69,23 @@ pub(crate) async fn require_subscription(
     state: &AppState,
     auth: &AuthUser,
 ) -> Result<(), Response> {
+    require_subscription_state(state, auth, false).await
+}
+
+/// As [`require_subscription`], but a paused subscription is enough: for the
+/// read routes of what is already agreed and for the chat.
+pub(crate) async fn require_subscription_or_pause(
+    state: &AppState,
+    auth: &AuthUser,
+) -> Result<(), Response> {
+    require_subscription_state(state, auth, true).await
+}
+
+async fn require_subscription_state(
+    state: &AppState,
+    auth: &AuthUser,
+    paused_is_enough: bool,
+) -> Result<(), Response> {
     if auth.role != Role::Patient {
         return Ok(());
     }
@@ -60,7 +96,10 @@ pub(crate) async fn require_subscription(
         }
         Err(response) => return Err(response),
     };
-    if has_active_subscription(state, patient_id).await? {
+    if has_active_subscription(state, patient_id).await?
+        || (paused_is_enough
+            && subscription_matches(state, patient_id, PAUSED_SUBSCRIPTION_SQL).await?)
+    {
         Ok(())
     } else {
         Err(subscription_required())
@@ -114,13 +153,38 @@ fn basic_path(path: &str) -> bool {
         .any(|root| within(path, root))
 }
 
+/// What a patient with a paused subscription still reaches besides the basic
+/// paths: the visits already booked and the own requests (read only), the
+/// subscriptions page, the chat with the team and the notifications. Creating
+/// or withdrawing a request, services and recommendations stay closed.
+fn paused_path(method: &Method, path: &str) -> bool {
+    let path = path.strip_prefix("/api/v1").unwrap_or(path);
+    let read = method == Method::GET || method == Method::HEAD;
+    (read
+        && [
+            "/me/appointments",
+            "/me/appointment-requests",
+            "/me/followup-milestones",
+            "/me/subscriptions",
+        ]
+        .contains(&path))
+        || within(path, "/messages")
+        || within(path, "/notifications")
+}
+
 pub async fn middleware(State(state): State<AppState>, req: Request, next: Next) -> Response {
     if let Some(auth) = req.extensions().get::<AuthUser>()
         && auth.role == Role::Patient
         && !basic_path(req.uri().path())
-        && let Err(response) = require_subscription(&state, auth).await
     {
-        return response;
+        let checked = if paused_path(req.method(), req.uri().path()) {
+            require_subscription_or_pause(&state, auth).await
+        } else {
+            require_subscription(&state, auth).await
+        };
+        if let Err(response) = checked {
+            return response;
+        }
     }
     next.run(req).await
 }
@@ -157,6 +221,34 @@ mod tests {
             "/patients/a/clinical",
         ] {
             assert!(!basic_path(path), "{path}");
+        }
+    }
+
+    #[test]
+    fn a_pause_keeps_agreed_visits_and_the_chat_but_no_new_requests() {
+        for path in [
+            "/me/appointments",
+            "/api/v1/me/appointment-requests",
+            "/me/followup-milestones",
+            "/me/subscriptions",
+            "/messages/conversations",
+            "/notifications/unread-count",
+        ] {
+            assert!(paused_path(&Method::GET, path), "{path}");
+        }
+        // Writing to the chat and marking a notice read stay possible.
+        assert!(paused_path(&Method::POST, "/messages/a/upload"));
+        assert!(paused_path(&Method::POST, "/notifications/a/read"));
+        for (method, path) in [
+            (Method::POST, "/me/appointment-requests"),
+            (Method::POST, "/me/appointment-requests/a/withdraw"),
+            (Method::GET, "/me/recommendations"),
+            (Method::GET, "/me/concierge-services"),
+            (Method::POST, "/me/concierge-services"),
+            (Method::GET, "/me/next-actions"),
+            (Method::GET, "/messagesX"),
+        ] {
+            assert!(!paused_path(&method, path), "{method} {path}");
         }
     }
 }
