@@ -11124,3 +11124,106 @@ async fn the_services_internal_note_stays_with_staff() {
     assert_eq!(status, StatusCode::OK, "{cleared}");
     assert_eq!(services_internal_note(pool, lead).await, None);
 }
+
+/// QA 2026-11-10, C-F1: the remark staff type in «Новый лид» is the
+/// staff-only comment. It never becomes `leads.notes` (the client's own
+/// "individual wishes") and never reaches the client's cabinet — under the
+/// new key `internal_note` and under the key older dialogs sent (`notes`).
+#[tokio::test]
+async fn a_note_given_with_a_new_lead_stays_with_staff() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    for (role, key, email, secret) in [
+        (
+            "sales",
+            "internal_note",
+            "intern.create1110a@example.com",
+            "INTERN 1110a: Kundin wirkt unentschlossen",
+        ),
+        (
+            "patient_manager",
+            "notes",
+            "intern.create1110b@example.com",
+            "INTERN 1110b: Rueckruf nur abends",
+        ),
+    ] {
+        let staff = app.staff(role);
+        let (status, created) = json_request(
+            router,
+            "POST",
+            "/api/v1/leads",
+            &staff,
+            Some(json!({
+                "first_name": "Nora",
+                "last_name": if key == "notes" { "Testnotizalt" } else { "Testnotizneu" },
+                "email": email,
+                key: format!("  {secret}  "),
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{role}: {created}");
+        let lead: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+        let user_id: Uuid = created["portal_account"]["user_id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        // Stored as the staff-only comment; the client's field stays empty.
+        assert_eq!(
+            services_internal_note(pool, lead).await.as_deref(),
+            Some(secret),
+            "{role}"
+        );
+        let client_notes: Option<String> =
+            sqlx::query_scalar("SELECT notes FROM leads WHERE id = $1")
+                .bind(lead)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(client_notes, None, "{role}");
+        // Staff read it on the lead (Sales too: it is no medical field).
+        let (status, detail) = json_request(
+            router,
+            "GET",
+            &format!("/api/v1/leads/{lead}"),
+            &staff,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{role}: {detail}");
+        assert_eq!(detail["services_internal_note"], secret, "{role}: {detail}");
+        // The client's own cabinet never shows it.
+        let (status, request) = json_request(
+            router,
+            "GET",
+            &format!("/api/v1/me/lead-requests/{lead}"),
+            &bearer(user_id, "patient"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{role}: {request}");
+        let text = request.to_string();
+        assert!(!text.contains(secret), "{role}: {request}");
+        assert!(
+            !text.contains("services_internal_note"),
+            "{role}: {request}"
+        );
+    }
+    // Too long is refused at the field.
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        "/api/v1/leads",
+        &app.staff("sales"),
+        Some(json!({
+            "first_name": "Nora",
+            "last_name": "Zulang",
+            "email": "intern.create1110c@example.com",
+            "internal_note": "x".repeat(4001),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["field"], "internal_note", "{refused}");
+}

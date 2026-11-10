@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { CalendarDays, Check, Copy, FileText, KeyRound, LoaderCircle, Mail, ShieldCheck, UserRound, UsersRound } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/toast";
 import { EmailDomainWarning } from "@/components/email-domain-warning";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { StatusChip } from "@/components/ui/status-chip";
@@ -269,11 +270,12 @@ export function LeadPortalAccessDetail({
         language,
       });
       setEmailConfirmOpen(false);
-      setEmailNotice(
-        de
-          ? `Zugang gesendet an ${sent.sent_to} · ${formatAppDateTime(sent.sent_at)}`
-          : `Доступ отправлен на ${sent.sent_to} · ${formatAppDateTime(sent.sent_at)}`,
-      );
+      const sentNotice = de
+        ? `Zugang gesendet an ${sent.sent_to} · ${formatAppDateTime(sent.sent_at)}`
+        : `Доступ отправлен на ${sent.sent_to} · ${formatAppDateTime(sent.sent_at)}`;
+      setEmailNotice(sentNotice);
+      // The dialog just closed; the line in the row is easy to miss (QA 2026-11-10).
+      toast.success(sentNotice);
     } catch (nextError) {
       setEmailConfirmOpen(false);
       const reason =

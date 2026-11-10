@@ -11,7 +11,18 @@ import { UncountedParentRow } from "./lead-risk-assessment-panel";
  * works the lead without the wizard, so the confirmation «Принято к
  * сведению» stands here too. Nothing shows while there is no such parent.
  */
-export function LeadUncountedParentsNotice({ leadId, tx, lang }: { leadId: string; tx: Tx; lang: string }) {
+export function LeadUncountedParentsNotice({
+  leadId,
+  tx,
+  lang,
+  onAcknowledged,
+}: {
+  leadId: string;
+  tx: Tx;
+  lang: string;
+  /** The confirmation lifts its blocker of the conversion: the card reloads its readiness (QA 2026-11-10, C-F4). */
+  onAcknowledged?: () => void;
+}) {
   const [parents, setParents] = useState<UncountedParentNotice[]>([]);
   const load = useCallback(async () => {
     try {
@@ -41,6 +52,7 @@ export function LeadUncountedParentsNotice({ leadId, tx, lang }: { leadId: strin
             const assessment = normalizeLeadRiskAssessment(next);
             if (assessment) setParents(assessment.uncounted_parents);
             else await load();
+            onAcknowledged?.();
           }}
         />
       ))}

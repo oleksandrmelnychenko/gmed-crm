@@ -2597,6 +2597,36 @@ async fn sales_acknowledge_a_listed_parent_without_a_billing_role() {
     assert_eq!(parents[0]["countries"], json!(["IR"]), "{read}");
     assert!(parents[0]["acknowledged_at"].is_null(), "{read}");
 
+    // QA 2026-11-10, C-F4: until then the release list holds the conversion
+    // (and only the conversion) with a reason of its own.
+    let unacknowledged =
+        "A parent who is not counted waits for the acknowledgement of the CEO or Sales";
+    let reasons_of = |lead: &Value, list: &str| -> Vec<String> {
+        lead["readiness"][list]
+            .as_array()
+            .map(|reasons| {
+                reasons
+                    .iter()
+                    .filter_map(|reason| reason.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let (status, lead) = request(&app, "GET", &format!("/leads/{lead_id}"), &app.ceo(), None).await;
+    assert_eq!(status, StatusCode::OK, "{lead}");
+    assert!(
+        reasons_of(&lead, "blocking_reasons")
+            .iter()
+            .any(|reason| reason == unacknowledged),
+        "{lead}"
+    );
+    assert!(
+        reasons_of(&lead, "qualification_reasons")
+            .iter()
+            .all(|reason| reason != unacknowledged),
+        "{lead}"
+    );
+
     let path =
         format!("/leads/{lead_id}/risk-assessment/uncounted-parents/{parent_id}/acknowledge");
     // Somebody else's id is not a parent of this lead.
@@ -2626,4 +2656,13 @@ async fn sales_acknowledge_a_listed_parent_without_a_billing_role() {
     .await
     .unwrap();
     assert_eq!(audited, 1);
+    // Acknowledged: the release list no longer names the parent.
+    let (status, lead) = request(&app, "GET", &format!("/leads/{lead_id}"), &app.ceo(), None).await;
+    assert_eq!(status, StatusCode::OK, "{lead}");
+    assert!(
+        reasons_of(&lead, "blocking_reasons")
+            .iter()
+            .all(|reason| reason != unacknowledged),
+        "{lead}"
+    );
 }

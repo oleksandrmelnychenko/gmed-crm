@@ -262,7 +262,14 @@ export function UncountedParentRow({
           {tx("Принято к сведению", "Zur Kenntnis genommen")}
         </Button>
       ) : (
-        <p className="text-muted-foreground">{tx("Ждёт подтверждения CEO или Sales", "Wartet auf Bestätigung durch CEO oder Sales")}</p>
+        // The patient is not created before it (server readiness, QA 2026-11-10, C-F4):
+        // who cannot confirm reads who does, and where.
+        <p className="text-muted-foreground">
+          {tx(
+            "Ждёт подтверждения CEO или Sales: до него пациента создать нельзя. CEO подтверждает здесь, Sales — в карточке лида («Обзор»).",
+            "Wartet auf Bestätigung durch CEO oder Sales: Vorher kann kein Patient angelegt werden. Der CEO bestätigt hier, Sales in der Lead-Karte („Überblick“).",
+          )}
+        </p>
       )}
       {error ? <p className="text-destructive" role="alert">{error}</p> : null}
     </div>

@@ -85,14 +85,17 @@ export function IdentityDocumentStatusChip({
   status,
   tx,
   testId,
+  noScanText,
 }: {
   status: IdentityDocumentStatus;
   tx: Tx;
   testId?: string;
+  /** What to say while no scan is on file where this form cannot upload one (the lead card of Sales). */
+  noScanText?: string;
 }) {
   return (
     <StatusChip tone={STATUS_TONE[status.kind]} className="whitespace-normal" data-testid={testId} data-status={status.kind}>
-      {identityDocumentStatusText(status, tx)}
+      {status.kind === "no_scan" && noScanText ? noScanText : identityDocumentStatusText(status, tx)}
     </StatusChip>
   );
 }
@@ -157,7 +160,10 @@ export function LeadIdentityDocumentDataForm({
   holder,
   onApplyHolder,
   clientMayType = false,
+  noScanText,
 }: {
+  /** See `IdentityDocumentStatusChip`. */
+  noScanText?: string;
   source: IdentityDocumentSource | null | undefined;
   /** The wizard's old "passport valid until", read only while nothing is stored in the new place. */
   fallbackValidUntil?: string;
@@ -395,7 +401,7 @@ export function LeadIdentityDocumentDataForm({
 
   return (
     <div className="space-y-2.5" data-testid={testId} onBlur={saveOnLeave}>
-      <IdentityDocumentStatusChip status={status} tx={tx} testId={`${testId}-status`} />
+      <IdentityDocumentStatusChip status={status} tx={tx} testId={`${testId}-status`} noScanText={noScanText} />
       {confirmationPending && status.kind === "complete" ? (
         <p className="text-xs font-medium leading-5 text-amber-700 dark:text-amber-300" data-testid={`${testId}-confirm-hint`}>
           {tx(
@@ -594,6 +600,59 @@ function storedStatus(person: LeadRepresentative, today: string) {
   });
 }
 
+/**
+ * The person's own PEP and sanctions answers of the cabinet (block R), read-only
+ * next to the person (QA 2026-11-10, A-St1): the patient's own stand under
+ * «Юридические вопросы», a parent's or a guardian's were shown nowhere outside
+ * the form of the enhanced check. `enteredByStaff`: the answers were typed by
+ * staff in the client's form (the server's marker), else in the cabinet.
+ */
+export function RepresentativeLegalAnswers({
+  person,
+  enteredByStaff,
+  tx,
+}: {
+  person: Pick<LeadRepresentative, "id" | "pep_self" | "pep_related" | "sanctions_links">;
+  enteredByStaff: boolean;
+  tx: Tx;
+}) {
+  const rows: Array<[string, boolean | null | undefined]> = [
+    [tx("Политически значимое лицо (PEP)", "Politisch exponierte Person (PeP)"), person.pep_self],
+    [tx("Член семьи или близкое лицо PEP", "Familienmitglied oder nahestehende Person einer PeP"), person.pep_related],
+    [tx("Связи с лицами под санкциями", "Verbindungen zu sanktionierten Personen"), person.sanctions_links],
+  ];
+  // An older server sends no answers of the person at all.
+  if (rows.every(([, answer]) => answer === undefined)) return null;
+  const answered = rows.some(([, answer]) => typeof answer === "boolean");
+  return (
+    <div
+      className="space-y-1.5 rounded-lg border border-border/60 bg-muted/20 p-3 text-xs leading-5"
+      data-testid={`lead-representative-legal-answers-${person.id}`}
+    >
+      <p className="font-medium text-foreground">
+        {tx("Юридические вопросы: ответы этого лица", "Rechtliche Fragen: eigene Angaben dieser Person")}
+      </p>
+      <ul className="space-y-0.5">
+        {rows.map(([label, answer]) => (
+          <li key={label} className="flex flex-wrap items-baseline justify-between gap-x-3">
+            <span className="text-muted-foreground">{label}</span>
+            <span className={answer === true ? "font-medium text-amber-700 dark:text-amber-300" : "text-foreground"}>
+              {answer === true ? tx("Да", "Ja") : answer === false ? tx("Нет", "Nein") : tx("Не отвечено", "Nicht beantwortet")}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {answered ? (
+        <p className="text-muted-foreground">
+          {enteredByStaff
+            ? tx("Внесено сотрудником в анкете клиента", "Von Mitarbeitenden im Formular des Kunden erfasst")
+            : tx("Ответы даны в кабинете клиента", "Im Kundenportal beantwortet")}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function RepresentativeForm({
   leadId,
   person,
@@ -606,7 +665,10 @@ function RepresentativeForm({
   onSaved,
   onUploaded,
   onApplyHolder,
+  legalAnswersByStaff,
 }: {
+  /** Staff typed the block-R answers in the client's form (marker `representative_questions`). */
+  legalAnswersByStaff: boolean;
   leadId: string;
   person: LeadRepresentative;
   custody: LeadCustody | null | undefined;
@@ -686,6 +748,7 @@ function RepresentativeForm({
             return stored;
           }}
         />
+        <RepresentativeLegalAnswers person={person} enteredByStaff={legalAnswersByStaff} tx={tx} />
       </div>
     </details>
   );
@@ -715,7 +778,13 @@ export function LeadIdentityDocumentData({
   today = appDateKey(),
   onSaved,
   onUploaded,
+  patientNoScanText,
 }: {
+  /**
+   * Said instead of «сначала загрузите документ» where the patient's own scan
+   * cannot be uploaded (the lead card of Sales, QA 2026-11-10): who uploads it.
+   */
+  patientNoScanText?: string;
   leadId: string;
   intake: LeadPortalIntake | null;
   fallbackValidUntil?: string;
@@ -778,6 +847,7 @@ export function LeadIdentityDocumentData({
       <LeadIdentityDocumentDataForm
         // Another lead: a fresh form (the stored baseline and entry time are per lead).
         key={leadId}
+        noScanText={patientNoScanText}
         source={intake?.identification ?? null}
         fallbackValidUntil={fallbackValidUntil}
         tx={tx}
@@ -818,6 +888,7 @@ export function LeadIdentityDocumentData({
               onSaved={onSaved}
               onUploaded={onUploaded ?? onSaved}
               onApplyHolder={onApplyRepresentativeHolder ? (patch) => onApplyRepresentativeHolder(person, patch) : undefined}
+              legalAnswersByStaff={intake?.marker_kinds?.representative_questions === "staff"}
             />
           ))}
         </div>

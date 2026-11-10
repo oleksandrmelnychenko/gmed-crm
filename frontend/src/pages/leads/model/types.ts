@@ -33,7 +33,8 @@ export type LeadGateForm = {
   complianceStatus: string;
   consentHealthcare: boolean;
   consentPrivacyPractices: boolean;
-  notes: string;
+  /** Staff's own comment (`leads.services_internal_note`), never the client's `notes`. */
+  internalNote: string;
 };
 
 export type FailedLeadResolutionForm = {

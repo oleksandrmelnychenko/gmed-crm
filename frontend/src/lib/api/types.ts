@@ -338,7 +338,8 @@ export interface CreateLeadBody {
   trusted_contacts?: LeadTrustedContact[];
   source?: string | null;
   country?: string | null;
-  notes?: string | null;
+  /** Staff's own remark (`leads.services_internal_note`): the client never sees it. */
+  internal_note?: string | null;
   /** A minor's custody stated by staff with the new lead (a guardian can be named only under "guardian"). */
   custody?: "joint" | "sole_parent" | "guardian";
 }

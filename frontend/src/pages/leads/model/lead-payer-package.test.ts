@@ -149,6 +149,8 @@ describe("payer package labels", () => {
       "no_third_party",
       "order_missing",
       "cost_estimate_missing",
+      // QA 2026-11-10: this reason stood only in a data attribute.
+      "cost_estimate_outdated",
       "payer_signer_incomplete",
       "payer_documents_pending",
     ]) {

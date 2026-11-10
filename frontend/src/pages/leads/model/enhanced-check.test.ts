@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  AUTOMATIC_BLACKLIST_RISK_REASON,
   EMPTY_RISK_COUNTRY_LISTS,
   ENHANCED_CHECK_TRIGGER_REASONS,
   RISK_ASSESSMENT_REASON,
@@ -20,6 +21,7 @@ import {
   normalizeLeadEnhancedCheck,
   normalizeRiskCountryLists,
   pepEnhancedCheckHint,
+  withoutStaleCountryFindings,
 } from "./enhanced-check";
 
 const ru = (ruText: string) => ruText;
@@ -150,5 +152,56 @@ describe("the enhanced check of the owner's rule (2026-10-07)", () => {
     expect(enhancedCheckRequirementLabel(true, de)).toBe("Nach GMED-Regel erforderlich");
     expect(enhancedCheckRequirementLabel(false, ru)).toBe("Добровольная проверка");
     expect(enhancedCheckRequirementLabel(false, de)).toBe("Freiwillige Prüfung");
+  });
+});
+
+describe("withoutStaleCountryFindings", () => {
+  // QA 2026-11-10, C-F3: the form kept «Iran» and the automatic reason of a father who
+  // neither pays nor receives the invoices, and the mother's GwG sheet printed them.
+  const lists = { blacklist: ["IR"], highRisk: ["RU"] };
+  const code = (value: string) => ({ Iran: "IR", Russland: "RU", Schweiz: "CH" })[value] ?? "";
+  const automatic = {
+    riskReason: AUTOMATIC_BLACKLIST_RISK_REASON,
+    internalRiskAnalysis: true,
+    affectedThirdCountry: "Iran",
+    highRiskCountryResident: false,
+    highRiskCountryTransaction: true,
+    reviewerName: "PM",
+  };
+
+  it("drops what the wizard filled in for a listed country that no longer counts", () => {
+    expect(withoutStaleCountryFindings(automatic, lists, code)).toEqual({
+      riskReason: "",
+      internalRiskAnalysis: false,
+      affectedThirdCountry: "",
+      highRiskCountryResident: false,
+      highRiskCountryTransaction: false,
+      reviewerName: "PM",
+    });
+    // A country of the longer list sets the ticks without a reason.
+    expect(withoutStaleCountryFindings(
+      { ...automatic, riskReason: "", internalRiskAnalysis: false, affectedThirdCountry: "Russland, Iran" },
+      lists,
+      code,
+    )?.affectedThirdCountry).toBe("");
+  });
+
+  it("keeps a finding staff worded themselves and a country they typed", () => {
+    expect(withoutStaleCountryFindings({ ...automatic, riskReason: "Zahlung über eine Bank in Teheran" }, lists, code)).toBeNull();
+    expect(withoutStaleCountryFindings(
+      { ...automatic, riskReason: "", internalRiskAnalysis: false, affectedThirdCountry: "Schweiz" },
+      lists,
+      code,
+    )).toBeNull();
+    expect(withoutStaleCountryFindings(
+      { ...automatic, riskReason: "", internalRiskAnalysis: false, affectedThirdCountry: "", highRiskCountryTransaction: false },
+      lists,
+      code,
+    )).toBeNull();
+  });
+
+  it("uses the words the server ignores on the GwG sheet", () => {
+    const documents = readFileSync(new URL("../../../../../crates/server/src/routes/documents.rs", import.meta.url), "utf8");
+    expect(documents).toContain(`"${AUTOMATIC_BLACKLIST_RISK_REASON}"`);
   });
 });

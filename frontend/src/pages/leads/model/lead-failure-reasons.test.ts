@@ -44,6 +44,10 @@ describe("the failure reason of a lead", () => {
     expect(leadFailureReasonLabel(null, ru)).toBeNull();
     expect(leadFailureReasonLabel(undefined, ru)).toBeNull();
     expect(leadFailureReasonLabel("other", ru)).toBeNull();
+    // QA 2026-11-10: a code of older data is never shown raw.
+    expect(leadFailureReasonLabel("insurance_gap", ru)).toBe("Страховка не покрывает услуги");
+    expect(leadFailureReasonLabel("insurance_gap", de)).toBe("Versicherung deckt die Leistungen nicht");
+    expect(leadFailureReasonLabel("some_unknown_code", ru)).toBe("Другая причина");
   });
 
   it("prefills the choice from the stored reason", () => {

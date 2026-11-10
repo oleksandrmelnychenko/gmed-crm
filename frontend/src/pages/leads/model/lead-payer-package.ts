@@ -246,6 +246,12 @@ export function payerPackageBlockedReasonText(
         "Сначала создайте смету к заказу (Kostenvoranschlag)",
         "Zuerst den Kostenvoranschlag zum Auftrag erstellen",
       );
+    // The reason stood only in a data attribute; staff read «сейчас подготовить нельзя» (QA 2026-11-10).
+    case "cost_estimate_outdated":
+      return tx(
+        "Смета к заказу устарела: заказ или его условия изменились. Создайте новую версию сметы на шаге «Договор и смета», затем подготовьте документы",
+        "Der Kostenvoranschlag zum Auftrag ist veraltet: Auftrag oder Konditionen wurden geändert. Im Schritt „Vertrag und Kostenvoranschlag“ eine neue Fassung erstellen, danach die Unterlagen vorbereiten",
+      );
     case "cost_estimate_consent_missing":
       return tx(
         "Пациент ещё не согласился на передачу сметы плательщику",

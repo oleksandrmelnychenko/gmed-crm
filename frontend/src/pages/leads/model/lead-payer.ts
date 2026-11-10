@@ -339,6 +339,48 @@ export function normalizePayerRepresentative(value: unknown): PayerRepresentativ
   };
 }
 
+function normalizePersonFunds(value: unknown): PersonFunds | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const enteredBy = record.entered_by;
+  return {
+    person: record.person === "payer" ? "payer" : "patient",
+    sources: stringList(record.sources),
+    description: textOrNull(record.description),
+    entered_by: enteredBy === "lead" || enteredBy === "staff" || enteredBy === "payer" ? enteredBy : null,
+    stated: record.stated === true,
+    text: textOrNull(record.text),
+    proof_documents: Array.isArray(record.proof_documents)
+      ? record.proof_documents.flatMap((item) => {
+          const proof = asRecord(item);
+          return proof && typeof proof.id === "string"
+            ? [{ id: proof.id, file_name: textOrNull(proof.file_name), uploaded_at: textOrNull(proof.uploaded_at) }]
+            : [];
+        })
+      : [],
+  };
+}
+
+/**
+ * `funds` of the payer declaration response (server `lead_funds::LeadFunds`):
+ * the effective source of funds per person. The response was read without it,
+ * so the AML form never showed the payer's own answer and asked staff for the
+ * source again (QA 2026-11-10, C-F6). Null without a declaration.
+ */
+export function normalizeLeadFunds(value: unknown): LeadFunds | null {
+  const record = asRecord(value);
+  const patient = normalizePersonFunds(record?.patient);
+  if (!record || !patient) return null;
+  return {
+    payer_pays: record.payer_pays === true,
+    relevant: record.relevant === "payer" ? "payer" : "patient",
+    patient,
+    payer: normalizePersonFunds(record.payer),
+    payer_stated_by_patient: normalizePersonFunds(record.payer_stated_by_patient),
+    staff_note_before_payer: textOrNull(record.staff_note_before_payer),
+  };
+}
+
 /**
  * The server response with every status field present; `null` for anything
  * that is not a payer declaration response (e.g. an unexpected proxy reply).
@@ -402,6 +444,8 @@ export function normalizePayerDeclarationResponse(value: unknown): PayerDeclarat
         ? { identification: normalizePayerIdentification(status.identification) }
         : {}),
     },
+    // Absent on an older server: the form then shows staff's own fields as before.
+    ...(Object.hasOwn(record, "funds") ? { funds: normalizeLeadFunds(record.funds) } : {}),
   };
 }
 
@@ -1169,7 +1213,11 @@ export function payerReasonLabel(code: string, tx: Tx, payerType?: PayerType | n
     ),
     payer_not_informed: tx("Подтвердите, что плательщик проинформирован об обработке его данных", "Bestätigen, dass die zahlende Person über die Verarbeitung ihrer Daten informiert wurde"),
     payer_not_identified: payerNotIdentifiedText(tx),
-    cost_assumption_missing: tx("Создайте заявление о принятии расходов (Kostenübernahmeerklärung)", "Kostenübernahmeerklärung erstellen"),
+    // Where it is made: the hint stood on the documents step without a button (QA 2026-11-10).
+    cost_assumption_missing: tx(
+      "Создайте заявление о принятии расходов (Kostenübernahmeerklärung) — на шаге «Договор и смета»",
+      "Kostenübernahmeerklärung erstellen – im Schritt „Vertrag & Angebot“",
+    ),
     cost_assumption_outdated: tx("Плательщик изменён — создайте новое заявление о принятии расходов", "Zahler/in geändert – neue Kostenübernahmeerklärung erstellen"),
     cost_assumption_terms_outdated: tx("Заказ или его условия изменились — создайте заявление о принятии расходов заново", "Auftrag oder Konditionen geändert – Kostenübernahmeerklärung neu erstellen"),
     cost_assumption_unsigned: tx("Получите подпись плательщика на заявлении о принятии расходов", "Unterschrift der zahlenden Person einholen"),

@@ -23,6 +23,25 @@ export const GATE_SERVER_FIELDS: Record<string, LeadGateField> = {
 const changed = (value: string, stored: string) => value.trim() !== "" && value.trim() !== stored.trim();
 
 /**
+ * A form after its record was loaded again in the background (a realtime
+ * refresh of the list reloads the open lead, QA 2026-11-10, C-F2): what the
+ * person changed and has not saved stays; a field left as it was loaded takes
+ * the newly stored value. `loaded` is what the form was filled from last time,
+ * `reloaded` what the server holds now.
+ */
+export function formAfterBackgroundReload<T extends Record<string, unknown>>(
+  current: T,
+  loaded: T,
+  reloaded: T,
+): T {
+  const next = { ...reloaded };
+  for (const key of Object.keys(current) as Array<keyof T>) {
+    if (current[key] !== loaded[key]) next[key] = current[key];
+  }
+  return next;
+}
+
+/**
  * What the side-panel form refuses before it is sent: a new or changed
  * e-mail or phone must be usable (an older stored value does not block
  * unrelated edits, as on the server), a date of birth not in the future and

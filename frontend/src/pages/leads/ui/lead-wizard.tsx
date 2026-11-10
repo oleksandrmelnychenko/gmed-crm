@@ -122,6 +122,8 @@ import { saveRepresentativeIdentityDocumentData, type IdentityDocumentDataInput,
 import { useLeadEnhancedCheck } from "../model/use-lead-enhanced-check";
 import { useRiskCountryLists } from "../model/use-risk-country-lists";
 import {
+  AUTOMATIC_BLACKLIST_RISK_REASON,
+  withoutStaleCountryFindings,
   enhancedCheckReasonsText,
   enhancedCheckRequired,
   enhancedCheckRequirementLabel,
@@ -359,6 +361,10 @@ import {
   leadIntakeTypeFromLead,
   isLeadConvertedError,
   leadErrorBlockingReasons,
+  SANCTIONS_CONFIRMED_REASON,
+  UNCOUNTED_PARENT_UNACKNOWLEDGED_REASON,
+  sanctionsConfirmedReasonText,
+  uncountedParentUnacknowledgedReasonText,
   leadErrorMessage,
   leadServerContactError,
   leadServerFieldError,
@@ -2806,6 +2812,10 @@ function readinessReasonLabel(reason: string, tx: Tx, minor = false) {
     "Required prepayment is not complete": tx("Предоплата получена не полностью", "Vorauszahlung noch nicht vollständig eingegangen"),
     "Lead is already converted": tx("Пациент уже создан", "Patient wurde bereits angelegt"),
     [CONTRACT_DETAILS_MISSING_REASON]: tx("Данные представителей для договора неполные", "Angaben der Vertreter für den Vertrag unvollständig"),
+    // QA 2026-11-10: a confirmed sanctions match (E F-5) and the parent who waits for
+    // «Принято к сведению» (C-F4) are named, never «Проверьте незавершённые данные».
+    [SANCTIONS_CONFIRMED_REASON]: sanctionsConfirmedReasonText(tx),
+    [UNCOUNTED_PARENT_UNACKNOWLEDGED_REASON]: uncountedParentUnacknowledgedReasonText(tx),
     ...payerReadinessReasonLabels(tx),
   };
   return labels[reason] ?? tx("Проверьте незавершённые данные", "Unvollständige Angaben prüfen");
@@ -2873,6 +2883,8 @@ function readinessReasonStep(reason: string): StepId {
     "Required prepayment is not complete": "commercial",
     "Lead is already converted": "release",
     [CONTRACT_DETAILS_MISSING_REASON]: "documents",
+    [SANCTIONS_CONFIRMED_REASON]: "documents",
+    [UNCOUNTED_PARENT_UNACKNOWLEDGED_REASON]: "documents",
     ...payerReadinessReasonSteps(),
   };
   return steps[reason] ?? "release";
@@ -2938,6 +2950,8 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
     "Enhanced due diligence document is missing": ENHANCED_CHECK_SECTION_ID,
     "Enhanced due diligence document is not signed": ENHANCED_CHECK_SECTION_ID,
     "Risk assessment waits for a staff decision": RISK_ASSESSMENT_SECTION_ID,
+    // The notice with «Принято к сведению» stands in the risk assessment.
+    [UNCOUNTED_PARENT_UNACKNOWLEDGED_REASON]: RISK_ASSESSMENT_SECTION_ID,
     "Payer GwG sheet is not signed": GWG_SHEETS_SECTION_ID,
     "Framework contract is not signed": FRAMEWORK_DOCUMENT_ID,
     "Framework contract was terminated; create a new contract": FRAMEWORK_DOCUMENT_ID,
@@ -4794,6 +4808,15 @@ export function LeadWizard({
   useEffect(() => {
     if (riskPayerLinkKey) void reloadPayerLink();
   }, [riskPayerLinkKey, reloadPayerLink]);
+  // «Принято к сведению» for a parent who is not counted lifts its entry of
+  // «Что осталось заполнить» (QA 2026-11-10, C-F4): the readiness follows the click.
+  const acknowledgedParentsKey = (risk.assessment?.uncounted_parents ?? [])
+    .filter((parent) => parent.acknowledged_at)
+    .map((parent) => `${parent.representative_id}:${parent.acknowledged_at}`)
+    .join("|");
+  useEffect(() => {
+    if (acknowledgedParentsKey) void refreshLeadState();
+  }, [acknowledgedParentsKey, refreshLeadState]);
   // A level of 2 or more requires the enhanced check: "Начать оценку", a
   // restart or a decision changes it at once, not only after reopening the
   // wizard (QA 2026-10-10).
@@ -6007,7 +6030,9 @@ export function LeadWizard({
             source: "manual",
             country: snapshot.draft.country.trim() || null,
             ...(newLeadCustody && isMinor(snapshot.draft.birthDate, new Date()) ? { custody: newLeadCustody } : {}),
-            notes: snapshot.draft.serviceNotes.trim() || null,
+            // Only staff's own comment goes with the new lead; the client-visible wishes
+            // (`notes`) are written by the update that follows (QA 2026-11-10, C-F1).
+            internal_note: snapshot.draft.servicesInternalNote.trim() || null,
           });
           targetLeadId = created.id;
           hydrated.current = targetLeadId;
@@ -6327,7 +6352,7 @@ export function LeadWizard({
         // the black list fills it by itself.
         riskReason: current.amlEnhancedDueDiligence.riskReason || (
           nextRisk.tier === "blacklist"
-            ? "Bezug zu einem Land der FATF-Liste der Hochrisiko-Jurisdiktionen"
+            ? AUTOMATIC_BLACKLIST_RISK_REASON
             : ""
         ),
       } : {
@@ -6392,17 +6417,24 @@ export function LeadWizard({
       if (!current) return current;
       // Residence only for the patient's own country (QA 2026-10-10 B4).
       const boxes = amlCountryBoxes(riskCountryLists, current.country, current.citizenships, [...payerCountries, ...representativeAmlCountries]);
+      // What the form once filled in for a listed country that no longer counts (a parent
+      // who stopped paying) goes with it; a recorded check keeps its form (QA 2026-11-10, C-F3).
+      // Only once the server's check and the country lists are known: nothing is dropped on a guess.
+      const rulesKnown = Boolean(enhancedCheck) && riskCountryLists.blacklist.length + riskCountryLists.highRisk.length > 0;
+      const stale = rulesKnown && !amlRisk && !amlRequired && wizardDocuments.enhanced_due_diligence.length === 0
+        ? withoutStaleCountryFindings(current.amlEnhancedDueDiligence, riskCountryLists, countryCodeFromStoredValue)
+        : null;
       return {
         ...current,
         amlEnhancedDueDiligence: {
-          ...current.amlEnhancedDueDiligence,
+          ...(stale ?? current.amlEnhancedDueDiligence),
           ...(riskFindingFollowsRule
             ? {
                 internalRiskAnalysis: amlRequired,
                 individualReview: !amlRequired || current.amlEnhancedDueDiligence.individualReview,
               }
             : {}),
-          affectedThirdCountry: current.amlEnhancedDueDiligence.affectedThirdCountry || affectedThirdCountry,
+          affectedThirdCountry: (stale ?? current.amlEnhancedDueDiligence).affectedThirdCountry || affectedThirdCountry,
           ...(amlRisk ? {
             highRiskCountryResident: boxes.resident,
             highRiskCountryTransaction: boxes.transaction || current.amlEnhancedDueDiligence.highRiskCountryTransaction,
@@ -8860,7 +8892,11 @@ ${serviceCommentLines.join("\n")}`
       scans: null,
       errors: identityDocumentFieldErrors(document, { today, birthDate: draft.birthDate || null }),
     });
-    return status.kind === "complete" ? null : identityDocumentStatusText(status, tx);
+    if (status.kind === "complete") return null;
+    // The form right below lists the missing fields itself: the same sentence stood twice (QA 2026-11-10).
+    return status.kind === "incomplete"
+      ? tx("Сначала заполните данные документа в форме ниже", "Zuerst die Ausweisdaten im Formular unten ausfüllen")
+      : identityDocumentStatusText(status, tx);
   })();
   // «Данные заполнены из записи …» belongs to the creating session; the PEP
   // hint stays until the person answers the PEP question (QA 2026-10-25).

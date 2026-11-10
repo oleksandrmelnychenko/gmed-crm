@@ -391,6 +391,14 @@ struct CreateLeadRequest {
     trusted_contacts: Option<Vec<TrustedContactRequest>>,
     source: Option<String>,
     country: Option<String>,
+    /// Staff's own remark about the new lead: stored as the staff-only comment
+    /// (`leads.services_internal_note`), never as `leads.notes` — that column
+    /// holds the client's own "individual wishes" and shows in the cabinet
+    /// (QA 2026-11-10, C-F1).
+    #[serde(default)]
+    internal_note: Option<String>,
+    /// The former name of [`Self::internal_note`] (creation dialogs before
+    /// 2026-11-10): read as the staff-only comment too, never shown to the client.
     notes: Option<String>,
     /// ISO 3166-1 alpha-2 codes; a person may hold several.
     citizenships: Option<Vec<String>>,
@@ -2957,6 +2965,19 @@ struct LeadConversionReadinessInput {
     /// (422 `representative_details_incomplete`), so the release list says so
     /// before staff click; never a qualification reason.
     contract_details_missing: Vec<String>,
+    /// A confirmed sanctions match of the lead, of a person or the bank
+    /// screened with it, or of its patient record: work with this person is
+    /// stopped for good (`sanctions::gate`), so nothing else on the list can
+    /// make the lead ready. The card listed every other blocker but this one
+    /// (QA 2026-11-10, E F-5).
+    sanctions_confirmed: bool,
+    /// The names of a minor's parents who neither pay nor receive the
+    /// invoices and whose listed country nobody has acknowledged yet (owner
+    /// decision 2026-11-10; `lead_risk::unacknowledged_uncounted_parents`).
+    /// The CEO or Sales confirms being aware before the patient is created
+    /// (QA 2026-11-10, C-F4: the conversion did not wait for it and a
+    /// converted lead is frozen); never a qualification reason.
+    uncounted_parents_unacknowledged: Vec<String>,
 }
 
 fn evaluate_lead_conversion_readiness(
@@ -3007,7 +3028,10 @@ fn evaluate_lead_conversion_readiness(
     let self_disclosure_ready = !input.self_disclosure.required || input.self_disclosure.signed;
     // The risk assessment's check belongs to this step (`stage: documents`):
     // the step is not ready while staff still have to decide.
+    let uncounted_parents_acknowledged = input.uncounted_parents_unacknowledged.is_empty();
     let documents_ready = compliance_completed
+        && !input.sanctions_confirmed
+        && uncounted_parents_acknowledged
         && !input.risk_assessment_held
         && input.consent_privacy_practices
         && input.consent_healthcare
@@ -3035,6 +3059,14 @@ fn evaluate_lead_conversion_readiness(
 
     let risk_assessment_released = !input.risk_assessment_held;
     let mut checks = vec![
+        // First: a confirmed match is final, whatever else is complete.
+        json!({
+            "key": "sanctions_clear",
+            "label": "No confirmed sanctions match",
+            "passed": !input.sanctions_confirmed,
+            "blocking_for": "qualification",
+            "stage": "documents",
+        }),
         json!({
             "key": "lead_qualified",
             "label": "Lead qualified",
@@ -3235,8 +3267,22 @@ fn evaluate_lead_conversion_readiness(
             "stage": "commercial",
         }),
     ];
+    // Listed only for a lead that has such a parent.
+    if !uncounted_parents_acknowledged {
+        checks.push(json!({
+            "key": "uncounted_parents_acknowledged",
+            "label": "Parent who is not counted acknowledged by the CEO or Sales",
+            "passed": false,
+            "blocking_for": "conversion",
+            "stage": "documents",
+            "names": input.uncounted_parents_unacknowledged,
+        }));
+    }
 
     let mut qualification_reasons = Vec::new();
+    if input.sanctions_confirmed {
+        qualification_reasons.push(SANCTIONS_CONFIRMED.to_string());
+    }
     if !compliance_signed {
         qualification_reasons.push("Compliance is not signed yet".to_string());
     }
@@ -3337,6 +3383,9 @@ fn evaluate_lead_conversion_readiness(
     if !input.contract_details_missing.is_empty() {
         conversion_reasons.push(CONTRACT_DETAILS_MISSING.to_string());
     }
+    if !uncounted_parents_acknowledged {
+        conversion_reasons.push(UNCOUNTED_PARENT_UNACKNOWLEDGED.to_string());
+    }
     if input.converted_patient_id.is_some() {
         conversion_reasons.push("Lead is already converted".to_string());
     }
@@ -3384,6 +3433,16 @@ fn evaluate_lead_conversion_readiness(
 /// The conversion reason of [`LeadConversionReadinessInput::contract_details_missing`];
 /// the frontend maps this exact text.
 const CONTRACT_DETAILS_MISSING: &str = "Contract details of the representatives are missing";
+
+/// The reason of [`LeadConversionReadinessInput::sanctions_confirmed`], first
+/// on both lists; the frontend maps this exact text.
+const SANCTIONS_CONFIRMED: &str = "Confirmed sanctions match: work with this person is stopped";
+
+/// The conversion reason of
+/// [`LeadConversionReadinessInput::uncounted_parents_unacknowledged`]; the
+/// frontend maps this exact text.
+const UNCOUNTED_PARENT_UNACKNOWLEDGED: &str =
+    "A parent who is not counted waits for the acknowledgement of the CEO or Sales";
 
 /// `{how, note}` of a consent staff recorded for the client (the
 /// `recorded_by_staff` context of its record), `null` otherwise.
@@ -3491,6 +3550,9 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
         self_disclosure: Default::default(),
         // Set by `load_lead_conversion_readiness` (needs the representatives).
         contract_details_missing: Vec::new(),
+        sanctions_confirmed: row.try_get("sanctions_confirmed").unwrap_or(false),
+        // Set by `load_lead_conversion_readiness` (needs the representatives).
+        uncounted_parents_unacknowledged: Vec::new(),
     }
 }
 
@@ -3534,6 +3596,16 @@ async fn load_lead_conversion_readiness(
                   wizard_state,
                   consent_privacy_practices,
                   consent_healthcare,
+                  -- A confirmed sanctions match of the lead (the person, the
+                  -- people and the bank screened with it) or of its patient
+                  -- record: final, the gate refuses every guarded action.
+                  EXISTS (
+                      SELECT 1 FROM sanctions_hits h
+                      WHERE h.status = 'confirmed'
+                        AND (h.lead_id = leads.id
+                             OR h.patient_id IN (leads.prospect_patient_id,
+                                                 leads.converted_patient_id))
+                  ) AS sanctions_confirmed,
                   -- The consents given in the cabinet count like the staff's
                   -- record of a paper consent (owner 2026-10-20): an active
                   -- record of the adult lead, or of a parent / guardian.
@@ -3937,6 +4009,12 @@ async fn load_lead_conversion_readiness(
     // that says "ready" while the conversion would refuse is no release list.
     input.contract_details_missing =
         super::lead_representatives::contract_details_missing(&mut conn, lead_id)
+            .await
+            .map_err(enhanced_check_failed)?;
+    // The acknowledgement of a parent who is not counted (owner 2026-11-10)
+    // belongs to what is done before the patient is created.
+    input.uncounted_parents_unacknowledged =
+        super::lead_risk::unacknowledged_uncounted_parents(&mut conn, lead_id)
             .await
             .map_err(enhanced_check_failed)?;
     drop(conn);
@@ -4845,6 +4923,21 @@ async fn create_lead(
     }
     // The address of the patient login: an adult's own.
     let account_email = portal_email.clone().filter(|_| !minor);
+    // Staff's remark of the creation dialog stays with staff (QA 2026-11-10,
+    // C-F1): it is the staff-only comment, never the client's `notes`.
+    let internal_note: Option<String> = body
+        .internal_note
+        .as_deref()
+        .or(body.notes.as_deref())
+        .map(str::trim)
+        .filter(|note| !note.is_empty())
+        .map(str::to_string);
+    if internal_note
+        .as_deref()
+        .is_some_and(|note| note.chars().count() > SERVICES_INTERNAL_NOTE_MAX_CHARS)
+    {
+        return field_err("internal_note", "Comment is too long");
+    }
 
     if let Some(creation_key) = body.creation_key {
         match sqlx::query_scalar::<_, Uuid>(
@@ -4970,7 +5063,9 @@ async fn create_lead(
     let inserted = sqlx::query_as::<_, (Uuid, bool)>(
         r#"INSERT INTO leads (
                 first_name, last_name, email, phone, source, country,
-                notes, created_by, intake_source, creation_key, date_of_birth,
+                -- Staff's remark: the staff-only comment, never `notes` (the
+                -- client's own wishes, shown in the cabinet).
+                services_internal_note, created_by, intake_source, creation_key, date_of_birth,
                 trusted_contacts,
                 -- The legacy single-contact columns mirror the first entry,
                 -- as `update_lead` keeps them (older readers still use them).
@@ -4993,7 +5088,7 @@ async fn create_lead(
     .bind(body.phone.as_deref())
     .bind(body.source.as_deref())
     .bind(body.country.as_deref())
-    .bind(body.notes.as_deref())
+    .bind(internal_note.as_deref())
     .bind(auth.user_id)
     .bind(body.creation_key)
     .bind(date_of_birth)
@@ -14484,7 +14579,61 @@ mod lead_conversion_readiness_tests {
                 signed: true,
             },
             contract_details_missing: Vec::new(),
+            sanctions_confirmed: false,
+            uncounted_parents_unacknowledged: Vec::new(),
         }
+    }
+
+    /// QA 2026-11-10, E F-5: a confirmed sanctions match is the first reason
+    /// on both lists and has its own check.
+    #[test]
+    fn a_confirmed_sanctions_match_is_the_first_blocking_reason() {
+        let mut input = ready_input();
+        input.sanctions_confirmed = true;
+        let readiness = evaluate_lead_conversion_readiness(&input);
+        assert!(!readiness.qualification_ready);
+        assert!(!readiness.conversion_ready);
+        assert_eq!(readiness.qualification_reasons[0], SANCTIONS_CONFIRMED);
+        assert_eq!(readiness.conversion_reasons[0], SANCTIONS_CONFIRMED);
+        assert_eq!(readiness.payload["checks"][0]["key"], "sanctions_clear");
+        assert_eq!(readiness.payload["checks"][0]["passed"], false);
+        let clear = evaluate_lead_conversion_readiness(&ready_input());
+        assert_eq!(clear.payload["checks"][0]["key"], "sanctions_clear");
+        assert_eq!(clear.payload["checks"][0]["passed"], true);
+    }
+
+    /// QA 2026-11-10, C-F4: the patient is not created while a parent who is
+    /// not counted waits for the acknowledgement; qualifying does not wait.
+    #[test]
+    fn an_unacknowledged_parent_holds_the_conversion_only() {
+        let mut input = ready_input();
+        input.uncounted_parents_unacknowledged = vec!["Ivan Testkind".to_string()];
+        let readiness = evaluate_lead_conversion_readiness(&input);
+        assert!(readiness.qualification_ready);
+        assert!(!readiness.conversion_ready);
+        assert_eq!(
+            readiness.conversion_reasons,
+            [UNCOUNTED_PARENT_UNACKNOWLEDGED]
+        );
+        let check = readiness.payload["checks"]
+            .as_array()
+            .and_then(|checks| {
+                checks
+                    .iter()
+                    .find(|check| check["key"] == "uncounted_parents_acknowledged")
+            })
+            .cloned()
+            .expect("the check is listed");
+        assert_eq!(check["passed"], false);
+        assert_eq!(check["names"], json!(["Ivan Testkind"]));
+        // Without such a parent the check is not listed at all.
+        let clear = evaluate_lead_conversion_readiness(&ready_input());
+        assert!(clear.conversion_ready);
+        assert!(clear.payload["checks"].as_array().is_some_and(|checks| {
+            checks
+                .iter()
+                .all(|check| check["key"] != "uncounted_parents_acknowledged")
+        }));
     }
 
     #[test]

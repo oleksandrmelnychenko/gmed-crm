@@ -2616,6 +2616,19 @@ async fn get_payer_declaration(
         Ok(payer) => payer,
         Err(error) => return database_error(error, "load payer declaration"),
     };
+    // Before a payer is named the same rule says whether the source of funds
+    // is asked (QA 2026-11-10, C-F3): the form asked for it while staff were
+    // still choosing who pays, although the enhanced check required nothing.
+    // Only here: the readiness of the leads list needs no answer without a
+    // declaration (`load_payer_state` stays one round trip for it).
+    if payer.declaration.is_none() {
+        match super::lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id).await {
+            Ok(check) => payer.funds_optional = !check.required,
+            Err(error) => {
+                return database_error(error, "load payer declaration enhanced check");
+            }
+        }
+    }
     // Section 7 as the lead's invoice recipient says it (the readiness of the
     // leads list does not need it, so `load_payer_state` leaves it out).
     if let Some(declaration) = payer.declaration.as_mut()

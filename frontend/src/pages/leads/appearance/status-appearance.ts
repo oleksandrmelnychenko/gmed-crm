@@ -57,7 +57,9 @@ export function withFinalPeriod(label: string): string {
 /**
  * The countdown as a full sentence (owner decision 2026-10-23): the date and
  * the days left come from the server deadline (the same rule as the purge
- * job), and the sentence names what stops it - the signed DSGVO package.
+ * job), and the sentence names what stops it - any signed document (owner
+ * 2026-11-10: a lead that signed anything is never purged; before, only the
+ * signed DSGVO package).
  */
 export function retentionDeadlineNotice(
   deadline: string,
@@ -67,17 +69,17 @@ export function retentionDeadlineNotice(
   const date = formatAppDate(deadline);
   if (lang === "de") {
     const when = days <= 0 ? "heute" : `in ${days} T.`;
-    return `Lead wird am ${date} gelöscht (${when}), solange das DSGVO-Paket nicht unterschrieben ist`;
+    return `Lead wird am ${date} gelöscht (${when}), solange kein Dokument unterschrieben ist`;
   }
   const when = days <= 0 ? "сегодня" : `через ${days} дн.`;
-  return `Лид будет удалён ${date} (${when}), пока не подписан пакет DSGVO`;
+  return `Лид будет удалён ${date} (${when}), пока не подписан ни один документ`;
 }
 
 /** What the countdown means, for a tooltip or a banner. */
 export function retentionCountdownHint(lang: string): string {
   return lang === "de"
-    ? "Ein nicht qualifizierter Lead ohne unterschriebenes DSGVO-Paket wird 14 Tage nach der Anlage mit allen Dokumenten automatisch gelöscht. Nur das unterschriebene DSGVO-Paket stoppt die Löschung; die Einwilligung zur Bearbeitung der Anfrage reicht dafür nicht."
-    : "Неквалифицированный лид без подписанного пакета DSGVO автоматически удаляется вместе со всеми документами через 14 дней после создания. Удаление останавливает только подписанный пакет DSGVO; согласия на обработку запроса для этого недостаточно.";
+    ? "Ein nicht qualifizierter Lead, der kein Dokument unterschrieben hat, wird 14 Tage nach der Anlage mit allen Dokumenten automatisch gelöscht. Jedes unterschriebene Dokument stoppt die Löschung; die im Portal gesetzten Häkchen (auch die Einwilligung zur Bearbeitung der Anfrage) reichen dafür nicht."
+    : "Неквалифицированный лид, не подписавший ни одного документа, автоматически удаляется вместе со всеми документами через 14 дней после создания. Удаление останавливает любой подписанный документ; отметок в кабинете (в том числе согласия на обработку запроса) для этого недостаточно.";
 }
 
 export function leadStatusTone(status: string): StatusTone {

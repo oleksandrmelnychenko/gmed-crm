@@ -1,8 +1,11 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { t as translateCatalog } from "@/lib/i18n";
 
 import {
+  SANCTIONS_CONFIRMED_REASON,
+  UNCOUNTED_PARENT_UNACKNOWLEDGED_REASON,
   LEAD_QUESTIONNAIRE_SERVICE_OPTIONS,
   LEAD_WIZARD_SERVICE_OPTIONS,
   formatDate,
@@ -54,6 +57,9 @@ const SERVER_READINESS_CHECK_KEYS = [
   "cost_estimate_document_generated",
   "debt_clear",
   "prepayment_ready",
+  // QA 2026-11-10: a confirmed sanctions match (E F-5), a parent who waits for «Принято к сведению» (C-F4).
+  "sanctions_clear",
+  "uncounted_parents_acknowledged",
 ];
 
 const SERVER_READINESS_REASONS = [
@@ -86,6 +92,9 @@ const SERVER_READINESS_REASONS = [
   "Medical work types are not selected",
   "Lead is already converted",
   "Contract details of the representatives are missing",
+  "Payer GwG sheet is not signed",
+  "Confirmed sanctions match: work with this person is stopped",
+  "A parent who is not counted waits for the acknowledgement of the CEO or Sales",
 ];
 
 describe("lead readiness labels", () => {
@@ -114,6 +123,15 @@ describe("lead readiness labels", () => {
       .toBe("Angaben der Vertreter für den Vertrag unvollständig");
     expect(leadReadinessReasonLabel("Contract details of the representatives are missing", translateCatalog("ru")))
       .toBe("Данные представителей для договора неполные");
+  });
+
+  it("uses the server's exact words for the reasons added on 2026-11-10", () => {
+    const leads = readFileSync(new URL("../../../../../crates/server/src/routes/leads.rs", import.meta.url), "utf8");
+    for (const reason of [SANCTIONS_CONFIRMED_REASON, UNCOUNTED_PARENT_UNACKNOWLEDGED_REASON]) {
+      // rustfmt may break the constant over two lines: compare without the layout.
+      expect(leads.replace(/\s+/g, " "), reason).toContain(`"${reason}"`);
+    }
+    expect(leadReadinessReasonLabel(SANCTIONS_CONFIRMED_REASON, translateCatalog("ru"))).toContain("санкционным списком");
   });
 
   it("names the terminated framework contract in German", () => {
@@ -157,16 +175,27 @@ describe("lead history labels", () => {
 });
 
 describe("lead release permissions", () => {
-  it("gives Concierge and the CEO assistant the grid without detail or mutation rights", () => {
-    for (const role of ["concierge", "ceo_assistant"]) {
-      expect(leadPermissions(role)).toEqual({
-        canViewPage: true,
-        canOpen: false,
-        canEdit: false,
-        canCreate: false,
-        canConvert: false,
-      });
-    }
+  it("gives the Concierge the grid without detail or mutation rights", () => {
+    expect(leadPermissions("concierge")).toEqual({
+      canViewPage: true,
+      canOpen: false,
+      canEdit: false,
+      canCreate: false,
+      canConvert: false,
+    });
+  });
+
+  // Owner 2026-10-11: the CEO Assistant reads everything and changes nothing (QA 2026-11-10, E F-2).
+  it("lets the CEO assistant open the lead card without any mutation right", () => {
+    expect(leadPermissions("ceo_assistant")).toEqual({
+      canViewPage: true,
+      canOpen: true,
+      canEdit: false,
+      canCreate: false,
+      canConvert: false,
+    });
+    // Without the right to see leads at all the card stays closed.
+    expect(leadPermissions({ role: "ceo_assistant", capabilities: [] }).canOpen).toBe(false);
   });
 
   it("keeps full lead operations for CEO", () => {

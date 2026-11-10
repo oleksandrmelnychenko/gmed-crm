@@ -133,6 +133,7 @@ import {
   leadListShowsConverted,
   leadTypeFromLead,
   leadPermissions,
+  sanctionsConfirmedReasonText,
   leadServerFieldError,
   leadToGateForm,
   nonempty,
@@ -141,6 +142,7 @@ import {
 import {
   EARLIEST_GATE_BIRTH_DATE,
   GATE_SERVER_FIELDS,
+  formAfterBackgroundReload,
   leadGateFormErrors,
   type LeadGateErrors,
   type LeadGateField,
@@ -173,6 +175,7 @@ import {
 import { LeadPortalAccessDetail, PortalCredentialsDialog, type PortalCredentials } from "./ui/lead-portal-access";
 import { LeadConfirmDialog } from "./ui/lead-confirm-dialog";
 import { LeadUncountedParentsNotice } from "./ui/lead-uncounted-parents-notice";
+import { ServicesInternalNoteField } from "./ui/lead-wizard-visibility";
 import { LeadIdentityDocumentsBlock } from "./ui/lead-identity-documents-block";
 import {
   LEAD_PURGED_EVENT,
@@ -341,6 +344,8 @@ type LeadsDetailPatch =
  * `reasonText` the text of «Другое» (QA 2026-10-11, A-39a).
  */
 type FailedLeadForm = FailedLeadResolutionForm & { reasonText: string };
+/** The fields of the failed-flow form that come from the lead. */
+type LoadedFailedLeadFields = { reason: string; reasonText: string; note: string };
 
 function blankFailedLeadForm(): FailedLeadForm {
   return { ...blankFailedLeadResolutionForm(), reasonText: "" };
@@ -472,6 +477,10 @@ function useLeadsPageContent() {
   const [gateBirthDateEntryError, setGateBirthDateEntryError] = useState<string | null>(null);
   // A save of the form that failed for another reason, shown above the form.
   const [gateSaveError, setGateSaveError] = useState("");
+  // What the forms of the open lead were last filled from, and whether the next load
+  // replaces them (after an own save): see the effect on `detail` (QA 2026-11-10, C-F2).
+  const loadedLeadFormsRef = useRef<{ leadId: string; gate: LeadGateForm; failed: LoadedFailedLeadFields } | null>(null);
+  const takeStoredLeadFormsRef = useRef(false);
   const [newLeadWizardOpen, setNewLeadWizardOpen] = useState(false);
   // A fresh wizard per "Новый лид": an open lead's wizard state must never carry
   // over into the new person (QA 2026-10-10, the new data overwrote the open lead).
@@ -482,7 +491,8 @@ function useLeadsPageContent() {
   const failedLoadMessage = t.common_failed_load;
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => leadPermissions(user), [user]);
-  // `leads.view` without `leads.edit` (concierge, CEO assistant): the service grid only.
+  // `leads.view` without `leads.edit`: nothing is changed. The concierge has the service
+  // grid only; the CEO Assistant also opens the lead card, read-only (`permissions.canOpen`).
   const isConciergeReadOnly = permissions.canViewPage && !permissions.canEdit;
   const conciergeTabsRef = useRef<HTMLDivElement | null>(null);
   const conciergeTabPillRef = useRef<HTMLSpanElement | null>(null);
@@ -752,9 +762,12 @@ function useLeadsPageContent() {
   const canIssuePortalPassword = canIssueLeadPortalPassword(user?.role);
   // Sanctions / blocked-country badge next to the name.
   const sanctionsFlags = useLeadSanctionsFlags(permissions.canViewPage, version);
+  // The service grid (the concierge) carries no login data: the row said «Нет доступа» /
+  // „Kein Zugang“ as if the lead had none (QA 2026-11-10). Only who gets the whole row expands it.
+  const canExpandLeadRows = permissions.canOpen;
   const renderLeadRowDetail = useCallback(
     (row: LeadListItem) =>
-      expandedLeadIds.has(row.id) ? (
+      canExpandLeadRows && expandedLeadIds.has(row.id) ? (
         <LeadPortalAccessDetail
           lead={row}
           lang={lang}
@@ -763,7 +776,7 @@ function useLeadsPageContent() {
           onChanged={() => setVersion((current) => current + 1)}
         />
       ) : null,
-    [canIssuePortalPassword, expandedLeadIds, lang, version],
+    [canExpandLeadRows, canIssuePortalPassword, expandedLeadIds, lang, version],
   );
   const leadColumns = useMemo<ColumnDef<LeadListItem>[]>(
     () => {
@@ -783,16 +796,18 @@ function useLeadsPageContent() {
           const expanded = expandedLeadIds.has(row.id);
           return (
             <span className="flex min-w-0 items-center gap-2">
-              <RowExpandButton
-                expanded={expanded}
-                label={
-                  lang === "de"
-                    ? expanded ? "Portalzugang ausblenden" : "Portalzugang anzeigen"
-                    : expanded ? "Скрыть доступ пациента" : "Показать доступ пациента"
-                }
-                testId={`lead-expand-${row.id}`}
-                onToggle={() => toggleLeadExpanded(row.id)}
-              />
+              {canExpandLeadRows ? (
+                <RowExpandButton
+                  expanded={expanded}
+                  label={
+                    lang === "de"
+                      ? expanded ? "Portalzugang ausblenden" : "Portalzugang anzeigen"
+                      : expanded ? "Скрыть доступ пациента" : "Показать доступ пациента"
+                  }
+                  testId={`lead-expand-${row.id}`}
+                  onToggle={() => toggleLeadExpanded(row.id)}
+                />
+              ) : null}
               <span className="truncate text-[13px] font-medium text-foreground">
                 {leadDisplayName(row, tx)}
               </span>
@@ -1087,6 +1102,7 @@ function useLeadsPageContent() {
       return columns.filter((column) => conciergeColumns.has(column.id));
     },
     [
+      canExpandLeadRows,
       expandedLeadIds,
       lang,
       leadColumnGroupLabels,
@@ -1208,10 +1224,12 @@ function useLeadsPageContent() {
     if (!permissions.canOpen || !detailOpen || !selectedLeadId) return;
 
     let cancelled = false;
-    dispatchDetailState({
-      detailLoading: true,
+    // A background refresh of the lead already on screen keeps the pane mounted: the
+    // spinner replaced the form and, with it, what was typed (QA 2026-11-10, C-F2).
+    dispatchDetailState((current) => ({
+      detailLoading: current.detail?.id !== selectedLeadId,
       detailError: "",
-    });
+    }));
 
     void fetchLeadDetail(selectedLeadId)
       .then((item) => {
@@ -1240,6 +1258,7 @@ function useLeadsPageContent() {
 
   useEffect(() => {
     if (!detail) {
+      loadedLeadFormsRef.current = null;
       dispatchUiState({
         gateForm: null,
         failedLeadForm: blankFailedLeadForm(),
@@ -1248,12 +1267,29 @@ function useLeadsPageContent() {
     }
     // The reason chosen with «Не подходит» comes back while the outcome is still "none".
     const storedReason = leadFailureReasonDraft(detail.failed_outcome?.reason);
-    setFailedReasonError("");
-    setGateErrors({});
-    setGateBirthDateEntryError(null);
-    setGateSaveError("");
+    const storedGate = leadToGateForm(detail);
+    const storedFailed: LoadedFailedLeadFields = {
+      reason: storedReason.choice,
+      reasonText: storedReason.text,
+      note: detail.failed_outcome?.note ?? "",
+    };
+    // The same lead loaded again in the background (any lead event reloads the list and
+    // the open lead): what was typed and not saved stays (QA 2026-11-10, C-F2). Another
+    // lead, or the load after an own save, fills the forms from the server.
+    const loaded = loadedLeadFormsRef.current;
+    const refreshed = loaded && loaded.leadId === detail.id && !takeStoredLeadFormsRef.current ? loaded : null;
+    loadedLeadFormsRef.current = { leadId: detail.id, gate: storedGate, failed: storedFailed };
+    takeStoredLeadFormsRef.current = false;
+    if (!refreshed) {
+      setFailedReasonError("");
+      setGateErrors({});
+      setGateBirthDateEntryError(null);
+      setGateSaveError("");
+    }
     dispatchUiState((current) => ({
-      gateForm: leadToGateForm(detail),
+      gateForm: refreshed && current.gateForm
+        ? formAfterBackgroundReload(current.gateForm, refreshed.gate, storedGate)
+        : storedGate,
       failedLeadForm: {
         resolution:
           current.failedLeadForm.resolution === "delete" &&
@@ -1261,9 +1297,17 @@ function useLeadsPageContent() {
           user?.role !== "ceo"
             ? "archive"
             : current.failedLeadForm.resolution,
-        reason: storedReason.choice,
-        reasonText: storedReason.text,
-        note: detail.failed_outcome?.note ?? "",
+        ...(refreshed
+          ? formAfterBackgroundReload<LoadedFailedLeadFields>(
+              {
+                reason: current.failedLeadForm.reason,
+                reasonText: current.failedLeadForm.reasonText,
+                note: current.failedLeadForm.note,
+              },
+              refreshed.failed,
+              storedFailed,
+            )
+          : storedFailed),
       },
     }));
   }, [detail, user?.role]);
@@ -1389,13 +1433,19 @@ function useLeadsPageContent() {
       phone: nonempty(createForm.phone),
       source: nonempty(createForm.source),
       country: nonempty(createForm.country),
-      notes: nonempty(createForm.notes),
+      // Staff's own remark: the staff-only comment, never the client's field (QA 2026-11-10, C-F1).
+      internal_note: nonempty(createForm.notes),
     };
 
     try {
       const created = await createLead(payload);
       setCreateOpen(false);
       setCreateForm(blankLeadForm());
+      // The sheet just closed without a word (QA 2026-11-10).
+      toast.success(tx(
+        `Лид создан: ${payload.first_name} ${payload.last_name}`,
+        `Lead angelegt: ${payload.first_name} ${payload.last_name}`,
+      ));
       const portalPassword = created.portal_account?.one_time_password;
           if (created.portal_account?.reused) {
             toast.success(lang === "de" ? "Bestehender Elternzugang verknüpft. Passwort und Zugang zu den Kindern bleiben erhalten." : "Подключён существующий аккаунт родителя. Пароль и доступ к детям сохранены.");
@@ -1515,9 +1565,15 @@ function useLeadsPageContent() {
         compliance_status: nonempty(gateForm.complianceStatus),
         consent_healthcare: gateForm.consentHealthcare,
         consent_privacy_practices: gateForm.consentPrivacyPractices,
-        // Without medical access the notes are not shown, so they are not sent.
-        ...(detailMedicalHidden ? {} : { notes: nonempty(gateForm.notes) }),
+        // Staff's own comment, sent only when it changed ("" clears it). The client's
+        // `notes` are never written from here (QA 2026-11-10, C-F1).
+        ...(gateForm.internalNote.trim() !== (detail.services_internal_note ?? "").trim()
+          ? { services_internal_note: gateForm.internalNote.trim() }
+          : {}),
       });
+      // The form shows what the server stored from here on.
+      takeStoredLeadFormsRef.current = true;
+      toast.success(tx("Данные сохранены", "Daten gespeichert"));
       reload();
     } catch (saveError) {
       const message = localizeLeadError(saveError, t.common_failed_update);
@@ -1569,6 +1625,7 @@ function useLeadsPageContent() {
         note: nonempty(failedLeadForm.note),
       });
       setFailedDeleteConfirmOpen(false);
+      takeStoredLeadFormsRef.current = true;
       reload();
     } catch (resolveError) {
       setFailedDeleteConfirmOpen(false);
@@ -1690,6 +1747,10 @@ function useLeadsPageContent() {
   // The languages GMED serves (owner 2026-10-29).
   const gateLanguageOptions = preferredLanguageOptions(LANGUAGE_OPTIONS);
   const detailIsMinor = Boolean(detail?.date_of_birth) && isMinor(detail?.date_of_birth ?? "", new Date());
+  // The server's readiness check of a confirmed sanctions match (`sanctions_clear`).
+  const detailSanctionsConfirmed = Boolean(
+    detail?.readiness.checks.some((check) => check.key === "sanctions_clear" && !check.passed),
+  );
 
   const detailPaneNode: ReactNode = (
     <div className="flex h-full flex-col">
@@ -2124,6 +2185,9 @@ function useLeadsPageContent() {
                     {detailIsMinor ? (
                       <StatusBadge tone="info">{tx("Несовершеннолетний", "Minderjährig")}</StatusBadge>
                     ) : null}
+                    {detailSanctionsConfirmed ? (
+                      <StatusBadge tone="error">{tx("Санкции: подтверждённое совпадение", "Sanktionen: bestätigter Treffer")}</StatusBadge>
+                    ) : null}
                     {detail.failed_outcome.status !== "none" ? (
                       <StatusBadge tone={failedOutcomeTone(detail.failed_outcome.status)}>
                         {failedOutcomeLabel(detail.failed_outcome.status, t)}
@@ -2139,6 +2203,12 @@ function useLeadsPageContent() {
                   <p className="mt-2 text-sm text-muted-foreground">
                     {t.users_created} {formatDate(detail.created_at, locale, t.common_not_set)}
                   </p>
+                  {/* The card listed every other blocker but the one nobody can lift (QA 2026-11-10, E F-5). */}
+                  {detailSanctionsConfirmed ? (
+                    <div className="mt-3" data-testid="lead-detail-sanctions-confirmed">
+                      <Banner tone="error">{sanctionsConfirmedReasonText(tx)}</Banner>
+                    </div>
+                  ) : null}
                 </section>
 
                 <section className={cardClass("p-4")}>
@@ -2255,7 +2325,7 @@ function useLeadsPageContent() {
                       </ul>
                     )}
                     {detailIsMinor && !detailIsConverted ? (
-                      <LeadUncountedParentsNotice leadId={detail.id} tx={tx} lang={lang} />
+                      <LeadUncountedParentsNotice leadId={detail.id} tx={tx} lang={lang} onAcknowledged={reload} />
                     ) : null}
                   </section>
                 ) : null}
@@ -2778,24 +2848,25 @@ function useLeadsPageContent() {
                             </p>
                           ) : null}
                         </LeadField>
-                        {/* Notes mix medical content; a role without medical access neither reads nor overwrites them. */}
-                        {detailMedicalHidden ? null : (
-                          <LeadField label={t.patients_notes} htmlFor="lead-gate-notes">
-                            <textarea
-                              id="lead-gate-notes"
-                              rows={3}
-                              className={cn(textareaClassName, "min-h-[72px]")}
-                              value={gateForm.notes}
-                              onChange={(event) =>
-                                setGateForm((current) =>
-                                  current
-                                    ? { ...current, notes: event.target.value }
-                                    : current
-                                )
-                              }
-                            />
-                          </LeadField>
-                        )}
+                        {/* Staff's own comment, the one typed with a new lead: the client never
+                            reads it. The field used to edit the client's «Индивидуальные пожелания»
+                            under the label «Заметки» (QA 2026-11-10, C-F1). */}
+                        <div className="md:col-span-2">
+                          <ServicesInternalNoteField
+                            id="lead-gate-internal-note"
+                            value={gateForm.internalNote}
+                            onChange={(value) =>
+                              setGateForm((current) =>
+                                current
+                                  ? { ...current, internalNote: value }
+                                  : current
+                              )
+                            }
+                            tx={tx}
+                            labelClassName={tokens.text.label}
+                            textareaClassName={cn(textareaClassName, "min-h-[72px]")}
+                          />
+                        </div>
                       </div>
 
                       <div className="grid gap-3 md:grid-cols-2">
@@ -2878,9 +2949,10 @@ function useLeadsPageContent() {
                           label={t.lead_compliance_status}
                           value={complianceStatusLabel(gateForm.complianceStatus, t)}
                         />
-                        {detailMedicalHidden ? null : (
-                          <DetailCard label={t.patients_notes} value={gateForm.notes || t.common_not_set} />
-                        )}
+                        <DetailCard
+                          label={tx("Внутренний комментарий (клиент не видит)", "Interner Kommentar (für den Kunden nicht sichtbar)")}
+                          value={gateForm.internalNote || t.common_not_set}
+                        />
                         <DetailCard
                           label={t.lead_healthcare_consent_available}
                           value={yesNo(gateForm.consentHealthcare || leadConsentGiven(detail, "healthcare_consent"), t)}
@@ -2906,7 +2978,14 @@ function useLeadsPageContent() {
                         </SectionTitle>
                         {detail.failed_outcome.status === "none" ? (
                           <p className="mt-1 text-sm text-muted-foreground">
-                            {t.lead_failed_resolution_description}
+                            {/* Only the patient manager and the CEO delete (server 403 for the rest):
+                                the text offered Sales a deletion the form does not have (QA 2026-11-10). */}
+                            {user?.role === "patient_manager" || user?.role === "ceo"
+                              ? t.lead_failed_resolution_description
+                              : tx(
+                                "Лид не подходит: заархивируйте его. Причина обязательна. Удалить с анонимизацией может менеджер пациентов или CEO.",
+                                "Der Lead passt nicht: archivieren. Ein Grund ist Pflicht. Löschen und anonymisieren können das Patientenmanagement oder der CEO.",
+                              )}
                           </p>
                         ) : null}
                       </div>
@@ -3258,10 +3337,25 @@ function useLeadsPageContent() {
                   ) : (
                     <p className="mt-3 text-sm text-muted-foreground">{t.lead_no_files_uploaded}</p>
                   )}
+                  {/* `notes` is the client's own text of the cabinet, not an internal note
+                      (QA 2026-11-10, C-F1); staff's comment is `services_internal_note`. */}
                   {detail.notes ? (
-                    <div className="mt-4 rounded-2xl bg-muted px-4 py-3 text-sm leading-6 text-foreground">
-                      <div className="mb-1 text-xs text-muted-foreground">{t.lead_internal_note}</div>
-                      {detail.notes}
+                    <div className="mt-4 rounded-2xl bg-muted px-4 py-3 text-sm leading-6 text-foreground" data-testid="lead-detail-client-wishes">
+                      <div className="mb-1 text-xs text-muted-foreground">
+                        {tx(
+                          "Индивидуальные пожелания клиента (видно клиенту в кабинете)",
+                          "Individuelle Wünsche des Kunden (für den Kunden im Portal sichtbar)",
+                        )}
+                      </div>
+                      <span className="whitespace-pre-wrap">{detail.notes}</span>
+                    </div>
+                  ) : null}
+                  {detail.services_internal_note ? (
+                    <div className="mt-4 rounded-2xl bg-muted px-4 py-3 text-sm leading-6 text-foreground" data-testid="lead-detail-internal-note">
+                      <div className="mb-1 text-xs text-muted-foreground">
+                        {tx("Внутренний комментарий (клиент не видит)", "Interner Kommentar (für den Kunden nicht sichtbar)")}
+                      </div>
+                      <span className="whitespace-pre-wrap">{detail.services_internal_note}</span>
                     </div>
                   ) : null}
                 </section>
@@ -3525,8 +3619,10 @@ function useLeadsPageContent() {
                 <section className={cardClass("p-4")}>
                   <SectionTitle>{t.lead_section_identity}</SectionTitle>
                   <div className="mt-5 grid gap-4 md:grid-cols-2">
-                    <LeadField label={t.patients_first_name}>
+                    <LeadField label={`${t.patients_first_name} *`} htmlFor="lead-create-first-name">
                       <Input
+                        id="lead-create-first-name"
+                        autoComplete="off"
                         className={shellInputClassName}
                         value={createForm.firstName}
                         onChange={(event) =>
@@ -3535,8 +3631,10 @@ function useLeadsPageContent() {
                         required
                       />
                     </LeadField>
-                    <LeadField label={t.patients_last_name}>
+                    <LeadField label={`${t.patients_last_name} *`} htmlFor="lead-create-last-name">
                       <Input
+                        id="lead-create-last-name"
+                        autoComplete="off"
                         className={shellInputClassName}
                         value={createForm.lastName}
                         onChange={(event) =>
@@ -3551,8 +3649,9 @@ function useLeadsPageContent() {
                 <section className={cardClass("p-4")}>
                   <SectionTitle>{t.lead_section_contact_origin}</SectionTitle>
                   <div className="mt-5 grid gap-4 md:grid-cols-2">
-                    <LeadField label={t.field_phone}>
+                    <LeadField label={t.field_phone} htmlFor="lead-create-phone">
                       <Input
+                        id="lead-create-phone"
                         className={shellInputClassName}
                         value={createForm.phone}
                         onChange={(event) =>
@@ -3560,8 +3659,9 @@ function useLeadsPageContent() {
                         }
                       />
                     </LeadField>
-                    <LeadField label={`${t.patients_email} *`}>
+                    <LeadField label={`${t.patients_email} *`} htmlFor="lead-create-email">
                       <Input
+                        id="lead-create-email"
                         type="email"
                         required
                         autoComplete="email"
@@ -3591,8 +3691,9 @@ function useLeadsPageContent() {
                         ))}
                       </NativeComboboxSelect>
                     </LeadField>
-                    <LeadField label={t.providers_country}>
+                    <LeadField label={t.providers_country} htmlFor="lead-create-country">
                       <Input
+                        id="lead-create-country"
                         className={shellInputClassName}
                         value={createForm.country}
                         onChange={(event) =>
@@ -3603,19 +3704,17 @@ function useLeadsPageContent() {
                   </div>
                 </section>
 
+                {/* Staff's own remark (`leads.services_internal_note`): the client never reads it.
+                    It used to land in the client's «Индивидуальные пожелания» (QA 2026-11-10, C-F1). */}
                 <section className={cardClass("p-4")}>
-                  <SectionTitle>{t.patients_notes}</SectionTitle>
-                  <div className="mt-5">
-                    <textarea
-                      aria-label={t.patients_notes}
-                      value={createForm.notes}
-                      onChange={(event) =>
-                        setCreateForm((current) => ({ ...current, notes: event.target.value }))
-                      }
-                      className={cn(textareaClassName, "min-h-[104px]")}
-                      rows={4}
-                    />
-                  </div>
+                  <ServicesInternalNoteField
+                    id="lead-create-internal-note"
+                    value={createForm.notes}
+                    onChange={(value) => setCreateForm((current) => ({ ...current, notes: value }))}
+                    tx={tx}
+                    labelClassName={tokens.text.label}
+                    textareaClassName={cn(textareaClassName, "min-h-[104px]")}
+                  />
                 </section>
               </div>
             </AdminSheetScaffold>

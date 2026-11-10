@@ -7916,7 +7916,8 @@ async fn concierge_sees_only_the_service_grid_and_cannot_mutate_leads() {
             "phone": "+49 151 7654321",
             "source": "Website",
             "country": "DE",
-            "notes": "internal note about the case"
+            // Staff's remark of the creation dialog: the staff-only comment.
+            "internal_note": "staff remark about the case"
         })),
     )
     .await;
@@ -7928,6 +7929,8 @@ async fn concierge_sees_only_the_service_grid_and_cannot_mutate_leads() {
         &format!("/api/v1/leads/{lead_id}/update"),
         &pm,
         Some(json!({
+            // The comment of the services step the client reads in the cabinet.
+            "notes": "internal note about the case",
             "primary_concern_text": "Oncology second opinion",
             "additional_concerns": "Diabetes",
             "services": ["driver", "concierge"],
@@ -7946,6 +7949,7 @@ async fn concierge_sees_only_the_service_grid_and_cannot_mutate_leads() {
 
     let excluded = [
         "notes",
+        "services_internal_note",
         "message",
         "primary_concern_text",
         "additional_concerns",

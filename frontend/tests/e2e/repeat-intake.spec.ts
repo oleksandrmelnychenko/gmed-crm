@@ -583,6 +583,6 @@ test("a lead without consent shows when it will be deleted automatically", async
   await wizard.getByRole("button", {name: "Обновить", exact: true}).click();
   // The full sentence of 2026-10-23: date, days left and what stops it.
   const [year, month, day] = new Intl.DateTimeFormat("en-CA", {timeZone: "Europe/Berlin"}).format(new Date(deadline)).split("-");
-  await expect(countdown).toContainText(`Лид будет удалён ${day}.${month}.${year} (через 2 дн.), пока не подписан пакет DSGVO.`);
+  await expect(countdown).toContainText(`Лид будет удалён ${day}.${month}.${year} (через 2 дн.), пока не подписан ни один документ.`);
   await expect(countdown).toHaveAttribute("title", /автоматически удаляется вместе со всеми документами/);
 });

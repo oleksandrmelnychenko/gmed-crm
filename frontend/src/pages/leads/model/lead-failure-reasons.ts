@@ -47,9 +47,18 @@ export function leadFailureReasonOtherLabel(tx: Tx): string {
 export function leadFailureReasonLabel(reason: string | null | undefined, tx: Tx): string | null {
   const value = reason?.trim() ?? "";
   if (!value || value === LEAD_FAILURE_REASON_OTHER) return null;
-  const known = LEAD_FAILURE_REASONS.find((item) => item.code === value);
-  return known ? tx(known.ru, known.de) : value;
+  const known = LEAD_FAILURE_REASONS.find((item) => item.code === value)
+    ?? LEGACY_FAILURE_REASONS.find((item) => item.code === value);
+  if (known) return tx(known.ru, known.de);
+  // Any other stored code (older data): never the raw code (QA 2026-11-10: `insurance_gap`).
+  return /^[a-z0-9]+(?:_[a-z0-9]+)+$/.test(value) ? tx("Другая причина", "Anderer Grund") : value;
 }
+
+/** Codes of older data that staff no longer choose; shown by their label. */
+const LEGACY_FAILURE_REASONS = [
+  { code: "insurance_gap", ru: "Страховка не покрывает услуги", de: "Versicherung deckt die Leistungen nicht" },
+  { code: "budget", ru: "Не устраивает стоимость", de: "Kosten passen nicht" },
+] as const;
 
 /** The lead history entries whose note is the failure reason (server `REASON_TRANSITIONS`). */
 const REASON_TRANSITIONS = new Set(["status_change", "archived", "deleted"]);

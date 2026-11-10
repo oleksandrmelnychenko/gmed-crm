@@ -88,7 +88,8 @@ describe("leads model", () => {
       if (actorRole !== role) return;
       expect(leadPermissions(actor)).toEqual({
         canViewPage: has("leads.view"),
-        canOpen: has("leads.edit"),
+        // The CEO Assistant reads the whole lead and changes nothing (owner 2026-10-11): the card opens read-only.
+        canOpen: has("leads.edit") || (has("leads.view") && actorRole === "ceo_assistant"),
         canEdit: has("leads.edit"),
         canCreate: has("leads.edit"),
         canConvert: has("leads.convert"),

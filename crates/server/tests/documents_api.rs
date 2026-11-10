@@ -9010,7 +9010,7 @@ async fn onboarding_documents_generate_for_a_lead_with_matching_human_numbers() 
         assert!(!pdf_text.contains('?'));
         match template_id {
             "confidentiality_release" => {
-                assert!(pdf_text.contains("Schweigepflichtentbindung"));
+                assert!(pdf_text.contains("Schweigepflichtsentbindung"));
                 assert!(pdf_text.contains("203 StGB"));
                 assert!(!pdf_text.contains("Maria Beispiel, Vertrauenskontakt"));
             }

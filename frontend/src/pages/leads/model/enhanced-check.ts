@@ -218,6 +218,51 @@ export function highRiskCountryHint(countries: string, tx: Tx, settled = true): 
   );
 }
 
+/**
+ * The reason the wizard fills in by itself when a black-list country comes
+ * into view. The server knows the same words (`AML_AUTOMATIC_BLACKLIST_REASON`,
+ * documents.rs): alone they are the rule's, not a finding staff documented.
+ */
+export const AUTOMATIC_BLACKLIST_RISK_REASON = "Bezug zu einem Land der FATF-Liste der Hochrisiko-Jurisdiktionen";
+
+/** The fields of the AML form the wizard fills in by itself for a listed country. */
+export type AutomaticCountryFindings = {
+  riskReason: string;
+  internalRiskAnalysis: boolean;
+  affectedThirdCountry: string;
+  highRiskCountryResident: boolean;
+  highRiskCountryTransaction: boolean;
+};
+
+/**
+ * The AML form without what the wizard once filled in for a listed country
+ * that no longer counts (QA 2026-11-10, C-F3: a minor's parent who stopped
+ * paying, or who never paid and never received the invoices): the automatic
+ * reason with the box of the internal risk analysis, and the affected country
+ * with its two ticks. Call it only while no person who counts has a listed
+ * country and the rule does not require the check. A reason staff worded
+ * themselves keeps everything; a country that is on no list was typed by
+ * staff and stays. Null when nothing changes.
+ */
+export function withoutStaleCountryFindings<T extends AutomaticCountryFindings>(
+  form: T,
+  lists: RiskCountryLists,
+  countryCode: (value: string) => string,
+): T | null {
+  const reason = form.riskReason.trim();
+  if (reason !== "" && reason !== AUTOMATIC_BLACKLIST_RISK_REASON) return null;
+  const named = form.affectedThirdCountry.split(",").map((part) => part.trim()).filter(Boolean);
+  const automaticCountry = named.length > 0 && named.every((part) => isRiskCountry(countryCode(part), lists));
+  if (!automaticCountry && reason === "") return null;
+  return {
+    ...form,
+    ...(reason === AUTOMATIC_BLACKLIST_RISK_REASON ? { riskReason: "", internalRiskAnalysis: false } : {}),
+    ...(automaticCountry
+      ? { affectedThirdCountry: "", highRiskCountryResident: false, highRiskCountryTransaction: false }
+      : {}),
+  };
+}
+
 export type EnhancedCheckRiskTier = "blacklist" | "sanctions" | "high_risk" | "pep" | "individual";
 
 /**

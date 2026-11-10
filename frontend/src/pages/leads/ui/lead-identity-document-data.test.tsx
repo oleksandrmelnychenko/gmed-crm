@@ -24,7 +24,7 @@ import {
   identityFieldErrorText,
   normalizeDocumentNumber,
 } from "../model/lead-identity-document-data";
-import { LeadIdentityDocumentData, LeadIdentityDocumentDataForm } from "./lead-identity-document-data";
+import { LeadIdentityDocumentData, LeadIdentityDocumentDataForm, RepresentativeLegalAnswers } from "./lead-identity-document-data";
 import { LeadPatientConcern, patientConcernTransferMode } from "./lead-patient-concern";
 import { PortalMarkerKindsContext, PortalUploadsProvider } from "./lead-wizard-portal-intake";
 
@@ -383,5 +383,38 @@ describe("«Со слов пациента» in the medical step", () => {
         />,
       ),
     ).toBe("");
+  });
+});
+
+// QA 2026-11-10, A-St1: a parent's or a guardian's own PEP and sanctions answers were
+// shown nowhere next to the person (the patient's own stand under «Юридические вопросы»).
+describe("RepresentativeLegalAnswers", () => {
+  it("shows the person's own answers read-only, and who entered them", () => {
+    const html = renderToStaticMarkup(
+      <RepresentativeLegalAnswers
+        person={{ id: "rep-1", pep_self: false, pep_related: true, sanctions_links: null }}
+        enteredByStaff={false}
+        tx={ru}
+      />,
+    );
+    expect(html).toContain("Юридические вопросы: ответы этого лица");
+    expect(html).toContain("Политически значимое лицо (PEP)");
+    expect(html).toContain("Нет");
+    expect(html).toContain("Да");
+    expect(html).toContain("Не отвечено");
+    expect(html).toContain("Ответы даны в кабинете клиента");
+    expect(html).not.toContain("<input");
+    const byStaff = renderToStaticMarkup(
+      <RepresentativeLegalAnswers
+        person={{ id: "rep-1", pep_self: false, pep_related: false, sanctions_links: false }}
+        enteredByStaff
+        tx={de}
+      />,
+    );
+    expect(byStaff).toContain("Von Mitarbeitenden im Formular des Kunden erfasst");
+  });
+
+  it("is nothing on a server that sends no answers of the person", () => {
+    expect(renderToStaticMarkup(<RepresentativeLegalAnswers person={{ id: "rep-1" }} enteredByStaff={false} tx={ru} />)).toBe("");
   });
 });

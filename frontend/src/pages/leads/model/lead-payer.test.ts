@@ -414,6 +414,44 @@ describe("payer type: person, company, organisation or insurer", () => {
     const older = normalizePayerDeclarationResponse({ declaration: thirdParty, status: {} });
     expect(older?.declaration).not.toHaveProperty("payer_type");
   });
+
+  // QA 2026-11-10, C-F6: the response was read without `funds`, so the AML form never
+  // showed the payer's own answer (several sources, staff's entry from paper included).
+  it("keeps the effective funds per person of a server response", () => {
+    const normalized = normalizePayerDeclarationResponse({
+      declaration: thirdParty,
+      status: {},
+      funds: {
+        payer_pays: true,
+        relevant: "payer",
+        patient: { person: "patient", sources: [], description: null, entered_by: null, stated: false, text: null, proof_documents: [] },
+        payer: {
+          person: "payer",
+          sources: ["business_income", "savings"],
+          description: "Ingenieurbüro und Ersparnisse",
+          entered_by: "payer",
+          stated: true,
+          text: "Einkünfte aus selbständiger Tätigkeit, Ersparnisse: Ingenieurbüro und Ersparnisse",
+          proof_documents: [{ id: "doc-1", file_name: "nachweis.pdf", uploaded_at: null }, { file_name: "ohne id" }],
+        },
+        payer_stated_by_patient: null,
+        staff_note_before_payer: null,
+      },
+    });
+    expect(normalized?.funds?.payer).toEqual({
+      person: "payer",
+      sources: ["business_income", "savings"],
+      description: "Ingenieurbüro und Ersparnisse",
+      entered_by: "payer",
+      stated: true,
+      text: "Einkünfte aus selbständiger Tätigkeit, Ersparnisse: Ingenieurbüro und Ersparnisse",
+      proof_documents: [{ id: "doc-1", file_name: "nachweis.pdf", uploaded_at: null }],
+    });
+    expect(normalized?.funds?.relevant).toBe("payer");
+    // No declaration: null. An older server without the key: the key stays absent.
+    expect(normalizePayerDeclarationResponse({ declaration: null, status: {}, funds: null })?.funds).toBeNull();
+    expect(normalizePayerDeclarationResponse({ declaration: thirdParty, status: {} })).not.toHaveProperty("funds");
+  });
 });
 
 /** The same company on a server that stores sections 7–8: the lead chose "to me", staff typed the VAT id. */
@@ -543,7 +581,7 @@ describe("payer AML and signing order", () => {
       .toEqual({
         tone: "warning",
         label: "Не заполнено",
-        hint: "Подтвердите, что плательщик проинформирован об обработке его данных; Создайте заявление о принятии расходов (Kostenübernahmeerklärung)",
+        hint: "Подтвердите, что плательщик проинформирован об обработке его данных; Создайте заявление о принятии расходов (Kostenübernahmeerklärung) — на шаге «Договор и смета»",
       });
     expect(payerStatusBadge(status({ complete: false, missing: [] }), de).label).toBe("Unvollständig");
     expect(payerStatusBadge(null, tx).label).toBe("Не заполнено");

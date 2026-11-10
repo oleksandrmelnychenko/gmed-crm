@@ -728,7 +728,10 @@ async fn withdraw_decision(
 
 /// The listed countries (ISO codes, sorted, unique) of a parent the rule does
 /// not count; empty when none is on a list.
-fn listed_countries(parent: &risk::inputs::UncountedParent, config: &RiskConfig) -> Vec<String> {
+pub(crate) fn listed_countries(
+    parent: &risk::inputs::UncountedParent,
+    config: &RiskConfig,
+) -> Vec<String> {
     let mut codes: Vec<String> = parent
         .citizenships
         .iter()
@@ -739,6 +742,45 @@ fn listed_countries(parent: &risk::inputs::UncountedParent, config: &RiskConfig)
     codes.sort();
     codes.dedup();
     codes
+}
+
+/// The names of the parents the rule does not count whose listed countries
+/// nobody has acknowledged yet. The lead readiness holds the conversion on
+/// them (QA 2026-11-10, C-F4): the patient was created without the
+/// confirmation, and a converted lead is frozen, so it could never be given.
+/// A confirmation covers the countries it was given for
+/// ([`uncounted_parents_json`]); empty for an adult.
+pub(crate) async fn unacknowledged_uncounted_parents(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<Vec<String>, sqlx::Error> {
+    let parents = risk::inputs::uncounted_parents(conn, lead_id).await?;
+    if parents.is_empty() {
+        return Ok(Vec::new());
+    }
+    let config = store::load_config(conn).await?;
+    let mut waiting = Vec::new();
+    for parent in &parents {
+        let countries = listed_countries(parent, &config);
+        if countries.is_empty() {
+            continue;
+        }
+        let acknowledged: bool = sqlx::query_scalar(
+            r#"SELECT EXISTS (
+                   SELECT 1 FROM lead_uncounted_parent_acknowledgements a
+                   WHERE a.lead_id = $1 AND a.representative_id = $2 AND a.countries = $3
+               )"#,
+        )
+        .bind(lead_id)
+        .bind(parent.id)
+        .bind(&countries)
+        .fetch_one(&mut *conn)
+        .await?;
+        if !acknowledged {
+            waiting.push(parent.name.clone());
+        }
+    }
+    Ok(waiting)
 }
 
 /// Who may confirm: the CEO (and the CEO's risk reviewers) or Sales.

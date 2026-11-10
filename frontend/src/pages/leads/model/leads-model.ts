@@ -10,7 +10,7 @@ import {
   type Translations,
   useLanguageBound,
 } from "@/lib/i18n";
-import { hasCapability, type Actor } from "@/lib/permissions";
+import { actorRole, hasCapability, type Actor } from "@/lib/permissions";
 
 import type {
   FailedLeadResolutionForm,
@@ -897,14 +897,19 @@ function runtimeLocale() {
 
 /**
  * Lead screen permissions from the capability registry. `leads.view` alone
- * (concierge, CEO assistant) gets the read-only service grid: no detail
- * sheet, wizard or mutation control until the role also holds `leads.edit`.
+ * (the concierge) gets the read-only service grid: no detail sheet, wizard or
+ * mutation control until the role also holds `leads.edit`. The CEO Assistant
+ * reads everything and changes nothing (owner 2026-10-11): the server answers
+ * this role the whole lead (`lead_payer::may_view`, leads.rs
+ * `lead_service_grid_only`), so the lead card opens for it, read-only
+ * (QA 2026-11-10, E F-2).
  */
 export function leadPermissions(actor?: Actor): LeadPermissions {
   const canEdit = hasCapability(actor, "leads.edit");
+  const canViewPage = hasCapability(actor, "leads.view");
   return {
-    canViewPage: hasCapability(actor, "leads.view"),
-    canOpen: canEdit,
+    canViewPage,
+    canOpen: canEdit || (canViewPage && actorRole(actor) === "ceo_assistant"),
     canEdit,
     canCreate: canEdit,
     canConvert: hasCapability(actor, "leads.convert"),
@@ -942,7 +947,9 @@ export function leadToGateForm(detail: LeadDetail): LeadGateForm {
     complianceStatus: detail.compliance_status ?? "pending",
     consentHealthcare: detail.consent_healthcare,
     consentPrivacyPractices: detail.consent_privacy_practices,
-    notes: detail.notes ?? "",
+    // The staff-only comment. `detail.notes` is the client's own text of the
+    // cabinet («Индивидуальные пожелания») and is not edited here (QA 2026-11-10, C-F1).
+    internalNote: detail.services_internal_note ?? "",
   };
 }
 
@@ -1309,13 +1316,52 @@ export function leadTransitionKindLabel(
   );
 }
 
+/**
+ * Server checks added after the catalogue (2026-11-10), worded here until a
+ * catalogue key exists: the list never shows the English label.
+ */
+const LEAD_READINESS_CHECK_INLINE_LABELS: Partial<Record<string, { ru: string; de: string }>> = {
+  sanctions_clear: {
+    ru: "Нет подтверждённого совпадения с санкционным списком",
+    de: "Kein bestätigter Sanktionstreffer",
+  },
+  uncounted_parents_acknowledged: {
+    ru: "Родитель из страны списка риска (не платит, счетов не получает): принято к сведению CEO или Sales",
+    de: "Elternteil aus einem Land der Risikoliste (zahlt nicht, erhält keine Rechnungen): von CEO oder Sales zur Kenntnis genommen",
+  },
+};
+
 export function leadReadinessCheckLabel(
   check: { key?: string | null; label?: string | null },
   translations?: Translations,
 ) {
   const tr = runtimeTranslations(translations);
   const labelKey = check.key ? LEAD_READINESS_CHECK_LABEL_KEYS[check.key] : undefined;
-  return labelKey ? tr[labelKey] : dashOrValue(check.label, tr);
+  if (labelKey) return tr[labelKey];
+  const inline = check.key ? LEAD_READINESS_CHECK_INLINE_LABELS[check.key] : undefined;
+  return inline ? (tr === translateCatalog("de") ? inline.de : inline.ru) : dashOrValue(check.label, tr);
+}
+
+/** The server's reason of a confirmed sanctions match (leads.rs `SANCTIONS_CONFIRMED`), first on its lists. */
+export const SANCTIONS_CONFIRMED_REASON = "Confirmed sanctions match: work with this person is stopped";
+
+/** The server's conversion reason of a parent who waits for «Принято к сведению» (leads.rs `UNCOUNTED_PARENT_UNACKNOWLEDGED`). */
+export const UNCOUNTED_PARENT_UNACKNOWLEDGED_REASON =
+  "A parent who is not counted waits for the acknowledgement of the CEO or Sales";
+
+/** The two reasons in words, for the lead card and the wizard alike. */
+export function sanctionsConfirmedReasonText(tx: (ru: string, de: string) => string): string {
+  return tx(
+    "Подтверждённое совпадение с санкционным списком ЕС: работа с этим лицом прекращена окончательно, блокировку снять нельзя",
+    "Bestätigter Treffer auf der EU-Sanktionsliste: die Arbeit mit dieser Person ist endgültig beendet, die Sperre kann nicht aufgehoben werden",
+  );
+}
+
+export function uncountedParentUnacknowledgedReasonText(tx: (ru: string, de: string) => string): string {
+  return tx(
+    "Родитель из страны списка риска не платит и не получает счета: CEO или Sales должны нажать «Принято к сведению» (CEO — «Документы» → «Оценка риска», Sales — карточка лида, «Обзор»)",
+    "Ein Elternteil aus einem Land der Risikoliste zahlt nicht und erhält keine Rechnungen: CEO oder Sales bestätigen mit „Zur Kenntnis genommen“ (CEO: „Unterlagen“ → „Risikobewertung“, Sales: Lead-Karte, „Überblick“)",
+  );
 }
 
 /**
@@ -1326,6 +1372,19 @@ const LEAD_READINESS_REASON_INLINE_LABELS: Partial<Record<string, { ru: string; 
   "Contract details of the representatives are missing": {
     ru: "Данные представителей для договора неполные",
     de: "Angaben der Vertreter für den Vertrag unvollständig",
+  },
+  [SANCTIONS_CONFIRMED_REASON]: {
+    ru: sanctionsConfirmedReasonText((ru) => ru),
+    de: sanctionsConfirmedReasonText((_ru, de) => de),
+  },
+  [UNCOUNTED_PARENT_UNACKNOWLEDGED_REASON]: {
+    ru: uncountedParentUnacknowledgedReasonText((ru) => ru),
+    de: uncountedParentUnacknowledgedReasonText((_ru, de) => de),
+  },
+  // The payer's open GwG sheet keeps the compliance open (owner 2026-10-30).
+  "Payer GwG sheet is not signed": {
+    ru: "Подпишите лист идентификации GwG плательщика",
+    de: "GwG-Identifizierungsbogen des Zahlers unterschreiben",
   },
 };
 

@@ -3956,7 +3956,15 @@ async fn load_gwg_identification_sheet(
     .await
     .map_err(|error| failed(error, "lead"))?
     .ok_or_else(|| err(StatusCode::NOT_FOUND, "Lead not found"))?;
-    let (declaration, identification, represented, enhanced_check, risk_level, risk_config) = {
+    let (
+        declaration,
+        identification,
+        represented,
+        enhanced_check,
+        risk_level,
+        risk_config,
+        uncounted_parent_countries,
+    ) = {
         let mut conn = state
             .db
             .acquire()
@@ -3988,6 +3996,15 @@ async fn load_gwg_identification_sheet(
             .await
             .map_err(|error| failed(error, "representation"))?
             .unwrap_or_default();
+        // The listed countries of a minor's parents who neither pay nor
+        // receive the invoices: no risk trigger (owner 2026-11-10).
+        let uncounted_parent_countries: Vec<String> =
+            crate::risk::inputs::uncounted_parents(&mut conn, lead_id)
+                .await
+                .map_err(|error| failed(error, "uncounted parents"))?
+                .iter()
+                .flat_map(|parent| super::lead_risk::listed_countries(parent, &risk_config))
+                .collect();
         (
             declaration,
             identification,
@@ -3995,6 +4012,7 @@ async fn load_gwg_identification_sheet(
             enhanced_check,
             risk_level,
             risk_config,
+            uncounted_parent_countries,
         )
     };
     let enhanced_check_required = enhanced_check.required;
@@ -4557,9 +4575,15 @@ async fn load_gwg_identification_sheet(
     // "Hochrisiko-Drittstaat": a country of the configured lists of high-risk
     // third countries (list 1, the long list, and list 2, the black list);
     // the retired cabinet question (owner 2026-10-22) does not count.
-    sheet.high_risk_third_country = aml.high_risk_country_transaction
+    // The form's own country ticks count unless they only repeat the country
+    // of a parent who neither pays nor receives the invoices: that parent
+    // raises no trigger (owner 2026-11-10) and stays a fact of the parent's
+    // own sheet alone (`risk_countries` there).
+    let wizard_country_ticks = (aml.high_risk_country_transaction
         || aml.high_risk_country_resident
-        || !aml.triggered_countries.is_empty()
+        || !aml.triggered_countries.is_empty())
+        && !aml_country_ticks_of_uncounted_parents(&aml, &uncounted_parent_countries);
+    sheet.high_risk_third_country = wizard_country_ticks
         || risk_countries
             .iter()
             .any(|country| risk_config.list_of(country).is_some());
@@ -4881,12 +4905,48 @@ fn gwg_increased_risk(
     aml: &AmlEnhancedDueDiligenceBindings,
     enhanced_check_required: bool,
 ) -> bool {
-    let risk_reason_stated = aml
-        .risk_reason
-        .as_deref()
-        .is_some_and(|reason| !reason.trim().is_empty());
+    // The words the wizard fills in by itself are the rule's, not a finding
+    // of staff: they answer a) only while the rule requires the check.
+    let risk_reason_stated = aml.risk_reason.as_deref().is_some_and(|reason| {
+        !reason.trim().is_empty() && reason.trim() != AML_AUTOMATIC_BLACKLIST_REASON
+    });
     enhanced_check_required
         || (risk_reason_stated && (aml.internal_risk_analysis || aml.individual_review))
+}
+
+/// The reason the lead wizard fills in by itself when a black-list country
+/// comes into view (`AUTOMATIC_BLACKLIST_RISK_REASON`, enhanced-check.ts). It
+/// stayed in the form when that country was a parent's who neither pays nor
+/// receives the invoices — a person the rule does not count (owner
+/// 2026-11-10) —, and the paying parent's sheet printed "erhöhtes Risiko: Ja"
+/// next to a risk assessment of level 1 (QA 2026-11-10, C-F3).
+const AML_AUTOMATIC_BLACKLIST_REASON: &str =
+    "Bezug zu einem Land der FATF-Liste der Hochrisiko-Jurisdiktionen";
+
+/// Whether the country ticks of the wizard's due-diligence form only repeat
+/// the listed country of a minor's parent the rule does not count
+/// (`uncounted_parent_countries`, ISO codes): the country the form names as
+/// affected is that parent's and no other. Such ticks say nothing about the
+/// business relationship (QA 2026-11-10, C-F3); a country staff named that is
+/// not such a parent's keeps them.
+fn aml_country_ticks_of_uncounted_parents(
+    aml: &AmlEnhancedDueDiligenceBindings,
+    uncounted_parent_countries: &[String],
+) -> bool {
+    if uncounted_parent_countries.is_empty() || !aml.triggered_countries.is_empty() {
+        return false;
+    }
+    let named: Vec<String> = aml
+        .affected_third_country
+        .as_deref()
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(crate::risk::country_value_code)
+        .collect();
+    !named.is_empty()
+        && named
+            .iter()
+            .all(|code| uncounted_parent_countries.contains(code))
 }
 
 #[derive(Deserialize, Serialize, Default, Clone)]
@@ -11320,7 +11380,9 @@ fn build_framework_contract_pdf(
     } else {
         &[
             "Anlage 1:  Einverständnis zur Datenübermittlung",
-            "Anlage 2:  Schweigepflichtentbindung",
+            // One spelling for the document, its file and its entry in the lists
+            // («Schweigepflichtsentbindung», QA 2026-11-10: the file said it, the title did not).
+            "Anlage 2:  Schweigepflichtsentbindung",
             "Anlage 3:  Informationsblatt zum Datenschutz",
         ]
     };
@@ -24816,7 +24878,7 @@ fn build_adult_confidentiality_release_pdf_for(
     let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
     let agency_identity = adult_legal_agency_identity(agency);
 
-    adult_legal_document_header(&mut layout, "Anlage 2", "Schweigepflichtentbindung");
+    adult_legal_document_header(&mut layout, "Anlage 2", "Schweigepflichtsentbindung");
     adult_legal_identity_block(&mut layout, party, false);
     adult_legal_representation_line(&mut layout, representative);
     fc_body(
@@ -40256,7 +40318,7 @@ mod tests {
         .unwrap();
         assert_signature_frames_detected(&release);
         let release_text = assert_legal_pdf_chrome(&release, "SE-20260716-UNITTEST0001");
-        assert!(release_text.contains("Schweigepflichtentbindung"));
+        assert!(release_text.contains("Schweigepflichtsentbindung"));
         assert!(release_text.contains("203 StGB"));
         assert!(release_text.contains("Anlage 2"));
         assert!(!release_text.contains("Anlage 1"));
@@ -40821,6 +40883,48 @@ mod tests {
             assert!(!super::gwg_increased_risk(&tiered, false), "{tier}");
             assert!(super::gwg_increased_risk(&tiered, true), "{tier}");
         }
+    }
+
+    /// QA 2026-11-10, C-F3: the wizard had filled the form for the Iranian
+    /// father who neither pays nor receives the invoices; the paying
+    /// mother's sheet printed "erhöhtes Risiko: Ja" and "Drittstaat mit hohem
+    /// Risiko beteiligt: Ja" next to a risk assessment of level 1.
+    #[test]
+    fn gwg_sheet_ignores_what_the_wizard_filled_in_for_a_parent_who_is_not_counted() {
+        let automatic = AmlEnhancedDueDiligenceBindings {
+            internal_risk_analysis: true,
+            risk_reason: Some(super::AML_AUTOMATIC_BLACKLIST_REASON.to_string()),
+            affected_third_country: Some("Iran".to_string()),
+            high_risk_country_transaction: true,
+            ..Default::default()
+        };
+        // The automatic words answer a) only while the rule requires the check.
+        assert!(!super::gwg_increased_risk(&automatic, false));
+        assert!(super::gwg_increased_risk(&automatic, true));
+        let uncounted = vec!["IR".to_string()];
+        assert!(super::aml_country_ticks_of_uncounted_parents(
+            &automatic, &uncounted
+        ));
+        // No such parent: the ticks are the form's own.
+        assert!(!super::aml_country_ticks_of_uncounted_parents(
+            &automatic,
+            &[]
+        ));
+        // A country staff named that is not that parent's keeps the ticks.
+        let other = AmlEnhancedDueDiligenceBindings {
+            affected_third_country: Some("Iran, Nordkorea".to_string()),
+            ..automatic.clone()
+        };
+        assert!(!super::aml_country_ticks_of_uncounted_parents(
+            &other, &uncounted
+        ));
+        let unnamed = AmlEnhancedDueDiligenceBindings {
+            affected_third_country: None,
+            ..automatic
+        };
+        assert!(!super::aml_country_ticks_of_uncounted_parents(
+            &unnamed, &uncounted
+        ));
     }
 
     fn recorded_roles(generated: &super::GeneratedPdf) -> Vec<&str> {
@@ -44126,7 +44230,7 @@ mod tests {
             "{text}"
         );
         assert!(
-            !text.contains("Anlage 2: Schweigepflichtentbindung"),
+            !text.contains("Anlage 2: Schweigepflichtsentbindung"),
             "{text}"
         );
         assert!(text.contains("Anlage 3: Informationsblatt zum Datenschutz"));
@@ -44341,7 +44445,7 @@ mod tests {
         }
         for annex in [
             "Anlage 1: Einverständnis zur Datenübermittlung",
-            "Anlage 2: Schweigepflichtentbindung",
+            "Anlage 2: Schweigepflichtsentbindung",
             "Anlage 3: Informationsblatt zum Datenschutz",
         ] {
             assert!(text.contains(annex), "missing annex index entry: {annex}");

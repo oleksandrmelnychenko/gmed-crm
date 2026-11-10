@@ -222,6 +222,11 @@ export function LeadIdentityDocumentsBlock({
               patientScanIds={patientGroup?.files.map((file) => file.id) ?? []}
               representativeFiles={representativeFiles}
               onSaved={() => void load()}
+              // No upload of the lead's own document here (QA 2026-11-10): the hint told Sales to upload it.
+              patientNoScanText={tx(
+                "Скан не загружен: его загружает клиент в кабинете или менеджер пациентов",
+                "Kein Scan: Er wird vom Kunden im Portal oder vom Patientenmanagement hochgeladen",
+              )}
             />
             {groups.filter((group) => group.kind === "payer").map(groupBlock)}
           </>
