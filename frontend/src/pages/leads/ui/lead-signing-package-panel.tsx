@@ -78,7 +78,7 @@ export function LeadSigningPackagePanel({
             <DocumentSignatureAction
               documentId={source.id}
               title={title}
-              triggerLabel={currentRequest ? tx("Открыть запрос", "Anfrage öffnen") : undefined}
+              showRequestDetails={Boolean(currentRequest)}
               signed={Boolean(source.signed_at)}
               onDone={onDone}
             />
