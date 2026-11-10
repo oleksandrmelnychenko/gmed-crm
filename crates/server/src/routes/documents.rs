@@ -21179,7 +21179,9 @@ fn admin_signature_grid(
 
 /// The height of one row of [`admin_signature_rows`] (two parties side by
 /// side).
-const ADMIN_SIGNATURE_ROW_HEIGHT_MM: f32 = 32.0;
+// 17 mm above the signature line: Skribble's 260 : 120 visual signature is
+// legible only from about 15 mm of height (DEV, 2026-11-10).
+const ADMIN_SIGNATURE_ROW_HEIGHT_MM: f32 = 37.0;
 
 /// The height [`admin_block`] takes for `text` at the full content width.
 fn admin_block_height_mm(
@@ -21215,7 +21217,7 @@ fn admin_signature_rows(
 ) {
     const COLUMN_GAP_MM: f32 = 14.0;
     const BLOCK_HEIGHT_MM: f32 = ADMIN_SIGNATURE_ROW_HEIGHT_MM;
-    const SIGNATURE_LINE_OFFSET_MM: f32 = 12.0;
+    const SIGNATURE_LINE_OFFSET_MM: f32 = 17.0;
     /// Distance from the signature line down to the "Ort, den Datum" line;
     /// leaves room to write the date by hand under the printed name.
     const PLACE_DATE_OFFSET_MM: f32 = 10.5;
@@ -24711,7 +24713,7 @@ fn adult_legal_signature_count(representative: Option<&ContractingDoc>) -> usize
 /// signature line, in millimetres.
 const LEGAL_SIGNATURE_FRAME_X_MM: f32 = 147.0;
 const LEGAL_SIGNATURE_FRAME_WIDTH_MM: f32 = 45.0;
-const LEGAL_SIGNATURE_FRAME_HEIGHT_MM: f32 = 9.0;
+const LEGAL_SIGNATURE_FRAME_HEIGHT_MM: f32 = 15.0;
 
 /// Bold glyphs run a little wider than [`approx_text_width_mm`] estimates.
 const BOLD_WIDTH_FACTOR: f32 = 1.1;
@@ -44862,7 +44864,7 @@ mod tests {
         assert!(
             signature_text_y_positions
                 .iter()
-                .all(|y| *y > pdf_mm_to_pt(230.0).0)
+                .all(|y| *y > pdf_mm_to_pt(225.0).0)
         );
     }
 

@@ -8152,7 +8152,15 @@ ${serviceCommentLines.join("\n")}`
         }));
         return;
       }
-      const latestOrderQuote = quotes.find(
+      // The quotes as the server holds them now, never the list of the last
+      // render: a list read before the quote of the previous document made a
+      // second quote, and the Einzelauftrag named another Kostenvoranschlag
+      // than the one printed after it (DEV, 2026-11-10).
+      const needsQuote = templateId !== "framework_contract" && templateId !== "cost_estimate";
+      const currentQuotes = needsQuote
+        ? await fetchQuotes(`/quotes?lead_id=${encodeURIComponent(leadId)}`)
+        : quotes;
+      const latestOrderQuote = currentQuotes.find(
         (item) => item.order_id === commercial.orderId && item.status !== "superseded",
       );
       const latestQuoteIsCurrent = Boolean(
@@ -8163,11 +8171,7 @@ ${serviceCommentLines.join("\n")}`
           commercialEstimate.gross,
         ),
       );
-      if (
-        templateId !== "framework_contract"
-        && templateId !== "cost_estimate"
-        && !latestQuoteIsCurrent
-      ) {
+      if (needsQuote && !latestQuoteIsCurrent) {
         await createQuote(commercial.orderId, {});
       }
       const generated = await generateDocument({

@@ -4389,7 +4389,26 @@ async fn create_quote(
             );
         }
     };
-    let intake = intake || repeat_intake;
+    // The order of a lead that is no patient yet: the lead wizard asks for a
+    // quote before each order document. An unchanged order keeps its quote
+    // and its number — a second quote made the Einzelauftrag name
+    // KV-…-0001 as its Anlage 1 while the Kostenvoranschlag printed
+    // KV-…-0002 (DEV, 2026-11-10).
+    let lead_order = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT o.id FROM orders o JOIN leads l ON l.id=o.source_lead_id
+         WHERE o.id=$1 AND l.converted_patient_id IS NULL",
+    )
+    .bind(order_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(value) => value.is_some(),
+        Err(error) => {
+            tracing::error!(%error, %order_id, "load lead order for quote");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare quote");
+        }
+    };
+    let intake = intake || repeat_intake || lead_order;
     if let Err(error) = lock_open_order_quotes_tx(&mut tx, order_id).await {
         tracing::error!(%error, %order_id, "lock open order quotes");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare quote");

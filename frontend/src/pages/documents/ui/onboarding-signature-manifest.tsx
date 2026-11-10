@@ -20,9 +20,11 @@ const names: Record<string, [string, string]> = {
 
 /** Full initial composition, including existing evidence and missing forms.
  * A paper scan is selected only by an explicit checkbox or the select-all action. */
-export function OnboardingSignatureManifest({ manifest, documentId, selectedIds = [], paperIds = [], availableIds = [], onSelect, disabled }: {
+export function OnboardingSignatureManifest({ manifest, documentId, selectedIds = [], paperIds = [], availableIds = [], onSelect, onPreview, disabled }: {
   manifest: OnboardingManifest; documentId?: string; selectedIds?: string[]; paperIds?: string[];
-  availableIds?: string[]; onSelect?: (ids: string[], paperIds: string[]) => void; disabled?: boolean;
+  availableIds?: string[]; onSelect?: (ids: string[], paperIds: string[]) => void;
+  /** Shows the document of a row in the preview: the rows of a sent package open. */
+  onPreview?: (id: string) => void; disabled?: boolean;
 }) {
   const { lang } = useLang();
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
@@ -65,7 +67,10 @@ export function OnboardingSignatureManifest({ manifest, documentId, selectedIds 
           </StatusBadge>
           </div>
           <div className="min-w-0 space-y-1.5">
-            {item.title ? <p className="break-words text-xs leading-5 text-foreground">{item.title}{item.version ? ` · v${item.version}` : ""}</p> : null}
+            {item.title && id && onPreview
+              ? <button type="button" data-onboarding-open={id} title={tx("Показать этот документ", "Dieses Dokument anzeigen")} onClick={() => onPreview(id)}
+                  className="block rounded-sm break-words text-left text-xs leading-5 text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]">{item.title}{item.version ? ` · v${item.version}` : ""}</button>
+              : item.title ? <p className="break-words text-xs leading-5 text-foreground">{item.title}{item.version ? ` · v${item.version}` : ""}</p> : null}
             {item.state === "missing" ? <p className="text-xs text-amber-700 dark:text-amber-300">{tx("Сначала создайте этот документ.", "Erstellen Sie zuerst dieses Dokument.")}</p> : null}
             {item.reason && CONSENT_CHOICE_REASONS.has(item.reason) ? <div className="flex w-full items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200"><Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" /><span>{signatureErrorText(item.reason, tx)}</span></div> : null}
             {item.state === "blocked" && !CONSENT_CHOICE_REASONS.has(item.reason ?? "") ? <p className="text-xs text-destructive">{tx("Проверьте доступ и текущую PDF-версию документа.", "Prüfen Sie den Zugriff und die aktuelle PDF-Version.")}</p> : null}

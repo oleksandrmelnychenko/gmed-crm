@@ -1153,6 +1153,17 @@ fn mm_to_pdf_points(value_mm: f32) -> i64 {
     (f64::from(value_mm) * 72.0 / 25.4).round() as i64
 }
 
+/// Skribble draws its visual signature 260 : 120 and takes the height from
+/// the width it is given: a 45 × 9 mm frame came back 45 × 20.8 mm and covered
+/// the text above the signature line (DEV, 2026-11-10). The frame sent is the
+/// largest one of that shape inside the reserved place, at its bottom-left
+/// corner, so the signature stays within the room the document left for it.
+fn provider_frame_size(width_mm: f32, height_mm: f32) -> (f32, f32) {
+    const ASPECT: f32 = 260.0 / 120.0;
+    let width = width_mm.min(height_mm * ASPECT);
+    (width, width / ASPECT)
+}
+
 /// One list of frames per signer, in signer order; no frame is given to two
 /// signers. Per document, the first client signer takes the `client` frame;
 /// in a document without one (minors' consents) client signer N takes
@@ -1193,12 +1204,14 @@ pub(super) fn visual_positions(
                         None => wanted.as_deref() == Some(anchor.role.as_str()),
                     };
                     if takes && anchor.page < *page_count {
+                        let (width_mm, height_mm) =
+                            provider_frame_size(anchor.width_mm, anchor.height_mm);
                         frames.push(json!({
                             "page": (page_offset + anchor.page).to_string(),
                             "x": mm_to_pdf_points(anchor.x_mm),
                             "y": mm_to_pdf_points(anchor.y_mm),
-                            "width": mm_to_pdf_points(anchor.width_mm),
-                            "height": mm_to_pdf_points(anchor.height_mm),
+                            "width": mm_to_pdf_points(width_mm),
+                            "height": mm_to_pdf_points(height_mm),
                         }));
                     }
                 }
@@ -1527,7 +1540,9 @@ mod visual_position_tests {
         assert_eq!(positions[0][0]["page"], "1");
         assert_eq!(positions[0][1]["page"], "2");
         assert_eq!(positions[0][0]["x"], 71); // 25 mm
-        assert_eq!(positions[0][0]["width"], 170); // 60 mm
+        // 60 × 10.5 mm reserved: Skribble's 260 : 120 shape inside it.
+        assert_eq!(positions[0][0]["width"], 64); // 22.75 mm
+        assert_eq!(positions[0][0]["height"], 30); // 10.5 mm
         assert_eq!(positions[1].len(), 1);
         assert_eq!(positions[1][0]["page"], "1");
         assert_eq!(positions[1][0]["x"], 312); // 110 mm

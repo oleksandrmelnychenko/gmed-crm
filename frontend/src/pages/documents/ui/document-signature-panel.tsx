@@ -151,7 +151,9 @@ export type PackagePreviewSelection = { documents: { id: string; title: string }
 
 /** The documents a request covers, in bundle order with their pages, and its
  * read-only attachments. Documents the viewer may not open stay anonymous. */
-export function SignatureRequestMembers({ request, documentId }: { request: SignatureRequest; documentId: string }) {
+const OPEN_LINK = "rounded-sm text-left underline decoration-border underline-offset-2 hover:decoration-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]";
+
+export function SignatureRequestMembers({ request, documentId, onPreview }: { request: SignatureRequest; documentId: string; onPreview?: (id: string, kind: "signing" | "review") => void }) {
   const { lang } = useLang();
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
   const members = request.members ?? [];
@@ -166,7 +168,10 @@ export function SignatureRequestMembers({ request, documentId }: { request: Sign
           return <li key={member.document_id} data-signature-member={member.document_id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-1.5 text-foreground">
             <span className={current ? "min-w-0 break-words font-semibold" : "min-w-0 break-words"}>
               <span className="mr-1 font-mono text-muted-foreground">{member.position + 1}.</span>{" "}
-              {member.accessible ? `${member.title ?? ""}${member.version ? ` · v${member.version}` : ""}` : tx("Документ без доступа", "Dokument ohne Zugriff")}
+              {member.accessible && onPreview
+                ? <button type="button" data-signature-member-open={member.document_id} className={OPEN_LINK} title={tx("Показать этот документ", "Dieses Dokument anzeigen")}
+                    onClick={() => onPreview(member.document_id, "signing")}>{`${member.title ?? ""}${member.version ? ` · v${member.version}` : ""}`}</button>
+                : member.accessible ? `${member.title ?? ""}${member.version ? ` · v${member.version}` : ""}` : tx("Документ без доступа", "Dokument ohne Zugriff")}
             </span>
             <span className="flex shrink-0 flex-wrap items-center gap-1.5">
               {current ? <StatusBadge tone="info">{tx("этот документ", "dieses Dokument")}</StatusBadge> : null}
@@ -179,7 +184,13 @@ export function SignatureRequestMembers({ request, documentId }: { request: Sign
     </div> : null}
     {request.attachments?.length ? <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-foreground" data-signature-attachments>
       <StatusBadge tone="neutral" className="text-foreground">{tx("Для ознакомления", "Zur Kenntnisnahme")}</StatusBadge>
-      <span className="min-w-0 break-words">{request.attachments.map(attachment => attachment.title ?? tx("документ без доступа", "Dokument ohne Zugriff")).join(", ")}</span>
+      <span className="min-w-0 break-words">{request.attachments.map((attachment, index) => <span key={attachment.document_id}>
+        {index > 0 ? ", " : null}
+        {attachment.title && onPreview
+          ? <button type="button" data-signature-attachment-open={attachment.document_id} className={OPEN_LINK} title={tx("Показать этот документ", "Dieses Dokument anzeigen")}
+              onClick={() => onPreview(attachment.document_id, "review")}>{attachment.title}</button>
+          : attachment.title ?? tx("документ без доступа", "Dokument ohne Zugriff")}
+      </span>)}</span>
     </p> : null}
   </>;
 }
@@ -482,7 +493,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onSent, onDirtyChan
               </div>
             </div>
             <div className="space-y-2 p-4">
-              <SignatureRequestMembers request={request} documentId={documentId} />
+              <SignatureRequestMembers request={request} documentId={documentId} onPreview={onPreviewRelated} />
               {request.expires_at || request.invitation_note ? <p className="text-xs text-foreground">{request.expires_at ? `${tx("Подписать до", "Unterschreiben bis")} ${formatAppDate(request.expires_at)}` : ""}{request.expires_at && request.invitation_note ? " · " : ""}{request.invitation_note ?? ""}</p> : null}
               {refreshCheck?.id === request.id ? <div role="status" className="text-xs leading-5 text-foreground">
                 {request.updated_at && request.updated_at !== refreshCheck.before
@@ -547,7 +558,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onSent, onDirtyChan
           {!outdatedSource && state.can_send && !pending && state.ineligible_reason && !state.requests.some(r => r.result_document_id) ? <div className={CONSENT_CHOICE_REASONS.has(state.ineligible_reason) ? "flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200" : "flex items-start gap-2 rounded-xl border border-border/70 bg-card px-4 py-3 text-sm text-foreground"}><Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" /><span>{tx(...(ineligibleMessages[state.ineligible_reason] ?? ["Документ сейчас недоступен для подписания.", "Das Dokument kann derzeit nicht unterzeichnet werden."]))}{state.electronic_form_excluded ? ` (${state.electronic_form_excluded})` : ""}</span></div> : null}
 
           {!outdatedSource && state.enabled && state.can_send && !pending && !state.ineligible_reason && completed && !composeNew ? <Button type="button" variant="outline" disabled={mutationDisabled} onClick={() => { setComposeNew(true); onComposeNew?.(); }}><Plus className="size-4" />{tx("Новый запрос подписи", "Neue Signaturanfrage")}</Button> : null}
-          {!composing && state.onboarding_manifest ? <OnboardingSignatureManifest manifest={state.onboarding_manifest} /> : null}
+          {!composing && state.onboarding_manifest ? <OnboardingSignatureManifest manifest={state.onboarding_manifest} onPreview={onPreviewRelated ? id => onPreviewRelated(id, "signing") : undefined} /> : null}
           {!outdatedSource && state.enabled && state.can_send && !pending && state.paper_resign_available && !composing ? <Button type="button" variant="outline" disabled={mutationDisabled} onClick={() => {
             setSelection(current => ({ ...current, paperSignedDocumentIds: [...new Set([...(current.paperSignedDocumentIds ?? []), documentId])] }));
             setComposeNew(true); setConfirmed(false); onComposeNew?.();
