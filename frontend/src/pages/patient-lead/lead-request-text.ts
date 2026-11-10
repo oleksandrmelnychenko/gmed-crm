@@ -462,6 +462,12 @@ export type LeadRequestText = {
     apply: string;
     dismiss: string;
     applied: string;
+    /** «Файл», before the name of the file a line is about. */
+    file: string;
+    /** Above the list of several files: the person says which one to read. */
+    choose: string;
+    /** The button of one file in that list. */
+    read: string;
   };
   /** Step "Anliegen & Unterlagen" (13.1): the reason of the request. */
   sectionRequest: string;
@@ -1541,6 +1547,9 @@ const de: LeadRequestText = {
     apply: "Angekreuztes übernehmen",
     dismiss: "Ausblenden",
     applied: "Übernommen. Bitte prüfen Sie die Felder und ergänzen Sie die Behörde.",
+    file: "Datei",
+    choose: "Sie haben mehrere Dateien hochgeladen – bitte wählen Sie, aus welcher die Daten gelesen werden:",
+    read: "Lesen",
   },
   sectionRequest: "Ihr Anliegen",
   requestReasonHint: "Beschreiben Sie kurz, wobei wir Ihnen helfen sollen.",
@@ -2203,6 +2212,9 @@ const ru: LeadRequestText = {
     apply: "Подставить отмеченное",
     dismiss: "Скрыть",
     applied: "Подставлено. Проверьте поля и укажите, кем выдан документ.",
+    file: "Файл",
+    choose: "Загружено несколько файлов — выберите, из какого прочитать данные:",
+    read: "Прочитать",
   },
   sectionRequest: "Ваше обращение",
   requestReasonHint: "Кратко опишите, с чем мы можем вам помочь.",
@@ -2868,6 +2880,9 @@ const uk: LeadRequestText = {
     apply: "Підставити позначене",
     dismiss: "Сховати",
     applied: "Підставлено. Перевірте поля і додайте, ким видано документ.",
+    file: "Файл",
+    choose: "Завантажено кілька файлів — оберіть, з якого прочитати дані:",
+    read: "Прочитати",
   },
   sectionRequest: "Ваше звернення",
   requestReasonHint: "Коротко опишіть, із чим ми можемо вам допомогти.",
@@ -3533,6 +3548,9 @@ const en: LeadRequestText = {
     apply: "Take over the ticked values",
     dismiss: "Hide",
     applied: "Taken over. Please check the fields and add the issuing authority.",
+    file: "File",
+    choose: "You uploaded several files – please choose which one to read the data from:",
+    read: "Read",
   },
   sectionRequest: "Your request",
   requestReasonHint: "Briefly describe what we can help you with.",

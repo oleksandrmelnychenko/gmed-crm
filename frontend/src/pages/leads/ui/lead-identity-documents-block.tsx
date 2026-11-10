@@ -222,6 +222,7 @@ export function LeadIdentityDocumentsBlock({
               lang={lang}
               patientScans={patientGroup && patientGroup.files.length > 0 ? rows(patientGroup.files) : noFile}
               patientScanIds={patientGroup?.files.map((file) => file.id) ?? []}
+              patientScanFiles={patientGroup?.files.map((file) => ({ id: file.id, name: file.file_name })) ?? []}
               representativeFiles={representativeFiles}
               onSaved={() => void load()}
               // No upload of the lead's own document here (QA 2026-11-10): the hint told Sales to upload it.

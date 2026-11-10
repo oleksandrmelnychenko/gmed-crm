@@ -5,6 +5,7 @@ import { checkboxClass } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
 import { ApiRequestError } from "@/lib/api";
+import { formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
 import { recognizeIdentityDocument } from "../data/identity-recognition-api";
@@ -26,17 +27,59 @@ import {
 import type { IdentityDocumentDraft } from "../model/lead-identity-document-data";
 import type { Tx } from "../model/lead-payer";
 
-/** The scans tried in one run, newest first: the data page is among the last uploads. */
-const MAX_SCANS_PER_RUN = 3;
 const ATTEMPTED_KEY = "gmed.identity-recognition.attempted";
+const APPLIED_KEY = "gmed.identity-recognition.applied";
 
+/** One file of the person's identity document, as the list above the form names it. */
+export type RecognitionScan = { id: string; name: string };
+
+/** Every state but `idle` names the one file it is about. */
 type RunState =
   | { kind: "idle" }
-  | { kind: "running" }
-  | { kind: "error"; message: string }
-  | { kind: "not_found" }
-  | { kind: "result"; result: IdentityRecognition }
-  | { kind: "applied" };
+  | { kind: "running"; scanId: string }
+  | { kind: "error"; scanId: string; message: string }
+  | { kind: "not_found"; scanId: string }
+  | { kind: "result"; scanId: string; result: IdentityRecognition }
+  | { kind: "applied"; scanId: string };
+
+/**
+ * A form of GMED itself that was uploaded among the identity files (DEV
+ * 2026-11-10: the sheet «Durchführung verstärkter Sorgfaltspflichten» of
+ * another lead): it has no machine readable zone and is never offered.
+ */
+export function looksLikeInternalForm(name: string): boolean {
+  return /sorgfaltspflicht|dokumentationsbogen|selbstauskunft|(^|[^a-z])gwg([^a-z]|$)/i.test(name);
+}
+
+/** Which file the values in the form were taken from, and when (this browser's note; no value of the document). */
+function appliedMarks(): Record<string, string> {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(APPLIED_KEY) ?? "{}") as unknown;
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function rememberApplied(scanId: string, at: string) {
+  try {
+    const entries = Object.entries(appliedMarks()).filter(([id]) => id !== scanId).slice(-199);
+    window.localStorage.setItem(APPLIED_KEY, JSON.stringify(Object.fromEntries([...entries, [scanId, at]])));
+  } catch {
+    // Without storage the note lives until the form is closed.
+  }
+}
+
+/** The file the form's values were last taken from, among the files still listed. */
+function lastApplied(scans: readonly RecognitionScan[]): { scan: RecognitionScan; at: string } | null {
+  const marks = appliedMarks();
+  let found: { scan: RecognitionScan; at: string } | null = null;
+  for (const scan of scans) {
+    const at = marks[scan.id];
+    if (typeof at === "string" && (!found || at > found.at)) found = { scan, at };
+  }
+  return found;
+}
 
 /** The scan sets a reading already started for by itself in this tab: it starts once, not at every opening. */
 function attempted(key: string): boolean {
@@ -55,9 +98,6 @@ function rememberAttempt(key: string) {
     // Without storage the reading simply starts again at the next opening.
   }
 }
-
-const better = (next: IdentityRecognition, best: IdentityRecognition | null) =>
-  !best || (best.status === "not_found" && next.status !== "not_found") || (best.status !== "verified" && next.status === "verified");
 
 function Rows<Field extends string>({
   rows,
@@ -117,11 +157,15 @@ function Rows<Field extends string>({
  * the machine readable zone of the uploaded scan and this panel shows the
  * values as a proposal. Nothing reaches the form before staff press
  * «Подставить»; a field that already holds another value is never ticked by
- * itself. The reading starts by itself once, while the document fields are
- * still empty.
+ * itself.
+ *
+ * One file is read at a time and every line names it (owner 2026-11-10: with
+ * two files nobody could tell which one was read): with several files staff
+ * choose the file; the reading starts by itself only when there is exactly one
+ * file and the document fields are still empty.
  */
 export function LeadIdentityRecognition({
-  scanIds,
+  scans,
   draft,
   onApply,
   holder,
@@ -131,8 +175,8 @@ export function LeadIdentityRecognition({
   disabled = false,
   testId,
 }: {
-  /** The ids of this person's identity scans, oldest first. */
-  scanIds: readonly string[];
+  /** The files of this person's identity document, in the order of the list above the form. */
+  scans: readonly RecognitionScan[];
   draft: IdentityDocumentDraft;
   /** Puts the ticked document values into the form (the form's own save stores them). */
   onApply: (patch: Partial<IdentityDocumentDraft>) => void;
@@ -158,7 +202,15 @@ export function LeadIdentityRecognition({
   holderRef.current = holder;
   const langRef = useRef(lang);
   langRef.current = lang;
-  const scanKey = scanIds.join(",");
+  const scanKey = scans.map((scan) => scan.id).join(",");
+  const readable = useMemo(() => scans.filter((scan) => !looksLikeInternalForm(scan.name)), [scans]);
+  const skipped = useMemo(() => scans.filter((scan) => looksLikeInternalForm(scan.name)), [scans]);
+  const onlyScanId = readable.length === 1 ? readable[0].id : "";
+  const [appliedFrom, setAppliedFrom] = useState(() => lastApplied(scans));
+  useEffect(() => {
+    setAppliedFrom(lastApplied(scans));
+    // Only another set of files changes the note.
+  }, [scanKey]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -167,54 +219,47 @@ export function LeadIdentityRecognition({
     };
   }, []);
 
-  const run = useCallback(async () => {
-    const ids = scanKey ? scanKey.split(",").reverse().slice(0, MAX_SCANS_PER_RUN) : [];
-    if (ids.length === 0) return;
+  const run = useCallback(async (scanId: string) => {
     const token = ++runRef.current;
     const current = () => mountedRef.current && runRef.current === token;
-    setState({ kind: "running" });
-    let best: IdentityRecognition | null = null;
-    let failure: unknown = null;
-    for (const id of ids) {
-      try {
-        const result = await recognizeIdentityDocument(id);
-        if (!current()) return;
-        if (result && better(result, best)) best = result;
-        if (best?.status === "verified") break;
-      } catch (error) {
-        if (!current()) return;
-        failure = error;
+    setState({ kind: "running", scanId });
+    try {
+      const result = await recognizeIdentityDocument(scanId);
+      if (!current()) return;
+      if (!result || result.status === "not_found") {
+        setState({ kind: "not_found", scanId });
+        return;
       }
+      setDocumentSelection(new Set(defaultRecognitionSelection(recognitionDocumentRows(result, draftRef.current, txRef.current, langRef.current))));
+      // The person's data are never ticked by themselves: they are entered elsewhere.
+      setHolderSelection(new Set());
+      setState({ kind: "result", scanId, result });
+    } catch (error) {
+      if (!current()) return;
+      const code = error instanceof ApiRequestError ? error.code ?? (error.body as { code?: string } | null)?.code : null;
+      setState({ kind: "error", scanId, message: recognitionErrorText(code, txRef.current) });
     }
-    if (!best || best.status === "not_found") {
-      if (failure && !best) {
-        const code = failure instanceof ApiRequestError ? failure.code ?? (failure.body as { code?: string } | null)?.code : null;
-        setState({ kind: "error", message: recognitionErrorText(code, txRef.current) });
-      } else {
-        setState({ kind: "not_found" });
-      }
-      return;
-    }
-    setDocumentSelection(new Set(defaultRecognitionSelection(recognitionDocumentRows(best, draftRef.current, txRef.current, langRef.current))));
-    // The person's data are never ticked by themselves: they are entered elsewhere.
-    setHolderSelection(new Set());
-    setState({ kind: "result", result: best });
-  }, [scanKey]);
+  }, []);
 
-  // Once per set of scans, while nothing of the document is entered yet.
+  // Once per set of scans, while nothing of the document is entered yet, and
+  // only with one file: among several, staff say which one to read.
   const empty = !draft.type && !draft.number.trim() && !draft.country && !draft.validUntil && !draft.unreadable;
   useEffect(() => {
-    if (!scanKey || disabled || !empty || attempted(scanKey)) return;
+    if (!onlyScanId || disabled || !empty || attempted(scanKey)) return;
     rememberAttempt(scanKey);
-    void run();
+    void run(onlyScanId);
     // Only a new set of scans starts a reading; typing into the form does not.
-  }, [scanKey, disabled]);
+  }, [scanKey, onlyScanId, disabled]);
 
   const result = state.kind === "result" ? state.result : null;
   const documentRows = useMemo(() => (result ? recognitionDocumentRows(result, draft, tx, lang) : []), [result, draft, tx, lang]);
   const holderRows = useMemo(() => (result ? recognitionHolderRows(result, holder ?? {}, tx, lang) : []), [result, holder, tx, lang]);
 
-  if (scanIds.length === 0) return null;
+  if (scans.length === 0) return null;
+
+  const fileName = (scanId: string) => scans.find((scan) => scan.id === scanId)?.name || tx("файл без имени", "Datei ohne Namen");
+  const stateFile = state.kind === "idle" ? "" : fileName(state.scanId);
+  const running = state.kind === "running";
 
   const toggle = <Field extends string>(set: (update: (current: ReadonlySet<Field>) => ReadonlySet<Field>) => void) => (field: Field) =>
     set((current) => {
@@ -231,53 +276,125 @@ export function LeadIdentityRecognition({
   const holderDiffers = holderRows.some((row) => row.state === "differs");
 
   const apply = () => {
+    if (state.kind !== "result") return;
     if (Object.keys(documentPatch).length > 0) onApply(documentPatch);
     if (onApplyHolder && Object.keys(holderPatch).length > 0) onApplyHolder(holderPatch);
-    setState({ kind: "applied" });
+    const at = new Date().toISOString();
+    rememberApplied(state.scanId, at);
+    const scan = scans.find((item) => item.id === state.scanId);
+    if (scan) setAppliedFrom({ scan, at });
+    setState({ kind: "applied", scanId: state.scanId });
   };
 
   return (
     <div className="space-y-2" data-testid={testId} data-state={state.kind}>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-8 rounded-lg"
-          disabled={disabled || state.kind === "running"}
-          onClick={() => void run()}
-          data-testid={`${testId}-run`}
-        >
-          {state.kind === "running" ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <ScanText aria-hidden="true" className="size-3.5" />}
-          {state.kind === "idle" ? tx("Распознать со скана", "Aus dem Scan lesen") : tx("Распознать ещё раз", "Erneut lesen")}
-        </Button>
-        <span className="text-xs text-muted-foreground" aria-live="polite">
-          {state.kind === "running"
-            ? tx("Читаем машиночитаемую зону документа…", "Die maschinenlesbare Zone wird gelesen…")
-            : state.kind === "applied"
-              ? tx("Подставлено из скана. Проверьте поля и дополните «Кем выдан».", "Aus dem Scan übernommen. Bitte prüfen und die Behörde ergänzen.")
+      {appliedFrom ? (
+        <p className="text-xs leading-5 text-muted-foreground" data-testid={`${testId}-source`}>
+          {tx("Данные подставлены из файла", "Daten übernommen aus der Datei")}{" "}
+          <span className="font-medium text-foreground [overflow-wrap:anywhere]">«{fileName(appliedFrom.scan.id)}»</span>
+          {" · "}
+          {formatAppDateTime(appliedFrom.at)}
+        </p>
+      ) : null}
+      {readable.length === 1 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            // As «Добавить файл» and «Подтвердить документ» of the same block (owner 2026-11-10).
+            variant="default"
+            className="h-8 rounded-lg"
+            aria-busy={running}
+            disabled={disabled || running}
+            onClick={() => void run(onlyScanId)}
+            data-testid={`${testId}-run`}
+          >
+            {running ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <ScanText aria-hidden="true" className="size-3.5" />}
+            {running
+              ? tx("Распознаём…", "Wird gelesen…")
               : state.kind === "idle"
-                ? tx("Заполняет поля из машиночитаемой зоны; ничего не сохраняется без вашего подтверждения.", "Füllt die Felder aus der maschinenlesbaren Zone; nichts wird ohne Ihre Bestätigung gespeichert.")
-                : null}
-        </span>
-      </div>
+                ? tx("Распознать со скана", "Aus dem Scan lesen")
+                : tx("Распознать ещё раз", "Erneut lesen")}
+          </Button>
+          <span className="min-w-0 text-xs text-muted-foreground" data-testid={`${testId}-file`}>
+            {tx("Файл", "Datei")}: <span className="font-medium text-foreground [overflow-wrap:anywhere]">{fileName(onlyScanId)}</span>
+          </span>
+        </div>
+      ) : readable.length > 1 ? (
+        <div className="space-y-1.5" data-testid={`${testId}-files`}>
+          <span className="block text-xs font-medium text-foreground">
+            {tx("Файлов несколько — выберите, из какого прочитать данные документа:", "Mehrere Dateien – bitte wählen, aus welcher die Ausweisdaten gelesen werden:")}
+          </span>
+          <ul className="space-y-1">
+            {readable.map((scan) => {
+              const active = state.kind !== "idle" && state.scanId === scan.id;
+              return (
+                <li key={scan.id} className="flex flex-wrap items-center gap-2" data-active={active ? "true" : undefined}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="default"
+                    className="h-8 shrink-0 rounded-lg"
+                    aria-busy={running && active}
+                    disabled={disabled || running}
+                    onClick={() => void run(scan.id)}
+                    aria-label={`${tx("Прочитать файл", "Datei lesen")} ${fileName(scan.id)}`}
+                    data-testid={`${testId}-run-${scan.id}`}
+                  >
+                    {running && active ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <ScanText aria-hidden="true" className="size-3.5" />}
+                    {running && active
+                      ? tx("Распознаём…", "Wird gelesen…")
+                      : active
+                        ? tx("Прочитать ещё раз", "Erneut lesen")
+                        : tx("Прочитать", "Lesen")}
+                  </Button>
+                  <span className={cn("min-w-0 text-xs [overflow-wrap:anywhere]", active ? "font-semibold text-foreground" : "text-muted-foreground")}>
+                    {fileName(scan.id)}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
+      {skipped.length > 0 ? (
+        <p className="text-xs leading-5 text-amber-700 dark:text-amber-300" data-testid={`${testId}-skipped`}>
+          {tx(
+            "Не читается как документ личности (похоже на внутренний бланк GMED, проверьте, тот ли файл загружен):",
+            "Wird nicht als Ausweis gelesen (sieht nach einem internen GMED-Formular aus, bitte prüfen, ob die richtige Datei hochgeladen wurde):",
+          )}{" "}
+          <span className="font-medium [overflow-wrap:anywhere]">{skipped.map((scan) => scan.name).join(", ")}</span>
+        </p>
+      ) : null}
+      <p className="text-xs text-muted-foreground" aria-live="polite" data-testid={`${testId}-progress`}>
+        {state.kind === "running"
+          ? `${tx("Читаем машиночитаемую зону файла", "Die maschinenlesbare Zone wird gelesen, Datei")} «${stateFile}»…`
+          : state.kind === "applied"
+            ? `${tx("Подставлено из файла", "Übernommen aus der Datei")} «${stateFile}». ${tx("Проверьте поля и дополните «Кем выдан».", "Bitte prüfen und die Behörde ergänzen.")}`
+            : state.kind === "idle" && readable.length > 0
+              ? tx("Заполняет поля из машиночитаемой зоны; ничего не сохраняется без вашего подтверждения.", "Füllt die Felder aus der maschinenlesbaren Zone; nichts wird ohne Ihre Bestätigung gespeichert.")
+              : null}
+      </p>
       {state.kind === "error" ? (
         <p role="alert" className="text-xs font-medium text-destructive" data-testid={`${testId}-error`}>
-          {state.message}
+          {tx("Файл", "Datei")} «{stateFile}»: {state.message}
         </p>
       ) : null}
       {state.kind === "not_found" ? (
         <p role="status" className="text-xs font-medium text-amber-700 dark:text-amber-300" data-testid={`${testId}-not-found`}>
+          {tx("В файле", "In der Datei")} «{stateFile}»{" "}
           {tx(
-            "Машиночитаемая зона на скане не найдена. Введите данные вручную. Лучше всего читается ровный скан страницы с фото целиком, без бликов.",
-            "Auf dem Scan wurde keine maschinenlesbare Zone gefunden. Bitte manuell eingeben. Am besten lesbar ist ein gerader Scan der ganzen Datenseite ohne Reflexionen.",
+            "машиночитаемая зона не найдена. Выберите другой файл или введите данные вручную. Лучше всего читается ровный скан страницы с фото целиком, без бликов.",
+            "wurde keine maschinenlesbare Zone gefunden. Bitte eine andere Datei wählen oder manuell eingeben. Am besten lesbar ist ein gerader Scan der ganzen Datenseite ohne Reflexionen.",
           )}
         </p>
       ) : null}
       {result ? (
         <div className="space-y-2.5 rounded-xl border border-border bg-muted/20 p-3" data-testid={`${testId}-proposal`} data-status={result.status}>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-semibold text-foreground">{tx("Распознано со скана", "Aus dem Scan gelesen")}</span>
+            <span className="text-sm font-semibold text-foreground" data-testid={`${testId}-proposal-file`}>
+              {tx("Распознано из файла", "Gelesen aus der Datei")} <span className="[overflow-wrap:anywhere]">«{stateFile}»</span>
+            </span>
             {result.status === "verified" ? (
               <StatusChip tone="success" className="whitespace-normal">
                 <ShieldCheck aria-hidden="true" />

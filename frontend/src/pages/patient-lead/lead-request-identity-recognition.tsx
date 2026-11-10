@@ -10,9 +10,6 @@ import { normalizeIdentityRecognition, type IdentityRecognition } from "@/pages/
 import { recognizeLeadIdentityDocument, type LeadRequestDocument } from "./lead-request-api";
 import { identificationFieldLabel, type LeadRequestText } from "./lead-request-text";
 
-/** The copies tried in one run, newest first. */
-const MAX_SCANS_PER_RUN = 3;
-
 export type RecognitionDocumentField = "id_document_type" | "id_document_number" | "id_issuing_country" | "id_valid_until";
 type DocumentField = RecognitionDocumentField;
 const FIELDS: readonly DocumentField[] = ["id_document_type", "id_document_number", "id_issuing_country", "id_valid_until"];
@@ -26,13 +23,14 @@ export type RecognitionRow = {
   verified: boolean;
 };
 
+/** Every state but `idle` names the one file it is about. */
 type State =
   | { kind: "idle" }
-  | { kind: "running" }
-  | { kind: "failed" }
-  | { kind: "not_found" }
-  | { kind: "result"; result: IdentityRecognition }
-  | { kind: "applied" };
+  | { kind: "running"; documentId: string }
+  | { kind: "failed"; documentId: string }
+  | { kind: "not_found"; documentId: string }
+  | { kind: "result"; documentId: string; result: IdentityRecognition }
+  | { kind: "applied"; documentId: string };
 
 const normalNumber = (value: string) => value.trim().split(/\s+/).filter(Boolean).join(" ").toUpperCase();
 
@@ -99,6 +97,9 @@ export function defaultRecognitionSelection(rows: readonly RecognitionRow[]): Do
  * a field that already holds another value is never ticked by itself, and
  * nothing is ticked when a check digit fails. The form's own autosave stores
  * what the person took over.
+ *
+ * One file is read at a time and every line names it (owner 2026-11-10); with
+ * several copies the person chooses the file, nothing is picked silently.
  */
 export function LeadRequestIdentityRecognition({
   leadId,
@@ -135,37 +136,36 @@ export function LeadRequestIdentityRecognition({
 
   if (documents.length === 0) return null;
 
-  const run = async () => {
+  const newestFirst = [...documents].sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at));
+  const fileName = (documentId: string) => documents.find((document) => document.id === documentId)?.file_name || "—";
+  const stateFile = state.kind === "idle" ? "" : fileName(state.documentId);
+  const running = state.kind === "running";
+
+  const run = async (documentId: string) => {
     const token = ++runRef.current;
     const current = () => mountedRef.current && runRef.current === token;
-    setState({ kind: "running" });
-    let best: IdentityRecognition | null = null;
-    let failed = false;
-    const newestFirst = [...documents].sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at));
-    for (const document of newestFirst.slice(0, MAX_SCANS_PER_RUN)) {
-      try {
-        const result = normalizeIdentityRecognition(await recognizeLeadIdentityDocument(leadId, document.id));
-        if (!current()) return;
-        if (result && result.status !== "not_found" && (!best || result.status === "verified")) best = result;
-        if (best?.status === "verified") break;
-      } catch {
-        if (!current()) return;
-        failed = true;
+    setState({ kind: "running", documentId });
+    try {
+      const result = normalizeIdentityRecognition(await recognizeLeadIdentityDocument(leadId, documentId));
+      if (!current()) return;
+      if (!result || result.status === "not_found") {
+        setState({ kind: "not_found", documentId });
+        return;
       }
+      setSelected(new Set(defaultRecognitionSelection(recognitionRows(result, draft, text, lang))));
+      setState({ kind: "result", documentId, result });
+    } catch {
+      if (!current()) return;
+      setState({ kind: "failed", documentId });
     }
-    if (!best) {
-      setState({ kind: failed ? "failed" : "not_found" });
-      return;
-    }
-    setSelected(new Set(defaultRecognitionSelection(recognitionRows(best, draft, text, lang))));
-    setState({ kind: "result", result: best });
   };
 
   const proposal = state.kind === "result" ? recognitionRows(state.result, draft, text, lang) : [];
   const taken = proposal.filter((row) => row.state !== "same" && selected.has(row.field));
   const apply = () => {
+    if (state.kind !== "result") return;
     for (const row of taken) onTake(row.field, row.value);
-    setState({ kind: "applied" });
+    setState({ kind: "applied", documentId: state.documentId });
   };
   const toggle = (field: DocumentField) =>
     setSelected((current) => {
@@ -177,37 +177,79 @@ export function LeadRequestIdentityRecognition({
 
   return (
     <div className="space-y-2" data-testid={testId} data-state={state.kind}>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-auto min-h-8 whitespace-normal py-1.5 text-left"
-          disabled={disabled || state.kind === "running"}
-          onClick={() => void run()}
-          data-testid={`${testId}-run`}
-        >
-          {state.kind === "running" ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <ScanText aria-hidden="true" className="size-3.5" />}
-          {state.kind === "idle" ? words.run : words.again}
-        </Button>
-        <span className="text-xs leading-5 text-muted-foreground" aria-live="polite">
-          {state.kind === "running" ? words.running : state.kind === "applied" ? words.applied : state.kind === "idle" ? words.hint : null}
-        </span>
-      </div>
+      {newestFirst.length === 1 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-auto min-h-8 whitespace-normal py-1.5 text-left"
+            disabled={disabled || running}
+            onClick={() => void run(newestFirst[0].id)}
+            data-testid={`${testId}-run`}
+          >
+            {running ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <ScanText aria-hidden="true" className="size-3.5" />}
+            {state.kind === "idle" ? words.run : words.again}
+          </Button>
+          <span className="min-w-0 text-xs leading-5 text-muted-foreground" data-testid={`${testId}-file`}>
+            {words.file}: <span className="font-medium text-foreground [overflow-wrap:anywhere]">{fileName(newestFirst[0].id)}</span>
+          </span>
+        </div>
+      ) : (
+        <div className="space-y-1.5" data-testid={`${testId}-files`}>
+          <span className="block text-xs font-medium leading-5 text-foreground">{words.choose}</span>
+          <ul className="space-y-1">
+            {newestFirst.map((document) => {
+              const active = state.kind !== "idle" && state.documentId === document.id;
+              return (
+                <li key={document.id} className="flex flex-wrap items-center gap-2" data-active={active ? "true" : undefined}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0"
+                    disabled={disabled || running}
+                    onClick={() => void run(document.id)}
+                    aria-label={`${words.read}: ${fileName(document.id)}`}
+                    data-testid={`${testId}-run-${document.id}`}
+                  >
+                    {running && active ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <ScanText aria-hidden="true" className="size-3.5" />}
+                    {active && !running ? words.again : words.read}
+                  </Button>
+                  <span className={cn("min-w-0 text-xs [overflow-wrap:anywhere]", active ? "font-semibold text-foreground" : "text-muted-foreground")}>
+                    {fileName(document.id)}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+      <p className="text-xs leading-5 text-muted-foreground" aria-live="polite" data-testid={`${testId}-progress`}>
+        {state.kind === "running"
+          ? `${words.running} ${words.file}: «${stateFile}»`
+          : state.kind === "applied"
+            ? `${words.applied} ${words.file}: «${stateFile}»`
+            : state.kind === "idle"
+              ? words.hint
+              : null}
+      </p>
       {state.kind === "failed" ? (
         <p role="alert" className="text-xs font-medium text-destructive" data-testid={`${testId}-failed`}>
-          {words.failed}
+          {words.file} «{stateFile}»: {words.failed}
         </p>
       ) : null}
       {state.kind === "not_found" ? (
         <p role="status" className="text-xs font-medium leading-5 text-amber-700 dark:text-amber-300" data-testid={`${testId}-not-found`}>
-          {words.notFound}
+          {words.file} «{stateFile}»: {words.notFound}
         </p>
       ) : null}
       {state.kind === "result" ? (
         <div className="space-y-2.5 rounded-xl border border-border bg-muted/20 p-3" data-testid={`${testId}-proposal`} data-status={state.result.status}>
           <div className="flex flex-wrap items-baseline gap-x-2">
-            <span className="text-sm font-semibold text-foreground">{words.title}</span>
+            <span className="text-sm font-semibold text-foreground" data-testid={`${testId}-proposal-file`}>
+              {words.title} · {words.file}: <span className="[overflow-wrap:anywhere]">«{stateFile}»</span>
+            </span>
             {state.result.status === "verified" ? <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">{words.verified}</span> : null}
           </div>
           {state.result.status === "unverified" ? (

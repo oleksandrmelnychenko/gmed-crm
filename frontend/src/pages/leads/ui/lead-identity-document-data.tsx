@@ -43,7 +43,7 @@ import { idDocumentTypeLabel, representativeName, representativeRoleLabel } from
 import type { RecognitionHolderCurrent, RecognitionHolderPatch } from "../model/identity-recognition";
 import type { Tx } from "../model/lead-payer";
 import type { LeadStaffIdDataMarks } from "../model/lead-risk-intake";
-import { LeadIdentityRecognition } from "./lead-identity-recognition";
+import { LeadIdentityRecognition, type RecognitionScan } from "./lead-identity-recognition";
 import { LeadRepresentativeUploads } from "./lead-representative-uploads";
 import { PARENT_ROLE_CHIP_CLASS } from "./trusted-contact-role";
 
@@ -157,7 +157,7 @@ export function LeadIdentityDocumentDataForm({
   birthDate = null,
   scanCount = null,
   confirmationPending = false,
-  scanIds,
+  scans,
   holder,
   onApplyHolder,
   clientMayType = false,
@@ -181,8 +181,8 @@ export function LeadIdentityDocumentDataForm({
   scanCount?: number | null;
   /** The data are complete but nobody confirmed the scan yet (owner 2026-10-30: «пише за документ хоча він є»). */
   confirmationPending?: boolean;
-  /** The ids of this person's scans: with them the form offers «Распознать со скана». */
-  scanIds?: readonly string[];
+  /** The files of this person's document, as listed above: with them the form offers «Распознать со скана», file by file. */
+  scans?: readonly RecognitionScan[];
   /** The person's data, compared with what the document says. */
   holder?: RecognitionHolderCurrent;
   /** Takes the person's data staff ticked in the proposal; without it they are only compared. */
@@ -411,9 +411,9 @@ export function LeadIdentityDocumentDataForm({
           )}
         </p>
       ) : null}
-      {scanIds && scanIds.length > 0 ? (
+      {scans && scans.length > 0 ? (
         <LeadIdentityRecognition
-          scanIds={scanIds}
+          scans={scans}
           draft={draft}
           onApply={(next) => {
             for (const field of Object.keys(next) as IdentityDocumentField[]) touch(field)();
@@ -733,7 +733,7 @@ function RepresentativeForm({
           today={today}
           birthDate={person.date_of_birth}
           scanCount={person.identity_documents.length}
-          scanIds={person.identity_documents.map((file) => file.id)}
+          scans={person.identity_documents.map((file) => ({ id: file.id, name: file.file_name }))}
           holder={{
             lastName: person.last_name,
             firstName: person.first_name,
@@ -770,6 +770,7 @@ export function LeadIdentityDocumentData({
   disabled = false,
   patientScans,
   patientScanIds = null,
+  patientScanFiles,
   patientBirthDate = null,
   patientScanConfirmed = null,
   patientHolder,
@@ -805,6 +806,11 @@ export function LeadIdentityDocumentData({
    * pass-front.pdf).
    */
   patientScanIds?: readonly string[] | null;
+  /**
+   * The files offered for «Распознать со скана», named as `patientScans`
+   * lists them; the scans of `patientScanIds` without a name when not given.
+   */
+  patientScanFiles?: readonly RecognitionScan[];
   patientBirthDate?: string | null;
   /** The server's `identity_document_verified`: false while a scan waits for «Подтвердить документ»; null when unknown. */
   patientScanConfirmed?: boolean | null;
@@ -858,7 +864,10 @@ export function LeadIdentityDocumentData({
         birthDate={patientBirthDate}
         scanCount={patientScanCount}
         confirmationPending={patientScanConfirmed === false && (patientScanCount ?? 0) > 0}
-        scanIds={[...cabinetScans.map((file) => file.id), ...(patientScanIds ?? [])]}
+        scans={[
+          ...(patientScanFiles ?? (patientScanIds ?? []).map((id) => ({ id, name: "" }))),
+          ...cabinetScans.map((file) => ({ id: file.id, name: file.file_name })),
+        ]}
         holder={patientHolder}
         onApplyHolder={onApplyPatientHolder}
         clientMayType

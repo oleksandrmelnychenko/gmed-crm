@@ -11191,6 +11191,10 @@ ${serviceCommentLines.join("\n")}`
                       disabled={isBusy}
                       patientScans={patientScans}
                       patientScanIds={wizardDocuments.identity.map((document) => document.id)}
+                      // Read file by file, named as the rows above; the archive is not offered.
+                      patientScanFiles={sortWizardDocumentsNewestFirst(wizardDocuments.identity)
+                        .filter((document) => document.is_latest_version && !wizardDocumentIsArchived(document))
+                        .map((document) => ({ id: document.id, name: wizardDocumentFilename(document) }))}
                       patientBirthDate={draft.birthDate || null}
                       patientScanConfirmed={readinessChecks.get("identity_document_verified") ?? null}
                       patientHolder={{
