@@ -1,5 +1,5 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Download, Eye, FileSignature, LoaderCircle, Info, Mail, Pencil, Plus, Send, ShieldCheck, Trash2 } from "lucide-react";
+import { Download, Eye, FileSignature, LoaderCircle, Info, Mail, Pencil, Plus, Send, ShieldCheck, Trash2, Inbox, FileClock, ServerCog, MailPlus, PencilLine, Briefcase, Users } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { StatusChip } from "@/components/ui/status-chip";
@@ -184,7 +184,22 @@ export function SignatureRequestMembers({ request, documentId }: { request: Sign
   </>;
 }
 
-export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onStateChange, onPreviewResult, onComposeNew, onPreviewRelated, onPackageSelectionChange, previewedDocumentIds = [], expanded = false, previewReady = true }: { documentId: string; onDone?: () => void; onDirtyChange?: (dirty: boolean) => void; onStateChange?: (state: SignatureState) => void; onPreviewResult?: (request: SignatureRequest) => void; onComposeNew?: () => void; onPreviewRelated?: (id: string, kind: "signing" | "review") => void; onPackageSelectionChange?: (selection: PackagePreviewSelection) => void; previewedDocumentIds?: string[]; expanded?: boolean; previewReady?: boolean }) {
+type SignaturePanelProps = {
+  documentId: string;
+  onDone?: () => void;
+  onSent?: (testMode: boolean) => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  onStateChange?: (state: SignatureState) => void;
+  onPreviewResult?: (request: SignatureRequest) => void;
+  onComposeNew?: () => void;
+  onPreviewRelated?: (id: string, kind: "signing" | "review") => void;
+  onPackageSelectionChange?: (selection: PackagePreviewSelection) => void;
+  previewedDocumentIds?: string[];
+  expanded?: boolean;
+  previewReady?: boolean;
+};
+
+export function DocumentSignaturePanel({ documentId, onDone, onSent, onDirtyChange, onStateChange, onPreviewResult, onComposeNew, onPreviewRelated, onPackageSelectionChange, previewedDocumentIds = [], expanded = false, previewReady = true }: SignaturePanelProps) {
   const { lang } = useLang();
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
   const [open, setOpen] = useState(expanded);
@@ -205,6 +220,12 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
   const [forbidden, setForbidden] = useState(false);
   const [revision, setRevision] = useState(0);
   const [awaitingState, setAwaitingState] = useState(false);
+  // HTTP 202 reserves an ID. Only Skribble's later status confirms acceptance.
+  const [submittedRequestId, setSubmittedRequestId] = useState<string | null>(null);
+  const submittedRequest = state?.requests.find(request => request.id === submittedRequestId);
+  const waitingForRequest = Boolean(submittedRequestId && !submittedRequest);
+  const feedbackRef = useRef<HTMLDivElement>(null);
+  const submittedCardRef = useRef<HTMLElement>(null);
   const [refreshCheck, setRefreshCheck] = useState<{ id: string; before?: string } | null>(null);
   const [paperSigned, setPaperSigned] = useState(false);
   // The lead's known patient-side people, offered when staff add a legal
@@ -213,6 +234,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const busyRef = useRef(false);
   const onDoneRef = useRef(onDone);
+  const onSentRef = useRef(onSent);
   const onStateChangeRef = useRef(onStateChange);
   const previousRequests = useRef<string | null>(null);
   const previousPending = useRef(false);
@@ -224,6 +246,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
   const selectionRef = useRef(selection);
   useEffect(() => { selectionRef.current = selection; }, [selection]);
   useEffect(() => { onDoneRef.current = onDone; }, [onDone]);
+  useEffect(() => { onSentRef.current = onSent; }, [onSent]);
   useEffect(() => { onStateChangeRef.current = onStateChange; }, [onStateChange]);
   const selectedSigners = signers.filter((_, index) => !excludedSigners.includes(index));
   const dirty = confirmed || excludedSigners.length > 0 || JSON.stringify(signers) !== JSON.stringify(baseline) || JSON.stringify(selection) !== suggestedSelection;
@@ -233,7 +256,25 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
   const completed = state?.requests.some(r => r.status === "completed");
   const outdatedSource = useContext(OutdatedSignatureDocuments).includes(documentId);
   const paperSourceConfirmed = Boolean(state?.paper_resign_available && selection.paperSignedDocumentIds?.includes(documentId));
-  const composing = Boolean(state?.enabled && state.can_send && !pending && (!state.ineligible_reason || paperSourceConfirmed) && (!completed || composeNew));
+  const composing = Boolean(state?.enabled && state.can_send && !pending && !waitingForRequest && (!state.ineligible_reason || paperSourceConfirmed) && (!completed || composeNew));
+
+  const submittedStatus = submittedRequest?.status;
+  const submittedError = submittedRequest?.last_error;
+  const submittedTestMode = submittedRequest?.test_mode === true;
+  const signerIssue = submittedRequest?.evidence.signatures?.some(
+    signer => ["DECLINED", "ERROR", "EXPIRED", "WITHDRAWN"].includes(signer.status),
+  );
+  useEffect(() => {
+    if (!error && !submittedError && !signerIssue && (submittedStatus === "pending" || submittedStatus === "completed")) {
+      setSubmittedRequestId(null);
+      onSentRef.current?.(submittedTestMode);
+    } else if (actionError || error || waitingForRequest) {
+      feedbackRef.current?.scrollIntoView({ block: "nearest" });
+    } else if (submittedStatus) {
+      submittedCardRef.current?.scrollIntoView({ block: "start" });
+      if (!isSignaturePending(submittedStatus)) setSubmittedRequestId(null);
+    }
+  }, [actionError, error, waitingForRequest, submittedStatus, submittedError, submittedTestMode, signerIssue]);
   const resolved = resolvePackage(candidates, selection);
   // The document's own rules come from its signature state; added documents
   // bring theirs from the candidate list.
@@ -276,7 +317,9 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
         if ((previousRequests.current !== null && previousRequests.current !== requestSnapshot) || (previousPending.current && !isPending)) onDoneRef.current?.();
         previousRequests.current = requestSnapshot;
         previousPending.current = isPending;
-        if (isPending) timer = setTimeout(() => { void load(); }, 5000);
+        if (isPending || (submittedRequestId && !next.requests.some(request => request.id === submittedRequestId))) {
+          timer = setTimeout(() => { void load(); }, 5000);
+        }
       } catch (reason) {
         if (cancelled) return;
         if (reason instanceof ApiRequestError && reason.status === 403) setForbidden(true);
@@ -285,7 +328,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
     }
     void load();
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [documentId, open, revision]);
+  }, [documentId, open, revision, submittedRequestId]);
 
   // Candidates of the same patient or lead, with the suggested package.
   useEffect(() => {
@@ -357,7 +400,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
       busyRef.current = false; setBusy(false);
     }
   }
-  const mutationDisabled = busy || awaitingState || error;
+  const mutationDisabled = busy || awaitingState || error || waitingForRequest;
   const policyError = signerPolicyError(policy, selectedSigners);
   const previewIds = [...selection.documentIds, ...resolved.attachmentIds];
   const allPreviewed = previewReady && previewIds.every(id => previewedDocumentIds.includes(id));
@@ -401,12 +444,15 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
       </summary>
       {open ? <div className={expanded ? "grid gap-4 text-sm" : "mt-4 grid gap-4 text-sm"}>
         {!state && !error ? <div role="status" className="flex min-h-28 items-center justify-center rounded-xl border border-border/70 bg-card text-sm text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" />{tx("Загрузка…", "Wird geladen…")}</div> : null}
-        {error ? <Banner tone="error">{tx("Не удалось выполнить действие. Проверьте статус перед повторной отправкой.", "Aktion fehlgeschlagen. Prüfen Sie vor erneutem Versand den Status.")}</Banner> : null}
-        {actionError ? <Banner tone="error">{actionError}</Banner> : null}
+        {error || actionError || waitingForRequest ? <div ref={feedbackRef} className="grid gap-2">
+          {error ? <Banner tone="error">{tx("Не удалось выполнить действие. Проверьте статус перед повторной отправкой.", "Aktion fehlgeschlagen. Prüfen Sie vor erneutem Versand den Status.")}</Banner> : null}
+          {actionError ? <Banner tone="error">{actionError}</Banner> : null}
+          {waitingForRequest && !error && !actionError ? <p role="status">{tx("Ожидаем подтверждения от Skribble…", "Warte auf die Bestätigung von Skribble…")}</p> : null}
+        </div> : null}
         {state ? <>
           {!state.enabled ? <section className="rounded-xl border border-border/70 bg-card shadow-xs">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
-              <AdminSectionTitle>{tx("Сервис подписи", "Signaturdienst")}</AdminSectionTitle>
+              <AdminSectionTitle icon={ServerCog}>{tx("Сервис подписи", "Signaturdienst")}</AdminSectionTitle>
               <StatusBadge tone="warning">{state.test_mode ? "DEMO" : "QES / eIDAS"}</StatusBadge>
             </div>
             <div className="flex flex-col items-start gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -424,10 +470,10 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
           {!state.can_send ? <p className="text-xs leading-5 text-muted-foreground">{tx("Доступен просмотр статуса. Для отправки документа на подпись нужны права редактирования и скачивания.", "Der Status ist sichtbar. Zum Versand werden Bearbeitungs- und Downloadrechte benötigt.")}</p> : null}
 
           {state.requests.map((request, index) => {
-            return <section key={request.id} aria-label={index === 0 ? tx("Текущий запрос подписи", "Aktuelle Signaturanfrage") : tx("Предыдущий запрос подписи", "Frühere Signaturanfrage")} className="rounded-xl border border-border/70 bg-card shadow-xs" data-signature-request={request.id}>
+            return <section key={request.id} ref={request.id === submittedRequestId ? submittedCardRef : undefined} aria-label={index === 0 ? tx("Текущий запрос подписи", "Aktuelle Signaturanfrage") : tx("Предыдущий запрос подписи", "Frühere Signaturanfrage")} className="rounded-xl border border-border/70 bg-card shadow-xs" data-signature-request={request.id}>
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
               <div className="space-y-1">
-                <AdminSectionTitle>{index === 0 ? tx("Текущий запрос", "Aktuelle Anfrage") : tx("Предыдущий запрос", "Frühere Anfrage")}</AdminSectionTitle>
+                <AdminSectionTitle icon={index === 0 ? Inbox : FileClock}>{index === 0 ? tx("Текущий запрос", "Aktuelle Anfrage") : tx("Предыдущий запрос", "Frühere Anfrage")}</AdminSectionTitle>
                 <time dateTime={request.created_at} className="block font-mono text-[11px] text-foreground">{formatAppDateTime(request.created_at)}</time>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
@@ -508,7 +554,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
           }}>{tx("Электронно подписать бумажную копию", "Papierkopie zusätzlich elektronisch unterschreiben")}</Button> : null}
           {composing ? <section className="rounded-xl border border-border/70 bg-card shadow-xs">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
-              <AdminSectionTitle>{tx("Новый запрос подписи", "Neue Signaturanfrage")}</AdminSectionTitle>
+              <AdminSectionTitle icon={MailPlus}>{tx("Новый запрос подписи", "Neue Signaturanfrage")}</AdminSectionTitle>
               <StatusBadge tone="neutral">{selection.level}</StatusBadge>
             </div>
             <div className="space-y-4 p-4">
@@ -518,7 +564,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
 
               <section aria-label={tx("Подписанты", "Unterzeichnende Personen")} className="space-y-3 rounded-xl border border-border/70 bg-card p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <AdminSectionTitle>{policy === "client_only" ? tx("Подпись пациента", "Unterschrift der Patientenseite") : policy === "agency_only" ? tx("Подпись GMED", "GMED-Unterschrift") : tx("Подписанты", "Unterzeichnende Personen")}</AdminSectionTitle>
+                  <AdminSectionTitle icon={policy === "client_only" ? PencilLine : policy === "agency_only" ? Briefcase : Users}>{policy === "client_only" ? tx("Подпись пациента", "Unterschrift der Patientenseite") : policy === "agency_only" ? tx("Подпись GMED", "GMED-Unterschrift") : tx("Подписанты", "Unterzeichnende Personen")}</AdminSectionTitle>
                   <Badge variant="outline" className="rounded-full text-[10px]" aria-label={`${tx("Выбрано подписантов", "Ausgewählte Personen")}: ${selectedSigners.length} / ${signers.length}`}>{selectedSigners.length} / {signers.length}</Badge>
                 </div>
                 {policy === "payer_and_agency" || policy === "payer_package" ? <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900"><Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" /><span>{tx("Заявление о принятии расходов подписывает плательщик в своём поле подписи, затем GMED.", "Die Kostenübernahmeerklärung unterschreibt die zahlende Person in ihrem eigenen Unterschriftsfeld, danach GMED.")}</span></div> : null}
@@ -573,11 +619,12 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
               <label className="flex items-start gap-3 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3.5 py-3 text-xs leading-5 dark:border-amber-800 dark:bg-amber-950/30"><input type="checkbox" checked={confirmed} disabled={busy} onChange={e => setConfirmed(e.target.checked)} className="mt-1 size-4 shrink-0 accent-[var(--brand)]" /><ShieldCheck className="mt-0.5 size-4 shrink-0 text-[var(--brand)]" /><span>{isPackage ? tx("Я проверил все PDF пакета, порядок документов и адреса. Отправить пакет выбранным подписантам через Skribble.", "Ich habe alle PDFs des Pakets, ihre Reihenfolge und die Adressen geprüft. Dieses Paket über Skribble versenden.") : tx("Я проверил сохранённый PDF и адреса. Отправить этот документ выбранным подписантам через Skribble.", "Ich habe die gespeicherte PDF und die Adressen geprüft. Dieses Dokument über Skribble an die ausgewählten Personen senden.")}</span></label>
               <div className="mt-3 flex justify-end">
                 <Button type="button" className="h-9 rounded-lg" disabled={!canSend} onClick={() => void run(async () => {
-                  await createSignaturePackage({
+                  const created = await createSignaturePackage({
                     document_ids: selection.documentIds, signers: selectedSigners, attachment_ids: resolved.attachmentIds,
                     paper_signed_document_ids: selection.paperSignedDocumentIds?.filter(id => selection.documentIds.includes(id)),
                     level: selection.level, expires_at: expiryInstant(selection.expiresOn), message: selection.message, language: selection.language,
                   });
+                  setSubmittedRequestId(created.id);
                   previousPending.current = true; setSigners(baseline); setExcludedSigners([]); setConfirmed(false); setComposeNew(false);
                   setSelection(current => ({ ...current, paperSignedDocumentIds: undefined }));
                 })}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}{busy ? tx("Отправка…", "Wird versendet…") : isPackage ? tx("Отправить пакет на подпись", "Paket zur Unterschrift senden") : tx("Отправить на подпись", "Zur Unterschrift senden")}</Button>

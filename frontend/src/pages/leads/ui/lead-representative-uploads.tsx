@@ -1,5 +1,6 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useId, useState, type ReactNode } from "react";
-import { CalendarDays, FileText, LoaderCircle, Upload } from "lucide-react";
+import { CalendarDays, FileText, LoaderCircle, Upload, Award, ScanQrCode } from "lucide-react";
 
 import { buttonVariants } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
@@ -82,7 +83,7 @@ function UploadBlock({
   return (
     <div className="space-y-2 rounded-lg border border-border/60 bg-card p-3" data-testid={`lead-representative-upload-${kind}-${person.id}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="flex items-center gap-2 text-sm font-semibold text-foreground"><span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />{title}</span>
+        <SectionHeading icon={kind === "authority" ? Award : ScanQrCode}>{title}</SectionHeading>
         <div className="flex flex-wrap items-center gap-2">
           <StatusChip tone="warning">{tx("PDF, JPG или PNG · до 25 МБ", "PDF, JPG oder PNG · bis 25 MB")}</StatusChip>
           <span className="inline-flex">

@@ -1,4 +1,18 @@
-import { Building2, CalendarDays, ChevronDown, FileText, History, Info, Languages, UserRound, UsersRound } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
+import {
+  Building2,
+  CalendarDays,
+  ChevronDown,
+  FileText,
+  History,
+  Info,
+  Languages,
+  UserRound,
+  UsersRound,
+  FileOutput,
+  Send,
+  Share2,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { StatusChip } from "@/components/ui/status-chip";
@@ -137,7 +151,7 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
     <div className={form ? "grid items-start gap-2 @5xl/consents:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]" : "grid items-start gap-2"}>
     <section className="@container min-w-0 rounded-xl border border-border/60 bg-card" data-testid="portal-disclosure" aria-label={tx("Информация третьим лицам", "Auskunft an Dritte")}>
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
-        <AdminSectionTitle className="text-sm">{tx("Информация третьим лицам", "Auskunft an Dritte")}</AdminSectionTitle>
+        <AdminSectionTitle icon={Share2} className="text-sm">{tx("Информация третьим лицам", "Auskunft an Dritte")}</AdminSectionTitle>
         <ClientFormEditButton section="disclosure" className="ml-auto" />
       </div>
       <div className="space-y-2.5 p-3">
@@ -219,7 +233,7 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
     </section>
     {form ? <section className="@container min-w-0 rounded-xl border border-border/60 bg-card" data-testid="portal-consent-choices" aria-label={tx("Передача данных · Anlage 1", "Datenübermittlung · Anlage 1")}>
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
-        <AdminSectionTitle className="text-sm">{tx("Передача данных · Anlage 1", "Datenübermittlung · Anlage 1")}</AdminSectionTitle>
+        <AdminSectionTitle icon={FileOutput} className="text-sm">{tx("Передача данных · Anlage 1", "Datenübermittlung · Anlage 1")}</AdminSectionTitle>
         <ClientFormEditButton section="consents" className="ml-auto" />
       </div>
       <div className="space-y-2.5 p-3">
@@ -247,7 +261,7 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
         ))}
       </dl>
       <div className="space-y-2 border-t border-border/60 pt-2">
-        <h4 className="text-sm font-semibold">{tx("Каналы передачи данных", "Kommunikationswege zur Datenübermittlung")}</h4>
+        <h4><SectionHeading icon={Send}>{tx("Каналы передачи данных", "Kommunikationswege zur Datenübermittlung")}</SectionHeading></h4>
         <dl className="grid gap-2 @sm:grid-cols-2 @3xl:grid-cols-4">
           {PORTAL_CONSENT_CHANNELS.filter((key) => key !== "channel_threema").map((key) => (
             <div key={key} className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 rounded-lg bg-muted/35 px-3 py-2 text-sm">

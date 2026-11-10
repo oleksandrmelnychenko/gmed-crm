@@ -1,3 +1,4 @@
+import { FileKey2 } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { StatusChip } from "@/components/ui/status-chip";
 import { useLang } from "@/lib/i18n";
@@ -67,7 +68,7 @@ export function LeadSigningPackagePanel({
     >
       <div className="min-w-0 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
-          <AdminSectionTitle>
+          <AdminSectionTitle icon={FileKey2}>
             {tx("Электронная подпись пакета", "Elektronische Unterschrift des Pakets")}
           </AdminSectionTitle>
         </div>

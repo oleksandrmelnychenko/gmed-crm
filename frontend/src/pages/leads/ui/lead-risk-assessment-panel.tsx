@@ -1,5 +1,24 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useState } from "react";
-import { CalendarDays, Check, ChevronDown, History, Info, LoaderCircle, RotateCcw, ShieldAlert, Undo2, UserRound, X } from "lucide-react";
+import {
+  CalendarDays,
+  Check,
+  ChevronDown,
+  History,
+  Info,
+  LoaderCircle,
+  RotateCcw,
+  ShieldAlert,
+  Undo2,
+  UserRound,
+  X,
+  ListChecks,
+  type LucideIcon,
+  MessageCircleQuestion,
+  Gavel,
+  UserRoundSearch,
+  ScrollText,
+} from "lucide-react";
 
 import { DataTable } from "@/components/data-table/data-table";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -58,8 +77,8 @@ type DialogState =
   | { kind: "withdraw"; decisionId: string }
   | null;
 
-function Caption({ children }: { children: string }) {
-  return <h4 className="text-sm font-semibold text-foreground">{children}</h4>;
+function Caption({ children, icon }: { children: string; icon: LucideIcon }) {
+  return <h4><SectionHeading icon={icon}>{children}</SectionHeading></h4>;
 }
 
 function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: Tx }) {
@@ -380,6 +399,7 @@ export function LeadRiskAssessmentPanel({
       data-status={assessment.status ?? "not_started"}
     >
       <Section
+        icon={ShieldAlert}
         className={SECTION_CLASS}
         title={tx("Оценка риска", "Risikobewertung")}
         accessory={(
@@ -447,7 +467,7 @@ export function LeadRiskAssessmentPanel({
 
         {assessment.representatives && assessment.representatives.length > 0 ? (
           <div className="space-y-3" data-testid="lead-risk-representative-answers">
-            <Caption>{riskBlockLabel("R", tx)}</Caption>
+            <Caption icon={UserRoundSearch}>{riskBlockLabel("R", tx)}</Caption>
             {assessment.representatives.map((person) => (
               <section key={person.id} className="rounded-lg border border-border bg-card p-3" data-testid={`lead-risk-representative-${person.id}`}>
                 <h5 className="mb-2 break-words text-sm font-semibold">{person.name || tx("Представитель", "Vertreter")}</h5>
@@ -502,7 +522,7 @@ export function LeadRiskAssessmentPanel({
 
         {(started || questionsBeforeSubmit) && blocksShown.length > 0 ? (
           <div className="space-y-3" data-testid="lead-risk-blocks">
-            <Caption>{questionsBeforeSubmit
+            <Caption icon={MessageCircleQuestion}>{questionsBeforeSubmit
               ? tx("Вопросы до отправки анкеты", "Fragen vor dem Absenden der Anfrage")
               : tx("Дополнительные сведения", "Ergänzende Angaben")}</Caption>
             {questionsBeforeSubmit ? <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-risk-questions-preview">
@@ -633,7 +653,7 @@ export function LeadRiskAssessmentPanel({
             </summary>
             <div className="grid gap-4 border-t border-border/60 bg-muted/10 p-3 @3xl/risk:grid-cols-2">
               <div className="min-w-0 space-y-3">
-                <Caption>{tx("Решения", "Entscheidungen")}</Caption>
+                <Caption icon={Gavel}>{tx("Решения", "Entscheidungen")}</Caption>
                 {assessment.decisions.length > 0 ? (
                   <ul className="space-y-2">
                     {assessment.decisions.map((decision) => (
@@ -645,7 +665,7 @@ export function LeadRiskAssessmentPanel({
                 )}
               </div>
               <div className="min-w-0 space-y-3">
-                <Caption>{tx("История", "Verlauf")}</Caption>
+                <Caption icon={ScrollText}>{tx("История", "Verlauf")}</Caption>
                 <ul className="space-y-2">
                   {assessment.history.map((event) => (
                     <li key={event.id} className="space-y-2 rounded-lg border border-border/60 bg-card p-3" data-testid="lead-risk-event">
@@ -706,7 +726,7 @@ export function LeadRiskAssessmentPanel({
           <fieldset className="min-w-0 rounded-xl border border-border/50 bg-card p-3.5" data-testid="lead-risk-block-chooser">
             <legend className="sr-only">{tx("Какие сведения запросить", "Welche Angaben anfordern")}</legend>
             <div className="mb-3 flex items-center justify-between gap-3" aria-hidden="true">
-              <span className="flex items-center gap-2 text-sm font-semibold"><span className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />{tx("Какие сведения запросить", "Welche Angaben anfordern")}</span>
+              <SectionHeading icon={ListChecks}>{tx("Какие сведения запросить", "Welche Angaben anfordern")}</SectionHeading>
               <StatusChip tone="info" className="font-mono">{blocks.length} / {RISK_BLOCK_KEYS.length}</StatusChip>
             </div>
             <div className="grid gap-1.5 sm:grid-cols-2">

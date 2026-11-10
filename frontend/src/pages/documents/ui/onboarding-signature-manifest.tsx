@@ -1,5 +1,5 @@
 import { useContext } from "react";
-import { Info } from "lucide-react";
+import { Info, PackageCheck } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
@@ -34,7 +34,7 @@ export function OnboardingSignatureManifest({ manifest, documentId, selectedIds 
     && !isOutdated(item) && !item.pending_elsewhere && (item.state === "ready" || (item.state === "signed" && item.paper_signed)));
   return <section data-onboarding-manifest className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-3">
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <AdminSectionTitle>{tx("Полный комплект первичного оформления", "Vollständige Erstaufnahme")}</AdminSectionTitle>
+      <AdminSectionTitle icon={PackageCheck}>{tx("Полный комплект первичного оформления", "Vollständige Erstaufnahme")}</AdminSectionTitle>
       <StatusBadge tone="neutral">{manifest.expected_count} {tx("документов", "Dokumente")}</StatusBadge>
     </div>
     {onSelect && selectable.length ? <Button type="button" size="sm" variant="outline" className="h-auto max-w-full whitespace-normal text-left" disabled={disabled} onClick={() => {

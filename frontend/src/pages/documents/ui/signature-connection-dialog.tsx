@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import {
   Check,
   ExternalLink,
@@ -52,9 +53,9 @@ export function SignatureConnectionDialog({ canConfigure, onChanged }: { canConf
   return <>
     <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}><KeyRound aria-hidden="true" className="size-4" />{lang === "de" ? "Skribble anmelden / verbinden" : "Вход / подключение Skribble"}</Button>
     <Dialog open={open} onOpenChange={value => { setOpen(value); if (!value) { setDirty(false); if (changed.current) { changed.current = false; onChanged(); } } }} dirty={dirty}>
-      <DialogContent className="grid max-h-[calc(100dvh-1rem)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 sm:max-h-[90dvh] sm:max-w-2xl">
+      <DialogContent className="grid max-h-[calc(100dvh-1rem)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 sm:pb-0 sm:max-h-[90dvh] sm:max-w-2xl">
         <DialogHeader className="border-b border-border/70 px-4 py-3.5 pr-12 sm:px-5 sm:pr-14">
-          <DialogTitle className="flex items-center gap-2 text-base"><span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />{lang === "de" ? "Skribble verbinden" : "Подключить Skribble"}</DialogTitle>
+          <DialogTitle><SectionHeading icon={KeyRound}>{lang === "de" ? "Skribble verbinden" : "Подключить Skribble"}</SectionHeading></DialogTitle>
           <DialogDescription className="text-xs">{lang === "de" ? "Deutschland · Elektronische Unterschriften für GMED" : "Германия · Электронные подписи для GMED"}</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 overflow-y-auto p-4 sm:p-5">

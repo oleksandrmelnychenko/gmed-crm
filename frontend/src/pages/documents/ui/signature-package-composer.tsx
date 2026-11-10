@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Eye, Info, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Eye, Info, Plus, Trash2, FileStack, Paperclip, Mails } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
@@ -128,7 +128,7 @@ export function SignaturePackageComposer({ documentId, candidates, selection, on
       disabled={disabled} onSelect={(documentIds, paperSignedDocumentIds) => update({ documentIds, paperSignedDocumentIds })} /> : null}
     <section aria-label={tx("Документы на подпись", "Dokumente zur Unterschrift")} className="space-y-3 rounded-xl border border-border/70 bg-card p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <AdminSectionTitle>{tx("Документы на подпись", "Dokumente zur Unterschrift")}</AdminSectionTitle>
+        <AdminSectionTitle icon={FileStack}>{tx("Документы на подпись", "Dokumente zur Unterschrift")}</AdminSectionTitle>
         <StatusBadge tone="neutral">{selection.documentIds.length} / {candidates.limits.max_documents}</StatusBadge>
       </div>
       {presetIds.length > 0 && !presetApplied ? <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => update({ documentIds: [...selection.documentIds, ...presetIds.filter(id => !selection.documentIds.includes(id))] })}>
@@ -184,7 +184,7 @@ export function SignaturePackageComposer({ documentId, candidates, selection, on
     </section>
 
     {resolved.required.length > 0 ? <section aria-label={tx("Приложения для ознакомления", "Anlagen zur Kenntnisnahme")} className="space-y-3 rounded-xl border border-border/70 bg-card p-3">
-      <AdminSectionTitle>{tx("Приложения для ознакомления", "Anlagen zur Kenntnisnahme")}</AdminSectionTitle>
+      <AdminSectionTitle icon={Paperclip}>{tx("Приложения для ознакомления", "Anlagen zur Kenntnisnahme")}</AdminSectionTitle>
       {resolved.required.map(template => {
         const options = resolved.attachmentOptions[template] ?? [];
         const chosen = selection.attachments[template] || (options.length === 1 ? options[0].id : "");
@@ -203,7 +203,7 @@ export function SignaturePackageComposer({ documentId, candidates, selection, on
     </section> : null}
 
     <section aria-label={tx("Параметры приглашения", "Einstellungen der Einladung")} className="grid items-start gap-3 rounded-xl border border-border/70 bg-card p-3 sm:grid-cols-2">
-      <div className="sm:col-span-2"><AdminSectionTitle>{tx("Параметры приглашения", "Einstellungen der Einladung")}</AdminSectionTitle></div>
+      <div className="sm:col-span-2"><AdminSectionTitle icon={Mails}>{tx("Параметры приглашения", "Einstellungen der Einladung")}</AdminSectionTitle></div>
       <label className="grid content-start gap-1.5 font-mono text-xs font-medium text-foreground/75">{tx("Уровень подписи", "Signaturstufe")}
         <NativeComboboxSelect className="h-9 bg-field text-sm font-sans font-normal text-foreground" value={selection.level} disabled={disabled} onChange={event => update({ level: event.target.value as SignatureLevel })}>
           <option value="QES">{tx("QES — квалифицированная (заменяет письменную форму)", "QES – qualifiziert (ersetzt die Schriftform)")}</option>

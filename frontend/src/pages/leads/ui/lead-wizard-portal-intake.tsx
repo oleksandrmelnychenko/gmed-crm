@@ -1,6 +1,8 @@
+import { portalTabTone } from "@/components/ui/portal-tab-style";
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import { CalendarDays, CheckCheck, Clock3, LoaderCircle, RefreshCw, UserRound, X } from "lucide-react";
+import { CalendarDays, CheckCheck, Clock3, LoaderCircle, RefreshCw, UserRound, X, BriefcaseBusiness, Smartphone } from "lucide-react";
 
+import { Popover } from "@base-ui/react/popover";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -116,13 +118,13 @@ export function useStep1PortalField(errorId?: string, portalField?: string) {
 }
 
 /** Hint and badge under a wizard field label; the hint only over an empty field. */
-export function Step1PortalFieldNote({ errorId, portalField }: { errorId?: string; portalField?: string }) {
+export function Step1PortalFieldNote({ errorId, portalField, compact = false }: { errorId?: string; portalField?: string; compact?: boolean }) {
   const { patientFills, filled, marker, tx } = useStep1PortalField(errorId, portalField);
   const hint = patientFills && !marker && !filled;
   if (!tx || (!hint && !marker)) return null;
   return (
     <span className="flex flex-wrap items-center gap-1.5">
-      {marker ? <PatientFieldBadge marker={marker} tx={tx} /> : null}
+      {marker ? <PatientFieldBadge marker={marker} tx={tx} compact={compact} /> : null}
       {hint ? (
         <span className="text-[11px] text-muted-foreground" data-testid="patient-fills-hint">
           {tx("заполнит пациент в портале", "füllt der Patient im Portal aus")}
@@ -142,21 +144,41 @@ export function useMarkerKind(key: string | undefined): PatientFieldMarker["acce
   return kind === "self" || kind === "guardian" || kind === "staff" ? kind : null;
 }
 
-export function PatientFieldBadge({ marker: given, markerKey, tx }: { marker: PatientFieldMarker; markerKey?: string; tx: Tx }) {
+export function PatientFieldBadge({ marker: given, markerKey, tx, compact = false }: { marker: PatientFieldMarker; markerKey?: string; tx: Tx; compact?: boolean }) {
   const kindOfKey = useMarkerKind(markerKey);
   const marker = given.access_kind ? given : { ...given, access_kind: kindOfKey };
+  const source = marker.access_kind === "staff" ? tx("внёс сотрудник", "von Mitarbeitenden") : tx("от пациента", "vom Patienten");
+  const description = marker.access_kind === "guardian" ? tx("Внёс родитель в портале", "Von einem Elternteil im Portal eingetragen")
+    : marker.access_kind === "staff" ? tx("Внёс сотрудник в анкете клиента", "Von Mitarbeitenden im Kundenformular eingetragen") : source;
+  const date = marker.at ? formatAppDateTime(marker.at) : null;
+  const detail = [description, date].filter(Boolean).join(" · ");
+  const badgeClass = "h-5 gap-1 rounded-full border-sky-200 bg-sky-50 px-1.5 text-[10.5px] font-medium text-sky-800";
+
+  if (compact) return (
+    <Popover.Root>
+      <Popover.Trigger
+        render={<button type="button" />}
+        aria-label={detail}
+        data-testid="patient-field-badge"
+        className={cn(badgeClass, "relative inline-flex items-center border font-mono after:absolute after:-inset-1 focus-visible:outline-2 focus-visible:outline-ring")}
+      >
+        <UserRound aria-hidden="true" className="size-3" />
+        <span className="hidden @min-[30rem]:inline">{source}</span>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Positioner sideOffset={4} className="z-[100]">
+          <Popover.Popup className="rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground shadow-sm">
+            <Popover.Description>{detail}</Popover.Description>
+          </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+
   return (
-    <Badge
-      variant="outline"
-      data-testid="patient-field-badge"
-      className="h-5 gap-1 rounded-full border-sky-200 bg-sky-50 px-1.5 text-[10.5px] font-medium text-sky-800"
-      title={marker.access_kind === "guardian" ? tx("Внёс родитель в портале", "Von einem Elternteil im Portal eingetragen")
-        : marker.access_kind === "staff" ? tx("Внёс сотрудник в анкете клиента", "Von Mitarbeitenden im Kundenformular eingetragen") : undefined}
-    >
+    <Badge variant="outline" data-testid="patient-field-badge" className={badgeClass} title={description}>
       <UserRound aria-hidden="true" className="size-3" />
-      {/* Staff's own entries in the client's form are theirs, not the patient's (owner 2026-10-30). */}
-      {marker.access_kind === "staff" ? tx("внёс сотрудник", "von Mitarbeitenden") : tx("от пациента", "vom Patienten")}
-      {marker.at ? ` · ${formatAppDateTime(marker.at)}` : ""}
+      {source}{date ? ` · ${date}` : ""}
     </Badge>
   );
 }
@@ -173,15 +195,15 @@ export function Step1FillModeSwitch({
   disabled?: boolean;
   tx: Tx;
 }) {
-  const options: Array<{ value: Step1FillMode; label: string }> = [
-    { value: "staff", label: tx("Заполняю сам", "Ich fülle aus") },
-    { value: "patient", label: tx("Заполнит пациент", "Patient füllt aus") },
+  const options: Array<{ value: Step1FillMode; label: string; icon: typeof BriefcaseBusiness }> = [
+    { value: "staff", label: tx("Заполняю сам", "Ich fülle aus"), icon: BriefcaseBusiness },
+    { value: "patient", label: tx("Заполнит пациент", "Patient füllt aus"), icon: Smartphone },
   ];
   return (
     <div
       role="radiogroup"
       aria-label={tx("Кто заполняет данные клиента", "Wer füllt die Personendaten aus")}
-      className="inline-flex max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-muted p-0.5"
+      className="inline-flex max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-card p-0.5"
       data-testid="step1-fill-mode"
     >
       {options.map((option, index) => (
@@ -193,10 +215,8 @@ export function Step1FillModeSwitch({
           tabIndex={mode === option.value ? 0 : -1}
           disabled={disabled}
           className={cn(
-            "min-h-7 max-sm:min-h-10 cursor-pointer rounded-md border px-2.5 py-1 text-xs leading-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-default disabled:opacity-60",
-            mode === option.value
-              ? "border-[var(--brand)] bg-[var(--brand)] font-semibold text-primary-foreground"
-              : "border-transparent bg-transparent text-muted-foreground hover:bg-card hover:text-foreground",
+            "inline-flex min-h-7 items-center gap-1.5 max-sm:min-h-10 cursor-pointer rounded-md border px-2.5 py-1 text-xs leading-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-default disabled:opacity-60",
+            portalTabTone(mode === option.value),
           )}
           onClick={() => onChange(option.value)}
           onKeyDown={(event) => {
@@ -212,6 +232,7 @@ export function Step1FillModeSwitch({
             event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[nextIndex]?.focus();
           }}
         >
+          <option.icon aria-hidden="true" className="size-3.5 shrink-0 text-foreground" />
           {option.label}
         </button>
       ))}

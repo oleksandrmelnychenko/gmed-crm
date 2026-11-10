@@ -56,34 +56,6 @@
   margin-top: 8px;
 }
 
-/* Every section title uses the same accent, including embedded clinical forms. */
-#lead-wizard-step-panel :is([data-slot="section-marker"], [data-slot="heading-marker"]) {
-  display: none;
-}
-
-#lead-wizard-step-panel h3 {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-#lead-wizard-step-panel h3:not(:has([data-slot="section-heading"]))::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  background: var(--dot);
-}
-
-#lead-wizard-step-panel [data-slot="section-heading"] > [data-slot="heading-marker"] { display: inline-block; }
-
-/* Nested groups carry the accent; their enclosing heading stays quiet. */
-#lead-wizard-step-panel [data-slot="record-section"]:has(> div:last-child :is(h3, [data-wizard-subsection-marker]))
-  > div:first-child h3::before {
-  display: none;
-}
-
 #lead-wizard-step-panel > fieldset {
   max-width: 1440px;
   margin-inline: auto;
@@ -104,11 +76,37 @@
   max-width: 32rem;
 }
 
+/* Keep the full citizenship instruction visible, even with a dated source marker. */
+.wizard-provenance-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "label note" "control control";
+  align-items: center;
+  gap: 4px 8px;
+}
+.wizard-provenance-label { grid-area: label; }
+.wizard-provenance-note { grid-area: note; }
+.wizard-provenance-control { grid-area: control; }
+.wizard-provenance-layout > [role="alert"] { grid-column: 1 / -1; }
+@container (max-width: 27.99rem) {
+  .wizard-provenance-layout { grid-template-areas: "label label" "control note"; }
+  .wizard-provenance-control [role="combobox"] { min-width: min(9rem, 100%); }
+}
+
 #lead-wizard-step-panel .wizard-contract-grid {
   max-width: 42rem;
 }
 
 @media (min-width: 640px) {
+  /* Both dates share caption, picker and validation rows when displayed side by side. */
+  #lead-wizard-step-panel .wizard-program-period > [data-wizard-field] {
+    display: grid;
+    grid-row: span 3;
+    grid-template-rows: subgrid;
+    align-items: start;
+    row-gap: 0;
+  }
+
   #lead-wizard-step-panel .wizard-contract-grid {
     grid-template-columns: 14rem minmax(0, 1fr);
   }

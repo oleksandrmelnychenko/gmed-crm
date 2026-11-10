@@ -1,15 +1,10 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useState } from "react";
-import { FileCheck2, FileText } from "lucide-react";
+import { FileCheck2, CheckCheck } from "lucide-react";
 
+import { AdminDialogScaffold } from "@/components/admin-dialog-scaffold";
 import { Button } from "@/components/ui/button";
-import { StatusChip } from "@/components/ui/status-chip";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 import { ApiRequestError, isLocalizedApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { fetchSignatureState, recordPaperSignature, signatureErrorText } from "../data/document-signature-api";
@@ -112,16 +107,11 @@ export function PaperSignatureConfirmButton({
         {label ?? tx("Подтвердить подпись", "Unterschrift bestätigen")}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="gap-3 sm:w-[calc(100vw-3rem)] sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><FileCheck2 aria-hidden="true" className="size-5 shrink-0 text-[var(--brand)]" />{tx("Подтверждение подписи", "Unterschrift bestätigen")}</DialogTitle>
-            <DialogDescription className="pt-1">
-              <StatusChip className="border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-200">
-                <FileText aria-hidden="true" />
-                <span className="min-w-0 whitespace-normal [overflow-wrap:anywhere]">{title}</span>
-              </StatusChip>
-            </DialogDescription>
-          </DialogHeader>
+        <AdminDialogScaffold
+          title={<SectionHeading icon={CheckCheck}>{tx("Подтверждение подписи", "Unterschrift bestätigen")}</SectionHeading>}
+          description={title}
+          maxWidthClassName="sm:max-w-2xl"
+        >
           {error ? (
             <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs leading-5 text-destructive">
               <span className="min-w-0 flex-1">{error}</span>
@@ -163,7 +153,7 @@ export function PaperSignatureConfirmButton({
               }
             }}
           />
-        </DialogContent>
+        </AdminDialogScaffold>
       </Dialog>
     </>
   );

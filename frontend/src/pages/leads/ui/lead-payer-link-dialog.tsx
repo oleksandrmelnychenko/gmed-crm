@@ -1,5 +1,6 @@
+import { portalTabTone } from "@/components/ui/portal-tab-style";
 import { useState } from "react";
-import { Check, Copy, Link as LinkIcon, LoaderCircle, Mail } from "lucide-react";
+import { Check, Copy, Link as LinkIcon, LoaderCircle, Mail, AtSign, MailOpen } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
@@ -40,7 +41,7 @@ export function LeadPayerLinkDialog({ share, language, onLanguage, busy, canSend
         <div className="space-y-4 bg-muted/30 p-4 sm:p-5">
           <section className="space-y-3 rounded-xl border bg-card p-4">
             <div className="flex flex-wrap items-center gap-2">
-              <AdminSectionTitle>{tx("Получатель", "Empfänger")}</AdminSectionTitle>
+              <AdminSectionTitle icon={AtSign}>{tx("Получатель", "Empfänger")}</AdminSectionTitle>
               <StatusChip tone="warning" className="min-w-0 break-all"><Mail className="size-3.5" />{share.email}</StatusChip>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -52,10 +53,10 @@ export function LeadPayerLinkDialog({ share, language, onLanguage, busy, canSend
           </section>
           <section className="space-y-3 rounded-xl border bg-card p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <AdminSectionTitle>{tx("Сообщение для плательщика", "Nachricht für den Zahler")}</AdminSectionTitle>
-              <div className="inline-flex gap-1 rounded-lg border bg-muted/30 p-1" role="group" aria-label={tx("Язык сообщения", "Sprache der Nachricht")}>
+              <AdminSectionTitle icon={MailOpen}>{tx("Сообщение для плательщика", "Nachricht für den Zahler")}</AdminSectionTitle>
+              <div className="inline-flex gap-1 rounded-lg border bg-card p-1" role="group" aria-label={tx("Язык сообщения", "Sprache der Nachricht")}>
                 {PAYER_LINK_LANGUAGES.map((option) => <button key={option} type="button" disabled={busy} aria-pressed={language === option}
-                  className={cn("h-7 rounded-md px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", language === option ? "bg-[var(--brand)] text-primary-foreground shadow-sm" : "text-foreground hover:bg-muted")}
+                  className={cn("h-7 rounded-md border px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", portalTabTone(language === option))}
                   onClick={() => { onLanguage(option); setCopied(null); }}>{LANGUAGE_LABELS[option]}</button>)}
               </div>
             </div>

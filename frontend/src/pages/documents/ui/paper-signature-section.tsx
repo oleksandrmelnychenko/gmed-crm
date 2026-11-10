@@ -52,8 +52,7 @@ export function PaperSignatureSection({ lang, electronicFormExcluded, disabled =
   return (
     <section data-paper-signature className="overflow-hidden rounded-xl border border-border/70 bg-card">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2.5">
-        <AdminSectionTitle>{tx("Подписано на бумаге", "Auf Papier unterschrieben")}</AdminSectionTitle>
-        <Stamp aria-hidden="true" className="size-4 text-muted-foreground" />
+        <AdminSectionTitle icon={Stamp}>{tx("Подписано на бумаге", "Auf Papier unterschrieben")}</AdminSectionTitle>
       </div>
       <div className="space-y-3 p-3">
         <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">

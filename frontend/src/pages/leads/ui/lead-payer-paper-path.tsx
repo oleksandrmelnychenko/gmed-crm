@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, CircleAlert, ClipboardPen, FileText, Info, LoaderCircle, Upload } from "lucide-react";
+import { Check, CircleAlert, ClipboardPen, FileText, Info, LoaderCircle, Upload, Printer } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, inputClass, selectClass, tokens } from "@/components/ui-shell";
@@ -188,7 +188,7 @@ export function LeadPayerPaperPath({
       data-testid="lead-payer-paper-path"
       data-identified={identification.identified && !onlyPreviousPapers ? "true" : "false"}
     >
-      <AdminSectionTitle>{tx("Бумажный путь (без ссылки)", "Papierweg (ohne Link)")}</AdminSectionTitle>
+      <AdminSectionTitle icon={Printer}>{tx("Бумажный путь (без ссылки)", "Papierweg (ohne Link)")}</AdminSectionTitle>
       <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
         <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
         {tx(

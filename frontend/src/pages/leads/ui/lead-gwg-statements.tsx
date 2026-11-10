@@ -1,5 +1,33 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { createContext, useContext, useId, useState, type ReactNode } from "react";
-import { CalendarDays, ChevronDown, CircleAlert, Download, FileText } from "lucide-react";
+import {
+  CalendarDays,
+  ChevronDown,
+  CircleAlert,
+  Download,
+  FileText,
+  type LucideIcon,
+  Building2,
+  ReceiptText,
+  Coins,
+  Scale,
+  NotebookText,
+  ShieldUser,
+  House,
+  Waypoints,
+  Flag,
+  Unlink,
+  BookPlus,
+  BadgeCheck,
+  NotebookTabs,
+  ScanFace,
+  ScanLine,
+  Crown,
+  Banknote,
+  BookOpenCheck,
+  Contact,
+  ScanBarcode,
+} from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
@@ -69,11 +97,10 @@ const STATEMENT_CARD_COLUMNS = "grid-cols-1 @sm/statement:grid-cols-2 @3xl/state
 const STATEMENT_CARD = "@container/statement min-w-0 space-y-3 rounded-xl border border-border/60 bg-card p-3";
 const STATEMENT_SECTION = "space-y-2.5 border-t border-border/50 pt-3";
 
-function StatementHeading({ children, edit }: { children: ReactNode; edit?: ClientFormSection }) {
+function StatementHeading({ children, icon, edit }: { children: ReactNode; icon: LucideIcon; edit?: ClientFormSection }) {
   const heading = (
     <h4 className="flex min-w-0 items-center gap-2 text-[13px] font-semibold leading-5 text-foreground">
-      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-      <span className="min-w-0 break-words">{children}</span>
+      <SectionHeading icon={icon}>{children}</SectionHeading>
     </h4>
   );
   if (!edit) return heading;
@@ -98,7 +125,7 @@ function PatientStatementsPanel({ title, marker, tx, children }: {
   return (
     <section className="@container/patient-statements min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card" data-testid="lead-gwg-statements">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-2.5">
-        <AdminSectionTitle variant="mono">{title}</AdminSectionTitle>
+        <AdminSectionTitle icon={NotebookText} variant="mono">{title}</AdminSectionTitle>
         {marker ? (
           <div className="order-last w-full sm:order-none sm:w-auto">
             <PatientFieldBadge marker={marker} tx={tx} />
@@ -126,14 +153,14 @@ function PatientStatementsPanel({ title, marker, tx, children }: {
 }
 
 /** One group of statements: a caption and its facts as a definition list. */
-function StatementGroup({ title, columns, children, card = false, wide = false, footer, edit }: {
-  title: string; columns: string; children: ReactNode; card?: boolean; wide?: boolean; footer?: ReactNode;
+function StatementGroup({ title, icon, columns, children, card = false, wide = false, footer, edit }: {
+  title: string; icon: LucideIcon; columns: string; children: ReactNode; card?: boolean; wide?: boolean; footer?: ReactNode;
   /** The block of the client's form that answers this group: an «Изменить» button opens it. */
   edit?: ClientFormSection;
 }) {
   return (
     <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && wide && "col-span-full")}>
-      <StatementHeading edit={edit}>{title}</StatementHeading>
+      <StatementHeading icon={icon} edit={edit}>{title}</StatementHeading>
       <dl className={cn("grid gap-x-4 gap-y-3", card ? STATEMENT_CARD_COLUMNS : columns)}>{children}</dl>
       {footer}
     </div>
@@ -367,7 +394,7 @@ function RepresentationGroup({
   return (
     <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && statements.persons.length > 0 && "col-span-full")} data-testid="lead-gwg-representation">
       <div className="flex flex-wrap items-center gap-2">
-        <StatementHeading>
+        <StatementHeading icon={ShieldUser}>
           {minor ? tx("Законные представители", "Gesetzliche Vertreter") : tx("Представительство", "Vertretung")}
         </StatementHeading>
         {updatedAt ? (
@@ -469,7 +496,7 @@ function PayerOrganisationGroup({
   return (
     <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && "col-span-full")} data-testid="lead-gwg-payer-organisation">
       <div className="flex flex-wrap items-center gap-2">
-        <StatementHeading>
+        <StatementHeading icon={Building2}>
           {tx("Плательщик — данные организации из кабинета", "Zahler – Organisationsangaben aus dem Portal")}
         </StatementHeading>
         {marker ? <PatientFieldBadge marker={marker} tx={tx} /> : null}
@@ -533,7 +560,7 @@ function BillingGroup({
   return (
     <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && "col-span-full")} data-testid="lead-gwg-billing">
       <div className="flex flex-wrap items-center gap-2">
-        <StatementHeading>
+        <StatementHeading icon={ReceiptText}>
           {tx("Счёт и оплата", "Rechnung und Zahlung")}
         </StatementHeading>
         {updatedAt ? (
@@ -656,7 +683,7 @@ function LeadGwgFollowUpAnswers({
   return (
     <div className={cards ? "contents" : "space-y-3"} data-testid="lead-gwg-follow-up-answers">
       {stay ? (
-        <StatementGroup card={cards} edit="follow_up" title={tx("Проживание и гражданства (доп. сведения)", "Aufenthalt und Staatsangehörigkeiten (ergänzend)")} columns={STATEMENT_COLUMNS}>
+        <StatementGroup icon={House} card={cards} edit="follow_up" title={tx("Проживание и гражданства (доп. сведения)", "Aufenthalt und Staatsangehörigkeiten (ergänzend)")} columns={STATEMENT_COLUMNS}>
           <Statement label={tx("Проживает там с", "Wohnhaft dort seit")} testId="lead-gwg-residence-since">{identification.residence_since}</Statement>
           <Statement label={tx("Другие места проживания", "Weitere Wohnsitze")}>{identification.other_residences}</Statement>
           <Statement label={tx("Прежние гражданства", "Frühere Staatsangehörigkeiten")}>
@@ -668,12 +695,12 @@ function LeadGwgFollowUpAnswers({
         </StatementGroup>
       ) : null}
       {identification.relationship_since ? (
-        <StatementGroup card={cards} edit="follow_up" title={tx("Отношение к плательщику (доп. сведения)", "Beziehung zum Zahler (ergänzend)")} columns={STATEMENT_COLUMNS}>
+        <StatementGroup icon={Waypoints} card={cards} edit="follow_up" title={tx("Отношение к плательщику (доп. сведения)", "Beziehung zum Zahler (ergänzend)")} columns={STATEMENT_COLUMNS}>
           <Statement label={tx("Знакомы с", "Bekannt seit")} testId="lead-gwg-relationship-since">{identification.relationship_since}</Statement>
         </StatementGroup>
       ) : null}
       {pep ? (
-        <StatementGroup card={cards} edit="follow_up" title={tx("PEP: подробности", "PEP: Einzelheiten")} columns={STATEMENT_COLUMNS}>
+        <StatementGroup icon={Flag} card={cards} edit="follow_up" title={tx("PEP: подробности", "PEP: Einzelheiten")} columns={STATEMENT_COLUMNS}>
           <Statement label={tx("Должность", "Amt / Funktion")} testId="lead-gwg-pep-office">{identification.pep_office}</Statement>
           <Statement label={tx("Страна", "Land")}>{country(identification.pep_country)}</Statement>
           <Statement label={tx("Период", "Zeitraum")}>{identification.pep_period}</Statement>
@@ -684,7 +711,7 @@ function LeadGwgFollowUpAnswers({
         </StatementGroup>
       ) : null}
       {sanctions ? (
-        <StatementGroup card={cards} edit="follow_up" title={tx("Связи с санкционными лицами: подробности", "Sanktionsbezug: Einzelheiten")} columns={STATEMENT_COLUMNS}>
+        <StatementGroup icon={Unlink} card={cards} edit="follow_up" title={tx("Связи с санкционными лицами: подробности", "Sanktionsbezug: Einzelheiten")} columns={STATEMENT_COLUMNS}>
           <Statement label={tx("Лицо или организация", "Person oder Organisation")} testId="lead-gwg-sanctions-link-name">
             {identification.sanctions_link_name}
           </Statement>
@@ -720,9 +747,7 @@ function EnhancedDetailsGroup({ details, tx, card = false }: { details: LeadPort
   return (
     <div className={card ? STATEMENT_CARD : STATEMENT_SECTION} data-testid="lead-gwg-enhanced-details">
       <div className="flex flex-wrap items-center gap-2">
-        <h4 className="text-xs font-semibold text-foreground">
-          {tx("Дополнительные сведения", "Zusätzliche Angaben")}
-        </h4>
+        <h4><SectionHeading icon={BookPlus}>{tx("Дополнительные сведения", "Zusätzliche Angaben")}</SectionHeading></h4>
         {details.updated_at ? (
           <span className="inline-flex" data-testid="lead-gwg-enhanced-details-updated">
             <PatientFieldBadge marker={{ at: details.updated_at, access_kind: null }} markerKey="enhanced_details" tx={tx} />
@@ -800,9 +825,7 @@ function RelationshipProofGroup({ details, tx, onDownload, fallbackRequested, ca
   return (
     <div className={card ? STATEMENT_CARD : STATEMENT_SECTION} data-testid="lead-gwg-relationship-proof">
       <div className="flex flex-wrap items-center gap-2">
-        <h4 className="text-xs font-semibold text-foreground">
-          {tx("Подтверждение связи с плательщиком", "Nachweis der Beziehung zum Zahler")}
-        </h4>
+        <h4><SectionHeading icon={BadgeCheck}>{tx("Подтверждение связи с плательщиком", "Nachweis der Beziehung zum Zahler")}</SectionHeading></h4>
         <ClientFormEditButton section="relationship_proof" className="ml-auto" />
       </div>
       {documents.length > 0 ? <UploadedFiles documents={documents} tx={tx} onDownload={onDownload} slot="relationship_proof" /> : (
@@ -871,7 +894,7 @@ export function PayerAnswersGroup({
   return (
     <div className="space-y-2.5 rounded-md border border-border/60 bg-background/50 p-2.5" data-testid="lead-gwg-payer">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <h4 className="text-xs font-semibold text-foreground">{tx("Анкета плательщика", "Angaben des Zahlers")}</h4>
+        <h4><SectionHeading icon={NotebookTabs}>{tx("Анкета плательщика", "Angaben des Zahlers")}</SectionHeading></h4>
         {questionnaire.submitted_at ? (
           <Badge
             variant="outline"
@@ -902,6 +925,7 @@ export function PayerAnswersGroup({
       {groups.map((group) => (
         <StatementGroup
           key={group.key}
+          icon={{ identity: ScanFace, id_document: ScanLine, owners: Crown, relation: Banknote, legal: BookOpenCheck }[group.key]}
           title={group.title}
           columns={group.key === "legal" ? "grid-cols-1 sm:grid-cols-2" : STATEMENT_COLUMNS}
         >
@@ -1095,7 +1119,7 @@ function LeadGwgStatementsBody({
       <div className="grid grid-cols-1 items-start gap-3 @3xl/patient-statements:grid-cols-2" data-testid="lead-gwg-statements-grid">
         <div className="min-w-0 space-y-3">
         {/* With the birth data (block K) the follow-up step; the salutation and the channels are step 1's. */}
-        <StatementGroup card edit={birthRows.length > 0 ? "birth" : "person"} title={tx("Личность", "Person")} columns={STATEMENT_COLUMNS}>
+        <StatementGroup icon={Contact} card edit={birthRows.length > 0 ? "birth" : "person"} title={tx("Личность", "Person")} columns={STATEMENT_COLUMNS}>
           <Statement label={tx("Обращение", "Anrede")}>{salutationLabel(identification.salutation, tx)}</Statement>
           {birthRows.map((item) => (
             <Statement key={item.key} label={item.label} testId={`lead-gwg-${item.key}`}>{item.value}</Statement>
@@ -1115,7 +1139,7 @@ function LeadGwgStatementsBody({
         {representation && representation.persons.length === 0 ? representationGroup : null}
         </div>
 
-        <StatementGroup card edit="identity" title={tx("Документ, удостоверяющий личность", "Ausweisdokument")} columns={STATEMENT_COLUMNS}
+        <StatementGroup icon={ScanBarcode} card edit="identity" title={tx("Документ, удостоверяющий личность", "Ausweisdokument")} columns={STATEMENT_COLUMNS}
           footer={identityDocumentEnteredLine(identification, tx) || identification.id_document_unreadable ? (
             <StatusChip tone="warning" className="whitespace-normal" data-testid="lead-gwg-id-entered-by">
               {identityDocumentEnteredLine(identification, tx)}
@@ -1153,6 +1177,7 @@ function LeadGwgStatementsBody({
           <StatementGroup
             card
             edit="economic_interest"
+            icon={Coins}
             title={tx("Экономический интерес", "Wirtschaftliches Interesse")}
             columns="grid-cols-1 sm:grid-cols-3"
           >
@@ -1194,7 +1219,7 @@ function LeadGwgStatementsBody({
         {organisationGroup}
 
         {legalAnswers.length > 0 ? (
-        <StatementGroup card wide edit="legal" title={tx("Юридические вопросы", "Rechtliche Fragen")} columns="grid-cols-1 sm:grid-cols-2">
+        <StatementGroup icon={Scale} card wide edit="legal" title={tx("Юридические вопросы", "Rechtliche Fragen")} columns="grid-cols-1 sm:grid-cols-2">
           {legalAnswers.map((item) => (
             <Statement
               key={item.key}

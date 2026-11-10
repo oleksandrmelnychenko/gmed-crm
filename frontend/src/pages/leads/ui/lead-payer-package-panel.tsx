@@ -1,5 +1,16 @@
+import { portalTabTone } from "@/components/ui/portal-tab-style";
 import { useState, type ReactNode } from "react";
-import { CalendarDays, Check, FileText, Info, LoaderCircle, Send, ShieldCheck, UserRound } from "lucide-react";
+import {
+  CalendarDays,
+  Check,
+  FileText,
+  Info,
+  LoaderCircle,
+  Send,
+  ShieldCheck,
+  UserRound,
+  PackageOpen,
+} from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, StatusBadge } from "@/components/ui-shell";
@@ -163,7 +174,7 @@ export function LeadPayerPackagePanel({
   return (
     <div className="min-w-0 space-y-2 rounded-xl border border-border/50 bg-card p-3" data-testid="lead-payer-package">
       <div className="flex flex-wrap items-center gap-2">
-        <AdminSectionTitle variant="mono">
+        <AdminSectionTitle icon={PackageOpen} variant="mono">
           {tx("Документы плательщику на подпись", "Unterlagen für den Zahler zur Unterschrift")}
         </AdminSectionTitle>
         {status ? (
@@ -316,7 +327,7 @@ export function LeadPayerPackagePanel({
                 {tx("Язык приглашения", "Sprache der Einladung")}
               </span>
               {/* The same segmented control as "Кто платит" (owner 2026-10-19). */}
-              <div className="flex w-fit gap-1 rounded-lg bg-muted/40 p-1" role="group" aria-labelledby={`lead-payer-package-language-${leadId}`}>
+              <div className="flex w-fit gap-1 rounded-lg border border-border bg-card p-1" role="group" aria-labelledby={`lead-payer-package-language-${leadId}`}>
                 {payerPackageLanguages(state).map((option) => (
                   <button
                     key={option}
@@ -324,10 +335,8 @@ export function LeadPayerPackagePanel({
                     aria-pressed={chosenLanguage === option}
                     disabled={locked}
                     className={cn(
-                      "min-h-7 min-w-9 rounded-md px-2.5 py-1 text-[13px] font-medium transition-colors disabled:cursor-default disabled:opacity-60",
-                      chosenLanguage === option
-                        ? "bg-[var(--brand)] text-primary-foreground shadow-sm"
-                        : "text-foreground hover:bg-muted",
+                      "min-h-7 min-w-9 rounded-md border px-2.5 py-1 text-[13px] font-medium transition-colors disabled:cursor-default disabled:opacity-60",
+                      portalTabTone(chosenLanguage === option),
                     )}
                     onClick={() => setLanguage(option)}
                   >

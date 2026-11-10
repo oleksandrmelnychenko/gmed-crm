@@ -1,3 +1,5 @@
+import { SectionHeading } from "@/components/ui/section-heading";
+import { MapPinned, MapPinHouse } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { inputClass, selectClass } from "@/components/ui-shell";
@@ -107,9 +109,7 @@ export function LeadRepresentativeDetailsForm({
   };
   return (
     <div className="space-y-3" data-testid={`lead-representative-details-${person.id}`}>
-      <h4 className="text-xs font-semibold text-foreground">
-        {tx("Адрес и данные для анкеты GwG", "Anschrift und Angaben für den GwG-Bogen")}
-      </h4>
+      <h4><SectionHeading icon={MapPinned}>{tx("Адрес и данные для анкеты GwG", "Anschrift und Angaben für den GwG-Bogen")}</SectionHeading></h4>
       <p className="text-[11.5px] leading-tight text-muted-foreground">
         {tx(
           "Сохраняются кнопкой «Сохранить» вместе с карточкой.",
@@ -165,9 +165,7 @@ export function PendingRepresentativeDetailsForm({
   const errors = representativeDetailsErrors(value, EMPTY_REPRESENTATIVE_DETAILS);
   return (
     <div className="space-y-3" data-testid="lead-representative-details-pending">
-      <h4 className="text-xs font-semibold text-foreground">
-        {tx("Адрес и данные для анкеты GwG", "Anschrift und Angaben für den GwG-Bogen")}
-      </h4>
+      <h4><SectionHeading icon={MapPinHouse}>{tx("Адрес и данные для анкеты GwG", "Anschrift und Angaben für den GwG-Bogen")}</SectionHeading></h4>
       <p className="text-[11.5px] leading-tight text-muted-foreground">
         {tx(
           "Нужны для договора и анкеты GwG родителя. Сохраняются вместе с карточкой.",

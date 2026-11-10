@@ -1,3 +1,5 @@
+import { SectionHeading } from "@/components/ui/section-heading";
+import { leadSpecializationIcons } from "./lead-specialization-icons";
 import { existingParentPatientFromError, fillMissingParentProfile } from "../model/parent-profile-reuse";
 import { ServiceInfo } from "@/pages/patient-lead/lead-request-services-step";
 import { servicesText } from "@/pages/patient-lead/lead-request-services-text";
@@ -91,6 +93,52 @@ import {
   UserRoundPlus,
   X,
   type LucideIcon,
+  Files,
+  UsersRound,
+  ShieldPlus,
+  FolderHeart,
+  ConciergeBell,
+  Fingerprint,
+  ScanSearch,
+  ClipboardPenLine,
+  LockKeyholeOpen,
+  IdCard,
+  Stethoscope,
+  FileSignature,
+  ListOrdered,
+  Signature,
+  Calculator,
+  Baby,
+  ClipboardCheck,
+  Clock3,
+  ListPlus,
+  Network,
+  Landmark,
+  Globe,
+  BadgeAlert,
+  ContactRound,
+  ListFilter,
+  FolderOpen,
+  SquareUserRound,
+  ShieldHalf,
+  ListTree,
+  CloudUpload,
+  Gauge,
+  FolderArchive,
+  BookOpenText,
+  Rows3,
+  BanknoteArrowUp,
+  ReceiptEuro,
+  CircleCheckBig,
+  ClipboardPlus,
+  TriangleAlert,
+  Cable,
+  Radar,
+  NotepadText,
+  MessageCircleMore,
+  Timer,
+  ListCollapse,
+  Sigma,
 } from "lucide-react";
 
 import { AdminSectionTitle, AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
@@ -997,7 +1045,7 @@ const COST_ESTIMATE_WORK_TYPES_REASON = "Medical work types are not selected";
 const COST_ESTIMATE_OUTDATED_REASON = "Preliminary cost calculation document is missing";
 const COST_ESTIMATE_WORK_TYPES_STEP = { ru: "Оформление заказа", de: "Auftragserfassung" };
 const DELETE_REASON_MIN_CHARS = 5;
-const WIZARD_DOCUMENT_SECTION_CLASS = "min-w-0 space-y-2 rounded-xl border border-border/50 bg-card p-3";
+const WIZARD_DOCUMENT_SECTION_CLASS = "min-w-0 space-y-2 rounded-xl border border-border bg-card p-3";
 
 /** Each wizard group sits on its own card against the shared muted canvas. */
 function Section({ className, ...props }: ComponentProps<typeof WorkspaceSection>) {
@@ -1109,10 +1157,10 @@ const STEP_ICONS: Record<StepId, LucideIcon> = {
   master_data: UserRound,
   medical: HeartPulse,
   service: History,
-  documents: FileText,
-  order: ClipboardList,
-  commercial: ReceiptText,
-  release: UserRoundCheck,
+  documents: Files,
+  order: ListOrdered,
+  commercial: FileSignature,
+  release: UserRoundPlus,
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -3356,18 +3404,18 @@ function Field({
   // The patient's marker and hint sit on the label's line, at its right end (wrapping only when narrow).
   const content = (
     <>
-      <span className={cn("min-w-0 items-center gap-x-2 gap-y-1", singleLine ? "grid grid-cols-[minmax(0,1fr)_auto]" : "flex flex-wrap")}>
+      <span className={singleLine ? "contents" : "flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"}>
         {htmlFor ? (
-          <label htmlFor={htmlFor} data-wizard-field-label title={singleLine && typeof label === "string" ? label : undefined} className={cn(tokens.text.label, "block font-mono", singleLine && "truncate")}>{caption}</label>
+          <label htmlFor={htmlFor} data-wizard-field-label className={cn(tokens.text.label, "block font-mono", singleLine && "wizard-provenance-label tracking-tight")}>{caption}</label>
         ) : (
           <span data-wizard-field-label className={cn(tokens.text.label, "block font-mono")}>{caption}</span>
         )}
-        <span className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-1">
+        <span className={cn("ml-auto flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-1", singleLine && "wizard-provenance-note")}>
           {note}
-          <Step1PortalFieldNote errorId={errorId} portalField={portalField} />
+          <Step1PortalFieldNote errorId={errorId} portalField={portalField} compact={singleLine} />
         </span>
       </span>
-      {children}
+      {singleLine ? <div className="wizard-provenance-control min-w-0">{children}</div> : children}
       {error ? (
         <span id={errorId} role="alert" className="block text-xs leading-4 text-destructive">
           {error}
@@ -3376,7 +3424,9 @@ function Field({
     </>
   );
   return htmlFor ? (
-    <div data-wizard-field className={cn("min-w-0 space-y-1", className)}>{content}</div>
+    <div data-wizard-field className={cn("min-w-0", singleLine ? "@container" : "space-y-1", className)}>
+      {singleLine ? <div className="wizard-provenance-layout">{content}</div> : content}
+    </div>
   ) : (
     <label data-wizard-field className={cn("min-w-0 space-y-1", className)}>{content}</label>
   );
@@ -8659,7 +8709,7 @@ ${serviceCommentLines.join("\n")}`
   // Contracts signed in this request stay lead-owned until the request is
   // completed, so the patient list alone would hide them.
   const reviewContracts = [...contracts.filter((item) => item.lead_id && !patientReview.contracts.some((known) => known.id === item.id)), ...patientReview.contracts];
-  const patientContractReview = repeatPatientId && draft ? <Section title={tx("Сохранённые договоры пациента", "Gespeicherte Patientenverträge")}>
+  const patientContractReview = repeatPatientId && draft ? <Section icon={Archive} title={tx("Сохранённые договоры пациента", "Gespeicherte Patientenverträge")}>
     {periodWarningBanner ? <div className="mb-3">{periodWarningBanner}</div> : null}
     <OrderExistingContractsTable contracts={reviewContracts} selectedId={contract?.id ?? null} lang={lang} busy={isBusy || patientReview.loading}
       onSelect={id => { if (reviewContracts.some(item => item.id === id)) setDraft(current => current ? { ...current, frameworkContractId: id } : current); }} />
@@ -8771,6 +8821,11 @@ ${serviceCommentLines.join("\n")}`
       )}
     />
   ) : null;
+  const stepLabel = (item: (typeof STEPS)[number]) => item.id === "documents" && isRepeatIntake
+    ? tx("Проверка документов", "Dokumentenprüfung")
+    : item.id === "release" && isRepeatIntake
+      ? tx("Завершение обращения", "Anfrage abschließen")
+      : lang === "de" ? item.de : item.ru;
   const stepIndex = STEPS.findIndex((item) => item.id === step);
   const previousStep = STEPS[stepIndex - 1];
   const nextStep = STEPS[stepIndex + 1];
@@ -9239,18 +9294,17 @@ ${serviceCommentLines.join("\n")}`
 
         <nav
           ref={stepNavRef}
-
           className="shrink-0 overflow-x-auto overscroll-x-contain border-b border-border bg-card [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           aria-label={tx("Этапы оформления", "Schritte der Lead-Aufnahme")}
         >
-          <div className="flex w-max min-w-full justify-center px-4 py-2.5">
+          <div className="flex w-max min-w-full justify-center px-3 py-2 max-sm:w-full max-sm:px-2">
             <div ref={stepTabsRef} className="t-tabs lead-wizard-step-tabs" role="tablist">
               <span ref={stepPillRef} className="t-tabs-pill lead-wizard-step-pill" aria-hidden="true" />
               {STEPS.map((item, itemIndex) => {
                 const selected = item.id === step;
                 const done = isStepTicked(item.id);
                 const optionalEmpty = (item.id === "medical" || item.id === "service") && !done && (leadConverted || isStepReady(item.id));
-                const StepIcon = STEP_ICONS[item.id];
+                const StepIcon = isRepeatIntake && item.id === "release" ? ClipboardCheck : STEP_ICONS[item.id];
                 return (
                   <button
                     key={item.id}
@@ -9260,6 +9314,7 @@ ${serviceCommentLines.join("\n")}`
                     aria-controls="lead-wizard-step-panel"
                     tabIndex={selected ? 0 : -1}
                     data-step={item.id}
+                    title={stepLabel(item)}
                     disabled={loading || isBusy}
                     onClick={() => navigateToStep(item.id)}
                     onKeyDown={(event) => {
@@ -9277,20 +9332,12 @@ ${serviceCommentLines.join("\n")}`
                     className="t-tab lead-wizard-step-tab focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <StepIcon aria-hidden="true" className="size-4 shrink-0" />
-                    <span className="whitespace-nowrap">{item.id === "documents" && isRepeatIntake ? tx("Проверка документов", "Dokumentenprüfung") : item.id === "release" && isRepeatIntake
-                      ? tx("Завершение обращения", "Anfrage abschließen")
-                      : lang === "de" ? item.de : item.ru}</span>
+                    <span className="whitespace-nowrap max-sm:sr-only">{stepLabel(item)}</span>
                     <span
                       aria-hidden="true"
                       data-count
-                      className={cn(
-                        "inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 font-mono text-[10px] leading-none",
-                        selected
-                          ? "bg-white/20 text-white"
-                          : done
-                            ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
-                            : "bg-muted text-muted-foreground",
-                      )}
+                      data-state={done ? "complete" : "pending"}
+                      className="lead-wizard-step-state"
                     >
                       {done ? <Check aria-hidden="true" className="size-3" /> : itemIndex + 1}
                     </span>
@@ -9304,6 +9351,7 @@ ${serviceCommentLines.join("\n")}`
               })}
             </div>
           </div>
+          <p aria-hidden="true" className="pb-2 text-center text-xs font-medium text-foreground sm:hidden">{stepLabel(STEPS[stepIndex])}</p>
         </nav>
 
         <main ref={stepPanelRef} id="lead-wizard-step-panel" role="tabpanel" aria-labelledby={`lead-wizard-tab-${step}`} tabIndex={-1} aria-busy={loading || isBusy} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-scroll overscroll-contain bg-muted p-3 outline-none [scrollbar-gutter:stable]">
@@ -9395,7 +9443,7 @@ ${serviceCommentLines.join("\n")}`
                 </div>
               ) : null}
               {lead ? (
-                <Section title={tx("Данные опросника", "Fragebogendaten")}>
+                <Section icon={ClipboardList} title={tx("Данные опросника", "Fragebogendaten")}>
                 <LeadQuestionnaireFacts
                   items={[
                     { label: tx("Тип", "Typ"), value: <StatusBadge tone={intakeTypeTone(lead)}>{intakeTypeLabel(lead, tx)}</StatusBadge> },
@@ -9445,6 +9493,7 @@ ${serviceCommentLines.join("\n")}`
                 tx={tx}
               >
               <Section
+                icon={isMinor(draft.birthDate, new Date()) ? Baby : SquareUserRound}
                 title={isMinor(draft.birthDate, new Date()) ? tx("Личные данные ребёнка", "Persönliche Daten des Kindes") : tx("Личные данные", "Persönliche Daten")}
                 accessory={isRepeatIntake ? null : (
                   <div className="flex flex-wrap items-center justify-end gap-2">
@@ -9661,7 +9710,7 @@ ${serviceCommentLines.join("\n")}`
                   />
                 </Field>
                 <SanctionsLiveCheckNotice
-                  className="md:col-span-2"
+                  className="mt-1 md:col-span-2"
                   input={liveCheckInput({
                     firstName: draft.firstName,
                     lastName: draft.lastName,
@@ -9895,20 +9944,21 @@ ${serviceCommentLines.join("\n")}`
               </Section>
               {isMinor(draft.birthDate, new Date()) ? (
                 <Section
-                  title={<span className="inline-flex items-center gap-1.5">
-                    {tx("Родитель или законный представитель", "Elternteil oder gesetzlicher Vertreter")}
-                    <InfoHint label={tx("О представителе ребёнка", "Zur Vertretung des Kindes")}>
-                      {tx(
-                        "Для ребёнка контакт и электронную подпись оформляет мать, отец или законный представитель. Можно выбрать существующего пациента или внести данные вручную.",
-                        "Bei Minderjährigen werden Kontakt und elektronische Unterschrift durch einen Elternteil oder gesetzlichen Vertreter angegeben. Eine bestehende Patientenakte kann verknüpft oder der Kontakt manuell erfasst werden.",
-                      )}
-                    </InfoHint>
-                  </span>}
+                  icon={UsersRound}
+                  title={tx("Родитель или законный представитель", "Elternteil oder gesetzlicher Vertreter")}
                   accessory={(
-                    <Button type="button" size="sm" variant="default" onClick={() => openNewTrustedContact(true)}>
-                      <Plus aria-hidden="true" className="size-3.5" />
-                      {tx("Добавить", "Hinzufügen")}
-                    </Button>
+                    <div className="flex items-center gap-1.5">
+                      <InfoHint label={tx("О представителе ребёнка", "Zur Vertretung des Kindes")}>
+                        {tx(
+                          "Для ребёнка контакт и электронную подпись оформляет мать, отец или законный представитель. Можно выбрать существующего пациента или внести данные вручную.",
+                          "Bei Minderjährigen werden Kontakt und elektronische Unterschrift durch einen Elternteil oder gesetzlichen Vertreter angegeben. Eine bestehende Patientenakte kann verknüpft oder der Kontakt manuell erfasst werden.",
+                        )}
+                      </InfoHint>
+                      <Button type="button" size="sm" variant="default" onClick={() => openNewTrustedContact(true)}>
+                        <Plus aria-hidden="true" className="size-3.5" />
+                        {tx("Добавить", "Hinzufügen")}
+                      </Button>
+                    </div>
                   )}
                 >
                   <div
@@ -10028,7 +10078,7 @@ ${serviceCommentLines.join("\n")}`
               ) : null}
               {/* Inside the portal state too: the lead fills the insurance in the cabinet, its
                   fields carry the «от пациента» marker like the personal ones (QA 2026-10-11, N-03). */}
-              <Section title={tx("Страхование", "Versicherung")}>
+              <Section icon={ShieldHalf} title={tx("Страхование", "Versicherung")}>
               <div className="wizard-form-grid grid gap-x-3 gap-y-2 md:grid-cols-2">
                 <Field label={tx("Есть ли медицинская страховка", "Krankenversicherung vorhanden")} portalField="has_insurance" htmlFor={STEP1_CONTROL_IDS.hasInsurance}>
                   <NativeComboboxSelect
@@ -10156,7 +10206,7 @@ ${serviceCommentLines.join("\n")}`
                   )}
                 </Banner>
               ) : null}
-              <Section title={tx("Обращение", "Anliegen")}>
+              <Section icon={MessageSquareText} title={tx("Обращение", "Anliegen")}>
               <Field label={tx("Направивший врач", "Zuweisender Arzt")}><Input className={inputClass} value={draft.referrer} onChange={(event) => patch("referrer", event.target.value)} /></Field>
               <PreviousRequestsPanel
                 requests={previousRequests.requests}
@@ -10252,6 +10302,7 @@ ${serviceCommentLines.join("\n")}`
               </Suspense>
               {leadId && !clinicalAccessDenied ? (
                 <Section
+                  icon={FolderHeart}
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Медицинские документы", "Medizinische Unterlagen")}
                   accessory={hasMedicalRecords ? (
@@ -10323,10 +10374,11 @@ ${serviceCommentLines.join("\n")}`
           {draft && lead && step === "service" ? (
             <section className="space-y-2">
               <Section
+                icon={CalendarDays}
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Период программы", "Programmzeitraum")}
               >
-                <div className="wizard-short-grid grid gap-x-3 gap-y-2 sm:grid-cols-2">
+                <div className="wizard-short-grid wizard-program-period grid gap-x-3 gap-y-2 sm:grid-cols-2">
                   {/* The client's wished start (owner TASK-46F1, also in the wizard 2026-11-03); staff may enter a past one. */}
                   <Field
                     label={serviceWording.period}
@@ -10368,7 +10420,7 @@ ${serviceCommentLines.join("\n")}`
                 {periodWarningBanner ? <div className="mt-2">{periodWarningBanner}</div> : null}
               </Section>
               {isQuestionnaireLead ? (
-                <Section title={tx("Данные опросника", "Fragebogendaten")}>
+                <Section icon={ListTree} title={tx("Данные опросника", "Fragebogendaten")}>
                 <LeadQuestionnaireFacts
                   items={[
                     { label: tx("Нужен переводчик", "Dolmetscher benötigt"), value: yesNoValue(draft.serviceNeeds.includes("interpreter_support"), tx) },
@@ -10385,6 +10437,7 @@ ${serviceCommentLines.join("\n")}`
                 </Section>
               ) : null}
               <Section
+                icon={ConciergeBell}
                 title={serviceWording.services}
                 accessory={(
                   <div className="flex items-center gap-2">
@@ -10507,13 +10560,13 @@ ${serviceCommentLines.join("\n")}`
               {renderPayerDeclarationSection(false)}
               {leadId && payer.data?.status.cost_assumption.required ? renderPayerSignatureFlow(false) : null}
               {step1Portal.intake ? (
-                <Section title={tx("Согласия из анкеты клиента", "Einwilligungen aus dem Kundenformular")}>
+                <Section icon={ShieldCheck} title={tx("Согласия из анкеты клиента", "Einwilligungen aus dem Kundenformular")}>
                   <PortalInquiryConsentLine intake={step1Portal.intake} tx={tx} />
                   <PortalHealthConsentLine intake={step1Portal.intake} tx={tx} />
                 </Section>
               ) : null}
               {patientUploadDocuments.length > 0 ? (
-                <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={portalUploadsTitle(step1Portal.intake?.uploads ?? [], patientUploadDocuments.map((item) => item.id), tx)}>
+                <Section icon={CloudUpload} className={WIZARD_DOCUMENT_SECTION_CLASS} title={portalUploadsTitle(step1Portal.intake?.uploads ?? [], patientUploadDocuments.map((item) => item.id), tx)}>
                   <WizardDocumentRows
                     documents={patientUploadDocuments}
                     emptyLabel=""
@@ -10531,6 +10584,7 @@ ${serviceCommentLines.join("\n")}`
               {leadId ? (
                 <div id={GWG_SHEETS_SECTION_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
+                  icon={Fingerprint}
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={gwgSheets.payerIsOrganisation
                     // A paying organisation adds the sheet for legal entities (owner 2026-10-22).
@@ -10612,7 +10666,7 @@ ${serviceCommentLines.join("\n")}`
                       />
                     );
                     return risk.assessment ? line : (
-                      <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Оценка риска", "Risikobewertung")}>
+                      <Section icon={Gauge} className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Оценка риска", "Risikobewertung")}>
                         {line}
                       </Section>
                     );
@@ -10629,6 +10683,7 @@ ${serviceCommentLines.join("\n")}`
                 data-required={amlRequired ? "true" : "false"}
               >
                 <Section
+                  icon={ScanSearch}
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={(
                     // One row: the check and whether it is required (owner 2026-10-19: more compact).
@@ -10702,6 +10757,7 @@ ${serviceCommentLines.join("\n")}`
                   data-requirement={selfDisclosureRequirement ?? undefined}
                 >
                   <Section
+                    icon={ClipboardPenLine}
                     className={WIZARD_DOCUMENT_SECTION_CLASS}
                     title={tx("Анкета пациента", "Patientenformular")}
                     accessory={(
@@ -10757,6 +10813,7 @@ ${serviceCommentLines.join("\n")}`
               ) : null}
               <div id={CONFIDENTIALITY_RELEASE_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
+                  icon={LockKeyholeOpen}
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Освобождение от медицинской тайны", "Schweigepflichtsentbindung")}
                   accessory={isMinor(draft.birthDate, new Date()) ? undefined : (
@@ -10801,6 +10858,7 @@ ${serviceCommentLines.join("\n")}`
 
               <div id={PRIVACY_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
+                  icon={FileCheck2}
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={isMinor(draft.birthDate, new Date())
                     ? tx(
@@ -10864,7 +10922,7 @@ ${serviceCommentLines.join("\n")}`
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <AdminSectionTitle className="text-sm">
+                        <AdminSectionTitle icon={Network} className="text-sm">
                           {tx("Лица и учреждения", "Personen und Einrichtungen")}
                         </AdminSectionTitle>
                         <CountBadge>{peopleRows.length}</CountBadge>
@@ -11024,6 +11082,7 @@ ${serviceCommentLines.join("\n")}`
               </div>
 
               <Section
+                icon={Info}
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Информационный лист о защите персональных данных", "Informationsblatt zum Datenschutz")}
                 accessory={(
@@ -11049,6 +11108,7 @@ ${serviceCommentLines.join("\n")}`
 
               <div id={IDENTITY_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
               <Section
+                icon={IdCard}
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Документ, удостоверяющий личность", "Ausweisdokument")}
                 accessory={(
@@ -11207,7 +11267,7 @@ ${serviceCommentLines.join("\n")}`
               </Section>
               </div>
               {supplementaryDocuments.length > 0 ? (
-                <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Другие документы", "Weitere Dokumente")}>
+                <Section icon={FolderArchive} className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Другие документы", "Weitere Dokumente")}>
                   <WizardDocumentRows
                     documents={supplementaryDocuments}
                     emptyLabel=""
@@ -11237,6 +11297,7 @@ ${serviceCommentLines.join("\n")}`
                 </div>
               ) : null}
               <Section
+                icon={Stethoscope}
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Специализации", "Fachrichtungen")}
               >
@@ -11370,6 +11431,8 @@ ${serviceCommentLines.join("\n")}`
                         className="max-h-[clamp(16rem,42dvh,26rem)] space-y-2 overflow-y-scroll overscroll-contain pr-1 outline-none [scrollbar-gutter:stable] focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         {selectedSpecializationItems.map((specialization) => {
+                          const specialtyIcon = leadSpecializationIcons.get(specialization.code);
+                          const label = specialtyLabel(specializationValue(specialization));
                           const specializationWorkTypes =
                             workTypesBySpecialization[specialization.id] ?? [];
                           const selectedInSpecialization = specializationWorkTypes.filter((workType) =>
@@ -11400,10 +11463,11 @@ ${serviceCommentLines.join("\n")}`
                                     <ChevronDown aria-hidden="true" className="size-4" />
                                   </span>
                                   <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
-                                    <span className="flex items-start gap-2 text-xs font-semibold text-foreground">
-                                      <span data-wizard-subsection-marker aria-hidden="true" className="mt-1.5 size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-                                      <span className="min-w-0 break-words">{specialtyLabel(specializationValue(specialization))}</span>
-                                    </span>
+                                    {specialtyIcon ? (
+                                      <SectionHeading icon={specialtyIcon}>{label}</SectionHeading>
+                                    ) : (
+                                      <span className="min-w-0 break-words text-[13px] font-semibold leading-5 tracking-tight">{label}</span>
+                                    )}
                                     <span className="text-xs text-muted-foreground">
                                       {selectedInSpecialization > 0
                                         ? tx(
@@ -11533,6 +11597,7 @@ ${serviceCommentLines.join("\n")}`
               ) : null}
               <div id={FRAMEWORK_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
+                  icon={BookOpenText}
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={(
                     <span className="inline-flex flex-wrap items-center gap-2">
@@ -11631,6 +11696,7 @@ ${serviceCommentLines.join("\n")}`
                 </Section>
               </div>
               <Section
+                icon={Rows3}
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Позиции заказа", "Auftragspositionen")}
                 accessory={(
@@ -11685,12 +11751,7 @@ ${serviceCommentLines.join("\n")}`
                       aria-expanded={workTypesExpanded}
                       onClick={() => setWorkTypesExpanded((current) => !current)}
                     >
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span aria-hidden="true" data-wizard-subsection-marker className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-                        <span className="text-xs font-semibold text-foreground">
-                          {tx("Виды работ и часы", "Leistungsarten und Stunden")}
-                        </span>
-                      </span>
+                      <SectionHeading icon={Clock3}>{tx("Виды работ и часы", "Leistungsarten und Stunden")}</SectionHeading>
                       <span className="flex shrink-0 items-center gap-2">
                         <CountBadge>{selectedCostEstimateWorkTypes.length}</CountBadge>
                         <span className="t-acc-chevron text-muted-foreground">
@@ -11717,8 +11778,7 @@ ${serviceCommentLines.join("\n")}`
                     htmlFor={ORDER_SERVICE_SELECT_ID}
                     className="flex items-center gap-2 font-mono text-xs font-semibold text-foreground"
                   >
-                    <span aria-hidden="true" data-wizard-subsection-marker className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-                    <span>{tx("Добавить услугу из каталога", "Leistung aus dem Katalog hinzufügen")}</span>
+                    <SectionHeading icon={ListPlus}>{tx("Добавить услугу из каталога", "Leistung aus dem Katalog hinzufügen")}</SectionHeading>
                   </label>
                   {draft.specialties.length === 0 ? (
                     <StatusChip tone="warning" className="wizard-notice w-fit max-w-full items-start rounded-lg px-2.5 py-1.5" data-testid="lead-order-service-needs-specialty">
@@ -11792,6 +11852,7 @@ ${serviceCommentLines.join("\n")}`
               </Section>
               <div id={ORDER_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
+                  icon={FileText}
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Документ заказа", "Einzelauftrag")}
                   accessory={leadConverted ? null : (
@@ -11855,7 +11916,7 @@ ${serviceCommentLines.join("\n")}`
               </div>
               {renderPayerSignatureFlow(true)}
               <div id={ORDER_SIGNATURES_ID} tabIndex={-1} className="focus:outline-none">
-              <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Подписи", "Unterschriften")}>
+              <Section icon={Signature} className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Подписи", "Unterschriften")}>
                 <div className="space-y-3">
                 {/* Owner decision 2026-10-12 (QA C2-14): the client's signature of the
                     order counts only with proof — the scan of the signed copy or a QES
@@ -12009,6 +12070,7 @@ ${serviceCommentLines.join("\n")}`
               </div>
               <div id={QUOTE_SECTION_ID} tabIndex={-1} className="focus:outline-none">
               <Section
+                icon={BanknoteArrowUp}
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Смета и предоплата", "Kostenvoranschlag und Vorauszahlung")}
                 accessory={(
@@ -12308,6 +12370,7 @@ ${serviceCommentLines.join("\n")}`
               </div>
               <div id={ORDER_COST_ESTIMATE_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
+                  icon={ReceiptEuro}
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Смета к заказу", "Kostenvoranschlag zum Einzelauftrag")}
                   accessory={leadConverted ? null : (
@@ -12342,6 +12405,7 @@ ${serviceCommentLines.join("\n")}`
               </div>
               <div id={COST_ESTIMATE_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
+                  icon={Calculator}
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Предварительный расчёт медицинских расходов", "Vorläufige medizinische Kostenkalkulation")}
                   accessory={leadConverted ? null : (
@@ -12419,7 +12483,7 @@ ${serviceCommentLines.join("\n")}`
               {leadId ? <LeadPayerPapersHint leadId={leadId} tx={tx} /> : null}
               {patientDocumentReview}
               {patientContractReview}
-              <Section title={isRepeatIntake ? tx("Завершение обращения", "Anfrage abschließen") : tx("Создание пациента", "Patient anlegen")}>
+              <Section icon={isRepeatIntake ? CircleCheckBig : ClipboardPlus} title={isRepeatIntake ? tx("Завершение обращения", "Anfrage abschließen") : tx("Создание пациента", "Patient anlegen")}>
                 <p className="max-w-3xl text-sm text-muted-foreground">
                   {isRepeatIntake
                     ? tx("Проверьте все этапы. После подтверждения обращение и заказ будут связаны с существующей карточкой пациента.", "Prüfen Sie alle Schritte. Nach der Bestätigung werden Anfrage und Auftrag der bestehenden Patientenakte zugeordnet.")
@@ -12692,7 +12756,7 @@ ${serviceCommentLines.join("\n")}`
                 </div>
 
                 <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
-                  <AdminSectionTitle>
+                  <AdminSectionTitle icon={TriangleAlert}>
                     {tx("1. Установление повышенного риска", "1. Feststellung eines erhöhten Geldwäscherisikos")}
                   </AdminSectionTitle>
                   <div className="border-y border-border/70">
@@ -12738,7 +12802,7 @@ ${serviceCommentLines.join("\n")}`
                 </section>
 
                 <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
-                  <AdminSectionTitle>
+                  <AdminSectionTitle icon={Landmark}>
                     {tx("Политически значимое лицо (PEP)", "Politisch exponierte Person (PeP)")}
                   </AdminSectionTitle>
                   {/* Per person (owner 2026-10-23): who answered what, and staff's review of each person. */}
@@ -12772,7 +12836,7 @@ ${serviceCommentLines.join("\n")}`
                 </section>
 
                 <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
-                  <AdminSectionTitle>
+                  <AdminSectionTitle icon={Cable}>
                     {tx("Связи с лицами под санкциями", "Verbindungen zu sanktionierten Personen")}
                   </AdminSectionTitle>
                   <Field label={tx("Сведения о связях с лицами под санкциями", "Angaben zu Verbindungen zu sanktionierten Personen")}>
@@ -12787,7 +12851,7 @@ ${serviceCommentLines.join("\n")}`
                 </section>
 
                 <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
-                  <AdminSectionTitle>
+                  <AdminSectionTitle icon={Globe}>
                     {tx("Третья страна с высоким риском", "Drittstaat mit hohem Risiko")}
                   </AdminSectionTitle>
                   <div className="border-y border-border/70">
@@ -12845,7 +12909,7 @@ ${serviceCommentLines.join("\n")}`
                 </section>
 
                 <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
-                  <AdminSectionTitle>
+                  <AdminSectionTitle icon={BadgeAlert}>
                     {tx("Необычная операция", "Ungewöhnliche Transaktion")}
                   </AdminSectionTitle>
                   <div className="border-y border-border/70">
@@ -12859,7 +12923,7 @@ ${serviceCommentLines.join("\n")}`
                 </section>
 
                 <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
-                  <AdminSectionTitle>
+                  <AdminSectionTitle icon={Radar}>
                     {tx("2. Усиленный мониторинг", "2. Verstärkte kontinuierliche Überwachung")}
                   </AdminSectionTitle>
                   <Field required label={tx("Меры постоянного мониторинга", "Maßnahmen der kontinuierlichen Überwachung")}>
@@ -12868,7 +12932,7 @@ ${serviceCommentLines.join("\n")}`
                 </section>
 
                 <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
-                  <AdminSectionTitle>
+                  <AdminSectionTitle icon={ShieldPlus}>
                     {tx("3. Дополнительные меры", "3. Weitere verstärkte Sorgfaltspflichten")}
                   </AdminSectionTitle>
                   <Field label={tx("Принятые дополнительные меры", "Zusätzliche getroffene Maßnahmen")}>
@@ -12932,7 +12996,7 @@ ${serviceCommentLines.join("\n")}`
                         "Der Kontakt wird im Lead gespeichert und bei der Konvertierung in die Patientenakte übernommen.",
                       )}
                 </p>
-                <AdminFormSection title={tx("Данные представителя", "Angaben zur Person")} className="trusted-contact-person-section">
+                <AdminFormSection icon={ContactRound} title={tx("Данные представителя", "Angaben zur Person")} className="trusted-contact-person-section">
                 <div className="grid gap-x-3 gap-y-2 sm:grid-cols-2 [&>div]:min-w-0">
                   <Field
                     className="min-w-0"
@@ -13164,7 +13228,7 @@ ${serviceCommentLines.join("\n")}`
                     contact while the client named no recipients in the cabinet; the
                     same choices as the cabinet's trusted persons (owner 2026-10-26). */}
                 </AdminFormSection>
-                <AdminFormSection title={tx("Объём информации", "Umfang der Auskunft")} className="trusted-contact-scope-section">
+                <AdminFormSection icon={ListFilter} title={tx("Объём информации", "Umfang der Auskunft")} className="trusted-contact-scope-section">
                 <fieldset className="min-w-0" data-testid="trusted-contact-scope">
                   <legend className="sr-only">
                     {tx("Объём информации (для формы согласия)", "Umfang der Auskunft (für die Einverständniserklärung)")}
@@ -13269,9 +13333,7 @@ ${serviceCommentLines.join("\n")}`
                       />
                     </div>
                     <div className="mt-4 space-y-2 border-t border-border/70 pt-3" data-testid="trusted-contact-representative-uploads">
-                      <h4 className="text-xs font-semibold text-foreground">
-                        {tx("Документы представителя", "Unterlagen des Vertreters")}
-                      </h4>
+                      <h4><SectionHeading icon={FolderOpen}>{tx("Документы представителя", "Unterlagen des Vertreters")}</SectionHeading></h4>
                       <LeadRepresentativeUploads
                         leadId={leadId}
                         person={person}
@@ -13322,6 +13384,7 @@ ${serviceCommentLines.join("\n")}`
           {draft ? (
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-muted/15 p-3 sm:p-4">
               <Section
+                icon={NotepadText}
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Данные заказа", "Auftragsdaten")}
               >
@@ -13361,6 +13424,7 @@ ${serviceCommentLines.join("\n")}`
 
               {draft.serviceNeeds.length > 0 ? (
                 <Section
+                  icon={MessageCircleMore}
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Запрос клиента", "Kundenbedarf")}
                 >
@@ -13389,12 +13453,7 @@ ${serviceCommentLines.join("\n")}`
                     aria-expanded={reportWorkTypesExpanded}
                     onClick={() => setReportWorkTypesExpanded((current) => !current)}
                   >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-                      <span className="text-sm font-semibold text-foreground">
-                        {tx("Виды работ и часы", "Leistungsarten und Stunden")}
-                      </span>
-                    </span>
+                    <SectionHeading icon={Timer}>{tx("Виды работ и часы", "Leistungsarten und Stunden")}</SectionHeading>
                     <span className="flex shrink-0 items-center gap-2">
                       <CountBadge>{selectedCostEstimateWorkTypes.length}</CountBadge>
                       <span className="t-acc-chevron text-muted-foreground">
@@ -13419,6 +13478,7 @@ ${serviceCommentLines.join("\n")}`
               ) : null}
 
               <Section
+                icon={ListCollapse}
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Услуги и описания", "Leistungen und Beschreibungen")}
                 accessory={<CountBadge>{lines.length}</CountBadge>}
@@ -13516,6 +13576,7 @@ ${serviceCommentLines.join("\n")}`
               </Section>
 
               <Section
+                icon={Sigma}
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Итоги заказа", "Auftragssummen")}
               >

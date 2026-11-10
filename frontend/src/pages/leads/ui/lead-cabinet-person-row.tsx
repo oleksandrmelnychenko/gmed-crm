@@ -1,5 +1,6 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useState } from "react";
-import { CalendarDays, Flag, Info, Lock, Mail, Pencil, Phone, Trash2, UserRound } from "lucide-react";
+import { CalendarDays, Flag, Info, Lock, Mail, Pencil, Phone, Trash2, UserRound, UserRoundX, UserRoundPen } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -187,10 +188,11 @@ export function CabinetPersonActions({ target, tx }: { target: CabinetPersonEdit
         <DialogContent className="gap-4 sm:max-w-2xl" data-testid="person-cabinet-correction">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2.5">
-              <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-              {mode === "delete"
+              <SectionHeading icon={mode === "delete" ? UserRoundX : UserRoundPen}>
+                {mode === "delete"
                 ? tx(`Удалить «${stored.name}»?`, `«${stored.name}» entfernen?`)
                 : tx("Исправить данные", "Daten korrigieren")}
+              </SectionHeading>
             </DialogTitle>
             {mode === "delete" ? <DialogDescription className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-800">
               <Info aria-hidden="true" className="mt-1 size-4 shrink-0" />

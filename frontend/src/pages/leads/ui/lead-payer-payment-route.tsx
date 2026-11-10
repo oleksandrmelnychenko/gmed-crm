@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Info, LoaderCircle } from "lucide-react";
+import { Info, LoaderCircle, CreditCard } from "lucide-react";
 
 import { inputClass, selectClass, textareaClass, tokens } from "@/components/ui-shell";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
@@ -132,7 +132,7 @@ export function LeadPayerPaymentRoute({
 
   const header = (
     <div className="flex flex-wrap items-center gap-2">
-      <AdminSectionTitle variant="mono">{tx("Способ оплаты плательщика", "Zahlungsweg des Zahlers")}</AdminSectionTitle>
+      <AdminSectionTitle icon={CreditCard} variant="mono">{tx("Способ оплаты плательщика", "Zahlungsweg des Zahlers")}</AdminSectionTitle>
       {source ? (
         <StatusChip tone={declaration.payment_route_source === "staff" ? "neutral" : "info"} data-testid="lead-payer-route-source">
           {source}

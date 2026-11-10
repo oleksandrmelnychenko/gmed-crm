@@ -1,3 +1,4 @@
+import { portalTabTone } from "@/components/ui/portal-tab-style";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LeadConfirmDialog } from "@/pages/leads/ui/lead-confirm-dialog";
 import { saveLeadPayerContactConsent, saveLeadPayerCostEstimateConsent, type StaffConsentRecord } from "@/pages/patient-lead/lead-request-api";
@@ -14,6 +15,18 @@ import {
   LoaderCircle,
   LockKeyhole,
   Upload,
+  CircleDollarSign,
+  ExternalLink,
+  Scroll,
+  HouseHeart,
+  BanknoteArrowDown,
+  FileBadge,
+  Wallet,
+  HandCoins,
+  ThumbsUp,
+  FileQuestionMark,
+  Mailbox,
+  ListStart,
 } from "lucide-react";
 
 import {
@@ -103,6 +116,8 @@ import {
   type Tx,
 } from "../model/lead-payer";
 import { staffRecordedLabel } from "../model/lead-portal-consents";
+
+const PAYER_ICONS = { self: CircleDollarSign, representative: HouseHeart, third_party: BanknoteArrowDown };
 
 const MAX_EVIDENCE_FILE_SIZE = 25 * 1024 * 1024;
 
@@ -897,7 +912,7 @@ export function LeadPayerDeclarationSection({
         {leadSelfFunds && selfFundsShown ? (
           <div className="space-y-1.5 border-t border-border/60 pt-3 text-xs" data-testid="lead-payer-self-funds">
             <div className="flex flex-wrap items-center gap-2">
-              <AdminSectionTitle variant="mono">
+              <AdminSectionTitle icon={FileBadge} variant="mono">
                 {tx("Подтверждение источника средств — загрузил пациент в кабинете", "Nachweis der Herkunft der Mittel – vom Patienten im Portal hochgeladen")}
               </AdminSectionTitle>
               {leadSelfFunds.updatedAt ? (
@@ -933,36 +948,41 @@ export function LeadPayerDeclarationSection({
   if (amlPartOnly) return <>{amlPart}</>;
 
   const payerKindSwitch = (
-        <div role="radiogroup" aria-label={tx("Кто платит", "Wer zahlt")} className="inline-flex max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-muted/40 p-0.5">
-          {payerKindOptions(minor, form.kind, tx).map(([kind, label]) => (
-            <label
-              key={kind}
-              className="relative min-w-0"
-            >
-              <input
-                type="radio"
-                name={`lead-payer-kind-${leadId}`}
-                className="peer sr-only"
-                value={kind}
-                checked={form.kind === kind}
-                disabled={readOnly}
-                onChange={() => chooseKind(kind)}
-              />
-              <span className={cn(
-                "flex min-h-7 cursor-pointer items-center rounded-md border px-2.5 py-1 text-xs leading-4 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-ring/30 peer-disabled:cursor-default peer-disabled:opacity-60",
-                form.kind === kind
-                  ? "border-[var(--brand)] bg-[var(--brand)] font-semibold text-primary-foreground shadow-sm"
-                  : "border-transparent bg-card text-muted-foreground hover:border-border hover:bg-muted/70 hover:text-foreground",
-              )}>{label}</span>
-            </label>
-          ))}
+        <div role="radiogroup" aria-label={tx("Кто платит", "Wer zahlt")} className="inline-flex max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-card p-0.5">
+          {payerKindOptions(minor, form.kind, tx).map(([kind, label]) => {
+            const PayerIcon = PAYER_ICONS[kind];
+            return (
+              <label
+                key={kind}
+                className="relative min-w-0"
+              >
+                <input
+                  type="radio"
+                  name={`lead-payer-kind-${leadId}`}
+                  className="peer sr-only"
+                  value={kind}
+                  checked={form.kind === kind}
+                  disabled={readOnly}
+                  onChange={() => chooseKind(kind)}
+                />
+                <span className={cn(
+                  "flex min-h-7 cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs leading-4 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-ring/30 peer-disabled:cursor-default peer-disabled:opacity-60",
+                  portalTabTone(form.kind === kind),
+                )}>
+                  <PayerIcon aria-hidden="true" className="size-3.5 shrink-0 text-foreground" />
+                  {label}
+                </span>
+              </label>
+            );
+          })}
         </div>
   );
 
   return (
     <div id={PAYER_SECTION_ID} tabIndex={-1} className="focus:outline-none">
       <Section
-        className="rounded-xl border border-border/50 bg-card p-3"
+        icon={Wallet}
+        className="rounded-xl border border-border bg-card p-3"
         title={(
           <span className="inline-flex flex-wrap items-center gap-2">
             <span>{tx("Кто платит", "Wer zahlt")}</span>
@@ -1129,7 +1149,7 @@ export function LeadPayerDeclarationSection({
         />
         {thirdParty ? (
           <div className="space-y-3 border-t border-border/60 pt-3">
-            <AdminSectionTitle variant="mono">
+            <AdminSectionTitle icon={HandCoins} variant="mono">
               {payingParent
                 ? tx("Плательщик — родитель / законный представитель", "Zahler – Elternteil / gesetzlicher Vertreter")
                 : tx("Плательщик (третье лицо)", "Zahler/in (dritte Person)")}
@@ -1315,7 +1335,7 @@ export function LeadPayerDeclarationSection({
             ) : null}
             {/* The paying parent is the contracting party: no third party's information (2026-10-19). */}
             {!payingParent ? <div className="space-y-2 rounded-xl border border-border/50 bg-card p-3.5">
-              <AdminSectionTitle variant="mono">{tx("Согласия", "Einwilligungen")}</AdminSectionTitle>
+              <AdminSectionTitle icon={ThumbsUp} variant="mono">{tx("Согласия", "Einwilligungen")}</AdminSectionTitle>
             {payingParent ? null : <div>
               <PayerCheckbox
                 checked={form.payerInformed}
@@ -1401,17 +1421,18 @@ export function LeadPayerDeclarationSection({
               onFocus={(event) => { if (event.target === event.currentTarget && paperAvailable) setQuestionnaireView({ leadId, path: "paper" }); }}
               className="space-y-2 rounded-xl border border-border/50 bg-card p-3 outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <AdminSectionTitle variant="mono">{tx("Анкета плательщика", "Fragebogen des Zahlers")}</AdminSectionTitle>
+                <AdminSectionTitle icon={FileQuestionMark} variant="mono">{tx("Анкета плательщика", "Fragebogen des Zahlers")}</AdminSectionTitle>
                 {paperAvailable && payerLink ? (
-                  <div role="group" aria-label={tx("Способ заполнения", "Art der Erfassung")} className="inline-flex gap-1 rounded-lg border border-border/60 bg-muted/30 p-1">
+                  <div role="group" aria-label={tx("Способ заполнения", "Art der Erfassung")} className="inline-flex gap-1 rounded-lg border border-border bg-card p-1">
                     {(["link", "paper"] as const).map((path) => (
                       <button key={path} type="button" aria-pressed={showPaperPath === (path === "paper")}
                         onClick={() => setQuestionnaireView({ leadId, path })}
-                        className={cn("inline-flex min-h-8 items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                          showPaperPath === (path === "paper") ? "bg-[var(--brand)] text-primary-foreground shadow-sm" : "text-foreground hover:bg-muted")}>
+                        className={cn("inline-flex min-h-8 items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          portalTabTone(showPaperPath === (path === "paper")))}>
+                        {path === "link" ? <ExternalLink aria-hidden="true" className="size-3.5 text-foreground" /> : <Scroll aria-hidden="true" className="size-3.5 text-foreground" />}
                         {path === "link" ? tx("По ссылке", "Per Link") : tx("На бумаге", "Auf Papier")}
                         {(path === "paper" ? paperCount > 0 : Boolean(payerLink.data?.questionnaire?.submitted_at)) ? (
-                          <span className={cn("rounded-full px-1.5 font-mono", showPaperPath === (path === "paper") ? "bg-white/20" : "bg-muted")}>{path === "paper" ? paperCount : 1}</span>
+                          <span className="rounded-full bg-muted px-1.5 font-mono text-foreground">{path === "paper" ? paperCount : 1}</span>
                         ) : null}
                       </button>
                     ))}
@@ -1488,7 +1509,7 @@ export function LeadPayerDeclarationSection({
         {recipientStatements.length > 0 || invoiceTaxEditable ? (
           <div className="space-y-3 border-t border-border/60 pt-3" data-testid="lead-payer-invoice-recipient">
             <div className="flex flex-wrap items-center gap-2">
-              <AdminSectionTitle variant="mono">
+              <AdminSectionTitle icon={Mailbox} variant="mono">
                 {tx("Получатель счёта (из анкеты клиента)", "Rechnungsempfänger (aus dem Kundenformular)")}
               </AdminSectionTitle>
               {cabinetBilling?.recipient_updated_at ? (
@@ -1716,7 +1737,8 @@ export function LeadPayerSignatureFlow({
 
   return (
     <Section
-      className="rounded-xl border border-border/50 bg-card p-3"
+      icon={ListStart}
+      className="rounded-xl border border-border bg-card p-3"
       title={tx("Порядок подписания", "Reihenfolge der Unterschriften")}
       accessory={required && canGenerate && standaloneKept ? (
         <Button

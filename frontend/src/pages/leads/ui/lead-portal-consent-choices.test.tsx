@@ -123,7 +123,7 @@ describe("portal consent facts in the staff wizard", () => {
     expect(html).toContain("+49 151 000000");
     expect(html).toContain("Только даты приёмов");
     expect(html).toContain("Praxis Dr. Beispiel");
-    expect(html.match(/<li/g)).toHaveLength(2);
+    expect(html.match(/<li\b/g)).toHaveLength(2);
   });
 
   it("respects restricted and older payloads and never presets unanswered choices", () => {

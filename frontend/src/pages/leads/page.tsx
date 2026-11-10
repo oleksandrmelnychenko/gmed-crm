@@ -1,3 +1,4 @@
+import { portalFilterClass } from "@/components/ui/portal-tab-style";
 import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import { existingParentPatientFromError } from "./model/parent-profile-reuse";
 import {
@@ -28,7 +29,6 @@ import { useSearchParams } from "react-router-dom";
 import {
   ArrowRight,
   ClipboardCheck,
-  FileCheck2,
   ScanText,
   LoaderCircle,
   Plus,
@@ -37,6 +37,12 @@ import {
   ShieldCheck,
   UserPlus,
   X,
+  LayoutDashboard,
+  Route,
+  type LucideIcon,
+  FileCheck2,
+  ShieldQuestionMark,
+  BookUser,
 } from "lucide-react";
 
 import {
@@ -1668,12 +1674,12 @@ function useLeadsPageContent() {
   const paneTabs: Array<{
     key: LeadPaneTab;
     label: string;
-    icon: typeof FileCheck2;
+    icon: LucideIcon;
   }> = [
-    { key: "overview", label: t.lead_tab_overview, icon: FileCheck2 },
-    { key: "process", label: t.lead_tab_process, icon: ArrowRight },
-    { key: "qualification", label: t.lead_tab_qualification, icon: ShieldCheck },
-    { key: "details", label: t.lead_tab_details, icon: ClipboardCheck },
+    { key: "overview", label: t.lead_tab_overview, icon: LayoutDashboard },
+    { key: "process", label: t.lead_tab_process, icon: Route },
+    { key: "qualification", label: t.lead_tab_qualification, icon: ShieldQuestionMark },
+    { key: "details", label: t.lead_tab_details, icon: BookUser },
   ];
 
   const leadWorkflow = detail && detailIsConsoleLead
@@ -1878,22 +1884,19 @@ function useLeadsPageContent() {
               </div>
             </nav>
           ) : (
-            <div className="mt-2 flex flex-wrap gap-1">
+            <div role="group" aria-label={lang === "de" ? "Lead-Bereiche" : "Разделы лида"} className="mt-2 flex flex-wrap gap-1">
               {paneTabs.map((tab) => {
                 const isActive = paneTab === tab.key;
+                const TabIcon = tab.icon;
                 return (
                   <button
                     key={tab.key}
                     type="button"
                     onClick={() => setPaneTab(tab.key)}
-                    className={cn(
-                      "rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                      isActive
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
-                    )}
+                    className={portalFilterClass(isActive)}
                     aria-pressed={isActive}
                   >
+                    <TabIcon aria-hidden="true" className="size-4 shrink-0 text-foreground" />
                     {tab.label}
                   </button>
                 );

@@ -125,7 +125,7 @@ test("package composer adds a document of the same patient, previews both and li
   } }));
   await page.route(`**/api/v1/documents/${documentId}/signature-requests`, route => route.fulfill({ json: {
     enabled: true, region: "DE", test_mode: false, can_send: true, can_configure: false, ineligible_reason: null, suggested_signers: [client, agency],
-    requests: fixture.packageSubmissions.length ? [{ id: "package-fixture", status: "pending", test_mode: false, signers: [client], evidence: {}, has_report: false,
+    requests: fixture.packageSubmissions.length ? [{ id: "signature-fixture", status: "pending", test_mode: false, signers: [client], evidence: {}, has_report: false,
       result_document_id: null, last_error: null, created_at: document.created_at, is_package: true, level: "QES",
       members: [
         { document_id: documentId, position: 0, page_start: 1, page_count: 1, result_document_id: null, accessible: true, title: "Rahmenvertrag – Testperson", template: null, version: 1 },
@@ -147,6 +147,9 @@ test("package composer adds a document of the same patient, previews both and li
   await send.click();
   await expect.poll(() => fixture.packageSubmissions.length).toBe(1);
   expect(fixture.packageSubmissions[0]).toEqual({ document_ids: [documentId, secondId], signers: [client], attachment_ids: [], level: "QES", language: "de" });
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "Skribble hat die Signaturanfrage angenommen." })).toBeVisible();
+  await page.getByRole("button", { name: "Elektronische Unterschrift: vertrag.pdf", exact: true }).click();
   await expect(dialog.getByText("Paket aus 2 Dokumenten – eine signierte PDF", { exact: true })).toBeVisible();
   // One row per document: number, title and version, then the chips.
   const firstMember = dialog.locator("[data-signature-member]").first();
@@ -434,7 +437,10 @@ test("German workflow requires checked recipients and reconciles uncertain sendi
   await expect(send).toHaveCount(0);
   expect(fixture.submissions).toHaveLength(1);
   fixture.complete();
-  await expect(page.getByText("PDF und Protokoll gespeichert", { exact: true })).toBeVisible({ timeout: 12_000 });
+  await expect(page.getByRole("dialog", { name: "Elektronische Unterschrift", exact: true })).toHaveCount(0, { timeout: 12_000 });
+  await expect(page.getByRole("status").filter({ hasText: "Skribble hat die Signaturanfrage angenommen." })).toBeVisible();
+  await page.getByRole("button", { name: "Elektronische Unterschrift: vertrag.pdf", exact: true }).click();
+  await expect(page.getByText("PDF und Protokoll gespeichert", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Signiertes PDF", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Signaturprotokoll", exact: true })).toBeVisible();
   for (const [label, path, filename] of [
@@ -1526,6 +1532,32 @@ test("contract recipient validation retains the selection and permits correcting
   expect(fixture.submissions).toEqual([{ signers: [client, agency] }]);
 });
 
+test("a pending package with a signer error keeps the affected recipient visible", async ({ page }) => {
+  const fixture = await prepare(page);
+  const signers = [
+    { first_name: "Erika", last_name: "Muster", email: "erika@example.org", role: "client" },
+    { first_name: "Max", last_name: "Muster", email: "max@example.org", role: "agency" },
+  ];
+  await page.route(`**/api/v1/documents/${documentId}/signature-requests`, route => route.fulfill({ json: {
+    enabled: true, region: "DE", test_mode: false, can_send: true, ineligible_reason: null, suggested_signers: signers,
+    requests: fixture.submissions.length ? [{ id: "signature-fixture", status: "pending", test_mode: false,
+      signers, last_error: null, created_at: document.created_at, evidence: { signatures: [
+        { email: signers[0].email, status: "OPEN" }, { email: signers[1].email, status: "ERROR" },
+      ] } }] : [],
+  } }));
+  await page.goto(`/documents/${documentId}`);
+  await page.getByRole("button", { name: "Elektronische Unterschrift: vertrag.pdf", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Elektronische Unterschrift", exact: true });
+  await dialog.getByRole("checkbox", { name: /Ich habe die gespeicherte PDF/ }).check();
+  const send = dialog.getByRole("button", { name: "Zur Unterschrift senden", exact: true });
+  await send.click();
+  await expect(dialog.locator('[data-signature-signer="error"]')).toContainText("Max Muster");
+  await expect(dialog.locator('[data-signature-signer="ready"]')).toContainText("Erika Muster");
+  await expect(send).toHaveCount(0);
+  await expect(page.getByText("Skribble hat die Signaturanfrage angenommen.", { exact: true })).toHaveCount(0);
+  expect(fixture.submissions).toHaveLength(1);
+});
+
 test("a rate-limited creation explains the refusal and permits an explicit retry", async ({ page }) => {
   await prepare(page);
   const client = { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" };
@@ -1556,6 +1588,9 @@ test("a rate-limited creation explains the refusal and permits an explicit retry
   expect(attempts).toBe(1);
   await consent.check();
   await send.click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: /DEMO.*Skribble hat die Signaturanfrage angenommen/ })).toBeVisible();
+  await page.getByRole("button", { name: "Elektronische Unterschrift: vertrag.pdf", exact: true }).click();
   await expect(dialog.getByText("TEST · Unterschriften ausstehend", { exact: true })).toBeVisible();
   await expect(send).toHaveCount(0);
   expect(attempts).toBe(2);

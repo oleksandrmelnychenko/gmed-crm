@@ -1,7 +1,9 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, PenTool, ScanText } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/toast";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { OverlayDirtyContext } from "@/components/ui/dismissal-guard";
@@ -47,6 +49,24 @@ export function DocumentSignatureAction({ documentId, scope, title, iconOnly, di
   if (!documentId && !scope?.patientId && !scope?.orderId && !scope?.leadId) return null;
   const label = lang === "de" ? "Elektronische Unterschrift" : "Электронная подпись";
 
+  function changeOpen(nextOpen: boolean) {
+    setOpen(nextOpen);
+    if (!nextOpen) {
+      setDirty(false);
+      if (changed.current) {
+        changed.current = false;
+        onDone?.();
+      }
+    }
+  }
+
+  function finishSend(testMode: boolean) {
+    changed.current = true;
+    changeOpen(false);
+    const message = lang === "de" ? "Skribble hat die Signaturanfrage angenommen." : "Skribble принял запрос на подпись.";
+    toast.success(testMode ? `DEMO · ${message}` : message);
+  }
+
   return <>
     <Button
       type="button" variant={iconOnly ? "ghost" : "default"} size={iconOnly ? "icon-sm" : "sm"}
@@ -59,26 +79,22 @@ export function DocumentSignatureAction({ documentId, scope, title, iconOnly, di
     >
       <presentation.Icon aria-hidden="true" className="size-4" />{!iconOnly ? presentation.label : null}
     </Button>
-    <Dialog open={open} onOpenChange={nextOpen => {
-      setOpen(nextOpen);
-      if (!nextOpen) setDirty(false);
-      if (!nextOpen && changed.current) { changed.current = false; onDone?.(); }
-    }} dirty={dirty}>
-      <DialogContent className="grid h-[min(940px,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 sm:h-[min(92dvh,940px)] sm:w-[96vw] sm:max-w-[1480px]" onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => {
+    <Dialog open={open} onOpenChange={changeOpen} dirty={dirty}>
+      <DialogContent className="grid h-[min(940px,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 sm:pb-0 sm:h-[min(92dvh,940px)] sm:w-[96vw] sm:max-w-[1480px]" onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => {
         if (["Enter", " ", "ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) event.stopPropagation();
       }}>
         <DialogHeader className="border-b border-border/70 px-5 py-4 pr-14">
-          <DialogTitle>{label}</DialogTitle>
+          <DialogTitle><SectionHeading icon={PenTool}>{label}</SectionHeading></DialogTitle>
           <DialogDescription className="break-words text-xs">{title}</DialogDescription>
         </DialogHeader>
-          {open ? <SignatureWorkspace key={documentId ?? `${scope?.patientId}:${scope?.orderId}:${scope?.leadId}`} documentId={documentId} scope={scope} title={title} onDirtyChange={setDirty} onDone={() => { changed.current = true; }} /> : null}
+          {open ? <SignatureWorkspace key={documentId ?? `${scope?.patientId}:${scope?.orderId}:${scope?.leadId}`} documentId={documentId} scope={scope} title={title} onDirtyChange={setDirty} onSent={finishSend} onDone={() => { changed.current = true; }} /> : null}
       </DialogContent>
     </Dialog>
   </>;
 }
 
-function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }: {
-  documentId?: string; scope?: DocumentScope; title: string; onDone?: () => void; onDirtyChange: (dirty: boolean) => void;
+function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange, onSent }: {
+  documentId?: string; scope?: DocumentScope; title: string; onDone?: () => void; onDirtyChange: (dirty: boolean) => void; onSent: (testMode: boolean) => void;
 }) {
   const { lang } = useLang();
   const overlay = useContext(OverlayDirtyContext);
@@ -151,7 +167,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
   return <div className="grid min-h-0 overflow-y-auto lg:grid-cols-[minmax(0,1.1fr)_minmax(26rem,0.9fr)] lg:overflow-hidden">
     <section aria-label={tx("Документ для подписи", "Dokument zur Unterschrift")} className="flex min-h-[28rem] min-w-0 flex-col border-b border-border/70 bg-muted/15 lg:min-h-0 lg:border-r lg:border-b-0">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border/60 bg-card px-4 py-3">
-        <AdminSectionTitle>{relatedPreview?.kind === "review" ? tx("Приложение для ознакомления", "Anlage zur Kenntnisnahme") : relatedPreview?.kind === "signing" ? tx("Документ пакета на подпись", "Dokument des Signaturpakets") : displayedResult ? `${displayedResult.test_mode ? "TEST · " : ""}${tx("Подписанный PDF", "Signiertes PDF")}` : packageDocuments.length > 1 ? `${tx("Пакет на подпись", "Signaturpaket")} · ${packageDocuments.length} PDF` : tx("Документ для подписи", "Dokument zur Unterschrift")}</AdminSectionTitle>
+        <AdminSectionTitle icon={ScanText}>{relatedPreview?.kind === "review" ? tx("Приложение для ознакомления", "Anlage zur Kenntnisnahme") : relatedPreview?.kind === "signing" ? tx("Документ пакета на подпись", "Dokument des Signaturpakets") : displayedResult ? `${displayedResult.test_mode ? "TEST · " : ""}${tx("Подписанный PDF", "Signiertes PDF")}` : packageDocuments.length > 1 ? `${tx("Пакет на подпись", "Signaturpaket")} · ${packageDocuments.length} PDF` : tx("Документ для подписи", "Dokument zur Unterschrift")}</AdminSectionTitle>
         {relatedPreview ? <Button type="button" size="sm" variant="outline" onClick={() => setRelatedPreview(null)}>{hasPackage ? tx("Ко всему пакету", "Zum gesamten Paket") : tx("К основному документу", "Zum Hauptdokument")}</Button> : null}
         {availableResult && !relatedPreview ? <div className="flex w-full flex-wrap gap-2" aria-label={tx("Версия PDF", "PDF-Version")}>
           <Button type="button" size="sm" variant={displayedResult ? "outline" : "default"} aria-pressed={!displayedResult} onClick={() => setShowOriginal(true)}>{tx("Исходный PDF", "Original-PDF")}</Button>
@@ -182,7 +198,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
       {previewId ? <SignatureDocumentPreview key={previewId} documentId={previewId} packageDocuments={packageDocuments} onReady={handlePreviewReady} /> : null}
     </section>
     <section aria-label={tx("Подписание документа", "Dokument unterzeichnen")} className="min-w-0 space-y-4 bg-muted/10 p-3.5 lg:overflow-y-auto">
-    {selectedId ? <DocumentSignaturePanel key={selectedId} documentId={selectedId} previewReady={previewedDocuments.includes(selectedId)} previewedDocumentIds={previewedDocuments} onPreviewRelated={(id, kind) => setRelatedPreview({ id, kind })} onPackageSelectionChange={setPackageSelection} expanded onDirtyChange={onDirtyChange} onStateChange={receiveState} onPreviewResult={request => { setRelatedPreview(null); setResultPreview(request); setShowOriginal(false); }} onComposeNew={() => { setRelatedPreview(null); setComposingNew(true); setShowOriginal(true); setResultPreview(null); }} onDone={() => {
+    {selectedId ? <DocumentSignaturePanel key={selectedId} documentId={selectedId} onSent={onSent} previewReady={previewedDocuments.includes(selectedId)} previewedDocumentIds={previewedDocuments} onPreviewRelated={(id, kind) => setRelatedPreview({ id, kind })} onPackageSelectionChange={setPackageSelection} expanded onDirtyChange={onDirtyChange} onStateChange={receiveState} onPreviewResult={request => { setRelatedPreview(null); setResultPreview(request); setShowOriginal(false); }} onComposeNew={() => { setRelatedPreview(null); setComposingNew(true); setShowOriginal(true); setResultPreview(null); }} onDone={() => {
       clearApiCache("/documents");
       refreshSignatureSummaries();
       onDone?.();

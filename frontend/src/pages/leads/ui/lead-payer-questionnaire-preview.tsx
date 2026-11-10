@@ -1,5 +1,6 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useId, useState } from "react";
-import { ChevronDown, FileText } from "lucide-react";
+import { ChevronDown, FileText, ListCheck, ArrowRightLeft } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
@@ -43,7 +44,7 @@ export function LeadPayerQuestionnairePreview({ state, tx }: { state: LeadPayerL
     <div className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card" data-testid="lead-payer-questionnaire-preview">
       {/* A plain card header (owner 2026-10-19: no green band): title, then when it came. */}
       <div className="flex flex-wrap items-center gap-2 border-b border-border/50 px-3 py-2">
-        <AdminSectionTitle variant="mono">{tx("Заполненная анкета плательщика", "Ausgefüllte Angaben des Zahlers")}</AdminSectionTitle>
+        <AdminSectionTitle icon={ListCheck} variant="mono">{tx("Заполненная анкета плательщика", "Ausgefüllte Angaben des Zahlers")}</AdminSectionTitle>
         <p className="text-xs leading-5 text-muted-foreground sm:ml-auto">{received}</p>
       </div>
       <div className="space-y-2 p-3">
@@ -78,7 +79,7 @@ export function LeadPayerQuestionnairePreview({ state, tx }: { state: LeadPayerL
           <PayerAnswersGroup state={state} tx={tx} lang={lang} today={today} />
           {payment.length > 0 ? (
             <section className="space-y-2 rounded-lg border border-border/60 bg-card p-3" data-testid="lead-payer-questionnaire-payment">
-              <h3 className="text-xs font-semibold">{tx("Способ и путь оплаты", "Zahlungsart und Zahlungsweg")}</h3>
+              <h3><SectionHeading icon={ArrowRightLeft}>{tx("Способ и путь оплаты", "Zahlungsart und Zahlungsweg")}</SectionHeading></h3>
               <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
                 {payment.map((row) => <PreviewFact key={row.key} label={row.label} value={row.value} details={row.details} warning={row.warning} />)}
               </dl>

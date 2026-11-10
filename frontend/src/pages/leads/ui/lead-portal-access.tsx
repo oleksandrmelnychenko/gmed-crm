@@ -1,6 +1,8 @@
+import { portalTabTone } from "@/components/ui/portal-tab-style";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { TrustedContactRole } from "./trusted-contact-role";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { CalendarDays, Check, Copy, FileText, KeyRound, LoaderCircle, Mail, ShieldCheck, UserRound, UsersRound } from "lucide-react";
+import { CalendarDays, Check, Copy, FileText, KeyRound, LoaderCircle, Mail, ShieldCheck, UserRound, UsersRound, MonitorSmartphone } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
@@ -303,7 +305,7 @@ export function LeadPortalAccessDetail({
       {/* Portal state and grouped actions stay visually separate. */}
       <div className="grid items-center gap-3 @[64rem]:grid-cols-[minmax(0,1fr)_auto]">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <AdminSectionTitle>{de ? "Patientenportal" : "Портал пациента"}</AdminSectionTitle>
+          <AdminSectionTitle icon={MonitorSmartphone}>{de ? "Patientenportal" : "Портал пациента"}</AdminSectionTitle>
           <StatusChip tone={minor === true ? "neutral" : leadPortalStatusTone(status)}>
             {minor === true ? <><UsersRound aria-hidden="true" />{de ? "Zugang über gesetzliche Vertreter" : "Вход через законных представителей"}</> : leadPortalStatusLabel(status, lang)}
           </StatusChip>
@@ -489,11 +491,7 @@ export function LeadPortalAccessDetail({
                     key={option.value}
                     type="button"
                     aria-pressed={language === option.value}
-                    className={
-                      language === option.value
-                        ? "rounded-md border border-primary/40 bg-primary/10 px-2 py-0.5 text-xs text-primary"
-                        : "rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground"
-                    }
+                    className={cn("rounded-md border px-2 py-0.5 text-xs", portalTabTone(language === option.value))}
                     onClick={() => setEmailLanguage(option.value)}
                   >
                     {option.label}
@@ -725,8 +723,7 @@ function PortalCredentialsContent({
       </dl>
       <div className="min-w-0 space-y-3 rounded-xl border border-border/60 bg-card p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="flex min-w-0 items-center gap-2 text-sm font-semibold sm:flex-1">
-            <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
+          <SectionHeading icon={Mail}>
             {parent
               ? de
                 ? "Nachricht an den Elternteil / die gesetzliche Vertretung"
@@ -734,18 +731,14 @@ function PortalCredentialsContent({
               : de
                 ? "Nachricht an den Patienten"
                 : "Сообщение для пациента"}
-          </span>
-          <div className="flex shrink-0 gap-0.5 rounded-lg border border-border/60 bg-muted/30 p-0.5" role="group" aria-label={de ? "Sprache" : "Язык"}>
+          </SectionHeading>
+          <div className="flex shrink-0 gap-0.5 rounded-lg border border-border bg-card p-0.5" role="group" aria-label={de ? "Sprache" : "Язык"}>
             {MESSAGE_LANGUAGES.map((option) => (
               <button
                 key={option.value}
                 type="button"
                 aria-pressed={language === option.value}
-                className={
-                  language === option.value
-                    ? "rounded-md bg-[var(--brand)] px-2 py-1 text-xs font-semibold text-primary-foreground"
-                    : "rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-                }
+                className={cn("rounded-md border px-2 py-1 text-xs", portalTabTone(language === option.value))}
                 onClick={() => {
                   setMessageLanguage(option.value);
                   setLanguageChosen(true);

@@ -1,5 +1,6 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FocusEvent, type ReactNode } from "react";
-import { Check, ChevronDown, Files, LoaderCircle, UserRound } from "lucide-react";
+import { Check, ChevronDown, Files, LoaderCircle, UserRound, IdCardLanyard, Folders } from "lucide-react";
 
 import { checkboxClass, inputClass, selectClass, tokens } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
@@ -830,7 +831,7 @@ export function LeadIdentityDocumentData({
   return (
     <div className="space-y-3" data-testid="lead-identity-document-data">
       {representatives.length > 0 ? (
-        <h4 className="text-xs font-semibold text-foreground">{tx("Документ пациента", "Ausweis des Patienten")}</h4>
+        <h4><SectionHeading icon={IdCardLanyard}>{tx("Документ пациента", "Ausweis des Patienten")}</SectionHeading></h4>
       ) : null}
       {patientScans ? <div data-testid="lead-id-patient-scans">{patientScans}</div> : null}
       {cabinetScans.length > 0 ? (
@@ -871,8 +872,7 @@ export function LeadIdentityDocumentData({
       {representatives.length > 0 ? (
         <div className="space-y-2" data-testid="lead-representatives-id-data">
           <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-            {tx("Документы представителей", "Ausweise der Vertreter")}
+            <SectionHeading icon={Folders}>{tx("Документы представителей", "Ausweise der Vertreter")}</SectionHeading>
           </h4>
           {representatives.map((person) => (
             <RepresentativeForm

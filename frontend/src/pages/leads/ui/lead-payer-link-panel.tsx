@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronRight, FileSignature, FileText, History, Info, LoaderCircle, Mail, Undo2 } from "lucide-react";
+import { ChevronRight, FileSignature, FileText, History, Info, LoaderCircle, Mail, Undo2, Link2 } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, checkboxClass } from "@/components/ui-shell";
@@ -178,7 +178,7 @@ export function LeadPayerLinkPanel({
   return (
     <div className="space-y-2 bg-card text-[13px] text-foreground" data-testid="lead-payer-link">
       <div className="flex flex-wrap items-center gap-2">
-        <AdminSectionTitle variant="mono">{tx("Ссылка для плательщика", "Zahler-Link")}</AdminSectionTitle>
+        <AdminSectionTitle icon={Link2} variant="mono">{tx("Ссылка для плательщика", "Zahler-Link")}</AdminSectionTitle>
         {status && !actions.cabinet ? (
           <StatusChip tone={status.tone} data-testid="lead-payer-link-badge" data-status={link?.status}>
             {status.label}
