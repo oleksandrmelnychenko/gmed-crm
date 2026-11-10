@@ -45,8 +45,10 @@ import {
   FolderOpen,
   HandCoins,
   Handshake,
+  HeartPulse,
   History,
   Inbox,
+  Link2,
   ListChecks,
   ListOrdered,
   ListPlus,
@@ -67,7 +69,6 @@ import {
   Search,
   Settings2,
   ShieldAlert,
-  ShieldCheck,
   SlidersHorizontal,
   Split,
   Stethoscope,
@@ -4336,7 +4337,7 @@ function useOrdersPageContent() {
                       <div className="grid min-w-0 gap-4 @min-[52rem]:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.6fr)]">
                         <div className="min-w-0 space-y-3">
                           <div className="flex flex-wrap items-center justify-between gap-2">
-                            <AdminSectionTitle>
+                            <AdminSectionTitle icon={HeartPulse}>
                               {lang === "de" ? "Bedarf des Patienten" : "Потребность пациента"}
                             </AdminSectionTitle>
                             {orderNeedSummary.interpreterRequired ? (
@@ -4477,7 +4478,7 @@ function useOrdersPageContent() {
                       </div>
 
                       <div className="mt-3 border-t border-border/60 pt-3">
-                        <AdminSectionTitle>
+                        <AdminSectionTitle icon={Link2}>
                           {lang === "de" ? "Zugehörige Bereiche" : "Связанные данные"}
                         </AdminSectionTitle>
                         <div className="mt-2 grid overflow-hidden rounded-lg border border-border/50 @min-[32rem]:grid-cols-3">
@@ -4955,10 +4956,7 @@ function useOrdersPageContent() {
                         <div className="flex flex-wrap items-start justify-between gap-2 border-b border-amber-200 bg-amber-50/70 px-3 py-2">
                           <div>
                             <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                              <ShieldCheck className="size-4 text-amber-700" />
-                              {lang === "de"
-                                ? "Was noch zu erledigen ist"
-                                : "Что ещё нужно сделать"}
+                              <SectionHeading icon={ListTodo}>{lang === "de" ? "Was noch zu erledigen ist" : "Что ещё нужно сделать"}</SectionHeading>
                             </h3>
                             <p className="mt-1 text-xs leading-5 text-muted-foreground">
                               {lang === "de"

@@ -3234,7 +3234,9 @@ export function ClinicalDocumentImportSheet({
                                 key={target}
                                 type="button"
                                 size="sm"
-                                variant={constructorDraft?.anchor === "source" && constructorDraft.target === target ? "default" : "outline"}
+                                variant="ghost"
+                                data-workspace-tab
+                                aria-pressed={constructorDraft?.anchor === "source" && constructorDraft.target === target}
                                 className="h-8 gap-1.5 rounded-full text-xs"
                                 onClick={() => openConstructor(target, "source", Boolean(pageSelection))}
                               >

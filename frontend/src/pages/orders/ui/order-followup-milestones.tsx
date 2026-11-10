@@ -1,5 +1,6 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useState, type Dispatch, type SetStateAction } from "react";
-import { BellPlus, CalendarPlus, CalendarX2, CheckCircle2, LoaderCircle } from "lucide-react";
+import { BellPlus, CalendarPlus, CalendarX2, CheckCircle2, LoaderCircle, PhoneCall } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -183,9 +184,7 @@ export function OrderFollowupMilestones({
       className="scroll-mt-4 rounded-2xl border border-border p-4"
       data-testid="order-followup-milestones"
     >
-      <div className="text-sm font-semibold text-foreground">
-        {tx("Контрольные контакты после лечения", "Nachsorgekontakte nach der Behandlung")}
-      </div>
+      <h3><SectionHeading icon={PhoneCall}>{tx("Контрольные контакты после лечения", "Nachsorgekontakte nach der Behandlung")}</SectionHeading></h3>
       <p className="mt-1 text-sm text-muted-foreground">
         {tx(
           "Статус «Запланировано» с датой засчитывается для перехода в наблюдение. Напоминание или визит можно создать сразу — дата подставлена от даты закрытия.",

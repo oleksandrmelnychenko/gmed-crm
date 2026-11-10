@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle, Languages } from "lucide-react";
 
@@ -313,10 +314,7 @@ export function OrderInterpretersByDay({
 
   return (
     <div data-testid="order-interpreters-by-day" className="rounded-lg border border-border bg-card p-3">
-      <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
-        <Languages className="size-4 text-muted-foreground" />
-        {tx("Переводчики по дням", "Dolmetscher nach Tagen")}
-      </div>
+      <h3><SectionHeading icon={Languages}>{tx("Переводчики по дням", "Dolmetscher nach Tagen")}</SectionHeading></h3>
       <div className="mt-2 space-y-2">
         {error ? <Banner tone="error">{error}</Banner> : null}
         {!error && !appointments ? (

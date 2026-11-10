@@ -186,36 +186,33 @@ export function OrderPipelinePanel({
   return (
     <div className="@container space-y-2">
       <nav aria-label={tx("Этапы выполнения заказа", "Bearbeitungsschritte des Auftrags")} className="overflow-x-auto rounded-xl border border-border bg-card p-1">
-      <ol className="flex min-w-max gap-1">
-        {pipeline.stages.map((stage, index) => (
-          <li
-            key={stage.key}
-            className="min-w-max flex-1 shrink-0"
-          >
-            <button type="button"
-              aria-current={stage.key === current ? "step" : undefined}
-              title={`${pipelineStageLabel(stage.key, lang)} · ${pipelineStateLabel(stage.state, lang)}`}
-              onClick={() => {
-                const section = sections.current[stage.key];
-                section?.scrollIntoView({ block: "start", behavior: "instant" });
-                section?.focus({ preventScroll: true });
-              }}
-              className={cn("flex min-h-9 w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-[13px] font-medium transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring max-sm:min-h-10", stage.key === current ? "bg-muted text-foreground" : "text-muted-foreground")}
-            >
-            <span aria-hidden className={cn("flex w-4 shrink-0 items-center justify-center text-xs tabular-nums", stage.state === "done" && "text-emerald-700")}>
-              {stage.state === "done" ? (
-                <Check className="size-3" />
-              ) : stage.state === "not_required" ? (
-                <Minus className="size-3" />
-              ) : (
-                index + 1
-              )}
-            </span>
-            <span className="whitespace-nowrap">{pipelineStageLabel(stage.key, lang)}</span>
-            </button>
-          </li>
-        ))}
-      </ol>
+        <ol className="mx-auto flex w-max gap-1">
+          {pipeline.stages.map((stage, index) => {
+            const Icon = STAGE_ICONS[stage.key];
+            return (
+              <li key={stage.key}>
+                <button
+                  type="button"
+                  data-workspace-tab
+                  aria-current={stage.key === current ? "step" : undefined}
+                  title={`${pipelineStageLabel(stage.key, lang)} · ${pipelineStateLabel(stage.state, lang)}`}
+                  onClick={() => {
+                    const section = sections.current[stage.key];
+                    section?.scrollIntoView({ block: "start", behavior: "instant" });
+                    section?.focus({ preventScroll: true });
+                  }}
+                  className="flex min-h-9 shrink-0 items-center gap-1.5 px-2.5 py-1.5 text-[13px] font-medium transition-colors max-sm:min-h-10"
+                >
+                  <Icon aria-hidden className="size-4 shrink-0" />
+                  <span className="whitespace-nowrap">{pipelineStageLabel(stage.key, lang)}</span>
+                  <span aria-hidden className={cn("inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs tabular-nums", stage.state === "done" && "bg-emerald-50 text-emerald-700")}>
+                    {stage.state === "done" ? <Check className="size-3" /> : stage.state === "not_required" ? <Minus className="size-3" /> : index + 1}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
       </nav>
 
       <StageBlock

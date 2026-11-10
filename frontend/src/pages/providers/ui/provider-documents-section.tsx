@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, FileText, FileUp, FolderOpen, LoaderCircle, Paperclip, Plus, Search } from "lucide-react";
+import { ContactRound, NotebookPen, Download, FileText, FileUp, FolderOpen, LoaderCircle, Paperclip, Plus, Search } from "lucide-react";
 
 import { SectionHeading } from "@/components/ui/section-heading";
 import { Badge } from "@/components/ui/badge";
@@ -249,16 +249,16 @@ export function ProviderDocumentsSection({
           }
         >
             {error ? <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p> : null}
-            <AdminFormSection title={labels.file}>
+            <AdminFormSection icon={Paperclip} title={labels.file}>
               <input ref={fileRef} aria-label={labels.file} type="file" required accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx" className="hidden" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
               <Button type="button" variant="outline" className="h-auto min-h-10 w-full justify-start gap-2 rounded-lg bg-muted/40 py-2 text-left text-xs whitespace-normal" onClick={() => fileRef.current?.click()}><Paperclip className="size-4 shrink-0 text-primary" /><span className="min-w-0 break-all">{file?.name || labels.chooseFile}</span></Button>
               <Field label={labels.titleField} htmlFor="provider-document-title"><Input id="provider-document-title" className={inputClass} value={title} maxLength={255} placeholder={file?.name || ""} onChange={(event) => setTitle(event.target.value)} /></Field>
             </AdminFormSection>
-            <AdminFormSection title={labels.linkPatient}>
+            <AdminFormSection icon={ContactRound} title={labels.linkPatient}>
               <Field label={labels.patient} htmlFor="provider-document-patient"><select id="provider-document-patient" className={selectClass} value={patientId} required={isMedical} onChange={(event) => setPatientId(event.target.value)}><option value="">{labels.noPatient}</option>{patientOptions.map((patient) => <option key={patient.id} value={patient.id}>{patient.name} · {patient.patientNumber}</option>)}</select></Field>
               <label className="flex items-start gap-2 py-1 text-xs"><input type="checkbox" className={checkboxClass} checked={isMedical} onChange={(event) => setIsMedical(event.target.checked)} /><span><span className="font-medium">{labels.medicalToggle}</span><span className="mt-0.5 block leading-5 text-muted-foreground">{labels.medicalHint}</span></span></label>
             </AdminFormSection>
-            <AdminFormSection title={labels.notes}>
+            <AdminFormSection icon={NotebookPen} title={labels.notes}>
               <textarea aria-label={labels.notes} className={textareaClass} value={notes} maxLength={4000} onChange={(event) => setNotes(event.target.value)} />
             </AdminFormSection>
         </AdminDialogScaffold>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LoaderCircle, Wallet } from "lucide-react";
+import { Banknote, LoaderCircle, Wallet } from "lucide-react";
 
 import { SectionHeading } from "@/components/ui/section-heading";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
@@ -108,7 +108,7 @@ export function OrderPrepaymentCard({
       data-testid="order-prepayment"
       aria-label={tx("Предоплата", "Vorauszahlung")}
     >
-      <AdminSectionTitle>{tx("Предоплата", "Vorauszahlung")}</AdminSectionTitle>
+      <AdminSectionTitle icon={Banknote}>{tx("Предоплата", "Vorauszahlung")}</AdminSectionTitle>
       <div className="flex flex-wrap items-center justify-between gap-2 text-[13px] leading-5">
         <p data-testid="order-prepayment-current">
           {stored.prepayment_required ? (

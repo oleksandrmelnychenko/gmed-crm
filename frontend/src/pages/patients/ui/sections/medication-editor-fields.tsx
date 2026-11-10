@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { CalendarRange, Pill, ShieldCheck, Timer, type LucideIcon } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -16,10 +17,10 @@ export const MEDICATION_EDITOR_CLASS_NAME =
 const controlClass = cn(inputClass, "h-9 w-full min-w-0 bg-field text-[13px]");
 const nullable = (value: string) => value === "" ? null : value;
 
-function MedicationFormSection({ title, children }: { title: string; children: ReactNode }) {
+function MedicationFormSection({ icon, title, children }: { icon: LucideIcon; title: string; children: ReactNode }) {
   return (
     <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
-      <AdminSectionTitle>{title}</AdminSectionTitle>
+      <AdminSectionTitle icon={icon}>{title}</AdminSectionTitle>
       {children}
     </section>
   );
@@ -50,7 +51,7 @@ export function MedicationEditorFields({ draft, onChange, lang, dateRangeValid, 
   }
 
   return <div className="space-y-3">
-    <MedicationFormSection title={tx("Препарат", "Medikament")}>
+    <MedicationFormSection icon={Pill} title={tx("Препарат", "Medikament")}>
       <MedicationNameFields value={draft} onChange={onChange} lang={lang} inputClassName={controlClass} />
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label={tx("Категория", "Kategorie")}>
@@ -85,7 +86,7 @@ export function MedicationEditorFields({ draft, onChange, lang, dateRangeValid, 
       </div>
     </MedicationFormSection>
 
-    <MedicationFormSection title={tx("Дозировка и схема приёма", "Dosierung und Einnahme")}>
+    <MedicationFormSection icon={Timer} title={tx("Дозировка и схема приёма", "Dosierung und Einnahme")}>
       <Field label={tx("Дозировка", "Stärke")}><Input value={draft.staerke ?? ""} onChange={event => onChange({staerke:nullable(event.target.value)})} className={controlClass} placeholder="5 mg" /></Field>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {doses.map(([key, label, accessibleLabel]) => <Field key={key} label={label}>
@@ -98,7 +99,7 @@ export function MedicationEditorFields({ draft, onChange, lang, dateRangeValid, 
       </div>
     </MedicationFormSection>
 
-    <MedicationFormSection title={tx("Назначение и сроки", "Verordnung und Zeitraum")}>
+    <MedicationFormSection icon={CalendarRange} title={tx("Назначение и сроки", "Verordnung und Zeitraum")}>
       <div className="grid gap-3 md:grid-cols-3">
         <Field label={tx("Дата назначения", "Verordnet am")}><Input type="date" value={draft.verordnet_am ?? ""} onChange={event => onChange({verordnet_am:nullable(event.target.value)})} className={controlClass} /></Field>
         <Field label={tx("Приём с", "Einnahme von")}><Input type="date" value={draft.einnahme_von ?? ""} onChange={event => onChange({einnahme_von:nullable(event.target.value)})} className={controlClass} /></Field>
@@ -108,7 +109,7 @@ export function MedicationEditorFields({ draft, onChange, lang, dateRangeValid, 
       {attribution}
     </MedicationFormSection>
 
-    <MedicationFormSection title={tx("Отпуск и ограничения", "Abgabe und Einschränkungen")}>
+    <MedicationFormSection icon={ShieldCheck} title={tx("Отпуск и ограничения", "Abgabe und Einschränkungen")}>
       <fieldset className="min-w-0 space-y-3">
         <legend className="text-xs font-medium text-muted-foreground">{tx("Правовой статус", "Rechtlicher Status")}</legend>
         <div className="grid gap-3 sm:grid-cols-3">

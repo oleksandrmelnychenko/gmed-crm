@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { LoaderCircle, PauseCircle, Pencil, Pill, PlayCircle, Plus, Trash2, type LucideIcon } from "lucide-react";
+import { ClipboardList, Flower2, LoaderCircle, PauseCircle, Pencil, Pill, PlayCircle, Plus, Trash2, TriangleAlert, type LucideIcon } from "lucide-react";
 
 import { SectionHeading } from "@/components/ui/section-heading";
 import { DataTable } from "@/components/data-table/data-table";
@@ -496,6 +496,7 @@ export function PatientClinicalWarningSection({
   const isAllergy = kind === "allergie";
   return (
     <ClinicalListSection<ClinicalWarning>
+      icon={isAllergy ? Flower2 : TriangleAlert}
       title={isAllergy ? tx("Аллергии", "Allergien") : "CAVE"}
       items={items}
       blank={() => blankWarning(kind)}
@@ -536,7 +537,7 @@ export function PatientClinicalWarningSection({
       )}
       form={(draft, set) => (
         <div className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
-          <AdminSectionTitle>{tx("Общие сведения", "Allgemeine Angaben")}</AdminSectionTitle>
+          <AdminSectionTitle icon={ClipboardList}>{tx("Общие сведения", "Allgemeine Angaben")}</AdminSectionTitle>
           <Field required label={isAllergy ? tx("Аллерген", "Allergen") : "CAVE"}>
             <Input
               required

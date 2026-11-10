@@ -8,8 +8,9 @@ import { Input } from "@/components/ui/input";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { toast } from "@/components/ui/toast";
 import { berlinLocalInputToIso, formatAppDateTime, isoToBerlinLocalInput } from "@/lib/app-time-zone";
+import { specializationIcons } from "@/lib/specialization-icons";
 import { cn } from "@/lib/utils";
-import { Copy, History, Pencil, Plus, Trash2 } from "lucide-react";
+import { Copy, History, NotebookText, Pencil, Plus, Stethoscope, Trash2 } from "lucide-react";
 
 import type {
   ClinicalNarrative,
@@ -707,7 +708,7 @@ export function AnamneseSection({
             {editing ? (
               <div className="space-y-3">
                 <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
-                  <AdminSectionTitle>{tx("Общие сведения", "Allgemeine Angaben")}</AdminSectionTitle>
+                  <AdminSectionTitle icon={NotebookText}>{tx("Общие сведения", "Allgemeine Angaben")}</AdminSectionTitle>
                   <label className="block min-w-0">
                     <span className="mb-1 block text-[11.5px] font-medium leading-tight text-muted-foreground">
                       {tx("Дата и время анамнеза", "Zeitpunkt der Anamnese")}
@@ -758,7 +759,7 @@ export function AnamneseSection({
                   </div>
                 </section>
                 <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
-                  <AdminSectionTitle>{tx("Специализации", "Spezialisierungen")}</AdminSectionTitle>
+                  <AdminSectionTitle icon={Stethoscope}>{tx("Специализации", "Spezialisierungen")}</AdminSectionTitle>
                   <ClinicalSpecializationsField
                     compact
                     ids={editing.specialization_ids ?? []}
@@ -790,7 +791,7 @@ export function AnamneseSection({
                     className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5"
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <AdminSectionTitle>
+                      <AdminSectionTitle icon={specializationIcons.get(specialization.code)}>
                         {specializationLabelForItem(specialization, lang === "de" ? "de" : "ru")}
                       </AdminSectionTitle>
                       <Button

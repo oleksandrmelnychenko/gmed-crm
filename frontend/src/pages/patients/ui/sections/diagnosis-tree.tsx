@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
-import { GitFork, LoaderCircle, Pencil, Plus, Trash2, X } from "lucide-react";
+import { ClipboardList, GitFork, LoaderCircle, Pencil, Plus, Signature, Stethoscope, Trash2, X } from "lucide-react";
 import type {
   AllDoctorOption,
   ClinicalDiagnosis,
@@ -716,7 +716,7 @@ function DiagnosisForm({
       ) : null}
 
       <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
-        <AdminSectionTitle>{tx("Общие сведения", "Allgemeine Angaben")}</AdminSectionTitle>
+        <AdminSectionTitle icon={ClipboardList}>{tx("Общие сведения", "Allgemeine Angaben")}</AdminSectionTitle>
       {isDiagnosis ? (
         <div className="space-y-2.5">
           <span className="block text-[11.5px] font-medium leading-tight text-muted-foreground">
@@ -894,7 +894,7 @@ function DiagnosisForm({
 
       {isDiagnosis ? (
         <div className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
-          <AdminSectionTitle>
+          <AdminSectionTitle icon={Stethoscope}>
             {tx("Лечащий врач", "Behandelnder Arzt")}
           </AdminSectionTitle>
           <label className="flex cursor-pointer items-center gap-2 text-[13px] text-foreground">
@@ -951,7 +951,7 @@ function DiagnosisForm({
       ) : null}
 
       <div className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
-        <AdminSectionTitle>
+        <AdminSectionTitle icon={Signature}>
           {tx("Кто поставил/провёл", "Wer gestellt/durchgeführt")}
         </AdminSectionTitle>
         <label className="flex cursor-pointer items-center gap-2 text-[13px] text-foreground">

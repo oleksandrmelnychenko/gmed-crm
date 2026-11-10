@@ -1,5 +1,25 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, Check, LoaderCircle, Plus, RefreshCw, Save, Timer } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  ChevronDown,
+  ClipboardPlus,
+  CreditCard,
+  FilePlus2,
+  FileSignature,
+  Files,
+  FolderArchive,
+  History,
+  ListChecks,
+  LoaderCircle,
+  Plus,
+  RefreshCw,
+  Save,
+  ShieldCheck,
+  Timer,
+  UserRoundPen,
+} from "lucide-react";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -277,8 +297,8 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
       <fieldset disabled={busy} className="min-w-0 space-y-3 disabled:opacity-75">
         {step === 0 ? <>
           {patientDocuments}
-          <OrderWizardSection flush title={tx("Сохранённые договоры пациента", "Gespeicherte Patientenverträge")}>{existingContracts}</OrderWizardSection>
-          <OrderWizardSection title={tx("Что изменилось с прошлого обращения?", "Was hat sich seit dem letzten Aufenthalt geändert?")}>
+          <OrderWizardSection flush icon={FolderArchive} title={tx("Сохранённые договоры пациента", "Gespeicherte Patientenverträge")}>{existingContracts}</OrderWizardSection>
+          <OrderWizardSection icon={History} title={tx("Что изменилось с прошлого обращения?", "Was hat sich seit dem letzten Aufenthalt geändert?")}>
             <p className="text-xs text-muted-foreground">{tx("Проверьте сохранённые сведения. Изменения попадут в карточку пациента после подтверждения.", "Prüfen Sie die gespeicherten Angaben. Änderungen werden nach Bestätigung in die Patientenakte übernommen.")}</p>
             <dl className="grid gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
               {(Object.keys(FACT_LABELS) as (keyof IntakeFacts)[]).filter(key => !["pep_office", "pep_asset_origin"].includes(key) || pep).map(key =>
@@ -294,7 +314,7 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
             </div>
             {workspace?.facts_confirmed_at ? <p className="mt-3 text-xs text-muted-foreground">{tx("Последнее подтверждение", "Zuletzt bestätigt")}: {formatIntakeDate(workspace.facts_confirmed_at)}</p> : null}
           </OrderWizardSection>
-          {editingFacts ? <OrderWizardSection title={tx("Обновить данные", "Angaben aktualisieren")}>
+          {editingFacts ? <OrderWizardSection icon={UserRoundPen} title={tx("Обновить данные", "Angaben aktualisieren")}>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {(Object.keys(FACT_LABELS) as (keyof IntakeFacts)[]).filter(key => !["pep_office", "pep_asset_origin"].includes(key) || pep).map(key =>
                 <Field key={key} label={FACT_LABELS[key][language]}>{key.startsWith("pep_") && ["pep_contract_partner", "pep_beneficial_owner"].includes(key) ?
@@ -307,7 +327,7 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
           </OrderWizardSection> : null}
         </> : null}
 
-        {step === 1 ? <><OrderWizardSection title={tx("Новое обращение", "Neuer Behandlungsanlass")}>
+        {step === 1 ? <><OrderWizardSection icon={ClipboardPlus} title={tx("Новое обращение", "Neuer Behandlungsanlass")}>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2"><Field label={tx("Цель и потребности этого заказа", "Ziel und Bedarf dieses Auftrags")}><textarea className={textareaClass} rows={4} value={data.needs_description} onChange={event => patch({ needs_description: event.target.value })} /></Field></div>
             <Field label={tx("Дата начала", "Beginn")}><Input type="date" value={data.date_from ?? ""} onChange={event => patch({ date_from: event.target.value || null })} /></Field>
@@ -325,18 +345,18 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
             {data.needs_description ? <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">{data.needs_description}</div> : null}
             {selectedWorkTypes.length ? <div className="space-y-2"><h4 className="flex items-center gap-2 text-xs font-semibold"><SectionHeading icon={Timer}>{tx("Виды работ и часы", "Leistungsarten und Stunden")}</SectionHeading></h4><SelectedWorkTypesSummary workTypes={selectedWorkTypes} specializationLabels={new Map(selectedSpecializations.map(item => [item.id, intakeSpecializationName(item, lang)]))} lang={lang} tx={tx} /></div> : null}
           </OrderWizardLinesTable>
-          <OrderWizardSection title={tx("Условия оплаты", "Zahlungsbedingungen")}>
+          <OrderWizardSection icon={CreditCard} title={tx("Условия оплаты", "Zahlungsbedingungen")}>
             <OrderPrepaymentFields value={data} maxAmount={amount} lang={lang} onChange={patch} />
             <Button type="button" variant="outline" className="h-auto min-h-9 whitespace-normal text-left" onClick={() => void run(async () => { await prepare(data); })}><Save className="size-3.5 shrink-0" />{tx("Сохранить услуги и подготовить смету", "Leistungen speichern und Kostenvoranschlag erstellen")}</Button>
           </OrderWizardSection>
         </> : null}
 
-        {step === 3 ? <OrderWizardSection title={tx("Рамочный договор", "Rahmenvertrag")}>
+        {step === 3 ? <OrderWizardSection icon={FileSignature} title={tx("Рамочный договор", "Rahmenvertrag")}>
           <Badge variant="outline" className="border-primary/20 bg-primary/10 text-primary">{periodLabel}</Badge>
           <Field label={tx("Рамочный договор", "Rahmenvertrag")}><NativeComboboxSelect aria-label={tx("Рамочный договор", "Rahmenvertrag")} disabled={busy} className="h-9 w-full text-xs" value={data.contract_id ?? ""} onChange={event => patch({ contract_id: event.target.value || null })}><option value="">{tx("Выберите договор", "Vertrag auswählen")}</option>{contracts.map(contract => <option key={contract.id} value={contract.id}>{contract.contract_number} · {CONTRACT_USABILITY_LABELS[contractUsability(contract)][language]}</option>)}</NativeComboboxSelect></Field>
           {existingContracts}
           {selectedContract ? <p className={`mt-3 text-sm ${isContractUsable(selectedContract) ? "text-emerald-700" : "text-amber-700"}`}>{isContractUsable(selectedContract) ? tx("Договор подписан и действует бессрочно, пока не расторгнут.", "Der unterzeichnete Vertrag gilt unbefristet, bis er gekündigt wird.") : tx("Этот договор нельзя использовать: нужен подписанный и не расторгнутый рамочный договор.", "Dieser Vertrag kann nicht verwendet werden: Erforderlich ist ein unterzeichneter, nicht gekündigter Rahmenvertrag.")}</p> : null}
-          <details className="mt-5 rounded-lg border p-4"><summary className="cursor-pointer font-medium">{tx("Создать новый рамочный договор", "Neuen Rahmenvertrag erstellen")}</summary><p className="mt-3 text-sm text-muted-foreground">{tx("Рамочный договор бессрочный: после подписания он действует для всех заказов, пока не будет расторгнут.", "Der Rahmenvertrag ist unbefristet: Nach der Unterzeichnung gilt er für alle Aufträge, bis er gekündigt wird.")}</p><Button type="button" className="mt-3" onClick={() => void run(async () => {
+          <details className="group mt-3 rounded-lg border border-border p-3"><summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-md focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden"><SectionHeading icon={FilePlus2}>{tx("Создать новый рамочный договор", "Neuen Rahmenvertrag erstellen")}</SectionHeading><ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground group-open:rotate-180" /></summary><p className="mt-3 text-sm text-muted-foreground">{tx("Рамочный договор бессрочный: после подписания он действует для всех заказов, пока не будет расторгнут.", "Der Rahmenvertrag ist unbefristet: Nach der Unterzeichnung gilt er für alle Aufträge, bis er gekündigt wird.")}</p><Button type="button" className="mt-3" onClick={() => void run(async () => {
             const draft = await persist(data);
             const contract = await createContract({ patient_id: patient.id, status: "draft", client_reference: `order-intake:${draft.order_id}:framework` });
             setContracts(await fetchContracts(`/framework-contracts?patient_id=${patient.id}`));
@@ -346,12 +366,12 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
 
         {step === 4 ? <>
           {patientDocuments}
-          <OrderWizardSection flush title={tx("Сохранённые договоры пациента", "Gespeicherte Patientenverträge")}>{existingContracts}</OrderWizardSection>
-          {pep ? <OrderWizardSection title={tx("Актуальная проверка PEP", "Aktuelle PEP-Prüfung")}><div className="grid gap-3 sm:grid-cols-2">{([
+          <OrderWizardSection flush icon={FolderArchive} title={tx("Сохранённые договоры пациента", "Gespeicherte Patientenverträge")}>{existingContracts}</OrderWizardSection>
+          {pep ? <OrderWizardSection icon={ShieldCheck} title={tx("Актуальная проверка PEP", "Aktuelle PEP-Prüfung")}><div className="grid gap-3 sm:grid-cols-2">{([
             ["risk_reason", "Причина проверки", "Prüfungsgrund"], ["manager_approval_name", "Согласовал руководитель", "Freigabe durch Führungskraft"],
             ["continuous_monitoring", "Порядок дальнейшего контроля", "Laufende Überwachung"], ["reviewer_name", "Проверил", "Geprüft von"],
           ] as const).map(([key, ru, de]) => <Field key={key} label={tx(ru, de)}><Input value={data.aml_review[key]} onChange={event => patch({ aml_review: { ...data.aml_review, [key]: event.target.value } })} /></Field>)}<Field label={tx("Дата проверки", "Prüfdatum")}><Input type="date" value={data.aml_review.review_date ?? ""} onChange={event => patch({ aml_review: { ...data.aml_review, review_date: event.target.value || null } })} /></Field></div></OrderWizardSection> : null}
-          <OrderWizardSection flush title={tx("Документы этого заказа", "Dokumente dieses Auftrags")}>
+          <OrderWizardSection flush icon={Files} title={tx("Документы этого заказа", "Dokumente dieses Auftrags")}>
             <div className="flex flex-wrap items-center gap-2 border-b border-border/60 p-2.5">
               <div className="w-full min-w-0 sm:w-80"><NativeComboboxSelect aria-label={tx("Документ для подготовки", "Dokument zur Erstellung")} disabled={busy} className="h-9 w-full text-xs" value={selectedDocumentKind} onChange={event => setDocumentKind(event.target.value)}>
                 {DOC_KINDS.filter(([kind]) => kind !== "enhanced_due_diligence" || pep).map(([kind, ru, de]) => <option key={kind} value={kind}>{tx(ru, de)}</option>)}
@@ -374,7 +394,7 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
           </OrderWizardSection>
         </> : null}
 
-        {step === 5 ? <OrderWizardSection title={tx("Проверка перед оформлением", "Prüfung vor Abschluss")}>
+        {step === 5 ? <OrderWizardSection icon={ListChecks} title={tx("Проверка перед оформлением", "Prüfung vor Abschluss")}>
           <dl className="grid gap-3 rounded-lg border border-border/60 bg-muted/20 p-3 sm:grid-cols-3 [&_dd]:mt-1 [&_dd]:font-mono [&_dd]:text-sm [&_dd]:font-medium"><div><dt className="text-xs text-muted-foreground">{tx("Период", "Zeitraum")}</dt><dd>{periodLabel}</dd></div><div><dt className="text-xs text-muted-foreground">{tx("Стоимость", "Gesamtpreis")}</dt><dd>{amountLabel}</dd></div><div><dt className="text-xs text-muted-foreground">{tx("Договор", "Vertrag")}</dt><dd>{selectedContract?.contract_number ?? "—"}</dd></div></dl>
           <OrderWizardChecksTable checks={workspace?.checks ?? []} lang={lang} busy={busy} onStepChange={nextStep => void run(async () => { await persist({ ...data, step: nextStep }); })} />
           <Button type="button" variant="outline" className="mt-4" onClick={reviewEvidence}><RefreshCw className="size-4" />{tx("Проверить снова", "Erneut prüfen")}</Button>

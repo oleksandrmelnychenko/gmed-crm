@@ -1,6 +1,6 @@
 import { PortalInfoRow, PortalListItem, PortalDateChip } from "./ui/portal-page-layout";
 import { startTransition, useEffect, useMemo, useReducer, type FormEvent, type ReactNode, type SetStateAction } from "react";
-import { CalendarPlus, CheckCircle2, LoaderCircle, MessageCircle, RefreshCw, XCircle } from "lucide-react";
+import { CalendarPlus, CheckCircle2, ClipboardPenLine, ListChecks, LoaderCircle, MessageCircle, RefreshCw, XCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -858,7 +858,7 @@ function useStaffRecommendationsWorkspaceContent() {
 
   if (lookupLoading) {
     return (
-      <Section title={t.patient_recommendations_staff_title}>
+      <Section icon={ClipboardPenLine} title={t.patient_recommendations_staff_title}>
         <TabLoader />
       </Section>
     );
@@ -1082,7 +1082,7 @@ function useStaffRecommendationsWorkspaceContent() {
         </form>
       ) : null}
 
-      <Section title={t.patient_recommendations_staff_patient_recommendations} accessory={<CountBadge>{recommendations.length}</CountBadge>}>
+      <Section icon={ListChecks} title={t.patient_recommendations_staff_patient_recommendations} accessory={<CountBadge>{recommendations.length}</CountBadge>}>
         {!selectedPatientId ? (
           <EmptyCell>{t.patient_recommendations_staff_select_patient_empty}</EmptyCell>
         ) : patientLoading ? (

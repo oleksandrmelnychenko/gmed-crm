@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { BadgeCheck, LoaderCircle } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
@@ -91,7 +91,7 @@ export function OrderSubscriptionCard({
       data-testid="order-subscription"
       aria-label={de ? "Tarif" : "Тариф"}
     >
-      <AdminSectionTitle>
+      <AdminSectionTitle icon={BadgeCheck}>
         {de ? "Tarif · Kontotyp des Patienten" : "Тариф · тип аккаунта пациента"}
       </AdminSectionTitle>
       <div className="space-y-3 text-[13px] leading-5">

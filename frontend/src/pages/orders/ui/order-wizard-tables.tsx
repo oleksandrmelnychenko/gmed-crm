@@ -5,7 +5,7 @@ import { serviceDescriptionItems, serviceDescriptionText } from "@/lib/service-d
 import { formatMoneyLabel, moneyLineAmounts, roundCents } from "@/lib/money";
 import { money, germanDateLabel, servicePriceOptionValue, parseServicePriceOptionValue, serviceBillingUnitLabel, resolveServiceDescriptionItems } from "../model/order-service-presentation";
 import { useState, type ReactNode } from "react";
-import { ArrowRight, Check, Download, ListOrdered, Trash2 } from "lucide-react";
+import { ArrowRight, Check, Download, ListOrdered, Trash2, type LucideIcon } from "lucide-react";
 import { PaperSignatureConfirmButton } from "@/pages/documents/ui/paper-signature-confirm";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { DataTable } from "@/components/data-table/data-table";
@@ -24,12 +24,16 @@ import { formatIntakeDate, INTAKE_CHECK_LABELS } from "../model/order-intake";
 import type { IntakeCheck, IntakeLine } from "../model/order-intake";
 import { PASSPORT_REVIEW_LABELS } from "../model/order-document-review";
 
-export function OrderWizardSection({ title, accessory, children, flush = false }: {
-  title: ReactNode; accessory?: ReactNode; children: ReactNode; flush?: boolean;
+export function OrderWizardSection({ icon, title, accessory, children, flush = false }: {
+  icon: LucideIcon;
+  title: ReactNode;
+  accessory?: ReactNode;
+  children: ReactNode;
+  flush?: boolean;
 }) {
   return <section className="min-w-0 rounded-lg border border-border/70 bg-card shadow-sm">
     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2.5">
-      <AdminSectionTitle>{title}</AdminSectionTitle>
+      <AdminSectionTitle icon={icon}>{title}</AdminSectionTitle>
       {accessory}
     </div>
     <div className={flush ? "min-w-0" : "space-y-3 p-3 sm:p-4"}>{children}</div>

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { LoaderCircle } from "lucide-react";
+import { FolderArchive, LoaderCircle } from "lucide-react";
 
 import type { Lang } from "@/lib/i18n";
 import { useRepeatPatientReview } from "@/pages/leads/model/use-repeat-patient-review";
@@ -41,7 +41,7 @@ export function OrderExistingPatientDocuments({ patientId, lang, selectedContrac
   return <div data-order-existing-patient-documents className="space-y-4">
     <OrderPatientDocumentReview readiness={review.readiness} documents={review.documents} dateTo={null} lang={lang} busy={review.loading} compact
       onRefresh={() => { void review.refresh().catch(() => undefined); }} onOpenDocuments={onOpenPatient} onSaveExpiry={review.saveExpiry} />
-    <OrderWizardSection flush title={tx("Сохранённые договоры пациента", "Gespeicherte Patientenverträge")}>
+    <OrderWizardSection flush icon={FolderArchive} title={tx("Сохранённые договоры пациента", "Gespeicherte Patientenverträge")}>
       <OrderExistingContractsTable contracts={review.contracts} selectedId={chosen} lang={lang} busy={review.loading} onSelect={onSelectContract} />
       <p className="border-t border-border/60 px-3 py-2.5 text-xs leading-5 text-muted-foreground">
         {chosen

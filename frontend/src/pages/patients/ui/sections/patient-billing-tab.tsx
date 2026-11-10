@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Ban, CheckCircle2, FilePlus2, LoaderCircle, ReceiptText, RefreshCw, Undo2, Wallet } from "lucide-react";
+import { Ban, BriefcaseMedical, CheckCircle2, FilePlus2, LoaderCircle, ReceiptText, RefreshCw, Undo2, Wallet } from "lucide-react";
 
 import { SectionHeading } from "@/components/ui/section-heading";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
@@ -396,7 +396,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
         {created ? <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"><div className="flex flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2"><CheckCircle2 className="size-4" />{copy.success}</span><StaffLink className="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground" to={`/invoices?invoice=${created.id}`}>{copy.open}</StaffLink></div></div> : null}
 
         <section className="overflow-hidden rounded-xl border border-border/70">
-          <div className="border-b border-border/60 px-4 py-3"><AdminSectionTitle>{copy.services}</AdminSectionTitle></div>
+          <div className="border-b border-border/60 px-4 py-3"><AdminSectionTitle icon={BriefcaseMedical}>{copy.services}</AdminSectionTitle></div>
           {!quote || !serviceLines.some(line => availableQuantity(line) > 0) ? <p className="px-4 py-5 text-sm text-muted-foreground">{overageOnly ? copy.overageOnly(formatMoneyAmount(String(overageTotal), activeCurrency)) : <>{copy.noServices}{quote ? ` ${partlyCreditedHint(lang)}` : ""}</>}</p> : <div className="divide-y divide-border/60">
             {serviceLines.map((line, index) => {
               const available = availableQuantity(line);
@@ -413,7 +413,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
           </div>}
         </section>
 
-        <DataTableSurface rows={[...readyExpenses, ...otherExpenses]} columns={expenseColumns} rowId={row => row.id} dictionary={t as unknown as Record<string, string>} defaultDensity="compact" storageKey={`patient-billing-expenses-${patientId}`} mobilePrimaryColumnId="document" mobileDetailColumnIds={["provider", "payment", "patient_invoice", "amount", "waiver"]} emptyState={copy.noExpenses} toolbarStart={<AdminSectionTitle>{copy.expenses}</AdminSectionTitle>} />
+        <DataTableSurface rows={[...readyExpenses, ...otherExpenses]} columns={expenseColumns} rowId={row => row.id} dictionary={t as unknown as Record<string, string>} defaultDensity="compact" storageKey={`patient-billing-expenses-${patientId}`} mobilePrimaryColumnId="document" mobileDetailColumnIds={["provider", "payment", "patient_invoice", "amount", "waiver"]} emptyState={copy.noExpenses} toolbarStart={<AdminSectionTitle icon={ReceiptText}>{copy.expenses}</AdminSectionTitle>} />
 
         <div className="sticky bottom-0 -mx-4 -mb-4 flex flex-wrap items-center justify-between gap-3 border-t border-border bg-card/95 px-4 py-3 backdrop-blur">
           <div><p className="text-xs text-muted-foreground">{copy.total}</p><p className="font-mono text-lg font-semibold tabular-nums">{formatMoneyAmount(String(total), activeCurrency)}</p></div>

@@ -6,8 +6,12 @@ import {
   ClipboardCheck,
   ClipboardList,
   ContactRound,
+  FileDown,
+  FileSignature,
   FileText,
+  FolderOpen,
   IdCard,
+  ListTodo,
   LoaderCircle,
   MapPin,
   NotebookPen,
@@ -16,6 +20,7 @@ import {
   Phone,
   PhoneCall,
   Plus,
+  ReceiptText,
   Scale,
   ShieldCheck,
   type LucideIcon,
@@ -455,12 +460,14 @@ function PatientEmergencyContactSummary({
 }
 
 function ProfileActionCard({
+  icon,
   title,
   description,
   disabled = false,
   busy = false,
   onClick,
 }: {
+  icon: LucideIcon;
   title: ReactNode;
   description: ReactNode;
   disabled?: boolean;
@@ -474,7 +481,7 @@ function ProfileActionCard({
       className="group grid w-full min-w-0 grid-cols-[minmax(0,1fr)_1.75rem] items-center gap-x-3 gap-y-1 rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:border-primary/40 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60"
       onClick={onClick}
     >
-      <h3 className="min-w-0 text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
+      <SectionHeading icon={icon}>{title}</SectionHeading>
       <p className="col-start-1 row-start-2 min-w-0 text-xs leading-5 text-muted-foreground">
         {description}
       </p>
@@ -1251,20 +1258,18 @@ function usePatientProfileTabContent({
       <PatientFormSection
         icon={Scale}
         className="patient-legal-section overflow-hidden"
-        title={
-          <span className="inline-flex items-center gap-2">
-            {t.patients_legal_status}
-            {legalStatusHidden ? null : <LegalStatusPill status={legalStatus} />}
-          </span>
-        }
-        accessory={
-          canEditPatientProfile && !legalStatusHidden ? (
-            <Button type="button" size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleLegalStatusSheetOpenChange(true)}>
-              <Pencil className="size-3.5" />
-              {t.patient_profile_update_status}
-            </Button>
-          ) : null
-        }
+        title={t.patients_legal_status}
+        accessory={legalStatusHidden ? null : (
+          <div className="flex flex-wrap items-center gap-2">
+            <LegalStatusPill status={legalStatus} />
+            {canEditPatientProfile ? (
+              <Button type="button" size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleLegalStatusSheetOpenChange(true)}>
+                <Pencil className="size-3.5" />
+                {t.patient_profile_update_status}
+              </Button>
+            ) : null}
+          </div>
+        )}
       >
         {legalStatusHidden ? (
           <p className="rounded-lg border border-border/70 bg-card px-3 py-2.5 text-sm text-muted-foreground">
@@ -1416,6 +1421,7 @@ function usePatientProfileTabContent({
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {canCreateTasks && id ? (
             <ProfileActionCard
+              icon={ListTodo}
               title={l("patients_create_task_for_this_patient")}
               description={l("patients_create_internal_or_external_task_linked_to_this_patient")}
               onClick={() => window.dispatchEvent(new CustomEvent(OPEN_PATIENT_TASK_CREATOR_EVENT, { detail: { patientId: id } }))}
@@ -1423,6 +1429,7 @@ function usePatientProfileTabContent({
           ) : null}
           {canExportPatientCompliance ? (
             <ProfileActionCard
+              icon={FileDown}
               title={t.patient_profile_dsgvo_export}
               description={l("patients_generate_a_dsgvo_export_for_this_patient")}
               disabled={complianceExportBusy}
@@ -1432,6 +1439,7 @@ function usePatientProfileTabContent({
           ) : null}
           {canOpenComplianceWorkspace ? (
             <ProfileActionCard
+              icon={ShieldCheck}
               title={t.patient_profile_open_dsgvo_workspace}
               description={l("patients_open_the_compliance_workspace_for_this_patient")}
               onClick={() => window.open(`/admin/compliance?patient=${id}`, "_blank", "noopener,noreferrer")}
@@ -1439,6 +1447,7 @@ function usePatientProfileTabContent({
           ) : null}
           {canViewDocuments ? (
             <ProfileActionCard
+              icon={FolderOpen}
               title={t.patient_profile_open_documents}
               description={l("patients_review_documents_linked_to_this_patient")}
               onClick={() => onOpenTab("documents")}
@@ -1446,6 +1455,7 @@ function usePatientProfileTabContent({
           ) : null}
           {canViewContracts ? (
             <ProfileActionCard
+              icon={FileSignature}
               title={t.patient_profile_open_contracts}
               description={l("patients_open_this_patient_s_contracts_and_confirmations")}
               onClick={() => onOpenTab("contracts")}
@@ -1453,6 +1463,7 @@ function usePatientProfileTabContent({
           ) : null}
           {canViewInvoices ? (
             <ProfileActionCard
+              icon={ReceiptText}
               title={t.patient_profile_open_invoices}
               description={l("patients_review_invoices_and_payments_for_this_patient")}
               onClick={() => onOpenTab("invoices")}

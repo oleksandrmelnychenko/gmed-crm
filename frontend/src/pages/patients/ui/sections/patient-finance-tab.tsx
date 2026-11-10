@@ -141,7 +141,7 @@ export function PatientFinanceTab({ patientId, onOpenInvoices }: { patientId: st
         <WritableScope>
         <div className="space-y-2 p-3">
           <div className="flex flex-wrap gap-1.5">
-            {(["month", "previous_month", "quarter", "year", "all", "custom"] as const).map(value => <Button key={value} type="button" size="sm" variant={preset === value ? "default" : "ghost"} aria-pressed={preset === value} onClick={() => changePreset(value)}>{l[value]}</Button>)}
+            {(["month", "previous_month", "quarter", "year", "all", "custom"] as const).map(value => <Button key={value} type="button" size="sm" variant="ghost" data-workspace-tab aria-pressed={preset === value} onClick={() => changePreset(value)}>{l[value]}</Button>)}
           </div>
           <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_10rem] lg:max-w-3xl">
             <Field label={l.from} htmlFor="patient-finance-from"><Input id="patient-finance-from" type="date" value={range.from} onChange={event => { setPreset("custom"); setSelectedMonth(""); setRange(current => ({ ...current, from: event.target.value })); }} /></Field>

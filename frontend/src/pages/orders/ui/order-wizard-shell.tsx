@@ -51,12 +51,12 @@ export function OrderWizardShell({ title, description, lang, steps, step, disabl
         </div>
       </header>
       <nav ref={navRef} aria-label={lang === "ru" ? "Этапы заказа" : "Auftragsschritte"} className="shrink-0 overflow-x-auto overscroll-x-contain border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div className="flex w-max min-w-full px-3 py-2 sm:px-4">
-          <div ref={tabsRef} className="t-tabs lead-wizard-step-tabs" role="tablist">
+        <div className="flex w-max min-w-full justify-center px-3 py-2 sm:px-4">
+          <div ref={tabsRef} className="flex w-max items-center gap-1" role="tablist">
             {steps.map((label, index) => {
               const Icon = STEP_ICONS[index];
-              return <button key={index} type="button" role="tab" id={`order-wizard-tab-${index}`} data-step={index} aria-controls="order-wizard-step-panel" aria-selected={step === index} aria-current={step === index ? "step" : undefined} tabIndex={step === index ? 0 : -1}
-                className="t-tab lead-wizard-step-tab focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50" disabled={disabled} onClick={() => onStepChange(index)}
+              return <button key={index} type="button" role="tab" data-workspace-tab id={`order-wizard-tab-${index}`} data-step={index} aria-controls="order-wizard-step-panel" aria-selected={step === index} aria-current={step === index ? "step" : undefined} tabIndex={step === index ? 0 : -1}
+                className="inline-flex min-h-9 shrink-0 items-center gap-1.5 px-2.5 py-1.5 text-[13px] font-medium transition-colors max-sm:min-h-10 disabled:cursor-not-allowed disabled:opacity-50" disabled={disabled} onClick={() => onStepChange(index)}
                 onKeyDown={event => {
                   const next = event.key === "ArrowRight" ? (index + 1) % steps.length : event.key === "ArrowLeft" ? (index + steps.length - 1) % steps.length : event.key === "Home" ? 0 : event.key === "End" ? steps.length - 1 : null;
                   if (next === null) return;
@@ -64,7 +64,7 @@ export function OrderWizardShell({ title, description, lang, steps, step, disabl
                   tabsRef.current?.querySelector<HTMLElement>(`[data-step="${next}"]`)?.focus();
                 }}>
                 <Icon aria-hidden className="size-4 shrink-0" /><span className="whitespace-nowrap">{label}</span>
-                <span aria-hidden data-count className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 font-mono text-[10px] leading-none ${step === index ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"}`}>{index + 1}</span>
+                <span aria-hidden data-count className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 font-mono text-[10px] leading-none ${step === index ? "bg-background text-foreground" : "bg-muted text-muted-foreground"}`}>{index + 1}</span>
               </button>;
             })}
           </div>

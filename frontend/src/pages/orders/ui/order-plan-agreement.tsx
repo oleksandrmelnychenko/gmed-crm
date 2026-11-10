@@ -1,5 +1,6 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useRef, useState } from "react";
-import { FileText, LoaderCircle } from "lucide-react";
+import { CalendarCheck2, FileText, LoaderCircle } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
 import { Banner, StatusBadge } from "@/components/ui-shell";
@@ -199,9 +200,7 @@ export function OrderPlanAgreement({
   return (
     <div data-testid="order-plan-agreement" className="rounded-lg border border-border bg-card p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-[13px] font-semibold text-foreground">
-          {tx("План для пациента", "Plan für den Patienten")}
-        </div>
+        <h3><SectionHeading icon={CalendarCheck2}>{tx("План для пациента", "Plan für den Patienten")}</SectionHeading></h3>
         <StatusBadge tone={statusInfo?.tone ?? "neutral"}>{statusLabel}</StatusBadge>
       </div>
       {statusSetLine ? (

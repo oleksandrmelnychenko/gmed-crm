@@ -188,7 +188,7 @@ export function PatientPortalAccessDetail({
     <div className="@container space-y-3 border-y border-border/60 bg-muted/40 px-4 py-3 text-[13px] text-foreground" data-testid="patient-portal-access">
       <div className="grid items-center gap-3 @[52rem]:grid-cols-[minmax(0,1fr)_auto]">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <AdminSectionTitle>{de ? "Patientenportal" : "Портал пациента"}</AdminSectionTitle>
+          <AdminSectionTitle icon={KeyRound}>{de ? "Patientenportal" : "Портал пациента"}</AdminSectionTitle>
           <StatusChip tone={minor ? "neutral" : leadPortalStatusTone(status)}>{minor
             ? de ? "Über Eltern / gesetzliche Vertretung" : "Через родителя / представителя"
             : leadPortalStatusLabel(status, lang)}</StatusChip>
@@ -326,12 +326,9 @@ export function PatientPortalAccessDetail({
                   <button
                     key={option.value}
                     type="button"
+                    data-workspace-tab
                     aria-pressed={language === option.value}
-                    className={
-                      language === option.value
-                        ? "rounded-md border border-primary/40 bg-primary/10 px-2 py-0.5 text-xs text-primary"
-                        : "rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground"
-                    }
+                    className="px-2 py-0.5 text-xs"
                     onClick={() => setEmailLanguage(option.value)}
                   >
                     {option.label}

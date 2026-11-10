@@ -20,28 +20,37 @@ import {
   BadgeCheck,
   BadgeInfo,
   BookOpen,
+  BriefcaseBusiness,
   BriefcaseMedical,
   Building2,
   CalendarClock,
+  CalendarRange,
   ChevronDown,
+  ClipboardList,
   ClipboardPenLine,
   Contact,
   ContactRound,
   Copy,
   ExternalLink,
+  FileBadge,
   FileSignature,
   GitBranch,
   Hospital,
+  IdCard,
   ListTree,
   LoaderCircle,
   Mail,
   MapPin,
+  MessageSquareText,
   MessagesSquare,
   Network,
   NotebookPen,
+  NotebookText,
   Pencil,
   Phone,
   Plus,
+  ReceiptText,
+  ScanSearch,
   Search,
   ShieldCheck,
   SlidersHorizontal,
@@ -51,8 +60,8 @@ import {
   Tags,
   Trash2,
   UserRoundCog,
-  UserRoundPen,
   UsersRound,
+  WalletCards,
   X,
 } from "lucide-react";
 
@@ -209,6 +218,7 @@ import type {
 import { ProviderHierarchyTimeline } from "./ui/provider-hierarchy-timeline";
 import { ProviderChildrenSection } from "./ui/provider-children-section";
 import { ProviderPeopleCatalog } from "./ui/provider-people-catalog";
+import { providerCategoryIcon } from "./ui/provider-category-icon";
 import { ProviderStatusPill } from "./ui/provider-status-pill";
 import { ProviderDocumentsSection } from "./ui/provider-documents-section";
 import { useProvidersListTableModel } from "./ui/hooks/use-providers-list-table-model";
@@ -3791,23 +3801,29 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           }
         />
 
-        <div className="mx-auto flex w-fit rounded-lg border border-border bg-card p-1">
+        <div role="group" aria-label={providerPageCopy.title} className="mx-auto flex w-fit max-w-full flex-wrap justify-center gap-1 rounded-lg border border-border bg-card p-1">
           <Button
             type="button"
-            variant={catalogMode === "providers" ? "default" : "ghost"}
+            variant="ghost"
+            data-workspace-tab
+            aria-pressed={catalogMode === "providers"}
             size="sm"
             className="h-8 rounded-md px-3"
             onClick={() => setCatalogMode("providers")}
           >
+            <Building2 aria-hidden="true" className="size-4" />
             {providerPageCopy.title}
           </Button>
           <Button
             type="button"
-            variant={catalogMode === "people" ? "default" : "ghost"}
+            variant="ghost"
+            data-workspace-tab
+            aria-pressed={catalogMode === "people"}
             size="sm"
             className="h-8 rounded-md px-3"
             onClick={() => setCatalogMode("people")}
           >
+            <UsersRound aria-hidden="true" className="size-4" />
             {providerPageCopy.peopleLabel}
           </Button>
         </div>
@@ -4106,7 +4122,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
           <form onSubmit={handleCreateProvider} className="flex flex-1 min-h-0 flex-col">
             <AdminSheetScaffold
-              icon={Hospital}
+              icon={permissions.forceNonMedical ? Building2 : Hospital}
               title={providerPageCopy.newLabel}
               description={providerPageCopy.createDescription}
               footer={(
@@ -4823,7 +4839,7 @@ function ProviderDoctorDetailSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <AdminSheetScaffold
-          icon={Stethoscope}
+          icon={isMedicalProvider ? Stethoscope : ContactRound}
           title={
             displayName ||
             (isMedicalProvider ? t.providers_doctor_detail : t.providers_contact_person_detail)
@@ -4859,7 +4875,7 @@ function ProviderDoctorDetailSheet({
           }
         >
           <div className="space-y-3 rounded-xl p-4">
-            <Section icon={Stethoscope} title={isMedicalProvider ? l("providers_doctor_profile") : t.providers_contact_profile}>
+            <Section icon={isMedicalProvider ? IdCard : Contact} title={isMedicalProvider ? l("providers_doctor_profile") : t.providers_contact_profile}>
               <ReadOnlyLine label={l("patients_display_name")} value={displayName || t.common_not_set} wrap />
               {isMedicalProvider ? (
                 <ReadOnlyLine label={l("providers_doctor_role")} value={role || t.common_not_set} />
@@ -5138,12 +5154,10 @@ function PaginatedLinkedPatientsGrid({
 function CollapsibleLinkedPatientsPanel({
   patients,
   cardClassName,
-  showMarker = false,
   emptyContent,
 }: {
   patients: LinkedPatient[];
   cardClassName?: string;
-  showMarker?: boolean;
   emptyContent?: ReactNode;
 }) {
   const { t } = useLang();
@@ -5162,9 +5176,7 @@ function CollapsibleLinkedPatientsPanel({
         }}
       >
         <span className="flex min-w-0 items-center gap-2">
-          {showMarker ? <SectionHeading icon={UsersRound}>{l("providers_linked_patients")}</SectionHeading> : <span className="truncate text-[13px] font-semibold tracking-tight text-foreground">
-            {l("providers_linked_patients")}
-          </span>}
+          <SectionHeading icon={UsersRound}>{l("providers_linked_patients")}</SectionHeading>
           <span className="shrink-0 rounded-full border border-border bg-card px-2 py-0.5 text-[11px] font-semibold leading-none text-muted-foreground">
             {patients.length}
           </span>
@@ -5331,7 +5343,7 @@ function ProviderEditFormSheet({
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
           <AdminSheetScaffold
-            icon={UserRoundPen}
+            icon={providerCategoryIcon(detail.provider_type, detail.taxonomy_node?.code)}
             title={t.patients_edit}
             description={detail.name || t.providers_detail}
             footer={
@@ -5416,7 +5428,7 @@ function ProviderDoctorFormSheet({
   return (
     <Dialog dirty={dirty} requireChanges={Boolean(form.id)} open={open} onOpenChange={onOpenChange}>
       <AdminDialogScaffold
-        icon={ContactRound}
+        icon={isMedicalProvider ? Stethoscope : ContactRound}
         onSubmit={onSubmit}
         title={form.id ? detailLabel : createLabel}
         footer={
@@ -5432,7 +5444,7 @@ function ProviderDoctorFormSheet({
         <div className="space-y-3">
           {error ? <Banner tone="error">{error}</Banner> : null}
           {isMedicalProvider && !form.id ? (
-            <AdminFormSection title={l("providers_existing_doctor_section")}>
+            <AdminFormSection icon={ScanSearch} title={l("providers_existing_doctor_section")}>
               <Field label={l("providers_existing_doctor_select")}>
                 <NativeComboboxSelect
                   value={form.sharedIdentityId || ""}
@@ -5715,7 +5727,7 @@ function ProviderServiceFormSheet({
   return (
     <Dialog dirty={dirty} requireChanges={Boolean(form.id)} open={open} onOpenChange={onOpenChange}>
       <AdminDialogScaffold
-        icon={BriefcaseMedical}
+        icon={providerType === "medical" ? BriefcaseMedical : BriefcaseBusiness}
         onSubmit={onSubmit}
         title={form.id ? t.providers_service_detail : t.providers_service_new}
         footer={
@@ -6454,7 +6466,7 @@ function ProviderOverviewSection({
   return (
     <section className={cn(providerDetailPanelClassName, "space-y-3 bg-card")}>
       <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-        <SectionHeading icon={Hospital}>{l("providers_provider_overview")}</SectionHeading>
+        <SectionHeading icon={providerCategoryIcon(detail.provider_type, detail.taxonomy_node?.code)}>{l("providers_provider_overview")}</SectionHeading>
       </h3>
       <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-4">
         <div className="space-y-2.5">
@@ -6471,7 +6483,7 @@ function ProviderOverviewSection({
             <div className="sm:col-span-2 rounded-xl border border-border/70 bg-muted/20 p-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-foreground">{financialText.title}</p>
+                  <h4><SectionHeading icon={ReceiptText}>{financialText.title}</SectionHeading></h4>
                   {financialSummaryBusy ? (
                     <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                       <LoaderCircle className="size-3.5 animate-spin" />
@@ -9153,7 +9165,7 @@ function ContactPersonProfileFields({
   const l = (key: string) => t.uiText[key] ?? key;
 
   return (
-    <AdminFormSection title={t.providers_contact_profile}>
+    <AdminFormSection icon={Contact} title={t.providers_contact_profile}>
       <div className="grid gap-3 md:grid-cols-2">
         <Field label={t.patients_first_name}>
           <Input
@@ -9248,7 +9260,7 @@ function DoctorProfileFields({
   ];
 
   return (
-    <AdminFormSection title={l("providers_doctor_profile")}>
+    <AdminFormSection icon={IdCard} title={l("providers_doctor_profile")}>
       <div className="grid gap-3 md:grid-cols-2">
         <Field label={t.patients_first_name}>
           <Input
@@ -9408,7 +9420,7 @@ function PersonContactFields({
     contactKind === "email" ? t.field_email : t.field_phone;
 
   return (
-    <AdminFormSection title={l("providers_contacts")}>
+    <AdminFormSection icon={Phone} title={l("providers_contacts")}>
       <div className="space-y-3">
         {contacts.map((contact) => (
           <div
@@ -9562,7 +9574,7 @@ function DoctorLicenseFields({
   const l = (key: string) => t.uiText[key] ?? key;
 
   return (
-    <AdminFormSection title={l("providers_license")}>
+    <AdminFormSection icon={FileBadge} title={l("providers_license")}>
       <div className="grid gap-3 md:grid-cols-3">
         <Field label={l("providers_license_number")}>
           <Input
@@ -9602,7 +9614,7 @@ function DoctorNotesFields({
   const l = (key: string) => t.uiText[key] ?? key;
 
   return (
-    <AdminFormSection title={l("appointments_notes")}>
+    <AdminFormSection icon={NotebookText} title={l("appointments_notes")}>
       <Field label={t.providers_notes}>
         <textarea
           value={notes}
@@ -9660,7 +9672,7 @@ function StaffFormFields({
 
   return (
     <div className="space-y-3">
-      <AdminFormSection title={l("providers_staff_profile")}>
+      <AdminFormSection icon={ClipboardList} title={l("providers_staff_profile")}>
         <div className="grid gap-3 md:grid-cols-2">
           <Field label={t.patients_first_name}>
             <Input
@@ -9758,7 +9770,7 @@ function StaffFormFields({
         onUpdate={updateContact}
       />
 
-      <AdminFormSection title={l("appointments_notes")}>
+      <AdminFormSection icon={MessageSquareText} title={l("appointments_notes")}>
         <Field label={t.providers_notes}>
           <textarea
             value={form.notes}
@@ -9791,7 +9803,7 @@ function ServiceFormFields({
   const formAttributeKeys = taxonomyAttributeKeys(selectedTaxonomyNode);
   return (
     <div className="space-y-3">
-      <AdminFormSection title={l("providers_service")}>
+      <AdminFormSection icon={Tags} title={l("providers_service")}>
         <div className="grid gap-3 md:grid-cols-2">
           <Field label={t.providers_service_name} required>
             <Input
@@ -9849,7 +9861,7 @@ function ServiceFormFields({
         ) : null}
       </AdminFormSection>
 
-      <AdminFormSection title={l("providers_cost")}>
+      <AdminFormSection icon={WalletCards} title={l("providers_cost")}>
         <div className="grid gap-3 md:grid-cols-2">
           <Field label={l("providers_price_type")}>
             <NativeComboboxSelect
@@ -9934,7 +9946,7 @@ function ServiceFormFields({
         </div>
       </AdminFormSection>
 
-      <AdminFormSection title={l("providers_validity")}>
+      <AdminFormSection icon={CalendarRange} title={l("providers_validity")}>
         <div className="grid gap-3 md:grid-cols-2">
           <Field label={t.providers_service_valid_from}>
             <Input

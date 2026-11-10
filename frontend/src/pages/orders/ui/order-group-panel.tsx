@@ -1,5 +1,3 @@
-import { UsersRound } from "lucide-react";
-import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -228,15 +226,10 @@ export function OrderGroupPanel({
   const viewingHead = group.head.id === orderId;
 
   return (
-    <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 className="text-sm font-semibold text-foreground">
-          <SectionHeading icon={UsersRound}>{tx("Групповой заказ", "Auftragsgruppe")}</SectionHeading>
-        </h4>
-        <Badge variant="outline" className="rounded-full bg-background">
-          {roleLabel(group.head.order_role, tx)}
-        </Badge>
-      </div>
+    <div className="min-w-0">
+      <Badge variant="outline" className="rounded-full bg-background">
+        {roleLabel(group.head.order_role, tx)}
+      </Badge>
 
       <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
         <SummaryTile

@@ -9,8 +9,9 @@ import {
   type FormEvent,
   type SetStateAction,
 } from "react";
-import { CalendarClock, ContactRound, IdCard, LoaderCircle, Mail, Phone, Save } from "lucide-react";
+import { CalendarClock, ContactRound, IdCard, LoaderCircle, Mail, Phone, Save, UserRoundCheck } from "lucide-react";
 
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
@@ -275,7 +276,7 @@ function AssignmentsSection({
 
   return (
     <section className="space-y-2.5 rounded-xl border border-border/60 bg-card p-3.5">
-      <div className="text-sm font-semibold text-foreground">{t.patients_assign_owner}</div>
+      <AdminSectionTitle icon={UserRoundCheck}>{t.patients_assign_owner}</AdminSectionTitle>
 
       {assignmentError ? <Banner tone="error">{assignmentError}</Banner> : null}
 

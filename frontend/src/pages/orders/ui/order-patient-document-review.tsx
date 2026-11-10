@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Eye, RefreshCw } from "lucide-react";
+import { Check, Eye, FileSearch, RefreshCw } from "lucide-react";
 import { DataTable } from "@/components/data-table/data-table";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
@@ -93,7 +93,7 @@ export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang,
     { id: "status", label: tx("Статус", "Status"), accessor: row => row.status, minWidth: 250, render: row => <ReviewBadge ready={row.ready}>{row.status}</ReviewBadge> },
     { id: "detail", label: tx("Срок / сведения", "Gültigkeit / Angaben"), accessor: row => row.detail, minWidth: 245 },
   ];
-  return <OrderWizardSection flush title={tx("Проверка документов пациента", "Patientendokumente prüfen")}
+  return <OrderWizardSection flush icon={FileSearch} title={tx("Проверка документов пациента", "Patientendokumente prüfen")}
     accessory={<Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onRefresh}><RefreshCw className="size-3.5" />{tx("Проверить снова", "Erneut prüfen")}</Button>}>
     <DataTable rows={rows} columns={columns} rowId={row => row.key} density="compact" rowHeightOverrides={{ compact: compact ? 68 : 44 }} mobilePrimaryColumnId="document" className={tableClass}
       rowActionsWidth={compact ? 200 : 210} rowActions={row => row.action ? <Button type="button" size="sm" variant={row.ready ? "outline" : "default"} disabled={busy} onClick={row.action.onClick}>{row.action.label}</Button> : row.key.startsWith("request:") ? null : row.key === "debt" ? null : row.key === "passport" ? <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => { setExpiry(readiness.passport_expiry ?? ""); setEditing(true); }}>{tx("Обновить срок", "Gültigkeit ändern")}</Button> : <Button type="button" size="sm" variant={row.ready ? "outline" : "default"} disabled={busy} onClick={onOpenDocuments}><Eye className="size-3.5" />{tx("Посмотреть документы", "Dokumente ansehen")}</Button>} />
