@@ -1674,6 +1674,173 @@ async fn interpreter_team_lead_reviews_team_reports_without_patient_assignment()
             .unwrap();
     assert_eq!(first_booking, Some(replacement_id));
 
+    // The VISIT's own mark «an interpreter is needed» decides before the
+    // order's planning (owner 2026-11-10): a marked visit WITHOUT an order
+    // reaches the team lead, who makes the first assignment; a visit without
+    // the mark and without an order stays invisible.
+    let marked_title = format!("Marked visit without order {tag}");
+    let marked_visit = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        admin_id,
+        "medical",
+        &marked_title,
+        "2026-05-15",
+    )
+    .await;
+    let unmarked_visit = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        admin_id,
+        "medical",
+        &format!("Unmarked visit without order {tag}"),
+        "2026-05-16",
+    )
+    .await;
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{marked_visit}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    // Staff who edit the visit set the mark in the appointment form.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{marked_visit}/update"),
+        &auth_header_for(admin_id, "ceo"),
+        Some(json!({
+            "provider_id": provider_id,
+            "title": marked_title,
+            "date": "2026-05-15",
+            "interpreter_needed": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let stored_mark: Option<bool> =
+        sqlx::query_scalar("SELECT interpreter_needed FROM appointments WHERE id = $1")
+            .bind(marked_visit)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored_mark, Some(true));
+    // Nobody marked the other visit: the column stays NULL.
+    let untouched_mark: Option<bool> =
+        sqlx::query_scalar("SELECT interpreter_needed FROM appointments WHERE id = $1")
+            .bind(unmarked_visit)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(untouched_mark, None);
+    // A visit of the order that needs an interpreter, explicitly marked «no
+    // interpreter needed»: the visit's answer wins over the order's planning.
+    let declined_need_visit = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        admin_id,
+        "medical",
+        &format!("Order visit without the need {tag}"),
+        "2026-05-17",
+    )
+    .await;
+    sqlx::query("UPDATE appointments SET order_id = $2, interpreter_needed = false WHERE id = $1")
+        .bind(declined_need_visit)
+        .bind(needing_order)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments?patient_id={patient_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(response_contains_resource(&body, marked_visit), "{body}");
+    assert!(!response_contains_resource(&body, unmarked_visit), "{body}");
+    assert!(
+        !response_contains_resource(&body, declined_need_visit),
+        "{body}"
+    );
+    assert_eq!(
+        find_resource(&body, marked_visit)["interpreter_needed"],
+        true,
+        "{body}"
+    );
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{marked_visit}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["interpreter_needed"], true, "{detail}");
+    assert_eq!(detail["can_assign_interpreter"], true, "{detail}");
+    assert_eq!(detail["can_edit"], false, "{detail}");
+    for hidden_visit in [unmarked_visit, declined_need_visit] {
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/appointments/{hidden_visit}"),
+            &bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/appointments/{hidden_visit}/assign-interpreter"),
+            &bearer,
+            Some(json!({ "interpreter_id": replacement_id })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    }
+    // The mark gives the team lead the assignment, nothing else.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{marked_visit}/update"),
+        &bearer,
+        Some(json!({
+            "provider_id": provider_id,
+            "title": "Renamed by the team lead",
+            "date": "2026-05-15",
+            "interpreter_needed": false,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{marked_visit}/assign-interpreter"),
+        &bearer,
+        Some(json!({ "interpreter_id": replacement_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let marked_booking: Option<Uuid> =
+        sqlx::query_scalar("SELECT interpreter_id FROM appointments WHERE id = $1")
+            .bind(marked_visit)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(marked_booking, Some(replacement_id));
+
     // A plain interpreter still cannot review reports.
     let other_visit = seed_interpreter_appointment(
         &pool,

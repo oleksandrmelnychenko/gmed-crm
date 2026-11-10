@@ -173,11 +173,25 @@ pub struct AppointmentRow {
     pub owner_user_id: Option<Uuid>,
 }
 
+/// SQL expression over an `appointments` row aliased `a`: whether the visit
+/// needs an interpreter. The visit's own mark (`appointments.interpreter_needed`)
+/// decides; while nobody set it (NULL) the planning of the visit's order
+/// counts (`order_planning_preparation.interpreter_required`). A visit
+/// without an order and without the mark needs none. The appointment routes
+/// repeat this expression in their own SQL (`routes/appointments.rs`).
+pub const APPOINTMENT_INTERPRETER_NEEDED_SQL: &str = r#"COALESCE(
+    a.interpreter_needed,
+    EXISTS (
+        SELECT 1 FROM order_planning_preparation interpreter_need
+        WHERE interpreter_need.order_id = a.order_id
+          AND interpreter_need.interpreter_required
+    )
+)"#;
+
 /// SQL condition over an `appointments` row aliased `a`: the visit needs an
-/// interpreter and has none yet — an open medical visit of an order whose
-/// planning says «interpreter required»
-/// (`order_planning_preparation.interpreter_required`, what the order's
-/// planning counts as a missing interpreter). Such a visit belongs to the
+/// interpreter and has none yet — an open medical visit that is marked
+/// «interpreter needed» ([`APPOINTMENT_INTERPRETER_NEEDED_SQL`]: the visit's
+/// own mark, else its order's planning). Such a visit belongs to the
 /// interpreter team lead's team context, so the team lead also makes the
 /// FIRST assignment (owner decision 2026-11-10); a visit without that need
 /// stays outside. The appointment list repeats this condition in its own
@@ -186,10 +200,13 @@ pub const APPOINTMENT_AWAITS_FIRST_INTERPRETER_SQL: &str = r#"(
     a.interpreter_id IS NULL
     AND a.appointment_type = 'medical'
     AND a.status NOT IN ('cancelled', 'completed')
-    AND EXISTS (
-        SELECT 1 FROM order_planning_preparation interpreter_need
-        WHERE interpreter_need.order_id = a.order_id
-          AND interpreter_need.interpreter_required
+    AND COALESCE(
+        a.interpreter_needed,
+        EXISTS (
+            SELECT 1 FROM order_planning_preparation interpreter_need
+            WHERE interpreter_need.order_id = a.order_id
+              AND interpreter_need.interpreter_required
+        )
     )
 )"#;
 

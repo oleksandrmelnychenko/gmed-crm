@@ -994,8 +994,18 @@ function useQueueSheetContent({
                     {item.provider_name}
                   </span>
                 ) : null}
+                {item.interpreter_needed &&
+                !item.interpreter_id &&
+                item.type === "medical" &&
+                item.status !== "cancelled" &&
+                item.status !== "completed" ? (
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                    {appointmentText("appointments_interpreter_needed_unassigned")}
+                  </span>
+                ) : null}
               </div>
-              <p className="break-words text-xs font-medium text-muted-foreground">
+              {/* Nothing to say (no curator, no provider): no empty line. */}
+              <p className="break-words text-xs font-medium text-muted-foreground empty:hidden">
                 {operationalScopeReason(
                   item,
                   operationalScope,

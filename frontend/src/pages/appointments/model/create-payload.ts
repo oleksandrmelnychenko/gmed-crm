@@ -85,6 +85,12 @@ export function buildCreateAppointmentPayload(
     doctor_id: form.doctorId || null,
     owner_user_id: form.ownerUserId || null,
     interpreter_id: form.interpreterId || null,
+    // The visit's own mark only when somebody set it: without the key the
+    // planning of the visit's order decides.
+    ...(form.appointmentType === "medical" &&
+    typeof form.interpreterNeeded === "boolean"
+      ? { interpreter_needed: form.interpreterNeeded }
+      : {}),
     appointment_type: form.appointmentType,
     order_id: form.orderId || null,
     skip_medical_provider_binding:

@@ -1095,6 +1095,31 @@ function useCreateAppointmentSheetContent({
                     </NativeComboboxSelect>
                   </Field>
                 </div>
+                {form.appointmentType === "medical" ? (
+                  <label className="flex items-start gap-3 rounded-lg border border-border/60 bg-card px-3 py-2 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={form.interpreterNeeded === true}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          // Unticked on a new visit means "not decided": the
+                          // planning of the visit's order counts.
+                          interpreterNeeded: event.target.checked ? true : undefined,
+                        }))
+                      }
+                      className={cn(checkboxClass, "mt-0.5")}
+                    />
+                    <span>
+                      <span className="block font-medium text-foreground">
+                        {appointmentText("appointments_interpreter_needed")}
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        {appointmentText("appointments_interpreter_needed_hint")}
+                      </span>
+                    </span>
+                  </label>
+                ) : null}
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field compact label={t.appointments_location}>
                     <Input

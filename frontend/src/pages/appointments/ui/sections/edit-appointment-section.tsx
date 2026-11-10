@@ -1249,6 +1249,35 @@ function useEditAppointmentSectionContentContent({
             </NativeComboboxSelect>
           </Field>
         </div>
+        {form.appointmentType === "medical" ? (
+          <label className="flex items-start gap-3 rounded-lg border border-border/60 bg-card px-3 py-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              checked={form.interpreterNeeded ?? Boolean(detail.interpreter_needed)}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                setFormFromUser((current) => ({
+                  ...current,
+                  // Back at the stored answer the form holds no own value,
+                  // so nothing is sent and the form is not "changed".
+                  interpreterNeeded:
+                    checked === Boolean(detail.interpreter_needed)
+                      ? undefined
+                      : checked,
+                }));
+              }}
+              className={`${checkboxClass} mt-0.5`}
+            />
+            <span>
+              <span className="block font-medium text-foreground">
+                {appointmentText("appointments_interpreter_needed")}
+              </span>
+              <span className="block text-xs text-muted-foreground">
+                {appointmentText("appointments_interpreter_needed_hint")}
+              </span>
+            </span>
+          </label>
+        ) : null}
         <div className="grid gap-4 md:grid-cols-2">
           <Field compact label={t.appointments_location}>
             <Input

@@ -117,6 +117,11 @@ export type AppointmentListItem = {
   owner_role: string | null;
   interpreter_id: string | null;
   interpreter_name: string | null;
+  /**
+   * The visit needs an interpreter: its own mark, else the planning of its
+   * order. Absent from an older server.
+   */
+  interpreter_needed?: boolean;
   recurrence_series_id: string | null;
   recurrence_frequency: AppointmentRecurrenceFrequency | null;
   recurrence_interval: number | null;
@@ -629,6 +634,12 @@ export type AppointmentFormState = {
   doctorId: string;
   ownerUserId: string;
   interpreterId: string;
+  /**
+   * The visit's own mark «an interpreter is needed». Left out (or null) while
+   * nobody ticked or unticked it: the planning of the visit's order decides
+   * then, and nothing is sent to the server.
+   */
+  interpreterNeeded?: boolean | null;
   orderId: string;
   appointmentType: AppointmentKind;
   carePathKind: AppointmentCarePathKind;

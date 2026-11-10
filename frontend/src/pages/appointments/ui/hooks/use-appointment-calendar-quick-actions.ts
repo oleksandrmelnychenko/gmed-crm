@@ -7,6 +7,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 
+import { CALENDAR_EVENT_MENU_BUTTON_ATTRIBUTE } from "@/pages/appointments/model/calendar-event-content";
 import type {
   AppointmentListItem,
   AppointmentRecurringActionScope,
@@ -36,7 +37,44 @@ const CALENDAR_QUICK_ACTIONS_INITIAL_STATE: CalendarQuickActionsState = {
   scope: "single",
 };
 
-function calendarQuickActionsReducer(
+const CALENDAR_QUICK_ACTION_MENU_WIDTH = 224;
+const CALENDAR_QUICK_ACTION_MENU_HEIGHT = 300;
+const CALENDAR_QUICK_ACTION_MENU_MARGIN = 16;
+
+/** Where the menu opens: at the given point, kept inside the window. */
+export function calendarQuickActionMenuPosition(
+  appointmentId: string,
+  left: number,
+  top: number,
+  viewport: { width: number; height: number } = {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  },
+): CalendarQuickActionMenuState {
+  return {
+    appointmentId,
+    top: Math.max(
+      CALENDAR_QUICK_ACTION_MENU_MARGIN,
+      Math.min(
+        top,
+        viewport.height -
+          CALENDAR_QUICK_ACTION_MENU_HEIGHT -
+          CALENDAR_QUICK_ACTION_MENU_MARGIN,
+      ),
+    ),
+    left: Math.max(
+      CALENDAR_QUICK_ACTION_MENU_MARGIN,
+      Math.min(
+        left,
+        viewport.width -
+          CALENDAR_QUICK_ACTION_MENU_WIDTH -
+          CALENDAR_QUICK_ACTION_MENU_MARGIN,
+      ),
+    ),
+  };
+}
+
+export function calendarQuickActionsReducer(
   state: CalendarQuickActionsState,
   action: CalendarQuickActionsAction,
 ): CalendarQuickActionsState {
@@ -93,8 +131,12 @@ export function useAppointmentCalendarQuickActions({
     [],
   );
 
-  // Opened by a right click (context menu) on a calendar event: the tiles
-  // themselves carry no button, so the menu appears at the pointer.
+  // The «⋯» button of the tile the menu was opened from, to give the focus
+  // back on Escape; null when the menu came from a right click.
+  const calendarQuickActionAnchorRef = useRef<HTMLElement | null>(null);
+
+  // Opened by a right click (context menu) on a calendar event: the menu
+  // appears at the pointer.
   const openCalendarQuickActionLayer = useCallback(
     (
       event: ReactMouseEvent<HTMLElement>,
@@ -102,22 +144,34 @@ export function useAppointmentCalendarQuickActions({
     ) => {
       event.preventDefault();
       event.stopPropagation();
-      const menuWidth = 224;
-      const menuHeight = 300;
+      calendarQuickActionAnchorRef.current = null;
       dispatchCalendarQuickActions({
         type: "toggle-menu",
         appointmentId,
-        menu: {
+        menu: calendarQuickActionMenuPosition(
           appointmentId,
-          top: Math.max(
-            16,
-            Math.min(event.clientY + 4, window.innerHeight - menuHeight - 16),
-          ),
-          left: Math.max(
-            16,
-            Math.min(event.clientX, window.innerWidth - menuWidth - 16),
-          ),
-        },
+          event.clientX,
+          event.clientY + 4,
+        ),
+      });
+    },
+    [],
+  );
+
+  // Opened by the «⋯» button of an event tile (mouse, touch or keyboard):
+  // the menu appears under the button; a second press closes it.
+  const openCalendarQuickActionLayerAt = useCallback(
+    (anchor: HTMLElement, appointmentId: string) => {
+      const rect = anchor.getBoundingClientRect();
+      calendarQuickActionAnchorRef.current = anchor;
+      dispatchCalendarQuickActions({
+        type: "toggle-menu",
+        appointmentId,
+        menu: calendarQuickActionMenuPosition(
+          appointmentId,
+          rect.left,
+          rect.bottom + 4,
+        ),
       });
     },
     [],
@@ -134,6 +188,14 @@ export function useAppointmentCalendarQuickActions({
       ) {
         return;
       }
+      // The tile's «⋯» button toggles the menu itself on the click that
+      // follows; closing here would make that click open it again.
+      if (
+        event.target instanceof Element &&
+        event.target.closest(`[${CALENDAR_EVENT_MENU_BUTTON_ATTRIBUTE}]`)
+      ) {
+        return;
+      }
       dispatchCalendarQuickActions({ type: "dismiss" });
     }
 
@@ -145,6 +207,8 @@ export function useAppointmentCalendarQuickActions({
       if (event.key === "Escape") {
         event.preventDefault();
         dispatchCalendarQuickActions({ type: "dismiss" });
+        const anchor = calendarQuickActionAnchorRef.current;
+        if (anchor?.isConnected) anchor.focus();
       }
     }
 
@@ -171,5 +235,6 @@ export function useAppointmentCalendarQuickActions({
     dismissCalendarQuickActionMenu,
     handleCalendarQuickActionScopeChange,
     openCalendarQuickActionLayer,
+    openCalendarQuickActionLayerAt,
   };
 }

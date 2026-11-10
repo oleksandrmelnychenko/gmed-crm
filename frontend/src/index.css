@@ -1413,6 +1413,66 @@ html[data-native-platform] {
   color: var(--color-foreground);
 }
 
+/*
+ * «⋯» button of an event tile: opens the quick-action menu (the same one a
+ * right click opens). It sits in the top right corner of the tile, takes no
+ * height, and the title row gives it room instead of running under it.
+ * With a mouse it shows on hover and keyboard focus; on touch it is always
+ * there.
+ */
+.appointments-calendar-shell .fc-apt-event-menu-button {
+  position: absolute;
+  top: -0.1rem;
+  right: -0.15rem;
+  display: inline-flex;
+  width: 1.05rem;
+  height: 1.05rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid color-mix(in oklch, var(--color-border) 85%, transparent);
+  border-radius: 0.3rem;
+  background: color-mix(in oklch, var(--color-background) 92%, transparent);
+  color: var(--color-muted-foreground);
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.appointments-calendar-shell .fc-apt-event-menu-button:hover,
+.appointments-calendar-shell .fc-apt-event-menu-button:focus-visible {
+  background: var(--color-background);
+  color: var(--color-foreground);
+}
+
+.appointments-calendar-shell .fc-apt-event-menu-button:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 1px;
+}
+
+.appointments-calendar-shell .fc-event:hover .fc-apt-event-menu-button,
+.appointments-calendar-shell .fc-apt-event-menu-button:focus-visible {
+  opacity: 1;
+}
+
+.appointments-calendar-shell .fc-event:hover .fc-apt-event-card:has(.fc-apt-event-menu-button) .fc-apt-event-row-primary,
+.appointments-calendar-shell .fc-apt-event-card:has(.fc-apt-event-menu-button:focus-visible) .fc-apt-event-row-primary {
+  padding-right: 1.05rem;
+}
+
+@media (hover: none) {
+  .appointments-calendar-shell .fc-apt-event-menu-button {
+    opacity: 1;
+  }
+
+  .appointments-calendar-shell .fc-apt-event-card:has(.fc-apt-event-menu-button) .fc-apt-event-row-primary {
+    padding-right: 1.05rem;
+  }
+}
+
 .appointments-calendar-shell .fc-apt-event-task {
   display: inline-flex;
   width: fit-content;

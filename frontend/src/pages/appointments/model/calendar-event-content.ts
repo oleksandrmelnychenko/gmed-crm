@@ -67,21 +67,32 @@ function resolveCalendarEventStatusOrTypeLabel(
   return appointmentText("appointments_appointment_2");
 }
 
+/** Marks the «⋯» button of an event tile that opens its quick-action menu. */
+export const CALENDAR_EVENT_MENU_BUTTON_ATTRIBUTE = "data-appointment-menu";
+
+export type CalendarEventContentOptions = {
+  /**
+   * Accessible name of the «⋯» button that opens the event's quick-action
+   * menu. Left out for roles that cannot change a status: no button then.
+   */
+  quickActionsLabel?: string;
+};
+
 export function renderStaticCalendarEventContent(
   arg: EventContentArg,
   dictionary: CalendarEventContentDictionary,
+  options: CalendarEventContentOptions = {},
 ) {
   const props = arg.event.extendedProps as CalendarEventRuntimeProps;
   const statusOrTypeLabel = resolveCalendarEventStatusOrTypeLabel(props, dictionary);
   const interpreterName = calendarText(props.interpreterName).trim();
+  const quickActionsLabel = calendarText(options.quickActionsLabel).trim();
+  // Doctor, provider, place or curator — whatever is known. A visit with none
+  // of them prints nothing there (the word «Приём» used to stand in).
   const secondaryLine = [
     arg.timeText,
     props.patientName,
-    props.doctorName ||
-      props.providerName ||
-      props.location ||
-      props.ownerName ||
-      appointmentText("appointments_appointment_2"),
+    props.doctorName || props.providerName || props.location || props.ownerName || "",
     interpreterName
       ? `${appointmentText("appointments_interpreter_2")}: ${interpreterName}`
       : "",
@@ -98,6 +109,11 @@ export function renderStaticCalendarEventContent(
         ? `<div class="fc-apt-event-row-secondary">${escapeCalendarEventHtml(secondaryLine)}</div>`
         : "",
       `<div class="mt-auto pt-1"><div class="fc-apt-event-tag">${escapeCalendarEventHtml(statusOrTypeLabel)}</div></div>`,
+      // Sits in the tile's top right corner and takes no room of its own;
+      // the same menu opens on a right click.
+      quickActionsLabel
+        ? `<button type="button" class="fc-apt-event-menu-button" ${CALENDAR_EVENT_MENU_BUTTON_ATTRIBUTE} aria-haspopup="menu" aria-label="${escapeCalendarEventHtml(quickActionsLabel)}" title="${escapeCalendarEventHtml(quickActionsLabel)}"><span aria-hidden="true">⋯</span></button>`
+        : "",
       "</div>",
     ].join(""),
   };

@@ -59,6 +59,13 @@ function AppointmentSnapshotSection({
           ].filter(Boolean).join(" · ")
         : tr.common_not_set,
     });
+  } else if (detail.interpreter_needed) {
+    // The visit is marked «an interpreter is needed» and has none yet.
+    snapshotCards.push({
+      label: appointmentText("appointments_interpreter"),
+      value: tr.common_not_set,
+      meta: appointmentText("appointments_interpreter_needed"),
+    });
   }
 
   if (detail.order_id) {

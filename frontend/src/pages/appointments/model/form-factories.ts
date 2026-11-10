@@ -155,6 +155,7 @@ const APPOINTMENT_FORM_DIRTY_FIELDS: Array<keyof AppointmentFormState> = [
   "doctorId",
   "ownerUserId",
   "interpreterId",
+  "interpreterNeeded",
   "orderId",
   "appointmentType",
   "carePathKind",

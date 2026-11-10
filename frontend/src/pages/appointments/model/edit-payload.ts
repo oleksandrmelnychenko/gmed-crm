@@ -149,6 +149,15 @@ export function buildEditAppointmentUpdatePayload({
     payload.recurrence_until =
       form.repeatEndMode === "until" ? form.repeatUntil || null : null;
   }
+  // The visit's own mark only when it was changed: an untouched form keeps
+  // what is stored (a visit nobody marked follows its order's planning).
+  if (
+    form.appointmentType === "medical" &&
+    typeof form.interpreterNeeded === "boolean" &&
+    form.interpreterNeeded !== Boolean(detail.interpreter_needed)
+  ) {
+    payload.interpreter_needed = form.interpreterNeeded;
+  }
   if (canEditAppointmentType) {
     payload.appointment_type = form.appointmentType;
   }

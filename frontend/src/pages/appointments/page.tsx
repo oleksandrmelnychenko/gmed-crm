@@ -69,7 +69,10 @@ import {
   isAppointmentTaskAssignableRole,
 } from "@/pages/appointments/model/staff-roles";
 import { toCalendarEvent } from "@/pages/appointments/model/calendar-events";
-import { useCalendarEventContent } from "@/pages/appointments/model/calendar-event-content";
+import {
+  CALENDAR_EVENT_MENU_BUTTON_ATTRIBUTE,
+  useCalendarEventContent,
+} from "@/pages/appointments/model/calendar-event-content";
 import { useAppointmentDetail } from "@/pages/appointments/data/use-appointment-detail";
 import { useAppointmentLinkedPatientAssignment } from "@/pages/appointments/data/use-appointment-linked-patient-assignment";
 import { useAppointmentLinkedRecords } from "@/pages/appointments/data/use-appointment-linked-records";
@@ -1149,6 +1152,7 @@ function useStaffAppointmentsPageContent() {
     dismissCalendarQuickActionMenu,
     handleCalendarQuickActionScopeChange,
     openCalendarQuickActionLayer,
+    openCalendarQuickActionLayerAt,
   } = useAppointmentCalendarQuickActions({
     appointmentsIndex,
   });
@@ -1638,6 +1642,20 @@ function useStaffAppointmentsPageContent() {
   }, 250);
 
   function handleEventClick(info: EventClickArg) {
+    // The tile's «⋯» button opens the quick-action menu, not the appointment.
+    const menuButton =
+      info.jsEvent.target instanceof Element
+        ? info.jsEvent.target.closest<HTMLElement>(
+            `[${CALENDAR_EVENT_MENU_BUTTON_ATTRIBUTE}]`,
+          )
+        : null;
+    if (menuButton) {
+      info.jsEvent.preventDefault();
+      if (permissions.canManageStatus) {
+        openCalendarQuickActionLayerAt(menuButton, info.event.id);
+      }
+      return;
+    }
     const props = info.event.extendedProps as CalendarEventExtendedProps;
     openDetailSheet(
       info.event.id,
@@ -1645,9 +1663,16 @@ function useStaffAppointmentsPageContent() {
     );
   }
 
+  // The «⋯» button only for roles that may change a status, as the right click.
+  const calendarQuickActionsLabel = permissions.canManageStatus
+    ? tr.appointments_quick_actions
+    : undefined;
   const renderCalendarEventContent = useCallback(
-    (arg: EventContentArg) => renderStaticCalendarEventContent(arg, tr),
-    [tr],
+    (arg: EventContentArg) =>
+      renderStaticCalendarEventContent(arg, tr, {
+        quickActionsLabel: calendarQuickActionsLabel,
+      }),
+    [calendarQuickActionsLabel, renderStaticCalendarEventContent, tr],
   );
 
   if (!permissions.canViewPage) {

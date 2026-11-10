@@ -86,11 +86,9 @@ export function operationalScopeReason(
         ? appointmentText("appointments_medical_slot_shown_as_blocked")
         : appointmentText("appointments_blocked_slot");
     case "all":
-      return (
-        item.owner_name ||
-        item.provider_name ||
-        (tr?.appointments_title ?? appointmentText("appointments_appointment"))
-      );
+      // No curator and no provider: nothing to say. The page title
+      // («Приёмы») used to stand in this line as if it were a place.
+      return item.owner_name || item.provider_name || "";
   }
 }
 

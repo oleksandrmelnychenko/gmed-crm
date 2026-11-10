@@ -184,6 +184,9 @@ struct CreateAppointment {
     doctor_id: Option<Uuid>,
     owner_user_id: Option<Uuid>,
     interpreter_id: Option<Uuid>,
+    /// The visit's own mark «an interpreter is needed». Absent leaves the
+    /// decision to the planning of the visit's order.
+    interpreter_needed: Option<bool>,
     order_id: Option<Uuid>,
     appointment_type: String,
     skip_medical_provider_binding: Option<bool>,
@@ -210,6 +213,9 @@ struct UpdateAppointment {
     doctor_id: Option<Uuid>,
     owner_user_id: Option<Uuid>,
     interpreter_id: Option<Uuid>,
+    /// The visit's own mark «an interpreter is needed». Absent keeps what is
+    /// stored (a visit nobody marked follows its order's planning).
+    interpreter_needed: Option<bool>,
     /// Absent keeps the current order link; an explicit null removes it.
     #[serde(default, deserialize_with = "deserialize_explicit_nullable_uuid")]
     order_id: Option<Option<Uuid>>,
@@ -2000,6 +2006,16 @@ async fn list_appointments(
         r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.care_path_kind, a.followup_milestone, a.status,
                   a.location, a.interpreter_response, a.checklist_phase, a.patient_id, a.interpreter_id,
                   a.provider_id, a.doctor_id, a.owner_user_id,
+                  -- The visit's own mark, else its order's planning
+                  -- (access::APPOINTMENT_INTERPRETER_NEEDED_SQL).
+                  COALESCE(
+                      a.interpreter_needed,
+                      EXISTS (
+                          SELECT 1 FROM order_planning_preparation interpreter_need
+                          WHERE interpreter_need.order_id = a.order_id
+                            AND interpreter_need.interpreter_required
+                      )
+                  ) AS interpreter_needed,
                   a.recurrence_series_id, a.recurrence_frequency, a.recurrence_interval,
                   a.recurrence_count, a.recurrence_until, a.recurrence_end_mode, a.recurrence_index,
                   CASE
@@ -2092,10 +2108,13 @@ async fn list_appointments(
                     OR (
                         a.appointment_type = 'medical'
                         AND a.status NOT IN ('cancelled', 'completed')
-                        AND EXISTS (
-                            SELECT 1 FROM order_planning_preparation interpreter_need
-                            WHERE interpreter_need.order_id = a.order_id
-                              AND interpreter_need.interpreter_required
+                        AND COALESCE(
+                            a.interpreter_needed,
+                            EXISTS (
+                                SELECT 1 FROM order_planning_preparation interpreter_need
+                                WHERE interpreter_need.order_id = a.order_id
+                                  AND interpreter_need.interpreter_required
+                            )
                         )
                     )
                 ))
@@ -2199,6 +2218,16 @@ async fn list_attention_items(
         r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.care_path_kind, a.followup_milestone, a.status,
                   a.location, a.interpreter_response, a.checklist_phase, a.patient_id, a.interpreter_id,
                   a.provider_id, a.doctor_id, a.owner_user_id,
+                  -- The visit's own mark, else its order's planning
+                  -- (access::APPOINTMENT_INTERPRETER_NEEDED_SQL).
+                  COALESCE(
+                      a.interpreter_needed,
+                      EXISTS (
+                          SELECT 1 FROM order_planning_preparation interpreter_need
+                          WHERE interpreter_need.order_id = a.order_id
+                            AND interpreter_need.interpreter_required
+                      )
+                  ) AS interpreter_needed,
                   a.recurrence_series_id, a.recurrence_frequency, a.recurrence_interval,
                   a.recurrence_count, a.recurrence_until, a.recurrence_end_mode, a.recurrence_index,
                   CASE
@@ -2382,10 +2411,13 @@ async fn list_attention_items(
                     OR (
                         a.appointment_type = 'medical'
                         AND a.status NOT IN ('cancelled', 'completed')
-                        AND EXISTS (
-                            SELECT 1 FROM order_planning_preparation interpreter_need
-                            WHERE interpreter_need.order_id = a.order_id
-                              AND interpreter_need.interpreter_required
+                        AND COALESCE(
+                            a.interpreter_needed,
+                            EXISTS (
+                                SELECT 1 FROM order_planning_preparation interpreter_need
+                                WHERE interpreter_need.order_id = a.order_id
+                                  AND interpreter_need.interpreter_required
+                            )
                         )
                     )
                 ))
@@ -3131,6 +3163,7 @@ async fn create_appointment(
         doctor_id,
         owner_user_id: _,
         interpreter_id,
+        interpreter_needed,
         order_id,
         appointment_type,
         skip_medical_provider_binding: _,
@@ -3286,6 +3319,20 @@ async fn create_appointment(
         }
     }
 
+    // The visit's own mark; without it the order's planning decides.
+    if let Some(interpreter_needed) = interpreter_needed
+        && let Err(e) = sqlx::query(
+            "UPDATE appointments SET interpreter_needed = $2 WHERE recurrence_series_id = $1 OR id = $1",
+        )
+        .bind(root_appointment_id)
+        .bind(interpreter_needed)
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(error = %e, "create appointment: interpreter needed mark");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
     if let Some(interpreter_id) = interpreter_id
         && let Err(e) = booking_links::grant_in_tx(
             &mut tx,
@@ -3425,6 +3472,7 @@ async fn create_appointment(
             "doctor_id": doctor_id,
             "owner_user_id": owner_user_id,
             "interpreter_id": interpreter_id,
+            "interpreter_needed": interpreter_needed,
             "care_path_kind": care_path_kind,
             "series_created_count": created_appointments.len(),
             "recurrence_frequency": recurrence.as_ref().map(|value| value.frequency.as_str()),
@@ -5226,6 +5274,16 @@ async fn get_appointment(
                   a.category, a.status, a.interpreter_response, a.interpreter_response_comment,
                   a.checklist_phase,
                   a.preparation_notes, a.followup_notes, a.notes, a.created_at,
+                  -- The visit's own mark, else its order's planning
+                  -- (access::APPOINTMENT_INTERPRETER_NEEDED_SQL).
+                  COALESCE(
+                      a.interpreter_needed,
+                      EXISTS (
+                          SELECT 1 FROM order_planning_preparation interpreter_need
+                          WHERE interpreter_need.order_id = a.order_id
+                            AND interpreter_need.interpreter_required
+                      )
+                  ) AS interpreter_needed,
                   a.recurrence_series_id, a.recurrence_frequency, a.recurrence_interval,
                   a.recurrence_count, a.recurrence_until, a.recurrence_end_mode, a.recurrence_index,
                   a.recurrence_parent_series_id, a.recurrence_split_from_appointment_id,
@@ -5816,7 +5874,7 @@ async fn update_appointment(
 
     let current = match sqlx::query(
         r#"SELECT patient_id, appointment_type, care_path_kind, status, checklist_phase, provider_id, doctor_id, owner_user_id,
-                  interpreter_id, interpreter_response, title, date, time_start, time_end,
+                  interpreter_id, interpreter_needed, interpreter_response, title, date, time_start, time_end,
                   location, order_id, followup_milestone, category, notes, recurrence_series_id, recurrence_index,
                   recurrence_frequency, recurrence_interval, recurrence_count, recurrence_until,
                   recurrence_end_mode, updated_at
@@ -5842,6 +5900,10 @@ async fn update_appointment(
     let current_type: String = current
         .try_get("appointment_type")
         .unwrap_or_else(|_| String::new());
+    // The stored mark: NULL while the order's planning decides.
+    let current_interpreter_needed: Option<bool> = current
+        .try_get::<Option<bool>, _>("interpreter_needed")
+        .unwrap_or_default();
     let current_care_path_kind: String = current
         .try_get("care_path_kind")
         .unwrap_or_else(|_| "regular".to_string());
@@ -6987,6 +7049,24 @@ async fn update_appointment(
         } else {
             None
         };
+    // The visit's own mark «an interpreter is needed», for every visit this
+    // save touched; absent keeps what is stored.
+    if let Some(interpreter_needed) = body.interpreter_needed {
+        let marked_ids: Vec<Uuid> = updated_targets
+            .iter()
+            .map(|(target_id, _, _)| *target_id)
+            .collect();
+        if let Err(e) =
+            sqlx::query("UPDATE appointments SET interpreter_needed = $2 WHERE id = ANY($1)")
+                .bind(&marked_ids)
+                .bind(interpreter_needed)
+                .execute(&mut *tx)
+                .await
+        {
+            tracing::error!(error = %e, appointment_id = %apt_id, "update appointment: interpreter needed mark");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
     if let Some((patient_notice, patient_changes)) = patient_notice {
         match insert_patient_appointment_notifications(
             &mut tx,
@@ -7103,6 +7183,7 @@ async fn update_appointment(
             "previous_doctor_id": current_doctor_id,
             "previous_owner_user_id": current_owner_user_id,
             "previous_interpreter_id": current_interpreter_id,
+            "previous_interpreter_needed": current_interpreter_needed,
             "previous_date": current_date,
             "previous_time_start": current_time_start,
             "previous_time_end": current_time_end,
@@ -7117,6 +7198,7 @@ async fn update_appointment(
             "doctor_id": body.doctor_id,
             "owner_user_id": owner_user_id,
             "interpreter_id": body.interpreter_id,
+            "interpreter_needed": body.interpreter_needed.or(current_interpreter_needed),
             "date": date,
             "time_start": time_start,
             "time_end": time_end,
@@ -12549,6 +12631,7 @@ fn build_appointment_list_json(
         "owner_role": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("owner_role").unwrap_or_default() },
         "interpreter_id": if blocked { None::<Uuid> } else { row.try_get::<Option<Uuid>, _>("interpreter_id").unwrap_or_default() },
         "interpreter_name": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("interpreter_name").unwrap_or_default() },
+        "interpreter_needed": if blocked { false } else { row.try_get::<bool, _>("interpreter_needed").unwrap_or(false) },
         "recurrence_series_id": if blocked { None::<Uuid> } else { row.try_get::<Option<Uuid>, _>("recurrence_series_id").unwrap_or_default() },
         "recurrence_frequency": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("recurrence_frequency").unwrap_or_default() },
         "recurrence_interval": if blocked { None::<i32> } else { row.try_get::<Option<i32>, _>("recurrence_interval").unwrap_or_default() },
@@ -12599,6 +12682,7 @@ fn build_appointment_detail_json(
         "category": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("category").unwrap_or_default() },
         "interpreter_id": if blocked { None::<Uuid> } else { interpreter_id },
         "interpreter_name": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("interpreter_name").unwrap_or_default() },
+        "interpreter_needed": if blocked { false } else { row.try_get::<bool, _>("interpreter_needed").unwrap_or(false) },
         "interpreter_response": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("interpreter_response").unwrap_or_default() },
         "interpreter_response_comment": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("interpreter_response_comment").unwrap_or_default() },
         "interpreter_state_at": if blocked { None::<String> } else { row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("interpreter_state_at").unwrap_or_default().map(|v| v.to_rfc3339()) },
