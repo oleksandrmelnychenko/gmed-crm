@@ -866,6 +866,13 @@ export type IdentificationDraft = {
   birth_country: string;
   habitual_residence_country: string;
   contact_channels: string[];
+  /** The own identity document (owner 2026-11-10, optional). */
+  id_document_type: string;
+  id_document_number: string;
+  id_issuing_authority: string;
+  id_issuing_country: string;
+  id_issued_on: string;
+  id_valid_until: string;
   /** The legal questions: "yes", "no" or "" (not answered yet). */
   pep_self: string;
   pep_related: string;
@@ -905,6 +912,12 @@ export const IDENTIFICATION_FIELDS: IdentificationField[] = [
   "birth_country",
   "habitual_residence_country",
   "contact_channels",
+  "id_document_type",
+  "id_document_number",
+  "id_issuing_authority",
+  "id_issuing_country",
+  "id_issued_on",
+  "id_valid_until",
   "pep_self",
   "pep_related",
   "sanctions_links",
@@ -967,6 +980,12 @@ export function draftFromIdentification(data: LeadRequestIdentification | null |
     birth_country: data?.birth_country ?? "",
     habitual_residence_country: data?.habitual_residence_country ?? "",
     contact_channels: contactChannels(data?.contact_channels ?? []),
+    id_document_type: data?.id_document_type ?? "",
+    id_document_number: data?.id_document_number ?? "",
+    id_issuing_authority: data?.id_issuing_authority ?? "",
+    id_issuing_country: data?.id_issuing_country ?? "",
+    id_issued_on: data?.id_issued_on ?? "",
+    id_valid_until: data?.id_valid_until ?? "",
     pep_self: answerFromBoolean(data?.pep_self),
     pep_related: answerFromBoolean(data?.pep_related),
     sanctions_links: answerFromBoolean(data?.sanctions_links),

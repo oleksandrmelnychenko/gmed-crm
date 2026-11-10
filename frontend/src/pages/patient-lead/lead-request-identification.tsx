@@ -320,7 +320,7 @@ export function IdentificationCountrySelect({
   guardian = false,
 }: {
   form: IdentificationForm;
-  field: "birth_country" | "habitual_residence_country" | "pep_country";
+  field: "birth_country" | "habitual_residence_country" | "pep_country" | "id_issuing_country";
   text: LeadRequestText;
   lang: string;
   guardian?: boolean;
@@ -333,6 +333,60 @@ export function IdentificationCountrySelect({
       aria-label={identificationFieldLabel(text, field, guardian)}
       onChange={(code) => form.set(field, code ?? "")}
     />
+  );
+}
+
+/**
+ * The data of the lead's own identity document, typed next to the scan
+ * (owner 2026-11-10): optional, printed on the documents as typed; staff
+ * check them against the copy and correct them in the wizard.
+ */
+export function IdentityDocumentDataFields({
+  form,
+  text,
+  lang,
+}: {
+  form: IdentificationForm;
+  text: LeadRequestText;
+  lang: string;
+}) {
+  const pickerLang = lang === "de" || lang === "ru" || lang === "uk" || lang === "en" ? lang : undefined;
+  const dateInput = (field: "id_issued_on" | "id_valid_until", bounds: { min?: string; max?: string }) => (
+    <Input
+      key={`${field}-${lang}`}
+      {...controlProps(form, field)}
+      className={inputClass}
+      type="date"
+      pickerLang={pickerLang}
+      {...bounds}
+      value={form.draft[field]}
+      onChange={(event) => form.set(field, event.target.value)}
+    />
+  );
+  return (
+    <div className="space-y-3" data-testid="lead-request-identity-data">
+      <p className="text-sm leading-6 text-muted-foreground">{text.identityIntro}</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <IdentificationFormField form={form} field="id_document_type" text={text}>
+          <IdentificationChoiceSelect form={form} field="id_document_type" options={text.idDocumentTypeOptions} text={text} />
+        </IdentificationFormField>
+        <IdentificationFormField form={form} field="id_document_number" text={text}>
+          <IdentificationTextInput form={form} field="id_document_number" maxLength={60} />
+        </IdentificationFormField>
+        <IdentificationFormField form={form} field="id_issuing_authority" text={text}>
+          <IdentificationTextInput form={form} field="id_issuing_authority" maxLength={200} />
+        </IdentificationFormField>
+        <IdentificationFormField form={form} field="id_issuing_country" text={text}>
+          <IdentificationCountrySelect form={form} field="id_issuing_country" text={text} lang={lang} />
+        </IdentificationFormField>
+        <IdentificationFormField form={form} field="id_issued_on" text={text}>
+          {dateInput("id_issued_on", { min: "1900-01-01" })}
+        </IdentificationFormField>
+        <IdentificationFormField form={form} field="id_valid_until" text={text}>
+          {dateInput("id_valid_until", {})}
+        </IdentificationFormField>
+      </div>
+    </div>
   );
 }
 

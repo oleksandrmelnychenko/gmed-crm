@@ -29,6 +29,7 @@ import {
   ArrowRight,
   ClipboardCheck,
   FileCheck2,
+  IdCard,
   LoaderCircle,
   Plus,
   RefreshCw,
@@ -805,6 +806,21 @@ function useLeadsPageContent() {
                 />
               ) : null}
               <LeadSanctionsBadge flag={sanctionsFlags.get(row.id)} />
+              {row.identity_data_missing ? (
+                <span
+                  role="img"
+                  aria-label={lang === "de" ? "Ausweis-Scan da, Daten fehlen" : "Скан документа есть, данные не внесены"}
+                  title={
+                    lang === "de"
+                      ? "Ausweis-Scan da, Nummer oder Gültigkeit fehlen: Daten aus dem Scan eintragen"
+                      : "Скан документа есть, номер или срок действия не внесены: заполните по скану"
+                  }
+                  className="inline-flex shrink-0 text-amber-600 dark:text-amber-400"
+                  data-testid={`lead-identity-data-missing-${row.id}`}
+                >
+                  <IdCard aria-hidden="true" className="size-3.5" />
+                </span>
+              ) : null}
             </span>
           );
         },

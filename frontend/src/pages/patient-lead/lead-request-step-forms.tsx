@@ -30,6 +30,7 @@ import {
   ContactChannelsField,
   IdentificationFormField,
   IdentificationTextArea,
+  IdentityDocumentDataFields,
   IdentityDocumentSection,
   LegalQuestionsSection,
   useIdentificationForm,
@@ -749,8 +750,13 @@ export function ContactStep({ request, text, lang, enqueue, onChange, missing, n
   );
 }
 
-/** Step 3 "Ausweis": a photo or scan of the identity document only; GMED enters its data. */
-export function IdentityStep({ request, text, enqueue, onChange, missing, nav }: StepProps) {
+/**
+ * Step 3 "Ausweis": a photo or scan of the identity document, and its data
+ * typed next to it (owner 2026-11-10, optional; GMED adds what is missing).
+ */
+export function IdentityStep({ request, text, lang, enqueue, onChange, missing, nav }: StepProps) {
+  const parts = usePartStates();
+  const identification = useIdentificationForm({ request, text, enqueue, onChange, onSaveState: parts.on("identification") });
   // A parent's login for a minor uploads two documents here: the child's and the own one
   // (owner report 2026-10-21: "I uploaded my passport and my child's" — only the child's arrived).
   const parentOfMinor = request.access_kind === "guardian" && request.minor && Boolean(request.representation);
@@ -760,7 +766,7 @@ export function IdentityStep({ request, text, enqueue, onChange, missing, nav }:
   // Three uploads on one step: "consent first" is said once above them (labels audit 2026-10-26, A6).
   const consentNoteAbove = forChild && !consentGiven(request, INQUIRY_CONSENT);
   return (
-    <StepFrame testId="lead-request-step-identity" step="identity" request={request} text={text} missing={missing} nav={nav} lockExempt={refusedIdentityUploadKeys(request).length > 0}>
+    <StepFrame testId="lead-request-step-identity" step="identity" request={request} text={text} missing={missing} nav={nav} saveState={parts.state} lockExempt={refusedIdentityUploadKeys(request).length > 0}>
       <ConsentNoteAboveContext.Provider value={consentNoteAbove}>
       {consentNoteAbove ? <ConsentNeededNote>{text.identityUploadNeedsConsent}</ConsentNeededNote> : null}
       {request.identification !== undefined ? (
@@ -772,6 +778,7 @@ export function IdentityStep({ request, text, enqueue, onChange, missing, nav }:
             onChange={onChange}
             title={forChild ? text.childDocumentTitle : undefined}
           />
+          <IdentityDocumentDataFields form={identification} text={text} lang={lang} />
         </div>
       ) : null}
       {parentOfMinor ? (

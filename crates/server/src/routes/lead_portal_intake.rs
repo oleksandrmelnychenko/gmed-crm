@@ -1607,7 +1607,19 @@ const IDENTIFICATION_FIELDS: [&str; 21] = [
 
 /// The identification fields the base form of the cabinet asks; every other
 /// one belongs to the follow-up blocks or to staff (`risk::cabinet::DROPPED_KEYS`).
-const BASE_FORM_IDENTIFICATION_FIELDS: [&str; 2] = ["salutation", "contact_channels"];
+/// The data of the lead's own identity document are optional there (owner
+/// 2026-11-10): the lead may type them next to the scan, staff check and
+/// correct them in the wizard.
+const BASE_FORM_IDENTIFICATION_FIELDS: [&str; 8] = [
+    "salutation",
+    "contact_channels",
+    "id_document_type",
+    "id_document_number",
+    "id_issuing_authority",
+    "id_issuing_country",
+    "id_issued_on",
+    "id_valid_until",
+];
 
 /// What the lead states himself for the GwG identification sheet (owner spec
 /// "Patientenformular (Lead-Link)", 2026-10-05): place of birth, identity
@@ -2082,6 +2094,12 @@ async fn store_identification(
                birth_country = EXCLUDED.birth_country,
                habitual_residence_country = EXCLUDED.habitual_residence_country,
                contact_channels = EXCLUDED.contact_channels,
+               id_document_type = EXCLUDED.id_document_type,
+               id_document_number = EXCLUDED.id_document_number,
+               id_issuing_authority = EXCLUDED.id_issuing_authority,
+               id_issuing_country = EXCLUDED.id_issuing_country,
+               id_issued_on = EXCLUDED.id_issued_on,
+               id_valid_until = EXCLUDED.id_valid_until,
                pep_self = EXCLUDED.pep_self,
                pep_self_details = EXCLUDED.pep_self_details,
                pep_related = EXCLUDED.pep_related,
@@ -4935,8 +4953,9 @@ async fn update_my_enhanced_details(
 /// `POST /me/lead-requests/{lead_id}/identification`: autosave of the lead's
 /// own statements for the GwG identification sheet (only the changed keys).
 /// The audit event names the changed fields, never their values.
-/// Staff's identity document data (`id_*`) answer 422 `staff_only` (the lead
-/// only uploads the document, staff enter its data); the statements of the
+/// The lead may state the data of the own identity document (owner
+/// 2026-11-10, optional); a representative's (`rep1_id_*`) answer 422
+/// `staff_only`. The statements of the
 /// follow-up blocks F, B, H, J and the reason of the request
 /// ([`crate::risk::cabinet::STATEMENT_KEYS`]) are taken here too.
 async fn update_my_identification(

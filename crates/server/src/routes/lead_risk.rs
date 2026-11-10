@@ -576,6 +576,10 @@ async fn post_decision(
             "A reason of at least 10 characters is required",
         );
     }
+    // A converted lead is frozen (owner 2026-10-25), its assessment too.
+    if let Err(response) = super::leads::refuse_if_converted(&state.db, lead_id).await {
+        return response;
+    }
     let result = async {
         let mut tx = state.db.begin().await?;
         if !lead_exists(&mut tx, lead_id).await? {
@@ -719,6 +723,10 @@ async fn restart_assessment(
     Path(lead_id): Path<Uuid>,
 ) -> Response {
     if let Err(response) = reviewer_or_forbidden(&state, &auth).await {
+        return response;
+    }
+    // A converted lead is frozen (owner 2026-10-25), its assessment too.
+    if let Err(response) = super::leads::refuse_if_converted(&state.db, lead_id).await {
         return response;
     }
     let result = async {

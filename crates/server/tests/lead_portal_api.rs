@@ -2067,10 +2067,10 @@ async fn the_lead_states_the_identification_and_staff_read_it() {
     let (status, body) = json_request(router, "GET", &request, &patient, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let empty = &body["identification"];
-    // Without staff's identity data, with the statements of the follow-up
-    // blocks and the reason of the request (trigger flow 2026-10-07).
-    assert_eq!(empty.as_object().unwrap().len(), 32, "{body}");
-    assert!(empty.get("id_document_number").is_none(), "{body}");
+    // With the data of the own identity document (owner 2026-11-10), the
+    // statements of the follow-up blocks and the reason of the request.
+    assert_eq!(empty.as_object().unwrap().len(), 38, "{body}");
+    assert!(empty["id_document_number"].is_null(), "{body}");
     assert!(empty["request_reason"].is_null(), "{body}");
     assert!(empty["birth_place"].is_null(), "{body}");
     assert!(empty["pep_self"].is_null(), "{body}");
@@ -2123,25 +2123,16 @@ async fn the_lead_states_the_identification_and_staff_read_it() {
             "contact_channels",
             "invalid_field",
         ),
+        // A representative's document data stay with staff.
         (
-            json!({ "id_document_type": "passport" }),
+            json!({ "rep1_id_document_number": "AB123456" }),
+            "rep1_id_document_number",
+            "staff_only",
+        ),
+        (
+            json!({ "id_document_type": "driving_licence" }),
             "id_document_type",
-            "staff_only",
-        ),
-        (
-            json!({ "id_document_number": "AB123456" }),
-            "id_document_number",
-            "staff_only",
-        ),
-        (
-            json!({ "id_issued_on": "2021-01-01" }),
-            "id_issued_on",
-            "staff_only",
-        ),
-        (
-            json!({ "id_valid_until": "2099-01-01" }),
-            "id_valid_until",
-            "staff_only",
+            "invalid_field",
         ),
     ] {
         let (status, error) =
@@ -2187,7 +2178,7 @@ async fn the_lead_states_the_identification_and_staff_read_it() {
     assert_eq!(stated["habitual_residence_country"], "AT", "{saved}");
     assert_eq!(stated["contact_channels"], json!(["email", "phone"]));
     assert_eq!(stated["residence_since"], "2019", "{saved}");
-    assert!(stated.get("id_document_number").is_none(), "{saved}");
+    assert!(stated["id_document_number"].is_null(), "{saved}");
     assert_eq!(stated["pep_self"], false, "{saved}");
     assert_eq!(stated["pep_related_details"], "Bruder,\nMinister");
     assert_eq!(stated["high_risk_country_code"], "IR", "{saved}");
@@ -2259,6 +2250,49 @@ async fn the_lead_states_the_identification_and_staff_read_it() {
     assert_eq!(
         audit_count(pool, "lead_portal_update_identification", lead_id).await,
         2
+    );
+
+    // The lead may type the data of the own identity document next to the
+    // scan (owner 2026-11-10); a second save keeps them (the row exists).
+    let (status, typed) = json_request(
+        router,
+        "POST",
+        &identification,
+        &patient,
+        Some(json!({
+            "id_document_type": "passport",
+            "id_document_number": " ab 123456 ",
+            "id_issuing_country": "ua",
+            "id_valid_until": "2099-01-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{typed}");
+    assert_eq!(typed["identification"]["id_document_number"], "AB 123456");
+    assert_eq!(typed["identification"]["id_issuing_country"], "UA");
+    let (status, typed) = json_request(
+        router,
+        "POST",
+        &identification,
+        &patient,
+        Some(json!({ "id_issued_on": "2020-01-01" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{typed}");
+    let (number, valid_until, issued_on): (Option<String>, Option<chrono::NaiveDate>, Option<chrono::NaiveDate>) =
+        sqlx::query_as(
+            "SELECT id_document_number, id_valid_until, id_issued_on FROM lead_gwg_declarations WHERE lead_id = $1",
+        )
+        .bind(lead_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(number.as_deref(), Some("AB 123456"));
+    assert_eq!(valid_until, chrono::NaiveDate::from_ymd_opt(2099, 1, 1));
+    assert_eq!(issued_on, chrono::NaiveDate::from_ymd_opt(2020, 1, 1));
+    assert_eq!(
+        audit_count(pool, "lead_portal_update_identification", lead_id).await,
+        4
     );
 
     // Staff read the statements where they read the payer declaration; the

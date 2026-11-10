@@ -32,8 +32,9 @@ describe("fresh cabinet to wizard personal-data parity audit", () => {
     expect(mergePatientUpdates(current, baseline, incoming)).toEqual({ ...incoming, phone: "staff typing" });
   });
 
+  // The own identity document (id_*) shows in the staff identity panel, not among the statements.
   it("retains and renders all nonmedical identification answers after their follow-up blocks close", () => {
-    expect(new Set(Object.keys(identification))).toEqual(new Set(IDENTIFICATION_FIELDS.filter((key) => key !== "request_reason")));
+    expect(new Set(Object.keys(identification))).toEqual(new Set(IDENTIFICATION_FIELDS.filter((key) => key !== "request_reason" && !key.startsWith("id_"))));
     const intake = normalizeLeadPortalIntake({ lead_id: "synthetic-parity", identification });
     expect(intake).not.toBeNull();
     expect(intake!.identification).toMatchObject(identification);

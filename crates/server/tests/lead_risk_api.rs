@@ -1003,18 +1003,19 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
     );
     assert_eq!(stored_rows(&app, lead_id).await, 0);
 
-    // Staff's identity data are not the lead's: 422 staff_only.
+    // A representative's identity data are staff's: 422 staff_only (the
+    // lead's own document data are the lead's since 2026-11-10).
     let (status, body) = request(
         &app,
         "POST",
         &format!("{path}/identification"),
         &patient,
-        Some(json!({ "id_document_number": "AB123456" })),
+        Some(json!({ "rep1_id_document_number": "AB123456" })),
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["code"], "staff_only");
-    assert_eq!(body["field"], "id_document_number");
+    assert_eq!(body["field"], "rep1_id_document_number");
 
     // The concern contains health data and requires the current consent.
     let (status, body) = request(
@@ -1048,7 +1049,8 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
         body["identification"]["request_reason"],
         "Zweitmeinung zur Knie-OP"
     );
-    assert!(body["identification"].get("id_document_number").is_none());
+    // The own document data are shown (empty here), never required to send.
+    assert!(body["identification"]["id_document_number"].is_null());
     assert!(
         !body["progress"]["missing_for_submit"]
             .as_array()
@@ -2506,4 +2508,52 @@ async fn a_parent_without_a_billing_role_raises_no_country_trigger() {
         trigger(&with_role, "T1", "representative").is_some(),
         "{with_role}"
     );
+}
+
+#[tokio::test]
+async fn a_converted_leads_assessment_is_frozen() {
+    let Some(app) = test_app().await else { return };
+    let lead_id = insert_lead(&app, "Frieda", &["IR"]).await;
+    assert!(held(&qualify(&app, lead_id).await));
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
+           VALUES ($1, 'Frieda', 'Muster', '1980-01-01', 'diverse', $2) RETURNING id"#,
+    )
+    .bind(format!(
+        "P-RISK-{}",
+        &Uuid::new_v4().simple().to_string()[..8]
+    ))
+    .bind(app.ceo_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    sqlx::query("UPDATE leads SET converted_patient_id = $2 WHERE id = $1")
+        .bind(lead_id)
+        .bind(patient_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+
+    // Neither a restart nor a decision changes the frozen lead (QA 2026-11-10).
+    let (status, body) = request(
+        &app,
+        "POST",
+        &format!("/leads/{lead_id}/risk-assessment/restart"),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "lead_converted", "{body}");
+    let (status, body) = decide(
+        &app,
+        &app.ceo(),
+        lead_id,
+        json!({ "decision": "release", "reason": "Identity verified in person" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "lead_converted", "{body}");
+    // Reading it still works.
+    assert_eq!(assessment(&app, lead_id).await["level"], 2);
 }

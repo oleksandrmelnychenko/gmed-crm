@@ -957,14 +957,18 @@ pub fn changed_statements(before: &Statements, after: &Statements) -> Vec<&'stat
         .collect()
 }
 
-/// Splits the body of `…/identification`: staff's identity data → 422
-/// `staff_only`; the new statements are returned apart; the rest is the
-/// base patch.
+/// Splits the body of `…/identification`: a representative's identity data
+/// → 422 `staff_only` (the lead's own document data are part of the base
+/// patch since 2026-11-10); the new statements are returned apart; the rest
+/// is the base patch.
 pub fn split_identification_body(body: Value) -> Result<(Value, Map<String, Value>), Response> {
     let Value::Object(mut object) = body else {
         return Ok((body, Map::new()));
     };
-    if let Some(field) = object.keys().find(|key| is_id_data_key(key)) {
+    if let Some(field) = object
+        .keys()
+        .find(|key| is_id_data_key(key) && !ID_DATA_KEYS.contains(&key.as_str()))
+    {
         return Err(staff_only(field));
     }
     let mut statements = Map::new();
@@ -1077,14 +1081,11 @@ pub async fn save_statements(
     Ok(Ok(changed))
 }
 
-/// The cabinet's `identification` object after the trigger flow: without
-/// staff's identity data, with the new statements and the reason of the
-/// request (the lead's own text).
+/// The cabinet's `identification` object after the trigger flow: with the
+/// data of the lead's own identity document (owner 2026-11-10), the new
+/// statements and the reason of the request (the lead's own text).
 pub fn cabinet_identification(mut base: Value, statements: &Statements) -> Value {
     if let Some(object) = base.as_object_mut() {
-        for key in ID_DATA_KEYS {
-            object.remove(key);
-        }
         for (key, value) in statements.gwg_json() {
             object.insert(key, value);
         }
@@ -1526,7 +1527,15 @@ mod tests {
         .unwrap();
         assert_eq!(base, json!({ "birth_place": "Kyiv" }));
         assert_eq!(statements.len(), 2);
+        // The lead's own document data pass (owner 2026-11-10); a
+        // representative's stay with staff.
         for key in ["id_document_number", "id_valid_until", "id_issued_on"] {
+            assert!(
+                split_identification_body(json!({ key: "x" })).is_ok(),
+                "{key}"
+            );
+        }
+        for key in ["rep1_id_document_number", "rep2_id_valid_until"] {
             assert!(
                 split_identification_body(json!({ key: "x" })).is_err(),
                 "{key}"
@@ -1643,7 +1652,7 @@ mod tests {
     }
 
     #[test]
-    fn the_cabinet_identification_has_no_staff_data() {
+    fn the_cabinet_identification_keeps_the_own_document_data() {
         let base =
             json!({ "birth_place": "Kyiv", "id_document_number": "AB1", "id_valid_until": null });
         let statements = Statements {
@@ -1651,8 +1660,8 @@ mod tests {
             ..Statements::default()
         };
         let value = cabinet_identification(base, &statements);
-        assert!(value.get("id_document_number").is_none());
-        assert!(value.get("id_valid_until").is_none());
+        assert_eq!(value["id_document_number"], "AB1");
+        assert!(value["id_valid_until"].is_null());
         assert_eq!(value["request_reason"], "Zweitmeinung");
         assert!(value.get("residence_since").is_some());
     }

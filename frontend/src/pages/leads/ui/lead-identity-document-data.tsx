@@ -369,6 +369,9 @@ export function LeadIdentityDocumentDataForm({
 
   const status = identityDocumentStatus(draft, { today, scans: scanCount, errors: { ...clientErrors, ...serverErrors } });
   const entered = identityDocumentEnteredLine(marks ?? source, tx);
+  // The lead may type the data in the cabinet (owner 2026-11-10): until staff
+  // saved them here, they are the client's and need a look at the scan.
+  const typedByClient = !entered && Boolean(source?.id_document_number || source?.id_valid_until);
   const errorId = (field: IdentityDocumentField) => `${fieldId}-${field}-error`;
   const described = (field: IdentityDocumentField) => (fieldError(field) ? errorId(field) : undefined);
 
@@ -500,6 +503,11 @@ export function LeadIdentityDocumentDataForm({
           <StatusChip tone="warning" className="whitespace-normal" data-testid={`${testId}-entered`}>
             <UserRound aria-hidden="true" />
             {entered}
+          </StatusChip>
+        ) : typedByClient ? (
+          <StatusChip tone="warning" className="whitespace-normal" data-testid={`${testId}-typed-by-client`}>
+            <UserRound aria-hidden="true" />
+            {tx("Внесено клиентом в кабинете: сверьте со сканом", "Vom Kunden im Kabinett eingetragen: mit dem Scan abgleichen")}
           </StatusChip>
         ) : null}
         <div className="flex min-h-8 items-center gap-2" aria-live="polite">

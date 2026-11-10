@@ -299,7 +299,7 @@ describe("lead cabinet languages", () => {
       "Причина обращения",
     ]);
     // A key of another server the cabinet has no words for is shown as it is, never empty.
-    expect(submitFieldLabel(de, "id_document_type" as never)).toBe("id_document_type");
+    expect(submitFieldLabel(de, "rep1_id_document_type" as never)).toBe("rep1_id_document_type");
   });
 
   it("asks a parent about the patient, not about 'you'", () => {

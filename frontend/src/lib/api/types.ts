@@ -55,6 +55,12 @@ export interface Lead {
   submitted_at: string | null;
   created_at: string;
   attachment_count?: number;
+  /**
+   * A scan of an identity document (the lead's or a representative's) is
+   * there, its number or validity is not: the documents print dashes (owner
+   * 2026-11-10).
+   */
+  identity_data_missing?: boolean;
   /** The patient login created with the lead; null for leads without one. */
   portal_account?: LeadPortalAccountSummary | null;
   /** What the patient did in the portal (step-1 fields, uploads, sent, parents' logins). */

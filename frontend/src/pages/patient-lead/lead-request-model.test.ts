@@ -153,8 +153,11 @@ describe("lead request identification autosave", () => {
     // Nothing entered yet, and an older server without the statements: an empty form.
     expect(draftFromIdentification(undefined)).toMatchObject({ birth_place: "", contact_channels: [], pep_self: "" });
     expect(identificationPatch(draftFromIdentification(undefined), draftFromIdentification(null))).toEqual({});
-    // The identity document's data are staff's (trigger flow): the form has no such field and never sends one.
-    expect(Object.keys(draftFromIdentification(identification)).some((key) => key.startsWith("id_"))).toBe(false);
+    // The lead's own document data are part of the form (owner 2026-11-10, optional).
+    expect(Object.keys(draftFromIdentification(identification))).toEqual(expect.arrayContaining(["id_document_number", "id_valid_until"]));
+    expect(identificationPatch(draftFromIdentification(null), { ...draftFromIdentification(null), id_document_number: " AB 1 " })).toEqual({
+      id_document_number: "AB 1",
+    });
   });
 
   it("sends the legal answers as true, false or null, without details", () => {
@@ -227,9 +230,9 @@ describe("lead request identification autosave", () => {
     expect(identificationPatch(saved, corrected, stillRejectedIdentification(rejected ?? {}, corrected))).toMatchObject({
       residence_since: "2015",
     });
-    // A field the form does not know (also staff's `id_*`) is not the form's to hold back.
+    // A field the form does not know (a representative's `rep1_id_*`) is not the form's to hold back.
     expect(withRejectedIdentification({}, "declared_correct_at", draft)).toBeNull();
-    expect(withRejectedIdentification({}, "id_valid_until", draft)).toBeNull();
+    expect(withRejectedIdentification({}, "rep1_id_valid_until", draft)).toBeNull();
   });
 });
 

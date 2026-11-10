@@ -1955,6 +1955,25 @@ async fn list_leads(
                   (SELECT COUNT(*) FROM lead_attachments a
                     WHERE a.lead_id = leads.id AND a.import_refused_at IS NOT NULL)
                       AS refused_attachment_count,
+                  -- A scan of an identity document is there, its number or
+                  -- validity is not (owner 2026-11-10): the documents would
+                  -- print dashes. The lead's own and each representative's.
+                  (EXISTS (SELECT 1 FROM lead_portal_uploads u
+                            JOIN documents d ON d.id = u.document_id
+                           WHERE u.lead_id = leads.id AND u.kind = 'identity'
+                             AND u.withdrawn_at IS NULL AND d.file_deleted_at IS NULL)
+                   AND NOT EXISTS (SELECT 1 FROM lead_gwg_declarations g
+                                    WHERE g.lead_id = leads.id
+                                      AND g.id_document_number IS NOT NULL
+                                      AND g.id_valid_until IS NOT NULL))
+                  OR EXISTS (SELECT 1 FROM lead_portal_uploads u
+                               JOIN documents d ON d.id = u.document_id
+                               LEFT JOIN lead_representatives r
+                                 ON r.lead_id = u.lead_id AND r.contact_id = u.representative_id
+                              WHERE u.lead_id = leads.id AND u.kind = 'representative_identity'
+                                AND u.withdrawn_at IS NULL AND d.file_deleted_at IS NULL
+                                AND (r.id_document_number IS NULL OR r.id_valid_until IS NULL))
+                      AS identity_data_missing,
                   converted_patient_id
            FROM leads
            WHERE ($1::bool = true OR $2::text IS NOT NULL
@@ -2133,6 +2152,8 @@ async fn list_leads(
                     "attachment_count": r.try_get::<i64, _>("attachment_count").unwrap_or(0),
                     // Questionnaire files the import refused (QA 2026-10-25).
                     "refused_attachment_count": r.try_get::<i64, _>("refused_attachment_count").unwrap_or(0),
+                    // A scan without its typed data: the documents print dashes.
+                    "identity_data_missing": r.try_get::<bool, _>("identity_data_missing").unwrap_or(false),
                     // A converted lead in the list links its patient record.
                     "converted_patient_id": r.try_get::<Option<Uuid>, _>("converted_patient_id").unwrap_or_default(),
                 });

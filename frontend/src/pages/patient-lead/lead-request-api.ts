@@ -197,6 +197,19 @@ export type LeadRequestIdentification = {
   habitual_residence_country: string | null;
   /** Subset of `email`, `phone`, `messenger`. */
   contact_channels: string[];
+  /**
+   * The lead's own identity document as typed next to the scan (owner
+   * 2026-11-10, optional): printed on the documents; staff check and correct
+   * them in the wizard. `passport`, `id_card` or `residence_permit`.
+   */
+  id_document_type?: string | null;
+  id_document_number?: string | null;
+  id_issuing_authority?: string | null;
+  /** ISO code. */
+  id_issuing_country?: string | null;
+  /** YYYY-MM-DD. */
+  id_issued_on?: string | null;
+  id_valid_until?: string | null;
   pep_self: boolean | null;
   pep_related: boolean | null;
   sanctions_links: boolean | null;
