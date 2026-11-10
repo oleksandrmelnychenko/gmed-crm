@@ -1,51 +1,7 @@
 import { useId, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import {
-  BadgeCheck,
-  BellRing,
-  Building2,
-  CalendarClock,
-  ChartSpline,
-  ChevronDown,
-  ClipboardList,
-  ConciergeBell,
-  FileHeart,
-  FileSignature,
-  FileText,
-  Files,
-  Fingerprint,
-  FolderOpen,
-  FolderKanban,
-  FolderLock,
-  IdCard,
-  GraduationCap,
-  HeartPulse,
-  History,
-  Hotel,
-  KeyRound,
-  KeySquare,
-  LayoutDashboard,
-  LogOut,
-  LockKeyhole,
-  Megaphone,
-  MessageCircleHeart,
-  MessagesSquare,
-  NotebookPen,
-  PackageCheck,
-  Pill,
-  Plug,
-  ReceiptText,
-  Scale,
-  Settings2,
-  Shield,
-  ShieldAlert,
-  SlidersHorizontal,
-  Stethoscope,
-  UserCog,
-  UserRoundPlus,
-  Wallet,
-  UsersRound,
-} from "lucide-react";
+import { ChevronDown, LogOut, LockKeyhole } from "lucide-react";
+import { navItemIcon } from "@/components/nav-item-icon";
 import { useAuth } from "@/lib/auth";
 import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
 import { useNavCounters } from "@/lib/use-nav-counters";
@@ -106,60 +62,6 @@ const SECTION_LABEL_KEYS: Record<StaffNavSection, string> = {
   security: "nav_section_security",
   dsgvo: "nav_section_dsgvo",
   admin: "nav_admin",
-};
-
-const NAV_ICONS: Record<string, React.ElementType> = {
-  dashboard: LayoutDashboard,
-  notifications: BellRing,
-  concierge: ConciergeBell,
-  "task-manager": ClipboardList,
-  chat: MessagesSquare,
-  notes: NotebookPen,
-  feedback: MessageCircleHeart,
-  reports: ChartSpline,
-  sops: GraduationCap,
-  leads: UserRoundPlus,
-  projects: FolderKanban,
-  patients: UsersRound,
-  providers: Building2,
-  hotels: Hotel,
-  orders: ClipboardList,
-  contracts: FileSignature,
-  invoices: ReceiptText,
-  "company-finance": Scale,
-  "finance-catalog": Wallet,
-  documents: FolderOpen,
-  files: Files,
-  specializations: Stethoscope,
-  medications: Pill,
-  recommendations: ClipboardList,
-  services: ConciergeBell,
-  after_request: PackageCheck,
-  subscriptions: PackageCheck,
-  privacy: Shield,
-  incidents: ShieldAlert,
-  account: UserCog,
-  "security/two-factor": KeyRound,
-  cases: FileHeart,
-  appointments: CalendarClock,
-  employees: UsersRound,
-  "admin/users": UserCog,
-  "admin/access": KeyRound,
-  "admin/settings": Settings2,
-  "admin/datev": Plug,
-  personnel: FolderLock,
-  "my-personnel-file": IdCard,
-  lead_request: ClipboardList,
-  trusted_persons: UsersRound,
-  sanctions: ShieldAlert,
-  "admin/api-connections": KeySquare,
-  "admin/activity": History,
-  "admin/security": Fingerprint,
-  "admin/health": HeartPulse,
-  "admin/compliance": BadgeCheck,
-  "admin/notifications": BellRing,
-  "admin/custom-fields": SlidersHorizontal,
-  "admin/announcements": Megaphone,
 };
 
 function toNavItem(item: StaffNavItem): NavItem {
@@ -440,7 +342,7 @@ function NavGroup({
   return (
     <div className="flex flex-col gap-0.5">
       {items.map((item) => {
-        const Icon = NAV_ICONS[item.id] ?? FileText;
+        const Icon = navItemIcon(item.id);
         const label = navItemLabel(item, tr, translations);
         const count = counters?.[item.id] ?? 0;
         if (item.locked) {

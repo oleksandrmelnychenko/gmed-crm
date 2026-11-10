@@ -29,7 +29,7 @@ import {
   ArrowRight,
   ClipboardCheck,
   FileCheck2,
-  IdCard,
+  ScanText,
   LoaderCircle,
   Plus,
   RefreshCw,
@@ -816,10 +816,10 @@ function useLeadsPageContent() {
                       ? "Ausweis-Scan da, Nummer oder Gültigkeit fehlen: Daten aus dem Scan eintragen"
                       : "Скан документа есть, номер или срок действия не внесены: заполните по скану"
                   }
-                  className="inline-flex shrink-0 text-amber-600 dark:text-amber-400"
+                  className="inline-flex size-5 shrink-0 items-center justify-center rounded-md bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300"
                   data-testid={`lead-identity-data-missing-${row.id}`}
                 >
-                  <IdCard aria-hidden="true" className="size-3.5" />
+                  <ScanText aria-hidden="true" className="size-4" />
                 </span>
               ) : null}
             </span>

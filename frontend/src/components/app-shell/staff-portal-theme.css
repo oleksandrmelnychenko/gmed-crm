@@ -90,11 +90,12 @@
   color: var(--primary-foreground);
 }
 
-.staff-portal-theme .executive-dashboard {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--gmed-panel-radius);
-  padding: var(--gmed-panel-padding);
+@layer components {
+  .staff-overview-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--gmed-panel-radius);
+  }
 }
 
 @media (min-width: 1024px) {
@@ -123,5 +124,4 @@
 @media (max-width: 639px) {
   .staff-portal-theme .navigation-section-label { min-height: 40px; }
   .staff-portal-theme #main-content { padding: 12px; }
-  .staff-portal-theme .executive-dashboard { padding: 12px; }
 }

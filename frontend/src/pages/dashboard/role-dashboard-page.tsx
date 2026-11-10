@@ -1,22 +1,54 @@
-import { useCallback, useEffect, useMemo, useState, type ElementType } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
+  AlarmClock,
   ArrowRight,
   ArrowUpRight,
+  BadgeCheck,
+  Calculator,
+  CalendarCheck,
   CalendarClock,
+  CalendarDays,
   CheckCircle2,
-  CircleDollarSign,
   ClipboardCheck,
-  Clock3,
+  ClipboardList,
+  ClockCheck,
+  ConciergeBell,
+  ContactRound,
+  Database,
+  FileClock,
+  Fingerprint,
   Gauge,
+  Globe2,
+  HandCoins,
+  History,
+  Hospital,
+  Inbox,
+  Layers3,
+  LayoutGrid,
+  ListChecks,
+  ListTodo,
+  LockKeyhole,
+  Monitor,
+  PackageCheck,
+  ReceiptText,
+  ShieldAlert,
+  ShieldBan,
   ShieldCheck,
-  Sparkles,
+  Star,
+  Timer,
   TrendingUp,
-  Users,
+  UserRoundCheck,
+  UserRoundPlus,
+  UsersRound,
+  Wallet,
+  type LucideIcon,
 } from "lucide-react";
 
 import { apiFetch } from "@/lib/api";
-import { formatAppDateTime } from "@/lib/app-time-zone";
+import { SectionHeading } from "@/components/ui/section-heading";
+import { PortalDateChip } from "@/components/ui/portal-date-chip";
+import { navItemIcon } from "@/components/nav-item-icon";
 import { formatMoneyAmount } from "@/lib/money";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
@@ -51,7 +83,50 @@ type RoleKpiResponse = {
   kpi: Record<string, unknown> | null;
 };
 
-const KPI_ICONS: ElementType[] = [Users, ClipboardCheck, Clock3, TrendingUp];
+const KPI_ICONS: Record<string, LucideIcon> = {
+  active_lead_country_count: Globe2,
+  active_orders: ClipboardList,
+  active_patients: UsersRound,
+  active_services: ConciergeBell,
+  active_sessions: Monitor,
+  active_users: UsersRound,
+  appointments_next_7d: CalendarDays,
+  approved_hours_30d: ClockCheck,
+  audit_events_24h: History,
+  avg_feedback_score: Star,
+  avg_invoice_gross: Calculator,
+  avg_service_to_invoice_days: Timer,
+  blocked_logins_24h: ShieldBan,
+  booked_hours_30d: Timer,
+  checklist_completion_rate_pct: ClipboardCheck,
+  completed_appointments_30d: CalendarCheck,
+  completed_services_30d: PackageCheck,
+  converted_leads_30d: ContactRound,
+  db_active_connections: Database,
+  failed_logins_24h: ShieldAlert,
+  hours_approval_rate_pct: BadgeCheck,
+  invoices_30d: ReceiptText,
+  lead_to_patient_conversion_rate_pct: TrendingUp,
+  locked_accounts: LockKeyhole,
+  new_leads_30d: UserRoundPlus,
+  new_partner_clinics_90d: Hospital,
+  open_advance_requests_total: HandCoins,
+  open_checklist_items: ListChecks,
+  open_tasks: ListTodo,
+  outstanding_receivables_total: Wallet,
+  overdue_invoice_count: FileClock,
+  overdue_tasks: AlarmClock,
+  paid_within_14d_rate_pct: CalendarCheck,
+  pending_logins: Fingerprint,
+  pending_reports: FileClock,
+  portal_requests_30d: Inbox,
+  qualified_leads: UserRoundCheck,
+  qualified_leads_30d: UserRoundCheck,
+  ready_for_billing: ReceiptText,
+  taxonomy_mix: Layers3,
+  team_size: UsersRound,
+  upcoming_hours_30d: CalendarClock,
+};
 
 const ROLE_DASHBOARD_EVENTS = [
   "concierge_operational_item.created",
@@ -150,7 +225,7 @@ function MetricCard({
   loading,
   onClick,
 }: {
-  icon: ElementType;
+  icon: LucideIcon;
   metric: RoleDashboardMetric;
   value: unknown;
   lang: Lang;
@@ -159,10 +234,9 @@ function MetricCard({
 }) {
   const content = (
     <>
-      <span className="absolute left-0 top-4 h-8 w-0.5 rounded-r-full bg-[var(--brand)]" />
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[12px] text-muted-foreground">{metric.label}</p>
+          <SectionHeading icon={Icon}>{metric.label}</SectionHeading>
           {loading ? (
             <div className="mt-3 h-7 w-24 animate-pulse rounded bg-muted" />
           ) : (
@@ -173,7 +247,6 @@ function MetricCard({
           <p className="mt-2 text-[11px] leading-4 text-muted-foreground">{metric.hint}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Icon className="size-[18px] shrink-0 text-muted-foreground" />
           {onClick ? <ArrowUpRight className="size-3.5 text-muted-foreground/70" /> : null}
         </div>
       </div>
@@ -181,8 +254,8 @@ function MetricCard({
   );
 
   const className = cn(
-    "relative min-h-32 w-full overflow-hidden rounded-lg border border-border/70 bg-card p-4 text-left",
-    onClick && "transition-colors hover:border-foreground/25 hover:bg-muted/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+    "staff-overview-card min-w-0 w-full p-4 text-left",
+    onClick && "transition-colors hover:border-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
   );
 
   return onClick ? (
@@ -303,11 +376,8 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
   const copy = lang === "de"
     ? {
         priorities: "Fokus heute",
-        prioritiesHint: "Die wichtigsten nächsten Schritte",
         details: "Weitere Kennzahlen",
-        detailsHint: "Zusätzlicher Kontext für Ihre Arbeit",
         quick: "Schnellzugriff",
-        quickHint: "Nur für Ihre Rolle freigegebene Bereiche",
         unavailable: "Aktuelle Kennzahlen konnten nicht geladen werden.",
         live: "Live priorisiert",
         allClear: "Keine dringenden Aufgaben in Ihrer persönlichen Queue.",
@@ -319,11 +389,8 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
       }
     : {
         priorities: "Фокус на сегодня",
-        prioritiesHint: "Главные следующие действия",
         details: "Дополнительные показатели",
-        detailsHint: "Контекст для вашей ежедневной работы",
         quick: "Быстрый доступ",
-        quickHint: "Только разрешённые для вашей роли разделы",
         unavailable: "Актуальные показатели пока не удалось загрузить.",
         live: "Приоритеты в реальном времени",
         allClear: "В вашей очереди сейчас нет срочных задач.",
@@ -334,20 +401,10 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
         provider: "Провайдер",
       };
 
-  const formatTaskDate = (task: ConciergeTask) => {
-    const date = conciergeTaskScheduledAt(task);
-    if (!date) return copy.noDue;
-    return formatAppDateTime(date) || copy.noDue;
-  };
-
   return (
-    <div className="space-y-4">
+    <div className="grid min-w-0 gap-3">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <div className="mb-2 flex items-center gap-2 text-[11px] font-medium text-muted-foreground">
-            <span className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />
-            {definition.eyebrow}
-          </div>
           <h1 className="text-[22px] font-semibold leading-tight tracking-tight text-foreground">
             {greeting}
           </h1>
@@ -357,10 +414,10 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <OpenTaskQueueLink />
-          <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-card px-3 py-2 text-[12px] text-muted-foreground">
+          {preview && <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-card px-3 py-2 text-[12px] text-muted-foreground">
             <ShieldCheck className="size-4 text-[var(--brand)]" />
             {roleTitle}
-          </div>
+          </div>}
         </div>
       </header>
 
@@ -371,14 +428,14 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
       ) : null}
 
       {hasScorecard ? (
-      <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        {definition.metrics.slice(0, 4).map((metricItem, index) => {
+      <section className="grid gap-3 min-[420px]:grid-cols-2 xl:grid-cols-4">
+        {definition.metrics.slice(0, 4).map((metricItem) => {
           const route = METRIC_ROUTES[metricItem.key];
           const canOpenRoute = route && availableRoutes.has(route.split("?")[0]);
           return (
             <MetricCard
               key={metricItem.key}
-              icon={KPI_ICONS[index] ?? Gauge}
+              icon={KPI_ICONS[metricItem.key] ?? Gauge}
               lang={lang}
               loading={loading}
               metric={metricItem}
@@ -398,19 +455,14 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
         )}
       >
         {hasScorecard ? (
-        <article className="overflow-hidden rounded-lg border border-border/70 bg-card">
+        <article className="staff-overview-card min-w-0 overflow-hidden">
           <div className="border-b border-border px-4 py-3">
-            <div className="flex items-center gap-2">
-              <Activity className="size-4 text-muted-foreground" />
-              <h2 className="text-[14px] font-semibold text-foreground">{copy.details}</h2>
-            </div>
-            <p className="mt-0.5 text-[11.5px] text-muted-foreground">{copy.detailsHint}</p>
+            <h2><SectionHeading icon={Activity}>{copy.details}</SectionHeading></h2>
           </div>
           <div className="grid md:grid-cols-2">
             {(secondaryMetrics.length > 0 ? secondaryMetrics : definition.metrics.slice(0, 2)).map(
               (metricItem, index) => {
-                const icons = [CircleDollarSign, CircleDollarSign, Gauge, Sparkles];
-                const Icon = icons[index] ?? Sparkles;
+                const Icon = KPI_ICONS[metricItem.key] ?? Gauge;
                 return (
                   <div
                     key={metricItem.key}
@@ -438,15 +490,9 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
         </article>
         ) : null}
 
-        <article className="overflow-hidden rounded-lg border border-border/70 bg-card">
+        <article className="staff-overview-card min-w-0 overflow-hidden">
           <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <CalendarClock className="size-4 text-muted-foreground" />
-                <h2 className="text-[14px] font-semibold text-foreground">{copy.priorities}</h2>
-              </div>
-              <p className="mt-0.5 text-[11.5px] text-muted-foreground">{copy.prioritiesHint}</p>
-            </div>
+            <h2><SectionHeading icon={CalendarClock}>{copy.priorities}</SectionHeading></h2>
             {showLiveFocus ? (
               <button
                 type="button"
@@ -469,6 +515,7 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
             ) : showLiveFocus && focusTasks.length > 0 ? (
               focusTasks.map((task) => {
                 const now = new Date();
+                const scheduledAt = conciergeTaskScheduledAt(task);
                 const overdue = isConciergeTaskOverdue(task, now);
                 const dueToday = !overdue && isConciergeTaskDueToday(task, now);
                 const context = task.patient_name
@@ -499,9 +546,8 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
                       <span className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
                         <span className="font-mono tracking-wide">{conciergeTaskCode(task)}</span>
                         <span aria-hidden="true">·</span>
-                        <span className={cn(overdue && "font-medium text-rose-600") }>
-                          {overdue ? copy.overdue : dueToday ? copy.today : formatTaskDate(task)}
-                        </span>
+                        {overdue || dueToday ? <span className={cn(overdue && "font-medium text-rose-600")}>{overdue ? copy.overdue : copy.today}</span> : null}
+                        {scheduledAt ? <PortalDateChip timestamp={scheduledAt.toISOString()} /> : copy.noDue}
                       </span>
                       <span className="mt-1 block break-words text-[12.5px] font-medium leading-5 text-foreground">
                         {dashboardTaskTitle(task, lang)}
@@ -537,34 +583,31 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
       ) : null}
 
       {quickLinks.length > 0 || quickLinksUnavailable ? (
-        <section data-testid="role-cabinet-quick-links">
-          <div className="mb-2 px-1">
-            <h2 className="text-[11px] font-semibold text-muted-foreground">
-              {copy.quick}
-            </h2>
-            <p className="mt-0.5 text-[12.5px] text-foreground">
-              {quickLinksUnavailable ? tr.cabinet_quick_links_empty : copy.quickHint}
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
-            {quickLinks.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                data-testid={`role-cabinet-link-${item.id}`}
-                onClick={() => staffGo(item.to)}
-                className={cn(
-                  "flex items-center gap-3 rounded-lg border border-border/70 bg-card px-4 py-3 text-left",
-                  "transition-colors hover:border-foreground/30",
-                )}
-              >
-                <CheckCircle2 className="size-4 text-[var(--brand)]" />
-                <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
-                  {tr[item.labelKey] ?? item.id}
-                </span>
-                <ArrowRight className="size-3.5 text-muted-foreground" />
-              </button>
-            ))}
+        <section data-testid="role-cabinet-quick-links" className="staff-overview-card min-w-0 p-4">
+          <h2><SectionHeading icon={LayoutGrid}>{copy.quick}</SectionHeading></h2>
+          {quickLinksUnavailable && <p className="mt-2 text-sm text-muted-foreground">{tr.cabinet_quick_links_empty}</p>}
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            {quickLinks.map((item) => {
+              const Icon = navItemIcon(item.id);
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  data-testid={`role-cabinet-link-${item.id}`}
+                  onClick={() => staffGo(item.to)}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg border border-border/70 bg-card px-4 py-3 text-left",
+                    "transition-colors hover:border-foreground/30",
+                  )}
+                >
+                  <Icon aria-hidden="true" className="size-4 shrink-0 text-foreground" />
+                  <span className="min-w-0 flex-1 break-words text-[13px] font-medium text-foreground">
+                    {tr[item.labelKey] ?? item.id}
+                  </span>
+                  <ArrowRight className="size-3.5 text-muted-foreground" />
+                </button>
+              );
+            })}
           </div>
         </section>
       ) : null}

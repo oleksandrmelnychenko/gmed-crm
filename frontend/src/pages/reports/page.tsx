@@ -6,7 +6,18 @@ import {
   CalendarDays,
   Download,
   Globe2,
+  CalendarCheck,
+  CalendarRange,
+  Coins,
+  ContactRound,
+  Eye,
+  Funnel,
+  Handshake,
+  Hospital,
+  Layers3,
   LoaderCircle,
+  ReceiptText,
+  Stethoscope,
   RefreshCw,
   Rows3,
   Wallet,
@@ -20,6 +31,7 @@ import {
 import { DataTable } from "@/components/data-table/data-table";
 import type { ColumnDef } from "@/components/data-table/types";
 import { StaffLink } from "@/components/staff-link";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -465,18 +477,7 @@ function clearReportsStatsCache() {
   clearApiCache("/stats");
 }
 
-function card(extra?: string) {
-  return cn(extra);
-}
-
-function titleWithDot(title: string) {
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-      <span>{title}</span>
-    </span>
-  );
-}
+const reportPanel = "staff-overview-card min-w-0 p-3";
 
 function tableEmpty(message: string) {
   return (
@@ -1709,10 +1710,10 @@ function useReportsPageContent() {
       {data ? (
         <>
           {allowedSections.has("billing_kpis") && data.billing_kpis ? (
-            <section className={card("rounded-lg bg-card p-3")}>
+            <section className={reportPanel}>
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.billing.title)}</h2>
+                  <h2 className={tokens.text.sectionTitle}><SectionHeading icon={ReceiptText}>{text.billing.title}</SectionHeading></h2>
                 </div>
                 <Badge variant="secondary">
                   {text.billing.trackedInvoices(data.billing_kpis.tracked_invoice_count)}
@@ -1783,10 +1784,10 @@ function useReportsPageContent() {
           ) : null}
 
           {allowedSections.has("sales_kpis") && data.sales_kpis ? (
-            <section className={card("rounded-lg bg-card p-3")}>
+            <section className={reportPanel}>
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.sales.title)}</h2>
+                  <h2 className={tokens.text.sectionTitle}><SectionHeading icon={BarChart3}>{text.sales.title}</SectionHeading></h2>
                 </div>
                 <Badge variant="secondary">
                   {text.sales.leadCountries(data.sales_kpis.active_lead_country_count)}
@@ -1824,9 +1825,7 @@ function useReportsPageContent() {
                 </div>
                 <article className="relative overflow-hidden rounded-xl px-4 py-2.5">
                   <div className="relative flex items-center justify-between gap-3">
-                    <p className="min-w-0 max-w-full break-words text-sm font-semibold text-foreground">
-                      {text.sales.topLeadCountries90d}
-                    </p>
+                    <h3><SectionHeading icon={Globe2}>{text.sales.topLeadCountries90d}</SectionHeading></h3>
                     <Badge variant="outline" className="rounded-full bg-card/70">
                       {data.sales_kpis.top_countries.length}
                     </Badge>
@@ -1878,98 +1877,96 @@ function useReportsPageContent() {
 
           {forecasting ? (
             <>
-              <section className="space-y-3">
-                {forecastSections.has("quote_pipeline") && forecasting.quote_pipeline ? (
-                  <section className={card("rounded-lg bg-card p-3")}>
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.forecast.pipelineTitle)}</h2>
-                      </div>
-                      <Badge variant="secondary">
-                        {text.forecast.quotes(forecasting.quote_pipeline.open_quotes)}
-                      </Badge>
+              {forecastSections.has("quote_pipeline") && forecasting.quote_pipeline ? (
+                <section className={reportPanel}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h2 className={tokens.text.sectionTitle}><SectionHeading icon={Funnel}>{text.forecast.pipelineTitle}</SectionHeading></h2>
                     </div>
-                    <div className="mt-3 grid gap-1.5 md:grid-cols-3">
-                      {capsuleMetric(text.forecast.expiring14d, forecasting.quote_pipeline.expiring_next_14d)}
-                      {capsuleMetric(
-                        text.forecast.grossPipeline,
-                        forecasting.quote_pipeline.gross_total ? formatMoney(forecasting.quote_pipeline.gross_total, locale) : text.countsOnly,
-                      )}
-                      {capsuleMetric(
-                        text.forecast.weighted,
-                        forecasting.quote_pipeline.weighted_gross ? formatMoney(forecasting.quote_pipeline.weighted_gross, locale) : text.countsOnly,
-                      )}
-                      <div className="md:col-span-3">
-                        {capsuleMetric(text.forecast.readModel, text.forecast.readModelLegend)}
-                      </div>
+                    <Badge variant="secondary">
+                      {text.forecast.quotes(forecasting.quote_pipeline.open_quotes)}
+                    </Badge>
+                  </div>
+                  <div className="mt-3 grid gap-1.5 md:grid-cols-3">
+                    {capsuleMetric(text.forecast.expiring14d, forecasting.quote_pipeline.expiring_next_14d)}
+                    {capsuleMetric(
+                      text.forecast.grossPipeline,
+                      forecasting.quote_pipeline.gross_total ? formatMoney(forecasting.quote_pipeline.gross_total, locale) : text.countsOnly,
+                    )}
+                    {capsuleMetric(
+                      text.forecast.weighted,
+                      forecasting.quote_pipeline.weighted_gross ? formatMoney(forecasting.quote_pipeline.weighted_gross, locale) : text.countsOnly,
+                    )}
+                    <div className="md:col-span-3">
+                      {capsuleMetric(text.forecast.readModel, text.forecast.readModelLegend)}
                     </div>
-                    <div className="mt-3">
-                      <DataTable
-                        rows={forecasting.quote_pipeline.by_status}
-                        columns={forecastQuotePipelineColumns}
-                        rowId={(row) => row.status}
-                        emptyState={tableEmpty(text.countsOnly)}
-                      />
+                  </div>
+                  <div className="mt-3">
+                    <DataTable
+                      rows={forecasting.quote_pipeline.by_status}
+                      columns={forecastQuotePipelineColumns}
+                      rowId={(row) => row.status}
+                      emptyState={tableEmpty(text.countsOnly)}
+                    />
+                  </div>
+                </section>
+              ) : null}
+
+              <div className="grid gap-3 empty:hidden xl:grid-cols-[repeat(auto-fit,minmax(min(100%,350px),1fr))]">
+                {forecastSections.has("collections") && forecasting.collections ? (
+                  <section className={reportPanel}>
+                    <h2 className={tokens.text.sectionTitle}><SectionHeading icon={Wallet}>{text.forecast.collectionsTitle}</SectionHeading></h2>
+                    <p className={cn("mt-1", tokens.text.muted)}>
+                      {text.forecast.collectionsDescription}
+                    </p>
+                    <div className="mt-3 grid gap-1.5 rounded-xl bg-card p-3">
+                      {lineMetric(
+                        text.forecast.due14d,
+                        `${forecasting.collections.due_next_14d_count} / ${forecasting.collections.due_next_14d_total ? formatMoney(forecasting.collections.due_next_14d_total, locale) : text.countsOnly}`,
+                      )}
+                      {lineMetric(
+                        text.forecast.overdue,
+                        `${forecasting.collections.overdue_invoice_count} / ${forecasting.collections.overdue_open_total ? formatMoney(forecasting.collections.overdue_open_total, locale) : text.countsOnly}`,
+                      )}
+                      {lineMetric(
+                        text.forecast.debtWorkflows,
+                        text.forecast.workflowOpenReview(forecasting.collections.workflow_open_count, forecasting.collections.reviews_due_7d),
+                      )}
+                      {lineMetric(
+                        text.forecast.escalationSplit,
+                        text.forecast.escalationSplitValue(forecasting.collections.payment_plan_count, forecasting.collections.escalated_count),
+                      )}
                     </div>
                   </section>
                 ) : null}
 
-                <div className={cn("grid gap-3 rounded-lg bg-card p-3 xl:grid-cols-2", card())}>
-                  {forecastSections.has("collections") && forecasting.collections ? (
-                    <section>
-                      <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.forecast.collectionsTitle)}</h2>
-                      <p className={cn("mt-1", tokens.text.muted)}>
-                        {text.forecast.collectionsDescription}
-                      </p>
-                      <div className="mt-3 grid gap-1.5 rounded-xl bg-card p-3">
-                        {lineMetric(
-                          text.forecast.due14d,
-                          `${forecasting.collections.due_next_14d_count} / ${forecasting.collections.due_next_14d_total ? formatMoney(forecasting.collections.due_next_14d_total, locale) : text.countsOnly}`,
-                        )}
-                        {lineMetric(
-                          text.forecast.overdue,
-                          `${forecasting.collections.overdue_invoice_count} / ${forecasting.collections.overdue_open_total ? formatMoney(forecasting.collections.overdue_open_total, locale) : text.countsOnly}`,
-                        )}
-                        {lineMetric(
-                          text.forecast.debtWorkflows,
-                          text.forecast.workflowOpenReview(forecasting.collections.workflow_open_count, forecasting.collections.reviews_due_7d),
-                        )}
-                        {lineMetric(
-                          text.forecast.escalationSplit,
-                          text.forecast.escalationSplitValue(forecasting.collections.payment_plan_count, forecasting.collections.escalated_count),
-                        )}
-                      </div>
-                    </section>
-                  ) : null}
-
-                  {forecastSections.has("followup") && forecasting.followup ? (
-                    <section>
-                      <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.forecast.followupTitle)}</h2>
-                      <p className={cn("mt-1", tokens.text.muted)}>
-                        {text.forecast.followupDescription}
-                      </p>
-                      <div className="mt-3 grid gap-1.5 rounded-xl bg-card p-3">
-                        {lineMetric(text.forecast.activeFollowupOrders, forecasting.followup.active_orders)}
-                        {lineMetric(text.forecast.milestones30d, forecasting.followup.milestones_due_next_30d)}
-                        {lineMetric(
-                          text.forecast.oneWeekOneMonthSixMonth,
-                          `${forecasting.followup.followup_1w_due_next_30d} / ${forecasting.followup.followup_1m_due_next_30d} / ${forecasting.followup.followup_6m_due_next_30d}`,
-                        )}
-                        {lineMetric(
-                          text.forecast.doctorPackageResults,
-                          `${forecasting.followup.doctor_followup_open} / ${forecasting.followup.package_end_due_next_30d} / ${forecasting.followup.results_handoff_pending}`,
-                        )}
-                      </div>
-                    </section>
-                  ) : null}
-                </div>
-              </section>
+                {forecastSections.has("followup") && forecasting.followup ? (
+                  <section className={reportPanel}>
+                    <h2 className={tokens.text.sectionTitle}><SectionHeading icon={CalendarCheck}>{text.forecast.followupTitle}</SectionHeading></h2>
+                    <p className={cn("mt-1", tokens.text.muted)}>
+                      {text.forecast.followupDescription}
+                    </p>
+                    <div className="mt-3 grid gap-1.5 rounded-xl bg-card p-3">
+                      {lineMetric(text.forecast.activeFollowupOrders, forecasting.followup.active_orders)}
+                      {lineMetric(text.forecast.milestones30d, forecasting.followup.milestones_due_next_30d)}
+                      {lineMetric(
+                        text.forecast.oneWeekOneMonthSixMonth,
+                        `${forecasting.followup.followup_1w_due_next_30d} / ${forecasting.followup.followup_1m_due_next_30d} / ${forecasting.followup.followup_6m_due_next_30d}`,
+                      )}
+                      {lineMetric(
+                        text.forecast.doctorPackageResults,
+                        `${forecasting.followup.doctor_followup_open} / ${forecasting.followup.package_end_due_next_30d} / ${forecasting.followup.results_handoff_pending}`,
+                      )}
+                    </div>
+                  </section>
+                ) : null}
+              </div>
 
               {forecastSections.has("clinic_capacity") && forecasting.clinic_capacity ? (
-                <section className={card("rounded-lg bg-card p-3")}>
+                <section className={reportPanel}>
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.forecast.clinicCapacityTitle)}</h2>
+                      <h2 className={tokens.text.sectionTitle}><SectionHeading icon={CalendarRange}>{text.forecast.clinicCapacityTitle}</SectionHeading></h2>
                       <p className={cn("mt-1", tokens.text.muted)}>
                         {text.forecast.clinicCapacityDescription}
                       </p>
@@ -1991,10 +1988,11 @@ function useReportsPageContent() {
             </>
           ) : null}
 
-                    <section className="space-y-3">
+          <section className="space-y-3">
             {allowedSections.has("clinics") ? (
               <AdminTableCard
-                title={titleWithDot(text.clinicReport.title)}
+                className={reportPanel}
+                title={<SectionHeading icon={Hospital}>{text.clinicReport.title}</SectionHeading>}
                 description={text.clinicReport.description}
                 count={data.clinics.length}
                 accessory={
@@ -2043,7 +2041,8 @@ function useReportsPageContent() {
 
             {allowedSections.has("service_types") ? (
               <AdminTableCard
-                title={titleWithDot(text.serviceTypeReport.title)}
+                className={reportPanel}
+                title={<SectionHeading icon={Layers3}>{text.serviceTypeReport.title}</SectionHeading>}
                 description={text.serviceTypeReport.description}
                 count={data.service_types.length}
                 accessory={
@@ -2071,7 +2070,8 @@ function useReportsPageContent() {
 
             {allowedSections.has("medical_providers") ? (
               <AdminTableCard
-                title={titleWithDot(text.medicalProviders.title)}
+                className={reportPanel}
+                title={<SectionHeading icon={Stethoscope}>{text.medicalProviders.title}</SectionHeading>}
                 description={text.medicalProviders.description}
                 count={data.medical_providers.length}
                 accessory={
@@ -2105,7 +2105,8 @@ function useReportsPageContent() {
 
             {allowedSections.has("provider_costs") ? (
               <AdminTableCard
-                title={titleWithDot(text.providerCosts.title)}
+                className={reportPanel}
+                title={<SectionHeading icon={Coins}>{text.providerCosts.title}</SectionHeading>}
                 description={text.providerCosts.description}
                 count={visibleProviderCosts.length}
                 accessory={
@@ -2150,7 +2151,8 @@ function useReportsPageContent() {
 
             {allowedSections.has("non_medical_providers") ? (
               <AdminTableCard
-                title={titleWithDot(text.nonMedicalProviders.title)}
+                className={reportPanel}
+                title={<SectionHeading icon={Handshake}>{text.nonMedicalProviders.title}</SectionHeading>}
                 description={text.nonMedicalProviders.description}
                 count={data.non_medical_providers.length}
                 accessory={
@@ -2184,7 +2186,8 @@ function useReportsPageContent() {
 
             {allowedSections.has("countries") ? (
               <AdminTableCard
-                title={titleWithDot(text.countries.title)}
+                className={reportPanel}
+                title={<SectionHeading icon={Globe2}>{text.countries.title}</SectionHeading>}
                 description={text.countries.description}
                 count={data.countries.length}
                 accessory={
@@ -2212,7 +2215,8 @@ function useReportsPageContent() {
 
             {allowedSections.has("doctors") ? (
               <AdminTableCard
-                title={titleWithDot(text.doctors.title)}
+                className={reportPanel}
+                title={<SectionHeading icon={ContactRound}>{text.doctors.title}</SectionHeading>}
                 description={text.doctors.description}
                 count={visibleDoctors.length}
                 accessory={
@@ -2252,7 +2256,8 @@ function useReportsPageContent() {
             ) : null}
 
             <AdminTableCard
-              title={titleWithDot(text.visibility.title)}
+              className={reportPanel}
+              title={<SectionHeading icon={Eye}>{text.visibility.title}</SectionHeading>}
               description={text.visibility.description}
             >
               <div className="flex flex-wrap gap-2 p-3">
@@ -2272,13 +2277,15 @@ function useReportsPageContent() {
             <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
               {detail ? (
                 <AdminSheetScaffold
-                  title={titleWithDot(
-                    detail.kind === "clinic"
-                      ? detail.row.name
-                      : detail.kind === "doctor"
-                        ? [detail.row.title, detail.row.name].filter(Boolean).join(" ")
-                        : reportBackendLabel(detail.row.service_label, text, t),
-                  )}
+                  title={
+                    <SectionHeading icon={detail.kind === "clinic" ? Hospital : detail.kind === "doctor" ? ContactRound : Coins}>
+                      {detail.kind === "clinic"
+                        ? detail.row.name
+                        : detail.kind === "doctor"
+                          ? [detail.row.title, detail.row.name].filter(Boolean).join(" ")
+                          : reportBackendLabel(detail.row.service_label, text, t)}
+                    </SectionHeading>
+                  }
                   description={
                     detail.kind === "clinic"
                       ? text.clinicReport.description
@@ -2289,31 +2296,31 @@ function useReportsPageContent() {
                 >
                   {detail.kind === "clinic" ? (
                     <>
-                      <AdminTableCard title={titleWithDot(text.clinicReport.title)}>
+                      <AdminTableCard title={<SectionHeading icon={Hospital}>{text.clinicReport.title}</SectionHeading>}>
                         <div className="grid gap-2.5 p-3 sm:grid-cols-2">
-                          <div className={card("p-3")}>
+                          <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.common.services}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">{providerTypeLabel(detail.row.provider_type)}</p>
                           </div>
-                          <div className={card("p-3")}>
+                          <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.countries.title}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">
                               {[detail.row.address_city, detail.row.address_country].filter(Boolean).join(", ") || text.locationNotSet}
                             </p>
                           </div>
-                          <div className={card("p-3")}>
+                          <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.common.patients90d}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">{detail.row.active_patients_90d}</p>
                           </div>
-                          <div className={card("p-3")}>
+                          <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.common.appointments90d}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">{detail.row.appointments_90d}</p>
                           </div>
-                          <div className={card("p-3")}>
+                          <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.common.deliveredItems}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">{detail.row.delivered_items}</p>
                           </div>
-                          <div className={card("p-3")}>
+                          <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.summary.deliveredServiceVolume}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">
                               {detail.row.gross_service_volume ? formatMoney(detail.row.gross_service_volume, locale) : text.countsOnly}
@@ -2341,31 +2348,31 @@ function useReportsPageContent() {
 
                   {detail.kind === "doctor" ? (
                     <>
-                      <AdminTableCard title={titleWithDot(text.doctors.title)}>
+                      <AdminTableCard title={<SectionHeading icon={ContactRound}>{text.doctors.title}</SectionHeading>}>
                         <div className="grid gap-2.5 p-3 sm:grid-cols-2">
-                          <div className={card("p-3")}>
+                          <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.medicalProviders.title}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">{detail.row.provider_name}</p>
                           </div>
-                          <div className={card("p-3")}>
+                          <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.common.specialties}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">
                               {reportDoctorSpecialtyLabel(detail.row, lang, text.unknown)}
                             </p>
                           </div>
-                          <div className={card("p-3")}>
+                          <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.common.patients90d}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">{detail.row.active_patients_90d}</p>
                           </div>
-                          <div className={card("p-3")}>
+                          <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.common.appointments90d}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">{detail.row.appointments_90d}</p>
                           </div>
-                          <div className={card("p-3")}>
+                          <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.common.feedbackCount}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">{detail.row.feedback_count}</p>
                           </div>
-                          <div className={card("p-3")}>
+                          <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.common.followupCompletion}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">
                               {formatPercent(detail.row.followup_completion_rate, text.noBaseline)}
@@ -2381,35 +2388,35 @@ function useReportsPageContent() {
 
                   {detail.kind === "provider_cost" ? (
                     <>
-                      <AdminTableCard title={titleWithDot(text.providerCosts.title)}>
+                      <AdminTableCard title={<SectionHeading icon={Coins}>{text.providerCosts.title}</SectionHeading>}>
                         <div className="grid gap-2.5 p-3 sm:grid-cols-2">
-                          <div className={card("p-3")}>
+                          <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.medicalProviders.title}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">{detail.row.provider_name}</p>
                           </div>
-                          <div className={card("p-3")}>
+                          <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.common.samples}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">{detail.row.sample_count}</p>
                           </div>
-                          <div className={card("p-3")}>
+                          <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.common.latestVsFirst}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">
                               {formatChange(detail.row.change_pct, text.noBaseline)}
                             </p>
                           </div>
-                          <div className={card("p-3")}>
+                          <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.common.average}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">
                               {formatMoneyMetric(detail.row.avg_unit_gross, locale)}
                             </p>
                           </div>
-                          <div className={card("p-3")}>
+                          <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.common.min}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">
                               {formatReportDate(detail.row.first_recorded_at, locale, text.unknown)}
                             </p>
                           </div>
-                          <div className={card("p-3")}>
+                          <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.common.latest}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">
                               {formatReportDate(detail.row.last_recorded_at, locale, text.unknown)}
@@ -2418,7 +2425,7 @@ function useReportsPageContent() {
                         </div>
                       </AdminTableCard>
                       {detail.row.trend_points.length > 0 ? (
-                        <AdminTableCard title={titleWithDot(text.forecast.pipelineTitle)}>
+                        <AdminTableCard title={<SectionHeading icon={Funnel}>{text.forecast.pipelineTitle}</SectionHeading>}>
                           <div className="flex flex-wrap gap-2 p-3">
                             {detail.row.trend_points.map((point) => (
                               <Badge key={`${detail.row.provider_id}-${detail.row.service_label}-${point.month}`} variant="secondary">
