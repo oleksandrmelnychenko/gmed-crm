@@ -260,6 +260,7 @@ import {
 } from "./ui/document-translation-dialog";
 import { DocumentTemplateBindingFields } from "./ui/document-template-binding-fields";
 import { DocumentWorkspaceNav } from "./ui/document-workspace-nav";
+import { TemplateImportDialog } from "./ui/template-import-dialog";
 
 /**
  * The categories a picker offers: a legacy duplicate (medical_report,
@@ -456,11 +457,13 @@ const TEMPLATE_GROUP_ORDER = [
   "administrative",
   "medical",
   "generated",
+  "agency",
   "provider",
 ];
 
 function templateGroupKey(template: DocumentTemplate): string {
   if (template.template_kind === "provider") return "provider";
+  if (template.template_kind === "agency") return "agency";
   return template.category || "generated";
 }
 
@@ -472,6 +475,7 @@ function templateGroupLabel(key: string, lang: "de" | "ru"): string {
     clinic_correspondence: { de: "Korrespondenz", ru: "Корреспонденция" },
     administrative: { de: "Administrativ", ru: "Административные" },
     medical: { de: "Medizinisch", ru: "Медицинские" },
+    agency: { de: "Importierte Vorlagen", ru: "Импортированные шаблоны" },
     provider: { de: "Anbieter-Vorlagen", ru: "Шаблоны провайдеров" },
     generated: { de: "Generiert", ru: "Сгенерированные" },
   };
@@ -1082,6 +1086,9 @@ function StaffDocumentsPage({
   const canView = canViewDocuments(user);
   const canManage = canManageDocuments(user);
   const canUpload = canUploadDocuments(user);
+  // Importing templates: the CEO only (owner decision 2026-11-10); the
+  // server checks the same (`document_template_imports.rs`).
+  const canImportTemplates = user?.role === "ceo";
   const canManageIntake = canManageDocumentIntake(user);
   const canRequestTranslation = canRequestTranslations(user);
   const canUpdateTranslation = canUpdateTranslations(user);
@@ -1154,6 +1161,7 @@ function StaffDocumentsPage({
   const [intakeDragActive, setIntakeDragActive] = useState(false);
 
   const [templateOpen, setTemplateOpen] = useState(false);
+  const [templateImportOpen, setTemplateImportOpen] = useState(false);
   const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
   const [templateTextBlocks, setTemplateTextBlocks] = useState<
     TemplateTextBlock[]
@@ -1702,6 +1710,15 @@ function StaffDocumentsPage({
       active = false;
     };
   }, [canManage, canView]);
+
+  // An imported template was activated or disabled: "generate from template"
+  // offers the new list at once.
+  function reloadTemplateCatalog() {
+    clearApiCache("/documents/templates");
+    void fetchDocumentLookups(canManage)
+      .then((lookups) => setTemplates(lookups.templates))
+      .catch(() => undefined);
+  }
 
   useEffect(() => {
     if (!canView) return;
@@ -3395,6 +3412,17 @@ function StaffDocumentsPage({
                 {t.documents_generate_from_template}
               </Button>
             ) : null}
+            {canImportTemplates ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-lg gap-1.5"
+                onClick={() => setTemplateImportOpen(true)}
+              >
+                <FileUp className="size-3.5" />
+                {lang === "ru" ? "Импорт шаблона" : "Vorlage importieren"}
+              </Button>
+            ) : null}
             {canUpload ? (
               <Button
                 size="sm"
@@ -4835,6 +4863,14 @@ function StaffDocumentsPage({
             ) : null}
           </AdminDialogScaffold>
         </Dialog>
+      ) : null}
+
+      {canImportTemplates ? (
+        <TemplateImportDialog
+          open={templateImportOpen}
+          onOpenChange={setTemplateImportOpen}
+          onCatalogChanged={reloadTemplateCatalog}
+        />
       ) : null}
 
       <Sheet open={uploadOpen} onOpenChange={setUploadOpen}>

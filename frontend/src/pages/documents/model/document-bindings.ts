@@ -291,8 +291,20 @@ export function isFixedLegalDocumentTemplate(templateId: string) {
   return FIXED_LEGAL_TEMPLATE_IDS.has(templateId);
 }
 
+/**
+ * An imported agency template (`agency_template:<id>`, documents page →
+ * "Импорт шаблона"): the server fills its text and prints it on the
+ * letterhead, so the dialogs offer no free-text fields for it.
+ */
+export function isImportedAgencyTemplateId(templateId?: string | null) {
+  return (templateId?.trim() ?? "").startsWith("agency_template:");
+}
+
 export function isDesignedAgencyDocumentTemplate(templateId: string) {
-  return DESIGNED_AGENCY_TEMPLATE_IDS.has(templateId);
+  return (
+    DESIGNED_AGENCY_TEMPLATE_IDS.has(templateId) ||
+    isImportedAgencyTemplateId(templateId)
+  );
 }
 
 /**

@@ -16333,6 +16333,17 @@ async fn list_document_templates(
             "text_block_keys": Vec::<String>::new(),
         })
     }));
+    // The agency's own imported templates (owner request 2026-11-10).
+    match super::document_template_imports::catalog_entries(&state).await {
+        Ok(entries) => templates.extend(entries),
+        Err(error) => {
+            tracing::error!(error = %error, "load agency document templates");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load document templates",
+            );
+        }
+    }
 
     Json(json!({
         "templates": templates,
@@ -16901,7 +16912,7 @@ async fn generate_provider_document_from_template(
 async fn generate_document(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
-    Json(body): Json<GenerateDocumentRequest>,
+    Json(mut body): Json<GenerateDocumentRequest>,
 ) -> axum::response::Response {
     if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return resp;
@@ -16912,6 +16923,77 @@ async fn generate_document(
             require_existing_document_upload_access(&state, &auth, replace_document_id).await
     {
         return response;
+    }
+
+    // An imported agency template (owner request 2026-11-10) is its text
+    // filled with the patient's data and printed like "Freies Dokument"; the
+    // document names the template version it was made from in `ursprung`.
+    if let Some(agency_template_id) =
+        super::document_template_imports::parse_public_id(&body.template_id)
+    {
+        if body.lead_id.is_some() {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Imported templates require a patient context",
+            );
+        }
+        let (resolved_patient_id, _, resolved_order_id, resolved_appointment_id) =
+            match validate_document_context(
+                &state,
+                body.patient_id,
+                None,
+                body.order_id,
+                body.appointment_id,
+            )
+            .await
+            {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+        let Some(resolved_patient_id) = resolved_patient_id else {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Generated documents must be linked to a patient",
+            );
+        };
+        if let Err(resp) =
+            require_generated_document_patient_access(&state, &auth, resolved_patient_id).await
+        {
+            return resp;
+        }
+        let rendered = match super::document_template_imports::render_for_generation(
+            &state,
+            agency_template_id,
+            resolved_patient_id,
+            resolved_order_id,
+            resolved_appointment_id,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+        let is_blank =
+            |value: &Option<String>| value.as_deref().is_none_or(|value| value.trim().is_empty());
+        body.template_id = "free_text_document".to_string();
+        body.ursprung = Some(format!("template:{}", rendered.public_id));
+        if is_blank(&body.manual_text) {
+            body.manual_text = Some(rendered.text);
+        }
+        if is_blank(&body.title_override) {
+            body.title_override = Some(rendered.label.clone());
+        }
+        if is_blank(&body.language) {
+            body.language = Some(rendered.language);
+        }
+        if is_blank(&body.auto_name) {
+            body.auto_name = Some(format!(
+                "{} · {} · {}",
+                rendered.label,
+                rendered.patient_name,
+                crate::app_time::today().format("%d.%m.%Y")
+            ));
+        }
     }
 
     if let Some(provider_template_id) = parse_provider_template_public_id(body.template_id.trim()) {
@@ -21062,6 +21144,19 @@ fn build_agency_free_text_document_pdf(
         }
     }
     Ok(finalize_admin_pdf(document, layout))
+}
+
+/// The preview of an imported agency template
+/// (`super::document_template_imports`): its text with sample data, printed
+/// like the document generated from it.
+pub(crate) async fn agency_template_preview_pdf(
+    state: &AppState,
+    title: &str,
+    text: &str,
+) -> Result<Vec<u8>, axum::response::Response> {
+    let agency = load_agency_contract_settings(state).await?;
+    build_agency_free_text_document_pdf(&agency, title, text, "VORSCHAU")
+        .map_err(|message| err(StatusCode::INTERNAL_SERVER_ERROR, message))
 }
 
 struct AdminSignatureParty<'a> {

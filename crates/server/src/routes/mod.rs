@@ -21,6 +21,7 @@ pub mod contracts;
 pub mod custom_fields;
 pub mod datev;
 pub(crate) mod debt_management;
+pub mod document_template_imports;
 pub mod documents;
 pub mod drug_products;
 pub mod e2e_support;
@@ -175,6 +176,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(notifications::router())
         .merge(custom_fields::router())
         .merge(documents::router())
+        .merge(document_template_imports::router())
         .merge(personnel::router())
         .merge(crate::document_signatures::router())
         .merge(crate::mail::connection::router())

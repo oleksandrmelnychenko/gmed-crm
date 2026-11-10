@@ -367,7 +367,8 @@ export type ShareFormState = {
 
 export type DocumentTemplate = {
   id: string;
-  template_kind?: "builtin" | "provider";
+  /** `agency`: imported on the documents page (`agency_template:<id>`). */
+  template_kind?: "builtin" | "provider" | "agency";
   /** Generated only for a lead (GwG sheet, patient form, payer package). */
   lead_only?: boolean;
   provider_id?: string | null;

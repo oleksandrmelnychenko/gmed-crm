@@ -21,6 +21,7 @@ import {
   buildBindingsPayload,
   documentBindingFieldLabel,
   isDesignedAgencyDocumentTemplate,
+  isImportedAgencyTemplateId,
 } from "./document-bindings";
 import { localizeTextBlock } from "./text-block-labels";
 
@@ -111,12 +112,20 @@ export function documentTemplateRequiresOrder(templateId?: string | null) {
 
 export function documentTemplateSupportsOrderContext(templateId?: string | null) {
   const id = templateId?.trim() ?? "";
-  return id.startsWith("provider_template:") || ORDER_CONTEXT_SUPPORTED_TEMPLATE_IDS.has(id);
+  return (
+    id.startsWith("provider_template:") ||
+    isImportedAgencyTemplateId(id) ||
+    ORDER_CONTEXT_SUPPORTED_TEMPLATE_IDS.has(id)
+  );
 }
 
 export function documentTemplateSupportsAppointmentContext(templateId?: string | null) {
   const id = templateId?.trim() ?? "";
-  return id.startsWith("provider_template:") || APPOINTMENT_CONTEXT_SUPPORTED_TEMPLATE_IDS.has(id);
+  return (
+    id.startsWith("provider_template:") ||
+    isImportedAgencyTemplateId(id) ||
+    APPOINTMENT_CONTEXT_SUPPORTED_TEMPLATE_IDS.has(id)
+  );
 }
 
 export function formatBusinessDocumentNumber(documentNumber?: string | null) {
