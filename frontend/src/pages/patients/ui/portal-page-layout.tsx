@@ -1,7 +1,6 @@
 import type { ComponentProps, ReactNode } from "react";
-import { CalendarDays, CheckCircle2 } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { InfoRow, ListItem, Section, StatCard } from "@/components/ui-shell";
-import { StatusChip } from "@/components/ui/status-chip";
 import { cn } from "@/lib/utils";
 
 /** Shared portal surfaces; colours come from the opt-in GMED theme. */
@@ -27,10 +26,7 @@ export function PortalStatCard({ label, value, description }: ComponentProps<typ
   </div>;
 }
 
-export function PortalDateChip({ children, icon: Icon = CalendarDays }: { children: ReactNode; icon?: typeof CalendarDays }) {
-  if (!children || children === "—" || children === "–") return <span>{children || "—"}</span>;
-  return <StatusChip tone="info" className="portal-date-chip tabular-nums"><Icon aria-hidden="true" /><span className="min-w-0 whitespace-normal">{children}</span></StatusChip>;
-}
+export { PortalDateChip } from "@/components/ui/portal-date-chip";
 
 export function PortalSummary({ items }: { items: { label: string; value: ReactNode; visible: boolean }[] }) {
   const visible = items.filter((item) => item.visible);

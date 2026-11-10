@@ -1,13 +1,14 @@
-import { RotateCcw } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
+import { ChartColumn, CircleDot, ListFilter, MousePointer2, Palette, RotateCcw, Table2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { contrastRatio, withContrast, type ControlColor, type ControlColors, type ThemeColors } from "@/lib/appearance-theme";
 import { useAppearanceTheme } from "@/lib/use-appearance-theme";
 import { cn } from "@/lib/utils";
 
 type Group = "base" | "actions" | "fields" | "tables" | "dots" | "states";
+const GROUP_ICONS = { base: Palette, actions: MousePointer2, fields: ListFilter, tables: Table2, dots: CircleDot, states: ChartColumn };
 const GROUPS: readonly { id: Group; keys: readonly ControlColor[] }[] = [
   { id: "base", keys: ["background", "surface", "sidebar", "muted", "accent", "border", "text", "textMuted"] },
   { id: "actions", keys: ["primary", "primaryText", "focus"] },
@@ -111,27 +112,23 @@ function check(colors: ThemeColors, key: ControlColor): { ratio: number; require
 }
 
 export function AppearanceControlColors({ onError }: { onError: (cause: unknown) => void }) {
-  const { user } = useAuth();
   const { lang } = useLang();
   const text = TEXT[lang as keyof typeof TEXT] ?? TEXT.en;
-  const { theme, contrast, controls, preferences, save } = useAppearanceTheme(user?.id ?? null);
+  const { theme, contrast, controls, save } = useAppearanceTheme();
   const colors: ThemeColors = { ...withContrast(theme, contrast).colors, ...controls };
-  const update = (next: ControlColors) => {
-    try { save({ ...preferences, controls: Object.keys(next).length ? next : undefined }); }
-    catch (cause) { onError(cause); }
-  };
-  const reset = (key: ControlColor) => {
-    const next = { ...controls };
-    delete next[key];
-    update(next);
-  };
+  const update = (key?: ControlColor, color?: string) => save(p => {
+    const next: ControlColors = key ? { ...p.controls } : {};
+    if (key && color) next[key] = color;
+    else if (key) delete next[key];
+    return { ...p, controls: Object.keys(next).length ? next : undefined };
+  }).catch(onError);
   return (
     <fieldset className="min-w-0 max-w-6xl border-0 p-0" data-testid="appearance-control-colors">
       <legend className="mb-2 p-0 text-sm font-semibold">{text.title}</legend>
       <div className="columns-1 gap-6 md:columns-2 xl:columns-3">
         {GROUPS.map((group) => (
           <section key={group.id} className="mb-4 break-inside-avoid" aria-labelledby={`control-colors-${group.id}`}>
-            <h3 id={`control-colors-${group.id}`} className="mb-1 flex items-center gap-2 font-mono text-xs font-medium text-foreground"><span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />{text.groups[group.id]}</h3>
+            <h3 id={`control-colors-${group.id}`} className="mb-1 flex items-center gap-2 font-mono text-xs font-medium text-foreground"><SectionHeading icon={GROUP_ICONS[group.id]}>{text.groups[group.id]}</SectionHeading></h3>
             <div className="space-y-0.5">
               {group.keys.map((key) => {
                 const value = effectiveColor(colors, key);
@@ -141,7 +138,7 @@ export function AppearanceControlColors({ onError }: { onError: (cause: unknown)
                 const id = `control-color-${key}`;
                 return (
                   <div key={key} className="flex min-w-0 items-center gap-2 py-1">
-                    <input id={id} type="color" value={value} onChange={(event) => update({ ...controls, [key]: event.target.value.toLowerCase() })}
+                    <input id={id} type="color" value={value} onChange={(event) => update(key, event.target.value.toLowerCase())}
                       className="size-7 shrink-0 cursor-pointer rounded border border-input bg-field p-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" />
                     <label htmlFor={id} className="min-w-0 flex-1">
                       <span className={cn("block break-words text-xs leading-4", own && "font-medium")}>{text.labels[key]}</span>
@@ -150,7 +147,7 @@ export function AppearanceControlColors({ onError }: { onError: (cause: unknown)
                       </span>
                     </label>
                     {own ? (
-                      <Button size="icon-sm" variant="ghost" onClick={() => reset(key)} aria-label={`${text.reset}: ${text.labels[key]}`} title={text.reset}>
+                      <Button size="icon-sm" variant="ghost" onClick={() => update(key)} aria-label={`${text.reset}: ${text.labels[key]}`} title={text.reset}>
                         <RotateCcw />
                       </Button>
                     ) : null}
@@ -161,7 +158,7 @@ export function AppearanceControlColors({ onError }: { onError: (cause: unknown)
           </section>
         ))}
       </div>
-      {controls ? <Button size="sm" variant="ghost" className="mt-1" onClick={() => update({})}>{text.resetAll}</Button> : null}
+      {controls ? <Button size="sm" variant="ghost" className="mt-1" onClick={() => update()}>{text.resetAll}</Button> : null}
     </fieldset>
   );
 }

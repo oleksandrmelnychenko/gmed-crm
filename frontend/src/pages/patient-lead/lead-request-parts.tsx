@@ -1,5 +1,18 @@
+import { PortalDateChip } from "@/components/ui/portal-date-chip";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowRight, CalendarDays, Check, CircleAlert, FileText, Info, LoaderCircle, Lock, Trash2, Upload } from "lucide-react";
+import {
+  ArrowRight,
+  Check,
+  CircleAlert,
+  FileText,
+  Info,
+  LoaderCircle,
+  Lock,
+  Trash2,
+  type LucideIcon,
+  Upload,
+} from "lucide-react";
 import { useCabinetStaffMode } from "./lead-request-staff-mode";
 import { StaffConsentRecordFields } from "./lead-request-staff-consent";
 import type { StaffConsentRecord } from "./lead-request-api";
@@ -9,7 +22,7 @@ import { StatusChip } from "@/components/ui/status-chip";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { checkboxClass, selectClass } from "@/components/record-workspace/primitives/design-tokens";
 import { ApiRequestError } from "@/lib/api";
-import { formatAppDateTime } from "@/lib/app-time-zone";
+import { formatPortalTimestamp } from "@/lib/portal-datetime";
 import { useUnsavedGuard } from "@/lib/use-unsaved-guard";
 import { cn } from "@/lib/utils";
 
@@ -298,12 +311,14 @@ export function useAutosave<Draft>(draft: Draft, save: (snapshot: Draft) => Prom
  */
 export function CabinetSection({
   title,
+  icon = FileText,
   accessory,
   children,
   className,
   compact = true,
 }: {
   title: ReactNode;
+  icon?: LucideIcon;
   accessory?: ReactNode;
   children: ReactNode;
   className?: string;
@@ -313,8 +328,7 @@ export function CabinetSection({
     <section data-cabinet-section className={cn("min-w-0 overflow-hidden rounded-xl border border-border/60 bg-card", className)}>
       <div data-cabinet-section-header className={cn("flex flex-wrap items-center justify-between gap-2", compact ? "px-3 pt-3" : "px-4 pt-4")}>
         <div className="flex min-w-0 items-center gap-2">
-          <div aria-hidden data-section-heading-marker className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-          <h3 className="min-w-0 max-w-full break-words text-sm font-semibold text-foreground">{title}</h3>
+          <h3 className="min-w-0 max-w-full break-words text-sm font-semibold text-foreground"><SectionHeading icon={icon}>{title}</SectionHeading></h3>
         </div>
         {accessory ? <div className="min-w-0 max-w-full">{accessory}</div> : null}
       </div>
@@ -640,7 +654,7 @@ export function ConsentCheckbox({
                 </a>
               ) : null}
               {given && consent?.given_at ? (
-                <ConsentGivenChip>{text.consentGivenAt(formatAppDateTime(consent.given_at))}</ConsentGivenChip>
+                <ConsentGivenChip>{text.consentGivenAt(formatPortalTimestamp(consent.given_at))}</ConsentGivenChip>
               ) : null}
             </span>
           ) : null}
@@ -914,7 +928,7 @@ export function UploadedFileList({
               <span className="min-w-0 flex-1">
                 <span className="block truncate line-through">{document.file_name ?? "—"}</span>
                 <span className="mt-0.5 inline-flex w-fit items-center rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-800 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
-                  {[document.uploaded_at ? formatAppDateTime(document.uploaded_at) : null, text.documentRefused].filter(Boolean).join(" · ")}
+                  {[document.uploaded_at ? formatPortalTimestamp(document.uploaded_at) : null, text.documentRefused].filter(Boolean).join(" · ")}
                 </span>
                 <span
                   className="mt-1 block text-xs leading-5 text-red-800 dark:text-red-200"
@@ -941,7 +955,7 @@ export function UploadedFileList({
             <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
               <span className="min-w-0 break-words leading-5 [overflow-wrap:anywhere]">{document.file_name ?? "—"}</span>
               <span className="flex flex-wrap items-center gap-1.5">
-                <StatusChip tone="info"><CalendarDays aria-hidden="true" />{formatAppDateTime(document.uploaded_at)}</StatusChip>
+                <PortalDateChip timestamp={document.uploaded_at} />
                 {document.added_after_submit ? <StatusChip tone="warning">{text.addedAfterSend}</StatusChip> : null}
                 {document.reviewed ? <StatusChip tone="success"><Check aria-hidden="true" />{text.documentTakenOver}</StatusChip> : null}
               </span>

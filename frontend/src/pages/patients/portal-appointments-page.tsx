@@ -10,7 +10,21 @@ import {
   type FormEvent,
   type SetStateAction,
 } from "react";
-import { Building2, Clock3, LoaderCircle, MapPin, Plus, RefreshCw, Send, UserRound } from "lucide-react";
+import {
+  Building2,
+  CalendarClock,
+  CalendarDays,
+  ClipboardPen,
+  History,
+  LoaderCircle,
+  MapPin,
+  Milestone,
+  Plus,
+  RefreshCw,
+  Send,
+  Stethoscope,
+  UserRound,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -198,7 +212,6 @@ function usePatientAppointmentsPageContent() {
     appointmentTimeOfDayLabel,
     appointmentTypeLabel,
     formatPortalDate,
-    formatPortalDateTime,
     portalStatusLabel,
   } = usePortalLabels();
   const { portalOrderPhaseLabel } = useLanguageHelpers();
@@ -376,11 +389,12 @@ function usePatientAppointmentsPageContent() {
   return (
     <TabShell className="mt-0 w-full min-w-0 max-w-none space-y-3">
       <PageHeader
+        pageAction={<Button onClick={() => setRequestSheetOpen(true)}><Plus className="size-4" />{t.portal_appointments_send_appointment_request}</Button>}
         title={t.portal_appointments_my_appointments}
         description={t.portal_appointments_review_scheduled_visits_and_send_new_appointment_requests_for_th}
         actions={
           <>
-            <CountBadge>{t.portal_appointments_patient_portal}</CountBadge>
+
             <Button
               variant="default"
               className="h-9 rounded-lg"
@@ -396,10 +410,6 @@ function usePatientAppointmentsPageContent() {
       {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="hidden text-lg font-semibold md:block">{t.portal_appointments_my_appointments}</h2>
-        <Button onClick={() => setRequestSheetOpen(true)}><Plus className="size-4" />{t.portal_appointments_send_appointment_request}</Button>
-      </div>
       <PortalSummary items={[
         { label: t.portal_appointments_upcoming_visits, value: upcomingAppointments.length, visible: upcomingAppointments.length > 0 },
         { label: t.portal_appointments_open_requests, value: openRequests.length, visible: openRequests.length > 0 },
@@ -409,16 +419,13 @@ function usePatientAppointmentsPageContent() {
       <section className="space-y-3">
         <section className="space-y-3">
           <Section
-            title={t.portal_appointments_scheduled_visits}
+            icon={CalendarDays} title={t.portal_appointments_scheduled_visits}
             accessory={appointments.length > 0 ? <CountBadge>{appointments.length}</CountBadge> : undefined}
           >
 
             {appointments.length === 0 ? (
               <EmptyCell>
                 <p className="text-base font-semibold text-foreground">{t.portal_appointments_no_appointments_yet}</p>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {t.portal_appointments_once_a_visit_is_scheduled_by_the_care_team_it_will_appear_here}
-                </p>
               </EmptyCell>
             ) : (
               <div className="space-y-3">
@@ -430,13 +437,12 @@ function usePatientAppointmentsPageContent() {
                         <StatusBadge status={item.status} className={appointmentStatusTone(item.status)}>
                           {portalStatusLabel(item.status)}
                         </StatusBadge>
-                        <StatusBadge tone="neutral" className="normal-case tracking-normal">
-                          {appointmentTypeLabel(item.appointment_type)}
-                        </StatusBadge>
-                        <StatusBadge tone="brand" className="normal-case tracking-normal">
-                          {appointmentCarePathKindLabel(item.care_path_kind)}
-                        </StatusBadge>
+                        {item.appointment_type && <StatusBadge tone="neutral" className="normal-case tracking-normal">{appointmentTypeLabel(item.appointment_type)}</StatusBadge>}
+                        {item.care_path_kind && <StatusBadge tone="brand" className="normal-case tracking-normal">{appointmentCarePathKindLabel(item.care_path_kind)}</StatusBadge>}
                       </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-medium tabular-nums" data-slot="visit-schedule">
+                      <PortalDateChip><time dateTime={item.date}>{formatPortalDate(item.date)}</time>{item.time_start ? " · " + item.time_start.slice(0, 5) + (item.time_end ? "–" + item.time_end.slice(0, 5) : "") : item.time_end ? " · " + t.appointments_until + " " + item.time_end.slice(0, 5) : ""}</PortalDateChip>
                     </div>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-foreground">
                       {item.doctor_name ? <span className="inline-flex min-w-0 items-center gap-1.5"><UserRound aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />{item.doctor_name}</span> : null}
@@ -444,10 +450,6 @@ function usePatientAppointmentsPageContent() {
                       {item.location ? (
                         <span className="inline-flex min-w-0 items-center gap-1.5 text-muted-foreground"><MapPin aria-hidden="true" className="size-4 shrink-0" />{item.location}</span>
                       ) : null}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <PortalDateChip>{formatPortalDate(item.date)}</PortalDateChip>
-                      <PortalDateChip icon={Clock3}>{[item.time_start, item.time_end].filter(Boolean).join(" – ") || t.portal_appointments_not_set}</PortalDateChip>
                     </div>
                   </ListItem>
                 ))}
@@ -457,7 +459,7 @@ function usePatientAppointmentsPageContent() {
 
           {followupMilestones.length > 0 ? (
           <Section
-            title={t.portal_appointments_follow_up_milestones}
+            icon={Milestone} title={t.portal_appointments_follow_up_milestones}
             accessory={<CountBadge>{followupMilestones.length}</CountBadge>}
           >
 
@@ -478,25 +480,25 @@ function usePatientAppointmentsPageContent() {
                       label: t.portal_appointments_1_week,
                       value: portalStatusLabel(item.followup_1w_status),
                       tone: followupStatusTone(item.followup_1w_status),
-                      hint: formatPortalDateTime(item.recommended_followup_1w_at),
+                      date: item.recommended_followup_1w_at,
                     },
                     {
                       label: t.portal_appointments_1_month,
                       value: portalStatusLabel(item.followup_1m_status),
                       tone: followupStatusTone(item.followup_1m_status),
-                      hint: formatPortalDateTime(item.recommended_followup_1m_at),
+                      date: item.recommended_followup_1m_at,
                     },
                     {
                       label: t.portal_appointments_6_month,
                       value: portalStatusLabel(item.followup_6m_status),
                       tone: followupStatusTone(item.followup_6m_status),
-                      hint: formatPortalDateTime(item.recommended_followup_6m_at),
+                      date: item.recommended_followup_6m_at,
                     },
                     {
                       label: t.portal_appointments_package_end,
                       value: portalStatusLabel(item.package_end_status),
                       tone: followupStatusTone(item.package_end_status),
-                      hint: formatPortalDate(item.package_end_date ?? item.suggested_package_end_date),
+                      date: item.package_end_date ?? item.suggested_package_end_date,
                     },
                     {
                       label: t.portal_appointments_results_handoff,
@@ -518,7 +520,7 @@ function usePatientAppointmentsPageContent() {
                             {item.order_number} / {portalOrderPhaseLabel(item.phase)}
                           </p>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {t.portal_appointments_closure_anchor} {formatPortalDateTime(item.closure_anchor_at)}
+                            {t.portal_appointments_closure_anchor} <PortalDateChip timestamp={item.closure_anchor_at} />
                           </p>
                         </div>
                         <StatusBadge tone={item.followup_ready ? "success" : "warning"}>
@@ -534,7 +536,7 @@ function usePatientAppointmentsPageContent() {
                               value={
                                 <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                                   <StatusBadge className={milestone.tone}>{milestone.value}</StatusBadge>
-                                  {milestone.hint ? <span className="text-xs text-muted-foreground">{milestone.hint}</span> : null}
+                                  {milestone.date ? <PortalDateChip timestamp={milestone.date} /> : milestone.hint ? <span className="text-xs text-muted-foreground">{milestone.hint}</span> : null}
                                 </span>
                               }
                             />
@@ -556,7 +558,7 @@ function usePatientAppointmentsPageContent() {
 
           {requests.length > 0 ? (
           <Section
-            title={t.portal_appointments_request_history}
+            icon={History} title={t.portal_appointments_request_history}
             accessory={<CountBadge>{requests.length}</CountBadge>}
           >
 
@@ -580,7 +582,7 @@ function usePatientAppointmentsPageContent() {
                           </p>
                           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                             <span>{appointmentCarePathKindLabel(item.care_path_kind)}</span>
-                            <span>{t.portal_appointments_requested} {formatPortalDateTime(item.requested_at)}</span>
+                            <span>{t.portal_appointments_requested} <PortalDateChip timestamp={item.requested_at} /></span>
                           </div>
                         </div>
                         <StatusBadge status={item.status} className={appointmentRequestStatusTone(item.status)}>
@@ -597,7 +599,7 @@ function usePatientAppointmentsPageContent() {
                                 ? t.portal_appointments_preferred_to
                                 : t.portal_appointments_preferred_from
                           }
-                          value={preferredDates.value || t.common_not_set}
+                          value={preferredDates.value ? <PortalDateChip>{preferredDates.value}</PortalDateChip> : t.common_not_set}
                         />
                         <InfoRow
                           className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
@@ -680,7 +682,7 @@ function usePatientAppointmentsPageContent() {
             </>
           }
         >
-          <Section title={t.portal_appointments_group_request_details}>
+          <Section icon={ClipboardPen} title={t.portal_appointments_group_request_details}>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label={t.portal_appointments_type} htmlFor="portal-appointment-type">
                 <NativeComboboxSelect
@@ -721,7 +723,7 @@ function usePatientAppointmentsPageContent() {
               </Field>
             </div>
           </Section>
-          <Section title={t.portal_appointments_group_schedule_preferences}>
+          <Section icon={CalendarClock} title={t.portal_appointments_group_schedule_preferences}>
             <div className="grid gap-3 sm:grid-cols-3">
               <Field label={t.portal_appointments_preferred_from} htmlFor="portal-appointment-preferred-from">
                 <Input
@@ -757,7 +759,7 @@ function usePatientAppointmentsPageContent() {
               </Field>
             </div>
           </Section>
-          <Section title={t.portal_appointments_group_visit_context}>
+          <Section icon={Stethoscope} title={t.portal_appointments_group_visit_context}>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label={t.portal_appointments_specialty_or_topic} htmlFor="portal-appointment-specialty">
                 <input

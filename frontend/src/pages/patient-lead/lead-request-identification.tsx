@@ -1,6 +1,6 @@
 import { useCallback, useContext, useRef, useState, type ReactNode, createContext } from "react";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
-import { LoaderCircle, Upload } from "lucide-react";
+import { LoaderCircle, Scale, ScanFace, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
@@ -546,7 +546,7 @@ export function IdentityDocumentSection({
     </>
   );
   // Inside a follow-up block the block's own section carries the title.
-  return bare ? body : <Section compact title={title ?? (request.minor ? text.childSections.identity : text.sectionIdentity)}>{body}</Section>;
+  return bare ? body : <Section compact icon={ScanFace} title={title ?? (request.minor ? text.childSections.identity : text.sectionIdentity)}>{body}</Section>;
 }
 
 /**
@@ -587,7 +587,7 @@ export function LegalQuestionsSection({
         ))}
       </div>
   );
-  return bare ? questions : <Section title={text.sectionLegal}>{questions}</Section>;
+  return bare ? questions : <Section icon={Scale} title={text.sectionLegal}>{questions}</Section>;
 }
 
 /** A list of countries as a statement (block F's former citizenships). */

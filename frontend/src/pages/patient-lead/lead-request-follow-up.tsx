@@ -1,12 +1,30 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, CircleCheck, LoaderCircle, Send } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  BriefcaseBusiness,
+  CircleCheck,
+  ContactRound,
+  CreditCard,
+  Globe,
+  Handshake,
+  IdCard,
+  Landmark,
+  ListChecks,
+  LoaderCircle,
+  Network,
+  Send,
+  UserRound,
+  UsersRound,
+} from "lucide-react";
 
 import { Banner } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { inputClass, selectClass, textareaClass } from "@/components/record-workspace/primitives/design-tokens";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
+import { formatPortalTimestamp } from "@/lib/portal-datetime";
 import { cn } from "@/lib/utils";
 
 import {
@@ -120,6 +138,8 @@ function followUpBlockTitle(
   if (block === "R" && !request.minor) return text.followUpBlockRAdult;
   return text.followUpBlocks[block];
 }
+
+const BLOCK_ICONS = {R: UsersRound, A: Landmark, B: Handshake, C: CreditCard, F: Globe, G: ContactRound, H: BriefcaseBusiness, I: IdCard, J: Network, K: UserRound, L: ListChecks};
 
 const FULL_ROW = "sm:col-span-2 lg:col-span-3";
 /** The blocks about the patient's own person (not the payer, not the representatives). */
@@ -338,13 +358,13 @@ export function FollowUpStep({
           data-testid="lead-request-follow-up-answered"
         >
           <CircleCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          <span>{text.followUpAnsweredAt(formatAppDateTime(answeredAt))}</span>
+          <span>{text.followUpAnsweredAt(formatPortalTimestamp(answeredAt))}</span>
         </p>
       ) : null}
 
       {shownBlocks.map((block) => (
         <div key={block} data-testid={`lead-request-follow-up-${block}`}>
-          <Section title={subjectFirstName && SUBJECT_BLOCKS.has(block) ? `${followUpBlockTitle(request, block, text)} — ${subjectFirstName}` : followUpBlockTitle(request, block, text)}>
+          <Section icon={BLOCK_ICONS[block]} title={subjectFirstName && SUBJECT_BLOCKS.has(block) ? `${followUpBlockTitle(request, block, text)} — ${subjectFirstName}` : followUpBlockTitle(request, block, text)}>
             {showMissing ? (
               <MissingList
                 title={text.stepMissingTitle}

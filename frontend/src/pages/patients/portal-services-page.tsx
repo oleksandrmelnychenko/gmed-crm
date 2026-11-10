@@ -1,3 +1,4 @@
+import { formatPortalTimeWindow } from "@/lib/portal-datetime";
 import { PortalInfoRow as InfoRow, PortalListItem as ListItem, PortalDateChip, PortalSection as Section, PortalSummary } from "./ui/portal-page-layout";
 import {
   startTransition,
@@ -9,7 +10,7 @@ import {
   type FormEvent,
   type SetStateAction,
 } from "react";
-import { Building2, LoaderCircle, Plus, RefreshCw, Send } from "lucide-react";
+import { Building2, ConciergeBell, LoaderCircle, Plus, RefreshCw, Send } from "lucide-react";
 
 import { Dialog } from "@/components/ui/dialog";
 import { AdminDialogScaffold } from "@/components/admin-dialog-scaffold";
@@ -317,7 +318,6 @@ export function PatientServicesPage() {
     conciergeServiceKindLabel,
     conciergeServiceSourceLabel,
     formatPortalCurrency,
-    formatPortalDateTime,
     portalStatusLabel,
   } = usePortalLabels();
   const { lang, t } = useLang();
@@ -479,6 +479,7 @@ export function PatientServicesPage() {
   return (
     <div className="w-full min-w-0 max-w-none space-y-3">
       <PageHeader
+        pageAction={<Button onClick={() => setRequestOpen(true)}><Plus className="size-4" />{t.services_request_title}</Button>}
         title={t.services_title}
         description={t.services_description}
         actions={
@@ -496,10 +497,6 @@ export function PatientServicesPage() {
       {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="hidden text-lg font-semibold md:block">{t.services_title}</h2>
-        <Button onClick={() => setRequestOpen(true)}><Plus className="size-4" />{t.services_request_title}</Button>
-      </div>
       <PortalSummary items={[
         { label: t.services_open_requests, value: openItems.length, visible: openItems.length > 0 },
         { label: t.services_booked_or_in_service, value: bookedItems.length, visible: bookedItems.length > 0 },
@@ -509,7 +506,7 @@ export function PatientServicesPage() {
       <section className="space-y-3">
         <section className="space-y-3">
           <Section
-            title={t.services_history_title}
+            icon={ConciergeBell} title={t.services_history_title}
             accessory={services.length > 0 ? <CountBadge>{services.length}</CountBadge> : undefined}
           >
 
@@ -523,6 +520,8 @@ export function PatientServicesPage() {
                 const contextParts = [item.provider_name, item.assigned_concierge_name, item.appointment_title]
                   .filter((value): value is string => Boolean(value?.trim()));
                 const context = portalServiceContext(item);
+                const { starts_at: start, ends_at: end } = item;
+                const period = formatPortalTimeWindow(start, end);
                 return (
                   <ListItem key={item.id} className="portal-service-card space-y-3">
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -539,9 +538,7 @@ export function PatientServicesPage() {
                               {portalServiceTaxonomyLabel(item, lang)}
                             </CountBadge>
                           ) : null}
-                          <CountBadge>
-                            {conciergeServiceSourceLabel(item.request_source)}
-                          </CountBadge>
+                          {item.request_source && item.request_source !== "patient_portal" && <CountBadge>{conciergeServiceSourceLabel(item.request_source)}</CountBadge>}
                         </div>
                         <h2 className="mt-2 text-base font-semibold text-foreground">{item.title}</h2>
                         {context || contextParts.length === 0 ? <p className="mt-1 text-sm text-muted-foreground">
@@ -551,16 +548,15 @@ export function PatientServicesPage() {
                       <Building2 className="size-5 text-muted-foreground" />
                     </div>
 
+                    {period && <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span>{start && end ? t.portal_appointments_time_window : start ? t.services_preferred_start : t.services_preferred_end}</span>
+                      <PortalDateChip>{period}</PortalDateChip>
+                    </div>}
                     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                      <InfoRow label={t.services_preferred_start} value={<PortalDateChip>{formatPortalDateTime(item.starts_at)}</PortalDateChip>} />
-                      <InfoRow label={t.services_preferred_end} value={<PortalDateChip>{formatPortalDateTime(item.ends_at)}</PortalDateChip>} />
-                      <InfoRow label={t.services_vendor} value={item.vendor_name || t.common_not_set} />
-                      <InfoRow
-                        label={t.services_estimate}
-                        value={item.cost_estimate ? formatPortalCurrency(item.cost_estimate) : t.common_not_set}
-                      />
-                      <InfoRow label={t.services_booking_reference} value={item.booking_reference || t.common_not_set} />
-                      <InfoRow label={t.services_created_at} value={<PortalDateChip>{formatPortalDateTime(item.created_at)}</PortalDateChip>} />
+                      {item.vendor_name && <InfoRow label={t.services_vendor} value={item.vendor_name} />}
+                      {item.cost_estimate != null && <InfoRow label={t.services_estimate} value={formatPortalCurrency(item.cost_estimate)} />}
+                      {item.booking_reference && <InfoRow label={t.services_booking_reference} value={item.booking_reference} />}
+                      <InfoRow label={t.services_created_at} value={<PortalDateChip timestamp={item.created_at} />} />
                     </div>
 
                     {item.service_notes ? (

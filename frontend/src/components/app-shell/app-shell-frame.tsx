@@ -39,11 +39,8 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
   const toggleSidebarLabel = leadShell?.toggleSidebar ?? t.ui_toggle_sidebar;
   const leadPortal = leadShell !== null;
   const patientPortal = user?.role === "patient";
-  const themeScope = leadPortal || !user ? null : patientPortal ? "patient-portal-theme" : "staff-portal-theme";
-  // Leads choose a theme too (owner 2026-11-03); their cabinet keeps its own styles and only
-  // receives the palette variables, so the default lead look stays as it is.
-  const paletteScope = themeScope !== null || (leadPortal && !!user);
-  const { theme, contrast, controls } = useAppearanceTheme(paletteScope ? user?.id ?? null : null);
+  const themeScope = !user ? null : patientPortal ? "patient-portal-theme" : "staff-portal-theme";
+  const { theme, contrast, controls } = useAppearanceTheme();
   // The default uses the existing stylesheet unchanged, including its legacy dark palette.
   // A contrast level or own control colours write the full palette, Graphite included.
   const themeVariables = useMemo(() => theme.id === DEFAULT_THEME.id && contrast === "standard" && !controls
@@ -51,8 +48,8 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
   // Sheets and dialogs render into document.body and need the same palette.
   // Remove the previous workspace scope on logout or a role change.
   useLayoutEffect(() => {
-    if (!paletteScope) return;
-    const classes = themeScope ? ["gmed-theme", themeScope] : ["gmed-theme-palette"];
+    if (!themeScope) return;
+    const classes = ["gmed-theme", themeScope];
     document.body.classList.add(...classes);
     const previous = Object.keys(themeVariables).map((key) => [key, document.body.style.getPropertyValue(key)]);
     for (const [key, value] of Object.entries(themeVariables)) document.body.style.setProperty(key, value);
@@ -63,7 +60,7 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
         else document.body.style.removeProperty(key);
       }
     };
-  }, [paletteScope, themeScope, themeVariables]);
+  }, [themeScope, themeVariables]);
   // `<html lang>` follows the cabinet language, UA and EN included (QA 2026-10-25, G F-G6): screen
   // readers and hyphenation. Every `useLang` sets the portal language there; the cabinet's wins.
   useEffect(() => {
@@ -82,7 +79,7 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
   }, [leadPortal, cabinetLang, lang]);
 
   return (
-    <div className={cn("h-dvh overflow-hidden bg-background", themeScope && "gmed-theme", themeScope)} style={paletteScope ? themeVariables as CSSProperties : undefined}>
+    <div className={cn("h-dvh overflow-hidden bg-background", themeScope && "gmed-theme", themeScope)} style={themeScope ? themeVariables as CSSProperties : undefined}>
       <a
         href="#main-content"
         className="sr-only fixed left-3 top-3 z-[60] rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background focus:not-sr-only focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -117,7 +114,7 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
         </div>
       </div>
       <CommandPalette />
-      {themeScope ? <ContrastMeter /> : null}
+      {themeScope && !leadPortal ? <ContrastMeter /> : null}
       <Toaster />
     </div>
   );

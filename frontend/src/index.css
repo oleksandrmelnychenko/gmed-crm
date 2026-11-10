@@ -309,11 +309,6 @@
   flex-direction: column;
 }
 
-/* Nested sections carry the markers; their enclosing title stays unmarked. */
-[data-cabinet-section]:has(> [data-cabinet-section-body] [data-section-heading-marker])
-  > [data-cabinet-section-header] [data-section-heading-marker] {
-  display: none;
-}
 
 /* Sent forms stay read-only, but their values must remain readable. */
 .patient-request-wizard {
@@ -373,22 +368,48 @@
   border-color: var(--cabinet-disabled-border) !important;
 }
 
-/* Lead cabinet (patient side): the wizard step tabs; on phones the three
-   steps share the width, icon above the label, instead of scrolling. */
+.patient-request-wizard, .patient-request-wizard [data-cabinet-section] {
+  border: 1px solid color-mix(in srgb, var(--border) 82%, var(--foreground));
+}
+
+.request-step-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px;
+}
+.request-step-tab {
+  display: flex;
+  min-width: 0;
+  min-height: 34px;
+  max-width: min(100%, 18rem);
+  align-items: flex-start;
+  gap: 6px;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 12px;
+  line-height: 16px;
+}
+.request-step-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 13px;
+  width: 13px;
+  height: 13px;
+  margin-top: 1.5px;
+  border: 1px solid var(--muted-foreground);
+  border-radius: 50%;
+}
+.request-step-state[data-step-state="complete"] {
+  border-color: var(--color-emerald-700);
+  background: var(--color-emerald-700);
+  color: white;
+}
 @media (max-width: 639px) {
-  .lead-cabinet-step-tabs {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    width: 100%;
-  }
-  .lead-cabinet-step-tabs .lead-wizard-step-tab {
-    height: auto;
-    min-height: 3.25rem;
-    flex-direction: column;
-    justify-content: center;
-    gap: 0.25rem;
-    padding: 0.375rem 0.25rem;
-  }
+  .request-step-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(36px, 1fr)); }
+  .request-step-tab { min-height: 40px; align-items: center; justify-content: center; padding-inline: 3px; }
+  .request-step-state { position: absolute; right: 1px; bottom: 3px; width: 10px; height: 10px; margin: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

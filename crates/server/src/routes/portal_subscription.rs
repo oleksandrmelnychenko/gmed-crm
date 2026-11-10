@@ -90,6 +90,7 @@ fn basic_path(path: &str) -> bool {
     [
         "/me",
         "/me/profile",
+        "/me/appearance",
         "/me/password",
         "/me/export",
         "/me/account-statement",
@@ -133,6 +134,7 @@ mod tests {
         for path in [
             "/me",
             "/me/profile",
+            "/me/appearance",
             "/auth/sessions",
             "/me/totp/setup",
             "/me/privacy-requests",

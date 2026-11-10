@@ -588,7 +588,7 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     await notice.getByRole("checkbox", { name: "E-Mail" }).check();
     await notice.getByRole("checkbox", { name: "Ich habe die Datenschutzhinweise gelesen." }).check();
     await expect.poll(() => calls.consents).toEqual([{ acknowledged: true, contact_channels: ["email"] }]);
-    await expect(notice).toContainText("Bestätigt am 06.10.2026 12:00");
+    await expect(notice).toContainText("Bestätigt am 06.10.2026 · 12:00");
     await expect(notice.getByRole("checkbox", { name: "Ich habe die Datenschutzhinweise gelesen." })).toBeDisabled();
     const fields = section.getByTestId("lead-request-payer-fields");
     await expect(fields).toBeVisible();
@@ -666,7 +666,7 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     await page.screenshot({ path: testInfo.outputPath("lead-cabinet-payer-filled-de-desktop.png"), animations: "disabled", fullPage: true });
     await submit.click();
     await expect(section.getByTestId("lead-request-payer-sent")).toContainText(
-      "Ihre Angaben als zahlende Person wurden am 06.10.2026 12:30 gesendet.",
+      "Ihre Angaben als zahlende Person wurden am 06.10.2026 · 12:30 gesendet.",
     );
     expect(calls.submits).toEqual([{ declared_correct: true }]);
     await expect(fields.getByRole("textbox", { name: /Beruf \/ Tätigkeit/ })).toBeDisabled();
@@ -717,7 +717,7 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     await page.goto("/");
     await step(page, "billing");
     const section = page.getByTestId("lead-request-payer-questionnaire");
-    await expect(section.getByTestId("lead-request-payer-sent")).toContainText("Ihre Angaben als zahlende Person wurden am 06.10.2026 12:30 gesendet.");
+    await expect(section.getByTestId("lead-request-payer-sent")).toContainText("Ihre Angaben als zahlende Person wurden am 06.10.2026 · 12:30 gesendet.");
 
     // From the request's short form: the questionnaire's answer does not name the package and keeps it.
     const status = section.getByTestId("lead-request-payer-signature");

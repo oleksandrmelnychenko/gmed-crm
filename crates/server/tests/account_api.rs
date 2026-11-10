@@ -416,3 +416,55 @@ async fn own_sessions_mark_the_current_one() {
         "{sessions:?}"
     );
 }
+
+#[tokio::test]
+async fn appearance_is_persistent_and_scoped_to_the_account() {
+    let Some((app, pool, admin)) = test_context().await else {
+        return;
+    };
+    let (_, email) =
+        seed_user_with_password(&pool, "appearance", "billing", "Original-pass-1!").await;
+    let login_token = |login: Value| format!("Bearer {}", login["access_token"].as_str().unwrap());
+    let first = login_token(login(&app, &email, "Original-pass-1!").await);
+    let path = "/api/v1/me/appearance";
+    let fresh = json_request(&app, "GET", path, Some(&first), None).await;
+    assert_eq!(fresh, (StatusCode::OK, Value::Null));
+    let prefs = json!({"selectedId":"gmed-clay","contrast":"soft","themes":[],"controls":{"dot":"#ef721c"}});
+    assert_eq!(
+        json_request(&app, "PUT", path, Some(&first), Some(prefs.clone())).await,
+        (StatusCode::OK, prefs.clone())
+    );
+    let second = login_token(login(&app, &email, "Original-pass-1!").await);
+    assert_eq!(
+        json_request(&app, "GET", path, Some(&second), None).await,
+        (StatusCode::OK, prefs.clone())
+    );
+    let import = json!({"selectedId":"gmed-orange","themes":[]});
+    assert_eq!(
+        json_request(
+            &app,
+            "PUT",
+            "/api/v1/me/appearance?initialize=true",
+            Some(&second),
+            Some(import)
+        )
+        .await,
+        (StatusCode::OK, prefs)
+    );
+    assert_eq!(
+        json_request(
+            &app,
+            "PUT",
+            path,
+            Some(&second),
+            Some(json!({"selectedId":"bad","themes":"no"}))
+        )
+        .await
+        .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        json_request(&app, "GET", path, Some(&ceo_bearer(admin)), None).await,
+        (StatusCode::OK, Value::Null)
+    );
+}

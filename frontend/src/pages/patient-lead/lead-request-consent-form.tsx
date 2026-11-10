@@ -1,10 +1,10 @@
 import { useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { FileSignature, LoaderCircle } from "lucide-react";
 import { cabinetStaffText, useCabinetStaffMode } from "./lead-request-staff-mode";
 import { StaffConsentRecordFields } from "./lead-request-staff-consent";
 
 import { checkboxClass } from "@/components/record-workspace/primitives/design-tokens";
-import { formatAppDateTime } from "@/lib/app-time-zone";
+import { formatPortalTimestamp } from "@/lib/portal-datetime";
 import { cn } from "@/lib/utils";
 
 import {
@@ -179,7 +179,7 @@ export function ConsentFormChoicesSection({
   if (choiceOnlyByGuardian(request)) {
     return (
       <div data-testid="lead-request-consent-form">
-        <Section title={text.title}>
+        <Section icon={FileSignature} title={text.title}>
           <p className="text-sm text-muted-foreground" data-testid="lead-request-consent-form-by-guardian">
             {text.byGuardianOnly}
           </p>
@@ -252,7 +252,7 @@ export function ConsentFormChoicesSection({
 
   return (
     <div data-testid="lead-request-consent-form">
-      <Section title={text.title}>
+      <Section icon={FileSignature} title={text.title}>
         <div className="space-y-3">
           <InfoNote>{text.intro}</InfoNote>
           <div className="space-y-2">{CONSENT_FORM_CORE.map(option)}</div>
@@ -279,7 +279,7 @@ export function ConsentFormChoicesSection({
           {/* Every consent staff record says when it was given, as the single consents do (owner 2026-10-30). */}
           {staffMode && !changed && !busy && form.chosen_at ? (
             <div data-testid="lead-request-consent-form-given">
-              <ConsentGivenChip>{leadRequestText(lang).consentGivenAt(formatAppDateTime(form.chosen_at))}</ConsentGivenChip>
+              <ConsentGivenChip>{leadRequestText(lang).consentGivenAt(formatPortalTimestamp(form.chosen_at))}</ConsentGivenChip>
             </div>
           ) : null}
           <div className="flex flex-wrap items-center gap-3">
@@ -289,7 +289,7 @@ export function ConsentFormChoicesSection({
               {busy ? text.saving : changed
                 ? text.unsaved
                 : !staffMode && form.chosen_at && form.chosen_by_me === false
-                  ? (form.chosen_by_staff ? text.savedByStaffAt : text.savedByOtherAt)(formatAppDateTime(form.chosen_at))
+                  ? (form.chosen_by_staff ? text.savedByStaffAt : text.savedByOtherAt)(formatPortalTimestamp(form.chosen_at))
                   : ""}
             </p>
           </div>

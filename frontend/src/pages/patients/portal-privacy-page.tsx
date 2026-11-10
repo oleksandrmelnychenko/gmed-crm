@@ -1,7 +1,7 @@
 import { PortalInfoRow as InfoRow, PortalListItem as ListItem, PortalSection as Section, PortalDateChip } from "./ui/portal-page-layout";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { startTransition, useEffect, useMemo, useReducer, type FormEvent } from "react";
-import { LoaderCircle, RefreshCw, Shield } from "lucide-react";
+import { History, LoaderCircle, RefreshCw, Shield } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -111,7 +111,6 @@ function privacyRequestSourceLabel(
 export function PatientPrivacyPage() {
   const {
     formatPortalDate,
-    formatPortalDateTime,
     portalStatusLabel,
     privacyRequestLabel,
   } = usePortalLabels();
@@ -219,7 +218,7 @@ export function PatientPrivacyPage() {
         description={t.portal_privacy_description}
         actions={
           <>
-            <CountBadge>{t.portal_privacy_patient_portal}</CountBadge>
+
             <CountBadge>
               {t.portal_privacy_open_requests}: {openRequests.length}
             </CountBadge>
@@ -240,11 +239,8 @@ export function PatientPrivacyPage() {
       <section className="grid items-start gap-3 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.25fr)]">
         <Section
           title={t.portal_privacy_new_request}
-          accessory={<Shield className="size-4 text-muted-foreground" />}
+          icon={Shield}
         >
-          <p className="text-sm text-muted-foreground">
-            {t.portal_privacy_manager_review_hint}
-          </p>
 
           <form onSubmit={handleSubmit} className="space-y-3 [&_label]:font-mono [&_label]:text-xs">
             <Field label={t.portal_privacy_request_type} htmlFor="privacy-type">
@@ -286,10 +282,7 @@ export function PatientPrivacyPage() {
           </form>
         </Section>
 
-        <Section title={t.portal_privacy_request_history} accessory={<CountBadge>{requests.length}</CountBadge>}>
-          <p className="text-sm text-muted-foreground">
-            {t.portal_privacy_history_description}
-          </p>
+        <Section icon={History} title={t.portal_privacy_request_history} accessory={<CountBadge>{requests.length}</CountBadge>}>
           {requests.length === 0 ? (
             <EmptyCell>
               {t.portal_privacy_empty}
@@ -303,7 +296,7 @@ export function PatientPrivacyPage() {
                       <p className="text-sm font-semibold text-foreground">
                         {privacyRequestLabel(item.request_type)}
                       </p>
-                      <PortalDateChip>{t.portal_privacy_submitted} {formatPortalDateTime(item.requested_at)}</PortalDateChip>
+                      <span>{t.portal_privacy_submitted} <PortalDateChip timestamp={item.requested_at} /></span>
                     </div>
                     <StatusBadge status={item.status} tone={privacyStatusBadgeTone(item.status)}>
                       {waitsForOpenBusiness(item)
@@ -319,8 +312,8 @@ export function PatientPrivacyPage() {
 
                   <div className="grid gap-2 md:grid-cols-2">
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_due} value={<PortalDateChip>{formatPortalDate(item.due_at)}</PortalDateChip>} />
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_reviewed} value={<PortalDateChip>{formatPortalDateTime(item.reviewed_at)}</PortalDateChip>} />
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_executed} value={<PortalDateChip>{formatPortalDateTime(item.executed_at)}</PortalDateChip>} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_reviewed} value={<PortalDateChip timestamp={item.reviewed_at} />} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_executed} value={<PortalDateChip timestamp={item.executed_at} />} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_source} value={privacyRequestSourceLabel(item.source)} />
                   </div>
 

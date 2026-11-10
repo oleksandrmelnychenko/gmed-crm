@@ -53,7 +53,6 @@
   box-shadow: none;
 }
 
-.patient-portal-theme .portal-section h3 { font-size: 15px; }
 .patient-portal-theme .portal-section > div:first-child { margin-bottom: 8px; }
 .patient-portal-theme .portal-section > div:first-child [aria-hidden].rounded-full { background: var(--dot); }
 
@@ -114,24 +113,22 @@
 }
 .patient-portal-theme .portal-request-form .portal-section > div:first-child { margin-bottom: 10px; }
 
-.patient-portal-theme .portal-date-chip {
-  background: transparent;
+:is(.patient-portal-theme, .patient-request-wizard) .portal-date-chip {
+  background: var(--muted);
   color: var(--foreground);
-  border: 0;
-  padding: 0;
-  font-family: var(--font-sans);
-  font-size: var(--gmed-date-size);
-  line-height: 20px;
-  font-weight: 400;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 6px;
+  gap: 4px;
+  font: 400 12px/16px var(--font-sans);
   letter-spacing: normal;
-  gap: 6px;
 }
-.patient-portal-theme .portal-date-chip > svg {
+:is(.patient-portal-theme, .patient-request-wizard) .portal-date-chip > svg {
   width: 13px;
   height: 13px;
   color: var(--muted-foreground);
 }
-.patient-portal-theme .portal-date-chip > span { font: inherit; letter-spacing: inherit; }
+:is(.patient-portal-theme, .patient-request-wizard) .portal-date-chip > span { font: inherit; letter-spacing: inherit; }
 
 .patient-portal-theme .portal-document-complete {
   background: var(--card);
@@ -197,11 +194,6 @@
   border-color: var(--primary);
 }
 
-.patient-portal-theme .portal-feedback form {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-}
 .patient-portal-theme .portal-feedback :is(label, select, [role="combobox"]) {
   font-family: var(--font-sans);
   font-size: 14px;
@@ -212,10 +204,9 @@
   border: 0;
   border-bottom: 1px solid var(--border);
   border-radius: 0;
-  padding: 10px 0;
+  padding: 6px 0;
 }
 @media (min-width: 640px) {
-  .patient-portal-theme .portal-detailed-ratings > div { grid-template-columns: 1fr; }
   .patient-portal-theme .portal-detailed-ratings .portal-rating-scale {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 210px;

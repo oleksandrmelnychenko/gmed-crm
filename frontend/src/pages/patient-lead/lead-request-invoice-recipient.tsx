@@ -1,3 +1,4 @@
+import { ContactRound, Wallet, ListPlus } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -362,7 +363,7 @@ export function InvoiceRecipientSection({
 
   return (
     <>
-      <Section title={text.recipient.section}>
+      <Section icon={ContactRound} title={text.recipient.section}>
         <div className="grid gap-x-4 gap-y-2.5 sm:grid-cols-2" data-testid="lead-request-invoice-recipient">
           {changedMeanwhile && (
             <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-5 text-amber-900 sm:col-span-2 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200" data-testid="lead-request-recipient-changed">
@@ -821,7 +822,7 @@ function ParentPayer({
     ? draft.representative_id ?? ""
     : "";
   return (
-    <Section title={text.recipient.payerSection}>
+    <Section icon={Wallet} title={text.recipient.payerSection}>
       <div data-testid="lead-request-parent-payer">
         <LabeledField
           id="lead-request-payer_kind"
@@ -928,7 +929,7 @@ function RecipientPayer({
   };
 
   return (
-    <Section title={text.recipient.payerExtrasBlock}>
+    <Section icon={ListPlus} title={text.recipient.payerExtrasBlock}>
       <div className="space-y-3" data-testid="lead-request-recipient-payer">
         {replacementPending ? <div className="space-y-3" data-testid="lead-request-payer-replacement">
           <StatusChip tone="warning">{text.recipient.replacePayerHint}</StatusChip>

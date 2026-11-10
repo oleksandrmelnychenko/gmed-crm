@@ -1,12 +1,14 @@
 import { useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
+import { useOptionalAuthUser } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 type PageHeaderProps = {
   title: ReactNode;
   description?: ReactNode;
   actions?: ReactNode;
+  pageAction?: ReactNode;
 };
 
 // The top bar shows `#topbar-page-slot` from Tailwind `lg` up; below it the
@@ -27,7 +29,8 @@ function topbarTitleQueryMatches() {
   return typeof window !== "undefined" && Boolean(window.matchMedia?.(TOPBAR_TITLE_QUERY).matches);
 }
 
-export function PageHeader({ title, actions }: PageHeaderProps) {
+export function PageHeader({ title, actions, pageAction }: PageHeaderProps) {
+  const portal = useOptionalAuthUser()?.role === "patient";
   // Lazy init covers client-side navigations (slot already in DOM); the
   // layout effect covers the very first app render where the shell commits
   // together with the page. One-time DOM sync for the portal target. It runs
@@ -60,7 +63,7 @@ export function PageHeader({ title, actions }: PageHeaderProps) {
     // actions keep their natural width (`w-max`, out of flow): the check
     // cannot flip its own result.
     const measure = () => {
-      const needed = actionsElement.scrollWidth + TOPBAR_MIN_TITLE_WIDTH + TOPBAR_COPY_CHROME_WIDTH;
+      const needed = actionsElement.scrollWidth + (portal ? 0 : TOPBAR_MIN_TITLE_WIDTH + TOPBAR_COPY_CHROME_WIDTH);
       setActionsFitTopbar(needed <= topbarSlot.clientWidth);
     };
     measure();
@@ -69,10 +72,10 @@ export function PageHeader({ title, actions }: PageHeaderProps) {
     observer.observe(topbarSlot);
     observer.observe(actionsElement);
     return () => observer.disconnect();
-  }, [hasActions, topbarSlot]);
+  }, [hasActions, portal, topbarSlot]);
 
   // Exactly one <h1> in the DOM: the copy the current viewport shows.
-  const topbarOwnsHeading = Boolean(topbarSlot) && topbarTitleShown;
+  const topbarOwnsHeading = !portal && Boolean(topbarSlot) && topbarTitleShown;
   const InPageTitle = topbarOwnsHeading ? "div" : "h1";
   const TopbarTitle = topbarOwnsHeading ? "h1" : "div";
   const actionsInTopbar = hasActions && actionsFitTopbar;
@@ -82,29 +85,31 @@ export function PageHeader({ title, actions }: PageHeaderProps) {
       <div
         className={cn(
           "flex flex-col items-stretch gap-3 lg:flex-row lg:flex-wrap lg:items-start lg:justify-between",
-          topbarSlot && (actionsInTopbar || !hasActions) && "lg:hidden",
-          topbarSlot && hasActions && !actionsFitTopbar && "lg:justify-end",
+          !portal && topbarSlot && (actionsInTopbar || !hasActions) && "lg:hidden",
+          !portal && topbarSlot && hasActions && !actionsFitTopbar && "lg:justify-end",
         )}
       >
-        <div className={cn("min-w-0 space-y-1", topbarSlot && "lg:hidden")}>
+        <div className={cn("min-w-0", pageAction && "flex w-full flex-wrap items-center justify-between gap-2", !portal && topbarSlot && "lg:hidden")}>
           <InPageTitle className="min-w-0 truncate text-lg font-semibold tracking-tight text-foreground">{title}</InPageTitle>
+          {pageAction}
         </div>
-        {actions ? (
+        {actions && !(portal && topbarTitleShown && topbarSlot && actionsInTopbar) ? (
           <div className="grid w-full grid-cols-2 items-center gap-2 lg:flex lg:w-auto lg:flex-wrap max-lg:[&>*]:min-w-0 max-lg:[&>[data-slot=badge]]:col-span-2 max-lg:[&>[data-slot=badge]]:h-auto max-lg:[&>[data-slot=badge]]:min-h-6 max-lg:[&>[data-slot=badge]]:w-full max-lg:[&>[data-slot=badge]]:whitespace-normal max-lg:[&>button:only-child]:col-span-2 max-lg:[&_:is(button,a)]:min-h-10">{actions}</div>
         ) : null}
       </div>
-      {topbarSlot
+      {topbarSlot && (!portal || hasActions)
         ? createPortal(
             <div
               className={cn(
-                "relative flex h-9 w-fit max-w-full min-w-0 items-center gap-3 rounded-lg border border-border/50 bg-muted/25 px-2.5",
+                "relative flex h-9 w-fit max-w-full min-w-0 items-center",
+                !portal && "gap-3 rounded-lg border border-border/50 bg-muted/25 px-2.5",
                 // The hidden actions are only measured; they must not widen the bar.
                 hasActions && !actionsInTopbar && "overflow-hidden",
               )}
             >
-              <TopbarTitle className="min-w-0 truncate text-[15px] font-medium tracking-tight text-foreground">
+              {!portal && <TopbarTitle className="min-w-0 truncate text-[15px] font-medium tracking-tight text-foreground">
                 {title}
-              </TopbarTitle>
+              </TopbarTitle>}
               {actions ? (
                 <div
                   ref={topbarActionsRef}

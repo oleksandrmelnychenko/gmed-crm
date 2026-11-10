@@ -1,3 +1,4 @@
+import { Wallet, UserRound, Phone, MapPin, ShieldCheck } from "lucide-react";
 import { useCallback, useRef, useState, type MutableRefObject } from "react";
 
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
@@ -11,7 +12,8 @@ import {
   selectClass,
   textareaClass,
 } from "@/components/record-workspace/primitives/design-tokens";
-import { appDateKey, formatAppDateTime } from "@/lib/app-time-zone";
+import { appDateKey } from "@/lib/app-time-zone";
+import { formatPortalTimestamp } from "@/lib/portal-datetime";
 import { cn } from "@/lib/utils";
 import { ApiRequestError } from "@/lib/api";
 import { EmailDomainWarning, emailDomainWarningText } from "@/components/email-domain-warning";
@@ -345,7 +347,7 @@ export function PayerSection({
     // The paying parent answers as the payer: no consent to send oneself the cost estimate.
     const parentPays = payerAnswer(request.payer, template) === "guardian";
     return (
-      <Section title={text.sectionPayer}>
+      <Section icon={Wallet} title={text.sectionPayer}>
         <div className="space-y-3" data-testid="lead-request-payer">
           <CabinetHint testId="lead-request-payer-answered">
             {text.payerAnsweredByPayer}
@@ -451,7 +453,7 @@ export function PayerSection({
   // Several cards (owner 2026-10-09): who pays, the payer, contact, residence and the consents.
   return (
     <div className="space-y-3" data-testid="lead-request-payer">
-      <Section title={text.recipient.payerSection}>
+      <Section icon={Wallet} title={text.recipient.payerSection}>
         <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
           <LabeledField
             {...field("payer_kind", true, "w-full max-w-xl sm:col-span-2 lg:col-span-3")}
@@ -480,7 +482,7 @@ export function PayerSection({
       </Section>
       {thirdParty ? (
         <>
-          <Section title={text.payerBlockPerson}>
+          <Section icon={UserRound} title={text.payerBlockPerson}>
             <div className={cn("grid gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3", !organisation && "2xl:grid-cols-4")}>
               {organisation ? (
                 // The organisation mask: an organisation has a name, a legal form, a register number
@@ -630,7 +632,7 @@ export function PayerSection({
               )}
             </div>
           </Section>
-          <Section title={text.payerBlockContact}>
+          <Section icon={Phone} title={text.payerBlockContact}>
             <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
               {/* Contact (owner request 2026-10-07): e-mail and phone are required of a third person, the
                   messenger is not. An organisation needs the e-mail (QA 2026-10-11 A-35: it answers on its
@@ -681,7 +683,7 @@ export function PayerSection({
             </div>
           </Section>
           {/* A person lives somewhere, an organisation has its seat (QA 2026-10-10). */}
-          <Section title={organisation ? text.payerSeat : text.payerResidence}>
+          <Section icon={MapPin} title={organisation ? text.payerSeat : text.payerResidence}>
             <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
               {/* The country of the seat is what the screening of an organisation works with. */}
               <LabeledField {...field("payer_country", organisation || contactRequired("payer_country"))}>
@@ -724,7 +726,7 @@ export function PayerSection({
             </div>
           </Section>
           {consentAsked || costEstimateConsentAsked(request, draft.guardian_pays) ? (
-            <Section title={text.payerBlockConsent}>
+            <Section icon={ShieldCheck} title={text.payerBlockConsent}>
               <div className="space-y-3">
                 {consentAsked ? (
                   <PayerContactConsent
@@ -871,7 +873,7 @@ export function PayerContactConsent({
       <div className="space-y-1 pl-7 text-xs text-muted-foreground">
         {checked && consentAt ? (
           <p>
-            <ConsentGivenChip>{text.consentGivenAt(formatAppDateTime(consentAt))}</ConsentGivenChip>
+            <ConsentGivenChip>{text.consentGivenAt(formatPortalTimestamp(consentAt))}</ConsentGivenChip>
           </p>
         ) : null}
       </div>
@@ -987,7 +989,7 @@ export function CostEstimateConsent({
           required; its explanatory line went (QA 2026-10-10). */}
       {checked && givenAt ? (
         <div className="pl-7 text-xs text-muted-foreground">
-          <ConsentGivenChip>{text.consentGivenAt(formatAppDateTime(givenAt))}</ConsentGivenChip>
+          <ConsentGivenChip>{text.consentGivenAt(formatPortalTimestamp(givenAt))}</ConsentGivenChip>
         </div>
       ) : null}
       {staffMode && recordOpen && !checked ? (

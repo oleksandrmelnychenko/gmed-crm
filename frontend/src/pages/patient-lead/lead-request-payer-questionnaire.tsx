@@ -1,5 +1,6 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
-import { LoaderCircle, Send, Upload } from "lucide-react";
+import { ClipboardList, Info, LoaderCircle, Send, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -12,7 +13,8 @@ import {
   selectClass,
   textareaClass,
 } from "@/components/record-workspace/primitives/design-tokens";
-import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
+import { formatPortalTimestamp } from "@/lib/portal-datetime";
 import { ApiRequestError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -147,7 +149,7 @@ export function PayerQuestionnaireSection({
   }, [load]);
 
   return (
-    <Section title={text.payerQuestionnaireTitle}>
+    <Section icon={ClipboardList} title={text.payerQuestionnaireTitle}>
       <div className="space-y-3" data-testid="lead-request-payer-questionnaire">
         <p className="text-sm leading-relaxed text-muted-foreground">
           {text.payerQuestionnaireIntro(text.sectionLegalRepresentatives)}
@@ -437,7 +439,7 @@ function PayerQuestionnaireForm({
   return (
     <div className="space-y-3">
       <div className="space-y-3 rounded-xl border border-border/60 bg-card p-3" data-testid="lead-request-payer-notice">
-        <h4 className="flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />{text.payerNoticeTitle}</h4>
+        <h4 className="flex items-center gap-2 text-sm font-semibold"><SectionHeading icon={Info}>{text.payerNoticeTitle}</SectionHeading></h4>
         <CabinetHint><p className="whitespace-pre-line">{text.payerNotice}</p></CabinetHint>
         <a href={`/legal?notice=form&lang=${lang}#privacy`} target="_blank" rel="noreferrer" className="text-xs text-[var(--brand)] underline">
           {text.privacyLink}
@@ -459,7 +461,7 @@ function PayerQuestionnaireForm({
             <span className="leading-snug">{text.payerNoticeAck}</span>
             {questionnaire.privacy.acknowledged_at ? (
               <ConsentGivenChip>
-                {text.payerNoticeAckAt(formatAppDateTime(questionnaire.privacy.acknowledged_at))}
+                {text.payerNoticeAckAt(formatPortalTimestamp(questionnaire.privacy.acknowledged_at))}
               </ConsentGivenChip>
             ) : null}
           </span>
@@ -710,7 +712,7 @@ function PayerQuestionnaireForm({
           className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200"
           data-testid="lead-request-payer-sent"
         >
-          <p className="font-medium">{text.payerSubmittedAt(formatAppDateTime(questionnaire.submitted_at))}</p>
+          <p className="font-medium">{text.payerSubmittedAt(formatPortalTimestamp(questionnaire.submitted_at))}</p>
           <p className="mt-0.5 text-xs opacity-80">{text.payerSubmittedNote}</p>
         </div>
       ) : (

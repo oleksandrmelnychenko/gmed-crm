@@ -1,6 +1,20 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { PortalInfoRow as InfoRow, PortalListItem as ListItem, PortalStatCard as StatCard, PortalSection as Section, PortalDateChip } from "./ui/portal-page-layout";
 import { startTransition, useEffect, useMemo, useReducer, useState, type FormEvent } from "react";
-import { Download, LoaderCircle, RefreshCw, Upload } from "lucide-react";
+import {
+  Bell,
+  Download,
+  FileCheck,
+  FileMinus,
+  History,
+  ListOrdered,
+  LoaderCircle,
+  ReceiptText,
+  RefreshCw,
+  Undo2,
+  Upload,
+  Wallet,
+} from "lucide-react";
 
 import { AdminSheetScaffold } from "@/components/admin-page-patterns";
 import { AdminDialogScaffold } from "@/components/admin-dialog-scaffold";
@@ -201,7 +215,6 @@ function usePatientInvoicesPageContent() {
   const {
     formatPortalCurrency,
     formatPortalDate,
-    formatPortalDateTime,
     invoiceTypeLabel,
     portalStatusLabel,
   } = usePortalLabels();
@@ -442,7 +455,7 @@ function usePatientInvoicesPageContent() {
         description={t.portal_invoices_review_released_invoice_snapshots_track_payment_state_and_upload}
         actions={
           <>
-            <CountBadge>{t.portal_invoices_patient_portal}</CountBadge>
+
             <a href="/documents">
               <Button variant="default" className={tokens.control.primaryButton}>
                 <Upload className="size-4" />
@@ -466,12 +479,12 @@ function usePatientInvoicesPageContent() {
       <section className="grid gap-3 md:grid-cols-3">
         <StatCard label={t.portal_invoices_visible_invoices} value={String(invoices.length)} />
         <StatCard label={t.portal_invoices_outstanding_balance} value={hiddenAmountCount > 0 ? t.portal_invoices_partly_hidden : totalBalance} />
-        <StatCard label={t.portal_invoices_missing_payment_proof} value={String(proofPendingCount)} description={formatPortalCountLabel(t.portal_invoices_overdue_count, overdueCount)} />
+        <StatCard label={t.portal_invoices_missing_payment_proof} value={String(proofPendingCount)} description={overdueCount > 0 ? formatPortalCountLabel(t.portal_invoices_overdue_count, overdueCount) : undefined} />
       </section>
 
       {accountStatement ? (
         <Section
-          title={lang === "de" ? "Meine Zahlungen und offenen Beträge" : "Мои оплаты и суммы к доплате"}
+          icon={Wallet} title={lang === "de" ? "Meine Zahlungen und offenen Beträge" : "Мои оплаты и суммы к доплате"}
           accessory={
             <div className="flex items-center gap-2">
               {accountStatement.available_currencies.length > 1 ? (
@@ -554,7 +567,7 @@ function usePatientInvoicesPageContent() {
                           : lang === "de" ? "Kontokorrektur" : "Корректировка счёта"}
                       </div>
                       <div className="mt-1 text-xs text-muted-foreground">
-                        {formatPortalDate(movement.entry_date)} · {movement.description}
+                        <PortalDateChip timestamp={movement.entry_date} /> · {movement.description}
                       </div>
                     </div>
                     <div className="font-mono text-sm font-semibold tabular-nums text-foreground">
@@ -597,7 +610,7 @@ function usePatientInvoicesPageContent() {
                         <div className="font-semibold text-foreground">{item.document_number || kindLabel}</div>
                         <div className="mt-0.5 max-w-[260px] truncate text-xs text-muted-foreground">{item.order_number ?? item.description}</div>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{formatPortalDate(item.entry_date)}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-muted-foreground"><PortalDateChip timestamp={item.entry_date} /></td>
                       <td className="px-4 py-3">
                         <StatusBadge tone={item.payment_state === "paid" ? "success" : item.payment_state === "partially_paid" ? "warning" : "neutral"}>
                           {portalAccountStateLabel(item.payment_state, lang)}
@@ -639,7 +652,7 @@ function usePatientInvoicesPageContent() {
                       {item.order_number ?? item.description}
                     </div>
                     <div className="mt-1 text-xs text-muted-foreground">
-                      {formatPortalDate(item.entry_date)}
+                      <PortalDateChip timestamp={item.entry_date} />
                     </div>
                   </div>
                   <StatusBadge
@@ -672,7 +685,7 @@ function usePatientInvoicesPageContent() {
         </Section>
       ) : null}
 
-      <Section title={t.portal_invoices_my_invoices} accessory={<CountBadge>{invoices.length}</CountBadge>}>
+      <Section icon={ReceiptText} title={t.portal_invoices_my_invoices} accessory={<CountBadge>{invoices.length}</CountBadge>}>
         {invoices.length === 0 ? (
           <EmptyCell>
             <p className="text-base font-semibold text-foreground">{t.portal_invoices_no_invoices_released_yet}</p>
@@ -722,7 +735,7 @@ function usePatientInvoicesPageContent() {
                         </button>
                         <div className="mt-0.5 text-xs text-muted-foreground">{invoice.order_number}</div>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{formatPortalDateTime(invoice.issued_at)}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-muted-foreground"><PortalDateChip timestamp={invoice.issued_at} /></td>
                       <td className="px-4 py-3"><StatusBadge status={invoice.display_status ?? invoice.status}>{portalStatusLabel(invoice.display_status ?? invoice.status)}</StatusBadge></td>
                       <td className="px-4 py-3"><StatusBadge tone={invoiceTypeBadgeTone(invoice.invoice_type)}>{invoiceTypeLabel(invoice.invoice_type)}</StatusBadge></td>
                       <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">
@@ -730,7 +743,7 @@ function usePatientInvoicesPageContent() {
                         {amountsVisible ? portalInvoiceCreditLine(invoice, lang, formatPortalCurrency) ? <div className="mt-0.5 text-xs font-sans text-muted-foreground">{portalInvoiceCreditLine(invoice, lang, formatPortalCurrency)}</div> : null : null}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right font-mono font-semibold tabular-nums text-foreground">{amountsVisible ? formatPortalCurrency(balanceDue, invoice.currency) : t.portal_invoices_hidden}</td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">{invoice.last_payment_proof_at ? `${t.portal_invoices_uploaded} ${formatPortalDate(invoice.last_payment_proof_at)}` : t.portal_invoices_not_uploaded}</td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{invoice.last_payment_proof_at ? <PortalDateChip title={t.portal_invoices_uploaded} timestamp={invoice.last_payment_proof_at} /> : t.portal_invoices_not_uploaded}</td>
                     </tr>
                   );
                 })}
@@ -756,7 +769,7 @@ function usePatientInvoicesPageContent() {
                       <div className={tokens.text.eyebrow}>{invoice.invoice_number}</div>
                       <h2 className="mt-2 text-base font-semibold text-foreground">{invoice.order_number}</h2>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        {t.portal_invoices_issued} {formatPortalDateTime(invoice.issued_at)}
+                        {t.portal_invoices_issued} <PortalDateChip timestamp={invoice.issued_at} />
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -782,7 +795,7 @@ function usePatientInvoicesPageContent() {
                     <InfoRow
                       className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
                       label={t.portal_invoices_payment_proof}
-                      value={invoice.last_payment_proof_at ? `${t.portal_invoices_uploaded} ${formatPortalDate(invoice.last_payment_proof_at)}` : t.portal_invoices_not_uploaded}
+                      value={invoice.last_payment_proof_at ? <PortalDateChip title={t.portal_invoices_uploaded} timestamp={invoice.last_payment_proof_at} /> : t.portal_invoices_not_uploaded}
                     />
                   </div>
                 </ListItem>
@@ -821,8 +834,7 @@ function usePatientInvoicesPageContent() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                        <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-                        <span>{t.portal_invoices_invoice_overview}</span>
+                        <SectionHeading icon={ReceiptText}>{t.portal_invoices_invoice_overview}</SectionHeading>
                       </h2>
                       <p className={cn("mt-1", tokens.text.muted)}>{t.portal_invoices_amounts_due_date_and_linked_quote_order_context}</p>
                     </div>
@@ -883,7 +895,7 @@ function usePatientInvoicesPageContent() {
                     </div>
                   </div>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_issued_at} value={<PortalDateChip>{formatPortalDateTime(detail.issued_at)}</PortalDateChip>} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_issued_at} value={<PortalDateChip timestamp={detail.issued_at} />} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_due_date} value={<PortalDateChip>{formatPortalDate(detail.due_date)}</PortalDateChip>} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_order} value={detail.order_number} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_quote} value={detail.quote_number || t.portal_invoices_not_set} />
@@ -911,8 +923,7 @@ function usePatientInvoicesPageContent() {
                 {detailCreditNotes.length > 0 ? (
                   <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-                      <span>{t.finance_credit_note_portal_title}</span>
+                      <SectionHeading icon={FileMinus}>{t.finance_credit_note_portal_title}</SectionHeading>
                     </h2>
                     <p className={cn("mt-1", tokens.text.muted)}>
                       {lang === "de" ? "Hier sehen Sie freigegebene Gutschriften und Stornierungen." : "Здесь показаны доступные вам кредит-ноты и их отмены."}
@@ -924,7 +935,7 @@ function usePatientInvoicesPageContent() {
                           <div key={credit.id} className={cn("flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border/70 bg-background/70 p-3", credit.is_reversed && "opacity-70")}>
                             <div className="min-w-0">
                               <div className="text-sm font-semibold text-foreground">{credit.document_number}</div>
-                              <div className="mt-1 text-xs text-muted-foreground">{formatPortalDate(credit.issued_on)} · {credit.reason}</div>
+                              <div className="mt-1 text-xs text-muted-foreground"><PortalDateChip timestamp={credit.issued_on} /> · {credit.reason}</div>
                               {(credit.line_items ?? []).map((line, index) => (
                                 <div key={`${index}-${line.description}`} className="mt-1 text-xs text-muted-foreground">
                                   {line.description} · {line.vat_rate} % · {formatPortalCurrency(line.line_gross, detail.currency)}
@@ -961,12 +972,8 @@ function usePatientInvoicesPageContent() {
                 {invoiceAmountsVisible(detail) ? (
                   <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-                      <span>{t.portal_invoices_payment_history}</span>
+                      <SectionHeading icon={History}>{t.portal_invoices_payment_history}</SectionHeading>
                     </h2>
-                    <p className={cn("mt-1", tokens.text.muted)}>
-                      {t.portal_invoices_payment_history_description}
-                    </p>
                     <div className="mt-3 space-y-2">
                       {detailPayments.length === 0 ? (
                         <div className={cn("rounded-xl px-3 py-3 text-sm text-muted-foreground", tokens.surface.dashed)}>
@@ -997,7 +1004,7 @@ function usePatientInvoicesPageContent() {
                                   ) : null}
                                 </div>
                                 <div className="mt-1 text-xs text-muted-foreground">
-                                  {formatPortalDate(payment.received_on)} · {portalPaymentMethodLabel(payment.payment_method, lang)}
+                                  <PortalDateChip timestamp={payment.received_on} /> · {portalPaymentMethodLabel(payment.payment_method, lang)}
                                 </div>
                                 {payment.payment_reference ? (
                                   <div className="mt-1 text-xs text-muted-foreground">
@@ -1025,8 +1032,7 @@ function usePatientInvoicesPageContent() {
                 {invoiceAmountsVisible(detail) && detailRefunds.length > 0 ? (
                   <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-                      <span>{lang === "de" ? "Rückzahlungen" : "Возвраты"}</span>
+                      <SectionHeading icon={Undo2}>{lang === "de" ? "Rückzahlungen" : "Возвраты"}</SectionHeading>
                     </h2>
                     <p className={cn("mt-1", tokens.text.muted)}>
                       {lang === "de"
@@ -1058,7 +1064,7 @@ function usePatientInvoicesPageContent() {
                                 ) : null}
                               </div>
                               <div className="mt-1 text-xs text-muted-foreground">
-                                {formatPortalDate(refund.refunded_on)} · {refund.reason}
+                                <PortalDateChip timestamp={refund.refunded_on} /> · {refund.reason}
                               </div>
                               <div className="mt-1 text-xs text-muted-foreground">
                                 {portalPaymentMethodLabel(refund.payment_method, lang)}
@@ -1087,8 +1093,7 @@ function usePatientInvoicesPageContent() {
                     data-testid="portal-dunning-letters"
                   >
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-                      <span>{lang === "de" ? "Zahlungserinnerungen und Mahnungen" : "Напоминания и требования об оплате"}</span>
+                      <SectionHeading icon={Bell}>{lang === "de" ? "Zahlungserinnerungen und Mahnungen" : "Напоминания и требования об оплате"}</SectionHeading>
                     </h2>
                     <p className={cn("mt-1", tokens.text.muted)}>
                       {lang === "de"
@@ -1104,9 +1109,9 @@ function usePatientInvoicesPageContent() {
                           <div>
                             <div className="text-sm font-semibold text-foreground">{letter.title}</div>
                             <div className="mt-1 text-xs text-muted-foreground">
-                              {formatPortalDate(letter.sent_at)}
+                              <PortalDateChip timestamp={letter.sent_at} />
                               {letter.payment_due_date
-                                ? ` · ${lang === "de" ? "zahlbar bis" : "оплатить до"} ${formatPortalDate(letter.payment_due_date)}`
+                                ? <> · {lang === "de" ? "zahlbar bis" : "оплатить до"} <PortalDateChip timestamp={letter.payment_due_date} /></>
                                 : ""}
                               {` · ${formatPortalCurrency(letter.balance_due, detail.currency)}`}
                             </div>
@@ -1138,8 +1143,7 @@ function usePatientInvoicesPageContent() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                        <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-                        <span>{t.portal_invoices_payment_proof}</span>
+                        <SectionHeading icon={FileCheck}>{t.portal_invoices_payment_proof}</SectionHeading>
                       </h2>
                       <p className={cn("mt-1", tokens.text.muted)}>
                         {t.portal_invoices_upload_transfer_receipt_or_payment_confirmation_once_funds_were}
@@ -1161,15 +1165,14 @@ function usePatientInvoicesPageContent() {
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_uploaded_proofs} value={String(detail.payment_proof_count ?? 0)} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
                       label={t.portal_invoices_latest_upload}
-                      value={detail.last_payment_proof_at ? formatPortalDateTime(detail.last_payment_proof_at) : t.portal_invoices_not_uploaded}
+                      value={detail.last_payment_proof_at ? <PortalDateChip timestamp={detail.last_payment_proof_at} /> : t.portal_invoices_not_uploaded}
                     />
                   </div>
                 </section>
 
                 <section className={cn("rounded-xl p-3", tokens.surface.card)}>
                   <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                    <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-                    <span>{t.portal_invoices_line_items}</span>
+                    <SectionHeading icon={ListOrdered}>{t.portal_invoices_line_items}</SectionHeading>
                   </h2>
                   <p className={cn("mt-1", tokens.text.muted)}>{t.portal_invoices_materialized_billing_lines_for_the_current_invoice_snapshot}</p>
                   <div className="mt-3 space-y-2">

@@ -1,12 +1,40 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useState } from "react";
-import { ArrowLeft, ArrowRight, CalendarDays, Info, LoaderCircle, LogOut, Pencil, Send, Upload } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  CalendarDays,
+  ClipboardCheck,
+  ConciergeBell,
+  Files,
+  FileSignature,
+  IdCard,
+  Info,
+  Landmark,
+  ListChecks,
+  LoaderCircle,
+  LogOut,
+  MapPin,
+  MessageSquareText,
+  Pencil,
+  Phone,
+  ReceiptText,
+  Scale,
+  Send,
+  Share2,
+  ShieldPlus,
+  Upload,
+  UserRound,
+  UsersRound,
+  Wallet,
+} from "lucide-react";
 import { cabinetStaffText, useCabinetStaffMode } from "./lead-request-staff-mode";
 
 import { Banner, SuccessBanner } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
 import { checkboxClass } from "@/components/record-workspace/primitives/design-tokens";
-import { formatAppDateTime } from "@/lib/app-time-zone";
+import { formatPortalTimestamp } from "@/lib/portal-datetime";
 import { useAuth } from "@/lib/auth";
 import { rememberSignOutNotice } from "@/lib/login-redirect";
 import { cn } from "@/lib/utils";
@@ -140,7 +168,7 @@ export function SendStep({
             <p className="font-semibold">{text.sentTitle}</p>
             {/* One thank-you (QA 2026-10-10). No review notice (owner 2026-10-22): it repeated the
                 first items of "what happens next" below. */}
-            <p data-testid="lead-request-sent">{text.sentBody(formatAppDateTime(request.submitted_at))}</p>
+            <p data-testid="lead-request-sent">{text.sentBody(formatPortalTimestamp(request.submitted_at))}</p>
           </SuccessBanner>
           {followUpOpen ? (
             <div
@@ -160,7 +188,7 @@ export function SendStep({
             </div>
           ) : null}
           <SentLockHint text={text} />
-          <Section compact title={text.nextTitle}>
+          <Section compact icon={ListChecks} title={text.nextTitle}>
             <ol className="space-y-1.5 text-sm" data-testid="lead-request-next-steps">
               {/* "Nothing is needed meanwhile" only while no follow-up block is open (QA 2026-10-10). */}
               {[
@@ -181,7 +209,7 @@ export function SendStep({
           </Section>
         </>
       ) : null}
-      <Section title={sendable ? text.sendTitle : text.sentSummaryTitle}>
+      <Section icon={ClipboardCheck} title={sendable ? text.sendTitle : text.sentSummaryTitle}>
         <RequestSummary groups={requestSummary(request, text, lang)} />
         {missingCount > 0 || !inquiryConsent ? (
           <div
@@ -253,7 +281,7 @@ export function SendStep({
         ) : null}
       </Section>
       {needsDeclaration && (sendable || declaredAt) ? (
-        <Section title={text.declarationTitle}>
+        <Section icon={FileSignature} title={text.declarationTitle}>
           <div className="rounded-lg border border-border bg-muted/10 px-3 py-2" data-testid="lead-request-declaration">
             <label className="flex items-start gap-3 text-sm">
               {/* Sent and unchanged: the confirmation given with that sending is shown, not asked again. */}
@@ -274,7 +302,7 @@ export function SendStep({
                 {!sendable && declaredAt ? (
                   <StatusChip tone="info" className="mt-1">
                     <CalendarDays aria-hidden="true" />
-                    {text.declarationGivenAt(formatAppDateTime(declaredAt))}
+                    {text.declarationGivenAt(formatPortalTimestamp(declaredAt))}
                   </StatusChip>
                 ) : null}
               </span>
@@ -287,7 +315,7 @@ export function SendStep({
         </Section>
       ) : null}
       {sendable && staffMode ? (
-        <Section title={cabinetStaffText(lang).sendTitle}>
+        <Section icon={Send} title={cabinetStaffText(lang).sendTitle}>
           <div className="grid gap-3 sm:grid-cols-2" data-testid="lead-request-submit-record">
             <label className="block space-y-1.5 text-xs">
               <span className="font-mono font-medium text-foreground/80">{cabinetStaffText(lang).sendHint}<RequiredMark /></span>
@@ -367,6 +395,25 @@ export function SendStep({
   );
 }
 
+const SUMMARY_ICONS = {
+  person: UserRound,
+  address: MapPin,
+  contact: Phone,
+  identity: IdCard,
+  representation: UsersRound,
+  insurance: ShieldPlus,
+  payer: Wallet,
+  billing: ReceiptText,
+  payment: Landmark,
+  legal: Scale,
+  follow_up: ListChecks,
+  request: MessageSquareText,
+  documents: Files,
+  services: ConciergeBell,
+  disclosure: Share2,
+  consent_form: FileSignature,
+};
+
 /** The statements of the request, read-only and grouped like the form. */
 function RequestSummary({ groups }: { groups: SummaryGroup[] }) {
   return (
@@ -374,8 +421,7 @@ function RequestSummary({ groups }: { groups: SummaryGroup[] }) {
       {groups.map((group) => (
         <section key={group.id} className="min-w-0 py-2.5 first:pt-0 last:pb-0" data-testid={`lead-request-summary-${group.id}`}>
           <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <span aria-hidden="true" data-section-heading-marker className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-            {group.title}
+            <SectionHeading icon={SUMMARY_ICONS[group.id]}>{group.title}</SectionHeading>
           </h4>
           {group.rows.length === 0 && !group.parts?.length ? (
             <p className="mt-1 text-sm text-muted-foreground">{group.empty}</p>

@@ -75,6 +75,7 @@ export type LeadRequestText = {
    */
   steps: Record<StepId, string>;
   stepsLabel: string;
+  stepPending: string;
   stepMissingBadge: (count: number) => string;
   stepComplete: string;
   /** The send step once the request is sent (screen readers; labels audit 2026-10-26, B15). */
@@ -1132,6 +1133,7 @@ const de: LeadRequestText = {
     send: "Prüfen & Senden",
   },
   stepsLabel: "Schritte der Anfrage",
+  stepPending: "Noch offen",
   stepMissingBadge: (count) => (count === 1 ? "1 Angabe fehlt" : `${count} Angaben fehlen`),
   stepComplete: "Vollständig",
   stepSent: "Gesendet",
@@ -1412,8 +1414,8 @@ const de: LeadRequestText = {
   },
   followUpSubmit: "Angaben senden",
   followUpBlockAWork: "Beruf und Branche",
-  representativeQuestionsIntro: "Bitte beantworten Sie die folgenden Fragen für die jeweils genannte Person. Die Angaben betreffen den Elternteil oder gesetzlichen Vertreter, nicht das Kind. Bereits gespeicherte Antworten werden übernommen.",
-  representativeQuestionsIntroAdult: "Bitte beantworten Sie die folgenden Fragen für die jeweils genannte Person. Die Angaben betreffen die vertretende Person, nicht die Patientin / den Patienten. Bereits gespeicherte Antworten werden übernommen.",
+  representativeQuestionsIntro: "Bitte beantworten Sie die folgenden Fragen für die jeweils genannte Person. Die Angaben betreffen den Elternteil oder gesetzlichen Vertreter, nicht das Kind.",
+  representativeQuestionsIntroAdult: "Bitte beantworten Sie die folgenden Fragen für die jeweils genannte Person. Die Angaben betreffen die vertretende Person, nicht die Patientin / den Patienten.",
   followUpBlockRAdult: "Ergänzende Angaben der vertretenden Person",
   followUpNothingNeeded: "Hier sind keine weiteren Angaben erforderlich.",
   followUpSending: "Wird gesendet…",
@@ -1787,6 +1789,7 @@ const ru: LeadRequestText = {
     send: "Проверка и отправка",
   },
   stepsLabel: "Шаги заявки",
+  stepPending: "Ещё не завершён",
   stepMissingBadge: (count) => `Не хватает: ${count}`,
   stepComplete: "Заполнено",
   stepSent: "Отправлено",
@@ -2062,8 +2065,8 @@ const ru: LeadRequestText = {
   },
   followUpSubmit: "Отправить сведения",
   followUpBlockAWork: "Профессия и сфера деятельности",
-  representativeQuestionsIntro: "Ответьте на вопросы для каждого указанного человека. Это сведения о родителе или законном представителе, а не о ребёнке. Уже сохранённые ответы подставляются автоматически.",
-  representativeQuestionsIntroAdult: "Ответьте на вопросы для каждого указанного человека. Это сведения о представителе, а не о пациенте. Уже сохранённые ответы подставляются автоматически.",
+  representativeQuestionsIntro: "Ответьте на вопросы для каждого указанного человека. Это сведения о родителе или законном представителе, а не о ребёнке.",
+  representativeQuestionsIntroAdult: "Ответьте на вопросы для каждого указанного человека. Это сведения о представителе, а не о пациенте.",
   followUpBlockRAdult: "Дополнительные сведения представителя",
   followUpNothingNeeded: "Здесь не нужны дополнительные сведения.",
   followUpSending: "Отправляется…",
@@ -2435,6 +2438,7 @@ const uk: LeadRequestText = {
     send: "Перевірка й надсилання",
   },
   stepsLabel: "Кроки заявки",
+  stepPending: "Ще не завершено",
   stepMissingBadge: (count) => `Бракує: ${count}`,
   stepComplete: "Заповнено",
   stepSent: "Надіслано",
@@ -2710,8 +2714,8 @@ const uk: LeadRequestText = {
   },
   followUpSubmit: "Надіслати відомості",
   followUpBlockAWork: "Професія та галузь",
-  representativeQuestionsIntro: "Дайте відповіді для кожної вказаної людини. Ці відомості стосуються батька, матері або законного представника, а не дитини. Уже збережені відповіді підставляються автоматично.",
-  representativeQuestionsIntroAdult: "Дайте відповіді для кожної вказаної людини. Ці відомості стосуються представника, а не пацієнта. Уже збережені відповіді підставляються автоматично.",
+  representativeQuestionsIntro: "Дайте відповіді для кожної вказаної людини. Ці відомості стосуються батька, матері або законного представника, а не дитини.",
+  representativeQuestionsIntroAdult: "Дайте відповіді для кожної вказаної людини. Ці відомості стосуються представника, а не пацієнта.",
   followUpBlockRAdult: "Додаткові відомості представника",
   followUpNothingNeeded: "Тут додаткові відомості не потрібні.",
   followUpSending: "Надсилається…",
@@ -3083,6 +3087,7 @@ const en: LeadRequestText = {
     send: "Review & send",
   },
   stepsLabel: "Steps of the request",
+  stepPending: "Not complete yet",
   stepMissingBadge: (count) => (count === 1 ? "1 item missing" : `${count} items missing`),
   stepComplete: "Complete",
   stepSent: "Sent",
@@ -3358,8 +3363,8 @@ const en: LeadRequestText = {
   },
   followUpSubmit: "Send details",
   followUpBlockAWork: "Occupation and sector",
-  representativeQuestionsIntro: "Please answer the questions for each named person. These details concern the parent or legal representative, rather than the child. Previously saved answers are filled in automatically.",
-  representativeQuestionsIntroAdult: "Please answer the questions for each named person. These details concern the representative, rather than the patient. Previously saved answers are filled in automatically.",
+  representativeQuestionsIntro: "Please answer the questions for each named person. These details concern the parent or legal representative, rather than the child.",
+  representativeQuestionsIntroAdult: "Please answer the questions for each named person. These details concern the representative, rather than the patient.",
   followUpBlockRAdult: "Additional details of the representative",
   followUpNothingNeeded: "No additional information is needed here.",
   followUpSending: "Sending…",

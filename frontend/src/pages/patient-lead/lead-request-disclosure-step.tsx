@@ -1,10 +1,10 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, CircleAlert, Info, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CircleAlert, Info, Share2, ShieldCheck, UsersRound } from "lucide-react";
 import { cabinetStaffText, useCabinetStaffMode } from "./lead-request-staff-mode";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
 import { checkboxClass } from "@/components/record-workspace/primitives/design-tokens";
-import { formatAppDateTime } from "@/lib/app-time-zone";
+import { formatPortalTimestamp } from "@/lib/portal-datetime";
 import { ApiRequestError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -209,7 +209,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
       <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
       <span>{common.sentLockedHint}</span>
     </StatusChip>
-    <CabinetSection compact title={text.title} accessory={state}>
+    <CabinetSection compact icon={Share2} title={text.title} accessory={state}>
       <div className="space-y-3" data-testid="disclosure-locked">
         <div className="flex flex-wrap items-center gap-2" data-testid="disclosure-locked-decision">
           <span className="font-mono text-xs font-medium text-foreground/75">{text.lockedDecision}:</span>
@@ -225,7 +225,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
       </div>
     </CabinetSection>
     {error ? <StatusChip tone="error" role="alert" className="rounded-lg px-3 py-2 text-sm"><CircleAlert aria-hidden="true" />{error}</StatusChip> : null}
-    {savedByOther ? <p className="px-1 text-xs leading-5 text-muted-foreground" data-testid="disclosure-receipt">{text.savedByOther(savedByOther.chosen_by_name?.trim() || text.otherParent, formatAppDateTime(savedByOther.chosen_at))}</p> : null}
+    {savedByOther ? <p className="px-1 text-xs leading-5 text-muted-foreground" data-testid="disclosure-receipt">{text.savedByOther(savedByOther.chosen_by_name?.trim() || text.otherParent, formatPortalTimestamp(savedByOther.chosen_at))}</p> : null}
     <StepFooter>
       <Button type="button" variant="outline" className="h-9" disabled={busy || !nav.onBack} onClick={() => nav.onBack?.()}><ArrowLeft aria-hidden="true" className="size-3.5" />{common.back}</Button>
       <Button type="button" className="h-9" disabled={busy || !nav.onNext} onClick={() => nav.onNext?.()}>{common.next}<ArrowRight aria-hidden="true" className="size-3.5" /></Button>
@@ -233,7 +233,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   </section>;
 
   return <section className="flex flex-col gap-3" data-testid="lead-request-disclosure-step">
-    <CabinetSection title={text.title} accessory={state}>
+    <CabinetSection icon={Share2} title={text.title} accessory={state}>
       <div className="space-y-3" data-testid="trusted-persons-form">
         {/* A child's parents read "your child … to you as parents" in the introduction already (B10). */}
         {actsAsGuardian(request) && !choosesForChild(request) ? <div className="flex items-start gap-2.5 rounded-lg border border-border/60 bg-muted/40 p-3 text-sm leading-6">
@@ -261,20 +261,20 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     </CabinetSection>
 
     {draft.allowDisclosure === true ? <>
-      <CabinetSection title={text.personsHeading}>
+      <CabinetSection icon={UsersRound} title={text.personsHeading}>
         <TrustedPersonsEditor persons={draft.persons} lang={lang} disabled={busy} showErrors={attempted} serverProblem={serverProblem} onChange={(persons) => {
           if (draftRef.current.consentGiven) setConsentReset(true);
           update({ persons, consentGiven: false });
         }} />
       </CabinetSection>
-      <CabinetSection title={text.consentHeading}>
+      <CabinetSection icon={ShieldCheck} title={text.consentHeading}>
         <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/60 bg-muted/25 p-3.5 text-sm leading-6">
           <input type="checkbox" aria-label={disclosureConsentText(lang, companyName, disclosureSubject(request))} className={`${checkboxClass} mt-1 shrink-0`} checked={draft.consentGiven} disabled={busy} data-testid="disclosure-consent" onChange={(event) => { setConsentReset(false); update({ consentGiven: event.currentTarget.checked }); }} />
           <span>{disclosureConsentText(lang, companyName, disclosureSubject(request))}</span>
         </label>
         {/* The consent staff recorded says when it was given, as the single consents do (owner 2026-10-30). */}
         {staffMode && !changed && !busy && draft.consentGiven && request.disclosure?.consent_given ? <div data-testid="disclosure-consent-given">
-          <ConsentGivenChip>{common.consentGivenAt(formatAppDateTime(request.disclosure.chosen_at))}</ConsentGivenChip>
+          <ConsentGivenChip>{common.consentGivenAt(formatPortalTimestamp(request.disclosure.chosen_at))}</ConsentGivenChip>
         </div> : null}
         {consentReset && !draft.consentGiven ? <p role="status" className="px-1 text-xs leading-5 text-amber-700 dark:text-amber-300" data-testid="disclosure-consent-reset">{text.consentReset}</p> : null}
         <a className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--brand)] underline underline-offset-4" href={`/legal?notice=form&lang=${lang}#privacy`} target="_blank" rel="noreferrer"><ShieldCheck aria-hidden="true" className="size-3.5" />{text.privacy}</a>
@@ -290,7 +290,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
       <CircleAlert aria-hidden="true" />{error || problemMessage(problem!)}
     </StatusChip> : null}
     {draft.allowDisclosure === true ? <p className="px-1 text-xs leading-5 text-muted-foreground">{text.footer}</p> : null}
-    {savedByOther ? <p className="px-1 text-xs leading-5 text-muted-foreground" data-testid="disclosure-receipt">{text.savedByOther(savedByOther.chosen_by_name?.trim() || text.otherParent, formatAppDateTime(savedByOther.chosen_at))}</p> : null}
+    {savedByOther ? <p className="px-1 text-xs leading-5 text-muted-foreground" data-testid="disclosure-receipt">{text.savedByOther(savedByOther.chosen_by_name?.trim() || text.otherParent, formatPortalTimestamp(savedByOther.chosen_at))}</p> : null}
     <StepFooter>
       <Button type="button" variant="outline" className="h-9" disabled={busy || !nav.onBack} onClick={() => nav.onBack?.()}><ArrowLeft aria-hidden="true" className="size-3.5" />{common.back}</Button>
       <Button type="button" className="h-9" disabled={busy || !nav.onNext} onClick={() => nav.onNext?.()}>{common.next}<ArrowRight aria-hidden="true" className="size-3.5" /></Button>

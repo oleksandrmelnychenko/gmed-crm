@@ -18,8 +18,110 @@ use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/me/appearance", get(get_appearance).put(save_appearance))
         .route("/me/password", put(change_own_password))
         .route("/me/profile", get(get_own_profile).put(update_own_profile))
+}
+
+async fn get_appearance(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> axum::response::Response {
+    match sqlx::query_scalar::<_, Option<serde_json::Value>>(
+        "SELECT appearance_preferences FROM users WHERE id = $1 AND is_active",
+    )
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => {
+            tracing::error!(%error, "read account appearance");
+            internal()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct AppearanceQuery {
+    #[serde(default)]
+    initialize: bool,
+}
+
+fn valid_appearance(value: &serde_json::Value) -> bool {
+    use serde_json::Value;
+    fn id(value: &Value) -> bool {
+        value.as_str().is_some_and(|s| {
+            !s.is_empty()
+                && s.len() <= 48
+                && !s.starts_with('-')
+                && s.bytes()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+        })
+    }
+    fn colors(value: &Value) -> bool {
+        value.as_object().is_some_and(|m| {
+            m.len() <= 100
+                && m.iter().all(|(key, v)| {
+                    key.len() <= 48
+                        && key.bytes().all(|c| c.is_ascii_alphanumeric())
+                        && v.as_str().is_some_and(|s| {
+                            s.len() == 7
+                                && s.starts_with('#')
+                                && s[1..].bytes().all(|c| c.is_ascii_hexdigit())
+                        })
+                })
+        })
+    }
+    let Some(obj) = value.as_object() else {
+        return false;
+    };
+    id(&value["selectedId"])
+        && obj.keys().all(|k| {
+            matches!(
+                k.as_str(),
+                "selectedId" | "themes" | "controls" | "contrast"
+            )
+        })
+        && obj.get("controls").is_none_or(colors)
+        && obj
+            .get("contrast")
+            .is_none_or(|v| matches!(v.as_str(), Some("standard" | "soft" | "softer")))
+        && value["themes"].as_array().is_some_and(|themes| {
+            themes.len() <= 30
+                && themes.iter().all(|t| {
+                    t.as_object().is_some_and(|m| m.len() == 4)
+                        && t["version"].as_u64() == Some(1)
+                        && id(&t["id"])
+                        && colors(&t["colors"])
+                        && t["name"]
+                            .as_str()
+                            .is_some_and(|s| !s.trim().is_empty() && s.chars().count() <= 64)
+                })
+        })
+}
+
+async fn save_appearance(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    axum::extract::Query(query): axum::extract::Query<AppearanceQuery>,
+    Json(value): Json<serde_json::Value>,
+) -> axum::response::Response {
+    if !valid_appearance(&value) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_appearance",
+            "Invalid appearance preferences",
+        );
+    }
+    // When importing a browser's legacy preferences, preserve any existing server choice.
+    match sqlx::query_scalar::<_, serde_json::Value>(
+        "UPDATE users SET appearance_preferences = CASE WHEN $3 THEN COALESCE(appearance_preferences, $2) ELSE $2 END
+         WHERE id = $1 AND is_active RETURNING appearance_preferences",
+    ).bind(auth.user_id).bind(value).bind(query.initialize).fetch_one(&state.db).await {
+        Ok(saved) => Json(saved).into_response(),
+        Err(error) => { tracing::error!(%error, "save account appearance"); internal() }
+    }
 }
 
 pub const PROFILE_NAME_MAX: usize = 200;

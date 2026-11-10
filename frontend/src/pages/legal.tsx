@@ -1,6 +1,7 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Scale, ShieldCheck } from "lucide-react";
 
 import { buttonVariants } from "@/components/ui/button";
 import { buildApiUrl } from "@/lib/api";
@@ -29,10 +30,6 @@ type LegalNotice = Partial<Record<
 
 const cardClass = "space-y-3 rounded-xl border border-border/50 bg-card p-3 sm:p-4";
 const headingClass = "flex items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground";
-
-function SectionMarker() {
-  return <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />;
-}
 
 /**
  * Impressum and Datenschutzerklärung, reachable without signing in (Art. 13
@@ -100,7 +97,7 @@ export function LegalNoticePage() {
   const content = (
     <>
       <section className={cardClass} data-testid="legal-imprint">
-        <h2 className={headingClass}><SectionMarker />{l("legal_imprint_title")}</h2>
+        <h2 className={headingClass}><SectionHeading icon={Scale}>{l("legal_imprint_title")}</SectionHeading></h2>
         {failed ? <p className="text-red-700">{l("legal_load_error")}</p> : null}
         <address className="break-words not-italic leading-6">
           <strong>{name}</strong>
@@ -114,7 +111,7 @@ export function LegalNoticePage() {
       </section>
 
       <section id="privacy" className={`${cardClass} scroll-mt-4 leading-relaxed`} data-testid="legal-privacy">
-        <h2 className={headingClass}><SectionMarker />{l("legal_privacy_title")}</h2>
+        <h2 className={headingClass}><SectionHeading icon={ShieldCheck}>{l("legal_privacy_title")}</SectionHeading></h2>
         {formNotice ? <FormPrivacyNotice lang={noticeLang === "ru" ? "ru" : "de"} agency={notice} /> : <>
         <p>
           <strong>{l("legal_privacy_controller")}:</strong> {name}

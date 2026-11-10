@@ -1,3 +1,4 @@
+import { AppearanceProvider } from "@/lib/use-appearance-theme";
 import { useState } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 
@@ -59,7 +60,9 @@ export function AuthenticatedAppShell() {
 
   return (
     <NavStateProvider>
-      <AuthenticatedAppShellContent />
+      <AppearanceProvider key={user.id} userId={user.id}>
+        <AuthenticatedAppShellContent />
+      </AppearanceProvider>
     </NavStateProvider>
   );
 }

@@ -2,7 +2,22 @@ import { authorityProofOf } from "./lead-request-representation-model";
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import { preferredLanguageOptions } from "@/pages/leads/model/lead-wizard.model";
-import { ArrowLeft, ArrowRight, CircleAlert, LoaderCircle, Upload } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  CircleAlert,
+  FileUp,
+  HeartPulse,
+  IdCard,
+  LoaderCircle,
+  MapPin,
+  MessageSquareText,
+  Phone,
+  ShieldCheck,
+  ShieldPlus,
+  Upload,
+  UserRound,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
@@ -413,7 +428,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
   const consentSection = (
     <>
       {/* The consent the request and the upload of the identity document need, at the end of the step (owner 2026-10-29). */}
-      <Section title={text.sectionConsent} className="[&>div:first-child]:px-3 [&>div:first-child]:pt-3 [&>div:last-child]:p-3">
+      <Section icon={ShieldCheck} title={text.sectionConsent} className="[&>div:first-child]:px-3 [&>div:first-child]:pt-3 [&>div:last-child]:p-3">
         <ConsentCheckbox
           request={request}
           purpose={INQUIRY_CONSENT}
@@ -442,7 +457,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
       open={sent ? consentSection : undefined}
     >
 
-      <Section title={childSectionTitle(text, "person", request.minor)}>
+      <Section icon={UserRound} title={childSectionTitle(text, "person", request.minor)}>
         {showNamePassportHint ? (
           <StatusChip id="lead-request-name-passport-hint" tone="warning" className="items-start rounded-lg px-2.5 py-1.5">
             <CircleAlert aria-hidden="true" className="mt-[3px]" />
@@ -560,7 +575,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
       </Section>
 
       {/* Address and contact (owner 2026-10-09: one tab with the consent and the person). */}
-      <Section title={childSectionTitle(text, "address", request.minor)}>
+      <Section icon={MapPin} title={childSectionTitle(text, "address", request.minor)}>
         <div className={GRID}>
           <FormField field="street_address" text={text} error={errorFor("street_address")} required className="sm:col-span-2">
             <Input
@@ -603,7 +618,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
           </FormField>
         </div>
       </Section>
-      <Section title={childSectionTitle(text, "contact", request.minor)}>
+      <Section icon={Phone} title={childSectionTitle(text, "contact", request.minor)}>
         <div className={GRID}>
           <FormField
             field="phone"
@@ -677,7 +692,7 @@ export function ContactStep({ request, text, lang, enqueue, onChange, missing, n
 
   return (
     <StepFrame testId="lead-request-step-contact" step="contact" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
-      <Section title={childSectionTitle(text, "address", request.minor)}>
+      <Section icon={MapPin} title={childSectionTitle(text, "address", request.minor)}>
         <div className={GRID}>
           <FormField field="street_address" text={text} error={errorFor("street_address")} required className="sm:col-span-2">
             <Input
@@ -717,7 +732,7 @@ export function ContactStep({ request, text, lang, enqueue, onChange, missing, n
           </FormField>
         </div>
       </Section>
-      <Section title={childSectionTitle(text, "contact", request.minor)}>
+      <Section icon={Phone} title={childSectionTitle(text, "contact", request.minor)}>
         <div className={GRID}>
           <FormField field="phone" text={text} error={errorFor("phone")}>
             <Input
@@ -824,7 +839,7 @@ export function OwnRepresentativeDocumentSection({
   );
   return (
     <div id={SECTION_ANCHORS.ownDocument} className="scroll-mt-4" data-testid="lead-request-own-document">
-      <Section compact title={actsAsVormund(request) ? text.ownRepresentativeDocumentTitleVormund : text.ownRepresentativeDocumentTitle}>
+      <Section compact icon={IdCard} title={actsAsVormund(request) ? text.ownRepresentativeDocumentTitleVormund : text.ownRepresentativeDocumentTitle}>
         {me && slot ? (
           <div className="space-y-2">
             <InfoNote>{text.ownRepresentativeDocumentHint}</InfoNote>
@@ -892,7 +907,7 @@ export function OtherParentDocumentSection({
   const proof = vormund ? authorityProofOf(slot, "guardian") : null;
   return (
     <div className="scroll-mt-4" data-testid={byStaff ? `lead-request-parent-document-${slot}` : "lead-request-other-parent-document"}>
-      <Section compact title={vormund ? [text.representativeGuardianOfChild, name].filter(Boolean).join(": ") : byStaff ? text.parentDocumentTitle(name) : text.otherParentDocumentTitle(name)}>
+      <Section compact icon={IdCard} title={vormund ? [text.representativeGuardianOfChild, name].filter(Boolean).join(": ") : byStaff ? text.parentDocumentTitle(name) : text.otherParentDocumentTitle(name)}>
         {person ? (
           <div className="space-y-2">
             {vormund ? null : <InfoNote>{byStaff ? text.parentDocumentHint : text.otherParentDocumentHint}</InfoNote>}
@@ -1018,7 +1033,7 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
       // After the send the paying parent's own questions and payment route stay open (owner 2026-10-26).
       open={request.submitted_at && (request.payer_questionnaire || ownRouteAfterSend) ? <>{ownRouteAfterSend ? paymentRoute : null}{request.payer_questionnaire ? payerQuestionnaire : null}</> : undefined}
     >
-      <Section title={childSectionTitle(text, "insurance", request.minor)}>
+      <Section icon={ShieldPlus} title={childSectionTitle(text, "insurance", request.minor)}>
         <div className="grid gap-x-3 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3" data-testid="lead-request-insurance">
           <LabeledField
             id="lead-request-has_insurance"
@@ -1244,7 +1259,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
   // («Dokumente nachreichen») without a new send, the consents stay open to withdraw.
   const sent = Boolean(request.submitted_at);
   const consentSection = (
-    <Section title={text.healthConsentTitle}>
+    <Section icon={HeartPulse} title={text.healthConsentTitle}>
       <p className="whitespace-pre-line border-l-2 border-border pl-3 text-sm leading-6 text-foreground">
         <HealthConsentText text={consentText(request, HEALTH_CONSENT, lang)} lang={lang} />
       </p>
@@ -1264,7 +1279,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
     </Section>
   );
   const reasonSection = asksReason ? (
-    <Section title={childSectionTitle(text, "request", request.minor)}>
+    <Section icon={MessageSquareText} title={childSectionTitle(text, "request", request.minor)}>
       <div className="max-w-3xl" data-testid="lead-request-reason">
         <IdentificationFormField form={identification} field="request_reason" text={text}>
           <IdentificationTextArea form={identification} field="request_reason" maxLength={4000} rows={3} disabled={!consentReady} />
@@ -1273,7 +1288,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
     </Section>
   ) : null;
   const uploadSection = (
-    <Section title={childSectionTitle(text, "upload", request.minor)}>
+    <Section icon={FileUp} title={childSectionTitle(text, "upload", request.minor)}>
       <div className="space-y-2">
         <input
           ref={fileInput}

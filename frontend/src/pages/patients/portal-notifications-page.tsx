@@ -1,5 +1,6 @@
+import { portalFilterClass } from "@/components/ui/portal-tab-style";
 import { useEffect, useMemo, useState } from "react";
-import { Bell, CheckCheck, ExternalLink, LoaderCircle, RefreshCw } from "lucide-react";
+import { Bell, CheckCheck, ExternalLink, Inbox, LoaderCircle, Mail, RefreshCw } from "lucide-react";
 
 import {
   fetchUserNotifications,
@@ -26,7 +27,6 @@ import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
-import { usePortalLabels } from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
 
 const PORTAL_NOTIFICATION_EVENTS = [
@@ -45,8 +45,8 @@ const COPY = {
     refresh: "Aktualisieren",
     markAll: "Alle als gelesen markieren",
     all: "Alle",
-    onlyUnread: "Nur ungelesen",
-    onlyRead: "Nur gelesen",
+    onlyUnread: "Ungelesen",
+    onlyRead: "Gelesen",
     filterLabel: "Benachrichtigungen filtern",
     empty: "Für diesen Filter gibt es keine Benachrichtigungen.",
     open: "Öffnen",
@@ -63,8 +63,8 @@ const COPY = {
     refresh: "Обновить",
     markAll: "Отметить все прочитанными",
     all: "Все",
-    onlyUnread: "Только непрочитанные",
-    onlyRead: "Только прочитанные",
+    onlyUnread: "Непрочитанные",
+    onlyRead: "Прочитанные",
     filterLabel: "Фильтр уведомлений",
     empty: "Для этого фильтра уведомлений нет.",
     open: "Открыть",
@@ -97,7 +97,6 @@ function notificationCategory(item: Notification, lang: "de" | "ru") {
 
 export function PatientNotificationsPage() {
   const { localizedNotificationCopy } = useTopbarLabels();
-  const { formatPortalDateTime } = usePortalLabels();
   const { user } = useAuth();
   const { lang } = useLang();
   const { staffGo } = useStaffNavigate();
@@ -239,11 +238,11 @@ export function PatientNotificationsPage() {
       {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
 
       <section className="space-y-3">
-        <div className="flex flex-wrap justify-center gap-1 rounded-xl border border-border/60 bg-card p-1.5" aria-label={copy.filterLabel}>
+        <div className="flex flex-wrap justify-center gap-1 rounded-xl border border-border/60 bg-card p-1.5" role="group" aria-label={copy.filterLabel}>
           {([['all', copy.all], ['unread', copy.onlyUnread], ['read', copy.onlyRead]] as const).map(([value, label]) => (
             <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}
-              className={cn("inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]", filter === value ? "bg-[var(--brand)] font-semibold text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
-              {value === 'read' ? <CheckCheck className="size-4" aria-hidden="true" /> : <Bell className="size-4" aria-hidden="true" />}{label}
+              className={portalFilterClass(filter === value)}>
+              {value === 'read' ? <CheckCheck className="size-4" aria-hidden="true" /> : value === "unread" ? <Mail className="size-4" aria-hidden="true" /> : <Inbox className="size-4" aria-hidden="true" />}{label}
             </button>
           ))}
         </div>
@@ -275,7 +274,7 @@ export function PatientNotificationsPage() {
                         <StatusChip tone={item.is_read ? "neutral" : "warning"}>{item.is_read ? copy.read : copy.new}</StatusChip>
                       </div>
                       {text.body ? <p className="mt-2 text-sm leading-6 text-foreground">{text.body}</p> : null}
-                      <div className="mt-2"><PortalDateChip>{formatPortalDateTime(item.created_at)}</PortalDateChip></div>
+                      <div className="mt-2"><PortalDateChip timestamp={item.created_at} /></div>
                     </div>
                   </div>
 

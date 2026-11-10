@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { Popover } from "@base-ui/react/popover";
-import { Info, X } from "lucide-react";
+import { CalendarRange, ConciergeBell, Info, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusChip } from "@/components/ui/status-chip";
@@ -155,7 +155,7 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
         <span>{error}</span>
         <Button type="button" size="sm" onClick={() => void save(draft)}>{text.retry}</Button>
       </div> : null}
-      <CabinetSection title={wording.period} accessory={<span className="font-mono text-xs text-muted-foreground">{wording.optional}</span>}>
+      <CabinetSection icon={CalendarRange} title={wording.period} accessory={<span className="font-mono text-xs text-muted-foreground">{wording.optional}</span>}>
         <LabeledField id="lead-request-service-program_date_from" label={wording.from} className={cn(fieldStyle, "max-w-sm")}>
           {/* A wished start lies ahead: no date in the past (owner 2026-10-29); staff may enter one (QA 2026-10-31). */}
           <Input key={`program_date_from-${lang}`} id="lead-request-service-program_date_from" type="date" className={inputClass}
@@ -166,7 +166,7 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
           {pastStart ? <p id="lead-request-service-program_date_from-error" role="alert" className="text-xs text-destructive">{pastDateMessage(lang)}</p> : null}
         </LabeledField>
       </CabinetSection>
-      <CabinetSection title={wording.services} accessory={<StatusChip tone={draft.services.length ? "info" : "neutral"}>{draft.services.length}</StatusChip>}>
+      <CabinetSection icon={ConciergeBell} title={wording.services} accessory={<StatusChip tone={draft.services.length ? "info" : "neutral"}>{draft.services.length}</StatusChip>}>
         <div id="lead-request-service-services" className="grid items-start gap-2 sm:grid-cols-2 2xl:grid-cols-3">
           {LEAD_WIZARD_SERVICE_OPTIONS.map((value) => {
             const checked = draft.services.includes(value);

@@ -491,6 +491,7 @@ function NavGroup({
                     isActive && "text-foreground",
                   )}
                 />
+                {isActive && <span aria-hidden="true" data-slot="nav-selection-dot" className="pointer-events-none absolute left-0 top-0 size-1.5 rounded-full bg-[var(--dot,#ed6e2c)]" />}
                 {!collapsed && (
                   <span className={cn("min-w-0 flex-1", item.id === "trusted_persons" ? "whitespace-normal leading-5" : "truncate whitespace-nowrap")}>{label}</span>
                 )}

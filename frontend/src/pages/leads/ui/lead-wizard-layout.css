@@ -67,7 +67,7 @@
   gap: 8px;
 }
 
-#lead-wizard-step-panel h3::before {
+#lead-wizard-step-panel h3:not(:has([data-slot="section-heading"]))::before {
   content: "";
   width: 6px;
   height: 6px;
@@ -75,6 +75,8 @@
   border-radius: 50%;
   background: var(--dot);
 }
+
+#lead-wizard-step-panel [data-slot="section-heading"] > [data-slot="heading-marker"] { display: inline-block; }
 
 /* Nested groups carry the accent; their enclosing heading stays quiet. */
 #lead-wizard-step-panel [data-slot="record-section"]:has(> div:last-child :is(h3, [data-wizard-subsection-marker]))

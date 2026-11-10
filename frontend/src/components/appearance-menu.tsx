@@ -2,17 +2,16 @@ import { Menu } from "@base-ui/react/menu";
 import { Check, Palette, Settings2 } from "lucide-react";
 
 import { toast } from "@/components/ui/toast";
-import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { CONTRAST_LEVELS, type ContrastLevel } from "@/lib/appearance-theme";
 import { useAppearanceTheme } from "@/lib/use-appearance-theme";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 
 const TEXT = {
-  ru: { title: "Темы", settings: "Настройки оформления", error: "Не удалось сохранить тему в браузере." },
-  de: { title: "Themes", settings: "Darstellung anpassen", error: "Das Theme konnte nicht im Browser gespeichert werden." },
-  en: { title: "Themes", settings: "Appearance settings", error: "Could not save the theme in this browser." },
-  uk: { title: "Теми", settings: "Налаштування оформлення", error: "Не вдалося зберегти тему в браузері." },
+  ru: { title: "Темы", settings: "Настройки оформления", error: "Не удалось сохранить тему." },
+  de: { title: "Themes", settings: "Darstellung anpassen", error: "Das Theme konnte nicht gespeichert werden." },
+  en: { title: "Themes", settings: "Appearance settings", error: "Could not save the theme." },
+  uk: { title: "Теми", settings: "Налаштування оформлення", error: "Не вдалося зберегти тему." },
 } as const;
 
 /** Contrast levels are picked apart from the theme (owner 2026-11-03). */
@@ -26,12 +25,11 @@ export const CONTRAST_LEVEL_TEXT = {
 const ITEM_CLASS = "flex min-h-8 w-full cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none data-highlighted:bg-[var(--control-highlight,var(--accent))] data-highlighted:text-accent-foreground";
 
 export function AppearanceMenu({ onOpen }: { onOpen?: () => void }) {
-  const { user } = useAuth();
   const { lang } = useLang();
   const { staffGo } = useStaffNavigate();
   const text = TEXT[lang as keyof typeof TEXT] ?? TEXT.en;
   const contrastText = CONTRAST_LEVEL_TEXT[lang as keyof typeof CONTRAST_LEVEL_TEXT] ?? CONTRAST_LEVEL_TEXT.en;
-  const { theme, themes, preferences, contrast, save } = useAppearanceTheme(user?.id ?? null);
+  const { theme, themes, contrast, save } = useAppearanceTheme();
 
   return (
     <Menu.Root onOpenChange={(open) => { if (open) onOpen?.(); }}>
@@ -49,8 +47,8 @@ export function AppearanceMenu({ onOpen }: { onOpen?: () => void }) {
             <Menu.RadioGroup
               aria-label={text.title}
               value={theme.id}
-              onValueChange={(selectedId: string) => {
-                try { save({ ...preferences, selectedId }); }
+              onValueChange={async (selectedId: string) => {
+                try { await save(p => ({ ...p, selectedId })); }
                 catch { toast.error(text.error); }
               }}
               className="max-h-[min(22rem,60dvh)] overflow-y-auto"
@@ -72,8 +70,8 @@ export function AppearanceMenu({ onOpen }: { onOpen?: () => void }) {
               <Menu.GroupLabel className="px-2 pb-0.5 pt-1 text-xs font-medium text-muted-foreground">{contrastText.title}</Menu.GroupLabel>
               <Menu.RadioGroup
                 value={contrast}
-                onValueChange={(level: ContrastLevel) => {
-                  try { save({ ...preferences, contrast: level }); }
+                onValueChange={async (level: ContrastLevel) => {
+                  try { await save(p => ({ ...p, contrast: level })); }
                   catch { toast.error(text.error); }
                 }}
               >

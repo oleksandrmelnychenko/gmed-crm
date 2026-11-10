@@ -1,6 +1,7 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useCabinetStaffMode } from "./lead-request-staff-mode";
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { CircleAlert, LoaderCircle, Trash2, Upload } from "lucide-react";
+import { CircleAlert, ContactRound, LoaderCircle, Scale, Trash2, Upload, UsersRound } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
@@ -784,8 +785,7 @@ function RepresentativeBlock({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h4 id={`lead-request-representative-${slot}-title`} className="flex min-w-0 items-center gap-2 break-words text-sm font-semibold">
-          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-          {heading}
+          <SectionHeading icon={ContactRound}>{heading}</SectionHeading>
         </h4>
         {person?.can_remove ? (
           <Button
@@ -1199,7 +1199,7 @@ export function RepresentationSection({
   if (minor) {
     return (
       // Nothing opens in a sent, read-only form: staff see the details at once (QA 2026-10-31, B-6).
-      <Section title={text.sectionLegalRepresentatives} accessory={representation.document_stage === false && !request.submitted_at ? (
+      <Section icon={UsersRound} title={text.sectionLegalRepresentatives} accessory={representation.document_stage === false && !request.submitted_at ? (
         <Button type="button" variant="outline" size="sm" className="h-auto min-h-8 max-w-full whitespace-normal" onClick={() => setShowDocumentDetails((value) => !value)} data-testid="lead-request-parent-document-details">
           {showDocumentDetails ? text.parentShortForm : text.parentDocumentDetails}
         </Button>
@@ -1263,7 +1263,7 @@ export function RepresentationSection({
   // representative (owner 2026-10-11), and that answer decides whose details the form asks.
   return (
     <div className="space-y-3" data-testid="lead-request-representation">
-      <Section title={text.sectionRepresentation}>
+      <Section icon={Scale} title={text.sectionRepresentation}>
         <div className="space-y-3">
           <LabeledField id="lead-request-has_representative" label={text.hasRepresentativeQuestion} required question>
             <YesNoSelect

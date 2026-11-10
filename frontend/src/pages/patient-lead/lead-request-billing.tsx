@@ -1,3 +1,4 @@
+import { ReceiptText, Route, Landmark } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -372,7 +373,7 @@ export function BillingSections({
   return (
     <>
       {part === "invoice" ? (
-      <Section title={text.sectionBilling}>
+      <Section icon={ReceiptText} title={text.sectionBilling}>
         <div className="space-y-3" data-testid="lead-request-billing">
           <div
             role="radiogroup"
@@ -455,7 +456,7 @@ export function BillingSections({
       {/* How the patient side will pay, without the account (owner 2026-10-10): cash or crypto
           counts for the risk at once; the details are follow-up block C. */}
       {part === "method" && asksPaymentRoute(context.routeBy) ? (
-        <Section title={text.sectionPaymentRoute}>
+        <Section icon={Route} title={text.sectionPaymentRoute}>
           <div className="sm:max-w-[calc(50%-0.5rem)]" data-testid="lead-request-payment-method-base">
             {paymentMethodField}
           </div>
@@ -665,5 +666,5 @@ function BillingExtras({
 
 /** The payment route's section, or only its content inside follow-up block C. */
 function RouteFrame({ bare, title, children }: { bare: boolean; title: string; children: ReactNode }) {
-  return bare ? <div>{children}</div> : <Section title={title}>{children}</Section>;
+  return bare ? <div>{children}</div> : <Section icon={Landmark} title={title}>{children}</Section>;
 }

@@ -1,4 +1,4 @@
-import { PortalListItem as ListItem, PortalDateChip, PortalSection as Section, PortalSummary, PortalComplete } from "./ui/portal-page-layout";
+import { PortalListItem as ListItem, PortalDateChip, PortalSection as Section, PortalComplete } from "./ui/portal-page-layout";
 import { startTransition, useCallback, useEffect, useMemo, useReducer } from "react";
 import {
   ArrowUpRight,
@@ -188,7 +188,6 @@ function usePatientDashboardPageContent() {
     feedbackStatusLabel,
     formatPortalCurrency,
     formatPortalDate,
-    formatPortalDateTime,
     portalDocumentTypeLabels,
     portalStatusLabel,
     privacyRequestLabel,
@@ -295,7 +294,6 @@ function usePatientDashboardPageContent() {
     [appointments],
   );
   const upcomingAppointments = upcomingAppointmentItems.length;
-  const nextAppointment = upcomingAppointmentItems[0] ?? null;
   const appointmentsById = useMemo(
     () => new Map(appointments.map((item) => [item.id, item])),
     [appointments],
@@ -304,24 +302,9 @@ function usePatientDashboardPageContent() {
     () => invoices.filter((item) => Number(item.balance_due ?? 0) > 0).length,
     [invoices],
   );
-  const pendingConfirmations = useMemo(
-    () => documents.filter((item) => item.requires_confirmation && !item.confirmed).length,
-    [documents],
-  );
   const openServiceRequests = useMemo(
     () => services.filter((item) => !["completed", "cancelled"].includes(item.status)).length,
     [services],
-  );
-  const openRequests = useMemo(
-    () =>
-      requests.filter(
-        (item) => !["rejected", "completed", "executed"].includes(item.status),
-      ).length,
-    [requests],
-  );
-  const outstandingBalance = useMemo(
-    () => invoices.reduce((sum, item) => sum + Number(item.balance_due ?? 0), 0),
-    [invoices],
   );
   const recentFeedback = useMemo(() => feedback.slice(0, 4), [feedback]);
   const recentDocuments = useMemo(() => documents.slice(0, 4), [documents]);
@@ -447,13 +430,6 @@ function usePatientDashboardPageContent() {
           </a>
         ))}
       </nav>
-      <PortalSummary items={[
-        { label: t.portal_dashboard_upcoming_visits, value: nextAppointment ? <PortalDateChip>{formatPortalDate(nextAppointment.date)}</PortalDateChip> : "", visible: Boolean(nextAppointment) },
-        { label: t.portal_documents_pending_confirmations, value: pendingConfirmations, visible: pendingConfirmations > 0 },
-        { label: t.portal_dashboard_outstanding_balance, value: formatPortalCurrency(outstandingBalance), visible: outstandingBalance > 0 },
-        { label: t.portal_dashboard_open_privacy_requests, value: openRequests, visible: openRequests > 0 },
-      ]} />
-
       {documentAlerts && documentAlerts.configured_rule_count > 0 ? (
         documentAlerts.document_pack_complete ? (
           <div className="portal-document-complete flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 px-4 py-3">
@@ -528,6 +504,7 @@ function usePatientDashboardPageContent() {
       <section className={cn("grid items-start gap-3", recentRecommendations.length > 0 && "lg:grid-cols-2")}>
         <Section
           className="portal-next-actions"
+          icon={LayoutGrid}
           title={t.portal_dashboard_next_actions}
           accessory={
             <div className="flex flex-wrap items-center gap-2">
@@ -558,7 +535,7 @@ function usePatientDashboardPageContent() {
                     {(item.due_at || item.amount) ? (
                       <div className="portal-action-meta mt-2 flex flex-wrap items-center gap-2">
                         {item.due_at ? (
-                          <PortalDateChip>{item.kind === "recommendation" ? formatPortalDate(item.due_at) : formatPortalDateTime(item.due_at)}</PortalDateChip>
+                          item.kind === "recommendation" ? <PortalDateChip>{formatPortalDate(item.due_at)}</PortalDateChip> : <PortalDateChip timestamp={item.due_at} />
                         ) : null}
                         {item.amount ? (
                           <StatusChip tone="warning">{t.portal_dashboard_amount}: {formatPortalCurrency(item.amount)}</StatusChip>
@@ -580,6 +557,7 @@ function usePatientDashboardPageContent() {
 
         {recentRecommendations.length > 0 ? (
         <Section
+          icon={FileText}
           title={t.portal_dashboard_recommendations}
           accessory={
             <a href="/recommendations" className="text-sm font-medium text-primary hover:underline">
@@ -622,6 +600,7 @@ function usePatientDashboardPageContent() {
       <section className="grid items-start gap-3 lg:grid-cols-2">
         {recentAppointments.length > 0 ? (
         <Section
+          icon={CalendarDays}
           title={t.portal_dashboard_upcoming_visits}
           accessory={
             <a href="/appointments" className="text-sm font-medium text-primary hover:underline">
@@ -656,6 +635,7 @@ function usePatientDashboardPageContent() {
 
         {recentDocuments.length > 0 ? (
         <Section
+          icon={FileText}
           title={t.portal_dashboard_recent_documents}
           accessory={
             <a href="/documents" className="text-sm font-medium text-primary hover:underline">
@@ -677,7 +657,7 @@ function usePatientDashboardPageContent() {
                     <StatusBadge tone={item.confirmed ? "success" : item.requires_confirmation ? "warning" : "info"}>
                       {item.confirmed ? t.portal_dashboard_confirmed : item.requires_confirmation ? t.portal_dashboard_needs_confirmation : t.portal_dashboard_released}
                     </StatusBadge>
-                    <PortalDateChip>{formatPortalDateTime(item.shared_at)}</PortalDateChip>
+                    <PortalDateChip timestamp={item.shared_at} />
                     {portalDocumentTypeLabels(item.art, item.category).map((label) => (
                       <StatusChip key={label} className="border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-300">{label}</StatusChip>
                     ))}
@@ -691,6 +671,7 @@ function usePatientDashboardPageContent() {
 
         {recentInvoices.length > 0 ? (
         <Section
+          icon={ReceiptText}
           title={t.portal_dashboard_recent_invoices}
           accessory={
             <a href="/invoices" className="text-sm font-medium text-primary hover:underline">
@@ -698,9 +679,6 @@ function usePatientDashboardPageContent() {
             </a>
           }
         >
-          <p className="text-sm text-muted-foreground">
-            {t.portal_dashboard_billing_snapshots_and_current_payment_state}
-          </p>
           <div className="space-y-2">
             {recentInvoices.length === 0 ? (
               <EmptyCell>{t.portal_dashboard_no_invoices_released_to_the_portal_yet}</EmptyCell>
@@ -732,6 +710,7 @@ function usePatientDashboardPageContent() {
 
         {recentServices.length > 0 ? (
         <Section
+          icon={Sparkles}
           title={t.portal_dashboard_my_services}
           accessory={
             <a href="/services" className="text-sm font-medium text-primary hover:underline">
@@ -739,9 +718,6 @@ function usePatientDashboardPageContent() {
             </a>
           }
         >
-          <p className="text-sm text-muted-foreground">
-            {t.portal_dashboard_concierge_and_add_on_services_from_your_portal}
-          </p>
           <div className="space-y-2">
             {recentServices.length === 0 ? (
               <EmptyCell>{t.portal_dashboard_no_services_yet}</EmptyCell>
@@ -761,7 +737,7 @@ function usePatientDashboardPageContent() {
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <StatusChip>{conciergeServiceKindLabel(item.service_kind)}</StatusChip>
-                    {item.starts_at ? <PortalDateChip>{formatPortalDateTime(item.starts_at)}</PortalDateChip> : null}
+                    {item.starts_at ? <PortalDateChip timestamp={item.starts_at} /> : null}
                   </div>
                 </ListItem>
               ))
@@ -772,6 +748,7 @@ function usePatientDashboardPageContent() {
 
         {recentRequests.length > 0 ? (
         <Section
+          icon={ShieldCheck}
           title={t.portal_dashboard_privacy_request_history}
           accessory={
             <a href="/privacy" className="text-sm font-medium text-primary hover:underline">
@@ -779,9 +756,6 @@ function usePatientDashboardPageContent() {
             </a>
           }
         >
-          <p className="text-sm text-muted-foreground">
-            {t.portal_dashboard_dsgvo_related_requests_you_already_submitted}
-          </p>
           <div className="space-y-2">
             {recentRequests.length === 0 ? (
               <EmptyCell>{t.portal_dashboard_no_privacy_requests_submitted_yet}</EmptyCell>
@@ -795,7 +769,7 @@ function usePatientDashboardPageContent() {
                       </p>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <span className="font-mono text-xs text-muted-foreground">{t.portal_dashboard_requested}</span>
-                        <PortalDateChip>{formatPortalDateTime(item.requested_at)}</PortalDateChip>
+                        <PortalDateChip timestamp={item.requested_at} />
                       </div>
                     </div>
                     <StatusBadge status={item.status} className={privacyStatusTone(item.status)}>
@@ -815,6 +789,7 @@ function usePatientDashboardPageContent() {
 
         {recentFeedback.length > 0 ? (
         <Section
+          icon={MessageSquare}
           title={t.portal_dashboard_recent_feedback}
           accessory={
             <a href="/feedback" className="text-sm font-medium text-primary hover:underline">
@@ -822,9 +797,6 @@ function usePatientDashboardPageContent() {
             </a>
           }
         >
-          <p className="text-sm text-muted-foreground">
-            {t.portal_dashboard_submitted_quality_surveys_and_review_follow_up}
-          </p>
           <div className="space-y-2">
             {recentFeedback.length === 0 ? (
               <EmptyCell>{t.portal_dashboard_no_feedback_submitted_yet}</EmptyCell>
@@ -838,7 +810,7 @@ function usePatientDashboardPageContent() {
                       </p>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <StatusChip>{t.uiText.feedback_nps_label} {item.nps_score}</StatusChip>
-                        <PortalDateChip>{formatPortalDateTime(item.submitted_at)}</PortalDateChip>
+                        <PortalDateChip timestamp={item.submitted_at} />
                       </div>
                     </div>
                     <StatusBadge status={item.status} className={feedbackStatusTone(item.status)}>

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { Check, Contrast, Download, Palette, Upload } from "lucide-react";
+import { AccountSectionHeading } from "@/components/account-section-heading";
 import { AppearanceControlColors } from "@/components/appearance-control-colors";
 import { CONTRAST_LEVEL_TEXT } from "@/components/appearance-menu";
 import { openContrastMeter } from "@/components/contrast-meter";
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import {
   addAppearanceTheme, BUILTIN_THEMES, CONTRAST_LEVELS, DEFAULT_THEME, withControls, MAX_THEME_JSON_LENGTH,
@@ -16,34 +16,34 @@ import { cn } from "@/lib/utils";
 
 const TEXT = {
   ru: {
-    title: "Оформление", hint: "Светлые темы сохраняются для вашего аккаунта в этом браузере.",
+    title: "Оформление",
     custom: "Своя тема · JSON", template: "Шаблон", apply: "Сохранить и применить", export: "Экспорт темы", import: "Импорт файла",
     reset: "Вернуть GMED", contrast: "Проверить контраст", remove: "Удалить тему", preview: "Предпросмотр", action: "Основная кнопка", secondary: "Подпись поля",
-    editor: "JSON темы", saved: "Тема сохранена", storage: "Не удалось сохранить тему в браузере.",
+    editor: "JSON темы", saved: "Тема сохранена", storage: "Не удалось сохранить тему.",
     scope: "Цвета предупреждений, ошибок и статусов сохраняют своё значение. Тема меняет палитру, а не размеры элементов.",
     errors: { "invalid-json": "Проверьте синтаксис JSON.", "invalid-theme": "Нужна светлая тема версии 1: id, name и colors. Максимум 16 КБ.", "invalid-color": "Неизвестный цвет или неверный формат. Используйте #RRGGBB.", "low-contrast": "Недостаточный контраст: текст ≥4,5:1, фокус ≥3:1.", "reserved-id": "Измените id: это имя встроенной темы.", "theme-limit": "Можно сохранить до 30 своих тем." },
   },
   de: {
-    title: "Darstellung", hint: "Helle Themes werden für Ihr Konto in diesem Browser gespeichert.",
+    title: "Darstellung",
     custom: "Eigenes Theme · JSON", template: "Vorlage", apply: "Speichern und anwenden", export: "Theme exportieren", import: "Datei importieren",
     reset: "GMED wiederherstellen", contrast: "Kontrast prüfen", remove: "Theme löschen", preview: "Vorschau", action: "Primäre Schaltfläche", secondary: "Feldbeschriftung",
-    editor: "Theme-JSON", saved: "Theme gespeichert", storage: "Das Theme konnte nicht im Browser gespeichert werden.",
+    editor: "Theme-JSON", saved: "Theme gespeichert", storage: "Das Theme konnte nicht gespeichert werden.",
     scope: "Warnungen, Fehler und Statusfarben behalten ihre Bedeutung. Das Theme ändert die Farbpalette, nicht die Größe der Elemente.",
     errors: { "invalid-json": "Bitte JSON-Syntax prüfen.", "invalid-theme": "Helles Theme Version 1 mit id, name und colors erforderlich. Maximal 16 KB.", "invalid-color": "Unbekannte Farbe oder ungültiges Format. #RRGGBB verwenden.", "low-contrast": "Kontrast zu gering: Text ≥4,5:1, Fokus ≥3:1.", "reserved-id": "Bitte id ändern: Diese ID gehört zu einem integrierten Theme.", "theme-limit": "Maximal 30 eigene Themes möglich." },
   },
   en: {
-    title: "Appearance", hint: "Light themes are saved for your account in this browser.",
+    title: "Appearance",
     custom: "Custom theme · JSON", template: "Template", apply: "Save and apply", export: "Export theme", import: "Import file",
     reset: "Restore GMED", contrast: "Check contrast", remove: "Delete theme", preview: "Preview", action: "Primary button", secondary: "Field label",
-    editor: "Theme JSON", saved: "Theme saved", storage: "Could not save the theme in this browser.",
+    editor: "Theme JSON", saved: "Theme saved", storage: "Could not save the theme.",
     scope: "Warning, error and status colours keep their meaning. Themes change the palette, not element sizes.",
     errors: { "invalid-json": "Check the JSON syntax.", "invalid-theme": "Use a light version 1 theme with id, name and colors. Maximum 16 KB.", "invalid-color": "Unknown colour or invalid format. Use #RRGGBB.", "low-contrast": "Contrast is too low: text ≥4.5:1, focus ≥3:1.", "reserved-id": "Change id: this ID belongs to a built-in theme.", "theme-limit": "You can save up to 30 custom themes." },
   },
   uk: {
-    title: "Оформлення", hint: "Світлі теми зберігаються для вашого акаунта в цьому браузері.",
+    title: "Оформлення",
     custom: "Власна тема · JSON", template: "Шаблон", apply: "Зберегти й застосувати", export: "Експорт теми", import: "Імпорт файлу",
     reset: "Повернути GMED", contrast: "Перевірити контраст", remove: "Видалити тему", preview: "Попередній перегляд", action: "Основна кнопка", secondary: "Підпис поля",
-    editor: "JSON теми", saved: "Тему збережено", storage: "Не вдалося зберегти тему в браузері.",
+    editor: "JSON теми", saved: "Тему збережено", storage: "Не вдалося зберегти тему.",
     scope: "Кольори попереджень, помилок і статусів зберігають своє значення. Тема змінює палітру, а не розміри елементів.",
     errors: { "invalid-json": "Перевірте синтаксис JSON.", "invalid-theme": "Потрібна світла тема версії 1: id, name та colors. Максимум 16 КБ.", "invalid-color": "Невідомий колір або хибний формат. Використовуйте #RRGGBB.", "low-contrast": "Недостатній контраст: текст ≥4,5:1, фокус ≥3:1.", "reserved-id": "Змініть id: це назва вбудованої теми.", "theme-limit": "Можна зберегти до 30 власних тем." },
   },
@@ -65,11 +65,10 @@ export function AppearanceSettings() {
     sectionRef.current?.scrollIntoView({ block: "start" });
     sectionRef.current?.focus({ preventScroll: true });
   }, [search, key]);
-  const { user } = useAuth();
   const { lang } = useLang();
   const text = TEXT[lang as keyof typeof TEXT] ?? TEXT.en;
   const contrastText = CONTRAST_LEVEL_TEXT[lang as keyof typeof CONTRAST_LEVEL_TEXT] ?? CONTRAST_LEVEL_TEXT.en;
-  const { theme: selectedTheme, themes, preferences, contrast, controls, save } = useAppearanceTheme(user?.id ?? null);
+  const { theme: selectedTheme, themes, contrast, controls, save } = useAppearanceTheme();
   // Export and the JSON template carry the person's own control colours (owner 2026-11-03).
   const theme = useMemo(() => withControls(selectedTheme, controls), [selectedTheme, controls]);
   const [draft, setDraft] = useState(() => portableTheme(theme, themes.map((item) => item.id)));
@@ -78,8 +77,8 @@ export function AppearanceSettings() {
   const preview = useMemo(() => { try { return parseAppearanceTheme(draft); } catch { return null; } }, [draft]);
   const fail = (cause: unknown) => setNotice({ error: true, message: cause instanceof ThemeValidationError
     ? `${text.errors[cause.code as ThemeErrorCode]}${cause.detail ? ` (${cause.detail})` : ""}` : text.storage });
-  const select = (id: string) => {
-    try { save({ ...preferences, selectedId: id }); setNotice({ error: false, message: text.saved }); }
+  const select = async (id: string) => {
+    try { await save(p => ({ ...p, selectedId: id })); setNotice({ error: false, message: text.saved }); }
     catch (cause) { fail(cause); }
   };
   const exportTheme = () => {
@@ -94,11 +93,9 @@ export function AppearanceSettings() {
   return (
     <section ref={sectionRef} id="appearance" tabIndex={-1} className="scroll-mt-3 rounded-lg bg-card focus:outline-none" aria-labelledby="appearance-title" data-testid="appearance-settings">
       <header className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
-        <Palette className="size-4" aria-hidden="true" />
-        <h2 id="appearance-title" className="text-sm font-semibold">{text.title}</h2>
+        <AccountSectionHeading as="h2" id="appearance-title" icon={Palette} title={text.title} />
       </header>
       <div className="space-y-3 p-3">
-        <p className="text-xs text-muted-foreground">{text.hint}</p>
         <div className="flex flex-wrap gap-2" role="group" aria-label={text.title}>
           {themes.map((item) => (
             <button key={item.id} type="button" onClick={() => select(item.id)} aria-pressed={theme.id === item.id}
@@ -113,8 +110,8 @@ export function AppearanceSettings() {
         <div className="flex flex-wrap items-center gap-2" role="group" aria-label={contrastText.title}>
           <span className="text-xs font-medium text-muted-foreground">{contrastText.title}</span>
           {CONTRAST_LEVELS.map((level) => (
-            <button key={level} type="button" aria-pressed={contrast === level} onClick={() => {
-              try { save({ ...preferences, contrast: level }); setNotice({ error: false, message: text.saved }); } catch (cause) { fail(cause); }
+            <button key={level} type="button" aria-pressed={contrast === level} onClick={async () => {
+              try { await save(p => ({ ...p, contrast: level })); setNotice({ error: false, message: text.saved }); } catch (cause) { fail(cause); }
             }}
               className={cn("min-h-8 rounded-md border px-2.5 py-1 text-xs focus-visible:outline-2 focus-visible:outline-ring", contrast === level ? "border-ring bg-accent font-medium" : "border-border bg-card hover:bg-muted")}>
               {contrastText.levels[level]}
@@ -125,8 +122,8 @@ export function AppearanceSettings() {
           <Button size="sm" onClick={exportTheme}><Download />{text.export}</Button>
           <Button size="sm" variant="outline" onClick={openContrastMeter}><Contrast />{text.contrast}</Button>
           <Button size="sm" variant="ghost" onClick={() => select(DEFAULT_THEME.id)}>{text.reset}</Button>
-          {!BUILTIN_THEMES.some((item) => item.id === theme.id) ? <Button size="sm" variant="ghost" onClick={() => {
-            try { save({ ...preferences, selectedId: DEFAULT_THEME.id, themes: preferences.themes.filter((item) => item.id !== theme.id) }); setNotice(null); } catch (cause) { fail(cause); }
+          {!BUILTIN_THEMES.some((item) => item.id === theme.id) ? <Button size="sm" variant="ghost" onClick={async () => {
+            try { await save(p => ({ ...p, selectedId: DEFAULT_THEME.id, themes: p.themes.filter((item) => item.id !== theme.id) })); setNotice(null); } catch (cause) { fail(cause); }
           }}>{text.remove}</Button> : null}
         </div>
         <AppearanceControlColors onError={fail} />
@@ -155,8 +152,8 @@ export function AppearanceSettings() {
                 <span className="rounded-lg px-3 py-1.5 text-sm font-medium" style={{ backgroundColor: preview.colors.primary, color: preview.colors.primaryText }}>{text.action}</span>
               </div>
             </div> : null}
-            <Button size="sm" onClick={() => {
-              try { save(addAppearanceTheme(preferences, parseAppearanceTheme(draft))); setNotice({ error: false, message: text.saved }); }
+            <Button size="sm" onClick={async () => {
+              try { await save(p => addAppearanceTheme(p, parseAppearanceTheme(draft))); setNotice({ error: false, message: text.saved }); }
               catch (cause) { fail(cause); }
             }}>{text.apply}</Button>
             <p className="text-xs leading-relaxed text-muted-foreground">{text.scope}</p>

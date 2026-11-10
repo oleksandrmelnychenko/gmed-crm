@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type FormEvent, type SetStateAction } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import {
@@ -29,10 +30,11 @@ import {
   type MessageKeyEnvelope,
 } from "@/lib/chat-e2e";
 import { useAuth } from "@/lib/auth";
-import { formatAppDate } from "@/lib/app-time-zone";
+import { formatAppDate, formatAppTime } from "@/lib/app-time-zone";
+import { formatPortalTimestamp } from "@/lib/portal-datetime";
 import { useLang } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
-import { PortalDateChip } from "@/pages/patients/ui/portal-page-layout";
+import { PortalDateChip } from "@/components/ui/portal-date-chip";
 import { Input } from "@/components/ui/input";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { cn } from "@/lib/utils";
@@ -74,6 +76,10 @@ import { ChatAttachment, PendingAttachment } from "./ui/chat-attachment";
 type ChatConnectionStatus = "connecting" | "connected" | "reconnecting" | "offline";
 
 const CHAT_TIMER_OPTIONS = [0, 60, 60 * 60, 24 * 60 * 60, 7 * 24 * 60 * 60] as const;
+
+function portalChatTime(iso: string) {
+  return (formatAppDate(iso) === formatAppDate(new Date()) ? formatAppTime(iso) : formatPortalTimestamp(iso)) || "—";
+}
 
 function formatChatDay(iso: string) {
   return formatAppDate(iso) || iso.slice(0, 10);
@@ -1263,7 +1269,7 @@ function useChatPageContent() {
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b px-3 py-2">
-          <h2 className="flex items-center gap-2 text-base font-semibold">{user?.role === "patient" ? <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" aria-hidden="true" /> : null}{t.chat_title}</h2>
+          <h2 className="flex items-center gap-2 text-base font-semibold">{user?.role === "patient" ? <SectionHeading icon={MessageSquare}>{t.chat_title}</SectionHeading> : t.chat_title}</h2>
           <button
             onClick={() => {
               setShowNewChat(!showNewChat);
@@ -1391,7 +1397,7 @@ function useChatPageContent() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-medium truncate">{c.name}</span>
-                    <span className="text-[10px] text-muted-foreground shrink-0">{timeAgo(c.last_at, lang)}</span>
+                    <span className="text-[10px] text-muted-foreground shrink-0">{user?.role === "patient" ? portalChatTime(c.last_at) : timeAgo(c.last_at, lang)}</span>
                   </div>
                   <div className="flex items-center justify-between gap-2 mt-0.5">
                     <span className={cn("text-xs truncate", c.unread > 0 ? "text-foreground font-medium" : "text-muted-foreground")}>
@@ -1559,7 +1565,7 @@ function useChatPageContent() {
                 const hasText = !!m.message?.trim();
                 const hasAttachment = !!m.attachment_key;
                 const readReceipt =
-                  mine && m.read_at ? `${t.chat_seen} ${timeAgo(m.read_at, lang)}` : null;
+                  mine && m.read_at ? `${t.chat_seen} ${user?.role === "patient" ? portalChatTime(m.read_at) : timeAgo(m.read_at, lang)}` : null;
                 const expiryLabel = m.expires_at
                   ? t.chat_message_expires.replace(
                       "{time}",
@@ -1643,7 +1649,7 @@ function useChatPageContent() {
                       ) : null}
                       {!groupedWithNext && m.delivery_state !== "sending" ? (
                         <span>
-                          {timeAgo(m.created_at, lang)}
+                          {user?.role === "patient" ? <time dateTime={m.created_at} title={formatPortalTimestamp(m.created_at)}>{formatAppTime(m.created_at)}</time> : timeAgo(m.created_at, lang)}
                         </span>
                       ) : null}
                       {mine && m.delivery_state !== "sending" ? (

@@ -723,10 +723,9 @@ test.describe("patient portal smoke flows", () => {
         /Zahlungsnachweis wurde für das Abrechnungsteam hochgeladen|Подтверждение оплаты загружено для отдела биллинга|Payment proof uploaded for the billing team/i,
       ),
     ).toBeVisible();
-    await expect(
-      // Dates are DD.MM.YYYY in every language (2026-09-28).
-      page.locator("td").getByText(/(Hochgeladen|Uploaded) 10\.04\.2026/i),
-    ).toBeVisible();
+    const uploadedAt = page.locator('td time[datetime="2026-04-10T09:15:00Z"]');
+    await expect(uploadedAt).toBeVisible();
+    await expect(uploadedAt).toHaveText("10.04.2026 · 11:15");
   });
 
   test("patient can export data and submit privacy request", async ({ page }) => {
@@ -1052,19 +1051,15 @@ test.describe("patient portal smoke flows", () => {
       await page.screenshot({ path: testInfo.outputPath(`patient-dashboard-${width}.png`) });
     }
 
-    // Compact summaries retain meaningful counts without a second set of KPI cards.
-    const summary = page.locator("main dl");
-    await expect(summary).toContainText("Offene Datenschutzanfragen");
-    await expect(summary).toContainText("1");
+    await expect(page.getByText("Offene Datenschutzanfragen", { exact: true })).toHaveCount(0);
     await expect(page.getByText(/Unbekannter Wert/i)).toHaveCount(0);
 
     await slot.getByRole("button", { name: "Weitere Bereiche" }).click();
     await page.getByRole("menuitem", { name: "Meine Dokumente" }).click();
     await expect(page).toHaveURL(/\/documents$/);
 
-    // A header whose actions do not fit next to the title keeps them in the
-    // page instead of drawing them over the bell (any page, any width).
-    await expect(slot.getByRole("heading", { level: 1 })).toHaveText("Meine Dokumente");
+    await expect(slot.getByRole("heading")).toHaveCount(0);
+    await expect(page.getByRole("main").getByRole("heading", { level: 1 })).toHaveText("Meine Dokumente");
     await expect(page.getByText("Released discharge note")).toBeVisible();
     const refresh = page.getByRole("button", { name: "Aktualisieren", exact: true });
     await expect(refresh).toBeVisible();

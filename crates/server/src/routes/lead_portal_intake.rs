@@ -701,7 +701,12 @@ pub(crate) fn lead_portal_allows_path(path: &str) -> bool {
     let path = path.strip_prefix("/api/v1").unwrap_or(path);
     matches!(
         path,
-        "/me" | "/me/password" | "/me/profile" | "/me/lead-requests" | "/me/email-check"
+        "/me"
+            | "/me/password"
+            | "/me/profile"
+            | "/me/appearance"
+            | "/me/lead-requests"
+            | "/me/email-check"
     ) || path.starts_with("/me/lead-requests/")
         || path.starts_with("/me/totp")
         || path.starts_with("/auth/")
@@ -10296,6 +10301,7 @@ mod tests {
             "/api/v1/me",
             "/me/password",
             "/me/profile",
+            "/me/appearance",
             "/me/lead-requests",
             "/me/lead-requests/0f4e/documents",
             "/me/totp/setup",

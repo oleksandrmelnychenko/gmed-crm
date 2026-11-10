@@ -1,6 +1,6 @@
 import { PortalInfoRow as InfoRow, PortalStatCard as StatCard, PortalSection as Section, PortalDateChip } from "./ui/portal-page-layout";
 import { useEffect, useMemo, useState } from "react";
-import { LoaderCircle, PackageCheck, ReceiptText, RefreshCw } from "lucide-react";
+import { Archive, CalendarClock, CircleCheck, Layers, LoaderCircle, PackageCheck, ReceiptText, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -140,7 +140,7 @@ export function PatientSubscriptionsPage() {
         description={t.portal_subscriptions_subtitle}
         actions={
           <>
-            <CountBadge>{t.portal_subscriptions_eyebrow}</CountBadge>
+
             <Button
               type="button"
               variant="default"
@@ -173,74 +173,29 @@ export function PatientSubscriptionsPage() {
 
       {error ? <Banner tone="error">{error}</Banner> : null}
 
-      <section className="grid gap-3 md:grid-cols-3">
-        <StatCard
-          label={t.portal_subscriptions_total}
-          value={String(subscriptions.length)}
-          description={`${grouped.active.length} ${t.portal_subscriptions_active.toLocaleLowerCase()}`}
-        />
-        <StatCard
-          label={t.portal_subscriptions_included_services}
-          value={String(serviceCount)}
-        />
-        <StatCard
-          label={t.portal_subscriptions_payment_attention}
-          value={String(paymentAttentionCount)}
-        />
-      </section>
-
-      <SubscriptionSection
-        title={t.portal_subscriptions_active}
-        subscriptions={grouped.active}
-        emptyDescription={t.portal_subscriptions_empty_description}
-      />
-      <div className={cn("grid gap-3", !grouped.upcoming.length && !grouped.completed.length && "md:grid-cols-2")}>
-        <SubscriptionSection
-          title={t.portal_subscriptions_upcoming}
-          subscriptions={grouped.upcoming}
-          emptyDescription={t.portal_subscriptions_empty_description}
-        />
-        <SubscriptionSection
-          title={t.portal_subscriptions_completed}
-          subscriptions={grouped.completed}
-          emptyDescription={t.portal_subscriptions_empty_description}
-        />
-      </div>
-    </div>
-  );
-}
-
-function SubscriptionSection({
-  title,
-  subscriptions,
-  emptyDescription,
-}: {
-  title: string;
-  subscriptions: PortalSubscriptionItem[];
-  emptyDescription: string;
-}) {
-  const { t } = useLang();
-
-  return (
-    <Section
-      title={title}
-      accessory={<CountBadge>{subscriptions.length}</CountBadge>}
-    >
       {subscriptions.length === 0 ? (
-        <div className="space-y-1 text-sm">
-          <p className="font-medium text-foreground">
-            {t.portal_subscriptions_empty_title}
-          </p>
-          <p className="text-muted-foreground">{emptyDescription}</p>
-        </div>
-      ) : (
-        <div className={cn("grid gap-3", subscriptions.length > 1 && "xl:grid-cols-2")}>
-          {subscriptions.map((subscription) => (
-            <SubscriptionCard key={subscription.id} subscription={subscription} />
-          ))}
-        </div>
-      )}
-    </Section>
+        <Section title={t.portal_subscriptions_title} icon={Layers}>
+          <p className="text-sm text-muted-foreground">{t.portal_subscriptions_empty_title}</p>
+        </Section>
+      ) : <>
+        <section className="grid gap-3 md:grid-cols-3">
+          <StatCard label={t.portal_subscriptions_total} value={String(subscriptions.length)} />
+          <StatCard label={t.portal_subscriptions_included_services} value={String(serviceCount)} />
+          <StatCard label={t.portal_subscriptions_payment_attention} value={String(paymentAttentionCount)} />
+        </section>
+        {([
+          [t.portal_subscriptions_active, CircleCheck, grouped.active],
+          [t.portal_subscriptions_upcoming, CalendarClock, grouped.upcoming],
+          [t.portal_subscriptions_completed, Archive, grouped.completed],
+        ] as const).map(([title, icon, items]) => items.length > 0 && (
+          <Section key={title} title={title} icon={icon} accessory={<CountBadge>{items.length}</CountBadge>}>
+            <div className={cn("grid gap-3", items.length > 1 && "xl:grid-cols-2")}>
+              {items.map(subscription => <SubscriptionCard key={subscription.id} subscription={subscription} />)}
+            </div>
+          </Section>
+        ))}
+      </>}
+    </div>
   );
 }
 

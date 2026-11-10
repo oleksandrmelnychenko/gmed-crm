@@ -1,6 +1,7 @@
 import { countryLabel } from "@/components/ui/country-select";
 import { servicesText } from "./lead-request-services-text";
-import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
+import { formatPortalTimestamp } from "@/lib/portal-datetime";
 
 import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api";
 import { actsAsGuardian } from "./lead-request-access";
@@ -105,7 +106,7 @@ function enteredRows(rows: Entry[]): SummaryRow[] {
  * payer; while it is missing the list of what is still needed names it.
  */
 function costEstimateConsentRow(givenAt: string | null | undefined, text: LeadRequestText): Entry {
-  return [text.payerCostEstimateConsentShort, givenAt ? text.consentGivenAt(formatAppDateTime(givenAt)) : ""];
+  return [text.payerCostEstimateConsentShort, givenAt ? text.consentGivenAt(formatPortalTimestamp(givenAt)) : ""];
 }
 
 /**
@@ -148,7 +149,7 @@ export function answeredPayerRows(request: LeadRequest, text: LeadRequestText): 
                 [label("payer_last_name"), payer.last_name],
               ] satisfies Entry[])),
           [label("payer_relationship"), relationship],
-          [text.payerConsentShort, payer.contact_consent_at ? text.consentGivenAt(formatAppDateTime(payer.contact_consent_at)) : ""],
+          [text.payerConsentShort, payer.contact_consent_at ? text.consentGivenAt(formatPortalTimestamp(payer.contact_consent_at)) : ""],
           costEstimateConsentRow(payer.cost_estimate_consent_at, text),
         ] satisfies Entry[])
       : []),
@@ -417,7 +418,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
         [payerLabel("payer_zip"), party.zip],
         [
           text.payerConsentShort,
-          party.contact_consent_at ? text.consentGivenAt(formatAppDateTime(party.contact_consent_at)) : "",
+          party.contact_consent_at ? text.consentGivenAt(formatPortalTimestamp(party.contact_consent_at)) : "",
         ],
         costEstimateConsentRow(party.cost_estimate_consent_at, text),
       ];
@@ -649,7 +650,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       ...(!request.disclosure && choices.named_recipients ? storedTrustedPersons(request).map((person): Entry =>
         [wording.recipientsTitle, [person.name, wording.recipientRelations[person.relation], formatBirthDate(person.birth_date), person.phone || person.contact, personScope(person, lang)].filter(Boolean).join(" · ")]) : []),
       // No save time of the own choice (labels audit 2026-10-26, A3); only the other parent's choice is named.
-      [text.saved, consent.chosen_at && consent.chosen_by_me === false ? (consent.chosen_by_staff ? wording.savedByStaffAt : wording.savedByOtherAt)(formatAppDateTime(consent.chosen_at)) : ""],
+      [text.saved, consent.chosen_at && consent.chosen_by_me === false ? (consent.chosen_by_staff ? wording.savedByStaffAt : wording.savedByOtherAt)(formatPortalTimestamp(consent.chosen_at)) : ""],
     ]);
   }
 

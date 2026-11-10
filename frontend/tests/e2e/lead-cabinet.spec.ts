@@ -1591,7 +1591,7 @@ test.describe("lead cabinet", () => {
     await expect(readOnly).toContainText("Viktor");
     await expect(readOnly).toContainText("Zahler");
     await expect(readOnly).toContainText("Elternteil");
-    await expect(readOnly).toContainText("Zugestimmt am 03.10.2026 11:16");
+    await expect(readOnly).toContainText("Zugestimmt am 03.10.2026 · 11:16");
     await expect(payer).not.toContainText("Zahlerstraße");
     await expect(payer).not.toContainText("03.02.1960");
     // Nothing of the payer can be changed here.
@@ -1604,7 +1604,7 @@ test.describe("lead cabinet", () => {
     await page.locator('[data-step="send"]').click();
     const summary = page.getByTestId("lead-request-summary-payer");
     await expect(summary).toContainText("Viktor");
-    await expect(summary).toContainText("Zugestimmt am 03.10.2026 11:16");
+    await expect(summary).toContainText("Zugestimmt am 03.10.2026 · 11:16");
     await expect(summary).not.toContainText("Zahlerstraße");
     await expect(page.getByTestId("lead-request-summary-payer-note")).toHaveText(
       "Die zahlende Person hat ihre Angaben selbst gemacht. Änderungen nur über GMED.",
@@ -1652,13 +1652,13 @@ test.describe("lead cabinet", () => {
     await step(page, "billing");
     await consent.getByRole("checkbox").check();
     await expect.poll(() => calls.costEstimateConsent).toEqual([{ consent: true }]);
-    await expect(consent).toContainText("Zugestimmt am 03.10.2026 11:17");
+    await expect(consent).toContainText("Zugestimmt am 03.10.2026 · 11:17");
     await expect(page.getByTestId("lead-request-save-state")).toHaveText("Gespeichert");
     await page.locator('[data-step="send"]').click();
     await expect(missing).toHaveCount(0);
     const summary = page.getByTestId("lead-request-summary-payer");
     await expect(summary).toContainText("Einwilligung zur Weitergabe des Kostenvoranschlags");
-    await expect(summary).toContainText("Zugestimmt am 03.10.2026 11:17");
+    await expect(summary).toContainText("Zugestimmt am 03.10.2026 · 11:17");
     expect(calls.payer).toEqual([]);
 
     // Taken back: removed on the server and missing again.
@@ -1698,7 +1698,7 @@ test.describe("lead cabinet", () => {
     await consent.getByRole("checkbox").check();
     await expect.poll(() => calls.costEstimateConsent).toEqual([{ consent: true }]);
     await expect(page.getByTestId("lead-request-payer-readonly")).toContainText("Einwilligung zur Weitergabe des Kostenvoranschlags");
-    await expect(consent).toContainText("Zugestimmt am 03.10.2026 11:17");
+    await expect(consent).toContainText("Zugestimmt am 03.10.2026 · 11:17");
     await page.locator('[data-step="send"]').click();
     await expect(page.getByTestId("lead-request-missing")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-summary-payer")).toContainText("Einwilligung zur Weitergabe des Kostenvoranschlags");

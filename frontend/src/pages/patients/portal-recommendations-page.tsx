@@ -222,7 +222,7 @@ export function PatientRecommendationsPage() {
         description={t.portal_recommendations_description}
         actions={
           <>
-            <CountBadge>{t.portal_recommendations_patient_portal}</CountBadge>
+
             <CountBadge>{t.portal_recommendations_active}: {activeCount}</CountBadge>
             <Button variant="default" className={tokens.control.primaryButton} onClick={() => dispatchRecommendationsState((current) => ({ version: current.version + 1 }))}>
               <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
@@ -239,9 +239,6 @@ export function PatientRecommendationsPage() {
         <PortalListItem className="space-y-1">
           <p className="text-sm font-semibold text-foreground">
             {t.portal_recommendations_empty_title}
-          </p>
-          <p className="text-sm text-muted-foreground">
-            {t.portal_recommendations_empty_description}
           </p>
         </PortalListItem>
       ) : (

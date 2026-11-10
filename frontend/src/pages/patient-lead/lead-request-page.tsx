@@ -1,5 +1,22 @@
+import { portalTabTone } from "@/components/ui/portal-tab-style";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Check, Clock, LoaderCircle } from "lucide-react";
+import {
+  Check,
+  ClipboardCheck,
+  ClipboardList,
+  Clock,
+  ConciergeBell,
+  ContactRound,
+  Files,
+  FileSignature,
+  IdCard,
+  ListPlus,
+  LoaderCircle,
+  Share2,
+  ShieldPlus,
+  UserRound,
+} from "lucide-react";
 import { CabinetStaffModeContext, cabinetStaffText, useCabinetStaffMode } from "./lead-request-staff-mode";
 import { useSearchParams } from "react-router-dom";
 
@@ -379,9 +396,7 @@ export function LeadRequestPage({
               aria-selected={item.lead_id === request.lead_id}
               className={cn(
                 "rounded-full border px-3 py-1.5 text-sm",
-                item.lead_id === request.lead_id
-                  ? "border-[var(--brand)] bg-[var(--brand-soft)] text-[var(--brand)]"
-                  : "border-border text-muted-foreground",
+                portalTabTone(item.lead_id === request.lead_id),
               )}
               onClick={() => { void switchAfterSave(request.lead_id, () => {
                 setSelected(item.lead_id);
@@ -469,7 +484,7 @@ function CabinetLanguageSwitch({ lang, onLang }: { lang: LeadCabinetLang; onLang
           className={cn(
             "min-w-10 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
             lang === option.value
-              ? "bg-[var(--heading-marker)] text-white"
+              ? "bg-muted font-semibold text-foreground ring-1 ring-inset ring-border"
               : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
           )}
           onClick={() => onLang(option.value)}
@@ -704,14 +719,13 @@ function LeadRequestView({
     <ServerConflictContext.Provider value={conflictRegistry}>
     <RequestPatchContext.Provider value={patchRequest}>
       {/* `overflow-clip`, not `hidden`: a hidden box would be the scroll container of the sticky step footer. */}
-      <article ref={topRef} className="patient-request-wizard flex min-w-0 flex-[1_0_auto] flex-col overflow-clip rounded-xl border border-border/60 bg-card" data-testid="lead-request">
+      <article ref={topRef} className="patient-request-wizard flex min-w-0 flex-[1_0_auto] flex-col overflow-clip rounded-xl border border-border bg-card" data-testid="lead-request">
         {/* The title and the deadline share one line (wrapping on a phone). */}
         <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border/60 px-4 py-3 sm:px-5">
           <h1 className="flex items-center gap-2.5 text-base font-semibold leading-tight">
-            <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
             {/* "Request for your child" only for a parent of a minor, "the child you represent" for its
                 guardian (Vormund); an adult's representative reads "Request for <name>". */}
-            {guardian ? guardianCabinetTitle(text, request, patientName) : text.title}
+            <SectionHeading icon={ClipboardList}>{guardian ? guardianCabinetTitle(text, request, patientName) : text.title}</SectionHeading>
           </h1>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             {/* The server's date is the staff list's: null once the lead is out of the purge
@@ -744,7 +758,7 @@ function LeadRequestView({
           <div
             key={step}
             ref={stepRef}
-            className="flex min-w-0 flex-1 flex-col bg-muted px-4 pt-3 sm:px-5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200 [&>section]:flex [&>section]:flex-1 [&>section]:flex-col"
+            className="flex min-w-0 flex-1 flex-col bg-background px-4 pt-3 sm:px-5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200 [&>section]:flex [&>section]:flex-1 [&>section]:flex-col"
             data-testid="lead-request-step"
             data-current-step={step}
           >
@@ -796,6 +810,12 @@ function LeadRequestView({
  * opened) carries a badge with the count of what its step still misses; a
  * complete step carries a check. Every step can be opened at any time.
  */
+const STEP_ICONS = {
+  person: UserRound, contact: ContactRound, identity: IdCard, billing: ShieldPlus,
+  declarations: FileSignature, follow_up: ListPlus, disclosure: Share2, documents: Files,
+  services: ConciergeBell, send: ClipboardCheck,
+};
+
 function StepNavBar({
   request,
   text,
@@ -814,17 +834,6 @@ function StepNavBar({
   onSelect: (step: StepId) => void;
 }) {
   const position = steps.indexOf(current);
-  const tabsRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const tabs = tabsRef.current;
-    const selected = tabs?.querySelector<HTMLElement>('[aria-selected="true"]');
-    if (!tabs || !selected) return;
-    // Move only this horizontal strip; never scroll the page or its sticky footer.
-    const strip = tabs.getBoundingClientRect();
-    const item = selected.getBoundingClientRect();
-    if (item.left < strip.left) tabs.scrollLeft += item.left - strip.left;
-    else if (item.right > strip.right) tabs.scrollLeft += item.right - strip.right;
-  }, [current]);
   return (
     <nav
       aria-label={text.stepsLabel}
@@ -832,12 +841,12 @@ function StepNavBar({
       data-testid="lead-request-steps"
     >
       <div
-        ref={tabsRef}
         role="tablist"
         aria-label={text.stepsLabel}
-        className="lead-wizard-step-tabs flex w-full min-w-0 items-center overflow-x-auto overscroll-x-contain py-0.5 [scrollbar-width:thin] max-sm:justify-between"
+        className="request-step-list"
       >
-        {steps.map((id, index) => {
+        {steps.map((id) => {
+          const Icon = STEP_ICONS[id];
           const selected = id === current;
           const count = id === "send" || !badgesFor(id) ? 0 : stepMissingCount(request, id, missing);
           const done = stepDone(request, id, missing);
@@ -849,29 +858,20 @@ function StepNavBar({
               data-step={id}
               aria-selected={selected}
               aria-current={selected ? "step" : undefined}
+              aria-description={!done ? text.stepPending : undefined}
+              title={text.steps[id] + " · " + (done ? (id === "send" ? text.stepSent : text.stepComplete) : text.stepPending)}
               className={cn(
-                "lead-wizard-step-tab relative shrink-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                selected
-                  ? "bg-[var(--heading-marker)] font-semibold text-white"
-                  : "text-foreground hover:bg-muted",
+                "request-step-tab relative border text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                portalTabTone(selected),
               )}
               onClick={() => onSelect(id)}
             >
-              <span
-                aria-hidden="true"
-                className={cn(
-                  "inline-flex size-6 shrink-0 items-center justify-center rounded-full font-mono text-[11px] leading-none",
-                  selected
-                    ? "bg-white/20 text-white"
-                    : done
-                      ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
-                      : "bg-muted text-muted-foreground",
-                )}
-              >
-                {done && !selected ? <Check className="size-3.5" /> : index + 1}
-              </span>
-              <span className="whitespace-nowrap max-sm:sr-only">
+              <Icon aria-hidden="true" className="size-4 shrink-0 text-foreground" strokeWidth={1.75} />
+              <span className="min-w-0 break-words max-sm:sr-only">
                 {text.steps[id]}
+              </span>
+              <span aria-hidden="true" data-step-state={done ? "complete" : "pending"} className="request-step-state">
+                {done ? <Check className="size-2.5" strokeWidth={3} /> : null}
               </span>
               {count > 0 ? (
                 <>
@@ -895,7 +895,7 @@ function StepNavBar({
           );
         })}
       </div>
-      {/* On a phone the dots carry no names: the current step is named below them. */}
+      {/* On a phone only the icons are visible: the current step is named below them. */}
       <p className="mt-2 text-xs text-muted-foreground sm:hidden" data-testid="lead-request-step-title">
         {text.stepOf(position + 1, steps.length)} · <span className="font-semibold text-foreground">{text.steps[current]}</span>
       </p>

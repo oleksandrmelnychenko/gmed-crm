@@ -98,7 +98,7 @@
 /* A theme's shadow colour tints Tailwind shadows. Without --shadow the value is invalid and
    each shadow keeps its default; explicit shadow-colour utilities win from the later layer. */
 @layer base {
-  :is(.gmed-theme, .gmed-theme-palette) * {
+  .gmed-theme * {
     --tw-shadow-color: color-mix(in srgb, var(--shadow) 10%, transparent);
   }
 }

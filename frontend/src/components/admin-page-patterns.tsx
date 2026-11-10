@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Children, cloneElement, isValidElement, type ReactNode } from "react";
 import { LoaderCircle, type LucideIcon } from "lucide-react";
 
@@ -231,12 +232,7 @@ export function AdminSectionTitle({
         className,
       )}
     >
-      <span
-        aria-hidden
-        data-slot="heading-marker"
-        className={cn("size-1.5 shrink-0 rounded-full", variant === "mono" ? "bg-orange-500" : "bg-[var(--brand)]")}
-      />
-      <span className="min-w-0 max-w-full break-words">{children}</span>
+      <SectionHeading>{children}</SectionHeading>
     </h3>
   );
 }

@@ -1,4 +1,5 @@
-import { PortalDateChip } from "@/pages/patients/ui/portal-page-layout";
+import { SectionHeading } from "@/components/ui/section-heading";
+import { PortalDateChip, PortalSection } from "@/pages/patients/ui/portal-page-layout";
 import {
   startTransition,
   useEffect,
@@ -12,6 +13,10 @@ import {
 } from "react";
 import {
   BarChart3,
+  CalendarDays,
+  History,
+  HeartPulse,
+  type LucideIcon,
   ChevronRight,
   ClipboardPen,
   LoaderCircle,
@@ -41,6 +46,7 @@ import {
 } from "@/components/ui/sheet";
 import {
   Banner as ShellBanner,
+  CountBadge,
   Section as FormSection,
   PageHeader,
   StatusBadge,
@@ -223,13 +229,8 @@ const FEEDBACK_TREATMENT_SUCCESS_LABEL_KEYS = {
   no: "feedback_treatment_success_no",
 } as const satisfies Partial<Record<string, TranslationKey>>;
 
-function titleWithDot(title: ReactNode) {
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-      <span>{title}</span>
-    </span>
-  );
+function titleWithDot(title: ReactNode, icon: LucideIcon = ClipboardPen) {
+  return <SectionHeading icon={icon}>{title}</SectionHeading>;
 }
 
 function feedbackReviewStatusLabel(status: string, translations: Translations) {
@@ -272,7 +273,7 @@ function Field({
   className,
   children,
 }: {
-  label: string;
+  label: ReactNode;
   className?: string;
   children: ReactNode;
 }) {
@@ -344,7 +345,7 @@ function FeedbackTextSection({
   );
 }
 
-function FeedbackReviewHeaderVariants({ item, t }: { item: PortalFeedbackItem; t: Translations }) {
+function FeedbackReviewHeaderVariants({ item, t, patient }: { item: PortalFeedbackItem; t: Translations; patient: boolean }) {
   const { formatPortalDateTime, npsBandLabel } = usePortalLabels();
   const title = item.patient_name || t.feedback_patient_feedback;
   const context =
@@ -379,7 +380,7 @@ function FeedbackReviewHeaderVariants({ item, t }: { item: PortalFeedbackItem; t
           </div>
           <div className="flex items-start md:justify-end">
             <span className="font-mono text-xs leading-5 text-muted-foreground">
-              {submittedAt}
+              {patient ? <PortalDateChip timestamp={item.submitted_at} /> : submittedAt}
             </span>
           </div>
         </div>
@@ -540,7 +541,7 @@ function PatientRatingScale({
       className="portal-rating-scale min-w-0 py-2"
     >
       <div className="mb-2 flex items-center justify-between gap-3">
-        <span className={cn("text-sm text-foreground", prominent ? "font-semibold" : "font-medium")}>{label}</span>
+        <span className={cn("text-sm text-foreground", prominent ? "font-semibold" : "font-medium")}>{prominent ? titleWithDot(label, isNpsScale ? BarChart3 : Star) : label}</span>
         <span className="text-sm font-semibold tabular-nums text-foreground">
           {value}
         </span>
@@ -599,7 +600,7 @@ function PatientScoreGrid({
 
   return (
     <div className="space-y-3">
-      <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1.8fr)]">
+      <div className="grid gap-x-5 gap-y-2 rounded-xl border border-border/70 bg-card p-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.8fr)]">
         <PatientRatingScale
           prominent
           label={t.feedback_overall}
@@ -620,9 +621,9 @@ function PatientScoreGrid({
         />
       </div>
 
-      <section className="portal-detailed-ratings">
+      <section className="portal-detailed-ratings rounded-xl border border-border/70 bg-card p-3">
         <h3 className="mb-3 text-sm font-semibold text-foreground">
-          {t.feedback_scores}
+          {titleWithDot(t.feedback_scores, Star)}
         </h3>
         <div className="grid gap-3 lg:grid-cols-2">
           {detailedScores.map(([label, field]) => (
@@ -640,9 +641,7 @@ function PatientScoreGrid({
       </section>
 
       <section className="rounded-xl border border-border/70 bg-card p-3">
-        <span className="text-sm font-medium text-foreground">
-          {t.feedback_treatment_success}
-        </span>
+        <h3 className="text-sm font-semibold text-foreground">{titleWithDot(t.feedback_treatment_success, HeartPulse)}</h3>
         <div className="mt-3 grid gap-2 sm:grid-cols-3">
           {([
             ["yes", t.feedback_treatment_success_yes],
@@ -704,7 +703,7 @@ function FeedbackFormNotes({
 }) {
   return (
     <>
-      <Field label={t.feedback_comment}>
+      <Field label={includeInternal ? t.feedback_comment : titleWithDot(t.feedback_comment, MessageSquare)}>
         <textarea
           value={form.comments}
           onChange={(event) => setForm((current) => ({ ...current, comments: event.target.value }))}
@@ -740,7 +739,7 @@ function feedbackCard(item: PortalFeedbackItem, t: Translations, withInternal = 
   const notRated = t.feedback_not_rated;
   return (
     <>
-        <FeedbackReviewHeaderVariants item={item} t={t} />
+        <FeedbackReviewHeaderVariants item={item} t={t} patient={!withInternal} />
 
         <section className="rounded-lg bg-card p-3">
           <div className="flex items-start justify-between gap-4">
@@ -874,7 +873,7 @@ function PatientFeedbackContent({
   setVersion,
   onSubmit,
 }: PatientFeedbackContentProps) {
-  const { formatPortalAverage, formatPortalDateTime, portalNotSetLabel } = usePortalLabels();
+  const { formatPortalAverage, portalNotSetLabel } = usePortalLabels();
   const { appointmentOptionLabel } = useLanguageHelpers();
   return (
     <div className="portal-feedback w-full min-w-0 space-y-3 [&_label]:font-sans [&_label]:text-sm">
@@ -903,34 +902,33 @@ function PatientFeedbackContent({
         <AdminInlineMetric icon={Users} label={t.feedback_available_visits_metric} value={availableAppointments.length} tone="slate" />
       </div>
 
-      <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
-        <AdminTableCard
-          title={titleWithDot(t.feedback_new_survey_title)}
-          description={t.feedback_new_survey_description}
-        >
-          <form className="space-y-3 p-3" onSubmit={(event) => void onSubmit(event)}>
-            <Field label={t.feedback_visit}>
-              <NativeComboboxSelect
-                value={form.appointmentId || "__general__"}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    appointmentId:
-                      event.target.value === "__general__" || !event.target.value
-                        ? ""
-                        : event.target.value,
-                  }))
-                }
-                className={selectClassName}
-              >
-                <option value="__general__">{t.feedback_general_feedback}</option>
-                {availableAppointments.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {appointmentOptionLabel(item)}
-                  </option>
-                ))}
-              </NativeComboboxSelect>
-            </Field>
+      <div className="grid min-w-0 grid-cols-1 gap-3">
+        <PortalSection icon={ClipboardPen} title={t.feedback_new_survey_title}>
+          <form className="space-y-3" onSubmit={(event) => void onSubmit(event)}>
+            <div className="rounded-xl border border-border/70 bg-card p-3">
+              <Field label={titleWithDot(t.feedback_visit, CalendarDays)}>
+                <NativeComboboxSelect
+                  value={form.appointmentId || "__general__"}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      appointmentId:
+                        event.target.value === "__general__" || !event.target.value
+                          ? ""
+                          : event.target.value,
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  <option value="__general__">{t.feedback_general_feedback}</option>
+                  {availableAppointments.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {appointmentOptionLabel(item)}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </Field>
+            </div>
 
             <PatientScoreGrid t={t} form={form} setForm={setForm} />
 
@@ -943,14 +941,10 @@ function PatientFeedbackContent({
               {t.feedback_submit_button}
             </Button>
           </form>
-        </AdminTableCard>
+        </PortalSection>
 
-        <AdminTableCard
-          title={titleWithDot(t.feedback_history_title)}
-          description={t.feedback_history_description}
-          count={feedback.length}
-        >
-          <div className="p-3">
+        <PortalSection icon={History} title={t.feedback_history_title} accessory={<CountBadge>{feedback.length}</CountBadge>}>
+          <div className="min-w-0">
             {feedback.length === 0 ? (
               <EmptyState
                 title={t.feedback_empty_title}
@@ -971,7 +965,7 @@ function PatientFeedbackContent({
                           <StatusBadge tone={feedbackStatusTone(item.status)}>
                             {feedbackReviewStatusLabel(item.status, t)}
                           </StatusBadge>
-                          <PortalDateChip>{formatPortalDateTime(item.submitted_at)}</PortalDateChip>
+                          <PortalDateChip timestamp={item.submitted_at} />
                         </div>
                         <p className="mt-2 truncate text-sm font-medium text-foreground">
                           {item.appointment_title || t.feedback_general_feedback}
@@ -996,7 +990,7 @@ function PatientFeedbackContent({
               </>
             )}
           </div>
-        </AdminTableCard>
+        </PortalSection>
       </div>
 
       <Sheet open={Boolean(activeFeedback)} onOpenChange={(open) => !open && setActiveFeedbackId("")}>
@@ -1014,7 +1008,6 @@ function PatientFeedbackContent({
 }
 
 function PatientFeedbackWorkspace() {
-  const { formatPortalDateTime, npsBandLabel, portalNotSetLabel } = usePortalLabels();
   const { t } = useLang();
   const [patientState, dispatchPatientState] = useReducer(
     (
@@ -1155,7 +1148,7 @@ function PatientFeedbackWorkspace() {
         sortable: true,
         width: 170,
         render: (row) => (
-          <span className="text-xs text-foreground">{formatPortalDateTime(row.submitted_at)}</span>
+          <PortalDateChip timestamp={row.submitted_at} />
         ),
       },
       {
@@ -1166,13 +1159,6 @@ function PatientFeedbackWorkspace() {
         render: (row) => (
           <StatusBadge tone={feedbackStatusTone(row.status)}>{feedbackReviewStatusLabel(row.status, t)}</StatusBadge>
         ),
-      },
-      {
-        id: "source",
-        label: t.feedback_source,
-        accessor: (row) => row.source,
-        width: 160,
-        render: (row) => <span className="text-xs text-foreground">{feedbackSourceDisplay(row.source, t)}</span>,
       },
       {
         id: "appointment",
@@ -1186,37 +1172,12 @@ function PatientFeedbackWorkspace() {
         ),
       },
       {
-        id: "provider",
-        label: t.feedback_provider,
-        accessor: (row) => row.provider_name ?? "",
-        width: 220,
-        render: (row) => (
-          <span className="text-xs text-foreground">{row.provider_name || portalNotSetLabel()}</span>
-        ),
-      },
-      {
-        id: "doctor",
-        label: t.feedback_doctor,
-        accessor: (row) => row.doctor_name ?? "",
-        width: 220,
-        render: (row) => (
-          <span className="text-xs text-foreground">{row.doctor_name || portalNotSetLabel()}</span>
-        ),
-      },
-      {
         id: "nps",
         label: t.uiText.feedback_nps_label,
         accessor: (row) => row.nps_score,
         sortable: true,
         width: 110,
         render: (row) => <span className="text-xs text-foreground">{row.nps_score}</span>,
-      },
-      {
-        id: "nps_band",
-        label: t.feedback_nps_band,
-        accessor: (row) => npsBandLabel(row.nps_score),
-        width: 150,
-        render: (row) => <span className="text-xs text-foreground">{npsBandLabel(row.nps_score)}</span>,
       },
       {
         id: "overall",

@@ -1,9 +1,26 @@
+import { portalFilterClass } from "@/components/ui/portal-tab-style";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { startTransition, useCallback, useEffect, useMemo, useReducer, useRef, type FormEvent } from "react";
-import { CalendarDays, ClipboardList, Download, Files, FileText, FlaskConical, IdCard, Languages, LoaderCircle, Mail, Receipt, RefreshCw, Upload } from "lucide-react";
+import {
+  ClipboardCheck,
+  ClipboardList,
+  Download,
+  Files,
+  FileText,
+  FileUp,
+  FlaskConical,
+  IdCard,
+  Languages,
+  LoaderCircle,
+  Mail,
+  Receipt,
+  RefreshCw,
+  Upload,
+} from "lucide-react";
 
 import { AdminDialogScaffold } from "@/components/admin-dialog-scaffold";
-import { PortalSection as Section, PortalComplete } from "./ui/portal-page-layout";
+import { PortalSection as Section, PortalComplete, PortalDateChip } from "./ui/portal-page-layout";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
 import { FilePicker } from "@/components/ui/file-picker";
@@ -175,7 +192,6 @@ function patientDocumentsReducer(
 
 function usePatientDocumentsPageContent() {
   const {
-    formatPortalDateTime,
     formatPortalFileSize,
     portalDocumentTypeLabels,
     portalStatusLabel,
@@ -462,7 +478,8 @@ function usePatientDocumentsPageContent() {
   return (
     <TabShell className="mt-0 w-full min-w-0 max-w-none space-y-3">
       <PageHeader
-        title={t.portal_documents_my_documents}
+        pageAction={<Button onClick={() => dispatchDocumentsState({ uploadOpen: true })}><Upload className="size-4" />{t.portal_documents_upload_documents}</Button>}
+        title={<SectionHeading icon={Files}>{t.portal_documents_my_documents}</SectionHeading>}
         description={t.portal_documents_only_files_explicitly_released_to_your_portal_are_visible_here}
         actions={
           <>
@@ -493,14 +510,10 @@ function usePatientDocumentsPageContent() {
       {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="flex items-center gap-2 text-base font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />{t.portal_documents_my_documents}</h2>
-        <Button onClick={() => dispatchDocumentsState({ uploadOpen: true })}><Upload className="size-4" />{t.portal_documents_upload_documents}</Button>
-      </div>
 
       {documentAlerts && documentAlerts.configured_rule_count > 0 ? (
         <Section
-          title={t.portal_documents_required_documents}
+          icon={ClipboardCheck} title={t.portal_documents_required_documents}
           className="p-3 sm:p-3"
           accessory={
             <CountBadge>
@@ -560,7 +573,7 @@ function usePatientDocumentsPageContent() {
       ) : null}
 
       {documents.length > 0 ? <div className="rounded-xl border border-border/60 bg-card p-1.5">
-        <div className="flex flex-wrap gap-1">
+        <div role="group" aria-label={t.portal_documents_category} className="flex flex-wrap justify-center gap-1">
           {PORTAL_DOCUMENT_CATEGORY_TABS.map((tab) => {
             const count = categoryCounts.get(tab.key) ?? 0;
             const label = l(tab.labelKey);
@@ -579,16 +592,11 @@ function usePatientDocumentsPageContent() {
                 type="button"
                 aria-pressed={activeCategory === tab.key}
                 onClick={() => dispatchDocumentsState({ activeCategory: tab.key })}
-                className={cn(
-                  "inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                  activeCategory === tab.key
-                    ? "bg-primary font-semibold text-primary-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                )}
+                className={portalFilterClass(activeCategory === tab.key)}
               >
                 <CategoryIcon aria-hidden="true" className="size-4 shrink-0" />
                 <span>{label}</span>
-                {count > 0 ? <span className={cn("rounded-full px-1.5 font-mono text-[11px] leading-5", activeCategory === tab.key ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted text-muted-foreground")}>{count}</span> : null}
+                {count > 0 ? <span className={cn("rounded-full px-1.5 font-mono text-[11px] leading-5", activeCategory === tab.key ? "bg-foreground/8 text-foreground" : "bg-muted text-muted-foreground")}>{count}</span> : null}
               </button>
             );
           })}
@@ -598,6 +606,7 @@ function usePatientDocumentsPageContent() {
       <section className="space-y-3">
         <section className="space-y-3">
           <Section
+            icon={Files}
             title={t.portal_documents_released_to_me}
             className="p-3 sm:p-3"
             accessory={visibleDocuments.length > 0 ? <CountBadge>{visibleDocuments.length}</CountBadge> : undefined}
@@ -631,7 +640,7 @@ function usePatientDocumentsPageContent() {
                               {item.confirmed ? t.portal_documents_confirmed : item.requires_confirmation ? t.portal_documents_needs_confirmation : t.portal_documents_released}
                             </StatusBadge>
                             <StatusBadge status={item.status}>{portalStatusLabel(item.status)}</StatusBadge>
-                            <StatusChip tone="info" title={t.portal_documents_released_at}><CalendarDays aria-hidden="true" />{formatPortalDateTime(item.shared_at)}</StatusChip>
+                            <PortalDateChip title={t.portal_documents_released_at} timestamp={item.shared_at} />
                             <span className="text-xs text-muted-foreground">{formatPortalFileSize(item.file_size)}</span>
                           </div>
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
@@ -686,7 +695,7 @@ function usePatientDocumentsPageContent() {
                               <span className="flex flex-wrap items-center gap-2">
                                 <Languages aria-hidden="true" className="size-3.5" />
                                 <span className="font-mono">{t.portal_documents_translation} {request.requested_language.toUpperCase()}</span>
-                                <StatusChip tone="info"><CalendarDays aria-hidden="true" />{formatPortalDateTime(request.requested_at)}</StatusChip>
+                                <PortalDateChip timestamp={request.requested_at} />
                               </span>
                               <StatusBadge status={request.status} className={translationRequestTone(request.status)}>
                                 {portalStatusLabel(request.status)}
@@ -775,7 +784,7 @@ function usePatientDocumentsPageContent() {
 
           {uploads.length > 0 ? (
           <Section
-            title={t.portal_documents_my_uploads}
+            icon={FileUp} title={t.portal_documents_my_uploads}
             className="p-3 sm:p-3"
             accessory={<CountBadge>{uploads.length}</CountBadge>}
           >
@@ -798,7 +807,7 @@ function usePatientDocumentsPageContent() {
                             <StatusBadge className={uploadedDocumentTone(item)}>
                               {portalDocumentValueLabel(item.art)}
                             </StatusBadge>
-                            <StatusChip tone="info" title={t.portal_documents_uploaded}><CalendarDays aria-hidden="true" />{formatPortalDateTime(item.created_at)}</StatusChip>
+                            <PortalDateChip title={t.portal_documents_uploaded} timestamp={item.created_at} />
                             <span className="text-xs text-muted-foreground">{formatPortalFileSize(item.file_size)}</span>
                           </div>
                           <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">

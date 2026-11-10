@@ -1,7 +1,8 @@
+import { PortalDateChip } from "@/components/ui/portal-date-chip";
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { CheckCircle2, Info, KeyRound, LogOut, Monitor, Save, Smartphone } from "lucide-react";
+import { CheckCircle2, Info, KeyRound, LogOut, Monitor, Save, ShieldCheck, Smartphone, UserRound, type LucideIcon } from "lucide-react";
 
-import { AdminSectionTitle } from "@/components/admin-page-patterns";
+import { AccountSectionHeading } from "@/components/account-section-heading";
 import { AppearanceSettings } from "@/components/appearance-settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,11 +34,11 @@ function useUiText() {
   return { l, lang, t };
 }
 
-function AccountSection({ title, accessory, children }: { title: string; accessory?: ReactNode; children: ReactNode }) {
+function AccountSection({ title, icon: Icon, accessory, children }: { title: string; icon: LucideIcon; accessory?: ReactNode; children: ReactNode }) {
   return (
     <section className="min-w-0 overflow-hidden rounded-xl border border-border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-3 py-2.5">
-        <AdminSectionTitle>{title}</AdminSectionTitle>
+        <AccountSectionHeading icon={Icon} title={title} />
         {accessory}
       </div>
       <div className="space-y-3 p-3">{children}</div>
@@ -63,7 +64,7 @@ export function AccountPage() {
         <div className={leadCabinet ? "min-w-0" : "grid items-start gap-3 xl:grid-cols-2"}>
           <ProfileSection />
           {leadCabinet ? null : (
-            <AccountSection title={l("account_password_title")}>
+            <AccountSection title={l("account_password_title")} icon={KeyRound}>
               <ChangePasswordForm compact />
             </AccountSection>
           )}
@@ -72,7 +73,7 @@ export function AccountPage() {
         <AppearanceSettings />
         {leadCabinet ? null : (
           <>
-            <AccountSection title={l("twofactor_title")}>
+            <AccountSection title={l("twofactor_title")} icon={ShieldCheck}>
               <TwoFactorSection embedded />
             </AccountSection>
             <SessionsSection />
@@ -160,7 +161,7 @@ function ProfileSection() {
   };
 
   return (
-    <AccountSection title={l("account_profile_title")}>
+    <AccountSection title={l("account_profile_title")} icon={UserRound}>
       <form className="space-y-3" onSubmit={(event) => void submit(event)} data-testid="account-profile-form">
         {error ? <Banner tone="error">{error}</Banner> : null}
         {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
@@ -171,7 +172,7 @@ function ProfileSection() {
           {/* A raw role code means nothing to a lead, parent or patient. */}
           {portalUser ? null : (
             <Field label={l("account_profile_role")} htmlFor="account-role">
-              <Input id="account-role" value={profile?.role ?? ""} readOnly disabled className="h-9 rounded-lg border-transparent bg-transparent px-0 font-mono text-xs text-foreground disabled:opacity-100" />
+              <Input id="account-role" value={profile?.role ?? ""} readOnly disabled className="h-9 rounded-lg border-transparent bg-transparent px-3 font-mono text-xs text-foreground disabled:opacity-100" />
             </Field>
           )}
         </div>
@@ -331,7 +332,7 @@ export function ChangePasswordForm({ onChanged, compact = false }: { onChanged?:
 
 function SessionsSection() {
   const { l } = useUiText();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const [sessions, setSessions] = useState<AccountSession[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -383,6 +384,7 @@ function SessionsSection() {
   return (
     <AccountSection
       title={l("account_sessions_title")}
+      icon={Monitor}
       accessory={
         <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg gap-1.5 text-xs" disabled={busy} onClick={() => void logoutEverywhere()}>
           <LogOut className="size-3.5" aria-hidden="true" />
@@ -420,7 +422,7 @@ function SessionsSection() {
                     </div> : null}
                     <div className="space-y-0.5">
                       <dt className="font-mono text-[10px] text-muted-foreground">{l("account_sessions_last_seen")}</dt>
-                      <dd className="font-mono tabular-nums">{formatDate(session.last_activity_at)}</dd>
+                      <dd className="font-mono tabular-nums">{user?.role === "patient" ? <PortalDateChip timestamp={session.last_activity_at} /> : formatDate(session.last_activity_at)}</dd>
                     </div>
                   </dl>
                 </div>
