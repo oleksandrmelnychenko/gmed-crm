@@ -1,3 +1,5 @@
+import { AlarmClock } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { memo } from "react";
 
 import {
@@ -28,9 +30,9 @@ function AppointmentAttentionSection({
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <div className="size-2 shrink-0 rounded-full bg-amber-500" />
+
             <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-              {title}
+              <SectionHeading icon={AlarmClock}>{title}</SectionHeading>
             </h3>
           </div>
           <p className="text-xs text-muted-foreground">{subtitle}</p>

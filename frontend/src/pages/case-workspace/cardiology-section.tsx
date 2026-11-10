@@ -1,3 +1,4 @@
+import { HeartPulse } from "lucide-react";
 import { useLang } from "@/lib/i18n";
 
 import { type CardiologyAssessment, useCaseWorkspace } from "./context";
@@ -31,6 +32,7 @@ export function CardiologySection() {
 
   return (
     <SpecialtySection<CardiologyAssessment>
+      icon={HeartPulse}
       title={t.cases_clinical_section_cardiology}
       description={t.cases_specialty_cardiology_description}
       blankValue={BLANK}

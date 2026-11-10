@@ -1,5 +1,6 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Building2, Check, FileUp, LoaderCircle, RotateCcw, Users } from "lucide-react";
+import { ClipboardCheck, Link2, ReceiptText, CalendarClock, ListOrdered, NotebookPen, FileText, Building2, Check, FileUp, LoaderCircle, RotateCcw, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -252,12 +253,12 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
       <DialogContent className="left-1/2 right-auto top-1/2 bottom-auto flex h-[min(940px,calc(100dvh-16px))] max-h-[calc(100dvh-16px)] w-[calc(100vw-16px)] max-w-[1480px] -translate-x-1/2 -translate-y-1/2 flex-col gap-0 overflow-hidden rounded-xl border-border/70 bg-card p-0 shadow-2xl sm:h-[min(92dvh,940px)] sm:w-[min(96vw,1480px)] sm:max-w-[1480px] sm:pb-0">
         <form onSubmit={save} className="flex min-h-0 flex-1 flex-col" aria-label={tx("Импорт инвойса", "Rechnungsimport")}>
           <DialogHeader className="shrink-0 gap-0 border-b border-border/70 bg-muted/20 px-5 py-4 pr-14 sm:px-6">
-            <DialogTitle>{tx("Проверка входящего инвойса", "Eingangsrechnung prüfen")}</DialogTitle>
+            <DialogTitle><SectionHeading icon={ClipboardCheck}>{tx("Проверка входящего инвойса", "Eingangsrechnung prüfen")}</SectionHeading></DialogTitle>
           </DialogHeader>
           <div className="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-[minmax(0,1.08fr)_minmax(28rem,0.92fr)] lg:overflow-hidden">
             <section aria-label={tx("Оригинал инвойса", "Originalrechnung")} className="flex min-h-[32rem] flex-col border-b bg-muted/15 lg:min-h-0 lg:border-r lg:border-b-0">
               <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-card px-4 py-3 sm:px-5">
-                <div className="flex min-w-0 items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--color-orange-500))]" /><span className="truncate">{file?.name || tx("Оригинал документа", "Originaldokument")}</span></div>
+                <div className="flex min-w-0 items-center gap-2 text-sm font-semibold"><SectionHeading icon={FileText}>{file?.name || tx("Оригинал документа", "Originaldokument")}</SectionHeading></div>
                 <Button type="button" size="sm" disabled={saving} onClick={() => { if (fileInput.current) { fileInput.current.value = ""; fileInput.current.click(); } }}><FileUp className="size-4" />{file ? tx("Заменить", "Ersetzen") : tx("Выбрать файл", "Datei wählen")}</Button>
               </div>
               <input ref={fileInput} type="file" className="sr-only" aria-label={tx("Файл инвойса", "Rechnungsdatei")} accept="application/pdf,image/png,image/jpeg,application/xml,text/xml,.xml" onChange={(event) => { void selectFile(event.target.files?.[0]); event.target.value = ""; }} />
@@ -274,7 +275,7 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
             </section>
             <section aria-label={tx("Данные и клиент", "Angaben und Patient")} className="space-y-4 bg-muted/10 p-4 sm:p-5 lg:overflow-y-auto">
               <div className="space-y-3 rounded-xl border border-border/70 bg-card p-4 shadow-sm">
-                <h3 className="flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--color-orange-500))]" />{tx("К чему относится входящий счёт", "Zuordnung der Eingangsrechnung")}</h3>
+                <h3 className="flex items-center gap-2 text-sm font-semibold"><SectionHeading icon={Link2}>{tx("К чему относится входящий счёт", "Zuordnung der Eingangsrechnung")}</SectionHeading></h3>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <Button
                     type="button"
@@ -304,7 +305,7 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                 ? tx("Оригинал уже сохранён в документах компании. Повторная попытка использует тот же документ.", "Das Original ist bereits in den Unternehmensdokumenten gespeichert. Beim erneuten Versuch wird dasselbe Dokument verwendet.")
                 : tx("Оригинал уже сохранён у выбранного клиента. Повторная попытка использует тот же документ.", "Das Original ist beim gewählten Patienten gespeichert. Beim erneuten Versuch wird dasselbe Dokument verwendet.")}</p> : null}
               {scope === "patient_order" ? <div className="space-y-3 rounded-xl border border-border/70 bg-card p-4 shadow-sm">
-                <h3 className="flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--color-orange-500))]" /><Users className="size-4 text-muted-foreground" />{tx("Привязка к клиенту", "Patientenzuordnung")}</h3>
+                <h3 className="flex items-center gap-2 text-sm font-semibold"><SectionHeading icon={Users}>{tx("Привязка к клиенту", "Patientenzuordnung")}</SectionHeading></h3>
                 {manualPatientId === null && patientMatch && !parsing ? <p className="text-xs text-muted-foreground" role="status">{patientMatch.status === "matched"
                   ? tx("Клиент подставлен из документа. Проверьте привязку; заказ можно выбрать при необходимости.", "Patient aus dem Dokument zugeordnet. Zuordnung prüfen; bei Bedarf einen Auftrag auswählen.")
                   : patientMatch.status === "ambiguous"
@@ -325,7 +326,7 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                 </div> : null}
               </div> : null}
               <div className="space-y-3 rounded-xl border border-border/70 bg-card p-4 shadow-sm">
-                <div className="flex items-center justify-between gap-2"><h3 className="flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--color-orange-500))]" />{tx("Реквизиты инвойса", "Rechnungsangaben")}</h3>
+                <div className="flex items-center justify-between gap-2"><h3 className="flex items-center gap-2 text-sm font-semibold"><SectionHeading icon={ReceiptText}>{tx("Реквизиты инвойса", "Rechnungsangaben")}</SectionHeading></h3>
                   {file && !documentId && !saving ? <Button type="button" size="sm" variant="ghost" disabled={parsing} onClick={() => void recognize(file)}><RotateCcw className="size-3.5" />{tx("Распознать", "Erkennen")}</Button> : null}
                 </div>
                 {parsing ? <div className="flex items-center justify-between gap-2 rounded-lg bg-muted/50 p-3 text-xs" role="status"><span className="flex items-center gap-2"><LoaderCircle className="size-4 animate-spin" />{tx("Распознаём документ…", "Dokument wird erkannt…")}</span><Button variant="ghost" size="sm" type="button" onClick={() => { generation.current += 1; request.current?.abort(); setParsing(false); }}>{tx("Заполнить вручную", "Manuell ausfüllen")}</Button></div> : null}
@@ -362,7 +363,7 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                 {!parsing && fields.amount_gross && !totalsValid ? <p className="text-xs text-amber-700">{tx("Укажите все суммы: без НДС + НДС должно равняться итогу. Если НДС нет, укажите 0.", "Alle Beträge angeben: Netto + Umsatzsteuer muss Brutto entsprechen. Ohne Umsatzsteuer 0 eintragen.")}</p> : null}
               </div>
               {preview?.payment && (preview.payment.terms?.length || preview.payment.method || preview.payment.amount_due != null) ? <div className="space-y-2 rounded-xl border border-border/70 bg-card p-4 text-xs shadow-sm">
-                <h3 className="flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--color-orange-500))]" />{tx("Условия оплаты из документа", "Zahlungsbedingungen laut Dokument")}</h3>
+                <h3 className="flex items-center gap-2 text-sm font-semibold"><SectionHeading icon={CalendarClock}>{tx("Условия оплаты из документа", "Zahlungsbedingungen laut Dokument")}</SectionHeading></h3>
                 {preview.payment.terms?.map((term, index) => <p key={index}>{term}</p>)}
                 {preview.payment.amount_due != null ? <p className="font-medium">{tx("К оплате по XML", "Zahlbetrag laut XML")}: {formatRecognizedMoney(preview.payment.amount_due, preview.fields.currency)}</p> : null}
                 {preview.payment.prepaid != null ? <p>{tx("Предоплата по XML", "Vorauszahlung laut XML")}: {formatRecognizedMoney(preview.payment.prepaid, preview.fields.currency)}</p> : null}
@@ -370,7 +371,7 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                 {preview.warnings.includes("payable_differs_from_total") ? <p>{tx("К оплате и итог инвойса различаются. В инвойс переносится полная сумма; передоплата из XML не создаёт платёж автоматически.", "Zahlbetrag und Rechnungsbrutto unterscheiden sich. Übernommen wird der volle Rechnungsbetrag; eine XML-Vorauszahlung erzeugt nicht automatisch eine Zahlung.")}</p> : null}
                 {preview.payment.method === "direct_debit" ? <p>{tx("Автоматическое списание", "Lastschrift")}{preview.payment.collection_date ? ` · ${preview.payment.collection_date.split("-").reverse().join(".")}` : ""}. {tx("Дата списания показана отдельно от срока оплаты.", "Das Abbuchungsdatum wird getrennt von der Fälligkeit angezeigt.")}</p> : null}
               </div> : null}
-              {preview?.line_items?.length ? <div className="space-y-3 rounded-xl border border-border/70 bg-card p-4 shadow-sm"><h3 className="flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--color-orange-500))]" />{tx("Позиции в документе", "Positionen im Dokument")} <span className="rounded-full border border-border/70 bg-muted/40 px-2 py-0.5 text-xs font-medium tabular-nums">{preview.line_items.length}</span></h3>
+              {preview?.line_items?.length ? <div className="space-y-3 rounded-xl border border-border/70 bg-card p-4 shadow-sm"><h3 className="flex items-center gap-2 text-sm font-semibold"><SectionHeading icon={ListOrdered}>{tx("Позиции в документе", "Positionen im Dokument")}</SectionHeading> <span className="rounded-full border border-border/70 bg-muted/40 px-2 py-0.5 text-xs font-medium tabular-nums">{preview.line_items.length}</span></h3>
                 {preview.warnings.includes("line_items_total_mismatch") ? <Banner tone="warning" withIcon>{tx("Сумма распознанных позиций не совпадает с итогом. Проверьте, все ли позиции прочитаны.", "Die Summe der erkannten Positionen stimmt nicht mit dem Gesamtbetrag überein. Prüfen, ob alle Positionen erfasst wurden.")}</Banner> : null}
                 {preview.warnings.includes("line_item_amount_recovered_from_subtotal") ? <Banner tone="warning" withIcon>{tx("В одной позиции OCR потерял десятичный разделитель. Сумма восстановлена только по точному совпадению с напечатанным подытогом; сверьте позицию с оригиналом.", "Bei einer Position hat die OCR das Dezimaltrennzeichen verloren. Der Betrag wurde nur anhand der exakten Übereinstimmung mit der gedruckten Zwischensumme rekonstruiert; bitte mit dem Original abgleichen.")}</Banner> : null}
                 <div className="divide-y rounded-lg border text-xs">{preview.line_items.map((line, index) => <div key={index} className="space-y-1.5 p-3">
@@ -383,7 +384,7 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                   </div>
                 </div>)}</div></div> : null}
               <div className="space-y-3 rounded-xl border border-border/70 bg-card p-4 shadow-sm">
-                <h3 className="flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--color-orange-500))]" />{tx("Проверка и примечание", "Prüfung und Notiz")}</h3>
+                <h3 className="flex items-center gap-2 text-sm font-semibold"><SectionHeading icon={NotebookPen}>{tx("Проверка и примечание", "Prüfung und Notiz")}</SectionHeading></h3>
                 {preview?.text ? <div><Button type="button" variant="outline" size="sm" onClick={() => setShowText(!showText)}>{showText ? tx("Скрыть текст", "Text ausblenden") : tx("Показать распознанный текст", "Erkannten Text anzeigen")}</Button>{showText ? <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-border/70 bg-muted/30 p-3 text-xs">{preview.text}</pre> : null}</div> : null}
                 <Field label={tx("Примечание", "Notiz")}><textarea aria-label={tx("Примечание", "Notiz")} value={notes} disabled={saving} onChange={(event) => setNotes(event.target.value)} rows={3} className="w-full rounded-md border bg-field px-3 py-2 text-sm" /></Field>
                 <label className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/25 p-3 text-xs leading-5"><input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-orange-500" checked={confirmed} disabled={parsing || saving || !contextReady} onChange={(event) => setConfirmed(event.target.checked)} /><span>{scope === "company"

@@ -1,3 +1,5 @@
+import { SlidersHorizontal } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import {
   Dialog,
   DialogContent,
@@ -54,7 +56,7 @@ export function DesktopSchedulerFiltersDialog({
         <DialogContent className="sm:max-w-[420px]">
           <DialogHeader className="space-y-0">
             <DialogTitle className="text-sm font-semibold text-foreground">
-              {title}
+              <SectionHeading icon={SlidersHorizontal}>{title}</SectionHeading>
             </DialogTitle>
           </DialogHeader>
           <div className="grid gap-3 pt-1">

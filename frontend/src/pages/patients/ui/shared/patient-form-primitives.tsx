@@ -1,5 +1,6 @@
 import { type ComponentProps } from "react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import {
   formatUnknownValue,
   getLang,
@@ -23,16 +24,15 @@ import { nationalityCountryCode } from "../../model/nationalities";
 export { Field };
 
 export function FormSection(props: ComponentProps<typeof ShellSection>) {
-  return <ShellSection showMarker={false} {...props} />;
+  return <ShellSection {...props} />;
 }
 
-export function PatientFormSection({ title, accessory, children, className }: ComponentProps<typeof ShellSection>) {
+export function PatientFormSection({ icon, title, accessory, children, className }: ComponentProps<typeof ShellSection>) {
   return (
     <section data-slot="patient-form-section" className={cn("min-w-0 rounded-xl border border-border bg-card", className)}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-4 py-3">
         <h3 className="flex min-w-0 items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
-          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-          {title}
+          <SectionHeading icon={icon}>{title}</SectionHeading>
         </h3>
         {accessory}
       </div>

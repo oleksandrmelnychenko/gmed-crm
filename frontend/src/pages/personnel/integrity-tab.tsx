@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, LoaderCircle, ShieldCheck, Stamp } from "lucide-react";
+import { ListChecks, Anchor, Download, LoaderCircle, ShieldCheck, Stamp } from "lucide-react";
 
 import { AdminTableCard } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -237,6 +237,7 @@ export function IntegrityTab({ canManage }: { canManage: boolean }) {
       {data ? (
         <>
           <AdminTableCard
+            icon={ListChecks}
             title={t.personnel_integrity_runs}
             count={runs.length}
             accessory={
@@ -293,6 +294,7 @@ export function IntegrityTab({ canManage }: { canManage: boolean }) {
           </AdminTableCard>
 
           <AdminTableCard
+            icon={Anchor}
             title={t.personnel_anchors}
             count={anchors.length}
             accessory={

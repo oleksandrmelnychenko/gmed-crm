@@ -436,7 +436,7 @@ describe("PatientClinicalTab laboratory history", () => {
 });
 
 describe("DiagnosisTreeSection", () => {
-  it("renders a decorative brand marker immediately before the section title", () => {
+  it("renders the diagnosis icon and a decorative marker after the section title", () => {
     const html = renderToStaticMarkup(
       <DiagnosisTreeSection
         allDoctors={[]}
@@ -448,7 +448,8 @@ describe("DiagnosisTreeSection", () => {
       />,
     );
 
-    expect(html).toMatch(/<span aria-hidden="true"[^>]*><\/span><h3[^>]*>Диагнозы<\/h3>/);
+    expect(html).toContain("lucide-git-fork");
+    expect(html).toMatch(/Диагнозы<\/span><span aria-hidden="true" data-slot="heading-marker"/);
   });
 
   it("keeps long diagnosis values out of the action column", () => {

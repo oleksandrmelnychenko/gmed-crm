@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { LoaderCircle, PauseCircle, Pencil, PlayCircle, Plus, Trash2 } from "lucide-react";
+import { LoaderCircle, PauseCircle, Pencil, Pill, PlayCircle, Plus, Trash2, type LucideIcon } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { DataTable } from "@/components/data-table/data-table";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -283,6 +284,7 @@ type ListViewArgs<T extends { id?: string | null }> = {
 };
 
 function ClinicalListSection<T extends { id?: string | null }>({
+  icon,
   title,
   items,
   blank,
@@ -299,6 +301,7 @@ function ClinicalListSection<T extends { id?: string | null }>({
   headerAction,
   editorClassName,
 }: {
+  icon?: LucideIcon;
   title: string;
   items: T[];
   blank: () => T;
@@ -387,8 +390,7 @@ function ClinicalListSection<T extends { id?: string | null }>({
     <section className={cn("overflow-hidden rounded-lg border", toneClasses.section)}>
       <header className={cn("flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2", toneClasses.header)}>
         <div className="flex min-w-0 items-center gap-2">
-          <span aria-hidden data-slot="heading-marker" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-          <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
+          <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground"><SectionHeading icon={icon}>{title}</SectionHeading></h3>
           <Badge variant="outline" className="h-5 rounded-full bg-background px-2 text-[10px] font-medium tabular-nums">
             {list.length}
           </Badge>
@@ -441,9 +443,9 @@ function ClinicalListSection<T extends { id?: string | null }>({
           <DialogContent overlayClassName="bg-[color-mix(in_srgb,var(--overlay,#000)_40%,transparent)]" className={cn("flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[680px] sm:pb-0", editorClassName)} data-testid="clinical-entry-editor-dialog">
             <DialogHeader className="shrink-0 border-b border-border/50 bg-card px-4 py-3 pr-14 text-left">
               <DialogTitle className="text-[15px] font-semibold">
-                {editing?.index === null
+                <SectionHeading icon={icon}>{editing?.index === null
                   ? `${tx("Добавить", "Hinzufügen")}: ${title}`
-                  : `${tx("Редактировать", "Bearbeiten")}: ${title}`}
+                  : `${tx("Редактировать", "Bearbeiten")}: ${title}`}</SectionHeading>
               </DialogTitle>
             </DialogHeader>
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-muted px-3 py-3 sm:px-4">
@@ -825,7 +827,7 @@ function MedicationHoldDialog({
       <DialogContent className="sm:max-w-md">
         <form onSubmit={handleSubmit} className="space-y-4">
           <DialogHeader>
-            <DialogTitle>{tx("На холд", "Auf Hold")}</DialogTitle>
+            <DialogTitle><SectionHeading icon={PauseCircle}>{tx("На холд", "Auf Hold")}</SectionHeading></DialogTitle>
             <DialogDescription>{editor?.medication.handelsname || editor?.medication.wirkstoff || tx("Медикамент", "Medikament")}</DialogDescription>
           </DialogHeader>
           {draft ? (
@@ -922,6 +924,7 @@ export function PatientMedicationSection({
   return (
     <>
       <ClinicalListSection<ClinicalMedication>
+        icon={Pill}
         title={tx("Медикаменты", "Medikation")}
         editorClassName={MEDICATION_EDITOR_CLASS_NAME}
         headerAction={headerAction}

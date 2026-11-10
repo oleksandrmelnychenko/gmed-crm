@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { LoaderCircle } from "lucide-react";
+import { Activity, ClipboardList, FileHeart, LoaderCircle, Scissors } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -495,6 +495,7 @@ function ScopedListSection<T extends EpisodeEntry>({
         <ScopeToggle scope={scope} onChange={setScope} />
       </div>
       <CaseItemList<T>
+        icon={ClipboardList}
         title={title}
         description={description}
         items={visible}
@@ -656,7 +657,7 @@ export function CaseRecordBefundeSection() {
         },
       ]}
       formContent={({ form, updateField, disabled }) => (
-        <Panel title={t.cases_workspace_section_befunde}>
+        <Panel icon={FileHeart} title={t.cases_workspace_section_befunde}>
           <Field label={tx("Название", "Titel")} required>
             <Input
               value={form.title}
@@ -829,7 +830,7 @@ export function CaseRecordProceduresSection() {
         },
       ]}
       formContent={({ form, updateField, disabled }) => (
-        <Panel title={t.cases_workspace_section_procedures}>
+        <Panel icon={Scissors} title={t.cases_workspace_section_procedures}>
           <Field label={tx("Описание", "Beschreibung")} required>
             <Input
               value={form.label}
@@ -941,7 +942,7 @@ export function CaseRecordVerlaufSection() {
         },
       ]}
       formContent={({ form, updateField, disabled }) => (
-        <Panel title={t.cases_workspace_section_verlauf}>
+        <Panel icon={Activity} title={t.cases_workspace_section_verlauf}>
           <Field label={tx("Дата", "Datum")}>
             <Input
               type="date"

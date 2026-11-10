@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { AlertCircle, CalendarCheck2, LoaderCircle, Mail, MapPinned, Phone } from "lucide-react";
+import { Building2, Clock3, AlertCircle, CalendarCheck2, LoaderCircle, Mail, MapPinned, Phone } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -392,7 +392,6 @@ export function ConciergeProviderBookingDialog<TService extends BookableConcierg
       <DialogContent className={conciergeDialogContentClassName}>
         <ConciergeDialogHeader
           icon={CalendarCheck2}
-          tone="plain"
           title={labels.title}
           description={serviceTitle ? `${serviceTitle} · ${labels.description}` : labels.description}
         />
@@ -407,7 +406,7 @@ export function ConciergeProviderBookingDialog<TService extends BookableConcierg
             <ConciergeDialogBody>
               <div className="grid items-start gap-4 lg:grid-cols-[minmax(18rem,0.8fr)_minmax(0,1.2fr)]">
                 <div className="space-y-4">
-                  <ConciergeDialogSection title={labels.provider} icon={CalendarCheck2}>
+                  <ConciergeDialogSection title={labels.provider} icon={Building2}>
                     <div className="space-y-3">
                       <ConciergeField label={labels.provider}>
                         <NativeComboboxSelect
@@ -462,7 +461,7 @@ export function ConciergeProviderBookingDialog<TService extends BookableConcierg
                   </ConciergeDialogSection>
                 </div>
 
-                <ConciergeDialogSection title={labels.title} icon={CalendarCheck2}>
+                <ConciergeDialogSection title={labels.title} icon={Clock3}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <ConciergeField label={labels.startsAt}>
                       <Input type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} required />

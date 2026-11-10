@@ -1,3 +1,5 @@
+import { BadgeCheck, ContactRound, ScanBarcode, ScanSearch, type LucideIcon } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -327,12 +329,12 @@ function CandidateRow({
   );
 }
 
-function ReviewColumn({ title, dotClass, children }: { title: string; dotClass: string; children: ReactNode }) {
+function ReviewColumn({ title, icon, children }: { title: string; icon: LucideIcon; children: ReactNode }) {
   return (
     <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <header className="flex items-center gap-2 border-b border-border/60 bg-muted/15 px-3 py-2">
-        <span className={cn("size-1.5 rounded-full", dotClass)} />
-        <h4 className="text-[11px] font-semibold text-foreground">{title}</h4>
+
+        <h4 className="text-[11px] font-semibold text-foreground"><SectionHeading icon={icon}>{title}</SectionHeading></h4>
       </header>
       <div className="px-3 py-1.5">{children}</div>
     </section>
@@ -371,22 +373,22 @@ function CandidateReview({
     <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <header className="border-b border-border/60 bg-muted/20 px-3.5 py-2.5">
         <div className="flex items-center gap-2">
-          <span className="size-2 rounded-full bg-foreground/70" />
+
           <h3 className="text-[13px] font-semibold text-foreground">
-            {tx("Проверить выбранную идентификацию", "Ausgewählte Identität prüfen")}
+            <SectionHeading icon={BadgeCheck}>{tx("Проверить выбранную идентификацию", "Ausgewählte Identität prüfen")}</SectionHeading>
           </h3>
         </div>
       </header>
       <div className="space-y-3 p-3">
         <div className="grid gap-2 sm:grid-cols-2">
-          <ReviewColumn title={tx("Запись пациента", "Patienteneintrag")} dotClass="bg-slate-500">
+          <ReviewColumn title={tx("Запись пациента", "Patienteneintrag")} icon={ContactRound}>
             <CandidateFact label={tx("Название", "Name")} value={medication.name} />
             <CandidateFact label={tx("ACT-значение", "ACT-Bedeutung")} value={medication.substance} />
             <CandidateFact label={tx("Дозировка", "Stärke")} value={medication.strength} />
             <CandidateFact label={tx("Форма", "Form")} value={medication.form} />
             <CandidateFact label="PZN / ATC" value={[medication.pzn, medication.atc_code].filter(Boolean).join(" / ")} />
           </ReviewColumn>
-          <ReviewColumn title={tx("Выбранный кандидат", "Ausgewählter Kandidat")} dotClass="bg-emerald-500">
+          <ReviewColumn title={tx("Выбранный кандидат", "Ausgewählter Kandidat")} icon={ScanSearch}>
             <CandidateFact label={tx("Название", "Name")} value={product.brand_name} />
             <CandidateFact label={tx("ACT-значение", "ACT-Bedeutung")} value={product.substances.join(", ")} />
             <CandidateFact label={tx("Дозировка", "Stärke")} value={product.strength} />
@@ -501,7 +503,7 @@ export function MedicationIdentityWorkflow({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-foreground">
-            {tx("Идентифицировать медикамент", "Medikament identifizieren")}
+            <SectionHeading icon={ScanBarcode}>{tx("Идентифицировать медикамент", "Medikament identifizieren")}</SectionHeading>
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
             {candidateSet.medication.name} · {candidateSet.candidates.length} {tx("кандидатов", "Kandidaten")}

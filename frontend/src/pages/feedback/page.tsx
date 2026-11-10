@@ -12,6 +12,17 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  Inbox,
+  ChartNoAxesCombined,
+  ThumbsUp,
+  Languages,
+  Hospital,
+  Lightbulb,
+  FileLock2,
+  ClipboardCheck,
+  MessagesSquare,
+  MessageSquareText,
+  ListChecks,
   BarChart3,
   CalendarDays,
   History,
@@ -233,7 +244,7 @@ const FEEDBACK_TREATMENT_SUCCESS_LABEL_KEYS = {
   no: "feedback_treatment_success_no",
 } as const satisfies Partial<Record<string, TranslationKey>>;
 
-function titleWithDot(title: ReactNode, icon: LucideIcon = ClipboardPen) {
+function titleWithDot(title: ReactNode, icon: LucideIcon) {
   return <SectionHeading icon={icon}>{title}</SectionHeading>;
 }
 
@@ -332,16 +343,18 @@ function FeedbackSummaryLine({ label, value }: { label: string; value?: string |
 
 function FeedbackTextSection({
   title,
+  icon,
   children,
 }: {
   title: string;
+  icon: LucideIcon;
   children: ReactNode;
 }) {
   return (
     <section className="min-w-0 rounded-lg bg-card p-3">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
+          <h2 className={tokens.text.sectionTitle}>{titleWithDot(title, icon)}</h2>
         </div>
       </div>
       <div className="mt-3 text-sm text-foreground">{children}</div>
@@ -810,7 +823,7 @@ function feedbackCard(item: PortalFeedbackItem, t: Translations, withInternal = 
         <section className="rounded-lg bg-card p-3">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.feedback_scores)}</h2>
+              <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.feedback_scores, Star)}</h2>
             </div>
           </div>
           <div className="mt-3 grid gap-2.5 xl:grid-cols-2">
@@ -834,22 +847,22 @@ function feedbackCard(item: PortalFeedbackItem, t: Translations, withInternal = 
         </section>
 
         {item.comments ? (
-          <FeedbackTextSection title={t.feedback_comment}>
+          <FeedbackTextSection icon={MessageSquare} title={t.feedback_comment}>
             {item.comments}
           </FeedbackTextSection>
         ) : null}
         {item.improvement_notes ? (
-          <FeedbackTextSection title={t.feedback_improvement_notes}>
+          <FeedbackTextSection icon={Lightbulb} title={t.feedback_improvement_notes}>
             {item.improvement_notes}
           </FeedbackTextSection>
         ) : null}
         {withInternal && item.internal_note ? (
-          <FeedbackTextSection title={t.feedback_internal_note}>
+          <FeedbackTextSection icon={FileLock2} title={t.feedback_internal_note}>
             {item.internal_note}
           </FeedbackTextSection>
         ) : null}
         {item.review_note ? (
-          <FeedbackTextSection title={t.feedback_review_note}>
+          <FeedbackTextSection icon={ClipboardCheck} title={t.feedback_review_note}>
             {item.review_note}
           </FeedbackTextSection>
         ) : null}
@@ -859,11 +872,13 @@ function feedbackCard(item: PortalFeedbackItem, t: Translations, withInternal = 
 
 function RankingList({
   title,
+  icon,
   empty,
   rows,
   horizontal = false,
 }: {
   title: string;
+  icon: LucideIcon;
   empty: string;
   rows: Array<{ id: string; name: string; subtitle: string; value: string }>;
   horizontal?: boolean;
@@ -872,7 +887,7 @@ function RankingList({
     <section className="rounded-lg bg-card p-3">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
+          <h2 className={tokens.text.sectionTitle}>{titleWithDot(title, icon)}</h2>
         </div>
       </div>
       <div className={cn("mt-3", horizontal ? "grid gap-1.5 md:grid-cols-2 2xl:grid-cols-5" : "space-y-1.5")}>
@@ -1066,6 +1081,7 @@ function PatientFeedbackContent({
       <Sheet open={Boolean(activeFeedback)} onOpenChange={(open) => !open && setActiveFeedbackId("")}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
           <AdminSheetScaffold
+            icon={MessageSquareText}
             title={t.feedback_detail_title}
             description={t.feedback_detail_description}
           >
@@ -2007,7 +2023,7 @@ function useStaffFeedbackWorkspaceContent() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2 className={tokens.text.sectionTitle}>
-                      {titleWithDot(t.feedback_summary_title)}
+                      {titleWithDot(t.feedback_summary_title, ChartNoAxesCombined)}
                     </h2>
                   </div>
                 </div>
@@ -2031,6 +2047,7 @@ function useStaffFeedbackWorkspaceContent() {
               </section>
 
               <RankingList
+                icon={ThumbsUp}
                 title={t.feedback_top_promoters_title}
                 empty={t.feedback_no_promoter_ranking}
                 rows={summary.top_promoters.slice(0, 5).map((item) => ({
@@ -2042,6 +2059,7 @@ function useStaffFeedbackWorkspaceContent() {
               />
 
               <RankingList
+                icon={Languages}
                 title={t.feedback_interpreter_ranking_title}
                 empty={t.feedback_no_interpreter_feedback}
                 rows={summary.interpreter_ranking.slice(0, 5).map((item) => ({
@@ -2054,6 +2072,7 @@ function useStaffFeedbackWorkspaceContent() {
 
               <div className="md:col-span-2 2xl:col-span-4">
                 <RankingList
+                  icon={Hospital}
                   title={t.feedback_clinic_ranking_title}
                   empty={t.feedback_no_clinic_ranking}
                   horizontal
@@ -2069,7 +2088,8 @@ function useStaffFeedbackWorkspaceContent() {
         ) : null}
 
         <AdminTableCard
-          title={titleWithDot(t.feedback_queue_title)}
+          icon={Inbox}
+          title={t.feedback_queue_title}
           description={t.feedback_queue_description}
           count={feedback.length}
         >
@@ -2112,6 +2132,7 @@ function useStaffFeedbackWorkspaceContent() {
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
           <form className="flex h-full flex-col" onSubmit={(event) => void handleCapture(event)}>
             <AdminSheetScaffold
+              icon={ClipboardPen}
               title={t.feedback_capture_button}
               description={t.feedback_capture_description}
               footer={
@@ -2125,7 +2146,7 @@ function useStaffFeedbackWorkspaceContent() {
               }
             >
               <div className="space-y-3">
-                <FormSection title={`${t.feedback_patient} / ${t.feedback_visit}`}>
+                <FormSection icon={CalendarDays} title={`${t.feedback_patient} / ${t.feedback_visit}`}>
                   <div className="grid gap-3 md:grid-cols-2">
                     <Field label={t.feedback_patient}>
                       <NativeComboboxSelect
@@ -2189,11 +2210,11 @@ function useStaffFeedbackWorkspaceContent() {
                 {/* The page banner lies behind the sheet on a narrow screen. */}
                 {error && !capturePatientError ? <Banner tone="error">{error}</Banner> : null}
 
-                <FormSection title={t.feedback_scores}>
+                <FormSection icon={Star} title={t.feedback_scores}>
                   <ScoreGrid t={t} form={form} setForm={setForm} />
                 </FormSection>
 
-                <FormSection title={`${t.feedback_comment} / ${t.feedback_internal_note}`}>
+                <FormSection icon={MessagesSquare} title={`${t.feedback_comment} / ${t.feedback_internal_note}`}>
                   <FeedbackFormNotes t={t} form={form} setForm={setForm} includeInternal />
                 </FormSection>
               </div>
@@ -2207,6 +2228,7 @@ function useStaffFeedbackWorkspaceContent() {
           {activeReview ? (
             <form className="flex h-full flex-col" onSubmit={(event) => void handleReview(event)}>
               <AdminSheetScaffold
+                icon={ListChecks}
                 title={t.feedback_review_title}
                 footer={
                   <SheetFormFooter
@@ -2227,7 +2249,7 @@ function useStaffFeedbackWorkspaceContent() {
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
-                          {titleWithDot(t.feedback_review_actions)}
+                          {titleWithDot(t.feedback_review_actions, ListChecks)}
                         </h2>
                       </div>
                     </div>

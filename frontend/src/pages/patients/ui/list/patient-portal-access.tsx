@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { CalendarDays, KeyRound, LoaderCircle, Mail } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
 import { EmailDomainWarning } from "@/components/email-domain-warning";
@@ -276,7 +277,7 @@ export function PatientPortalAccessDetail({
       <Dialog open={confirmOpen} onOpenChange={(open) => !busy && setConfirmOpen(open)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{de ? "Neues Passwort ausgeben?" : "Выдать новый пароль?"}</DialogTitle>
+            <DialogTitle><SectionHeading icon={KeyRound}>{de ? "Neues Passwort ausgeben?" : "Выдать новый пароль?"}</SectionHeading></DialogTitle>
             <DialogDescription>
               {de
                 ? "Das bisherige Passwort funktioniert danach nicht mehr, offene Sitzungen des Patienten werden beendet."
@@ -302,7 +303,7 @@ export function PatientPortalAccessDetail({
       <Dialog open={emailConfirmOpen} onOpenChange={(open) => !busy && setEmailConfirmOpen(open)}>
         <DialogContent className="max-w-md" data-testid="patient-portal-email-dialog">
           <DialogHeader>
-            <DialogTitle>{de ? "Zugang per E-Mail senden?" : "Отправить доступ на e-mail?"}</DialogTitle>
+            <DialogTitle><SectionHeading icon={Mail}>{de ? "Zugang per E-Mail senden?" : "Отправить доступ на e-mail?"}</SectionHeading></DialogTitle>
             <DialogDescription>
               {!mailReady
                 ? de

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, type ReactNode } from "react";
-import { Lock, Scale } from "lucide-react";
+import { Files, Lock, Scale } from "lucide-react";
 
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -285,7 +285,7 @@ export function PersonnelDocumentsTable({
       rowActionsWidth={rowActionsWidth}
       mobilePrimaryColumnId="archive_file_name"
       mobileDetailColumnIds={["category", "period", "marks", "archived_at", "file_size", "note"]}
-      toolbarStart={<TableTitle count={rows.length}>{title}</TableTitle>}
+      toolbarStart={<TableTitle icon={Files} count={rows.length}>{title}</TableTitle>}
       emptyState={<EmptyCell>{emptyText}</EmptyCell>}
     />
   );

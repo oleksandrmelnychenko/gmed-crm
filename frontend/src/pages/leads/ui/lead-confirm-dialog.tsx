@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
-import { LoaderCircle } from "lucide-react";
+import { CircleHelp, LoaderCircle, TriangleAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { SectionHeading } from "@/components/ui/section-heading";
 import {
   Dialog,
   DialogContent,
@@ -50,7 +51,7 @@ export function LeadConfirmDialog({
     >
       <DialogContent className="max-w-md" data-testid={testId}>
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+          <DialogTitle><SectionHeading icon={destructive ? TriangleAlert : CircleHelp}>{title}</SectionHeading></DialogTitle>
           {description ? <DialogDescription>{description}</DialogDescription> : null}
         </DialogHeader>
         <DialogFooter>

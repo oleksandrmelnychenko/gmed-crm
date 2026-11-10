@@ -842,6 +842,7 @@ function AdminActivityDetailSheet({
   return (
     <Dialog open={detailOpen} onOpenChange={onOpenChange}>
       <AdminDialogScaffold
+        icon={History}
         maxWidthClassName="sm:w-[calc(100vw-2rem)] sm:max-w-[800px]"
         title={
           selectedActivity
@@ -1109,14 +1110,10 @@ function AdminActivityViewSelector({
               <button
                 key={option.value}
                 type="button"
+                data-workspace-tab
                 aria-pressed={view === option.value}
                 onClick={() => onChange(option.value)}
-                className={cn(
-                  "inline-flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-                  view === option.value
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
+                className="inline-flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               >
                 <Icon className="size-3.5" />
                 {option.label}

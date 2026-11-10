@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  Cpu,
   Activity,
   ChevronRight,
   Database,
@@ -546,6 +547,7 @@ function createAdminHealthFieldPatch<K extends keyof AdminHealthState>(
 }
 
 type AdminHealthDetailMeta = {
+  icon: LucideIcon;
   title: string;
   description: string;
 };
@@ -576,6 +578,7 @@ function AdminHealthDetailSheet({
     >
       {data && detailPanel && detailMeta ? (
         <AdminDialogScaffold
+          icon={detailMeta.icon}
           title={detailMeta.title}
           description={detailMeta.description}
           maxWidthClassName="sm:w-[calc(100vw-2rem)] sm:max-w-[800px]"
@@ -1121,6 +1124,7 @@ export function AdminHealthPage() {
 
     if (detailPanel === "database") {
       return {
+        icon: Database,
         title: t.health_section_database,
         description: `${t.health_db_size}: ${data.database.size}`,
       };
@@ -1128,6 +1132,7 @@ export function AdminHealthPage() {
 
     if (detailPanel === "access") {
       return {
+        icon: ShieldCheck,
         title: t.health_section_access,
         description: `${t.health_sessions_active}: ${data.sessions.active}`,
       };
@@ -1135,12 +1140,14 @@ export function AdminHealthPage() {
 
     if (detailPanel === "ai") {
       return {
+        icon: Cpu,
         title: aiCopy.section,
         description: `${aiCopy.operational}: ${aiStatusLabel(data.medication_ai.operational_status, aiCopy)}`,
       };
     }
 
     return {
+      icon: Files,
       title: t.health_section_data,
       description: `${t.health_data}: ${datasetVolume}`,
     };

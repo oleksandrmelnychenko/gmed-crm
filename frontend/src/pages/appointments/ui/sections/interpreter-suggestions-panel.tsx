@@ -1,3 +1,5 @@
+import { History, Languages } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Banner, CountBadge, Section, tokens } from "@/components/ui-shell";
@@ -61,6 +63,7 @@ export function InterpreterSuggestionsPanel({
 
   return (
     <Section
+      icon={Languages}
       title={t.appointments_interpreter_suggestions_title}
     >
       <p className={tokens.text.muted}>
@@ -188,7 +191,7 @@ export function InterpreterSuggestionsPanel({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h4 className="text-sm font-semibold text-foreground">
-              {t.appointments_interpreter_history_title}
+              <SectionHeading icon={History}>{t.appointments_interpreter_history_title}</SectionHeading>
             </h4>
             <p className="mt-1 text-xs text-muted-foreground">
               {preferredCount} {interpreterPreferenceLabel("preferred")} -{" "}

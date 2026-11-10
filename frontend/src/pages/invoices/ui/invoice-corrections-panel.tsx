@@ -1,5 +1,6 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useState } from "react";
-import { Download, LoaderCircle } from "lucide-react";
+import {FileMinus2, BellOff,  Download, LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Banner, StatusBadge, inputClass, tokens } from "@/components/ui-shell";
@@ -42,9 +43,7 @@ export function StornoDocumentCard({ invoice }: { invoice: InvoiceItem }) {
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-foreground">
-            {t.revenue_invoices_storno_title} {storno.document_number}
-          </p>
+          <h3><SectionHeading icon={FileMinus2}>{t.revenue_invoices_storno_title} {storno.document_number}</SectionHeading></h3>
           <p className="text-xs text-muted-foreground">
             {formatDate(storno.issued_on, locale)} ·{" "}
             <span className="font-mono tabular-nums">
@@ -122,7 +121,7 @@ export function DunningBlockPanel({ invoice, canManage, onChanged }: DunningBloc
       data-testid="invoice-dunning-block"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-semibold text-foreground">{t.revenue_invoices_dunning_block}</span>
+        <h3><SectionHeading icon={BellOff}>{t.revenue_invoices_dunning_block}</SectionHeading></h3>
         {active ? (
           <StatusBadge tone="warning">
             {t.revenue_invoices_dunning_block_active.replace("{reason}", active.reason)}

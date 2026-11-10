@@ -20,6 +20,11 @@ import {
 import { createPortal, flushSync } from "react-dom";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
+  History,
+  ScanText,
+  Tags,
+  Link2,
+  FileSearch,
   ArrowUpRight,
   Blocks,
   CalendarClock,
@@ -106,7 +111,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -3938,7 +3942,7 @@ function StaffDocumentsPage({
             className="flex min-h-0 flex-1 flex-col"
           >
             <DialogHeader className="relative shrink-0 border-b border-border px-5 py-4 pr-12">
-              <DialogTitle>{t.documents_generate_title}</DialogTitle>
+              <DialogTitle><SectionHeading icon={LayoutTemplate}>{t.documents_generate_title}</SectionHeading></DialogTitle>
               <Button
                 type="button"
                 variant="ghost"
@@ -4718,7 +4722,8 @@ function StaffDocumentsPage({
           }}
         >
           <AdminDialogScaffold
-            title={<SectionHeading icon={FolderInput}>{metaText.intakeUploadTitle}</SectionHeading>}
+            icon={FolderInput}
+            title={metaText.intakeUploadTitle}
             description={metaText.intakeUploadDescription}
             onSubmit={handleIntakeBatchUpload}
             maxWidthClassName="sm:max-w-lg"
@@ -4878,6 +4883,7 @@ function StaffDocumentsPage({
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[760px]">
           <form onSubmit={handleUpload} className="flex flex-1 min-h-0 flex-col">
             <AdminSheetScaffold
+              icon={FileUp}
               title={t.documents_upload}
               description={text.uploadDescription}
               footer={(
@@ -5349,6 +5355,7 @@ function StaffDocumentsPage({
             className="flex flex-1 min-h-0 flex-col"
           >
             <AdminSheetScaffold
+              icon={Languages}
               title={t.documents_request_translation}
               description={t.documents_translation_requests}
               footer={(
@@ -5362,7 +5369,7 @@ function StaffDocumentsPage({
               )}
             >
               {translationError ? <Banner tone="error">{translationError}</Banner> : null}
-              <DocumentSheetSection icon={Languages} title={t.documents_request_translation}>
+              <section className="space-y-4 rounded-lg border border-border bg-card p-4">
                 <Field label={t.patients_languages} required>
                   <NativeComboboxSelect
                     value={translationForm.requestedLanguage}
@@ -5394,7 +5401,7 @@ function StaffDocumentsPage({
                     placeholder={t.documents_translation_note_placeholder}
                   />
                 </Field>
-              </DocumentSheetSection>
+              </section>
             </AdminSheetScaffold>
           </form>
         </SheetContent>
@@ -5410,6 +5417,7 @@ function StaffDocumentsPage({
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[640px]">
           <form onSubmit={handleCreateShare} className="flex flex-1 min-h-0 flex-col">
             <AdminSheetScaffold
+              icon={Share2}
               title={t.documents_create_share}
               description={t.documents_share}
               footer={(
@@ -5623,7 +5631,7 @@ function StaffDocumentsPage({
             setMetadataEditOpen(open);
           }}
         >
-          <DialogContent className="flex h-[92vh] w-[98vw] max-w-[1680px] flex-col overflow-hidden rounded-xl p-0 sm:w-[98vw] sm:max-w-[1680px]">
+          <DialogContent className="flex h-[92dvh] flex-col gap-0 overflow-hidden rounded-xl p-0 sm:pb-0 sm:w-[98vw] sm:max-w-[1680px]">
             <DialogHeader className="sr-only">
               <DialogTitle>{t.documents_edit_metadata_title}</DialogTitle>
               <DialogDescription>
@@ -5636,8 +5644,9 @@ function StaffDocumentsPage({
               onSubmit={handleSave}
               className="grid min-h-0 flex-1 md:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]"
             >
-              <div className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-border/70">
+              <div className="flex min-h-0 min-w-0 flex-col overflow-hidden border-border/70 md:border-r">
                 <AdminSheetScaffold
+                  icon={FilePenLine}
                   title={t.documents_edit_metadata_title}
                   footer={(
                     <SheetFormFooter
@@ -6288,33 +6297,17 @@ function StaffDocumentsPage({
           }
         }}
       >
-        <DialogContent className="max-w-2xl rounded-xl p-0">
-          <DialogHeader className="border-b border-border/70 px-6 pt-6 pb-4">
-            <DialogTitle>{t.documents_delete_file}</DialogTitle>
-            <DialogDescription>
-              {deleteTarget?.name
-                ? `${deleteTarget.name} · ${t.documents_delete_file_description}`
-                : t.documents_delete_file_description}
-            </DialogDescription>
-          </DialogHeader>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void handleDeleteStoredFile();
-            }}
-            className="space-y-5 px-6 py-5"
-          >
-            {deleteError ? <Banner tone="error">{deleteError}</Banner> : null}
-            <Banner tone="warning">{t.documents_delete_file_hint}</Banner>
-            <Field label={t.documents_delete_file_reason} required>
-              <textarea
-                value={deleteReason}
-                onChange={(event) => setDeleteReason(event.target.value)}
-                placeholder={t.documents_delete_file_reason_placeholder}
-                className={textareaClassName}
-              />
-            </Field>
-            <DialogFooter>
+        <AdminDialogScaffold
+          icon={Trash2}
+          title={t.documents_delete_file}
+          description={deleteTarget?.name ? `${deleteTarget.name} · ${t.documents_delete_file_description}` : t.documents_delete_file_description}
+          maxWidthClassName="sm:max-w-xl"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void handleDeleteStoredFile();
+          }}
+          footer={
+            <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-3">
               <Button
                 type="button"
                 variant="outline"
@@ -6340,9 +6333,20 @@ function StaffDocumentsPage({
                 )}
                 {deleteBusy ? t.documents_deleting : t.documents_delete_file_confirm}
               </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
+            </div>
+          }
+        >
+          {deleteError ? <Banner tone="error">{deleteError}</Banner> : null}
+          <Banner tone="warning">{t.documents_delete_file_hint}</Banner>
+          <Field label={t.documents_delete_file_reason} required>
+            <textarea
+              value={deleteReason}
+              onChange={(event) => setDeleteReason(event.target.value)}
+              placeholder={t.documents_delete_file_reason_placeholder}
+              className={textareaClassName}
+            />
+          </Field>
+        </AdminDialogScaffold>
       </Dialog>
 
       <Dialog
@@ -6354,13 +6358,13 @@ function StaffDocumentsPage({
         }}
       >
         <DialogContent
-          className="flex h-[86vh] w-[94vw] max-w-none flex-col overflow-hidden rounded-xl p-0 duration-0 data-closed:animate-none data-open:animate-none sm:w-[70vw] sm:max-w-[1500px]"
+          className="flex h-[86dvh] max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0 sm:pb-0 duration-0 data-closed:animate-none data-open:animate-none sm:w-[70vw] sm:max-w-[1500px]"
         >
           <DialogHeader className="border-b border-border/70 px-5 py-4">
             <div className="flex min-w-0 flex-wrap items-start justify-between gap-4 pr-14">
               <div className="min-w-0">
                 <DialogTitle className="truncate text-base">
-                  {documentPreview?.title ?? t.documents_preview}
+                  <SectionHeading icon={FileSearch}>{documentPreview?.title ?? t.documents_preview}</SectionHeading>
                 </DialogTitle>
                 <DialogDescription className="truncate">
                   {documentPreview?.contentType ?? ""}
@@ -6660,6 +6664,7 @@ function StaffDocumentsPage({
                   <div className="grid xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_310px]">
                     <DocumentMetaPanel
                       className="border-b border-border/70 xl:border-b-0 xl:border-r"
+                      icon={Link2}
                       title={l("documents_links")}
                     >
                       <DocumentMetaHighlight
@@ -6690,6 +6695,7 @@ function StaffDocumentsPage({
 
                     <DocumentMetaPanel
                       className="border-b border-border/70 xl:border-b-0 xl:border-r"
+                      icon={Tags}
                       title={l("documents_classification")}
                     >
                       <DocumentMetaHighlight
@@ -6830,10 +6836,7 @@ function StaffDocumentsPage({
                       <div className="flex w-full flex-col gap-2">
                         <div className="w-full">
                           <div className="mb-2 flex items-center gap-2.5">
-                            <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-                            <span className="min-w-0 break-words text-[13px] font-semibold text-foreground">
-                              {t.patients_notes}
-                            </span>
+                            <SectionHeading icon={NotebookPen}>{t.patients_notes}</SectionHeading>
                           </div>
                           <p className="w-full whitespace-pre-wrap text-[13.5px] font-normal leading-6 text-muted-foreground">
                             {detail.notes}
@@ -6846,11 +6849,8 @@ function StaffDocumentsPage({
 
                 {detailVersions.length > 0 ? (
                   <SectionCard
-                    icon={<span aria-hidden className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />}
-                    iconChrome="plain"
-                    neutralSurface
+                    icon={History}
                     title={t.documents_version_history}
-                    tone="neutral"
                   >
                     <div className="space-y-1">
                       {detailVersions.map((version, index) => {
@@ -6934,11 +6934,8 @@ function StaffDocumentsPage({
                 ) : null}
 
                 <SectionCard
-                  icon={<span aria-hidden className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />}
-                  iconChrome="plain"
-                  neutralSurface
+                  icon={ScanText}
                   title={t.documents_text_extraction}
-                  tone="neutral"
                   accessory={
                     canRequestTranslation && detail.has_stored_file ? (
                       <Button
@@ -7061,11 +7058,8 @@ function StaffDocumentsPage({
 
                 {detail.patient_id ? (
                   <SectionCard
-                    icon={<span aria-hidden className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />}
-                    iconChrome="plain"
-                    neutralSurface
+                    icon={Languages}
                     title={t.documents_translation_requests}
-                    tone="neutral"
                     accessory={
                       <div className="flex flex-wrap items-center justify-end gap-2">
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
@@ -7612,11 +7606,8 @@ function StaffDocumentsPage({
 
                 {canReviewSelectedDocument && editForm ? (
                   <SectionCard
-                    icon={<span aria-hidden className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />}
-                    iconChrome="plain"
-                    neutralSurface
+                    icon={ListChecks}
                     title={t.documents_interpreter_review}
-                    tone="neutral"
                   >
                     {saveError ? (
                       <Banner tone="error">{saveError}</Banner>
@@ -7736,11 +7727,8 @@ function StaffDocumentsPage({
                 ) : null}
 
                 <SectionCard
-                  icon={<span aria-hidden className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />}
-                  iconChrome="plain"
-                  neutralSurface
+                  icon={ContactRound}
                   title={t.documents_patient_portal}
-                  tone="neutral"
                   accessory={
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       <span
@@ -7904,11 +7892,8 @@ function StaffDocumentsPage({
 
                 {canViewShares ? (
                   <SectionCard
-                    icon={<span aria-hidden className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />}
-                    iconChrome="plain"
-                    neutralSurface
+                    icon={Share2}
                     title={t.documents_share}
-                    tone="neutral"
                     accessory={
                       <div className="flex flex-wrap items-center justify-end gap-2">
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
@@ -8738,72 +8723,6 @@ function Banner({
   );
 }
 
-type DocumentSectionTone =
-  | "brand"
-  | "neutral"
-  | "sky"
-  | "amber"
-  | "emerald"
-  | "rose"
-  | "violet";
-
-function documentSectionToneBorder(tone: DocumentSectionTone) {
-  switch (tone) {
-    case "brand":
-      return "border-[var(--brand)]/25";
-    case "sky":
-      return "border-sky-200/80";
-    case "amber":
-      return "border-amber-200/80";
-    case "emerald":
-      return "border-emerald-200/80";
-    case "rose":
-      return "border-rose-200/80";
-    case "violet":
-      return "border-violet-200/80";
-    default:
-      return "border-border/60";
-  }
-}
-
-function documentSectionToneHeader(tone: DocumentSectionTone) {
-  switch (tone) {
-    case "brand":
-      return "border-[var(--brand)]/15 bg-muted";
-    case "sky":
-      return "border-sky-200/70 bg-sky-50/60";
-    case "amber":
-      return "border-amber-200/70 bg-amber-50/65";
-    case "emerald":
-      return "border-emerald-200/70 bg-emerald-50/60";
-    case "rose":
-      return "border-rose-200/70 bg-rose-50/60";
-    case "violet":
-      return "border-violet-200/70 bg-violet-50/60";
-    default:
-      return "border-border/50 bg-muted/25";
-  }
-}
-
-function documentSectionToneIcon(tone: DocumentSectionTone) {
-  switch (tone) {
-    case "brand":
-      return "border-[var(--brand)]/25 bg-[var(--brand)]/10 text-[var(--brand)]";
-    case "sky":
-      return "border-sky-200 bg-sky-100 text-sky-700";
-    case "amber":
-      return "border-amber-200 bg-amber-100 text-amber-700";
-    case "emerald":
-      return "border-emerald-200 bg-emerald-100 text-emerald-700";
-    case "rose":
-      return "border-rose-200 bg-rose-100 text-rose-700";
-    case "violet":
-      return "border-violet-200 bg-violet-100 text-violet-700";
-    default:
-      return "border-border/60 bg-background text-muted-foreground";
-  }
-}
-
 function ShareProviderContextPanel({
   hasEligibleProviders,
   orderId,
@@ -8990,51 +8909,16 @@ function DocumentProviderCombobox({
   );
 }
 
-function SectionCard({
-  title,
-  accessory,
-  children,
-  icon,
-  iconChrome = "default",
-  neutralSurface = false,
-  tone = "neutral",
-}: {
+function SectionCard({ title, accessory, children, icon }: {
   title: ReactNode;
   accessory?: ReactNode;
   children: ReactNode;
-  icon?: ReactNode;
-  iconChrome?: "default" | "plain";
-  neutralSurface?: boolean;
-  tone?: DocumentSectionTone;
+  icon: LucideIcon;
 }) {
   return (
-    <section
-      className={cn(
-        "overflow-hidden rounded-xl border bg-card shadow-sm",
-        neutralSurface ? "border-border/60" : documentSectionToneBorder(tone),
-      )}
-    >
-      <div
-        className={cn(
-          "flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3",
-          documentSectionToneHeader(tone),
-        )}
-      >
-        <div className="flex min-w-0 items-center gap-2">
-          <span
-            className={cn(
-              "inline-flex size-8 shrink-0 items-center justify-center rounded-lg",
-              iconChrome === "default" && "border shadow-sm",
-              documentSectionToneIcon(tone),
-              iconChrome === "plain" && "border-0 bg-transparent shadow-none",
-            )}
-          >
-            {icon ?? <span className="size-2 rounded-full bg-current" />}
-          </span>
-          <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">
-            {title}
-          </h3>
-        </div>
+    <section className="overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-card px-4 py-3">
+        <h3><SectionHeading icon={icon}>{title}</SectionHeading></h3>
         {accessory ? (
           <div className="min-w-0 max-w-full">{accessory}</div>
         ) : null}
@@ -9083,11 +8967,13 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
 }
 
 function DocumentMetaPanel({
+  icon,
   title,
   compact = false,
   className,
   children,
 }: {
+  icon: LucideIcon;
   title: ReactNode;
   compact?: boolean;
   className?: string;
@@ -9096,10 +8982,7 @@ function DocumentMetaPanel({
   return (
     <div className={cn("p-3", compact && "p-0", className)}>
       <div className={cn("flex items-center gap-2", compact ? "mb-1.5" : "mb-2")}>
-        <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-        <p className="min-w-0 break-words text-[13px] font-semibold text-foreground">
-          {title}
-        </p>
+        <SectionHeading icon={icon}>{title}</SectionHeading>
       </div>
       <div className="space-y-1">{children}</div>
     </div>

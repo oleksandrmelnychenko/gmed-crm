@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import {
   useEffect,
   useMemo,
@@ -5,6 +6,10 @@ import {
   type FormEvent,
 } from "react";
 import {
+  TextAlignStart,
+  Hospital,
+  Stethoscope,
+  BriefcaseBusiness,
   ArrowDown,
   ArrowUp,
   BriefcaseMedical,
@@ -926,6 +931,7 @@ function SpecializationSheet({
       >
         <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <AdminSheetScaffold
+            icon={Stethoscope}
             title={title}
             footer={
               <SheetFormFooter
@@ -1326,6 +1332,7 @@ function WorkTypeSheet({
       >
         <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <AdminSheetScaffold
+            icon={BriefcaseBusiness}
             title={title}
             footer={
               <SheetFormFooter
@@ -1591,7 +1598,7 @@ function WorkTypeSheet({
             <section className="border-t border-border/70 pt-4">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-sm font-semibold text-foreground">
-                  {tx("Описания", "Beschreibungen")}
+                  <SectionHeading icon={TextAlignStart}>{tx("Описания", "Beschreibungen")}</SectionHeading>
                 </h3>
                 <Button
                   type="button"
@@ -1708,7 +1715,7 @@ function WorkTypeSheet({
             <section className="border-t border-border/70 pt-4">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-sm font-semibold text-foreground">
-                  {tx("Провайдеры", "Provider")}
+                  <SectionHeading icon={Hospital}>{tx("Провайдеры", "Provider")}</SectionHeading>
                 </h3>
                 <span className="font-mono text-xs tabular-nums text-muted-foreground">
                   {linkedProviders.length}

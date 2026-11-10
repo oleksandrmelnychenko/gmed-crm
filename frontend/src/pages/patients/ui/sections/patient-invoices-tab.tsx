@@ -11,18 +11,34 @@ import {
 } from "react";
 
 import {
+  ArrowLeftRight,
+  BellRing,
+  BookOpen,
   CheckCircle2,
   CircleDollarSign,
+  CircleMinus,
+  ClipboardList,
   Copy,
   Download,
   ExternalLink,
+  Files,
   KeyRound,
+  LockKeyhole,
   MessageSquare,
+  MessageSquareText,
   MoreHorizontal,
+  NotebookPen,
+  Package,
+  PackageMinus,
+  PackagePlus,
   Plus,
   RotateCcw,
+  UserRoundCog,
+  Wallet,
+  WalletCards,
 } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { AdminToolbar } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import { WritableScope } from "@/components/read-only-scope";
@@ -2643,8 +2659,7 @@ function usePatientInvoicesTabContent({
             toolbarStart={
               <>
                 <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-                  <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-                  {lang === "de" ? "Kontobewegungen" : "Движения взаиморасчётов"}
+                  <SectionHeading icon={ArrowLeftRight}>{lang === "de" ? "Kontobewegungen" : "Движения взаиморасчётов"}</SectionHeading>
                 </span>
                 <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
                 <NativeComboboxSelect
@@ -2706,8 +2721,7 @@ function usePatientInvoicesTabContent({
             toolbarStart={
               <>
                 <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-                  <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-                  {lang === "de" ? "Belege und Leistungen" : "Документы и услуги"}
+                  <SectionHeading icon={Files}>{lang === "de" ? "Belege und Leistungen" : "Документы и услуги"}</SectionHeading>
                 </span>
                 <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
               </>
@@ -2719,7 +2733,7 @@ function usePatientInvoicesTabContent({
         </>
       ) : null}
 
-      <PatientSheetScaffold presentation="dialog"
+      <PatientSheetScaffold icon={Wallet} presentation="dialog"
         open={balanceAdjustmentOpen && canManageBalance}
         onOpenChange={(open) => {
           setBalanceAdjustmentOpen(open);
@@ -2770,7 +2784,7 @@ function usePatientInvoicesTabContent({
             : "Используйте только для сумм, которые ещё не отражены счётом, оплатой, возвратом или кредит-нотой. Ошибочная запись сторнируется и остаётся в истории."}
         </Banner>
 
-        <PatientFormSection title={lang === "de" ? "Buchung" : "Операция"}>
+        <PatientFormSection icon={Wallet} title={lang === "de" ? "Buchung" : "Операция"}>
           <div className="grid gap-3 md:grid-cols-2">
             <Field label={lang === "de" ? "Richtung" : "Направление"} htmlFor="balance-adjustment-direction">
               <NativeComboboxSelect
@@ -2880,7 +2894,7 @@ function usePatientInvoicesTabContent({
           </div>
         </PatientFormSection>
 
-        <PatientFormSection title={lang === "de" ? "Begründung" : "Основание"}>
+        <PatientFormSection icon={MessageSquareText} title={lang === "de" ? "Begründung" : "Основание"}>
           <div className="space-y-3">
             <Field label={lang === "de" ? "Grund" : "Причина"} htmlFor="balance-adjustment-reason">
               <Input
@@ -2935,6 +2949,7 @@ function usePatientInvoicesTabContent({
       </PatientSheetScaffold>
 
       <PatientSheetScaffold
+        icon={UserRoundCog}
         open={portalAccountOpen && canManagePortalAccount}
         onOpenChange={(open) => {
           if (open) setPortalAccountOpen(true);
@@ -3042,7 +3057,7 @@ function usePatientInvoicesTabContent({
               </div>
             </div>
 
-            {!activatedPortalAccount.reused ? <FormSection title={lang === "de" ? "Zugangsdaten" : "Данные для входа"}>
+            {!activatedPortalAccount.reused ? <FormSection icon={KeyRound} title={lang === "de" ? "Zugangsdaten" : "Данные для входа"}>
               <div className="space-y-3">
                 <Field
                   label={lang === "de" ? "E-Mail" : "Электронная почта"}
@@ -3113,7 +3128,7 @@ function usePatientInvoicesTabContent({
                   : "Существующий аккаунт родителя для этого же человека подключается с прежним паролем. Для нового аккаунта укажите пароль."}
             </Banner>
 
-            <FormSection title={lang === "de" ? "Patientenzugang" : "Доступ пациента"}>
+            <FormSection icon={LockKeyhole} title={lang === "de" ? "Patientenzugang" : "Доступ пациента"}>
               <div className="space-y-3">
                 <Field
                   label={lang === "de" ? "E-Mail" : "Электронная почта"}
@@ -3213,7 +3228,7 @@ function usePatientInvoicesTabContent({
       </PatientSheetScaffold>
 
 
-      <PatientSheetScaffold presentation="dialog"
+      <PatientSheetScaffold icon={PackagePlus} presentation="dialog"
         open={assignOpen && canManagePackages}
         onOpenChange={(open) => setAssignOpen(open)}
         width="form-heavy"
@@ -3249,7 +3264,7 @@ function usePatientInvoicesTabContent({
           </Banner>
         ) : null}
 
-        <PatientFormSection title={t.patient_invoices_package}>
+        <PatientFormSection icon={Package} title={t.patient_invoices_package}>
           <div className="grid gap-3 md:grid-cols-2">
             <Field label={t.patient_invoices_package} htmlFor="assign-package-id">
               <NativeComboboxSelect
@@ -3329,7 +3344,7 @@ function usePatientInvoicesTabContent({
           </div>
         </PatientFormSection>
 
-        <PatientFormSection title={t.patient_invoices_payer}>
+        <PatientFormSection icon={WalletCards} title={t.patient_invoices_payer}>
           <div className="grid gap-3 md:grid-cols-2">
             <Field label={t.patient_invoices_payer} htmlFor="assign-package-payer">
               <Input
@@ -3365,7 +3380,7 @@ function usePatientInvoicesTabContent({
           </div>
         </PatientFormSection>
 
-        <PatientFormSection title={l("patients_additional")}>
+        <PatientFormSection icon={NotebookPen} title={l("patients_additional")}>
           <Field label={t.patient_invoices_notes} htmlFor="assign-package-notes">
             <textarea
               id="assign-package-notes"
@@ -3384,7 +3399,7 @@ function usePatientInvoicesTabContent({
         </PatientFormSection>
       </PatientSheetScaffold>
 
-      <PatientSheetScaffold presentation="dialog"
+      <PatientSheetScaffold icon={CircleMinus} presentation="dialog"
         open={Boolean(withdrawTarget)}
         onOpenChange={(open) => {
           if (!open) setWithdrawTarget(null);
@@ -3438,6 +3453,7 @@ function usePatientInvoicesTabContent({
       </PatientSheetScaffold>
 
       <PatientSheetScaffold
+        icon={ClipboardList}
         open={Boolean(consumeTargetId) && canManagePackages}
         onOpenChange={(open) => {
           if (!open) closeConsumeSheet();
@@ -3475,7 +3491,7 @@ function usePatientInvoicesTabContent({
           </Banner>
         ) : null}
 
-        <FormSection title={l("patients_consumption")}>
+        <FormSection icon={PackageMinus} title={l("patients_consumption")}>
           <div className="grid gap-3 md:grid-cols-2">
             <Field label={t.patient_invoices_item} htmlFor="consume-package-item">
               <NativeComboboxSelect
@@ -3551,7 +3567,7 @@ function usePatientInvoicesTabContent({
           </div>
         </FormSection>
 
-        <FormSection title={l("patients_additional")}>
+        <FormSection icon={NotebookPen} title={l("patients_additional")}>
           <Field label={t.patient_invoices_consumption_note} htmlFor="consume-package-note">
             <textarea
               id="consume-package-note"
@@ -3584,8 +3600,7 @@ function usePatientInvoicesTabContent({
           toolbarStart={
             <>
               <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-                {t.patient_invoices_service_packages}
+              <SectionHeading icon={Package}>{t.patient_invoices_service_packages}</SectionHeading>
               </span>
               {canManagePackages ? (
                 <Button
@@ -3676,8 +3691,7 @@ function usePatientInvoicesTabContent({
           toolbarStart={
             <>
               <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-                {t.patient_invoices_accounting_ledger}
+              <SectionHeading icon={BookOpen}>{t.patient_invoices_accounting_ledger}</SectionHeading>
               </span>
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
             </>
@@ -3701,8 +3715,7 @@ function usePatientInvoicesTabContent({
           toolbarStart={
             <>
               <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-                {t.patient_invoices_payment_followup}
+              <SectionHeading icon={BellRing}>{t.patient_invoices_payment_followup}</SectionHeading>
               </span>
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
             </>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Download, Lock } from "lucide-react";
+import { ContactRound, Download, Lock } from "lucide-react";
 
 import { Banner, EmptyCell, InfoRow, PageHeader, Section, TabLoader, TabShell } from "@/components/ui-shell";
 import { toast } from "@/components/ui/toast";
@@ -58,7 +58,7 @@ export function MyPersonnelFilePage() {
       {missing ? <EmptyCell>{t.personnel_my_file_missing}</EmptyCell> : null}
       {employee ? (
         <>
-          <Section title={employee.display_name}>
+          <Section icon={ContactRound} title={employee.display_name}>
             <div className="grid gap-4 sm:grid-cols-2">
               <InfoRow label={t.personnel_number} value={<span className="font-mono">{employee.personnel_number || "—"}</span>} />
               <InfoRow

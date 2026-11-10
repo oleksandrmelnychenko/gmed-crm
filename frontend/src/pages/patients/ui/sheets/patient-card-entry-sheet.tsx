@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { LoaderCircle } from "lucide-react";
+import { ClipboardPenLine, ClipboardPlus, LoaderCircle, Text } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -144,6 +144,7 @@ function PatientCardEntrySheetContent({
 
   return (
     <PatientSheetScaffold
+      icon={ClipboardPlus}
       open={open}
       onOpenChange={onOpenChange}
       title={l("patients_add_card_entry")}
@@ -168,7 +169,7 @@ function PatientCardEntrySheetContent({
         </>
       }
     >
-      <FormSection title={l("patients_entry")}>
+      <FormSection icon={ClipboardPenLine} title={l("patients_entry")}>
         <div className="grid gap-3 md:grid-cols-2">
           <FormField label={l("patients_entry_date")} htmlFor="patient-card-entry-date">
             <Input
@@ -214,7 +215,7 @@ function PatientCardEntrySheetContent({
         </FormField>
       </FormSection>
 
-      <FormSection title={l("patients_content")}>
+      <FormSection icon={Text} title={l("patients_content")}>
         <FormField label={l("patients_note")} htmlFor="patient-card-entry-content">
           <textarea
             id="patient-card-entry-content"

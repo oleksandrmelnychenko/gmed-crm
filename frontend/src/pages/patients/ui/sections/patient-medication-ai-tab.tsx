@@ -1,3 +1,5 @@
+import { ClipboardCheck, Database, Lightbulb, ScanSearch, ShieldCheck } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useState } from "react";
 
 import { AiMark } from "@/components/ui/ai-mark";
@@ -18,6 +20,8 @@ import { MedicationIntelligencePanel } from "./medication-intelligence-panel";
 type PatientMedicationAiTabProps = {
   patientId: string;
 };
+
+const stepIcons = [Database, ScanSearch, ClipboardCheck];
 
 export function PatientMedicationAiTab({ patientId }: PatientMedicationAiTabProps) {
   const { lang } = useLang();
@@ -85,9 +89,9 @@ export function PatientMedicationAiTab({ patientId }: PatientMedicationAiTabProp
     <section className="space-y-4" aria-label={lang === "de" ? "KI-Medikationsanalyse" : "AI-анализ медикаментов"}>
       <header className="flex flex-col gap-3 border-b border-border/70 pb-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
-          <AiMark className="size-4 text-foreground" />
+
           <h2 className="text-base font-semibold text-foreground">
-            {lang === "de" ? "KI-Medikationsanalyse" : "AI-анализ медикаментов"}
+            <SectionHeading icon={AiMark}>{lang === "de" ? "KI-Medikationsanalyse" : "AI-анализ медикаментов"}</SectionHeading>
           </h2>
         </div>
         <Button
@@ -110,8 +114,8 @@ export function PatientMedicationAiTab({ patientId }: PatientMedicationAiTabProp
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader className="border-b border-border/70 pb-3">
             <div className="flex items-center gap-2">
-              <AiMark className="size-4 text-foreground" />
-              <DialogTitle>{copy.title}</DialogTitle>
+
+              <DialogTitle><SectionHeading icon={AiMark}>{copy.title}</SectionHeading></DialogTitle>
             </div>
             <DialogDescription>{copy.description}</DialogDescription>
           </DialogHeader>
@@ -121,8 +125,7 @@ export function PatientMedicationAiTab({ patientId }: PatientMedicationAiTabProp
               {copy.steps.map((step, index) => (
                 <li key={step.title} className="rounded-lg border border-border/70 bg-muted/10 p-3">
                   <div className="flex items-center gap-2">
-                    <span className="size-1.5 rounded-full bg-[var(--dot,var(--color-orange-500))]" />
-                    <span className="text-xs font-semibold text-foreground">{index + 1}. {step.title}</span>
+                    <SectionHeading icon={stepIcons[index]}>{index + 1}. {step.title}</SectionHeading>
                   </div>
                   <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{step.text}</p>
                 </li>
@@ -130,12 +133,12 @@ export function PatientMedicationAiTab({ patientId }: PatientMedicationAiTabProp
             </ol>
 
             <section className="rounded-lg border border-border/70 px-3 py-3">
-              <h3 className="text-xs font-semibold text-foreground">{copy.purposeTitle}</h3>
+              <h3 className="text-xs font-semibold text-foreground"><SectionHeading icon={Lightbulb}>{copy.purposeTitle}</SectionHeading></h3>
               <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{copy.purpose}</p>
             </section>
 
             <section className="rounded-lg border border-sky-200 bg-sky-50/70 px-3 py-3">
-              <h3 className="text-xs font-semibold text-sky-950">{copy.safetyTitle}</h3>
+              <h3 className="text-xs font-semibold text-sky-950"><SectionHeading icon={ShieldCheck}>{copy.safetyTitle}</SectionHeading></h3>
               <ul className="mt-2 space-y-1.5">
                 {copy.safety.map((item) => (
                   <li key={item} className="flex gap-2 text-xs leading-relaxed text-sky-950/75">

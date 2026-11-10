@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
-import { HelpCircle } from "lucide-react";
+import { BookOpen, HelpCircle, SlidersHorizontal, type LucideIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { SectionHeading } from "@/components/ui/section-heading";
 import {
   Dialog,
   DialogContent,
@@ -49,7 +50,7 @@ export function AdminGuideButton({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
+            <DialogTitle><SectionHeading icon={BookOpen}>{title}</SectionHeading></DialogTitle>
             {description ? <DialogDescription>{description}</DialogDescription> : null}
           </DialogHeader>
 
@@ -75,16 +76,15 @@ export function AdminGuideButton({
 }
 
 type GuideSectionProps = {
+  icon?: LucideIcon;
   title: ReactNode;
   children: ReactNode;
 };
 
-export function GuideSection({ title, children }: GuideSectionProps) {
+export function GuideSection({ title, icon, children }: GuideSectionProps) {
   return (
     <section className="space-y-1.5">
-      <h4 className="text-[12px] font-semibold text-muted-foreground">
-        {title}
-      </h4>
+      <h4><SectionHeading icon={icon}>{title}</SectionHeading></h4>
       <div className="text-muted-foreground">{children}</div>
     </section>
   );
@@ -94,7 +94,7 @@ function TableToolbarGuide() {
   const { t } = useLang();
 
   return (
-    <GuideSection title={t.admin_guide_table_toolbar}>
+    <GuideSection icon={SlidersHorizontal} title={t.admin_guide_table_toolbar}>
       <ul className="space-y-1">
         <li>
           <span className="font-medium text-foreground">+ {t.table_filter}</span>{" "}

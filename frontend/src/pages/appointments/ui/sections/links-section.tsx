@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, Link2 } from "lucide-react";
 
 import { Section } from "@/components/ui-shell";
 import { useAuth } from "@/lib/auth";
@@ -38,6 +38,7 @@ function AppointmentLinksSection({
 
   return (
     <Section
+      icon={Link2}
       title={t.compliance_col_linked_records}
     >
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">

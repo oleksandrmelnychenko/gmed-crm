@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import {
   ArrowRight,
   CalendarDays,
@@ -52,10 +53,7 @@ export function StaffDashboardActivitySection({
         <div className="flex flex-col overflow-hidden rounded-lg border border-border/70 bg-card">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <div className="flex items-center gap-2">
-              <CalendarDays className="size-4 text-muted-foreground" />
-              <h3 className="text-[14px] font-semibold text-foreground">
-                {tr.dash_upcoming ?? tr.common_unknown}
-              </h3>
+              <h3><SectionHeading icon={CalendarDays}>{tr.dash_upcoming ?? tr.common_unknown}</SectionHeading></h3>
             </div>
             <button
               type="button"
@@ -111,10 +109,7 @@ export function StaffDashboardActivitySection({
         <div className="flex flex-col overflow-hidden rounded-lg border border-border/70 bg-card">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <div className="flex items-center gap-2">
-              <CheckCircle2 className="size-4 text-muted-foreground" />
-              <h3 className="text-[14px] font-semibold text-foreground">
-                {tr.dash_my_tasks ?? tr.common_unknown}
-              </h3>
+              <h3><SectionHeading icon={CheckCircle2}>{tr.dash_my_tasks ?? tr.common_unknown}</SectionHeading></h3>
               {openTasksCount > 0 ? (
                 <span className="rounded-full bg-[var(--brand-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--brand)]">
                   {openTasksCount}

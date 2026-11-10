@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   ORDER_LOADED_EVENT,
@@ -22,29 +23,62 @@ import {
 } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
-  ArrowUpRight,
+  Activity,
   AlertTriangle,
+  ArrowUpRight,
   Ban,
+  BriefcaseMedical,
   CalendarClock,
+  CalendarRange,
+  ChartNoAxesCombined,
   CheckCircle2,
-  CircleSlash,
   ChevronDown,
   ChevronRight,
+  CirclePlus,
+  CircleSlash,
+  ClipboardCheck,
   ClipboardList,
+  ClipboardPlus,
+  Coins,
+  Files,
   FileText,
+  FolderOpen,
+  HandCoins,
+  Handshake,
+  History,
+  Inbox,
+  ListChecks,
+  ListOrdered,
+  ListPlus,
+  ListTodo,
   LoaderCircle,
+  Milestone,
+  NotebookPen,
+  NotebookText,
+  PackageCheck,
+  Paperclip,
   Pause,
   Play,
   Plus,
   ReceiptText,
   RefreshCw,
   RotateCcw,
+  Route,
   Search,
+  Settings2,
+  ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
+  Split,
+  Stethoscope,
   UserRound,
+  UserRoundCheck,
+  UsersRound,
+  Wallet,
   WalletCards,
+  Waypoints,
   X,
+  type LucideIcon,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -347,6 +381,7 @@ const ORDER_REALTIME_EVENTS = [
 ] as const;
 
 type SectionCardProps = {
+  icon?: LucideIcon;
   title: string;
   description?: string;
   action?: ReactNode;
@@ -377,6 +412,7 @@ const ORDER_TASK_STATUS_LABEL_KEYS = {
 } satisfies Partial<Record<string, TranslationKey>>;
 
 function SectionCard({
+  icon,
   title,
   description,
   action,
@@ -392,7 +428,7 @@ function SectionCard({
     >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-card px-3 py-2">
         <div className="min-w-0 flex-1">
-          <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
+          <h2 className={tokens.text.sectionTitle}><SectionHeading icon={icon}>{title}</SectionHeading></h2>
           {description ? (
             <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
           ) : null}
@@ -405,15 +441,17 @@ function SectionCard({
 }
 
 function OrderSheetSection({
+  icon,
   title,
   children,
 }: {
+  icon?: LucideIcon;
   title: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section className="rounded-lg border border-border/70 bg-card p-6">
-      <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
+      <h2 className={tokens.text.sectionTitle}><SectionHeading icon={icon}>{title}</SectionHeading></h2>
       <div className="mt-5 space-y-4">{children}</div>
     </section>
   );
@@ -542,15 +580,6 @@ function EmptyState({ title, description, action }: EmptyStateProps) {
       </div>
       {action}
     </div>
-  );
-}
-
-function titleWithDot(title: ReactNode) {
-  return (
-    <span className="inline-flex min-w-0 items-center gap-2">
-      <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />
-      <span className="min-w-0 break-words">{title}</span>
-    </span>
   );
 }
 
@@ -3558,9 +3587,7 @@ function useOrdersPageContent() {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h2 className={cn(tokens.text.sectionTitle, "flex flex-wrap items-center gap-2")}>
-                {titleWithDot(
-                  l("orders_orders_blocked_by_overdue_receivables_or_an_open_debt_wo"),
-                )}
+                <SectionHeading icon={ShieldAlert}>{l("orders_orders_blocked_by_overdue_receivables_or_an_open_debt_wo")}</SectionHeading>
                 <Badge variant="outline" className="rounded-full border-rose-200 bg-rose-50 text-rose-700">
                   {debtQueue.length}
                 </Badge>
@@ -3925,6 +3952,7 @@ function useOrdersPageContent() {
           )}
         >
           <AdminSheetScaffold
+            icon={ClipboardList}
             title={
               orderDetail
                 ? `${orderDetail.order_number} / ${detailSubjectName}`
@@ -4297,6 +4325,7 @@ function useOrdersPageContent() {
                 {shouldRenderOrderSection("overview") ? (
                   <>
                     <SectionCard
+                      icon={ClipboardList}
                       title={lang === "de" ? "Auftrag auf einen Blick" : "Главное о заказе"}
                       description={
                         lang === "de"
@@ -4487,6 +4516,7 @@ function useOrdersPageContent() {
                     />
 
                     <SectionCard
+                      icon={Wallet}
                       title={lang === "de" ? "Finanzen des Auftrags" : "Деньги по заказу"}
                       description={
                         lang === "de"
@@ -4678,7 +4708,7 @@ function useOrdersPageContent() {
                               <div className="grid min-w-0 gap-5 @min-[64rem]:grid-cols-2">
                                 <div className="min-w-0">
                                   <h3 className="text-sm font-semibold text-foreground">
-                                    {lang === "de" ? "Plan" : "План"}
+                                    <SectionHeading icon={ClipboardList}>{lang === "de" ? "Plan" : "План"}</SectionHeading>
                                   </h3>
                                   <dl className="mt-2 grid gap-2 @min-[30rem]:grid-cols-2">
                                     <OrderFinancialMetric
@@ -4731,7 +4761,7 @@ function useOrdersPageContent() {
 
                                 <div className="min-w-0">
                                   <h3 className="text-sm font-semibold text-foreground">
-                                    {lang === "de" ? "Aktueller Stand" : "Фактическое состояние"}
+                                    <SectionHeading icon={Activity}>{lang === "de" ? "Aktueller Stand" : "Фактическое состояние"}</SectionHeading>
                                   </h3>
                                   <dl className="mt-2 grid gap-2 @min-[30rem]:grid-cols-2">
                                     <OrderFinancialMetric
@@ -4874,6 +4904,7 @@ function useOrdersPageContent() {
 
                 {shouldRenderOrderSection("gates") ? (
                   <SectionCard
+                    icon={Waypoints}
                     title={lang === "de" ? "Phasen des Auftrags" : "Этапы заказа"}
                   >
                     <div className="grid gap-2 @min-[28rem]:grid-cols-3 @min-[38rem]:grid-cols-5">
@@ -5017,7 +5048,7 @@ function useOrdersPageContent() {
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
-                          {titleWithDot(l("orders_prozess_gates"))}
+                          <SectionHeading icon={ListChecks}>{l("orders_prozess_gates")}</SectionHeading>
                         </h2>
                       </div>
                     </div>
@@ -5128,7 +5159,7 @@ function useOrdersPageContent() {
                           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
                             <div className="min-w-0">
                               <div className="text-sm font-semibold text-foreground">
-                                {titleWithDot(l("orders_debt_management"))}
+                                <SectionHeading icon={Wallet}>{l("orders_debt_management")}</SectionHeading>
                               </div>
                               <div className="mt-1 text-xs text-muted-foreground">
                                 {l("orders_aktiven_debt_workflow_nachverfolgen_owner_zuweisen_und_d")}
@@ -5224,7 +5255,7 @@ function useOrdersPageContent() {
                         {permissions.canManagePhase ? (
                           <div className="rounded-2xl border border-border p-4">
                             <div className="text-sm font-semibold text-foreground">
-                              {titleWithDot(l("orders_paketdeckung"))}
+                              <SectionHeading icon={PackageCheck}>{l("orders_paketdeckung")}</SectionHeading>
                             </div>
                             <div className="mt-1 text-sm text-muted-foreground">
                               {l("orders_bestehende_paketdeckung_kann_wiederholungsleistungen_ohn")}
@@ -5283,9 +5314,7 @@ function useOrdersPageContent() {
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
-                          {titleWithDot(
-                            l("orders_planung_und_vorbereitung"),
-                          )}
+                          <SectionHeading icon={CalendarRange}>{l("orders_planung_und_vorbereitung")}</SectionHeading>
                         </h2>
                       </div>
                       {detailNewAppointmentHref ? (
@@ -5533,9 +5562,7 @@ function useOrdersPageContent() {
                         <div className="grid gap-2">
                           <div id={PLANNING_ANCHOR_IDS.control} className="scroll-mt-4 rounded-lg border border-border p-3">
                             <div className="text-[13px] font-semibold text-foreground">
-                              {titleWithDot(
-                                l("orders_planungssteuerung"),
-                              )}
+                              <SectionHeading icon={SlidersHorizontal}>{l("orders_planungssteuerung")}</SectionHeading>
                             </div>
                             <div className="mt-1 text-[13px] text-muted-foreground">
                               {l("orders_behandlungsplan_fixieren_bedarf_an_nicht_medizinischen_l")}
@@ -5697,9 +5724,7 @@ function useOrdersPageContent() {
 
                           <div className="rounded-lg border border-border p-3">
                             <div className="text-[13px] font-semibold text-foreground">
-                              {titleWithDot(
-                                l("orders_operative_ubergabe"),
-                              )}
+                              <SectionHeading icon={Handshake}>{l("orders_operative_ubergabe")}</SectionHeading>
                             </div>
                             <div className="mt-1 text-[13px] text-muted-foreground">
                               {l("orders_verknupfte_arbeitsbereiche_nutzen_um_medizinische_slots")}
@@ -5762,7 +5787,7 @@ function useOrdersPageContent() {
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
-                          {titleWithDot(l("orders_durchfuhrung_2"))}
+                          <SectionHeading icon={Play}>{l("orders_durchfuhrung_2")}</SectionHeading>
                         </h2>
                       </div>
                     </div>
@@ -5895,9 +5920,7 @@ function useOrdersPageContent() {
                       <div className="grid gap-4">
                         <div className="rounded-2xl border border-border p-4">
                           <div className="text-sm font-semibold text-foreground">
-                            {titleWithDot(
-                              l("orders_steuerung_der_durchfuhrung"),
-                            )}
+                            <SectionHeading icon={ClipboardCheck}>{l("orders_steuerung_der_durchfuhrung")}</SectionHeading>
                           </div>
                           <div className="mt-1 text-sm text-muted-foreground">
                             {l("orders_ankunft_leistungsumfang_und_klarung_von_abweichungen_ode")}
@@ -6064,9 +6087,7 @@ function useOrdersPageContent() {
 
                         <div className="rounded-2xl border border-border p-4">
                           <div className="text-sm font-semibold text-foreground">
-                            {titleWithDot(
-                              l("orders_nachweise_der_durchfuhrung"),
-                            )}
+                            <SectionHeading icon={Files}>{l("orders_nachweise_der_durchfuhrung")}</SectionHeading>
                           </div>
                           <div className="mt-1 text-sm text-muted-foreground">
                             {l("orders_verknupfte_arbeitsbereiche_nutzen_um_die_restliche_opera")}
@@ -6146,7 +6167,7 @@ function useOrdersPageContent() {
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
-                          {titleWithDot(l("orders_nachsorge_ablauf"))}
+                          <SectionHeading icon={Route}>{l("orders_nachsorge_ablauf")}</SectionHeading>
                         </h2>
                       </div>
                     </div>
@@ -6263,9 +6284,7 @@ function useOrdersPageContent() {
                       <div className="grid gap-4">
                         <div className="rounded-2xl border border-border p-4">
                           <div className="text-sm font-semibold text-foreground">
-                            {titleWithDot(
-                              l("orders_steuerung_der_nachsorge"),
-                            )}
+                            <SectionHeading icon={Settings2}>{l("orders_steuerung_der_nachsorge")}</SectionHeading>
                           </div>
                           <div className="mt-1 text-sm text-muted-foreground">
                             {l("orders_markieren_welche_meilensteine_erforderlich_sind_und_ob_d")}
@@ -6403,9 +6422,7 @@ function useOrdersPageContent() {
 
                         <div className="rounded-2xl border border-border p-4">
                           <div className="text-sm font-semibold text-foreground">
-                            {titleWithDot(
-                              l("orders_empfohlene_meilenstein_anker"),
-                            )}
+                            <SectionHeading icon={Milestone}>{l("orders_empfohlene_meilenstein_anker")}</SectionHeading>
                           </div>
                           <div className="mt-1 text-sm text-muted-foreground">
                             {l("orders_bestehende_termin_presets_und_portalsichtbarkeit_lesen_d")}
@@ -6496,7 +6513,7 @@ function useOrdersPageContent() {
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
-                          {titleWithDot(tx.orders_phase)}
+                          <SectionHeading icon={Waypoints}>{tx.orders_phase}</SectionHeading>
                         </h2>
                       </div>
                     </div>
@@ -6551,7 +6568,7 @@ function useOrdersPageContent() {
                       {orderDetail.lifecycle?.history?.length ? (
                         <div className="space-y-3">
                           <h3 className={tokens.text.sectionTitle}>
-                            {titleWithDot(l("orders_historie"))}
+                            <SectionHeading icon={History}>{l("orders_historie")}</SectionHeading>
                           </h3>
                           <div className="space-y-3 pl-6">
                             {orderDetail.lifecycle.history.map((event, index) => (
@@ -6607,7 +6624,7 @@ function useOrdersPageContent() {
                   <section className="rounded-lg border border-border/70 bg-card p-6">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <h2 className={tokens.text.sectionTitle}>
-                        {titleWithDot(l("orders_workflow_checkliste"))}
+                        <SectionHeading icon={ListTodo}>{l("orders_workflow_checkliste")}</SectionHeading>
                       </h2>
                       <div className="flex flex-wrap items-center gap-2">
                         {workflowChecklist ? (
@@ -6971,6 +6988,7 @@ function useOrdersPageContent() {
                 {shouldRenderOrderSection("services") ? (
                   <>
                     <SectionCard
+                      icon={ChartNoAxesCombined}
                       title={l("orders_leistungsubersicht")}
                       description={t.orders_services_section_description}
                       action={
@@ -7038,7 +7056,7 @@ function useOrdersPageContent() {
                       </div>
                     </SectionCard>
 
-                    <SectionCard title={tx.providers_services}>
+                    <SectionCard icon={BriefcaseMedical} title={tx.providers_services}>
                       <div className="space-y-3">
                         {orderDetail.leistungen.length === 0 ? (
                           <EmptyState
@@ -7463,6 +7481,7 @@ function useOrdersPageContent() {
                     </SectionCard>
 
                     <SectionCard
+                      icon={Coins}
                       title={
                         lang === "de" ? "Betragsänderungen" : "Изменения суммы"
                       }
@@ -7477,7 +7496,7 @@ function useOrdersPageContent() {
                       />
                     </SectionCard>
 
-                    <SectionCard title={t.orders_service_group_split_title}>
+                    <SectionCard icon={Split} title={t.orders_service_group_split_title}>
                       <div className="space-y-3">
                         {serviceGroupsError ? (
                           <Banner tone="error" withIcon>
@@ -7521,6 +7540,7 @@ function useOrdersPageContent() {
                     </SectionCard>
 
                     <SectionCard
+                      icon={UsersRound}
                       title={lang === "de" ? "Auftragsgruppe" : "Групповой заказ"}
                     >
                       <OrderGroupPanel
@@ -7535,6 +7555,7 @@ function useOrdersPageContent() {
                 {shouldRenderOrderSection("invoices") ? (
                   <>
                     <SectionCard
+                      icon={ReceiptText}
                       title={t.orders_external_invoices_title}
                       action={
                         permissions.canManageExternalInvoices &&
@@ -7582,7 +7603,7 @@ function useOrdersPageContent() {
                       </div>
                     </SectionCard>
 
-                    <SectionCard title={lang === "de" ? "Eingangsrechnungen" : "Входящие счета"}>
+                    <SectionCard icon={Inbox} title={lang === "de" ? "Eingangsrechnungen" : "Входящие счета"}>
                       {(orderDetail.external_invoices ?? []).length === 0 ? (
                         <EmptyState
                           title={
@@ -8004,6 +8025,7 @@ function useOrdersPageContent() {
             }}
           >
             <AdminSheetScaffold
+              icon={Wallet}
               title={l("orders_debt_management")}
               description={l("orders_aktiven_debt_workflow_nachverfolgen_owner_zuweisen_und_d")}
               footer={
@@ -8191,6 +8213,7 @@ function useOrdersPageContent() {
           {plannedCostEditor ? (
             <form onSubmit={handlePlannedCostSave} className="flex h-full min-h-0 flex-col">
               <AdminSheetScaffold
+                icon={Coins}
                 title={lang === "de" ? "Geplante Partnerkosten" : "Плановые затраты на партнёра"}
                 description={plannedCostEditor.serviceName}
                 footer={
@@ -8207,7 +8230,7 @@ function useOrdersPageContent() {
                 bodyClassName="min-h-0 space-y-4 px-5 py-4"
               >
                 {plannedCostError ? <Banner tone="error" withIcon>{plannedCostError}</Banner> : null}
-                <OrderSheetSection title={lang === "de" ? "Kostenplanung" : "Планирование затрат"}>
+                <OrderSheetSection icon={Coins} title={lang === "de" ? "Kostenplanung" : "Планирование затрат"}>
                   <div className="grid gap-3">
                     <Field label={lang === "de" ? "Betrag ohne Mehrwertsteuer" : "Сумма без налога"}>
                       <Input
@@ -8282,6 +8305,7 @@ function useOrdersPageContent() {
             className="flex h-full min-h-0 flex-col"
           >
             <AdminSheetScaffold
+              icon={ReceiptText}
               title={t.orders_external_invoice_create_title}
               description={t.orders_external_invoice_create_description}
               footer={
@@ -8303,7 +8327,7 @@ function useOrdersPageContent() {
                 </Banner>
               ) : null}
 
-              <OrderSheetSection title={l("orders_grunddaten")}>
+              <OrderSheetSection icon={ClipboardList} title={l("orders_grunddaten")}>
                 <div className="grid gap-3 md:grid-cols-4">
                   <Field htmlFor="order-external-invoice-externalInvoiceNumber"
                     label={t.orders_external_invoice_number}
@@ -8465,7 +8489,7 @@ function useOrdersPageContent() {
                 </div>
               </OrderSheetSection>
 
-              <OrderSheetSection title={l("orders_kosten")}>
+              <OrderSheetSection icon={Wallet} title={l("orders_kosten")}>
                 <div className="grid gap-3 md:grid-cols-4">
                   <Field htmlFor="order-external-invoice-amountNet" label={t.orders_external_invoice_net}>
                     <Input
@@ -8522,7 +8546,7 @@ function useOrdersPageContent() {
                 </div>
               </OrderSheetSection>
 
-              <OrderSheetSection title={t.patients_notes}>
+              <OrderSheetSection icon={NotebookPen} title={t.patients_notes}>
                 <Field htmlFor="order-external-invoice-notes" label={t.patients_notes}>
                   <textarea
                     id="order-external-invoice-notes"
@@ -8548,6 +8572,7 @@ function useOrdersPageContent() {
           className="w-full border-l border-border p-0 sm:max-w-[860px]"
         >
           <AdminSheetScaffold
+            icon={Split}
             title={t.orders_service_group_wizard_title}
             description={t.orders_service_group_wizard_steps}
             headerClassName="px-4 py-3"
@@ -8581,6 +8606,7 @@ function useOrdersPageContent() {
         >
           <form className="flex h-full flex-col" onSubmit={handleAddWorkflowItem}>
             <AdminSheetScaffold
+              icon={ListPlus}
               title={l("orders_neuer_workflow_punkt")}
               footer={
                 <SheetFormFooter
@@ -8596,7 +8622,7 @@ function useOrdersPageContent() {
               headerClassName="px-4 py-3"
               bodyClassName="min-h-0 overscroll-y-contain space-y-4 px-5 py-4"
             >
-              <FormSection title={l("orders_workflow_punkt")}>
+              <FormSection icon={ListChecks} title={l("orders_workflow_punkt")}>
                 <Field
                   label={l("orders_beschreibung")}
                   htmlFor="order-workflow-item-sheet"
@@ -8617,7 +8643,7 @@ function useOrdersPageContent() {
                 </Field>
               </FormSection>
 
-              <FormSection title={l("orders_zustandigkeit")}>
+              <FormSection icon={UserRoundCheck} title={l("orders_zustandigkeit")}>
                 <div className="grid gap-3 md:grid-cols-2">
                   <Field
                     htmlFor="order-workflow-owner-sheet"
@@ -8699,6 +8725,7 @@ function useOrdersPageContent() {
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
           <form className="flex h-full flex-col" onSubmit={handleCreateOrder}>
             <AdminSheetScaffold
+              icon={ClipboardPlus}
               title={t.orders_create_title}
               description={t.orders_create_description}
               footer={
@@ -8720,7 +8747,7 @@ function useOrdersPageContent() {
                 ) : null}
 
                 {requestedAgencyServiceId ? (
-                  <OrderSheetSection title={t.revenue_agency_service_catalog_items}>
+                  <OrderSheetSection icon={ListOrdered} title={t.revenue_agency_service_catalog_items}>
                     {!agencyServicesLoaded ? (
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
                         <LoaderCircle className="size-4 animate-spin" />
@@ -8756,7 +8783,7 @@ function useOrdersPageContent() {
                   </OrderSheetSection>
                 ) : null}
 
-                <OrderSheetSection title={l("orders_grunddaten")}>
+                <OrderSheetSection icon={ClipboardList} title={l("orders_grunddaten")}>
                   <Field label={t.orders_patient}>
                     <NativeComboboxSelect
                       value={createForm.patientId || "__empty__"}
@@ -8793,7 +8820,7 @@ function useOrdersPageContent() {
                 </OrderSheetSection>
 
                 {createForm.patientId ? (
-                  <OrderSheetSection title={l("orders_re_check_fur_bestandskunden")}>
+                  <OrderSheetSection icon={UserRoundCheck} title={l("orders_re_check_fur_bestandskunden")}>
                     <div className="space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
@@ -9063,6 +9090,7 @@ function useOrdersPageContent() {
 
                 {createForm.patientId ? (
                   <OrderSheetSection
+                    icon={FolderOpen}
                     title={lang === "de" ? "Vorhandene Dokumente des Patienten" : "Имеющиеся документы пациента"}
                   >
                     <OrderExistingPatientDocuments
@@ -9078,7 +9106,7 @@ function useOrdersPageContent() {
                   </OrderSheetSection>
                 ) : null}
 
-                <OrderSheetSection title={l("orders_zusatzlich")}>
+                <OrderSheetSection icon={NotebookText} title={l("orders_zusatzlich")}>
                   <Field label={t.orders_intake_note}>
                     <textarea
                       value={createForm.needsDescription}
@@ -9094,7 +9122,7 @@ function useOrdersPageContent() {
                   </Field>
                 </OrderSheetSection>
 
-                <OrderSheetSection title={lang === "de" ? "Zahlungsbedingungen" : "Условия оплаты"}>
+                <OrderSheetSection icon={HandCoins} title={lang === "de" ? "Zahlungsbedingungen" : "Условия оплаты"}>
                   <div className="space-y-3">
                     <OrderPrepaymentFields
                       value={createForm.prepayment}
@@ -9127,6 +9155,7 @@ function useOrdersPageContent() {
         >
           <form onSubmit={handleAddLeistung} className="flex h-full min-h-0 flex-col">
             <AdminSheetScaffold
+              icon={CirclePlus}
               title={t.orders_add_service_title}
               footer={
                 <SheetFormFooter
@@ -9145,7 +9174,7 @@ function useOrdersPageContent() {
               <Banner tone="error" withIcon>{leistungError}</Banner>
             ) : null}
 
-            <OrderSheetSection title={l("orders_basis")}>
+            <OrderSheetSection icon={FileText} title={l("orders_basis")}>
               <div className="grid gap-3 md:grid-cols-4">
                 <Field htmlFor="order-service-agencyServiceId"
                   label={t.revenue_agency_service_catalog_items}
@@ -9371,7 +9400,7 @@ function useOrdersPageContent() {
               </div>
             </OrderSheetSection>
 
-            <OrderSheetSection title={l("orders_kosten")}>
+            <OrderSheetSection icon={Coins} title={l("orders_kosten")}>
               <div className="grid gap-3 md:grid-cols-3">
                 <Field htmlFor="order-service-quantity" label={t.orders_service_quantity}>
                   <Input
@@ -9453,7 +9482,7 @@ function useOrdersPageContent() {
               </div>
             </OrderSheetSection>
 
-            <OrderSheetSection title={t.orders_service_group_doctors}>
+            <OrderSheetSection icon={Stethoscope} title={t.orders_service_group_doctors}>
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label={t.orders_service_provider}>
                   <ProviderSelectWithTaxonomyFilter
@@ -9505,7 +9534,7 @@ function useOrdersPageContent() {
               </div>
             </OrderSheetSection>
 
-            <OrderSheetSection title={t.orders_supporting_document}>
+            <OrderSheetSection icon={Paperclip} title={t.orders_supporting_document}>
             <div className={cn("rounded-lg px-4 py-3", tokens.surface.mutedCard)}>
               <label
                 htmlFor="leistung-cost-passthrough"

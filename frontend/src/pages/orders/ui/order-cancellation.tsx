@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { Ban, LoaderCircle } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -235,7 +236,7 @@ export function OrderCancellationDialog({
       {open ? (
         <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>
-            <DialogTitle>{tx("Отменить заказ", "Auftrag stornieren")}</DialogTitle>
+            <DialogTitle><SectionHeading icon={Ban}>{tx("Отменить заказ", "Auftrag stornieren")}</SectionHeading></DialogTitle>
             <DialogDescription>
               {tx(
                 "Отмена закрывает всё, что ещё не выполнено. Оказанные и выставленные позиции остаются и служат основанием для итогового счёта или возврата.",

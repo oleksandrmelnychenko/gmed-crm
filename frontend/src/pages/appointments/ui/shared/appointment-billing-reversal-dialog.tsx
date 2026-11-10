@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Undo2 } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { BillingReversalNotice } from "@/components/billing-reversal-notice";
 import { Button } from "@/components/ui/button";
 import {
@@ -118,7 +119,7 @@ export function AppointmentBillingReversalDialog() {
         <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
             <DialogTitle>
-              {tx("Отменить приём со сторно начисления", "Termin mit Abrechnungsstorno absagen")}
+              <SectionHeading icon={Undo2}>{tx("Отменить приём со сторно начисления", "Termin mit Abrechnungsstorno absagen")}</SectionHeading>
             </DialogTitle>
             <DialogDescription>
               {tx(

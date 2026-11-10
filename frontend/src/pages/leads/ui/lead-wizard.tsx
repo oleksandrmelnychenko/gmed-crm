@@ -1,5 +1,5 @@
 import { SectionHeading } from "@/components/ui/section-heading";
-import { leadSpecializationIcons } from "./lead-specialization-icons";
+import { specializationIcons } from "@/lib/specialization-icons";
 import { existingParentPatientFromError, fillMissingParentProfile } from "../model/parent-profile-reuse";
 import { ServiceInfo } from "@/pages/patient-lead/lead-request-services-step";
 import { servicesText } from "@/pages/patient-lead/lead-request-services-text";
@@ -11440,7 +11440,7 @@ ${serviceCommentLines.join("\n")}`
                         className="max-h-[clamp(16rem,42dvh,26rem)] space-y-2 overflow-y-scroll overscroll-contain pr-1 outline-none [scrollbar-gutter:stable] focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         {selectedSpecializationItems.map((specialization) => {
-                          const specialtyIcon = leadSpecializationIcons.get(specialization.code);
+                          const specialtyIcon = specializationIcons.get(specialization.code);
                           const label = specialtyLabel(specializationValue(specialization));
                           const specializationWorkTypes =
                             workTypesBySpecialization[specialization.id] ?? [];

@@ -1,13 +1,8 @@
 import { memo, useEffect, useMemo, useState, type FormEvent } from "react";
 
-import {
-  CheckCircle2,
-  Clock3,
-  LoaderCircle,
-  Stethoscope,
-  XCircle,
-} from "lucide-react";
+import { CheckCircle2, Clock3, Inbox, ListOrdered, LoaderCircle, Stethoscope, XCircle } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
@@ -503,6 +498,7 @@ function useQueueSheetContent({
 
   return (
     <AppointmentPreviewSheet
+      icon={ListOrdered}
       open={open}
       onOpenChange={handleOpenChange}
       title={t.appointments_title}
@@ -529,7 +525,7 @@ function useQueueSheetContent({
         <div className="space-y-2.5">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-[13px] font-semibold tracking-tight text-foreground">
-              {appointmentText("appointments_portal_requests")}
+              <SectionHeading icon={Inbox}>{appointmentText("appointments_portal_requests")}</SectionHeading>
             </h2>
             <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
               {appointmentRequests.length}
@@ -960,7 +956,7 @@ function useQueueSheetContent({
         <div className="space-y-2.5">
           {hasAppointmentRequests ? (
             <h2 className="text-[13px] font-semibold tracking-tight text-foreground">
-              {appointmentText("appointments_appointment_queue")}
+              <SectionHeading icon={ListOrdered}>{appointmentText("appointments_appointment_queue")}</SectionHeading>
             </h2>
           ) : null}
           {items.map((item) => (

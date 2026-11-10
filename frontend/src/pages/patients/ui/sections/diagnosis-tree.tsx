@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Button } from "@/components/ui/button";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
-import { LoaderCircle, Pencil, Plus, Trash2, X } from "lucide-react";
+import { GitFork, LoaderCircle, Pencil, Plus, Trash2, X } from "lucide-react";
 import type {
   AllDoctorOption,
   ClinicalDiagnosis,
@@ -1125,8 +1126,7 @@ export function DiagnosisTreeSection({
     <section className={cn("rounded-xl border border-border/70 bg-card", className)}>
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
         <div className="flex items-center gap-2">
-          <span aria-hidden data-slot="heading-marker" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-          <h3 className="text-sm font-semibold text-foreground">{tx("Диагнозы", "Diagnosen")}</h3>
+          <h3 className="text-sm font-semibold text-foreground"><SectionHeading icon={GitFork}>{tx("Диагнозы", "Diagnosen")}</SectionHeading></h3>
         </div>
         {canManage ? (
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1185,11 +1185,11 @@ export function DiagnosisTreeSection({
           <DialogContent overlayClassName="bg-[color-mix(in_srgb,var(--overlay,#000)_40%,transparent)]" className="flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[680px] sm:pb-0" data-testid="diagnosis-editor-dialog">
             <DialogHeader className="shrink-0 border-b border-border/50 bg-card px-4 py-3 pr-14 text-left">
               <DialogTitle className="text-[15px] font-semibold">
-                {editing?.mode === "add"
+                <SectionHeading icon={GitFork}>{editing?.mode === "add"
                   ? editingParentLabel
                     ? `${tx("Добавить вложенный", "Untergeordnet hinzufügen")}: ${editing ? kindLabel(editing.draft.kind, tx) : ""}`
                     : `${tx("Добавить", "Hinzufügen")}: ${editing ? kindLabel(editing.draft.kind, tx) : ""}`
-                  : `${tx("Редактировать", "Bearbeiten")}: ${editing ? kindLabel(editing.draft.kind, tx) : ""}`}
+                  : `${tx("Редактировать", "Bearbeiten")}: ${editing ? kindLabel(editing.draft.kind, tx) : ""}`}</SectionHeading>
               </DialogTitle>
             </DialogHeader>
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-muted px-3 py-3 sm:px-4">

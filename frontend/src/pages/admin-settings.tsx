@@ -8,6 +8,7 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  Settings2,
   BellRing,
   Building2,
   Fingerprint,
@@ -982,9 +983,9 @@ function useAdminSettingsPageContent() {
           <>
             <Tabs value={workspaceTab} onValueChange={(value) => setWorkspaceTab(String(value))}>
               <TabsList className="group-data-horizontal/tabs:h-auto max-w-full flex-wrap justify-start gap-0.5 rounded-lg border border-border bg-card p-0.5">
-                <TabsTrigger value="configuration" className="h-8 gap-2 rounded-lg px-3 data-active:bg-primary data-active:text-primary-foreground data-active:hover:text-primary-foreground"><ScrollText className="size-3.5" />{t.common_configuration}</TabsTrigger>
-                <TabsTrigger value="sessions" className="h-8 gap-2 rounded-lg px-3 data-active:bg-primary data-active:text-primary-foreground data-active:hover:text-primary-foreground"><KeyRound className="size-3.5" />{t.settings_active_sessions}<span className="font-mono text-xs">{sessions.length}</span></TabsTrigger>
-                <TabsTrigger value="pending" className="h-8 gap-2 rounded-lg px-3 data-active:bg-primary data-active:text-primary-foreground data-active:hover:text-primary-foreground"><UserRoundCheck className="size-3.5" />{t.mfa_pending_logins}<span className="font-mono text-xs">{pending.length}</span></TabsTrigger>
+                <TabsTrigger value="configuration" className="h-8 gap-2 rounded-lg px-3"><ScrollText className="size-3.5" />{t.common_configuration}</TabsTrigger>
+                <TabsTrigger value="sessions" className="h-8 gap-2 rounded-lg px-3"><KeyRound className="size-3.5" />{t.settings_active_sessions}<span className="font-mono text-xs">{sessions.length}</span></TabsTrigger>
+                <TabsTrigger value="pending" className="h-8 gap-2 rounded-lg px-3"><UserRoundCheck className="size-3.5" />{t.mfa_pending_logins}<span className="font-mono text-xs">{pending.length}</span></TabsTrigger>
               </TabsList>
               <TabsContent value="configuration" className="mt-0">
                 <div className="grid items-stretch gap-2.5 md:grid-cols-2 2xl:grid-cols-3">
@@ -1086,7 +1087,7 @@ function useAdminSettingsPageContent() {
         onOpenChange={handleGroupSheetOpenChange}
         dirty={groupHasChanges}
       >
-        <AdminDialogScaffold maxWidthClassName={selectedGroup && selectedGroup.fields.length > 3 ? "sm:max-w-[760px]" : "sm:max-w-[560px]"}
+        <AdminDialogScaffold icon={selectedGroup?.icon ?? Settings2} maxWidthClassName={selectedGroup && selectedGroup.fields.length > 3 ? "sm:max-w-[760px]" : "sm:max-w-[560px]"}
             bodyClassName="space-y-2 [&_label]:font-mono [&_label]:text-xs"
             title={selectedGroup ? tr[selectedGroup.titleKey] : t.settings_title}
             description={selectedGroup ? tr[selectedGroup.descriptionKey] : t.settings_subtitle}

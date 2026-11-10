@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
-import { LoaderCircle } from "lucide-react";
+import { Folders, LoaderCircle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -80,7 +81,7 @@ export function CasesRosterSection({
         <div className={cn("flex items-center justify-between gap-3", headerClassName)}>
           <div>
             <h2 className={cn("text-sm font-semibold text-foreground", titleClassName)}>
-              {title}
+              <SectionHeading icon={Folders}>{title}</SectionHeading>
             </h2>
             <p className={cn("mt-1 text-sm text-muted-foreground", subtitleClassName)}>
               {subtitle}

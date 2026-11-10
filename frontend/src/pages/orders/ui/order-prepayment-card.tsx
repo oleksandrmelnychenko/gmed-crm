@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Wallet } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner } from "@/components/record-workspace/recipes/banner";
 import { Button } from "@/components/ui/button";
@@ -171,7 +172,7 @@ export function OrderPrepaymentCard({
         {form ? (
           <DialogContent className="sm:max-w-[480px]">
             <DialogHeader>
-              <DialogTitle>{tx("Изменить предоплату", "Vorauszahlung ändern")}</DialogTitle>
+              <DialogTitle><SectionHeading icon={Wallet}>{tx("Изменить предоплату", "Vorauszahlung ändern")}</SectionHeading></DialogTitle>
               <DialogDescription>
                 {orderTotal !== null
                   ? tx(

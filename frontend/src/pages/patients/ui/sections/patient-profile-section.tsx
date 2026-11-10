@@ -4,14 +4,24 @@ import {
   ArrowUpRight,
   CheckCircle2,
   ClipboardCheck,
+  ClipboardList,
+  ContactRound,
   FileText,
+  IdCard,
   LoaderCircle,
+  MapPin,
+  NotebookPen,
   NotebookText,
   Pencil,
+  Phone,
+  PhoneCall,
   Plus,
+  Scale,
   ShieldCheck,
+  type LucideIcon,
 } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Badge } from "@/components/ui/badge";
 import { Banner } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
@@ -254,11 +264,13 @@ function ProfileDetailTile({
 }
 
 function ProfileSummaryCard({
+  icon,
   title,
   children,
   className,
   action,
 }: {
+  icon?: LucideIcon;
   title: ReactNode;
   children: ReactNode;
   className?: string;
@@ -268,10 +280,7 @@ function ProfileSummaryCard({
     <section className={cn("overflow-hidden rounded-lg border border-border/70 bg-card", className)}>
       <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-3.5 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-          <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">
-            {title}
-          </h3>
+          <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground"><SectionHeading icon={icon}>{title}</SectionHeading></h3>
         </div>
         {action ? <div className="shrink-0">{action}</div> : null}
       </div>
@@ -769,6 +778,7 @@ function usePatientProfileTabContent({
 
       <div className="space-y-3">
         <ProfileSummaryCard
+          icon={ContactRound}
           title={t.patient_profile_personal_data}
         >
           <ProfileSummaryLine
@@ -819,6 +829,7 @@ function usePatientProfileTabContent({
         </ProfileSummaryCard>
 
         <ProfileSummaryCard
+          icon={Phone}
           title={t.patient_profile_contact}
         >
           {patientProfileContactRows(detail, t, l).map((contact) => (
@@ -851,6 +862,7 @@ function usePatientProfileTabContent({
         </ProfileSummaryCard>
 
         <ProfileSummaryCard
+          icon={ShieldCheck}
           title={t.patient_profile_insurance_and_payer}
         >
           <ProfileSummaryLine
@@ -880,6 +892,7 @@ function usePatientProfileTabContent({
         ) : null}
 
         <ProfileSummaryCard
+          icon={MapPin}
           title={t.patient_profile_address}
         >
           <ProfileSummaryLine
@@ -912,6 +925,7 @@ function usePatientProfileTabContent({
         </ProfileSummaryCard>
 
         <ProfileSummaryCard
+          icon={PhoneCall}
           title={t.patient_profile_emergency_contact}
         >
           {isHidden("emergency_contact") ? (
@@ -928,6 +942,7 @@ function usePatientProfileTabContent({
 
         {hasIntakeProfile ? (
           <ProfileSummaryCard
+            icon={ClipboardList}
             title={t.patient_profile_intake_data}
             action={leadOrigin.sourceLeadId && canViewLeads ? (
               <Button
@@ -1144,7 +1159,7 @@ function usePatientProfileTabContent({
           </ProfileSummaryCard>
         ) : null}
 
-        <ProfileSummaryCard title={identityLabels.title}>
+        <ProfileSummaryCard icon={IdCard} title={identityLabels.title}>
           {canViewDocuments ? (
             <ProfileSummaryLine
               label={l("required_doc_passport_scan")}
@@ -1234,6 +1249,7 @@ function usePatientProfileTabContent({
       </div>
 
       <PatientFormSection
+        icon={Scale}
         className="patient-legal-section overflow-hidden"
         title={
           <span className="inline-flex items-center gap-2">
@@ -1461,6 +1477,7 @@ function usePatientProfileTabContent({
 
 
       <PatientFormSection
+        icon={NotebookPen}
         className="overflow-hidden shadow-xs"
         title={t.patients_notes}
         accessory={

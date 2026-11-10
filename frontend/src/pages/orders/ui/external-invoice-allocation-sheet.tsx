@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link2, LoaderCircle, RotateCcw } from "lucide-react";
+import { History, Link2, LoaderCircle, RotateCcw } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -171,6 +172,7 @@ export function ExternalInvoiceAllocationSheet({
     <Sheet open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <AdminSheetScaffold
+          icon={Link2}
           title={lang === "de" ? "Patientenrechnung zuordnen" : "Связать со счётом пациента"}
           description={
             workspace
@@ -288,7 +290,7 @@ export function ExternalInvoiceAllocationSheet({
                   <section className="space-y-3 border-t border-border pt-5">
                     <div>
                       <h3 className="text-sm font-semibold text-foreground">
-                        {lang === "de" ? "Zuordnungshistorie" : "История распределений"}
+                        <SectionHeading icon={History}>{lang === "de" ? "Zuordnungshistorie" : "История распределений"}</SectionHeading>
                       </h3>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {lang === "de"

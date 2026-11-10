@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
@@ -9,7 +10,7 @@ import {
   type SetStateAction,
 } from "react";
 
-import { LoaderCircle, Plus } from "lucide-react";
+import { ClipboardList, ClipboardPenLine, FileHeart, ListChecks, LoaderCircle, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -567,6 +568,7 @@ function useAppointmentIncomingDataSectionContent({
   return (
     <div className="space-y-4">
       <Section
+        icon={FileHeart}
         title={appointmentText("appointments_incoming_medical_data")}
         accessory={<CountBadge>{intakeStateLabel}</CountBadge>}
       >
@@ -587,8 +589,7 @@ function useAppointmentIncomingDataSectionContent({
           toolbarStart={
             <>
               <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-                {appointmentText("appointments_intake_checklist")}
+              <SectionHeading icon={ClipboardList}>{appointmentText("appointments_intake_checklist")}</SectionHeading>
               </span>
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
             </>
@@ -650,6 +651,7 @@ function useAppointmentIncomingDataSectionContent({
       </div>
 
       <AppointmentEditorSheet
+        icon={ClipboardPenLine}
         open={composerOpen}
         onOpenChange={handleIncomingComposerOpenChange}
         dirty={incomingComposerDirty}
@@ -1264,8 +1266,7 @@ function useAppointmentFindingsSectionContent({
           toolbarStart={
             <>
               <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-                {appointmentText("appointments_follow_up_checklist")}
+              <SectionHeading icon={ListChecks}>{appointmentText("appointments_follow_up_checklist")}</SectionHeading>
               </span>
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
             </>
@@ -1325,6 +1326,7 @@ function useAppointmentFindingsSectionContent({
       </div>
 
       <AppointmentEditorSheet
+        icon={FileHeart}
         open={composerOpen}
         onOpenChange={handleFindingsComposerOpenChange}
         dirty={findingsComposerDirty}

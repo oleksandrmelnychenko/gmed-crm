@@ -1,3 +1,13 @@
+import {
+  ClipboardCheck,
+  Flower2,
+  Pill,
+  Stethoscope,
+  TriangleAlert,
+  UsersRound,
+  type LucideIcon,
+} from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { DataTable } from "@/components/data-table/data-table";
@@ -246,10 +256,10 @@ export function mergePatientDoctors(
   });
 }
 
-function ColumnTitle({ children, count }: { children: ReactNode; count?: number }) {
+function ColumnTitle({ icon, children, count }: { icon: LucideIcon; children: ReactNode; count?: number }) {
   return (
     <div className="mb-1.5 flex items-baseline gap-1.5">
-      <h3 className="text-[11px] font-semibold text-muted-foreground">{children}</h3>
+      <h3 className="text-[11px] font-semibold text-muted-foreground"><SectionHeading icon={icon}>{children}</SectionHeading></h3>
       {typeof count === "number" && count > 0 ? (
         <span className="text-[10px] font-medium text-muted-foreground/60">{count}</span>
       ) : null}
@@ -684,7 +694,7 @@ export function PatientOverviewCard({
         <div className="min-w-0 space-y-4">
           <div className="grid gap-x-5 gap-y-3 sm:grid-cols-2 lg:grid-cols-[0.8fr_1.3fr_1.3fr]">
             <div className="min-w-0">
-              <ColumnTitle count={allergyCount || undefined}>{tx("Аллергии", "Allergien")}</ColumnTitle>
+              <ColumnTitle icon={Flower2} count={allergyCount || undefined}>{tx("Аллергии", "Allergien")}</ColumnTitle>
               {allergien.length > 0 ? (
                 <ul className="space-y-0.5 text-[13px] font-medium leading-snug text-orange-700">
                   {allergien.map((item, index) => (
@@ -710,7 +720,7 @@ export function PatientOverviewCard({
 
               {cave.length > 0 ? (
                 <div className="mt-2.5">
-                  <ColumnTitle count={cave.length}>CAVE</ColumnTitle>
+                  <ColumnTitle icon={TriangleAlert} count={cave.length}>CAVE</ColumnTitle>
                   <ul className="space-y-0.5 text-[13px] font-medium leading-snug text-rose-700">
                     {cave.map((item, index) => (
                       <li key={item.id ?? index}>
@@ -726,7 +736,7 @@ export function PatientOverviewCard({
             </div>
 
             <div className="min-w-0">
-              <ColumnTitle count={diagnoses.length || undefined}>{tx("Диагнозы", "Diagnosen")}</ColumnTitle>
+              <ColumnTitle icon={Stethoscope} count={diagnoses.length || undefined}>{tx("Диагнозы", "Diagnosen")}</ColumnTitle>
               {diagnoses.length === 0 ? (
                 dash
               ) : (
@@ -737,7 +747,7 @@ export function PatientOverviewCard({
             </div>
 
             <div className="min-w-0">
-              <ColumnTitle count={activeRecommendations.length || undefined}>{tx("Рекомендации", "Empfehlungen")}</ColumnTitle>
+              <ColumnTitle icon={ClipboardCheck} count={activeRecommendations.length || undefined}>{tx("Рекомендации", "Empfehlungen")}</ColumnTitle>
               {activeRecommendations.length === 0 ? (
                 dash
               ) : (
@@ -751,7 +761,7 @@ export function PatientOverviewCard({
           </div>
 
           <div>
-            <ColumnTitle count={profileMedications.length || undefined}>
+            <ColumnTitle icon={Pill} count={profileMedications.length || undefined}>
               {tx("Назначенные препараты", "Verordnete Medikamente")}
             </ColumnTitle>
             {profileMedications.length === 0 ? (
@@ -763,7 +773,7 @@ export function PatientOverviewCard({
         </div>
 
         <aside className="min-w-0 border-t border-border/60 pt-3 lg:-my-3 lg:-mr-3 lg:self-stretch lg:rounded-r-2xl lg:border-l lg:border-t-0 lg:border-border/60 lg:bg-muted/30 lg:p-3">
-          <ColumnTitle count={doctors.length || undefined}>{tx("Лечащие врачи", "Behandelnde Ärzte")}</ColumnTitle>
+          <ColumnTitle icon={UsersRound} count={doctors.length || undefined}>{tx("Лечащие врачи", "Behandelnde Ärzte")}</ColumnTitle>
           {doctors.length === 0 ? (
             dash
           ) : (

@@ -1,5 +1,6 @@
-import { ChevronRight, History, Search } from "lucide-react";
+import { CalendarDays, ChevronRight, History, Search } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { DataTablePager } from "@/components/data-table/data-table-pager";
 import { WritableScope } from "@/components/read-only-scope";
 import { Button } from "@/components/ui/button";
@@ -250,10 +251,7 @@ export function PatientTimelineTab({
               {groupedTimeline.map((group) => (
                 <section key={group.key} className="space-y-2" aria-label={group.label}>
                   <div className="flex items-center gap-2 px-1">
-                    <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />
-                    <h3 className="text-xs font-medium text-muted-foreground">
-                      {group.label}
-                    </h3>
+                    <h3 className="text-xs font-medium text-muted-foreground"><SectionHeading icon={CalendarDays}>{group.label}</SectionHeading></h3>
                     <span className="h-px flex-1 bg-border" aria-hidden="true" />
                   </div>
                   {group.items.map((item, itemIndex) => {

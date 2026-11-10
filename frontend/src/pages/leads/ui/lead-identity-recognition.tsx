@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LoaderCircle, ScanText, ShieldAlert, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Check, CheckCheck, ContactRound, IdCard, LoaderCircle, ScanLine, ScanText, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import { checkboxClass } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { StatusChip } from "@/components/ui/status-chip";
 import { ApiRequestError } from "@/lib/api";
 import { formatAppDateTime } from "@/lib/app-time-zone";
@@ -114,41 +115,60 @@ function Rows<Field extends string>({
   tx: Tx;
   testId: string;
 }) {
+  const id = useId();
+  const scanLabel = tx("На скане", "Im Scan");
+  const currentLabel = tx("сейчас в форме", "im Formular");
+  const unverified = tx("Не подтверждено контрольной цифрой", "Nicht durch Prüfziffer bestätigt");
+  const columns = "grid-cols-[1rem_minmax(0,1fr)_minmax(0,1fr)] @min-[30rem]:grid-cols-[1rem_minmax(0,1.05fr)_minmax(0,1fr)_minmax(0,1fr)]";
   return (
-    <ul className="space-y-1">
-      {rows.map((row) => {
-        const takeable = selectable && row.state !== "same";
-        return (
-          <li key={row.field} data-testid={`${testId}-${row.field}`} data-state={row.state}>
-            <label className={cn("flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm", takeable && "cursor-pointer")}>
-              {takeable ? (
-                <input
-                  type="checkbox"
-                  className={cn(checkboxClass, "translate-y-0.5")}
-                  checked={selected.has(row.field)}
-                  onChange={() => onToggle(row.field)}
-                  aria-label={`${row.label}: ${row.proposed}`}
-                />
-              ) : (
-                <span aria-hidden="true" className="inline-block w-4" />
-              )}
-              <span className="text-muted-foreground">{row.label}:</span>
-              <span className="font-medium text-foreground [overflow-wrap:anywhere]">{row.proposed}</span>
-              {row.state === "same" ? (
-                <span className="text-xs text-emerald-700 dark:text-emerald-300">{tx("совпадает", "stimmt überein")}</span>
-              ) : row.state === "differs" ? (
-                <span className="text-xs font-medium text-amber-700 dark:text-amber-300">
-                  {tx("сейчас в форме", "im Formular")}: {row.current}
+    <div className="@container min-w-0 rounded-lg border border-border">
+      <div aria-hidden="true" className={cn("hidden items-center gap-x-2 rounded-t-lg bg-muted/45 px-2.5 py-1.5 text-xs font-medium text-muted-foreground @min-[30rem]:grid", columns)}>
+        <span /><span>{tx("Поле", "Feld")}</span><span>{scanLabel}</span><span>{tx("В форме", "Im Formular")}</span>
+      </div>
+      <ul className="divide-y divide-border">
+        {rows.map((row) => {
+          const takeable = selectable && row.state !== "same";
+          const noteId = `${id}-${row.field}-current`;
+          const needsCheck = !row.verified && row.state !== "same";
+          return (
+            <li key={row.field} data-testid={`${testId}-${row.field}`} data-state={row.state}>
+              <label className={cn("grid items-start gap-x-2 gap-y-1 px-2.5 py-2 text-[13px] leading-5 [overflow-wrap:anywhere]", columns, takeable && "cursor-pointer hover:bg-muted/40 has-checked:bg-muted/35")}>
+                {takeable ? (
+                  <input
+                    type="checkbox"
+                    className={cn(checkboxClass, "mt-0.5")}
+                    checked={selected.has(row.field)}
+                    onChange={() => onToggle(row.field)}
+                    aria-label={`${row.label}: ${row.proposed}`}
+                    aria-describedby={needsCheck ? `${noteId} ${id}-check` : noteId}
+                  />
+                ) : (
+                  <span aria-hidden="true" className="inline-block w-4" />
+                )}
+                <span className="col-span-2 font-medium text-foreground @min-[30rem]:col-span-1">{row.label}</span>
+                <span className="col-start-2 min-w-0 @min-[30rem]:col-start-auto">
+                  <span className="block text-xs text-muted-foreground @min-[30rem]:sr-only">{scanLabel}: </span>
+                  <span className="font-semibold text-foreground">{row.proposed}</span>
+                  {needsCheck && <span title={unverified}><ShieldAlert aria-hidden className="ms-1 inline size-3.5 align-text-bottom text-amber-700" /></span>}
                 </span>
-              ) : null}
-              {!row.verified && row.state !== "same" ? (
-                <span className="text-xs text-amber-700 dark:text-amber-300">{tx("не подтверждено контрольной цифрой", "nicht durch Prüfziffer bestätigt")}</span>
-              ) : null}
-            </label>
-          </li>
-        );
-      })}
-    </ul>
+                <span id={noteId} className="min-w-0 text-muted-foreground">
+                  <span aria-hidden className="block text-xs @min-[30rem]:hidden">{tx("В форме", "Im Formular")}</span>
+                  <span className="sr-only">{currentLabel}: </span>
+                  {row.state === "same" ? (
+                    <span className="inline-flex items-baseline gap-1 text-emerald-700"><Check aria-hidden className="size-3 shrink-0 self-center" />{row.current === row.proposed ? tx("совпадает", "stimmt überein") : row.current}</span>
+                  ) : row.current || <span aria-label={tx("Не заполнено", "Nicht ausgefüllt")}>—</span>}
+                </span>
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+      {rows.some((row) => !row.verified && row.state !== "same") && (
+        <p id={`${id}-check`} className="flex items-start gap-1.5 border-t border-border px-2.5 py-1.5 text-xs text-muted-foreground">
+          <ShieldAlert aria-hidden className="size-3.5 shrink-0 text-amber-700" />{unverified}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -390,11 +410,13 @@ export function LeadIdentityRecognition({
         </p>
       ) : null}
       {result ? (
-        <div className="space-y-2.5 rounded-xl border border-border bg-muted/20 p-3" data-testid={`${testId}-proposal`} data-status={result.status}>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-semibold text-foreground" data-testid={`${testId}-proposal-file`}>
-              {tx("Распознано из файла", "Gelesen aus der Datei")} <span className="[overflow-wrap:anywhere]">«{stateFile}»</span>
-            </span>
+        <div className="@container min-w-0 rounded-xl border border-border bg-card" data-testid={`${testId}-proposal`} data-status={result.status}>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2.5">
+            <h4 className="min-w-0 max-w-full" data-testid={`${testId}-proposal-file`}>
+              <SectionHeading icon={ScanLine}>
+                {tx("Распознано из файла", "Gelesen aus der Datei")} <span className="[overflow-wrap:anywhere]">«{stateFile}»</span>
+              </SectionHeading>
+            </h4>
             {result.status === "verified" ? (
               <StatusChip tone="success" className="whitespace-normal">
                 <ShieldCheck aria-hidden="true" />
@@ -408,51 +430,57 @@ export function LeadIdentityRecognition({
             )}
           </div>
           {result.status === "unverified" ? (
-            <p role="alert" className="text-xs font-medium leading-5 text-amber-700 dark:text-amber-300" data-testid={`${testId}-unverified`}>
+            <p role="alert" className="mx-3 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200" data-testid={`${testId}-unverified`}>
               {tx(
-                `Скан прочитан с ошибками (${failedChecks.join(", ")}). Значения ниже могут быть неверными: ничего не отмечено, сверьте каждое по скану или введите вручную.`,
-                `Der Scan wurde fehlerhaft gelesen (${failedChecks.join(", ")}). Die Werte unten können falsch sein: nichts ist angekreuzt, bitte jeden Wert mit dem Scan vergleichen oder manuell eingeben.`,
+                `Ошибка чтения${failedChecks.length ? `: ${failedChecks.join(", ")}` : ""}. Сверьте значения со сканом перед подстановкой или заполните форму вручную.`,
+                `Lesefehler${failedChecks.length ? `: ${failedChecks.join(", ")}` : ""}. Bitte die Werte vor der Übernahme mit dem Scan vergleichen oder das Formular manuell ausfüllen.`,
               )}
             </p>
           ) : null}
-          {documentRows.length > 0 ? (
-            <Rows rows={documentRows} selected={documentSelection} selectable onToggle={toggle(setDocumentSelection)} tx={tx} testId={`${testId}-document`} />
-          ) : null}
-          <p className="text-xs leading-5 text-muted-foreground">
-            {tx(
-              "«Кем выдан» и дата выдачи в машиночитаемой зоне отсутствуют — внесите их со скана.",
-              "Ausstellende Behörde und Ausstellungsdatum stehen nicht in der maschinenlesbaren Zone – bitte vom Scan übernehmen.",
-            )}
-          </p>
-          {holderRows.length > 0 ? (
-            <div className="space-y-1.5 border-t border-border/60 pt-2.5">
-              <span className="block text-xs font-semibold text-foreground">{tx("Владелец документа", "Inhaber des Dokuments")}</span>
-              <Rows
-                rows={holderRows}
-                selected={holderSelection}
-                selectable={Boolean(onApplyHolder)}
-                onToggle={toggle(setHolderSelection)}
-                tx={tx}
-                testId={`${testId}-holder`}
-              />
+          <div className="grid min-w-0 gap-4 p-3 @min-[68rem]:grid-cols-2">
+            <section className="min-w-0 space-y-2">
+              <h5><SectionHeading icon={IdCard}>{tx("Данные документа", "Dokumentdaten")}</SectionHeading></h5>
+              {documentRows.length > 0 && (
+                <Rows rows={documentRows} selected={documentSelection} selectable={!disabled} onToggle={toggle(setDocumentSelection)} tx={tx} testId={`${testId}-document`} />
+              )}
               <p className="text-xs leading-5 text-muted-foreground">
                 {tx(
-                  "Имя в документе записано латиницей без диакритики и дефисов.",
-                  "Der Name steht im Dokument in lateinischer Umschrift ohne Sonderzeichen und Bindestriche.",
+                  "«Кем выдан» и дата выдачи в машиночитаемой зоне отсутствуют — внесите их со скана.",
+                  "Ausstellende Behörde und Ausstellungsdatum stehen nicht in der maschinenlesbaren Zone – bitte vom Scan übernehmen.",
                 )}
-                {result.namesTruncated ? ` ${tx("Длинное имя в зоне обрезано.", "Ein langer Name ist in der Zone gekürzt.")}` : ""}
               </p>
-              {holderDiffers ? (
-                <p role="alert" className="text-xs font-medium leading-5 text-amber-700 dark:text-amber-300" data-testid={`${testId}-holder-differs`}>
-                  {onApplyHolder
-                    ? tx("Данные человека в форме отличаются от документа. Проверьте, тот ли это документ; отметьте, что взять из документа.", "Die Personendaten im Formular weichen vom Dokument ab. Bitte prüfen, ob es das richtige Dokument ist; ankreuzen, was übernommen werden soll.")
-                    : tx("Данные человека в форме отличаются от документа. Проверьте, тот ли это документ, и при необходимости исправьте данные человека.", "Die Personendaten im Formular weichen vom Dokument ab. Bitte prüfen, ob es das richtige Dokument ist, und die Personendaten ggf. korrigieren.")}
+            </section>
+            {holderRows.length > 0 ? (
+              <section className="min-w-0 space-y-2">
+                <h5><SectionHeading icon={ContactRound}>{tx("Владелец документа", "Inhaber des Dokuments")}</SectionHeading></h5>
+                <Rows
+                  rows={holderRows}
+                  selected={holderSelection}
+                  selectable={Boolean(onApplyHolder) && !disabled}
+                  onToggle={toggle(setHolderSelection)}
+                  tx={tx}
+                  testId={`${testId}-holder`}
+                />
+                <p className="text-xs leading-5 text-muted-foreground">
+                  {tx(
+                    "Имя в документе записано латиницей без диакритики и дефисов.",
+                    "Der Name steht im Dokument in lateinischer Umschrift ohne Sonderzeichen und Bindestriche.",
+                  )}
+                  {result.namesTruncated ? ` ${tx("Длинное имя в зоне обрезано.", "Ein langer Name ist in der Zone gekürzt.")}` : ""}
                 </p>
-              ) : null}
-            </div>
-          ) : null}
-          <div className="flex flex-wrap items-center gap-2">
+                {holderDiffers ? (
+                  <p role="alert" className="text-xs font-medium leading-5 text-amber-700 dark:text-amber-300" data-testid={`${testId}-holder-differs`}>
+                    {onApplyHolder
+                      ? tx("Данные человека в форме отличаются от документа. Проверьте, тот ли это документ; отметьте, что взять из документа.", "Die Personendaten im Formular weichen vom Dokument ab. Bitte prüfen, ob es das richtige Dokument ist; ankreuzen, was übernommen werden soll.")
+                      : tx("Данные человека в форме отличаются от документа. Проверьте, тот ли это документ, и при необходимости исправьте данные человека.", "Die Personendaten im Formular weichen vom Dokument ab. Bitte prüfen, ob es das richtige Dokument ist, und die Personendaten ggf. korrigieren.")}
+                  </p>
+                ) : null}
+              </section>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-2 rounded-b-xl border-t border-border bg-muted/20 px-3 py-2">
             <Button type="button" size="sm" className="h-8 rounded-lg" disabled={disabled || nothingTicked} onClick={apply} data-testid={`${testId}-apply`}>
+              <CheckCheck aria-hidden className="size-3.5" />
               {tx("Подставить отмеченное", "Angekreuztes übernehmen")}
             </Button>
             <Button type="button" size="sm" variant="ghost" className="h-8 rounded-lg" onClick={() => setState({ kind: "idle" })} data-testid={`${testId}-dismiss`}>

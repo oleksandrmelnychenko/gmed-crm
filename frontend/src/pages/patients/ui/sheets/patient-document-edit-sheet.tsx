@@ -1,5 +1,5 @@
 import { hasFormChanges } from "@/lib/form-changes";
-import { LoaderCircle } from "lucide-react";
+import { FileInput, FilePenLine, FileText, LoaderCircle, Tags, Wallet, Workflow } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -623,7 +623,7 @@ export function PatientDocumentEditSheet({
   }
 
   return (
-    <PatientSheetScaffold requireChanges dirty={dirty}
+    <PatientSheetScaffold icon={FilePenLine} requireChanges dirty={dirty}
       open={open}
       onOpenChange={onOpenChange}
       width="detail-wide"
@@ -662,7 +662,7 @@ export function PatientDocumentEditSheet({
               onDone={() => void handleSignatureDone()}
             />
           ) : null}
-          <FormSection title={copy.identity}>
+          <FormSection icon={FileText} title={copy.identity}>
             <div className="grid gap-3 md:grid-cols-2">
               <Field
                 label={copy.name}
@@ -721,7 +721,7 @@ export function PatientDocumentEditSheet({
             </div>
           </FormSection>
 
-          <FormSection title={copy.classification}>
+          <FormSection icon={Tags} title={copy.classification}>
             <div className="grid gap-3 md:grid-cols-3">
               <SelectField
                 id="patient-document-edit-status"
@@ -805,7 +805,7 @@ export function PatientDocumentEditSheet({
             </div>
           </FormSection>
 
-          <FormSection title={copy.source}>
+          <FormSection icon={FileInput} title={copy.source}>
             <div className="grid gap-3 md:grid-cols-2">
               <CodedTextField
                 key={`source-person-${activeDocumentId}-${lang}`}
@@ -836,7 +836,7 @@ export function PatientDocumentEditSheet({
             </div>
           </FormSection>
 
-          <FormSection title={copy.finance}>
+          <FormSection icon={Wallet} title={copy.finance}>
             <div className="grid gap-3 md:grid-cols-2">
               <SelectField
                 id="patient-document-financial-status"
@@ -887,7 +887,7 @@ export function PatientDocumentEditSheet({
             </div>
           </FormSection>
 
-          <FormSection title={copy.processing}>
+          <FormSection icon={Workflow} title={copy.processing}>
             <div className="grid gap-3 md:grid-cols-2">
               <TextField
                 id="patient-document-clinic"

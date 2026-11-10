@@ -3,7 +3,7 @@
  * admin settings and the CEO review page.
  */
 import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
-import { CircleCheck, Info, LoaderCircle, ShieldAlert } from "lucide-react";
+import { ShieldCheck, ShieldMinus, type LucideIcon, Scale, CircleCheck, Info, LoaderCircle, ShieldAlert } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
 import { Field, StatusBadge, textareaClass } from "@/components/ui-shell";
@@ -45,6 +45,7 @@ function announceSanctionsChange() {
 /** A reason dialog for the CEO's decisions (mandatory, at least 10 characters). */
 export function SanctionsReasonDialog({
   open,
+  icon = Scale,
   title,
   description,
   confirmLabel,
@@ -55,6 +56,7 @@ export function SanctionsReasonDialog({
   onClose,
 }: {
   open: boolean;
+  icon?: LucideIcon;
   title: ReactNode;
   description?: ReactNode;
   confirmLabel: string;
@@ -99,6 +101,7 @@ export function SanctionsReasonDialog({
   return (
     <Dialog open={open} onOpenChange={(next) => (!next ? onClose() : undefined)} dirty={Boolean(reason)}>
       <AdminDialogScaffold
+          icon={icon}
           title={title}
           description={description}
           maxWidthClassName={maxWidthClassName}
@@ -395,6 +398,7 @@ export function SanctionsLeadBanner({
       {status.can_lift_country_block && leadId ? (
         <>
           <SanctionsReasonDialog
+            icon={ShieldCheck}
             open={liftOpen}
             title={t.sanctions_country_lift_title}
             description={t.sanctions_country_lift_hint}
@@ -406,6 +410,7 @@ export function SanctionsLeadBanner({
             onClose={() => setLiftOpen(false)}
           />
           <SanctionsReasonDialog
+            icon={ShieldMinus}
             open={revokeOpen}
             title={t.sanctions_country_revoke_title}
             confirmLabel={t.sanctions_country_revoke}

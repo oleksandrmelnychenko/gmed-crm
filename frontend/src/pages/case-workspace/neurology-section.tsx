@@ -1,3 +1,4 @@
+import { Brain } from "lucide-react";
 import { t as translateCatalog, useLang } from "@/lib/i18n";
 
 import { type NeurologyAssessment, useCaseWorkspace } from "./context";
@@ -35,6 +36,7 @@ export function NeurologySection() {
 
   return (
     <SpecialtySection<NeurologyAssessment>
+      icon={Brain}
       title={tri(lang, "case_ws_neurology")}
       description={tri(lang, "case_ws_neurological_signs_and_diagnostic_history")}
       blankValue={BLANK}

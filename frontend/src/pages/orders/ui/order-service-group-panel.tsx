@@ -1,4 +1,6 @@
-﻿import { useMemo, useState, type FormEvent } from "react";
+﻿import { Coins, ListTree, ScanEye, Split, Stethoscope, type LucideIcon } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
+import { useMemo, useState, type FormEvent } from "react";
 
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { useEffect } from "react";
@@ -389,11 +391,13 @@ function PanelSummaryLine({
 }
 
 function SheetSectionCard({
+  icon,
   title,
   description,
   action,
   children,
 }: {
+  icon?: LucideIcon;
   title: ReactNode;
   description?: ReactNode;
   action?: ReactNode;
@@ -403,22 +407,13 @@ function SheetSectionCard({
     <section className="rounded-lg border border-border/70 bg-card p-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
+          <h2 className={tokens.text.sectionTitle}><SectionHeading icon={icon}>{title}</SectionHeading></h2>
           {description ? <p className={tokens.text.muted}>{description}</p> : null}
         </div>
         {action ? <div className="shrink-0">{action}</div> : null}
       </div>
       <div className="mt-5">{children}</div>
     </section>
-  );
-}
-
-function titleWithDot(title: ReactNode) {
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />
-      <span>{title}</span>
-    </span>
   );
 }
 
@@ -603,6 +598,7 @@ export function OrderServiceGroupWizard({
 
   return (
     <Section
+      icon={Split}
       title={t.orders_service_group_wizard_title}
       accessory={
         <Button
@@ -814,7 +810,7 @@ function WizardBasicsSection({
   }
 
   return (
-    <SheetSectionCard title={title}>
+    <SheetSectionCard icon={ListTree} title={title}>
       <div className="grid gap-3 md:grid-cols-4">
         <Field
           label={lang === "de" ? "Katalogleistung" : "Услуга каталога"}
@@ -933,7 +929,7 @@ function WizardCostSection({
   translations: Translations;
 }) {
   return (
-    <SheetSectionCard title={title}>
+    <SheetSectionCard icon={Coins} title={title}>
       <div className="grid gap-3 md:grid-cols-4">
         <Field label={t.orders_service_group_quantity}>
           <Input
@@ -1033,6 +1029,7 @@ function WizardParticipantsSection({
 
   return (
     <SheetSectionCard
+      icon={Stethoscope}
       title={t.orders_service_group_doctors}
       description={formatCountMessage(
         t.orders_service_group_wizard_preview_summary,
@@ -1179,7 +1176,7 @@ function WizardPreviewSection({
   translations: Translations;
 }) {
   return (
-    <SheetSectionCard title={t.orders_service_group_preview}>
+    <SheetSectionCard icon={ScanEye} title={t.orders_service_group_preview}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className={tokens.text.muted}>
           {formatCountMessage(

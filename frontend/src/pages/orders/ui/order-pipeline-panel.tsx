@@ -13,6 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { StaffLink } from "@/components/staff-link";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -85,7 +86,7 @@ function StageBlock({
     >
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-3 py-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <h2 className="flex items-center gap-2 text-[13px] font-semibold"><Icon className="size-[18px] shrink-0" aria-hidden />{pipelineStageLabel(stage.key, lang)}</h2>
+          <h2 className="flex items-center gap-2 text-[13px] font-semibold"><SectionHeading icon={Icon}>{pipelineStageLabel(stage.key, lang)}</SectionHeading></h2>
           <StatusChip
             tone={
               stage.state === "done"

@@ -96,12 +96,8 @@ export function PatientWorkspaceNav() {
                     replace
                     to={to}
                     aria-current={isActive ? "page" : undefined}
-                    className={cn(
-                      "group relative flex h-9 items-center gap-3 rounded-lg px-3 text-sm transition-colors",
-                      isActive
-                        ? "bg-muted/60 text-foreground font-semibold before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-r-full before:bg-[var(--brand)]"
-                        : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                    )}
+                    data-workspace-tab
+                    className="group relative flex h-9 items-center gap-3 rounded-lg px-3 text-sm transition-colors"
                   >
                     <Icon
                       className={cn(

@@ -1,4 +1,4 @@
-﻿import { LoaderCircle, Trash2 } from "lucide-react";
+﻿import { LoaderCircle, Trash2, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ type CaseItemEditSheetProps = {
   dirty?: boolean;
   onOpenChange: (open: boolean) => void;
   mode: "create" | "edit";
+  icon?: LucideIcon;
   title: string;
   description?: string;
   submitLabel?: string;
@@ -31,6 +32,7 @@ export function CaseItemEditSheet({
   dirty,
   onOpenChange,
   mode,
+  icon,
   title,
   description,
   submitLabel,
@@ -52,6 +54,7 @@ export function CaseItemEditSheet({
 
   return (
     <PatientSheetScaffold
+      icon={icon}
       dirty={dirty}
       requireChanges={mode === "edit"}
       open={open}

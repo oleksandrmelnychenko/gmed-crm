@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useRef, useState } from "react";
 import { Download, Languages, LoaderCircle } from "lucide-react";
 
@@ -251,28 +252,25 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
       onSaveBeforeDismiss={() => void handleSave()}
     >
       <DialogContent
-        className="flex h-[92vh] w-[96vw] max-w-none flex-col overflow-hidden rounded-xl p-0 sm:max-w-[1600px]"
+        className="flex h-[92dvh] max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0 sm:w-[96vw] sm:max-w-[1600px] sm:pb-0"
         onClick={(event) => event.stopPropagation()}
       >
         <DialogHeader className="border-b border-border/70 px-5 py-4">
           <div className="flex min-w-0 flex-wrap items-start justify-between gap-3 pr-14">
             <div className="min-w-0">
-              <DialogTitle className="flex items-center gap-2 truncate text-base">
-                <Languages className="size-4 shrink-0" />
-                {editing ? tx("Редактировать перевод", "Übersetzung bearbeiten") : tx("Перевод документа", "Dokument übersetzen")}
-              </DialogTitle>
+              <DialogTitle><SectionHeading icon={Languages}>{editing ? tx("Редактировать перевод", "Übersetzung bearbeiten") : tx("Перевод документа", "Dokument übersetzen")}</SectionHeading></DialogTitle>
               <DialogDescription className="truncate">{title}</DialogDescription>
             </div>
           </div>
         </DialogHeader>
-        <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-          <div className="min-h-[320px] border-b border-border/70 bg-muted p-3 lg:border-b-0 lg:border-r">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain lg:grid lg:overflow-hidden lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+          <div className="h-[clamp(10rem,32dvh,20rem)] shrink-0 border-b border-border/70 bg-muted p-3 lg:h-auto lg:min-h-0 lg:border-b-0 lg:border-r">
             {preview ? (
               <iframe
                 title={title}
                 src={preview.url}
                 sandbox={documentPreviewSandbox(preview.contentType)}
-                className="h-full min-h-[320px] w-full rounded-lg border border-border bg-white"
+                className="h-full w-full rounded-lg border border-border bg-white"
               />
             ) : previewError ? (
               <p className="p-3 text-sm text-destructive">{previewError}</p>
@@ -283,7 +281,7 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
               </div>
             )}
           </div>
-          <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
+          <div className="flex min-w-0 flex-col gap-3 p-4 lg:min-h-0 lg:overflow-y-auto">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1 text-xs font-medium">
                 <span>{tx("С языка", "Von")}</span>

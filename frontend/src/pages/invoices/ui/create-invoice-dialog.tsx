@@ -1,5 +1,6 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, type FormEvent, type ReactNode, type SetStateAction } from "react";
-import { AlertCircle, FileText, LoaderCircle } from "lucide-react";
+import { FilePlus2, ReceiptText, NotebookPen, Banknote, ListOrdered, Calculator, AlertCircle, FileText, LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -147,14 +148,14 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
         className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden rounded-xl p-0 sm:w-[calc(100vw-3rem)] sm:max-w-5xl sm:pb-0"
       >
         <DialogHeader className="shrink-0 border-b border-border/50 bg-card px-4 py-3 pr-14 text-left">
-          <DialogTitle className="text-[15px] font-semibold">{t.invoices_new}</DialogTitle>
+          <DialogTitle className="text-[15px] font-semibold"><SectionHeading icon={FilePlus2}>{t.invoices_new}</SectionHeading></DialogTitle>
         </DialogHeader>
         <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-muted">
             <div className="grid min-w-0 gap-3 p-3 sm:p-4 lg:grid-cols-[minmax(0,1fr)_17rem]">
               <fieldset disabled={formBusy} className="min-w-0 space-y-3">
                 <section className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
-                <AdminSectionTitle>{de ? "Rechnungsdaten" : "Данные счёта"}</AdminSectionTitle>
+                <AdminSectionTitle icon={ReceiptText}>{de ? "Rechnungsdaten" : "Данные счёта"}</AdminSectionTitle>
                 <FormField label={t.revenue_invoices_section_quote}>
                   <NativeComboboxSelect
                     aria-label={t.revenue_invoices_section_quote}
@@ -256,7 +257,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                 {prepaymentSplit ? (
                   <section aria-label={de ? "Anzahlung" : "Предоплата"} className="min-w-0 overflow-hidden rounded-xl border border-border bg-card" data-testid="invoice-prepayment-advance">
                     <div className="border-b border-border px-3 py-2.5">
-                      <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />{de ? "Anzahlung" : "Предоплата"}</h3>
+                      <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><SectionHeading icon={Banknote}>{de ? "Anzahlung" : "Предоплата"}</SectionHeading></h3>
                       <p className="mt-1 text-xs leading-5 text-muted-foreground">
                         {de
                           ? `Anzahlung gemäß Angebot ${selectedQuote?.quote_number ?? ""}. Die Umsatzsteuer wird wie im Angebot anteilig aufgeteilt.`
@@ -282,7 +283,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                 {prepaymentSplit ? null : (
                 <section aria-label={de ? "Rechnungspositionen" : "Позиции счёта"} className="min-w-0 overflow-hidden rounded-xl border border-border bg-card">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2.5">
-                    <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />{de ? "Rechnungspositionen" : "Позиции счёта"}
+                    <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><SectionHeading icon={ListOrdered}>{de ? "Rechnungspositionen" : "Позиции счёта"}</SectionHeading>
                       {selectedQuote ? <CountBadge>{form.selectedLineIndexes.length} / {availableCount}</CountBadge> : null}
                     </h3>
                     {selectedQuote && !final && availableCount > 0 ? (
@@ -374,7 +375,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                 </section>
                 )}
                 <section className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
-                <AdminSectionTitle>{de ? "Anmerkungen" : "Примечания"}</AdminSectionTitle>
+                <AdminSectionTitle icon={NotebookPen}>{de ? "Anmerkungen" : "Примечания"}</AdminSectionTitle>
                 <FormField label={t.invoices_workspace_notes}>
                   <textarea rows={2} className={cn(textareaClass, "min-h-20")} value={form.notes}
                     onChange={(event) => onFormChange((current) => ({ ...current, notes: event.target.value }))}
@@ -394,7 +395,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
 
               <aside className="min-w-0">
                 <div className="space-y-4 rounded-xl border border-border/50 bg-card p-3.5 lg:sticky lg:top-0">
-                  <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />{de ? "Rechnungsübersicht" : "Итог счёта"}</h3>
+                  <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><SectionHeading icon={Calculator}>{de ? "Rechnungsübersicht" : "Итог счёта"}</SectionHeading></h3>
                   {selectedQuote ? (
                     <dl className="space-y-3 text-sm">
                       <SummaryField label={t.invoices_patient} value={selectedQuote.patient_name} />

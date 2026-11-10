@@ -1,3 +1,5 @@
+import { Keyboard } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Button } from "@/components/ui/button";
 
 type PatientsShortcutsDialogProps = {
@@ -29,7 +31,7 @@ export function PatientsShortcutsDialog({
         className="w-full max-w-md rounded-lg border border-border bg-card p-4 shadow-xl"
       >
         <h2 className="mb-3 text-sm font-semibold">
-          {t.patients_shortcuts_title}
+          <SectionHeading icon={Keyboard}>{t.patients_shortcuts_title}</SectionHeading>
         </h2>
         <ul className="space-y-1.5 text-xs">
           <li>

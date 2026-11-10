@@ -6,7 +6,23 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { LoaderCircle, Mail, Phone, Plus, Save, Trash2 } from "lucide-react";
+import {
+  ContactRound,
+  IdCard,
+  LoaderCircle,
+  Mail,
+  MapPin,
+  NotebookPen,
+  Phone,
+  PhoneCall,
+  Plus,
+  Save,
+  Scale,
+  ShieldCheck,
+  Trash2,
+  TriangleAlert,
+  UserRoundPen,
+} from "lucide-react";
 
 import {
   CountrySelect,
@@ -423,7 +439,7 @@ function PatientProfileEditorFormSections({
   }
 
   return (        <div className="space-y-4">
-              <FormSection title={dictionary.patient_profile_editor_personal_data}>
+              <FormSection icon={ContactRound} title={dictionary.patient_profile_editor_personal_data}>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
                   <FormField label={dictionary.patient_profile_editor_title} className="lg:col-span-2">
                     <Input
@@ -520,7 +536,7 @@ function PatientProfileEditorFormSections({
                   />
                 </FormField>
               </FormSection>
-              <FormSection title={dictionary.patient_profile_editor_contact}>
+              <FormSection icon={Phone} title={dictionary.patient_profile_editor_contact}>
                 <div className="space-y-2.5">
                   {contacts.map((contact) => (
                     <div
@@ -661,7 +677,7 @@ function PatientProfileEditorFormSections({
                   </div>
                 </div>
               </FormSection>
-              <FormSection title={dictionary.patient_profile_editor_address}>
+              <FormSection icon={MapPin} title={dictionary.patient_profile_editor_address}>
                 <FormField label={dictionary.patient_profile_editor_street}>
                   <Input
                     value={form.addressStreet}
@@ -693,7 +709,7 @@ function PatientProfileEditorFormSections({
                   </FormField>
                 </div>
               </FormSection>
-              <FormSection title={identityLabels.title}>
+              <FormSection icon={IdCard} title={identityLabels.title}>
                 <div className="grid gap-2.5 md:grid-cols-2">
                   <FormField
                     label={identityLabels.number}
@@ -720,7 +736,7 @@ function PatientProfileEditorFormSections({
                   </FormField>
                 </div>
               </FormSection>
-              <FormSection title={dictionary.patient_profile_editor_insurance}>
+              <FormSection icon={ShieldCheck} title={dictionary.patient_profile_editor_insurance}>
                 <div className="grid gap-2.5 md:grid-cols-3">
                   <FormField label={dictionary.patient_profile_editor_insurance_provider}>
                     <Input
@@ -762,6 +778,7 @@ function PatientProfileEditorFormSections({
               </FormSection>
 
               <FormSection
+                icon={PhoneCall}
                 className={isMinor ? "border-amber-200 bg-amber-50/60" : undefined}
                 title={
                   isMinor
@@ -984,6 +1001,7 @@ function PatientProfileLegalStatusSection({
 
   return (
     <FormSection
+      icon={Scale}
       title={dictionary.patients_legal_status}
       accessory={<LegalStatusPill status={form.legalStatus} />}
     >
@@ -1070,7 +1088,7 @@ function PatientProfileNotesSections({
 }) {
   return (
     <>
-      <FormSection title={dictionary.patient_profile_editor_cave_warnings}>
+      <FormSection icon={TriangleAlert} title={dictionary.patient_profile_editor_cave_warnings}>
         <textarea
           className={formTextareaClassName}
           value={form.clinicalWarnings}
@@ -1081,7 +1099,7 @@ function PatientProfileNotesSections({
         />
       </FormSection>
 
-      <FormSection title={dictionary.patient_profile_editor_notes}>
+      <FormSection icon={NotebookPen} title={dictionary.patient_profile_editor_notes}>
         <textarea
           className={formTextareaClassName}
           value={form.notes}
@@ -1329,7 +1347,7 @@ function PatientProfileEditorSheetContent({
   );
 
   return (
-    <PatientSheetScaffold presentation="dialog" requireChanges dirty={dirty}
+    <PatientSheetScaffold icon={UserRoundPen} presentation="dialog" requireChanges dirty={dirty}
       open={open}
       onOpenChange={onOpenChange}
       width="detail-wide"

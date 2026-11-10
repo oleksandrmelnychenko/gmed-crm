@@ -1,5 +1,7 @@
+import type { LucideIcon } from "lucide-react";
 import type { FormEvent, ReactNode } from "react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import {
   AdminSheetScaffold,
   SheetActionsFooter,
@@ -22,6 +24,7 @@ export function PatientSheetScaffold({
   dirty,
   requireChanges,
   onOpenChange,
+  icon,
   title,
   description,
   width = "default",
@@ -40,6 +43,7 @@ export function PatientSheetScaffold({
   dirty?: boolean;
   requireChanges?: boolean;
   onOpenChange: (open: boolean) => void;
+  icon?: LucideIcon;
   title: ReactNode;
   description?: ReactNode;
   width?: PatientSheetWidthPreset;
@@ -60,7 +64,7 @@ export function PatientSheetScaffold({
     const dialogContent = (
       <>
         <DialogHeader className={cn("shrink-0 border-b border-border/50 bg-card px-4 py-3 pr-14 text-left", headerClassName)}>
-          <DialogTitle className="text-[15px] font-semibold">{title}</DialogTitle>
+          <DialogTitle className="text-[15px] font-semibold">{icon ? <SectionHeading icon={icon}>{title}</SectionHeading> : title}</DialogTitle>
           {description ? <DialogDescription className="text-xs">{description}</DialogDescription> : null}
         </DialogHeader>
         <div className={cn("min-h-0 flex-1 overflow-y-auto overscroll-contain bg-muted px-3 py-3 sm:px-4", bodyClassName)}>
@@ -92,6 +96,7 @@ export function PatientSheetScaffold({
 
   const content = (
     <AdminSheetScaffold
+      icon={icon}
       title={title}
       description={description}
       headerClassName={cn("px-4 py-3", headerClassName)}

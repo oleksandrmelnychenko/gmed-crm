@@ -1,3 +1,4 @@
+import { Network, NotebookPen, UsersRound, Wallet } from "lucide-react";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
@@ -274,6 +275,7 @@ function PatientRelationEditorSheet({
 
   return (
     <PatientSheetScaffold
+      icon={UsersRound}
       open={open}
       onOpenChange={onOpenChange}
       presentation="dialog"
@@ -294,7 +296,7 @@ function PatientRelationEditorSheet({
       }
     >
       {error ? <Banner tone="error">{error}</Banner> : null}
-      <FormSection title={l("patients_linked_patient")}>
+      <FormSection icon={UsersRound} title={l("patients_linked_patient")}>
         <FormField
           label={t.patient_relation_link_patient}
           htmlFor="relation-linked-patient"
@@ -358,7 +360,7 @@ function PatientRelationEditorSheet({
         </FormField>
       </FormSection>
 
-      <FormSection title={l("patients_relation_details")}>
+      <FormSection icon={Network} title={l("patients_relation_details")}>
         <div className="grid gap-3 md:grid-cols-2">
           <FormField label={t.patient_relation_name} htmlFor="relation-name">
             <Input
@@ -489,7 +491,7 @@ function PatientRelationEditorSheet({
         </div>
       </FormSection>
 
-      <FormSection title={tx("Счета и плательщик", "Rechnungen und Zahler")}>
+      <FormSection icon={Wallet} title={tx("Счета и плательщик", "Rechnungen und Zahler")}>
         <p className="text-xs leading-5 text-muted-foreground">
           {tx(
             "Если этот человек оплачивает лечение, счёт выставляется на его имя и адрес. Для выпуска счёта нужны улица, индекс, город и страна.",
@@ -580,7 +582,7 @@ function PatientRelationEditorSheet({
         </label>
       </FormSection>
 
-      <FormSection title={l("patients_additional")}>
+      <FormSection icon={NotebookPen} title={l("patients_additional")}>
         <FormField label={t.patient_relation_notes} htmlFor="relation-notes">
           <textarea
             id="relation-notes"

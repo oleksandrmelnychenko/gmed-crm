@@ -1,13 +1,7 @@
-import {
-  Download,
-  FilePlus2,
-  FileWarning,
-  LoaderCircle,
-  PencilLine,
-  ScanText,
-} from "lucide-react";
+import { Download, FilePlus2, FileSearch, FileWarning, LoaderCircle, PencilLine, ScanText } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import { createDocumentPreviewColumn } from "@/components/data-table/document-preview-column";
 import {
@@ -862,7 +856,7 @@ export function PatientDocumentsTab({
             <div className="flex min-w-0 flex-wrap items-start justify-between gap-4 pr-10">
               <div className="min-w-0">
                 <DialogTitle className="truncate text-base">
-                  {documentPreview?.title ?? t.documents_preview}
+                  <SectionHeading icon={FileSearch}>{documentPreview?.title ?? t.documents_preview}</SectionHeading>
                 </DialogTitle>
                 <DialogDescription className="truncate">
                   {documentPreviewBusy

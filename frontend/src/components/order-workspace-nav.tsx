@@ -235,21 +235,21 @@ export function OrderWorkspaceNavView({
           {groupedSections.flatMap(group => group.items).map(item => {
             const isActive = currentSection === item.key;
             const lockedPhase = notReachedPhase(item.key);
+            const Icon = item.icon;
             return (
               <StaffLink
                 key={item.key}
                 replace
                 to={buildSectionLink(item.key)}
+                data-workspace-tab
                 aria-current={isActive ? "page" : undefined}
                 title={lockedPhase ? notReachedTitle(lockedPhase) : undefined}
                 className={cn(
                   "inline-flex h-8 shrink-0 items-center gap-1 rounded-md px-3 text-xs font-medium",
-                  isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-muted",
                   lockedPhase && !isActive && "opacity-60",
                 )}
               >
+                <Icon aria-hidden className="size-3.5" />
                 {orderSectionLabel(item, lang)}
                 {lockedPhase ? <Lock aria-hidden className="size-3" /> : null}
               </StaffLink>

@@ -9,6 +9,8 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  BellPlus,
+  Radio,
   BellRing,
   CheckCheck,
   Info,
@@ -620,6 +622,7 @@ function useAdminNotificationsPageContent() {
 
       <Dialog open={createOpen} onOpenChange={handleCreateOpenChange}>
             <AdminDialogScaffold
+              icon={BellPlus}
               onSubmit={handleCreate}
               title={t.notif_new}
               description={t.notif_subtitle}
@@ -675,6 +678,7 @@ function useAdminNotificationsPageContent() {
 
       <Dialog open={detailOpen} onOpenChange={handleDetailOpenChange}>
           <AdminDialogScaffold
+            icon={Radio}
             title={selectedChannel?.name ?? t.notif_title}
             description={t.notif_subtitle}
             footer={(

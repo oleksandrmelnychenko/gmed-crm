@@ -1,3 +1,4 @@
+import { Stethoscope } from "lucide-react";
 import { memo } from "react";
 
 import { EmptyCell, Section } from "@/components/ui-shell";
@@ -125,6 +126,7 @@ function AppointmentClinicalSection({
         </>
       ) : (
         <Section
+          icon={Stethoscope}
           title={appointmentText("appointments_clinical_surface")}
         >
           <EmptyCell>{clinicalEmpty}</EmptyCell>

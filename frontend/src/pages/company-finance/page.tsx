@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import { ToolbarField } from "@/components/data-table/toolbar-field";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -912,10 +912,7 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
                 ] as const).map(([value, Icon, label, count]) => (
                   <TabsTrigger
                     key={value}
-                    className={cn(
-                      buttonVariants({ variant: activeTab === value ? "default" : "ghost", size: "sm" }),
-                      "h-9 min-w-0 rounded-md px-3 text-xs text-foreground data-active:!bg-primary data-active:!text-primary-foreground data-active:shadow-none data-active:[&_[data-count]]:bg-white/20 data-active:[&_[data-count]]:text-primary-foreground sm:h-8",
-                    )}
+                    className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8"
                     value={value}
                   >
                     <Icon />
@@ -946,7 +943,7 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
               toolbarStart={(
                 <div className="flex shrink-0 items-end gap-1">
                   {([ ["all", text.all], ["debit", text.debit], ["credit", text.credit], ["reconciliation", text.reconciliation] ] as const).map(([value, label]) => (
-                    <Button key={value} type="button" size="sm" className="h-8 rounded-md px-2.5 text-xs" variant={patientSide === value ? "default" : "ghost"} onClick={() => setPatientSide(value)}>{label}</Button>
+                    <Button key={value} type="button" size="sm" className="h-8 rounded-md px-2.5 text-xs" variant="ghost" data-workspace-tab aria-pressed={patientSide === value} onClick={() => setPatientSide(value)}>{label}</Button>
                   ))}
                   <span className="self-center px-1 text-[10px] tabular-nums text-muted-foreground">{text.shown(patientRows.length, position.patient_positions.length)}</span>
                 </div>
@@ -957,8 +954,8 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
           <TabsContent value="providers" className="space-y-2">
             {documentError ? <ShellBanner tone="error">{documentError}</ShellBanner> : null}
             <div className="flex flex-wrap items-center gap-1 rounded-lg border border-border/70 bg-card p-1.5">
-              <Button type="button" size="sm" className="h-8 rounded-md px-3 text-xs" variant={providerView === "providers" ? "default" : "ghost"} onClick={() => { setProviderView("providers"); setSelectedProviderId(null); }}>{text.byProviders}</Button>
-              <Button type="button" size="sm" className="h-8 rounded-md px-3 text-xs" variant={providerView === "documents" ? "default" : "ghost"} onClick={() => setProviderView("documents")}>{text.providerDocuments}</Button>
+              <Button type="button" size="sm" className="h-8 rounded-md px-3 text-xs" variant="ghost" data-workspace-tab aria-pressed={providerView === "providers"} onClick={() => { setProviderView("providers"); setSelectedProviderId(null); }}>{text.byProviders}</Button>
+              <Button type="button" size="sm" className="h-8 rounded-md px-3 text-xs" variant="ghost" data-workspace-tab aria-pressed={providerView === "documents"} onClick={() => setProviderView("documents")}>{text.providerDocuments}</Button>
               {selectedProviderName ? <Badge variant="outline" className="ml-1 rounded-full">{selectedProviderName}</Badge> : null}
               {selectedProviderId !== null ? (
                 <Button type="button" size="sm" className="ml-auto h-8 rounded-md px-3 text-xs" variant="outline" onClick={() => setSelectedProviderId(null)}>{text.allProviders}</Button>
@@ -990,7 +987,7 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
                       ["expected", text.expected],
                       ["all", text.all],
                     ] as const).map(([value, label]) => (
-                      <Button key={value} type="button" size="sm" className="h-8 rounded-md px-2.5 text-xs" variant={providerFilter === value ? "default" : "ghost"} onClick={() => setProviderFilter(value)}>{label}</Button>
+                      <Button key={value} type="button" size="sm" className="h-8 rounded-md px-2.5 text-xs" variant="ghost" data-workspace-tab aria-pressed={providerFilter === value} onClick={() => setProviderFilter(value)}>{label}</Button>
                     ))}
                     <span className="self-center px-1 text-[10px] tabular-nums text-muted-foreground">{text.shown(providerPositionRows.length, position.provider_positions.length)}</span>
                   </div>
@@ -1026,7 +1023,7 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
                       ["expected", text.expected],
                       ["all", text.all],
                     ] as const).map(([value, label]) => (
-                      <Button key={value} type="button" size="sm" className="h-8 rounded-md px-2.5 text-xs" variant={providerFilter === value ? "default" : "ghost"} onClick={() => setProviderFilter(value)}>{label}</Button>
+                      <Button key={value} type="button" size="sm" className="h-8 rounded-md px-2.5 text-xs" variant="ghost" data-workspace-tab aria-pressed={providerFilter === value} onClick={() => setProviderFilter(value)}>{label}</Button>
                     ))}
                     <span className="self-center px-1 text-[10px] tabular-nums text-muted-foreground">{text.shown(providerRows.length, selectedProviderDocumentCount)}</span>
                   </div>

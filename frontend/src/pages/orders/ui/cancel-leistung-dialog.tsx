@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { CircleX, LoaderCircle } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { BillingReversalNotice } from "@/components/billing-reversal-notice";
 import { Button } from "@/components/ui/button";
 import {
@@ -166,7 +167,7 @@ export function CancelLeistungDialog({
       {leistung ? (
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>{tx("Отменить услугу", "Leistung stornieren")}</DialogTitle>
+            <DialogTitle><SectionHeading icon={CircleX}>{tx("Отменить услугу", "Leistung stornieren")}</SectionHeading></DialogTitle>
             <DialogDescription>
               {tx(
                 "Услуга останется в заказе с отметкой об отмене, но больше не учитывается в предложениях, счетах и при завершении заказа.",

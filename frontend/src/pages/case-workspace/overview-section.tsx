@@ -1,6 +1,6 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { useState, type FormEvent } from "react";
-import { ArrowUpRight, LoaderCircle } from "lucide-react";
+import { ArrowUpRight, ClipboardList, Link2, LoaderCircle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -87,7 +87,7 @@ function CaseLinksPanel({ detail }: { detail: CaseWorkspaceDetail | null }) {
     .join(" · ");
 
   return (
-    <Panel title={t.cases_workspace_overview_links}>
+    <Panel icon={Link2} title={t.cases_workspace_overview_links}>
       <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div>
           <dt className="text-[11.5px] font-medium text-muted-foreground">
@@ -195,7 +195,7 @@ function OverviewSectionForm({
   }
 
   return (
-    <Panel title={t.cases_clinical_section_overview}>
+    <Panel icon={ClipboardList} title={t.cases_clinical_section_overview}>
       <form onSubmit={handleSubmit} className="space-y-5">
         {sectionError ? <Banner tone="error">{sectionError}</Banner> : null}
 

@@ -37,7 +37,7 @@ export function DatevWorkspace({ active, demo, onModeChange, onConnection }: {
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex flex-wrap items-center gap-2"><Building2 className="size-4 text-muted-foreground" /><span className="text-sm font-medium">{demo ? text.demoCompany : text.systemName}</span><Badge variant="secondary"><Eye className="mr-1 size-3" />{text.readOnly}</Badge></div>
       <div className="flex rounded-lg border bg-muted/30 p-0.5" aria-label={text.mode}>
-        {[false, true].map((isDemo) => <Button key={String(isDemo)} type="button" variant={demo === isDemo ? "secondary" : "ghost"} size="sm" aria-pressed={demo === isDemo} onClick={() => { setNotice(null); onModeChange(isDemo); }}>{isDemo ? text.demo : text.live}</Button>)}
+        {[false, true].map((isDemo) => <Button key={String(isDemo)} type="button" variant="ghost" data-workspace-tab size="sm" aria-pressed={demo === isDemo} onClick={() => { setNotice(null); onModeChange(isDemo); }}>{isDemo ? text.demo : text.live}</Button>)}
       </div>
     </div>
     {!demo ? <section className="flex min-h-[360px] flex-col items-center justify-center rounded-xl border bg-card px-5 py-12 text-center">

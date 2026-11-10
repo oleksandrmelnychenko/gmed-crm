@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Ban, Eye, FileSignature, Pencil, Plus } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -277,7 +278,7 @@ export function PatientContractsTab({
               </span>
               <div className="min-w-0">
                 <DialogTitle className="break-words font-mono text-base tracking-[0.08em]">
-                  {selectedContract?.contract_number}
+                  <SectionHeading icon={FileSignature}>{selectedContract?.contract_number}</SectionHeading>
                 </DialogTitle>
                 <DialogDescription className="mt-1">
                   {l("patients_contract")}

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { Archive, BriefcaseMedical, LoaderCircle } from "lucide-react";
 import { useParams, useSearchParams } from "react-router-dom";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -221,13 +222,7 @@ function CaseWorkspaceContent() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2.5">
-              <span
-                aria-hidden
-                className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]"
-              />
-              <h1 className="text-base font-semibold text-foreground">
-                {detail?.case_id ?? caseId}
-              </h1>
+              <h1 className="text-base font-semibold text-foreground"><SectionHeading icon={BriefcaseMedical}>{detail?.case_id ?? caseId}</SectionHeading></h1>
               {detail?.status ? (
                 <Badge
                   variant="outline"
@@ -313,7 +308,7 @@ function CaseWorkspaceContent() {
       <Dialog open={closeDialogOpen} onOpenChange={setCloseDialogOpen} allowImplicitDismissal>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{tri(lang, "case_ws_status_close")}</DialogTitle>
+            <DialogTitle><SectionHeading icon={Archive}>{tri(lang, "case_ws_status_close")}</SectionHeading></DialogTitle>
             <DialogDescription>
               {tri(lang, "case_ws_close_description")}
             </DialogDescription>

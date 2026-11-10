@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LoaderCircle, Trash2, Upload } from "lucide-react";
+import { FileMinus2, Inbox, LoaderCircle, Trash2, Upload } from "lucide-react";
 
 import { AdminTableCard } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -205,7 +205,7 @@ export function IntakeTab({
   return (
     <div className="space-y-3">
       {error ? <Banner tone="error">{error}</Banner> : null}
-      <AdminTableCard title={t.personnel_tab_intake} count={loading && items.length === 0 ? undefined : items.length}>
+      <AdminTableCard icon={Inbox} title={t.personnel_tab_intake} count={loading && items.length === 0 ? undefined : items.length}>
         <p className="px-1 text-xs text-muted-foreground">{t.personnel_intake_intro}</p>
         {loading && items.length === 0 ? (
           <TabLoader />
@@ -269,6 +269,7 @@ export function IntakeTab({
         }}
       />
       <ReasonDialog
+        icon={FileMinus2}
         open={Boolean(discardItem)}
         title={t.personnel_intake_discard_title}
         description={discardItem?.original_file_name}

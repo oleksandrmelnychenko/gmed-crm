@@ -1,3 +1,4 @@
+import { Wind } from "lucide-react";
 import { t as translateCatalog, useLang } from "@/lib/i18n";
 
 import { type PulmonologyAssessment, useCaseWorkspace } from "./context";
@@ -35,6 +36,7 @@ export function PulmonologySection() {
 
   return (
     <SpecialtySection<PulmonologyAssessment>
+      icon={Wind}
       title={tri(lang, "case_ws_pulmonology")}
       description={tri(lang, "case_ws_respiratory_complaints_smoking_history_and_therapies")}
       blankValue={BLANK}

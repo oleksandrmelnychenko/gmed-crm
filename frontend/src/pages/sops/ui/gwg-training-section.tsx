@@ -717,6 +717,7 @@ function GwgTrainingManager() {
           {formFor && form ? (
             <form className="flex h-full min-h-0 flex-col" onSubmit={(event) => void submit(event)}>
               <AdminSheetScaffold
+                icon={GraduationCap}
                 title={`${t.sops_gwg_form_title}: ${formFor.display_name}`}
                 footer={
                   <SheetFormFooter
@@ -754,7 +755,7 @@ function GwgTrainingManager() {
       <Sheet open={Boolean(historyEmployee)} onOpenChange={(open) => (!open ? setHistoryFor(null) : undefined)}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
           {historyEmployee ? (
-            <AdminSheetScaffold title={`${t.sops_gwg_history_title}: ${historyEmployee.display_name}`}>
+            <AdminSheetScaffold icon={History} title={`${t.sops_gwg_history_title}: ${historyEmployee.display_name}`}>
               <RecordList
                 records={historyEmployee.records}
                 t={t}

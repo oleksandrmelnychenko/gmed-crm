@@ -1,3 +1,4 @@
+import { Gauge, MapPin, ScanLine, TrendingUp, Zap } from "lucide-react";
 import { useMemo } from "react";
 
 import { Input } from "@/components/ui/input";
@@ -124,6 +125,7 @@ export function PainSection() {
 
   return (
     <CaseItemList<PainItem>
+      icon={Zap}
       columns={columns}
       title={t.cases_pain_title}
       description={t.cases_pain_description}
@@ -145,7 +147,7 @@ export function PainSection() {
       missingPrimaryMessage={t.cases_pain_missing_location}
       formContent={({ form, updateField, disabled }) => (
         <>
-          <Panel title={t.cases_pain_group_location_timing}>
+          <Panel icon={MapPin} title={t.cases_pain_group_location_timing}>
             <div className="grid gap-4 md:grid-cols-2">
               <Field label={t.cases_pain_location}>
                 <Input
@@ -166,7 +168,7 @@ export function PainSection() {
             </div>
           </Panel>
 
-          <Panel title={t.cases_pain_group_characteristics}>
+          <Panel icon={ScanLine} title={t.cases_pain_group_characteristics}>
             <div className="grid gap-4 md:grid-cols-2">
               <Field label={t.cases_pain_cause}>
                 <Input
@@ -206,7 +208,7 @@ export function PainSection() {
             </div>
           </Panel>
 
-          <Panel title={t.cases_pain_group_intensity}>
+          <Panel icon={Gauge} title={t.cases_pain_group_intensity}>
             <div className="grid gap-4 md:grid-cols-2">
               <Field label={t.cases_pain_nrs_current}>
                 <Input
@@ -229,7 +231,7 @@ export function PainSection() {
             </div>
           </Panel>
 
-          <Panel title={t.cases_pain_group_course}>
+          <Panel icon={TrendingUp} title={t.cases_pain_group_course}>
             <div className="grid gap-4 md:grid-cols-2">
               <Field label={t.cases_pain_initial_duration}>
                 <Input

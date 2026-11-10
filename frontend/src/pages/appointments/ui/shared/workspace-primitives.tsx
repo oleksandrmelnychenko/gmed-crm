@@ -1,6 +1,7 @@
 import { useId, type ComponentProps, type FormEvent, type ReactNode } from "react";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Tag, type LucideIcon } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import {
   AdminSheetScaffold,
   SheetActionsFooter,
@@ -84,6 +85,7 @@ export function AppointmentEditorSheet({
   onOpenChange,
   allowImplicitDismissal,
   dirty,
+  icon,
   title,
   description,
   maxWidthClassName = "sm:max-w-[560px]",
@@ -99,6 +101,7 @@ export function AppointmentEditorSheet({
   ) => void;
   allowImplicitDismissal?: boolean;
   dirty?: boolean;
+  icon?: LucideIcon;
   title: ReactNode;
   description?: ReactNode;
   maxWidthClassName?: string;
@@ -109,6 +112,7 @@ export function AppointmentEditorSheet({
 }) {
   const content = (
     <AdminSheetScaffold
+      icon={icon}
       title={title}
       description={description}
       headerClassName="px-4 py-3"
@@ -148,6 +152,7 @@ export function AppointmentPreviewSheet({
   open,
   onOpenChange,
   dirty,
+  icon,
   title,
   description,
   maxWidthClassName = "sm:max-w-[560px]",
@@ -161,6 +166,7 @@ export function AppointmentPreviewSheet({
     eventDetails?: AppointmentEditorSheetOpenChangeDetails,
   ) => void;
   dirty?: boolean;
+  icon?: LucideIcon;
   title: ReactNode;
   description?: ReactNode;
   maxWidthClassName?: string;
@@ -175,6 +181,7 @@ export function AppointmentPreviewSheet({
         className={cn("w-full border-l border-border p-0", maxWidthClassName)}
       >
         <AdminSheetScaffold
+          icon={icon}
           title={title}
           description={description}
           headerClassName={cn("px-4 py-3", headerClassName)}
@@ -194,6 +201,7 @@ export function AppointmentPreviewSheet({
 export function AppointmentPreviewSheetLoadingState({
   open,
   onOpenChange,
+  icon,
   title,
   description,
   maxWidthClassName = "sm:max-w-[560px]",
@@ -202,6 +210,7 @@ export function AppointmentPreviewSheetLoadingState({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  icon?: LucideIcon;
   title: ReactNode;
   description?: ReactNode;
   maxWidthClassName?: string;
@@ -210,6 +219,7 @@ export function AppointmentPreviewSheetLoadingState({
 }) {
   return (
     <AppointmentPreviewSheet
+      icon={icon}
       open={open}
       onOpenChange={onOpenChange}
       title={title}
@@ -253,8 +263,10 @@ export function Field({
 }
 
 export function AppointmentSectionHeading({
+  icon,
   title,
 }: {
+  icon?: LucideIcon;
   title: ReactNode;
   // Descriptive sub-texts were dropped app-wide; the prop stays so call
   // sites don't need to change.
@@ -263,8 +275,7 @@ export function AppointmentSectionHeading({
   return (
     <div className="min-w-0">
       <div className="flex min-w-0 items-center gap-2">
-        <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-        <h3 className={cn(tokens.text.sectionTitle, "min-w-0 break-words")}>{title}</h3>
+        <h3 className={cn(tokens.text.sectionTitle, "min-w-0 break-words")}><SectionHeading icon={icon}>{title}</SectionHeading></h3>
       </div>
     </div>
   );
@@ -273,8 +284,7 @@ export function AppointmentSectionHeading({
 export function AppointmentDotLabel({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-w-0 items-center gap-2">
-      <span className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-      <p className={cn(tokens.text.eyebrow, "min-w-0 break-words")}>{children}</p>
+      <p className={cn(tokens.text.eyebrow, "min-w-0 break-words")}><SectionHeading icon={Tag}>{children}</SectionHeading></p>
     </div>
   );
 }

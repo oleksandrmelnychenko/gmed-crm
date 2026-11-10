@@ -1,3 +1,4 @@
+import { Bone } from "lucide-react";
 import { t as translateCatalog, useLang } from "@/lib/i18n";
 
 import { type OrthopedicsAssessment, useCaseWorkspace } from "./context";
@@ -34,6 +35,7 @@ export function OrthopedicsSection() {
 
   return (
     <SpecialtySection<OrthopedicsAssessment>
+      icon={Bone}
       title={tri(lang, "case_ws_orthopedics")}
       description={tri(lang, "case_ws_musculoskeletal_history_and_functional_limitations")}
       blankValue={BLANK}

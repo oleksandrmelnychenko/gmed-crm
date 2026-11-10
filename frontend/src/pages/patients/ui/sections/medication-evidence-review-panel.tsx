@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { AiMark } from "@/components/ui/ai-mark";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,7 +32,17 @@ import { useLang, type Lang } from "@/lib/i18n";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { useRealtimeSubscription, type RealtimeEvent } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
-import { ChevronDown } from "lucide-react";
+import {
+  ChevronDown,
+  CircleHelp,
+  ClipboardList,
+  FileText,
+  ListChecks,
+  Quote,
+  ScanSearch,
+  ShieldAlert,
+  type LucideIcon,
+} from "lucide-react";
 
 import { officialSourceLabel } from "../../data/official-medication-source-label";
 
@@ -234,9 +245,9 @@ export function MedicationEvidenceReviewPanelContent({
       <header className="flex flex-col gap-2 border-b border-border/60 bg-muted/15 px-3.5 py-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <AiMark className="size-4 text-foreground" />
+
             <h2 className="text-[13px] font-semibold text-foreground">
-              {tx("AI-анализ доказательств", "KI-Evidenzprüfung")}
+              <SectionHeading icon={AiMark}>{tx("AI-анализ доказательств", "KI-Evidenzprüfung")}</SectionHeading>
             </h2>
           </div>
         </div>
@@ -417,29 +428,29 @@ function CitationRefs({
 }
 
 function DraftGroup({
+  icon,
   title,
   items,
   citations,
   lang,
   emptyText,
-  ai = false,
   collapsible = false,
   defaultOpen = true,
 }: {
+  icon?: LucideIcon;
   title: string;
   items: MedicationEvidenceDraftItem[];
   citations: Map<string, MedicationEvidenceCitation>;
   lang: Lang;
   emptyText: string;
-  ai?: boolean;
   collapsible?: boolean;
   defaultOpen?: boolean;
 }) {
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
   const header = (
     <div className="flex items-center gap-2 bg-muted/15 px-3 py-2.5">
-        {ai ? <AiMark className="size-3.5 text-orange-500" /> : <span className="size-1.5 rounded-full bg-[var(--dot,var(--color-orange-500))]" />}
-        <h3 className="text-xs font-semibold text-foreground">{title}</h3>
+
+        <h3 className="text-xs font-semibold text-foreground"><SectionHeading icon={icon}>{title}</SectionHeading></h3>
         <span className="ml-auto font-mono text-[10px] text-muted-foreground">{items.length}</span>
         {collapsible ? <ChevronDown className="size-3.5 text-muted-foreground transition-transform group-open/draft:rotate-180" /> : null}
     </div>
@@ -486,8 +497,7 @@ function EvidenceSnapshot({ review, lang, tx }: { review: MedicationEvidenceRevi
   return (
     <details className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <summary className="flex cursor-pointer list-none items-center gap-2 bg-muted/15 px-3 py-2.5 marker:hidden">
-        <span className="size-1.5 rounded-full bg-[var(--dot,var(--color-orange-500))]" />
-        <span className="text-xs font-semibold text-foreground">{tx("Снимок доказательств", "Evidenz-Snapshot")}</span>
+        <SectionHeading icon={ScanSearch}>{tx("Снимок доказательств", "Evidenz-Snapshot")}</SectionHeading>
         <span className="ml-auto font-mono text-[10px] text-muted-foreground">
           {review.bundle.findings.length + review.bundle.missing_data.length + review.bundle.benefit_assessments.length}
         </span>
@@ -559,8 +569,7 @@ function ProvenanceDetails({ review, lang, tx }: { review: MedicationEvidenceRev
   return (
     <details className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <summary className="flex cursor-pointer list-none items-center gap-2 bg-muted/15 px-3 py-2.5 marker:hidden">
-        <span className="size-1.5 rounded-full bg-[var(--dot,var(--color-orange-500))]" />
-        <span className="text-xs font-semibold text-foreground">{tx("Цитаты и источники", "Zitate und Quellen")}</span>
+        <SectionHeading icon={Quote}>{tx("Цитаты и источники", "Zitate und Quellen")}</SectionHeading>
         <span className="ml-auto font-mono text-[10px] text-muted-foreground">{review.bundle.citations.length}</span>
       </summary>
       <div className="divide-y divide-border/50 border-t border-border/60">
@@ -668,6 +677,7 @@ export function MedicationEvidenceReviewContent({
       ) : null}
 
       <DraftGroup
+        icon={FileText}
         title={tx("Сводка доказательств", "Evidenzzusammenfassung")}
         items={review.draft.evidence_summary}
         citations={citations}
@@ -676,6 +686,7 @@ export function MedicationEvidenceReviewContent({
         collapsible
       />
       <DraftGroup
+        icon={CircleHelp}
         title={tx("Вопросы для проверки", "Prüffragen")}
         items={review.draft.verification_questions}
         citations={citations}
@@ -685,6 +696,7 @@ export function MedicationEvidenceReviewContent({
         defaultOpen={false}
       />
       <DraftGroup
+        icon={ListChecks}
         title={tx("Ограничения", "Einschränkungen")}
         items={review.draft.limitations}
         citations={citations}
@@ -812,7 +824,7 @@ export function MedicationAiAnalysisSection({
             </div>
             <div className="grid items-start gap-2.5 lg:grid-cols-[minmax(0,1.3fr)_minmax(18rem,0.7fr)]">
               <DraftGroup
-                ai
+                icon={ClipboardList}
                 collapsible
                 title={tx("Краткий вывод", "Kurzfazit")}
                 items={analysis.draft.evidence_summary}
@@ -822,7 +834,7 @@ export function MedicationAiAnalysisSection({
               />
               <div className="space-y-2.5">
                 <DraftGroup
-                  ai
+                  icon={CircleHelp}
                   collapsible
                   defaultOpen={false}
                   title={tx("Что проверить", "Was ist zu prüfen")}
@@ -832,7 +844,7 @@ export function MedicationAiAnalysisSection({
                   emptyText={tx("AI-вопросов нет.", "Keine KI-Prüffragen vorhanden.")}
                 />
                 <DraftGroup
-                  ai
+                  icon={ShieldAlert}
                   collapsible
                   defaultOpen={false}
                   title={tx("Ограничения", "Einschränkungen")}
@@ -1364,8 +1376,7 @@ export function MedicationEvidenceReviewPanel({
           <DialogHeader className="border-b border-border/60 px-4 py-3.5 pr-12">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <DialogTitle className="flex items-center gap-2">
-                <AiMark className="size-4" />
-                {lang === "de" ? "KI-Medikationsanalyse" : "AI-анализ медикаментов"}
+                <SectionHeading icon={AiMark}>{lang === "de" ? "KI-Medikationsanalyse" : "AI-анализ медикаментов"}</SectionHeading>
               </DialogTitle>
               {review ? (
                 <div className="flex flex-wrap items-center gap-2">
@@ -1394,14 +1405,14 @@ export function MedicationEvidenceReviewPanel({
               <TabsList className="h-8" aria-label={lang === "de" ? "Analysebereiche" : "Разделы анализа"}>
                 <TabsTrigger
                   value="ai"
-                  className="px-3 text-xs data-active:bg-primary data-active:text-primary-foreground data-active:shadow-none"
+                  className="px-3 text-xs"
                 >
                   <AiMark className="size-3.5" />
                   {lang === "de" ? "KI-Ergebnis" : "AI-результат"}
                 </TabsTrigger>
                 <TabsTrigger
                   value="evidence"
-                  className="px-3 text-xs data-active:bg-primary data-active:text-primary-foreground data-active:shadow-none"
+                  className="px-3 text-xs"
                 >
                   {lang === "de" ? "Evidenzpaket" : "Доказательства"}
                 </TabsTrigger>

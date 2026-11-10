@@ -1,4 +1,5 @@
-import { FileSignature } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
+import { ShieldMinus, FileSignature } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { StatusChip, type StatusChipTone } from "@/components/ui/status-chip";
@@ -128,7 +129,7 @@ function ConsentRevokeDialog({
       <DialogContent overlayClassName="bg-[color-mix(in_srgb,var(--overlay,#000)_40%,transparent)]" className="sm:max-w-[560px]" data-testid="consent-revoke-dialog">
         <DialogHeader>
           <DialogTitle>
-            {l("consents_revoke_title")}: {consentType ? typeLabel(consentType) : ""}
+            <SectionHeading icon={ShieldMinus}>{l("consents_revoke_title")}: {consentType ? typeLabel(consentType) : ""}</SectionHeading>
           </DialogTitle>
           <DialogDescription>
             {consentType && ORDER_BLOCKING_CONSENTS.has(consentType)

@@ -70,7 +70,7 @@ import {
 } from "lucide-react";
 
 /** Keyed by directory code so language changes do not change the symbol. */
-export const leadSpecializationIcons: ReadonlyMap<string, LucideIcon> = new Map([
+export const specializationIcons: ReadonlyMap<string, LucideIcon> = new Map([
   ["allgemeinchirurgie", ScissorsLineDashed],
   ["allgemeinmedizin", Cross],
   ["anaesthesiologie", Syringe],

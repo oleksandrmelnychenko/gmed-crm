@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowUpRight, CheckCircle2, ChevronDown, Clock3, Info } from "lucide-react";
+import { ArrowUpRight, CheckCircle2, ChevronDown, Clock3, Info, WalletCards } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
@@ -70,10 +71,7 @@ function SummaryCard({
     >
       <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-3.5 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-          <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">
-            {title}
-          </h3>
+          <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground"><SectionHeading icon={WalletCards}>{title}</SectionHeading></h3>
         </div>
       </div>
       <div className="divide-y divide-border/60">{children}</div>

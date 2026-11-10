@@ -1,9 +1,12 @@
+import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { tokens } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
 
 type PanelProps = {
+  icon?: LucideIcon;
   title: string;
   description?: string;
   action?: ReactNode;
@@ -13,6 +16,7 @@ type PanelProps = {
 };
 
 export function Panel({
+  icon,
   title,
   description,
   action,
@@ -30,17 +34,9 @@ export function Panel({
     >
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            {accent ? (
-              <span
-                aria-hidden
-                className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]"
-              />
-            ) : null}
-            <h3 className={cn(tokens.text.sectionTitle, "min-w-0 max-w-full break-words")}>
-              {title}
-            </h3>
-          </div>
+          <h3 className={cn(tokens.text.sectionTitle, "min-w-0 max-w-full break-words")}>
+            {accent ? <SectionHeading icon={icon}>{title}</SectionHeading> : title}
+          </h3>
           {description ? (
             <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">
               {description}

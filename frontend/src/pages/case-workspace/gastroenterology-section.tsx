@@ -1,3 +1,4 @@
+import { Utensils } from "lucide-react";
 import { t as translateCatalog, useLang } from "@/lib/i18n";
 
 import { type GastroenterologyAssessment, useCaseWorkspace } from "./context";
@@ -36,6 +37,7 @@ export function GastroenterologySection() {
 
   return (
     <SpecialtySection<GastroenterologyAssessment>
+      icon={Utensils}
       title={tri(lang, "case_ws_gastroenterology")}
       description={tri(lang, "case_ws_gastrointestinal_complaints_and_history")}
       blankValue={BLANK}

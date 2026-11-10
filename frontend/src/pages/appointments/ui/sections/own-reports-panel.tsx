@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { LoaderCircle } from "lucide-react";
+import { ClipboardPenLine, LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -133,6 +133,7 @@ export function OwnInterpreterReportsPanel({
   return (
     <section className={appointmentSectionCardClassName("p-4")}>
       <Section
+        icon={ClipboardPenLine}
         title={t.appointments_own_reports_title}
         accessory={reports ? <CountBadge>{reports.length}</CountBadge> : null}
       >

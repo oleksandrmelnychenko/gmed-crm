@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useOpenedFormDirty } from "@/hooks/use-opened-form-dirty";
 import { hasFormChanges } from "@/lib/form-changes";
 import {
@@ -16,24 +17,43 @@ import {
 import { useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowUpRight,
+  BadgeCheck,
+  BadgeInfo,
+  BookOpen,
+  BriefcaseMedical,
+  Building2,
   CalendarClock,
   ChevronDown,
+  ClipboardPenLine,
+  Contact,
+  ContactRound,
   Copy,
+  ExternalLink,
+  FileSignature,
+  GitBranch,
+  Hospital,
+  ListTree,
   LoaderCircle,
   Mail,
   MapPin,
+  MessagesSquare,
+  Network,
+  NotebookPen,
   Pencil,
   Phone,
   Plus,
   Search,
-  SlidersHorizontal,
   ShieldCheck,
+  SlidersHorizontal,
   Star,
   Stethoscope,
+  StickyNote,
+  Tags,
   Trash2,
+  UserRoundCog,
+  UserRoundPen,
+  UsersRound,
   X,
-  BadgeCheck,
-  ExternalLink,
 } from "lucide-react";
 
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -1269,15 +1289,6 @@ function WeeklyAvailabilityEditor({
         </div>
       ))}
     </div>
-  );
-}
-
-function titleWithDot(title: ReactNode) {
-  return (
-    <span className="inline-flex min-w-0 items-center gap-2">
-      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-      <span className="min-w-0 truncate">{title}</span>
-    </span>
   );
 }
 
@@ -4095,6 +4106,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
           <form onSubmit={handleCreateProvider} className="flex flex-1 min-h-0 flex-col">
             <AdminSheetScaffold
+              icon={Hospital}
               title={providerPageCopy.newLabel}
               description={providerPageCopy.createDescription}
               footer={(
@@ -4164,6 +4176,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           ) : detail ? (
             <div className="flex flex-1 min-h-0 flex-col">
               <AdminSheetScaffold
+                icon={Building2}
                 title={detail.name || t.providers_detail}
                 description={t.providers_subtitle}
                 hideHeader
@@ -4708,6 +4721,7 @@ function ProviderProfileReadOnlySection({ detail }: { detail: ProviderDetail }) 
     <div className="space-y-3">
       {attributeRows.length > 0 ? (
         <Section
+          icon={Tags}
           className={providerDetailSectionClassName}
           title={lang === "ru" ? "Атрибуты категории" : "Kategorieattribute"}
         >
@@ -4719,7 +4733,7 @@ function ProviderProfileReadOnlySection({ detail }: { detail: ProviderDetail }) 
         </Section>
       ) : null}
 
-      <Section className={providerDetailSectionClassName} title={l("patients_contact")}>
+      <Section icon={Contact} className={providerDetailSectionClassName} title={l("patients_contact")}>
         <div className="space-y-3">
           <div className="grid gap-x-8 gap-y-1 lg:grid-cols-2">
             <ReadOnlyLine label={t.providers_website} value={detail.website || fallback} wrap />
@@ -4733,7 +4747,7 @@ function ProviderProfileReadOnlySection({ detail }: { detail: ProviderDetail }) 
         </div>
       </Section>
 
-      <Section className={providerDetailSectionClassName} title={l("providers_contract_and_notes")}>
+      <Section icon={FileSignature} className={providerDetailSectionClassName} title={l("providers_contract_and_notes")}>
         <div className="grid gap-x-8 gap-y-1 lg:grid-cols-2">
           <ReadOnlyLine
             label={t.providers_contract}
@@ -4809,6 +4823,7 @@ function ProviderDoctorDetailSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <AdminSheetScaffold
+          icon={Stethoscope}
           title={
             displayName ||
             (isMedicalProvider ? t.providers_doctor_detail : t.providers_contact_person_detail)
@@ -4844,7 +4859,7 @@ function ProviderDoctorDetailSheet({
           }
         >
           <div className="space-y-3 rounded-xl p-4">
-            <Section title={isMedicalProvider ? l("providers_doctor_profile") : t.providers_contact_profile}>
+            <Section icon={Stethoscope} title={isMedicalProvider ? l("providers_doctor_profile") : t.providers_contact_profile}>
               <ReadOnlyLine label={l("patients_display_name")} value={displayName || t.common_not_set} wrap />
               {isMedicalProvider ? (
                 <ReadOnlyLine label={l("providers_doctor_role")} value={role || t.common_not_set} />
@@ -4882,14 +4897,14 @@ function ProviderDoctorDetailSheet({
                 value={openingHours}
               />
             </Section>
-            <Section title={l("providers_contacts")}>
+            <Section icon={Phone} title={l("providers_contacts")}>
               <ReadOnlyContacts contacts={contacts} fallbackPhone={phone} fallbackEmail={email} />
             </Section>
             {isMedicalProvider ? (
               <DoctorLinkedPatientsSection patients={linkedPatients} />
             ) : null}
             {isMedicalProvider ? (
-              <Section title={l("providers_license")}>
+              <Section icon={BadgeCheck} title={l("providers_license")}>
                 <ReadOnlyLine label={l("providers_license_number")} value={licenseNumber || t.common_not_set} />
                 <ReadOnlyLine
                   label={l("providers_licensing_country")}
@@ -4899,7 +4914,7 @@ function ProviderDoctorDetailSheet({
               </Section>
             ) : null}
             {doctor && isMedicalProvider ? (
-              <Section title={l("providers_doctor_relationships")}>
+              <Section icon={Network} title={l("providers_doctor_relationships")}>
                 {doctor.relationships.length === 0 ? (
                   <p className="text-sm text-muted-foreground">{l("providers_relationships_empty")}</p>
                 ) : (
@@ -4937,7 +4952,7 @@ function ProviderDoctorDetailSheet({
                 )}
               </Section>
             ) : null}
-            <Section title={l("appointments_notes")}>
+            <Section icon={NotebookPen} title={l("appointments_notes")}>
               <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">
                 {notes || t.common_not_set}
               </p>
@@ -5098,8 +5113,7 @@ function PaginatedLinkedPatientsGrid({
           toolbarTitle ? (
             <>
               <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-                {toolbarTitle}
+                <SectionHeading icon={ContactRound}>{toolbarTitle}</SectionHeading>
               </span>
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
             </>
@@ -5148,12 +5162,9 @@ function CollapsibleLinkedPatientsPanel({
         }}
       >
         <span className="flex min-w-0 items-center gap-2">
-          {showMarker ? (
-            <span className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-          ) : null}
-          <span className="truncate text-[13px] font-semibold tracking-tight text-foreground">
+          {showMarker ? <SectionHeading icon={UsersRound}>{l("providers_linked_patients")}</SectionHeading> : <span className="truncate text-[13px] font-semibold tracking-tight text-foreground">
             {l("providers_linked_patients")}
-          </span>
+          </span>}
           <span className="shrink-0 rounded-full border border-border bg-card px-2 py-0.5 text-[11px] font-semibold leading-none text-muted-foreground">
             {patients.length}
           </span>
@@ -5232,6 +5243,7 @@ function ProviderStaffDetailSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <AdminSheetScaffold
+          icon={ContactRound}
           title={displayName}
           description={providerName}
           footer={
@@ -5253,7 +5265,7 @@ function ProviderStaffDetailSheet({
           }
         >
           <div className="space-y-3 rounded-xl p-4">
-            <Section title={l("providers_staff_detail")}>
+            <Section icon={BadgeInfo} title={l("providers_staff_detail")}>
               <ReadOnlyLine label={l("patients_display_name")} value={displayName} wrap />
               <ReadOnlyLine label={l("providers_people_role")} value={role || t.common_not_set} />
               <ReadOnlyLine label={l("providers_staff_department")} value={(staff?.department ?? row?.department) || t.common_not_set} />
@@ -5264,10 +5276,10 @@ function ProviderStaffDetailSheet({
                 value={openingHours}
               />
             </Section>
-            <Section title={l("providers_contacts")}>
+            <Section icon={ContactRound} title={l("providers_contacts")}>
               <ReadOnlyContacts contacts={contacts} fallbackPhone={phone} fallbackEmail={email} />
             </Section>
-            <Section title={l("appointments_notes")}>
+            <Section icon={StickyNote} title={l("appointments_notes")}>
               <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">
                 {notes || t.common_not_set}
               </p>
@@ -5319,6 +5331,7 @@ function ProviderEditFormSheet({
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
           <AdminSheetScaffold
+            icon={UserRoundPen}
             title={t.patients_edit}
             description={detail.name || t.providers_detail}
             footer={
@@ -5403,6 +5416,7 @@ function ProviderDoctorFormSheet({
   return (
     <Dialog dirty={dirty} requireChanges={Boolean(form.id)} open={open} onOpenChange={onOpenChange}>
       <AdminDialogScaffold
+        icon={ContactRound}
         onSubmit={onSubmit}
         title={form.id ? detailLabel : createLabel}
         footer={
@@ -5523,6 +5537,7 @@ function ProviderDoctorRelationshipFormSheet({
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
           <AdminSheetScaffold
+            icon={GitBranch}
             title={form.id ? l("providers_relationship_edit") : l("providers_relationship_add")}
             footer={
               <SheetFormFooter
@@ -5543,7 +5558,7 @@ function ProviderDoctorRelationshipFormSheet({
           >
             <div className="space-y-3 rounded-xl p-4">
               {error ? <Banner tone="error">{error}</Banner> : null}
-              <Section title={l("providers_doctor_relationships")}>
+              <Section icon={GitBranch} title={l("providers_doctor_relationships")}>
                 <div className="grid gap-3 md:grid-cols-2">
                   <Field label={l("providers_relationship_source")} required>
                     <NativeComboboxSelect
@@ -5700,6 +5715,7 @@ function ProviderServiceFormSheet({
   return (
     <Dialog dirty={dirty} requireChanges={Boolean(form.id)} open={open} onOpenChange={onOpenChange}>
       <AdminDialogScaffold
+        icon={BriefcaseMedical}
         onSubmit={onSubmit}
         title={form.id ? t.providers_service_detail : t.providers_service_new}
         footer={
@@ -5755,6 +5771,7 @@ function ProviderStaffFormSheet({
   return (
     <Dialog dirty={dirty} requireChanges={Boolean(form.id)} open={open} onOpenChange={onOpenChange}>
       <AdminDialogScaffold
+        icon={BadgeInfo}
         onSubmit={onSubmit}
         title={form.id ? l("providers_staff_detail") : l("providers_staff_new")}
         footer={
@@ -5915,6 +5932,7 @@ function SpecializationManagerSheet({
     <Sheet requireChanges={Boolean(editingId)} open={open} onOpenChange={handleOpenChange} dirty={isDirty}>
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <AdminSheetScaffold
+          icon={ListTree}
           title={l("providers_specializations_title")}
           footer={
             <SheetActionsFooter>
@@ -5946,6 +5964,7 @@ function SpecializationManagerSheet({
 
             <form id="provider-specialization-form" onSubmit={handleSubmit} className="space-y-3">
               <Section
+                icon={ClipboardPenLine}
                 title={
                   editingItem
                     ? formatUiText(l("common_edit_label"), {
@@ -6001,7 +6020,7 @@ function SpecializationManagerSheet({
               </Section>
             </form>
 
-            <Section title={l("providers_specializations_list")}>
+            <Section icon={ListTree} title={l("providers_specializations_list")}>
               {items.length === 0 ? (
                 <EmptyPanel
                   title={l("providers_specializations_title")}
@@ -6197,6 +6216,7 @@ function StaffRoleManagerSheet({
     <Sheet requireChanges={Boolean(editingId)} open={open} onOpenChange={handleOpenChange} dirty={isDirty}>
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <AdminSheetScaffold
+          icon={UsersRound}
           title={l("providers_staff_roles_title")}
           footer={
             <SheetActionsFooter>
@@ -6226,6 +6246,7 @@ function StaffRoleManagerSheet({
 
             <form id="provider-staff-role-form" onSubmit={handleSubmit} className="space-y-3">
               <Section
+                icon={UserRoundCog}
                 title={
                   editingRole
                     ? formatUiText(l("common_edit_label"), {
@@ -6280,7 +6301,7 @@ function StaffRoleManagerSheet({
               </Section>
             </form>
 
-            <Section title={l("providers_staff_roles_list")}>
+            <Section icon={UsersRound} title={l("providers_staff_roles_list")}>
               {roles.length === 0 ? (
                 <EmptyPanel
                   title={l("providers_staff_roles_title")}
@@ -6433,7 +6454,7 @@ function ProviderOverviewSection({
   return (
     <section className={cn(providerDetailPanelClassName, "space-y-3 bg-card")}>
       <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-        {titleWithDot(l("providers_provider_overview"))}
+        <SectionHeading icon={Hospital}>{l("providers_provider_overview")}</SectionHeading>
       </h3>
       <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-4">
         <div className="space-y-2.5">
@@ -7202,8 +7223,7 @@ function ProviderDoctorsTable({
         title ? (
           <>
             <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-              {title}
+              <SectionHeading icon={Stethoscope}>{title}</SectionHeading>
             </span>
             {createLabel && onNew ? (
               <>
@@ -7468,8 +7488,7 @@ function ContactPersonsTable({
       toolbarStart={
         <>
           <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-            {title}
+            <SectionHeading icon={Contact}>{title}</SectionHeading>
           </span>
           {canManage ? (
             <Button
@@ -7659,8 +7678,7 @@ function StaffSection({
         toolbarStart={
           <>
             <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-              {l("providers_staff")}
+              <SectionHeading icon={UsersRound}>{l("providers_staff")}</SectionHeading>
             </span>
             {canManage ? (
               <>
@@ -7933,8 +7951,7 @@ function ProviderWorkTypesCatalog({ detail }: { detail: ProviderDetail }) {
           toolbarStart={
             <>
               <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-                {lang === "de" ? "Leistungsarten" : "Виды работ"}
+                <SectionHeading icon={ListTree}>{lang === "de" ? "Leistungsarten" : "Виды работ"}</SectionHeading>
               </span>
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
             </>
@@ -8062,8 +8079,7 @@ function ServiceSection({
           toolbarStart={
             <>
               <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-                {l("providers_service_catalog")}
+                <SectionHeading icon={BookOpen}>{l("providers_service_catalog")}</SectionHeading>
               </span>
               {canManage ? (
                 <>
@@ -8360,8 +8376,7 @@ function InteractionHistorySection({
       toolbarStart={
         <>
           <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-            {l("providers_interaction_history")}
+            <SectionHeading icon={MessagesSquare}>{l("providers_interaction_history")}</SectionHeading>
           </span>
           <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
         </>
@@ -8482,16 +8497,16 @@ function ProviderFormFields({
   if (grouped) {
     return (
       <div className="space-y-3">
-        <Section title={l("providers_provider_profile")}>
+        <Section icon={Building2} title={l("providers_provider_profile")}>
           {profileFields}
         </Section>
-        <Section title={l("patients_address")}>
+        <Section icon={MapPin} title={l("patients_address")}>
           {addressFields}
         </Section>
-        <Section title={l("patients_contact")}>
+        <Section icon={Phone} title={l("patients_contact")}>
           {contactFields}
         </Section>
-        <Section title={l("providers_contract_and_notes")}>
+        <Section icon={FileSignature} title={l("providers_contract_and_notes")}>
           {contractFields}
         </Section>
       </div>

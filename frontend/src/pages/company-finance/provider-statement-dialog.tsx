@@ -1,5 +1,6 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useRef, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { FileSpreadsheet, LoaderCircle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -156,7 +157,7 @@ export function ProviderStatementDialog({
     <Dialog open={Boolean(provider?.provider_id)} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto sm:max-h-[92vh] sm:max-w-6xl">
         <DialogHeader>
-          <DialogTitle>{text.title}</DialogTitle>
+          <DialogTitle><SectionHeading icon={FileSpreadsheet}>{text.title}</SectionHeading></DialogTitle>
           <DialogDescription>
             {provider?.provider_name} · {text.description}
             {statement ? ` · ${formatDate(statement.period.from)} — ${formatDate(statement.period.to)}` : ""}

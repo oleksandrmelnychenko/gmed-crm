@@ -7,6 +7,8 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  ShieldCheck,
+  SlidersHorizontal,
   Check,
   Eye,
   EyeOff,
@@ -545,7 +547,7 @@ function useAdminAccessPageContent() {
                 title={t.admin_system_access_levels_guide_title}
                 description={t.admin_system_access_levels_guide_description}
               >
-                <GuideSection title={t.access_title}>
+                <GuideSection icon={ShieldCheck} title={t.access_title}>
                   <ul className="space-y-2">
                     {(
                       [
@@ -577,7 +579,7 @@ function useAdminAccessPageContent() {
                   </ul>
                 </GuideSection>
 
-                <GuideSection title={t.admin_system_access_how_change_title}>
+                <GuideSection icon={SlidersHorizontal} title={t.admin_system_access_how_change_title}>
                   <p>{t.admin_system_access_how_change_body}</p>
                   <p className="mt-1 rounded-md bg-muted/40 px-2.5 py-1.5 font-mono text-[12px] text-foreground">
                     {t.access_full} → {t.access_masked} → {t.access_hidden} → {t.access_conditional} → {t.access_full}
@@ -587,7 +589,7 @@ function useAdminAccessPageContent() {
                   </p>
                 </GuideSection>
 
-                <GuideSection title={t.admin_system_access_reset_title}>
+                <GuideSection icon={RotateCcw} title={t.admin_system_access_reset_title}>
                   {t.admin_system_access_reset_body}
                 </GuideSection>
               </AdminGuideButton>
@@ -666,6 +668,7 @@ function useAdminAccessPageContent() {
       >
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <AdminSheetScaffold
+            icon={KeyRound}
             title={selectedField ? fieldLabel(selectedField) : t.access_title}
             footer={(
               <SheetActionsFooter>

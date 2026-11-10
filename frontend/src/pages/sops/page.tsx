@@ -9,6 +9,8 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  NotebookPen,
+  ClipboardCheck,
   BookOpen,
   FileText,
   Library,
@@ -1049,6 +1051,7 @@ function useSopsPageContent() {
       >
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
           <AdminSheetScaffold
+            icon={BookOpen}
             title={selectedItem ? selectedItem.title : text.detailTitle}
             description={text.detailDescription}
           >
@@ -1220,6 +1223,7 @@ function useSopsPageContent() {
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
           <form className="flex h-full min-h-0 flex-col" onSubmit={(event) => void submitForm(event)}>
             <AdminSheetScaffold
+              icon={NotebookPen}
               title={editing ? text.formEditTitle : text.formCreateTitle}
               description={formDescription(user?.role, t)}
               footer={
@@ -1405,6 +1409,7 @@ function useSopsPageContent() {
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
           <form className="flex h-full min-h-0 flex-col" onSubmit={(event) => void submitReview(event)}>
             <AdminSheetScaffold
+              icon={ClipboardCheck}
               title={text.reviewTitle}
               description={text.reviewDescription}
               footer={

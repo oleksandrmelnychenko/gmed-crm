@@ -1,3 +1,4 @@
+import { CalendarClock, ChartNoAxesCombined, Grid3X3, Hospital, Workflow } from "lucide-react";
 import { apptStatusToChart } from "../../model/staff-dashboard-formatters";
 import type { OperationsPayload } from "../../model/staff-dashboard-types";
 import {
@@ -26,12 +27,13 @@ export function StaffDashboardOperationsSection({
   return (
     <>
       <SectionHeader
+        icon={Workflow}
         title={tr.dash_sec_ops ?? tr.common_unknown}
         hint={tr.dash_sec_ops_hint ?? tr.common_unknown}
       />
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard title={tr.dash_appointments_by_status ?? tr.common_unknown}>
+        <ChartCard icon={CalendarClock} title={tr.dash_appointments_by_status ?? tr.common_unknown}>
           <MiniDonut
             loading={sectionsLoading}
             data={apptStatusToChart(operations?.appointments_by_status, tr)}
@@ -40,6 +42,7 @@ export function StaffDashboardOperationsSection({
         </ChartCard>
 
         <ChartCard
+          icon={ChartNoAxesCombined}
           title={`${tr.orders_title ?? tr.common_unknown} - ${tr.dash_pipeline_value ?? tr.common_unknown}`}
           hint={tr.dash_pipeline_hint ?? tr.common_unknown}
         >
@@ -52,6 +55,7 @@ export function StaffDashboardOperationsSection({
       </div>
 
       <ChartCard
+        icon={Grid3X3}
         title={tr.dash_heatmap ?? tr.common_unknown}
         hint={tr.dash_heatmap_hint ?? tr.common_unknown}
       >
@@ -63,6 +67,7 @@ export function StaffDashboardOperationsSection({
       </ChartCard>
 
       <ChartCard
+        icon={Hospital}
         title={tr.dash_top_providers ?? tr.common_unknown}
         hint={tr.dash_top_providers_hint ?? tr.common_unknown}
       >

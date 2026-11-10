@@ -1,5 +1,7 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useRef, useState } from "react";
 import {
+  Cable,
   Download,
   History,
   Link2,
@@ -151,7 +153,7 @@ export function DatevLiveConnection({ canAdmin = true }: { canAdmin?: boolean } 
       </details>
       </> : null}
       {access ? <section className="space-y-2 rounded-md border p-3" aria-label={t.services}>
-        <h3 className="text-sm font-medium">{t.services}</h3><p className="text-xs text-muted-foreground">{t.servicesHint}</p>
+        <h3 className="text-sm font-medium"><SectionHeading icon={Cable}>{t.services}</SectionHeading></h3><p className="text-xs text-muted-foreground">{t.servicesHint}</p>
         {access.clients.map((company) => <div key={company.id} className="space-y-2"><p className="text-sm font-medium">{company.name}</p><p className="text-xs">Beraternummer: {company.consultant_number} · Mandantennummer: {company.client_number}</p><ul className="space-y-1 text-sm">{company.services.map((service, index) => <li key={`${service.name}-${index}`}>{service.name}</li>)}</ul>{company.services.length === 0 ? <p className="text-sm">{t.noServices}</p> : null}</div>)}
       </section> : null}
     </DatevSetupSection>

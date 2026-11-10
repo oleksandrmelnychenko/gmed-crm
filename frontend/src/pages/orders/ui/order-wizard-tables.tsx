@@ -1,10 +1,11 @@
 import { OrderCatalogServicesTable } from "./order-catalog-services-table";
 import type { ServiceLine } from "../model/order-service-line";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { serviceDescriptionItems, serviceDescriptionText } from "@/lib/service-description";
 import { formatMoneyLabel, moneyLineAmounts, roundCents } from "@/lib/money";
 import { money, germanDateLabel, servicePriceOptionValue, parseServicePriceOptionValue, serviceBillingUnitLabel, resolveServiceDescriptionItems } from "../model/order-service-presentation";
 import { useState, type ReactNode } from "react";
-import { ArrowRight, Check, Download } from "lucide-react";
+import { ArrowRight, Check, Download, ListOrdered, Trash2 } from "lucide-react";
 import { PaperSignatureConfirmButton } from "@/pages/documents/ui/paper-signature-confirm";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { DataTable } from "@/components/data-table/data-table";
@@ -58,7 +59,7 @@ export function OrderWizardLinesTable({ lines, catalog, effectiveOn, dateTo, spe
   const describe = (line: ServiceLine) => serviceDescriptionText(resolveServiceDescriptionItems(line.catalogDescriptionItems ?? [], {
     dateFrom: effectiveOn ?? "", dateTo: dateTo ?? "", specialties,
   }));
-  return <Section title={tx("Позиции заказа", "Auftragspositionen")} className="rounded-xl border border-border/70 bg-card p-4" accessory={<Badge variant="secondary">{lines.length}</Badge>}>
+  return <Section icon={ListOrdered} title={tx("Позиции заказа", "Auftragspositionen")} className="rounded-xl border border-border/70 bg-card p-4" accessory={<Badge variant="secondary">{lines.length}</Badge>}>
     {children}
     <Field label={tx("Добавить услугу из каталога", "Leistung aus dem Katalog hinzufügen")}>
       <NativeComboboxSelect aria-label={tx("Выбрать услугу из каталога", "Leistung aus dem Katalog auswählen")} className="w-full md:max-w-2xl" value="" disabled={busy} onChange={event => {
@@ -82,7 +83,7 @@ export function OrderWizardLinesTable({ lines, catalog, effectiveOn, dateTo, spe
       onPriceChange={(line, service, priceId) => { const price = listAgencyServicePriceChoices(service, effectiveOn ?? undefined).find(item => item.id === priceId); if (price && price.currency.toUpperCase() === "EUR") updateLine(line.id, { agency_service_price_version_id: price.id || null, unit_price: String(price.unit_price), vat_rate: String(price.vat_rate) }); }}
       onDelete={setDeleteLine} /> : <p className="py-3 text-xs text-muted-foreground">{tx("Услуги из каталога не выбраны", "Keine Katalogleistungen ausgewählt")}</p>}
     <Dialog open={Boolean(deleteLine)} onOpenChange={open => { if (!open) setDeleteLine(null); }}>
-      <DialogContent><DialogHeader><DialogTitle>{tx("Удалить услугу?", "Leistung entfernen?")}</DialogTitle><DialogDescription>{deleteLine?.description}</DialogDescription></DialogHeader>
+      <DialogContent><DialogHeader><DialogTitle><SectionHeading icon={Trash2}>{tx("Удалить услугу?", "Leistung entfernen?")}</SectionHeading></DialogTitle><DialogDescription>{deleteLine?.description}</DialogDescription></DialogHeader>
         <DialogFooter><Button type="button" variant="outline" onClick={() => setDeleteLine(null)}>{tx("Отмена", "Abbrechen")}</Button><Button type="button" variant="destructive" disabled={busy} onClick={() => { if (deleteLine) onChange(lines.filter(line => line.id !== deleteLine.id)); setDeleteLine(null); }}>{tx("Удалить", "Entfernen")}</Button></DialogFooter>
       </DialogContent>
     </Dialog>

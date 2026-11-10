@@ -1,6 +1,7 @@
 import { useId, useMemo, useState, type FormEvent } from "react";
-import { LoaderCircle } from "lucide-react";
+import { ListChecks, LoaderCircle, type LucideIcon } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Button } from "@/components/ui/button";
 import { checkboxClass, tokens } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
@@ -21,6 +22,7 @@ type SpecialtyTextField<T> = {
 };
 
 export type SpecialtySectionProps<T extends Record<string, unknown>> = {
+  icon: LucideIcon;
   title: string;
   description: string;
   blankValue: T;
@@ -47,6 +49,7 @@ type SpecialtySectionContentProps<T extends Record<string, unknown>> = Omit<
 >;
 
 function SpecialtySectionContent<T extends Record<string, unknown>>({
+  icon,
   title,
   blankValue,
   rawValue,
@@ -85,7 +88,7 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
   const relevantLabel = t.cases_workspace_specialty_relevant;
 
   return (
-    <Panel title={title}>
+    <Panel icon={icon} title={title}>
       <form onSubmit={handleSubmit} className="space-y-5">
         {sectionError ? <Banner tone="error">{sectionError}</Banner> : null}
 
@@ -120,8 +123,7 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
         {booleanFlags.length > 0 ? (
           <div>
             <p className="mb-2 inline-flex items-center gap-1.5 text-[11.5px] font-medium text-muted-foreground">
-              <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />
-              {t.cases_workspace_specialty_key_signs}
+              <SectionHeading icon={ListChecks}>{t.cases_workspace_specialty_key_signs}</SectionHeading>
             </p>
             <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
               {booleanFlags.map((flag) => {

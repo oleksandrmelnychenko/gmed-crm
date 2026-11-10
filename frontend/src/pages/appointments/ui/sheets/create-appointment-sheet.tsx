@@ -8,8 +8,9 @@ import {
   type SetStateAction,
 } from "react";
 
-import { Plus, LoaderCircle } from "lucide-react";
+import { CalendarClock, CalendarPlus, Hospital, LoaderCircle, NotebookPen, Plus } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { apiFetch } from "@/lib/api";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
@@ -534,17 +535,10 @@ function useCreateAppointmentSheetContent({
 
   const canPlanNext = Boolean(form.orderId);
 
-  function sectionTitle(label: string) {
-    return (
-      <h3 className="inline-flex items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
-        <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />
-        <span>{label}</span>
-      </h3>
-    );
-  }
 
   return (
     <AppointmentEditorSheet
+      icon={CalendarPlus}
       open={open}
       onOpenChange={handleEditorOpenChange}
       dirty={isDirty}
@@ -621,7 +615,7 @@ function useCreateAppointmentSheetContent({
           </div>
         ) : null}
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
-                {sectionTitle(appointmentText("appointments_appointment_and_timing"))}
+                <h3><SectionHeading icon={CalendarClock}>{appointmentText("appointments_appointment_and_timing")}</SectionHeading></h3>
                 <div className="grid gap-4 md:grid-cols-3">
                   <Field compact required label={t.orders_patient}>
                     <NativeComboboxSelect
@@ -904,7 +898,7 @@ function useCreateAppointmentSheetContent({
                 </div>
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
-                {sectionTitle(appointmentText("appointments_provider_and_doctor"))}
+                <h3><SectionHeading icon={Hospital}>{appointmentText("appointments_provider_and_doctor")}</SectionHeading></h3>
                 {providersError ? (
                   <Banner tone="error">{providersError}</Banner>
                 ) : null}
@@ -1037,7 +1031,7 @@ function useCreateAppointmentSheetContent({
                 ) : null}
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
-                {sectionTitle(appointmentText("appointments_coordination_and_notes"))}
+                <h3><SectionHeading icon={NotebookPen}>{appointmentText("appointments_coordination_and_notes")}</SectionHeading></h3>
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field compact label={t.patients_assign_owner}>
                     <NativeComboboxSelect

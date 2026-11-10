@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
@@ -9,7 +10,19 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
-import { LoaderCircle, Plus } from "lucide-react";
+import {
+  BellRing,
+  CheckCircle2,
+  ClipboardCheck,
+  ClipboardPlus,
+  Languages,
+  ListChecks,
+  ListPlus,
+  LoaderCircle,
+  MessageCircle,
+  Plus,
+  type LucideIcon,
+} from "lucide-react";
 
 import { WritableScope } from "@/components/read-only-scope";
 import { Button } from "@/components/ui/button";
@@ -198,17 +211,18 @@ function WorkflowSheetBody({ children }: { children: ReactNode }) {
 }
 
 function WorkflowSheetSection({
+  icon,
   title,
   children,
 }: {
+  icon?: LucideIcon;
   title: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
       <h3 className="inline-flex items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
-        <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />
-        <span>{title}</span>
+        <SectionHeading icon={icon}>{title}</SectionHeading>
       </h3>
       {children}
     </section>
@@ -917,8 +931,7 @@ function InterpreterAssignmentManagement({
     <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b sm:flex-nowrap sm:overflow-x-auto border-border/70 bg-card px-3 py-2">
         <span className="flex shrink-0 items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-          {appointmentText("appointments_interpreter_assignment")}
+              <SectionHeading icon={Languages}>{appointmentText("appointments_interpreter_assignment")}</SectionHeading>
         </span>
         {/* A completed or cancelled appointment takes no new interpreter. */}
         {isClosedAppointmentStatus(detail.status) ? null : (
@@ -950,6 +963,7 @@ function InterpreterAssignmentManagement({
       />
 
       <AppointmentEditorSheet
+        icon={Languages}
         open={assignmentSheetOpen}
         onOpenChange={onOpenChange}
         title={appointmentText("appointments_interpreter_assignment")}
@@ -982,6 +996,7 @@ function InterpreterAssignmentManagement({
       >
         <WorkflowSheetBody>
           <WorkflowSheetSection
+            icon={Languages}
             title={appointmentText("appointments_interpreter_assignment")}
           >
             <Field compact label={appointmentText("appointments_interpreter")}>
@@ -1038,7 +1053,7 @@ function InterpreterResponseControls({
   useEffect(() => setComment(savedComment ?? ""), [savedComment]);
   const commentMissing = !comment.trim();
   return (
-    <Section title={appointmentText("appointments_interpreter_response")}>
+    <Section icon={MessageCircle} title={appointmentText("appointments_interpreter_response")}>
       <div className="flex flex-wrap gap-2">
         {/* "pending" is the state before an answer, not an answer. */}
         {INTERPRETER_RESPONSE_OPTIONS.filter((value) => value !== "pending").map((value) => (
@@ -1345,8 +1360,7 @@ function AppointmentChecklistSection({
       toolbarStart={
         <>
           <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-            {appointmentText("appointments_checklist")}
+              <SectionHeading icon={ListChecks}>{appointmentText("appointments_checklist")}</SectionHeading>
           </span>
           {checklistClosed || readOnly ? null : (
             <Button
@@ -1382,6 +1396,7 @@ function AppointmentChecklistSection({
     />
 
     <AppointmentEditorSheet
+      icon={ListPlus}
       open={sheetOpen}
       onOpenChange={handleChecklistSheetOpenChange}
       dirty={checklistFormDirty}
@@ -1413,6 +1428,7 @@ function AppointmentChecklistSection({
     >
       <WorkflowSheetBody>
         <WorkflowSheetSection
+          icon={ListPlus}
           title={appointmentText("appointments_add_checklist_item")}
         >
           <div className="grid gap-4 md:grid-cols-[180px_minmax(0,1fr)]">
@@ -1612,6 +1628,7 @@ function AppointmentRemindersSection({
 
     {canManageReminders ? (
       <AppointmentEditorSheet
+        icon={BellRing}
         open={sheetOpen}
         onOpenChange={handleReminderSheetOpenChange}
         dirty={reminderFormDirty}
@@ -1649,7 +1666,7 @@ function AppointmentRemindersSection({
         }
       >
         <WorkflowSheetBody>
-          <WorkflowSheetSection title={t.appointments_add_reminder}>
+          <WorkflowSheetSection icon={BellRing} title={t.appointments_add_reminder}>
         <div className="grid gap-4 md:grid-cols-2">
           <Field compact label={appointmentText("patients_owner")}>
             <NativeComboboxSelect
@@ -1878,8 +1895,7 @@ function AppointmentCompletionSectionContent({
     <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b sm:flex-nowrap sm:overflow-x-auto border-border/70 bg-card px-3 py-2">
         <span className="flex shrink-0 items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-          {appointmentText("appointments_completion_readiness")}
+              <SectionHeading icon={ClipboardCheck}>{appointmentText("appointments_completion_readiness")}</SectionHeading>
         </span>
         {canCompleteAppointment ? (
           <>
@@ -1920,6 +1936,7 @@ function AppointmentCompletionSectionContent({
       ) : null}
       {canCompleteAppointment ? (
         <AppointmentEditorSheet
+          icon={ClipboardCheck}
           open={completionSheetOpen}
           onOpenChange={setCompletionSheetOpen}
           title={appointmentText("appointments_completion_readiness")}
@@ -2292,7 +2309,7 @@ function AppointmentStatusSection({
   const { t } = useLang();
 
   return (
-    <Section title={t.users_status}>
+    <Section icon={CheckCircle2} title={t.users_status}>
       <AppointmentStatusToggleControl
         detail={detail}
         openChecklistCount={openChecklistCount}
@@ -2527,6 +2544,7 @@ function AppointmentTaskEditorSheet({
 
   return (
     <AppointmentEditorSheet
+      icon={ClipboardPlus}
       open={open}
       onOpenChange={onOpenChange}
       dirty={dirty}
@@ -2557,7 +2575,7 @@ function AppointmentTaskEditorSheet({
       }
     >
       <WorkflowSheetBody>
-        <WorkflowSheetSection title={t.appointments_workflow_add_task}>
+        <WorkflowSheetSection icon={ClipboardPlus} title={t.appointments_workflow_add_task}>
           <div className="grid gap-4 md:grid-cols-2">
             <Field compact label={tr.appointments_title_col}>
               <Input

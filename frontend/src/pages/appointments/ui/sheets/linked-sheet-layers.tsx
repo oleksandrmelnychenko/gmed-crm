@@ -1,3 +1,4 @@
+import { ContactRound, FolderOpen, Hospital, Link2 } from "lucide-react";
 import { Suspense, lazy } from "react";
 
 import type { PatientDetailSheetProps } from "@/pages/patients";
@@ -87,6 +88,7 @@ export function LinkedPatientSheetLayer({
     <Suspense
       fallback={
         <AppointmentPreviewSheetLoadingState
+          icon={ContactRound}
           open={open}
           onOpenChange={onOpenChange}
           title={appointmentText("appointments_patient")}
@@ -118,6 +120,7 @@ export function LinkedProviderSheetLayer({
     <Suspense
       fallback={
         <AppointmentPreviewSheetLoadingState
+          icon={Hospital}
           open={open}
           onOpenChange={onOpenChange}
           title={detail?.name || fallbackTitle}
@@ -156,6 +159,7 @@ export function LinkedDocumentsSheetLayer({
     <Suspense
       fallback={
         <AppointmentPreviewSheetLoadingState
+          icon={FolderOpen}
           open={open}
           onOpenChange={onOpenChange}
           title={appointmentText("appointments_documents")}
@@ -196,6 +200,7 @@ export function LinkedRecordsSheetLayer({
     <Suspense
       fallback={
         <AppointmentPreviewSheetLoadingState
+          icon={Link2}
           open={open}
           onOpenChange={onOpenChange}
           title={title}

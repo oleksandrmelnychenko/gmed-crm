@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { LoaderCircle } from "lucide-react";
+import { Hospital, LoaderCircle, MessagesSquare, UsersRound } from "lucide-react";
 
 import {
   Banner,
@@ -145,6 +145,7 @@ function LinkedProviderOverviewSection({
 
   return (
     <Section
+      icon={Hospital}
       title={appointmentText("appointments_clinic_profile")}
       accessory={<CountBadge>{providerTypeLabel}</CountBadge>}
     >
@@ -244,6 +245,7 @@ function LinkedProviderPatientsSection({
   const { t } = useLang();
   return (
     <Section
+      icon={UsersRound}
       title={appointmentText("appointments_linked_patients")}
       accessory={<CountBadge>{detail.linked_patients.length}</CountBadge>}
     >
@@ -308,6 +310,7 @@ function LinkedProviderInteractionsSection({
 
   return (
     <Section
+      icon={MessagesSquare}
       title={appointmentText("appointments_interaction_history")}
       accessory={<CountBadge>{detail.interactions.length}</CountBadge>}
     >
@@ -404,6 +407,7 @@ function LinkedProviderSheet({
   const { appointmentText } = useAppointmentLabels();
   return (
     <AppointmentPreviewSheet
+      icon={Hospital}
       open={open}
       onOpenChange={onOpenChange}
       title={detail?.name || fallbackTitle}

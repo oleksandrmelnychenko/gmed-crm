@@ -1,6 +1,7 @@
 import {
   CalendarClock,
   CalendarDays,
+  CalendarRange,
   ClipboardList,
   Clock3,
   MapPin,
@@ -8,6 +9,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useLang } from "@/lib/i18n";
@@ -367,7 +369,7 @@ export function InterpreterMobileAgenda({
             <div className="mb-3 flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-[13px] font-semibold tracking-tight text-foreground">
-                  {section.label}
+                  <SectionHeading icon={CalendarRange}>{section.label}</SectionHeading>
                 </h2>
                 <p className="text-xs text-muted-foreground">
                   {formatCount(lang, section.itemCount, APPOINTMENT_COUNT_WORDS)}

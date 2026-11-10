@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, Check, LoaderCircle, Plus, RefreshCw, Save } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, LoaderCircle, Plus, RefreshCw, Save, Timer } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, textareaClass } from "@/components/ui-shell";
@@ -322,7 +323,7 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
         {step === 2 ? <>
           <OrderWizardLinesTable lines={data.lines} catalog={orderCatalog} effectiveOn={data.date_from} dateTo={data.date_to} specialties={selectedSpecializations.map(item => item.name_de || item.name_en || item.code)} lang={lang} busy={busy} onChange={lines => patch({ lines })}>
             {data.needs_description ? <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">{data.needs_description}</div> : null}
-            {selectedWorkTypes.length ? <div className="space-y-2"><h4 className="flex items-center gap-2 text-xs font-semibold"><span className="size-2 rounded-full bg-[var(--dot,var(--color-orange-500))]" />{tx("Виды работ и часы", "Leistungsarten und Stunden")}</h4><SelectedWorkTypesSummary workTypes={selectedWorkTypes} specializationLabels={new Map(selectedSpecializations.map(item => [item.id, intakeSpecializationName(item, lang)]))} lang={lang} tx={tx} /></div> : null}
+            {selectedWorkTypes.length ? <div className="space-y-2"><h4 className="flex items-center gap-2 text-xs font-semibold"><SectionHeading icon={Timer}>{tx("Виды работ и часы", "Leistungsarten und Stunden")}</SectionHeading></h4><SelectedWorkTypesSummary workTypes={selectedWorkTypes} specializationLabels={new Map(selectedSpecializations.map(item => [item.id, intakeSpecializationName(item, lang)]))} lang={lang} tx={tx} /></div> : null}
           </OrderWizardLinesTable>
           <OrderWizardSection title={tx("Условия оплаты", "Zahlungsbedingungen")}>
             <OrderPrepaymentFields value={data} maxAmount={amount} lang={lang} onChange={patch} />

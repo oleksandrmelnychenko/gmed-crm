@@ -1,5 +1,15 @@
 import { useId } from "react";
-import { Mail, Phone, Plus, Trash2 } from "lucide-react";
+import {
+  ContactRound,
+  Mail,
+  MapPin,
+  NotebookPen,
+  Phone,
+  PhoneCall,
+  Plus,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { CitizenshipMultiSelect, citizenshipFieldLabel } from "@/components/ui/citizenship-multi-select";
@@ -264,7 +274,7 @@ export function PatientFormFields({
         onUpdateContact={updateContact}
       />
 
-      <FormSection title={l("patients_address")}>
+      <FormSection icon={MapPin} title={l("patients_address")}>
         <Field label={t.patients_address_street}>
           <Input
             value={form.addressStreet}
@@ -306,7 +316,7 @@ export function PatientFormFields({
         </div>
       </FormSection>
 
-      <FormSection title={l("patients_insurance")}>
+      <FormSection icon={ShieldCheck} title={l("patients_insurance")}>
         <div className="grid gap-3 md:grid-cols-3">
           <Field label={t.patients_insurance_provider}>
             <Input
@@ -338,6 +348,7 @@ export function PatientFormFields({
       </FormSection>
 
       <FormSection
+        icon={PhoneCall}
         className={isMinor ? "border-amber-200 bg-amber-50/60" : undefined}
         title={
           isMinor
@@ -495,7 +506,7 @@ export function PatientFormFields({
         )}
       </FormSection>
 
-      <FormSection title={t.patients_notes}>
+      <FormSection icon={NotebookPen} title={t.patients_notes}>
         <textarea
           value={form.notes}
           onChange={(event) => onChange("notes", event.target.value)}
@@ -536,7 +547,7 @@ function PatientPersonalDataSection({
   onCitizenshipsChange: (citizenships: string[]) => void;
 }) {
   return (
-    <FormSection title={l("patients_personal_data")}>
+    <FormSection icon={ContactRound} title={l("patients_personal_data")}>
       <div className="grid gap-3 md:grid-cols-3">
         <Field label={t.patients_title_field}>
           <Input
@@ -689,7 +700,7 @@ function PatientContactSection({
     contactKind === "email" ? t.field_email : t.field_phone;
 
   return (
-    <FormSection title={l("patients_contact")}>
+    <FormSection icon={Phone} title={l("patients_contact")}>
       {contactMode === "multiple" ? (
         <div className="space-y-3">
           {form.contacts.map((contact) => (

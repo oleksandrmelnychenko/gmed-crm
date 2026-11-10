@@ -6,7 +6,7 @@ import {
   type FormEvent,
 } from "react";
 
-import { LoaderCircle, Plus } from "lucide-react";
+import { LoaderCircle, Plus, ReceiptText } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -297,6 +297,7 @@ function useAppointmentBillingHandoffSectionContentContent({
     <section className={sectionCardClass}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <AppointmentSectionHeading
+          icon={ReceiptText}
           title={appointmentText("appointments_billing_and_settlement_handoff")}
         />
         {canHandOff ? (
@@ -340,6 +341,7 @@ function useAppointmentBillingHandoffSectionContentContent({
 
       {canHandOff ? (
         <AppointmentEditorSheet
+          icon={ReceiptText}
           open={sheetOpen}
           onOpenChange={setSheetOpen}
           title={appointmentText("appointments_billing_and_settlement_handoff")}

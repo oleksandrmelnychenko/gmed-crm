@@ -33,6 +33,7 @@ test("a template is imported, corrected and activated", async ({ page }) => {
 
   const templates: Template[] = [];
   const calls: string[] = [];
+  let listUnavailable = true;
   await page.route("**/api/v1/**", async route => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -42,6 +43,7 @@ test("a template is imported, corrected and activated", async ({ page }) => {
       } });
     }
     if (path.endsWith("/documents/template-imports") && request.method() === "GET") {
+      if (listUnavailable) return route.fulfill({ status: 400, body: "" });
       return route.fulfill({ json: {
         templates: templates.map(describeTemplate),
         variables: KNOWN.map(key => ({ key, sample: key })),
@@ -109,6 +111,12 @@ test("a template is imported, corrected and activated", async ({ page }) => {
 
   const dialog = page.getByTestId("template-import-dialog");
   await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("alert")).toContainText("Не удалось загрузить шаблоны.");
+  await expect(dialog.getByText("Импортированных шаблонов пока нет.")).toHaveCount(0);
+  await dialog.locator("#template-import-description").fill("Памятка перед визитом");
+  listUnavailable = false;
+  await dialog.getByRole("button", { name: "Повторить", exact: true }).click();
+  await expect(dialog.locator("#template-import-description")).toHaveValue("Памятка перед визитом");
   await expect(dialog.getByText("Импортированных шаблонов пока нет.")).toBeVisible();
 
   // A file that is neither Word nor text is refused before any upload.

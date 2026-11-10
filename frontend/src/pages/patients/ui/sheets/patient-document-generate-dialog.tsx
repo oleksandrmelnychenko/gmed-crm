@@ -1,3 +1,4 @@
+import { FilePlus2 } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -388,6 +389,7 @@ export function PatientDocumentGenerateDialog({
 
   return (
     <PatientSheetScaffold
+      icon={FilePlus2}
       open={open}
       onOpenChange={onOpenChange}
       width="form-heavy"

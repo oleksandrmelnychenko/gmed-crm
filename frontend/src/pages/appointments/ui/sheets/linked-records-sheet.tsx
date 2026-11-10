@@ -1,3 +1,4 @@
+import { Link2 } from "lucide-react";
 import { memo, useMemo } from "react";
 
 import { Banner, EmptyCell, InfoRow, ListItem } from "@/components/ui-shell";
@@ -291,6 +292,7 @@ function LinkedRecordsSheet({
 
   return (
     <AppointmentPreviewSheet
+      icon={Link2}
       open={open}
       onOpenChange={onOpenChange}
       title={title}

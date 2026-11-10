@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { hasFormChanges } from "@/lib/form-changes";
 import { parseMoneyInput } from "@/lib/money";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
@@ -17,6 +18,25 @@ import {
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  BookOpen,
+  ChartColumn,
+  NotebookPen,
+  ContactRound,
+  Wallet,
+  ReceiptText,
+  CreditCard,
+  FileMinus,
+  WalletCards,
+  Undo2,
+  Banknote,
+  Calculator,
+  UsersRound,
+  ListOrdered,
+  BellRing,
+  Files,
+  FileSearch,
+  type LucideIcon,
+  ListChecks,
   ArrowUpRight,
   Download,
   Eye,
@@ -2503,10 +2523,10 @@ function useStaffInvoicesPageContent() {
 
         <div className="-mx-2.5 overflow-x-auto overflow-y-hidden px-2.5 pb-1 sm:mx-0 sm:px-0">
           <nav aria-label={lang === "de" ? "Rechnungsquelle" : "Источник счетов"} className="flex w-max min-w-full justify-center gap-1">
-            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant={datevActive || incomingActive || settlementsActive ? "ghost" : "default"} aria-current={!datevActive && !incomingActive && !settlementsActive ? "page" : undefined} onClick={() => syncQuery({ source: null, datev_mode: null }, { replace: false })}><FileOutput className="size-4" aria-hidden />{lang === "de" ? "Ausgangsrechnungen" : "Исходящие"}</Button>
-            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant={incomingActive ? "default" : "ghost"} aria-current={incomingActive ? "page" : undefined} onClick={() => syncQuery({ source: "incoming", invoice: null, datev_mode: null }, { replace: false })}><FileInput className="size-4" aria-hidden />{lang === "de" ? "Eingangsrechnungen" : "Входящие"}</Button>
-            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant={datevActive ? "default" : "ghost"} aria-current={datevActive ? "page" : undefined} onClick={() => syncQuery({ source: "datev", invoice: null }, { replace: false })}><Landmark className="size-4" aria-hidden />{lang === "de" ? "Aus DATEV" : "Из DATEV"}</Button>
-            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant={settlementsActive ? "default" : "ghost"} aria-current={settlementsActive ? "page" : undefined} onClick={() => syncQuery({ source: "settlements", invoice: null, datev_mode: null }, { replace: false })}><FileWarning className="size-4" aria-hidden />{lang === "de" ? "Abrechnung bei Kündigung" : "Расчёты при расторжении"}</Button>
+            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant="ghost" data-workspace-tab aria-current={!datevActive && !incomingActive && !settlementsActive ? "page" : undefined} onClick={() => syncQuery({ source: null, datev_mode: null }, { replace: false })}><FileOutput className="size-4" aria-hidden />{lang === "de" ? "Ausgangsrechnungen" : "Исходящие"}</Button>
+            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant="ghost" data-workspace-tab aria-current={incomingActive ? "page" : undefined} onClick={() => syncQuery({ source: "incoming", invoice: null, datev_mode: null }, { replace: false })}><FileInput className="size-4" aria-hidden />{lang === "de" ? "Eingangsrechnungen" : "Входящие"}</Button>
+            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant="ghost" data-workspace-tab aria-current={datevActive ? "page" : undefined} onClick={() => syncQuery({ source: "datev", invoice: null }, { replace: false })}><Landmark className="size-4" aria-hidden />{lang === "de" ? "Aus DATEV" : "Из DATEV"}</Button>
+            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant="ghost" data-workspace-tab aria-current={settlementsActive ? "page" : undefined} onClick={() => syncQuery({ source: "settlements", invoice: null, datev_mode: null }, { replace: false })}><FileWarning className="size-4" aria-hidden />{lang === "de" ? "Abrechnung bei Kündigung" : "Расчёты при расторжении"}</Button>
           </nav>
         </div>
         <DatevWorkspace active={datevActive} demo={datevDemo} onConnection={canStaffPath("/admin/datev") ? () => staffGo("/admin/datev") : undefined} onModeChange={(demo) => syncQuery({ datev_mode: demo ? "demo" : null })} />
@@ -2551,7 +2571,7 @@ function useStaffInvoicesPageContent() {
             toolbarStart={
               <>
             <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
-              {titleWithDot(lang === "de" ? "Ausgangsrechnungen" : "Исходящие счета")}
+              <SectionHeading icon={FileOutput}>{lang === "de" ? "Ausgangsrechnungen" : "Исходящие счета"}</SectionHeading>
             </span>
             <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
             <ToolbarField label={t.common_search} className="w-full min-w-[200px] flex-1 sm:w-auto sm:max-w-xs">
@@ -2803,7 +2823,7 @@ function useStaffInvoicesPageContent() {
                   toolbarStart={
                     <>
                       <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
-                        {titleWithDot(text.accountingTitle)}
+                        <SectionHeading icon={BookOpen}>{text.accountingTitle}</SectionHeading>
                       </span>
                       <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
                       <ToolbarField label={lang === "de" ? "Währung" : "Валюта"}>
@@ -2883,7 +2903,7 @@ function useStaffInvoicesPageContent() {
                     toolbarStart={
                       <>
                         <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
-                          {titleWithDot(text.monthlyEuer)}
+                          <SectionHeading icon={ChartColumn}>{text.monthlyEuer}</SectionHeading>
                         </span>
                         <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
                       </>
@@ -2979,6 +2999,7 @@ function useStaffInvoicesPageContent() {
           className="w-full border-l border-border p-0 data-[side=right]:sm:max-w-[min(960px,70vw)]"
         >
           <AdminSheetScaffold
+            icon={ReceiptText}
             title={detail ? `${invoiceDisplayNumber(detail, t.revenue_invoices_draft_number)} / ${detail.patient_name}` : t.invoices_title}
             description={text.detailSheetDescription}
           >
@@ -3110,7 +3131,7 @@ function useStaffInvoicesPageContent() {
                 </section>
 
                 <SectionCard
-                  title={text.invoiceOverview}
+                  icon={ReceiptText} title={text.invoiceOverview}
                   action={
                     <Button
                       type="button"
@@ -3188,7 +3209,7 @@ function useStaffInvoicesPageContent() {
                     {detail.notes ? <div className="space-y-2.5">
                       <div className="flex items-start justify-between gap-4">
                         <div>
-                          <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.notes)}</h2>
+                          <h2 className={tokens.text.sectionTitle}><SectionHeading icon={NotebookPen}>{text.notes}</SectionHeading></h2>
                         </div>
                       </div>
                       <div className="rounded-xl border border-border bg-background/60 p-3.5 text-sm leading-snug text-muted-foreground">
@@ -3210,7 +3231,7 @@ function useStaffInvoicesPageContent() {
                   </div>
                 </SectionCard>
 
-                <SectionCard title={text.payments}>
+                <SectionCard icon={CreditCard} title={text.payments}>
                   <div className="space-y-4">
                     <p className="text-sm text-muted-foreground">
                       {text.paymentsDescription}
@@ -3588,7 +3609,7 @@ function useStaffInvoicesPageContent() {
                   </div>
                 </SectionCard>
 
-                <SectionCard title={t.finance_credit_note_section_title}>
+                <SectionCard icon={FileMinus} title={t.finance_credit_note_section_title}>
                   <div className="space-y-4">
                     <p className="text-sm text-muted-foreground">
                       {t.finance_credit_note_section_description}
@@ -3705,7 +3726,7 @@ function useStaffInvoicesPageContent() {
                 </SectionCard>
 
                 {Number(detail.credit_balance ?? 0) > 0 || (detail.credit_transfers?.length ?? 0) > 0 ? (
-                  <SectionCard title={t.finance_credit_section_title}>
+                  <SectionCard icon={WalletCards} title={t.finance_credit_section_title}>
                     <CreditBalancePanel
                       invoiceId={detail.id}
                       currency={detail.currency ?? "EUR"}
@@ -3719,7 +3740,7 @@ function useStaffInvoicesPageContent() {
                   </SectionCard>
                 ) : null}
 
-                <SectionCard title={text.refunds}>
+                <SectionCard icon={Undo2} title={text.refunds}>
                   <div className="space-y-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <p className="max-w-3xl text-sm text-muted-foreground">
@@ -3983,7 +4004,7 @@ function useStaffInvoicesPageContent() {
                 {detail.invoice_type !== "advance" &&
                 ((detail.available_prepayments?.length ?? 0) > 0 ||
                   (detail.prepayment_allocations?.length ?? 0) > 0) ? (
-                  <SectionCard title={text.prepayment}>
+                  <SectionCard icon={Banknote} title={text.prepayment}>
                     <div className="space-y-4">
                       {(detail.prepayment_allocations?.length ?? 0) > 0 ? (
                         <div className="space-y-2">
@@ -4115,7 +4136,7 @@ function useStaffInvoicesPageContent() {
                 ) : null}
 
                 {detail.invoice_type === "advance" && detail.advance_settlement ? (
-                  <SectionCard title={lang === "de" ? "Abrechnung über die Schlussrechnung" : "Расчёт через финальный счёт"}>
+                  <SectionCard icon={Calculator} title={lang === "de" ? "Abrechnung über die Schlussrechnung" : "Расчёт через финальный счёт"}>
                     <div className="space-y-3 text-sm">
                       <p className="text-muted-foreground">
                         {lang === "de"
@@ -4147,7 +4168,7 @@ function useStaffInvoicesPageContent() {
                   </SectionCard>
                 ) : null}
 
-                <SectionCard title={t.providers_linked_patients}>
+                <SectionCard icon={UsersRound} title={t.providers_linked_patients}>
                   <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
                     {[
                       {
@@ -4198,7 +4219,7 @@ function useStaffInvoicesPageContent() {
                 <div className="space-y-4">
                     <section className="relative rounded-lg border border-border/70 bg-card p-6">
                       <h2 className={tokens.text.sectionTitle}>
-                        {titleWithDot(t.revenue_invoices_patient_preview)}
+                        <SectionHeading icon={ContactRound}>{t.revenue_invoices_patient_preview}</SectionHeading>
                       </h2>
                       <Button
                         type="button"
@@ -4263,7 +4284,7 @@ function useStaffInvoicesPageContent() {
 
                     <section className="relative rounded-lg border border-border/70 bg-card p-6">
                       <h2 className={tokens.text.sectionTitle}>
-                        {titleWithDot(paidByOther ? text.payerRole : t.revenue_invoices_current_payer)}
+                        <SectionHeading icon={Wallet}>{paidByOther ? text.payerRole : t.revenue_invoices_current_payer}</SectionHeading>
                       </h2>
                       <Button
                         type="button"
@@ -4523,8 +4544,7 @@ function useStaffInvoicesPageContent() {
                   toolbarStart={
                     <>
                       <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-                        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-                        {text.dunningTitle}
+                        <SectionHeading icon={BellRing}>{text.dunningTitle}</SectionHeading>
                       </span>
                       <Button
                         type="button"
@@ -4551,7 +4571,7 @@ function useStaffInvoicesPageContent() {
                 />
 
                 {!detail.line_items || detail.line_items.length === 0 ? (
-                  <SectionCard title={text.lineItems}>
+                  <SectionCard icon={ListOrdered} title={text.lineItems}>
                     <EmptyState title={text.noLineItems} description={text.noLineItemsDescription} />
                   </SectionCard>
                 ) : (
@@ -4726,8 +4746,7 @@ function useStaffInvoicesPageContent() {
                     toolbarStart={
                       <>
                         <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-                          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-                          {text.lineItems}
+                          <SectionHeading icon={ListOrdered}>{text.lineItems}</SectionHeading>
                         </span>
                         <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
                       </>
@@ -4825,8 +4844,7 @@ function useStaffInvoicesPageContent() {
                   toolbarStart={
                     <>
                       <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-                        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-                        {text.supportingDocuments}
+                        <SectionHeading icon={Files}>{text.supportingDocuments}</SectionHeading>
                       </span>
                       <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
                     </>
@@ -4849,7 +4867,7 @@ function useStaffInvoicesPageContent() {
             <div className="flex min-w-0 items-center justify-between gap-3">
               <div className="min-w-0">
                 <DialogTitle className="truncate text-base">
-                  {invoicePdfPreview?.title ?? text.previewPdf}
+                  <SectionHeading icon={FileSearch}>{invoicePdfPreview?.title ?? text.previewPdf}</SectionHeading>
                 </DialogTitle>
                 <DialogDescription className="truncate">
                   application/pdf
@@ -4895,7 +4913,7 @@ function useStaffInvoicesPageContent() {
         <DialogContent className="overflow-hidden p-0 sm:max-w-xl">
           <div>
             <DialogHeader className="border-b border-border px-6 py-4 pr-12">
-              <DialogTitle>{text.nextEscalation}</DialogTitle>
+              <DialogTitle><SectionHeading icon={BellRing}>{text.nextEscalation}</SectionHeading></DialogTitle>
             </DialogHeader>
             <div className="space-y-4 px-6 py-5">
               {dunningError ? (
@@ -4974,7 +4992,7 @@ function useStaffInvoicesPageContent() {
         <DialogContent className="sm:max-w-2xl">
           <div className="space-y-5">
             <DialogHeader>
-              <DialogTitle>{t.invoices_status}</DialogTitle>
+              <DialogTitle><SectionHeading icon={ListChecks}>{t.invoices_status}</SectionHeading></DialogTitle>
             </DialogHeader>
             <div className="space-y-4 rounded-xl p-4">
               {statusError ? <ShellBanner tone="error">{statusError}</ShellBanner> : null}
@@ -5151,7 +5169,7 @@ function useStaffInvoicesPageContent() {
         <DialogContent className="sm:max-w-2xl">
           <div className="space-y-5">
             <DialogHeader>
-              <DialogTitle>{t.revenue_invoices_patient_preview}</DialogTitle>
+              <DialogTitle><SectionHeading icon={ContactRound}>{t.revenue_invoices_patient_preview}</SectionHeading></DialogTitle>
             </DialogHeader>
             <div className="space-y-4 rounded-xl p-4">
               {visibilityError ? <ShellBanner tone="error">{visibilityError}</ShellBanner> : null}
@@ -5261,7 +5279,7 @@ function useStaffInvoicesPageContent() {
         <DialogContent className="sm:max-w-2xl">
           <div className="space-y-5">
             <DialogHeader>
-              <DialogTitle>{paidByOther ? text.payerRole : t.revenue_invoices_current_payer}</DialogTitle>
+              <DialogTitle><SectionHeading icon={Wallet}>{paidByOther ? text.payerRole : t.revenue_invoices_current_payer}</SectionHeading></DialogTitle>
             </DialogHeader>
             <div className="space-y-4 rounded-xl p-4">
               {payerError ? <ShellBanner tone="error">{payerError}</ShellBanner> : null}
@@ -5511,12 +5529,12 @@ export function InvoicesPage() {
   return <StaffInvoicesPage />;
 }
 
-function SectionCard({ title, description, action, children }: { title: string; description?: string; action?: ReactNode; children: ReactNode }) {
+function SectionCard({ icon, title, description, action, children }: { icon: LucideIcon; title: string; description?: string; action?: ReactNode; children: ReactNode }) {
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
         <div>
-          <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
+          <h2 className={tokens.text.sectionTitle}><SectionHeading icon={icon}>{title}</SectionHeading></h2>
           {description ? <p className={tokens.text.muted}>{description}</p> : null}
         </div>
         {action ? <div className="shrink-0">{action}</div> : null}
@@ -5541,15 +5559,6 @@ function SummaryLine({ label, value }: { label: string; value: ReactNode }) {
       <span className="text-xs leading-5 text-muted-foreground">{label}</span>
       <span className={cn("min-w-0 break-words text-right text-sm font-medium leading-5 text-foreground", typeof value === "string" && value.includes("€") && "whitespace-nowrap font-mono tabular-nums")}>{value}</span>
     </div>
-  );
-}
-
-function titleWithDot(title: ReactNode) {
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />
-      <span>{title}</span>
-    </span>
   );
 }
 

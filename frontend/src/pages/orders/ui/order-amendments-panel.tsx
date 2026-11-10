@@ -1,3 +1,5 @@
+import { Coins } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -343,7 +345,7 @@ export function OrderAmendmentsPanel({
     <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h4 className="text-sm font-semibold text-foreground">
-          {tx("Изменения суммы", "Betragsänderungen")}
+          <SectionHeading icon={Coins}>{tx("Изменения суммы", "Betragsänderungen")}</SectionHeading>
         </h4>
         {pendingCount > 0 ? (
           <Badge variant="outline" className={`rounded-full ${statusTone("pending")}`}>

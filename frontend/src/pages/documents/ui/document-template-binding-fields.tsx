@@ -1,4 +1,5 @@
-import { Check, Plus, Trash2 } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
+import { Check, Plus, Trash2, ContactRound, FileText, Landmark, ShieldCheck, Signature, WalletCards, type LucideIcon } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,15 @@ type BindingGroup =
   | "payer"
   | "bank"
   | "signatures";
+
+const bindingGroupIcons: Record<BindingGroup, LucideIcon> = {
+  document: FileText,
+  consents: ShieldCheck,
+  patient: ContactRound,
+  payer: WalletCards,
+  bank: Landmark,
+  signatures: Signature,
+};
 
 let serviceLineKeySequence = 0;
 
@@ -398,8 +408,8 @@ export function DocumentTemplateBindingFields({
         if (groupFields.length === 0) return null;
         return (
           <section key={group} className="border-t border-border py-4 first:border-t-0 first:pt-0 last:pb-0">
-            <h3 className="mb-3 text-xs font-semibold text-muted-foreground">
-              {groupLabel(group, lang)}
+            <h3 className="mb-3">
+              <SectionHeading icon={bindingGroupIcons[group]}>{groupLabel(group, lang)}</SectionHeading>
             </h3>
             <div className="grid gap-4 md:grid-cols-2">
               {groupFields.map((field) => {

@@ -1,5 +1,6 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useState } from "react";
-import { Building2, Eye, LoaderCircle, RefreshCw, Search, UserRound } from "lucide-react";
+import { FileInput, HandCoins, Building2, Eye, LoaderCircle, RefreshCw, Search, UserRound } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import { DataTablePager } from "@/components/data-table/data-table-pager";
@@ -196,7 +197,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
     {error ? <Banner tone="error">{error}</Banner> : null}
     <DataTableSurface rows={rows} columns={columns} rowId={row => row.id} loading={busy} defaultDensity="compact" storageKey="incoming-invoices"
       mobilePrimaryColumnId="document" mobileDetailColumnIds={["provider", "status", "payer", "patient_billing", "amount", "remaining", "patient", "order"]}
-      toolbarStart={<><AdminSectionTitle>{tx("Входящие счета", "Eingangsrechnungen")}</AdminSectionTitle><div className="relative min-w-48 flex-1 sm:max-w-sm"><Search className="absolute left-2.5 top-2 size-4 text-muted-foreground" /><Input className="h-8 pl-8" type="search" aria-label={tx("Поиск входящих счетов", "Eingangsrechnungen suchen")} placeholder={tx("Номер, поставщик или пациент", "Nummer, Lieferant oder Patient")} value={search} onChange={event => { setSearch(event.target.value); setPage(0); }} /></div><Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setRefresh(value => value + 1)}><RefreshCw className="size-3.5" />{tx("Обновить", "Aktualisieren")}</Button></>}
+      toolbarStart={<><AdminSectionTitle icon={FileInput}>{tx("Входящие счета", "Eingangsrechnungen")}</AdminSectionTitle><div className="relative min-w-48 flex-1 sm:max-w-sm"><Search className="absolute left-2.5 top-2 size-4 text-muted-foreground" /><Input className="h-8 pl-8" type="search" aria-label={tx("Поиск входящих счетов", "Eingangsrechnungen suchen")} placeholder={tx("Номер, поставщик или пациент", "Nummer, Lieferant oder Patient")} value={search} onChange={event => { setSearch(event.target.value); setPage(0); }} /></div><Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setRefresh(value => value + 1)}><RefreshCw className="size-3.5" />{tx("Обновить", "Aktualisieren")}</Button></>}
       toolbarAfter={<DataTablePager pageIndex={page} pageSize={25} totalRows={total} totalPages={Math.max(1, Math.ceil(total / 25))} previousLabel={tx("Назад", "Zurück")} nextLabel={tx("Далее", "Weiter")} onPageChange={setPage} />}
       emptyState={tx("Входящих счетов пока нет", "Noch keine Eingangsrechnungen")}
       rowActionsWidth={canManage ? 225 : 55} rowActions={row => <div className="flex items-center gap-2">
@@ -208,8 +209,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
       <DialogContent className="gap-0 overflow-hidden rounded-xl p-0 sm:max-w-xl sm:pb-0">
         <DialogHeader className="shrink-0 gap-1.5 border-b border-border/70 bg-muted/20 px-4 py-3.5 pr-12 sm:px-5 sm:pr-14">
           <DialogTitle className="flex min-w-0 items-center gap-2 text-base">
-            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />
-            <span className="min-w-0 break-words">{tx("Оплата входящего счёта", "Zahlung der Eingangsrechnung")}</span>
+            <SectionHeading icon={HandCoins}>{tx("Оплата входящего счёта", "Zahlung der Eingangsrechnung")}</SectionHeading>
           </DialogTitle>
           <DialogDescription className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs leading-5">
             {paymentChoice ? <><span className="font-mono font-medium text-foreground">{paymentChoice.external_invoice_number}</span><span aria-hidden>·</span><span className="min-w-0 break-words">{paymentChoice.provider_name || "—"}</span></> : null}

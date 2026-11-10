@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
-import { Check, FileText, LoaderCircle } from "lucide-react";
+import { Check, FileHeart, FileText, LoaderCircle } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { PdfFileIcon } from "@/components/pdf-file-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -102,8 +103,7 @@ export function ClinicalReportPdfAction({ patientId, className }: { patientId: s
       <DialogContent className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-h-[92dvh] sm:max-w-2xl sm:pb-0">
         <DialogHeader className="shrink-0 gap-1.5 border-b border-border/70 bg-muted/20 px-4 py-3.5 pr-12 sm:px-5 sm:pr-14">
           <DialogTitle className="flex min-w-0 items-start gap-2 pr-0 text-base leading-snug sm:leading-snug">
-            <span aria-hidden className="mt-2 size-2 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />
-            <span>{tx("Состав медицинской сводки", "Inhalt der medizinischen Zusammenfassung")}</span>
+            <SectionHeading icon={FileHeart}>{tx("Состав медицинской сводки", "Inhalt der medizinischen Zusammenfassung")}</SectionHeading>
           </DialogTitle>
           <DialogDescription className="text-xs leading-5">
             {tx(

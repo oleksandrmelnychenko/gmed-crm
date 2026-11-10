@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, Clock3, Info, LoaderCircle } from "lucide-react";
+import { Stethoscope, CalendarDays, Clock3, Info, LoaderCircle } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { buttonVariants } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
 import { StaffLink } from "@/components/staff-link";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
-import { cn } from "@/lib/utils";
 
 import {
   groupAppointmentsByDay,
@@ -200,8 +200,7 @@ export function OrderPlannedAppointments({
     <div data-testid="order-planned-appointments" className="rounded-lg border border-border bg-card p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
-          <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--primary))]" />
-          {tx("Приёмы заказа", "Termine des Auftrags")}
+          <SectionHeading icon={CalendarDays}>{tx("Приёмы заказа", "Termine des Auftrags")}</SectionHeading>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canReleasePlan ? (
@@ -228,22 +227,19 @@ export function OrderPlannedAppointments({
           <div className="inline-flex rounded-lg border border-border/70 bg-muted/30 p-0.5" role="group">
             {(
               [
-                ["day", tx("По дням", "Nach Tagen")],
-                ["doctor", tx("По врачам", "Nach Ärzten")],
+                ["day", tx("По дням", "Nach Tagen"), CalendarDays],
+                ["doctor", tx("По врачам", "Nach Ärzten"), Stethoscope],
               ] as const
-            ).map(([value, label]) => (
+            ).map(([value, label, Icon]) => (
               <button
                 key={value}
                 type="button"
                 aria-pressed={groupBy === value}
                 onClick={() => setGroupBy(value)}
-                className={cn(
-                  "h-[30px] rounded-md px-2.5 max-sm:h-10 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  groupBy === value
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                )}
+                data-workspace-tab
+                className="inline-flex h-[30px] items-center gap-1.5 rounded-md px-2.5 max-sm:h-10 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
+                <Icon aria-hidden="true" className="size-3.5 shrink-0" />
                 {label}
               </button>
             ))}

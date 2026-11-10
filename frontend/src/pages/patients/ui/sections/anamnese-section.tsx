@@ -1,5 +1,6 @@
 import { useEffect, useState, type JSX } from "react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Button } from "@/components/ui/button";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -8,7 +9,7 @@ import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm
 import { toast } from "@/components/ui/toast";
 import { berlinLocalInputToIso, formatAppDateTime, isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
-import { Copy, Pencil, Plus, Trash2 } from "lucide-react";
+import { Copy, History, Pencil, Plus, Trash2 } from "lucide-react";
 
 import type {
   ClinicalNarrative,
@@ -399,8 +400,7 @@ export function AnamneseSection({
     <section className={cn("rounded-xl border border-border/70 bg-card", className)}>
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
         <div className="flex items-center gap-2">
-          <span aria-hidden data-slot="heading-marker" className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-          <h3 className="text-sm font-semibold text-foreground">{tx("Анамнез", "Anamnese")}</h3>
+          <h3 className="text-sm font-semibold text-foreground"><SectionHeading icon={History}>{tx("Анамнез", "Anamnese")}</SectionHeading></h3>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -698,9 +698,9 @@ export function AnamneseSection({
         <DialogContent overlayClassName="bg-[color-mix(in_srgb,var(--overlay,#000)_40%,transparent)]" className="flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[860px] sm:pb-0" data-testid="anamnesis-editor-dialog">
           <DialogHeader className="shrink-0 border-b border-border/50 bg-card px-4 py-3 pr-14 text-left">
             <DialogTitle className="text-[15px] font-semibold">
-              {editingMode === "edit"
+              <SectionHeading icon={History}>{editingMode === "edit"
                 ? `${tx("Редактировать", "Bearbeiten")}: ${tx("Анамнез", "Anamnese")}`
-                : `${tx("Новая версия", "Neue Version")}: ${tx("Анамнез", "Anamnese")}`}
+                : `${tx("Новая версия", "Neue Version")}: ${tx("Анамнез", "Anamnese")}`}</SectionHeading>
             </DialogTitle>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-muted px-3 py-3 sm:px-4">

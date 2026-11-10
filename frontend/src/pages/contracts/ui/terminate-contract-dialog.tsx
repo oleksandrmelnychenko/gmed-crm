@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from "react";
-import { LoaderCircle, OctagonAlert } from "lucide-react";
+import { FileCheck2, FileX2, LoaderCircle, OctagonAlert } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -150,7 +151,7 @@ export function TerminateContractDialog({
         <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>
             <DialogTitle>
-              {tx("Договор расторгнут", "Vertrag gekündigt")} {contract.contract_number}
+              <SectionHeading icon={FileCheck2}>{tx("Договор расторгнут", "Vertrag gekündigt")} {contract.contract_number}</SectionHeading>
             </DialogTitle>
             <DialogDescription>
               {tx(
@@ -188,7 +189,7 @@ export function TerminateContractDialog({
         <DialogContent className={openOrders.length > 0 ? "sm:max-w-[560px]" : "sm:max-w-[460px]"}>
           <DialogHeader>
             <DialogTitle>
-              {tx("Расторгнуть договор", "Vertrag kündigen")} {contract.contract_number}
+              <SectionHeading icon={FileX2}>{tx("Расторгнуть договор", "Vertrag kündigen")} {contract.contract_number}</SectionHeading>
             </DialogTitle>
             <DialogDescription>
               {tx(

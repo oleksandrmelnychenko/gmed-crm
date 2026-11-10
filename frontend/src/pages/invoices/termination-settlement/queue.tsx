@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { Scale, RefreshCw } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -182,7 +182,7 @@ export function TerminationSettlementQueue({
         emptyState={tx("Нет расчётов при расторжении.", "Keine Abrechnungen bei Kündigung.")}
         toolbarStart={
           <div className="flex flex-wrap items-center gap-2">
-            <AdminSectionTitle>{tx("Расчёты при расторжении", "Abrechnung bei Kündigung")}</AdminSectionTitle>
+            <AdminSectionTitle icon={Scale}>{tx("Расчёты при расторжении", "Abrechnung bei Kündigung")}</AdminSectionTitle>
             <NativeComboboxSelect
               aria-label={tx("Статус расчёта", "Status der Abrechnung")}
               value={filter}

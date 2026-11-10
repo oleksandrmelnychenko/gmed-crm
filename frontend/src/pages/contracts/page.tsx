@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { hasFormChanges } from "@/lib/form-changes";
 import { ServiceDescriptionEditor } from "@/components/service-description-editor";
 import { serviceDescriptionItems, serviceDescriptionText } from "@/lib/service-description";
@@ -15,13 +16,37 @@ import {
 import { useSearchParams } from "react-router-dom";
 import {
   ArrowUpRight,
+  BookOpen,
+  CalendarDays,
+  CalendarRange,
   ChevronLeft,
   ChevronRight,
+  ClipboardCheck,
+  ClipboardList,
   FileBadge2,
+  FilePlus2,
+  Files,
+  FileSignature,
+  FileText,
+  FolderOpen,
+  History,
+  Link2,
+  ListChecks,
+  ListOrdered,
+  ListTodo,
   LoaderCircle,
+  MessageSquare,
+  NotebookPen,
+  NotebookText,
   Plus,
+  Route,
+  ScrollText,
   Search,
+  StickyNote,
+  Tags,
   Trash2,
+  UserRound,
+  UsersRound,
   X,
 } from "lucide-react";
 
@@ -2092,7 +2117,7 @@ function useContractsPageContent() {
             toolbarStart={
               <>
                 <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
-                  {titleWithDot(text.agencyServiceTitle)}
+                  <SectionHeading icon={BookOpen}>{text.agencyServiceTitle}</SectionHeading>
                 </span>
                 <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
                 <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
@@ -2191,7 +2216,7 @@ function useContractsPageContent() {
                 toolbarStart={
                   <>
                     <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
-                      {titleWithDot(text.contractsTab)}
+                      <SectionHeading icon={Files}>{text.contractsTab}</SectionHeading>
                     </span>
                     <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
                     <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
@@ -2322,7 +2347,7 @@ function useContractsPageContent() {
                 toolbarStart={
                   <>
                   <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
-                    {titleWithDot(text.quotesTab)}
+                    <SectionHeading icon={FileText}>{text.quotesTab}</SectionHeading>
                   </span>
                   <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
                   <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
@@ -2472,6 +2497,7 @@ function useContractsPageContent() {
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
           <form className="flex h-full flex-col" onSubmit={handleSaveAgencyService}>
             <AdminSheetScaffold
+              icon={BookOpen}
               title={agencyServiceForm.id ? text.editCatalogItem : text.newCatalogItem}
               description={text.catalogHelp}
               footer={
@@ -2486,7 +2512,7 @@ function useContractsPageContent() {
             >
               <div className="space-y-4 rounded-xl">
                 <section className="rounded-lg border border-border/70 bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.basicData)}</h2>
+                  <h2 className={tokens.text.sectionTitle}><SectionHeading icon={ClipboardList}>{text.basicData}</SectionHeading></h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={text.serviceName} className="sm:col-span-2">
                       <Input
@@ -2546,7 +2572,7 @@ function useContractsPageContent() {
                 </section>
 
                 <section className="rounded-lg border border-border/70 bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.pricing)}</h2>
+                  <h2 className={tokens.text.sectionTitle}><SectionHeading icon={Tags}>{text.pricing}</SectionHeading></h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={text.unitPrice}>
                       <Input
@@ -2578,7 +2604,7 @@ function useContractsPageContent() {
                 </section>
 
                 <section className="rounded-lg border border-border/70 bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.validityPeriod)}</h2>
+                  <h2 className={tokens.text.sectionTitle}><SectionHeading icon={CalendarRange}>{text.validityPeriod}</SectionHeading></h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={t.providers_service_valid_from}>
                       <Input
@@ -2605,7 +2631,7 @@ function useContractsPageContent() {
                 </section>
 
                 <section className="rounded-lg border border-border/70 bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.descriptionStatus)}</h2>
+                  <h2 className={tokens.text.sectionTitle}><SectionHeading icon={NotebookText}>{text.descriptionStatus}</SectionHeading></h2>
                   <div className="mt-5 space-y-4">
                     <ServiceDescriptionEditor
                       items={serviceDescriptionItems(agencyServiceForm.descriptionItems, agencyServiceForm.description)}
@@ -2664,6 +2690,7 @@ function useContractsPageContent() {
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
           <form className="flex h-full flex-col" onSubmit={handleCreateContract}>
             <AdminSheetScaffold
+              icon={FileSignature}
               title={text.newContract}
               description={text.createContractDescription}
               footer={
@@ -2678,7 +2705,7 @@ function useContractsPageContent() {
             >
               <div className="space-y-4 rounded-xl">
                 <section className="rounded-lg border border-border/70 bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.contractPatientStatus)}</h2>
+                  <h2 className={tokens.text.sectionTitle}><SectionHeading icon={FileSignature}>{text.contractPatientStatus}</SectionHeading></h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={t.contracts_patient} required>
                       <NativeComboboxSelect
@@ -2731,7 +2758,7 @@ function useContractsPageContent() {
                 </section>
 
                 <section className="rounded-lg border border-border/70 bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.contractDates)}</h2>
+                  <h2 className={tokens.text.sectionTitle}><SectionHeading icon={CalendarDays}>{text.contractDates}</SectionHeading></h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={t.contracts_valid_from} required>
                       <Input
@@ -2759,7 +2786,7 @@ function useContractsPageContent() {
                 </section>
 
                 <section className="rounded-lg border border-border/70 bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.contractConditions)}</h2>
+                  <h2 className={tokens.text.sectionTitle}><SectionHeading icon={ListChecks}>{text.contractConditions}</SectionHeading></h2>
                   <div className="mt-5">
                     <Field label={t.contracts_notes}>
                       <textarea
@@ -2786,6 +2813,7 @@ function useContractsPageContent() {
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
           <form className="flex h-full flex-col" onSubmit={handleCreateQuote}>
             <AdminSheetScaffold
+              icon={FilePlus2}
               title={text.newQuote}
               description={text.createQuoteDescription}
               footer={
@@ -2801,7 +2829,7 @@ function useContractsPageContent() {
             >
               <div className="space-y-4 rounded-xl">
                 <section className="rounded-lg border border-border/70 bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.quoteOrderSection)}</h2>
+                  <h2 className={tokens.text.sectionTitle}><SectionHeading icon={ClipboardCheck}>{text.quoteOrderSection}</SectionHeading></h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={t.orders_title} className="sm:col-span-2">
                       <NativeComboboxSelect
@@ -2853,7 +2881,7 @@ function useContractsPageContent() {
                 </section>
 
                 <section className="rounded-lg border border-border/70 bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.quoteNotesSection)}</h2>
+                  <h2 className={tokens.text.sectionTitle}><SectionHeading icon={StickyNote}>{text.quoteNotesSection}</SectionHeading></h2>
                   <div className="mt-5">
                     {/* Printed on the cost estimate and copied into its
                         invoices (QA D-62). */}
@@ -2905,6 +2933,7 @@ function useContractsPageContent() {
       >
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
           <AdminSheetScaffold
+            icon={ScrollText}
             title={contractDetail ? `${contractDetail.contract_number} / ${contractDetail.patient_name}` : t.contracts_framework}
             description={text.contractSheetDescription}
           >
@@ -2920,7 +2949,7 @@ function useContractsPageContent() {
                   <section>
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.contracts_title)}</h2>
+                        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={ScrollText}>{t.contracts_title}</SectionHeading></h2>
                       </div>
                     <Badge variant="outline" className={cn("rounded-full", contractStatusClassName(contractDetail.status))}>
                       {contractStatusLabel(contractDetail.status)}
@@ -2953,7 +2982,7 @@ function useContractsPageContent() {
                       <div className="space-y-2.5">
                         <div className="flex items-start justify-between gap-4">
                           <div>
-                            <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.contracts_notes)}</h2>
+                            <h2 className={tokens.text.sectionTitle}><SectionHeading icon={NotebookPen}>{t.contracts_notes}</SectionHeading></h2>
                           </div>
                         </div>
                         <pre className="rounded-xl border border-border bg-background/60 p-4 font-mono text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
@@ -2968,7 +2997,7 @@ function useContractsPageContent() {
                   <section>
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.providers_linked_patients)}</h2>
+                        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={UsersRound}>{t.providers_linked_patients}</SectionHeading></h2>
                       </div>
                     </div>
                     <div className="mt-5 grid gap-3 md:grid-cols-3">
@@ -2978,7 +3007,7 @@ function useContractsPageContent() {
                         onClick={() => window.open(`/patients?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
-                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{t.contracts_patient}</h3>
+                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground"><SectionHeading icon={UserRound}>{t.contracts_patient}</SectionHeading></h3>
                           <p className="mt-2 text-xs leading-tight text-muted-foreground">
                             {text.contractLinkedPatientCard}
                           </p>
@@ -2993,7 +3022,7 @@ function useContractsPageContent() {
                         onClick={() => window.open(`/orders?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
-                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.orders}</h3>
+                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground"><SectionHeading icon={ClipboardList}>{text.orders}</SectionHeading></h3>
                           <p className="mt-2 text-xs leading-tight text-muted-foreground">
                             {text.contractLinkedOrdersCard}
                           </p>
@@ -3008,7 +3037,7 @@ function useContractsPageContent() {
                         onClick={() => window.open(`/documents?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
-                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.documents}</h3>
+                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground"><SectionHeading icon={FolderOpen}>{text.documents}</SectionHeading></h3>
                           <p className="mt-2 text-xs leading-tight text-muted-foreground">
                             {text.contractLinkedDocumentsCard}
                           </p>
@@ -3024,7 +3053,7 @@ function useContractsPageContent() {
                   <section>
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.contracts_status)}</h2>
+                        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={ListTodo}>{t.contracts_status}</SectionHeading></h2>
                       </div>
                     </div>
                     <div className="mt-5 space-y-4">
@@ -3120,6 +3149,7 @@ function useContractsPageContent() {
       >
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
           <AdminSheetScaffold
+            icon={FileText}
             title={quoteDetail ? `${quoteDetail.quote_number} / ${quoteDetail.patient_name}` : text.quotesTab}
             description={text.quoteSheetDescription}
           >
@@ -3135,7 +3165,7 @@ function useContractsPageContent() {
                   <section>
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.quotesTab)}</h2>
+                        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={FileText}>{text.quotesTab}</SectionHeading></h2>
                       </div>
                       <Badge variant="outline" className={cn("rounded-full", quoteStatusClassName(quoteDetail.status))}>
                         {quoteStatusLabel(quoteDetail.status)}
@@ -3172,7 +3202,7 @@ function useContractsPageContent() {
                       <div className="space-y-2.5">
                         <div className="flex items-start justify-between gap-4">
                           <div>
-                            <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.finance_quote_printed_notes)}</h2>
+                            <h2 className={tokens.text.sectionTitle}><SectionHeading icon={MessageSquare}>{t.finance_quote_printed_notes}</SectionHeading></h2>
                           </div>
                         </div>
                         <div className="rounded-xl border border-border bg-background/60 p-4 text-sm leading-snug text-muted-foreground">
@@ -3197,7 +3227,7 @@ function useContractsPageContent() {
                   <section>
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.linkedData)}</h2>
+                        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={Link2}>{text.linkedData}</SectionHeading></h2>
                       </div>
                     </div>
                     <div className="mt-4 overflow-hidden rounded-xl border border-border bg-card">
@@ -3246,7 +3276,7 @@ function useContractsPageContent() {
                   <section>
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.quoteLifecycle)}</h2>
+                        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={Route}>{text.quoteLifecycle}</SectionHeading></h2>
                       </div>
                     </div>
                     <div className="mt-5 space-y-4">
@@ -3350,7 +3380,7 @@ function useContractsPageContent() {
                   <section>
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.lineItems)}</h2>
+                        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={ListOrdered}>{text.lineItems}</SectionHeading></h2>
                       </div>
                     </div>
                     <div className="mt-5">
@@ -3369,7 +3399,7 @@ function useContractsPageContent() {
                   <section>
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.versionHistory)}</h2>
+                        <h2 className={tokens.text.sectionTitle}><SectionHeading icon={History}>{text.versionHistory}</SectionHeading></h2>
                       </div>
                     </div>
                     <div className="mt-5 space-y-4">
@@ -3472,15 +3502,6 @@ function ContractsPager({
         </Button>
       </div>
     </div>
-  );
-}
-
-function titleWithDot(title: ReactNode) {
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />
-      <span>{title}</span>
-    </span>
   );
 }
 

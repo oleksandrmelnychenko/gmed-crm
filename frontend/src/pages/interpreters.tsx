@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import {
   useCallback,
   useDeferredValue,
@@ -8,6 +9,22 @@ import {
   type ReactNode,
 } from "react";
 import {
+  BadgeCheck,
+  CalendarClock,
+  ChartNoAxesCombined,
+  ContactRound,
+  Files,
+  GraduationCap,
+  Languages,
+  ListChecks,
+  Phone,
+  ReceiptText,
+  Scale,
+  Settings2,
+  UserRoundPlus,
+  UsersRound,
+  Wallet,
+  type LucideIcon,
   RefreshCcw,
   Search,
   Plus,
@@ -875,11 +892,13 @@ function Metric({
 }
 
 function OperationsList({
+  icon,
   title,
   items,
   empty,
   renderItem,
 }: {
+  icon: LucideIcon;
   title: string;
   items: Record<string, unknown>[];
   empty: string;
@@ -887,9 +906,7 @@ function OperationsList({
 }) {
   return (
     <div className="rounded-lg border border-border bg-background p-3">
-      <h3 className="text-xs font-semibold text-muted-foreground">
-        {title}
-      </h3>
+      <h3><SectionHeading icon={icon}>{title}</SectionHeading></h3>
       <div className="mt-2 space-y-2">
         {items.length > 0 ? (
           items.slice(0, 4).map((item, index) => (
@@ -1451,6 +1468,7 @@ export function InterpretersPage() {
                 className="flex min-h-0 flex-1 flex-col"
               >
                 <AdminSheetScaffold
+                  icon={UserRoundPlus}
                   title={copy.createAccountTitle}
                   description={copy.createAccountDescription}
                   footer={(
@@ -1689,6 +1707,7 @@ export function InterpretersPage() {
                 className="flex min-h-0 flex-1 flex-col"
               >
                 <AdminSheetScaffold
+                  icon={Languages}
                   title={selected.name}
                   description={`${selected.email || copy.notSet} · ${selected.id}`}
                   footer={(
@@ -1713,7 +1732,7 @@ export function InterpretersPage() {
                   ) : null}
                   <div className="space-y-6">
 
-	              <Section title={copy.coreData}>
+	              <Section icon={ContactRound} title={copy.coreData}>
 	                <div className="grid gap-3 md:grid-cols-3">
 	                  <Field label={copy.status}>
                     <NativeComboboxSelect
@@ -1828,7 +1847,7 @@ export function InterpretersPage() {
                 </div>
               </Section>
 
-              <Section title={profileCopy.contactAvailability}>
+              <Section icon={Phone} title={profileCopy.contactAvailability}>
                 <div className="grid gap-3 md:grid-cols-2">
                   <Field label={profileCopy.phone}>
                     <Input
@@ -1887,12 +1906,10 @@ export function InterpretersPage() {
                 </div>
               </Section>
 
-              <Section title={profileCopy.qualificationLanguages}>
+              <Section icon={GraduationCap} title={profileCopy.qualificationLanguages}>
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-[12.5px] font-semibold tracking-tight text-foreground">
-                      {profileCopy.structuredLanguages}
-                    </h3>
+                    <h4><SectionHeading icon={Languages}>{profileCopy.structuredLanguages}</SectionHeading></h4>
                     <Button
                       type="button"
                       variant="outline"
@@ -2034,9 +2051,7 @@ export function InterpretersPage() {
 
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-xs font-semibold text-muted-foreground">
-                      {profileCopy.structuredCredentials}
-                    </h3>
+                    <h4><SectionHeading icon={BadgeCheck}>{profileCopy.structuredCredentials}</SectionHeading></h4>
                     <Button
                       type="button"
                       variant="outline"
@@ -2191,7 +2206,7 @@ export function InterpretersPage() {
                 </div>
               </Section>
 
-              <Section title={profileCopy.legalCompliance}>
+              <Section icon={Scale} title={profileCopy.legalCompliance}>
                 <div className="grid gap-3 md:grid-cols-3">
                   <Field label={profileCopy.confidentiality}>
                     <NativeComboboxSelect
@@ -2343,7 +2358,7 @@ export function InterpretersPage() {
                 </div>
               </Section>
 
-              <Section title={profileCopy.financeAccess}>
+              <Section icon={Wallet} title={profileCopy.financeAccess}>
                 <div className="grid gap-3 md:grid-cols-3">
                   <Field label={profileCopy.hourlyRate}>
                     <Input
@@ -2433,7 +2448,7 @@ export function InterpretersPage() {
                 </div>
               </Section>
 
-              <Section title={profileCopy.performanceWorkload}>
+              <Section icon={ChartNoAxesCombined} title={profileCopy.performanceWorkload}>
                 <div className="grid gap-3 md:grid-cols-4">
                   <Field label={profileCopy.weeklyCapacityHours}>
                     <Input
@@ -2498,7 +2513,7 @@ export function InterpretersPage() {
                   </div>
                 ) : operations ? (
                   <div className="grid gap-3 xl:grid-cols-2">
-                    <OperationsList
+                    <OperationsList icon={UsersRound}
                       title={profileCopy.assignedPatients}
                       items={operations.patients}
                       empty={profileCopy.noAssignedPatients}
@@ -2519,7 +2534,7 @@ export function InterpretersPage() {
                         </div>
                       )}
                     />
-                    <OperationsList
+                    <OperationsList icon={CalendarClock}
                       title={profileCopy.upcomingAppointments}
                       items={operations.upcoming_appointments}
                       empty={profileCopy.noUpcomingAppointments}
@@ -2537,7 +2552,7 @@ export function InterpretersPage() {
                         </div>
                       )}
                     />
-                    <OperationsList
+                    <OperationsList icon={ListChecks}
                       title={profileCopy.activeTasks}
                       items={operations.active_tasks}
                       empty={profileCopy.noActiveTasks}
@@ -2554,7 +2569,7 @@ export function InterpretersPage() {
                         </div>
                       )}
                     />
-                    <OperationsList
+                    <OperationsList icon={Files}
                       title={profileCopy.recentReports}
                       items={operations.recent_reports}
                       empty={profileCopy.noReports}
@@ -2572,7 +2587,7 @@ export function InterpretersPage() {
                         </div>
                       )}
                     />
-                    <OperationsList
+                    <OperationsList icon={ReceiptText}
                       title={profileCopy.billingLines}
                       items={operations.billing_lines}
                       empty={profileCopy.noBillingLines}
@@ -2594,7 +2609,7 @@ export function InterpretersPage() {
                 ) : null}
               </Section>
 
-              <Section title={profileCopy.internalManagement}>
+              <Section icon={Settings2} title={profileCopy.internalManagement}>
                 <div className="grid gap-3 md:grid-cols-2">
                   <Field label={profileCopy.internalNotes}>
                     <textarea

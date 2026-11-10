@@ -1,3 +1,4 @@
+import { Gauge, MapPin, ScanLine, Stethoscope, TrendingUp, Zap } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Input } from "@/components/ui/input";
@@ -253,6 +254,7 @@ export function PatientSymptomsPainSections({
   return (
     <>
       <CaseItemList<PatientSymptomItem>
+        icon={Stethoscope}
         editorPresentation="dialog"
         columns={symptomColumns}
         title={tri(lang, "case_ws_symptoms")}
@@ -270,7 +272,7 @@ export function PatientSymptomsPainSections({
         addFirstLabel={tri(lang, "case_ws_add_first_entry_3")}
         missingPrimaryMessage={tri(lang, "case_ws_please_enter_a_description")}
         formContent={({ form, updateField, disabled }) => (
-          <Panel title={tri(lang, "case_ws_symptoms")}>
+          <Panel icon={Stethoscope} title={tri(lang, "case_ws_symptoms")}>
             <Field label={tri(lang, "case_ws_description")} required>
               <Input value={form.beschreibung} onChange={(event) => updateField("beschreibung", event.target.value)} className={inputBaseClassName} disabled={disabled} />
             </Field>
@@ -282,6 +284,7 @@ export function PatientSymptomsPainSections({
       />
 
       <CaseItemList<PatientPainItem>
+        icon={Zap}
         editorPresentation="dialog"
         columns={painColumns}
         title={t.cases_pain_title}
@@ -301,13 +304,13 @@ export function PatientSymptomsPainSections({
         missingPrimaryMessage={t.cases_pain_missing_location}
         formContent={({ form, updateField, disabled }) => (
           <>
-            <Panel title={t.cases_pain_group_location_timing}>
+            <Panel icon={MapPin} title={t.cases_pain_group_location_timing}>
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label={t.cases_pain_location}><Input value={form.lokalisierung} onChange={(event) => updateField("lokalisierung", event.target.value)} className={inputBaseClassName} disabled={disabled} /></Field>
                 <Field label={t.cases_pain_since_when}><Input value={form.seit_wann ?? ""} onChange={(event) => updateField("seit_wann", event.target.value)} className={inputBaseClassName} disabled={disabled} /></Field>
               </div>
             </Panel>
-            <Panel title={t.cases_pain_group_characteristics}>
+            <Panel icon={ScanLine} title={t.cases_pain_group_characteristics}>
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label={t.cases_pain_cause}><Input value={form.ursache ?? ""} onChange={(event) => updateField("ursache", event.target.value)} className={inputBaseClassName} disabled={disabled} /></Field>
                 <Field label={t.cases_pain_quality}><Input value={form.qualitaet ?? ""} onChange={(event) => updateField("qualitaet", event.target.value)} className={inputBaseClassName} disabled={disabled} /></Field>
@@ -317,13 +320,13 @@ export function PatientSymptomsPainSections({
                 <Field label={t.cases_pain_evolution}><Input value={form.entwicklung ?? ""} onChange={(event) => updateField("entwicklung", event.target.value)} className={inputBaseClassName} disabled={disabled} /></Field>
               </div>
             </Panel>
-            <Panel title={t.cases_pain_group_intensity}>
+            <Panel icon={Gauge} title={t.cases_pain_group_intensity}>
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label={t.cases_pain_nrs_current}><Input value={nrsToString(form.nrs_aktuell)} onChange={(event) => updateField("nrs_aktuell", normalizePatientPainNumber(event.target.value))} className={inputBaseClassName} disabled={disabled} inputMode="numeric" /></Field>
                 <Field label={t.cases_pain_nrs_initial}><Input value={nrsToString(form.nrs_anfang)} onChange={(event) => updateField("nrs_anfang", normalizePatientPainNumber(event.target.value))} className={inputBaseClassName} disabled={disabled} inputMode="numeric" /></Field>
               </div>
             </Panel>
-            <Panel title={t.cases_pain_group_course}>
+            <Panel icon={TrendingUp} title={t.cases_pain_group_course}>
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label={t.cases_pain_initial_duration}><Input value={form.dauer_anfang ?? ""} onChange={(event) => updateField("dauer_anfang", event.target.value)} className={inputBaseClassName} disabled={disabled} /></Field>
                 <Field label={t.cases_pain_current_duration}><Input value={form.dauer_aktuell ?? ""} onChange={(event) => updateField("dauer_aktuell", event.target.value)} className={inputBaseClassName} disabled={disabled} /></Field>

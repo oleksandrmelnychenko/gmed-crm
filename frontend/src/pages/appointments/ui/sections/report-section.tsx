@@ -7,8 +7,9 @@ import {
   type ReactNode,
 } from "react";
 
-import { LoaderCircle } from "lucide-react";
+import { FilePenLine, Languages, LoaderCircle } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { WritableScope } from "@/components/read-only-scope";
 import { Button } from "@/components/ui/button";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -385,8 +386,7 @@ function useAppointmentReportSectionContent({
               toolbarStart={
                 <>
                   <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-                    <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-                    {t.appointments_interpreter_report_title}
+                    <SectionHeading icon={Languages}>{t.appointments_interpreter_report_title}</SectionHeading>
                   </span>
                   <StatusBadge tone={reportStatusTone}>
                     {reportApprovalLabel(detailReport.approval_status)}
@@ -468,8 +468,7 @@ function useAppointmentReportSectionContent({
           <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
             <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b sm:flex-nowrap sm:overflow-x-auto border-border/70 bg-card px-3 py-2">
               <span className="flex shrink-0 items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
-                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-                {t.appointments_interpreter_report_title}
+                <SectionHeading icon={Languages}>{t.appointments_interpreter_report_title}</SectionHeading>
               </span>
               <CountBadge>{appointmentText("appointments_not_submitted")}</CountBadge>
               {canOpenReportEditor ? (
@@ -497,6 +496,7 @@ function useAppointmentReportSectionContent({
       {canOpenReportEditor ? (
         <ReportSubmissionScope writable={canSubmitInterpreterReport}>
           <AppointmentEditorSheet
+            icon={FilePenLine}
             open={editorOpen}
             onOpenChange={(open) => dispatchReportState({ editorOpen: open })}
             title={reportEditorTitle}

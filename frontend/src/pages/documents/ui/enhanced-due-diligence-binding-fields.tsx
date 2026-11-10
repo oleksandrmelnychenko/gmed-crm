@@ -1,5 +1,6 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useState, type ReactNode } from "react";
-import { X } from "lucide-react";
+import { X, ShieldAlert, Landmark, Network, Globe, ReceiptText, ScanSearch, ListChecks } from "lucide-react";
 
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect, countryLabel } from "@/components/ui/country-select";
@@ -123,11 +124,11 @@ export function EnhancedDueDiligenceBindingFields({
   return (
     <div className="space-y-6">
       <section className="space-y-4">
-        <h3 className="text-sm font-semibold text-foreground">
-          {tx(
+        <h3>
+          <SectionHeading icon={ShieldAlert}>{tx(
             "1. Установление повышенного риска",
             "1. Feststellung eines erhöhten Geldwäscherisikos",
-          )}
+          )}</SectionHeading>
         </h3>
         <div className="grid gap-4 md:grid-cols-2">
           <AmlField required label={tx("Уровень риска", "Risikostufe")}>
@@ -246,8 +247,8 @@ export function EnhancedDueDiligenceBindingFields({
       </section>
 
       <section className="space-y-4 border-t border-border pt-5">
-        <h3 className="text-sm font-semibold text-foreground">
-          {tx("Политически значимое лицо (PEP)", "Politisch exponierte Person (PeP)")}
+        <h3>
+          <SectionHeading icon={Landmark}>{tx("Политически значимое лицо (PEP)", "Politisch exponierte Person (PeP)")}</SectionHeading>
         </h3>
         <div className="border-y border-border/70">
           <AmlToggle
@@ -288,8 +289,8 @@ export function EnhancedDueDiligenceBindingFields({
       </section>
 
       <section className="space-y-4 border-t border-border pt-5">
-        <h3 className="text-sm font-semibold text-foreground">
-          {tx("Связи с лицами под санкциями", "Verbindungen zu sanktionierten Personen")}
+        <h3>
+          <SectionHeading icon={Network}>{tx("Связи с лицами под санкциями", "Verbindungen zu sanktionierten Personen")}</SectionHeading>
         </h3>
         <AmlField
           label={tx(
@@ -306,8 +307,8 @@ export function EnhancedDueDiligenceBindingFields({
       </section>
 
       <section className="space-y-4 border-t border-border pt-5">
-        <h3 className="text-sm font-semibold text-foreground">
-          {tx("Третья страна с высоким риском", "Drittstaat mit hohem Risiko")}
+        <h3>
+          <SectionHeading icon={Globe}>{tx("Третья страна с высоким риском", "Drittstaat mit hohem Risiko")}</SectionHeading>
         </h3>
         <div className="border-y border-border/70">
           <AmlToggle
@@ -442,8 +443,8 @@ export function EnhancedDueDiligenceBindingFields({
       </section>
 
       <section className="space-y-4 border-t border-border pt-5">
-        <h3 className="text-sm font-semibold text-foreground">
-          {tx("Необычная операция", "Ungewöhnliche Transaktion")}
+        <h3>
+          <SectionHeading icon={ReceiptText}>{tx("Необычная операция", "Ungewöhnliche Transaktion")}</SectionHeading>
         </h3>
         <div className="border-y border-border/70">
           <AmlToggle
@@ -478,8 +479,8 @@ export function EnhancedDueDiligenceBindingFields({
       </section>
 
       <section className="space-y-4 border-t border-border pt-5">
-        <h3 className="text-sm font-semibold text-foreground">
-          {tx("2. Усиленный мониторинг", "2. Verstärkte kontinuierliche Überwachung")}
+        <h3>
+          <SectionHeading icon={ScanSearch}>{tx("2. Усиленный мониторинг", "2. Verstärkte kontinuierliche Überwachung")}</SectionHeading>
         </h3>
         <AmlField
           required
@@ -498,8 +499,8 @@ export function EnhancedDueDiligenceBindingFields({
       </section>
 
       <section className="space-y-4 border-t border-border pt-5">
-        <h3 className="text-sm font-semibold text-foreground">
-          {tx("3. Дополнительные меры", "3. Weitere verstärkte Sorgfaltspflichten")}
+        <h3>
+          <SectionHeading icon={ListChecks}>{tx("3. Дополнительные меры", "3. Weitere verstärkte Sorgfaltspflichten")}</SectionHeading>
         </h3>
         <AmlField
           label={tx("Принятые дополнительные меры", "Zusätzlich getroffene Maßnahmen")}

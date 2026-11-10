@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Download, Eye, FileWarning, LoaderCircle, type LucideIcon } from "lucide-react";
 
@@ -77,12 +78,11 @@ export function MutedNote({
 }
 
 /** Section title at the start of a table toolbar (like the providers' interaction history). */
-export function TableTitle({ children, count }: { children: ReactNode; count?: number }) {
+export function TableTitle({ children, count, icon }: { children: ReactNode; count?: number; icon: LucideIcon }) {
   return (
     <>
       <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-        {children}
+        <SectionHeading icon={icon}>{children}</SectionHeading>
         {count !== undefined ? <CountBadge>{count}</CountBadge> : null}
       </span>
       <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
@@ -246,7 +246,7 @@ export function FilePreviewDialog({
           <div className="flex min-w-0 flex-wrap items-start justify-between gap-2 pr-10">
             <div className="min-w-0">
               <DialogTitle className="truncate font-mono text-base" title={fileName}>
-                {fileName || t.personnel_preview}
+                <SectionHeading icon={Eye}>{fileName || t.personnel_preview}</SectionHeading>
               </DialogTitle>
               <DialogDescription className="truncate">
                 {[mimeType, note].filter(Boolean).map((part, index) => (
@@ -304,6 +304,7 @@ export function FilePreviewDialog({
 /** Asks for a mandatory reason before a recorded action (discard, delete, legal hold). */
 export function ReasonDialog({
   open,
+  icon,
   title,
   description,
   confirmLabel,
@@ -313,6 +314,7 @@ export function ReasonDialog({
   onClose,
 }: {
   open: boolean;
+  icon: LucideIcon;
   title: ReactNode;
   description?: ReactNode;
   confirmLabel: string;
@@ -359,7 +361,7 @@ export function ReasonDialog({
     <Dialog open={open} onOpenChange={(next) => (!next ? onClose() : undefined)} dirty={Boolean(reason)}>
       <DialogContent className="sm:max-w-[460px]">
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+          <DialogTitle><SectionHeading icon={icon}>{title}</SectionHeading></DialogTitle>
           {description ? <DialogDescription>{description}</DialogDescription> : null}
         </DialogHeader>
         <form
@@ -405,11 +407,11 @@ export function ReasonDialog({
 }
 
 /** Compact field group with a divider between adjacent sections. */
-export function FormSection({ title, hint, children }: { title: ReactNode; hint?: ReactNode; children: ReactNode }) {
+export function FormSection({ title, icon, hint, children }: { title: ReactNode; icon: LucideIcon; hint?: ReactNode; children: ReactNode }) {
   return (
     <section className="space-y-2 border-b border-border/60 pb-3 last:border-b-0 last:pb-0">
       <div className="space-y-1">
-        <AdminSectionTitle>{title}</AdminSectionTitle>
+        <AdminSectionTitle icon={icon}>{title}</AdminSectionTitle>
         {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
       </div>
       {children}

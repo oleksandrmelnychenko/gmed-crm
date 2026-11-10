@@ -1,5 +1,11 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  Link2,
+  MessagesSquare,
+  History,
+  GitBranch,
+  type LucideIcon,
   ArchiveRestore,
   ArrowLeft,
   Building2,
@@ -408,7 +414,7 @@ function TaskChildrenTable({ rows, parentId, lang, disabled, onOpen, actions }: 
       mobilePrimaryColumnId="title"
       mobileDetailColumnIds={["code", "kind", "assignee", "start", "end", "status"]}
       toolbarStart={<>
-        <h3 className="flex shrink-0 items-center gap-2 self-center text-sm font-semibold"><span className="size-1.5 rounded-full bg-[var(--dot,var(--primary))]" />{labels.children}</h3>
+        <h3 className="flex shrink-0 items-center gap-2 self-center text-sm font-semibold"><SectionHeading icon={GitBranch}>{labels.children}</SectionHeading></h3>
         {progress.total > 0 ? <Badge variant="outline" data-testid="task-children-progress" className={cn("shrink-0 self-center rounded-full text-[10px]", progress.done === progress.total ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "bg-muted/20 text-muted-foreground")}>{labels.childrenDone}: <span className="ml-1 font-semibold tabular-nums">{progress.done}/{progress.total}</span></Badge> : null}
         {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
       </>}
@@ -418,12 +424,14 @@ function TaskChildrenTable({ rows, parentId, lang, disabled, onOpen, actions }: 
 }
 
 function TaskDetailSection({
+  icon,
   title,
   count,
   action,
   className,
   children,
 }: {
+  icon: LucideIcon;
   title: ReactNode;
   count?: number;
   action?: ReactNode;
@@ -434,8 +442,7 @@ function TaskDetailSection({
     <section className={cn("overflow-hidden rounded-lg bg-card", className)}>
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border/60 px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-          <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
+          <h3><SectionHeading icon={icon}>{title}</SectionHeading></h3>
           {count !== undefined ? <Badge variant="secondary" className="tabular-nums">{count}</Badge> : null}
         </div>
         {action ? <div className="flex max-w-full flex-wrap items-center gap-2">{action}</div> : null}
@@ -1046,7 +1053,6 @@ export function ConciergeTaskDetailDialog({
       <DialogContent className={cn(conciergeDialogContentClassName, (canDelete || canMarkNotRequired || statusDirty) && "grid-rows-[auto_minmax(0,1fr)_auto]")} style={{ maxWidth: "64rem" }}>
         <ConciergeDialogHeader
           icon={ListChecks}
-          tone="plain"
           title={detail ? localizeTaskTitle(detail.item.title, lang) : labels.loading}
           meta={detail ? <><Badge variant="outline" className="rounded-full font-mono text-muted-foreground">{conciergeTaskCode(detail.item)}</Badge><Badge variant="outline" className={detail.item.archived_at ? "bg-muted text-muted-foreground" : taskStatusClassName(detail.item.status)}>{detail.item.archived_at ? labels.archivedStatus : labels[detail.item.status]}</Badge><Badge variant="secondary" className="rounded-full" data-testid="task-detail-checklist-progress" title={`${labels.checklist}: ${detail.item.checklist_completed}/${detail.item.checklist_total}`}>{labels.checklist}: {detail.item.checklist_completed}/{detail.item.checklist_total}</Badge></> : undefined}
         />
@@ -1075,7 +1081,7 @@ export function ConciergeTaskDetailDialog({
                   ) : undefined}
                 />
               ) : null}
-              <TaskDetailSection title={labels.overview}>
+              <TaskDetailSection icon={ClipboardList} title={labels.overview}>
                 <div className="divide-y divide-border/60">
                   <TaskDetailRow label={labels.assignee} value={detail.item.assigned_to_name} />
                   <TaskDetailRow label={labels.start} value={dateTime(detail.item.starts_at)} />
@@ -1129,7 +1135,7 @@ export function ConciergeTaskDetailDialog({
               ) : null}
 
               {(detail.item.patient_id && detail.item.patient_name) || (detail.item.order_id && canOpenOrders) || (detail.item.provider_id && detail.item.provider_name) || (detail.item.project_id && detail.item.project_name) || detail.item.task_audience === "external" ? (
-                <TaskDetailSection title={labels.links}>
+                <TaskDetailSection icon={Link2} title={labels.links}>
                   <div className="divide-y divide-border/60">
                     {/* Generated order work (checklist, appointment concierge tasks) links back to its order. */}
                     {detail.item.order_id && canOpenOrders ? (
@@ -1166,6 +1172,7 @@ export function ConciergeTaskDetailDialog({
 
               {canReadTaskExpenses ? (
                 <TaskDetailSection
+                  icon={ReceiptText}
                   title={labels.expenses}
                   action={canSubmitTaskExpense ? (
                     <Button
@@ -1237,7 +1244,7 @@ export function ConciergeTaskDetailDialog({
               />
 
             <div className="grid items-start gap-3 lg:grid-cols-2">
-              <TaskDetailSection title={labels.checklist} action={<Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge>}>
+              <TaskDetailSection icon={ListChecks} title={labels.checklist} action={<Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge>}>
                 <div className="divide-y divide-border/60">
                   {detail.checklist.length === 0 ? <p className="px-3 py-3 text-center text-xs text-muted-foreground">{labels.emptyChecklist}</p> : detail.checklist.map((item) => (
                     <div key={item.id} className="flex items-start gap-1.5 px-3 py-2 text-sm">
@@ -1294,7 +1301,7 @@ export function ConciergeTaskDetailDialog({
                 </div>
               </TaskDetailSection>
 
-              <TaskDetailSection title={labels.comments} action={<Badge variant="secondary" className="rounded-full">{detail.comments.length}</Badge>}>
+              <TaskDetailSection icon={MessagesSquare} title={labels.comments} action={<Badge variant="secondary" className="rounded-full">{detail.comments.length}</Badge>}>
                 <div className="divide-y divide-border/60">
                   {detail.comments.length === 0 ? <p className="px-3 py-3 text-center text-xs text-muted-foreground">{labels.emptyComments}</p> : detail.comments.map((item) => (
                     <article key={item.id} className="px-3 py-2">
@@ -1329,8 +1336,7 @@ export function ConciergeTaskDetailDialog({
             <details className="group overflow-hidden rounded-lg bg-card">
               <summary className="flex min-w-0 cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 transition-colors hover:bg-muted/35 [&::-webkit-details-marker]:hidden">
                 <span className="flex min-w-0 items-center gap-2">
-                  <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-                  <span className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">{labels.history}</span>
+                  <SectionHeading icon={History}>{labels.history}</SectionHeading>
                   <Badge variant="secondary" className="rounded-full">{detail.history.length}</Badge>
                 </span>
                 <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />

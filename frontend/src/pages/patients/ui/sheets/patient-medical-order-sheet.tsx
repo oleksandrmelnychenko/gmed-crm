@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { LoaderCircle } from "lucide-react";
+import { ClipboardPlus, FileText, LoaderCircle, Network } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -138,6 +138,7 @@ export function PatientMedicalOrderSheet({
 
   return (
     <PatientSheetScaffold
+      icon={ClipboardPlus}
       open={open}
       onOpenChange={onOpenChange}
       maxWidthClassName="sm:max-w-[540px]"
@@ -162,7 +163,7 @@ export function PatientMedicalOrderSheet({
         </>
       }
     >
-      <FormSection title={l("patients_order_2")}>
+      <FormSection icon={ClipboardPlus} title={l("patients_order_2")}>
         <div className="grid gap-3 md:grid-cols-2">
           <FormField
             label={l("patients_order_date_2")}
@@ -217,7 +218,7 @@ export function PatientMedicalOrderSheet({
         </FormField>
       </FormSection>
 
-      <FormSection title={l("appointments_coordination")}>
+      <FormSection icon={Network} title={l("appointments_coordination")}>
         <div className="grid gap-3 md:grid-cols-2">
           <FormField
             label={l("patients_due_date_2")}
@@ -247,7 +248,7 @@ export function PatientMedicalOrderSheet({
         </div>
       </FormSection>
 
-      <FormSection title={l("patients_details")}>
+      <FormSection icon={FileText} title={l("patients_details")}>
         <FormField
           label={l("patients_instructions")}
           htmlFor="patient-medical-order-instructions"

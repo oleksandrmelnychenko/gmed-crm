@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { LoaderCircle, MessageSquareText } from "lucide-react";
+import { ClipboardPenLine, UserRoundCheck, UsersRound, CalendarClock, MessagesSquare, CalendarPlus, LoaderCircle, MessageSquareText } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -666,7 +666,7 @@ export function ConciergeTaskEventDialog({
   return (
     <Dialog requireChanges={Boolean(item)} open={open} onOpenChange={onOpenChange}>
       <DialogContent className={conciergeDialogContentClassName}>
-        <ConciergeDialogHeader tone="plain" title={item ? labels.editTitle : labels.createTitle} />
+        <ConciergeDialogHeader icon={CalendarPlus} title={item ? labels.editTitle : labels.createTitle} />
 
         <form className="flex min-h-0 flex-col" onSubmit={(event) => void submit(event)}>
           <ConciergeDialogBody>
@@ -675,11 +675,11 @@ export function ConciergeTaskEventDialog({
             <div className="space-y-3">
               <div className="grid items-start gap-3 lg:grid-cols-[minmax(18rem,0.9fr)_minmax(0,1.1fr)]">
                 <div className="space-y-3">
-                  <ConciergeDialogSection title={labels.detailsSection} dot>
+                  <ConciergeDialogSection icon={ClipboardPenLine} title={labels.detailsSection}>
                     <div className="space-y-3">
                       <div className="grid grid-cols-2 gap-1 rounded-md bg-muted/30 p-0.5">
                         {(["task", "event"] as const).map((value) => (
-                          <Button key={value} type="button" size="sm" className="h-8 rounded-md text-xs" variant={kind === value ? "default" : "ghost"} aria-pressed={kind === value} disabled={value === "event" && (item?.child_count ?? 0) > 0} onClick={() => setKind(value)}>
+                          <Button key={value} type="button" size="sm" className="h-8 rounded-md text-xs" variant="ghost" data-workspace-tab aria-pressed={kind === value} disabled={value === "event" && (item?.child_count ?? 0) > 0} onClick={() => setKind(value)}>
                             {labels[value]}
                           </Button>
                         ))}
@@ -694,7 +694,7 @@ export function ConciergeTaskEventDialog({
                   </ConciergeDialogSection>
 
                   {showServiceLink || canAssign ? (
-                    <ConciergeDialogSection title={labels.assignmentSection} dot>
+                    <ConciergeDialogSection icon={UserRoundCheck} title={labels.assignmentSection}>
                       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                         {showServiceLink ? (
                           <ConciergeField label={labels.linkedService}>
@@ -718,10 +718,10 @@ export function ConciergeTaskEventDialog({
                 </div>
 
                 <div className="space-y-3">
-                <ConciergeDialogSection title={labels.audience} dot>
+                <ConciergeDialogSection icon={UsersRound} title={labels.audience}>
                   <div className="grid grid-cols-2 gap-1 rounded-md bg-muted/30 p-0.5">
                     {(["internal", "external"] as const).map((value) => (
-                      <Button key={value} type="button" size="sm" className="h-8 rounded-md text-xs" variant={audience === value ? "default" : "ghost"} onClick={() => setAudience(value)}>
+                      <Button key={value} type="button" size="sm" className="h-8 rounded-md text-xs" variant="ghost" data-workspace-tab aria-pressed={audience === value} onClick={() => setAudience(value)}>
                         {labels[value]}
                       </Button>
                     ))}
@@ -761,7 +761,7 @@ export function ConciergeTaskEventDialog({
                     ) : null}
                   </div>
                 </ConciergeDialogSection>
-                <ConciergeDialogSection title={labels.planningSection} dot>
+                <ConciergeDialogSection icon={CalendarClock} title={labels.planningSection}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     {parentTask ? (
                       <p className="min-w-0 rounded-md border border-[var(--brand)]/20 bg-[var(--brand)]/5 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground sm:col-span-2">
@@ -809,7 +809,7 @@ export function ConciergeTaskEventDialog({
               )}
               {item ? (
                 <div>
-                  <ConciergeDialogSection title={labels.comments} dot>
+                  <ConciergeDialogSection icon={MessagesSquare} title={labels.comments}>
                     {commentError ? <p role="alert" className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{commentError}</p> : null}
                     <div className="overflow-hidden bg-card">
                       {commentsLoading ? (

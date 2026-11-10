@@ -166,6 +166,7 @@ function SecurityMetric({
 
 function SecurityDialog({
   open,
+  icon,
   onOpenChange,
   title,
   description,
@@ -174,6 +175,7 @@ function SecurityDialog({
   onSubmit,
 }: {
   open: boolean;
+  icon: LucideIcon;
   onOpenChange: (open: boolean) => void;
   title: string;
   description?: string;
@@ -184,6 +186,7 @@ function SecurityDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <AdminDialogScaffold
+        icon={icon}
         title={title}
         description={description}
         onSubmit={onSubmit}
@@ -1286,6 +1289,7 @@ function useAdminSecurityPageContent() {
       </div>
 
       <SecurityDialog
+        icon={Wrench}
         open={maintOpen}
         onOpenChange={closeMaintenanceSheet}
         title={t.security_maintenance}
@@ -1356,6 +1360,7 @@ function useAdminSecurityPageContent() {
       </SecurityDialog>
 
       <SecurityDialog
+        icon={Network}
         open={ipOpen}
         onOpenChange={closeIpSheet}
         title={t.security_ip_add}

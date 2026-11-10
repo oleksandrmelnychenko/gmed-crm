@@ -1,5 +1,6 @@
-import { ArrowUpRight, Building2, MapPin } from "lucide-react";
+import { ArrowUpRight, Building2, MapPin, Network } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Badge } from "@/components/ui/badge";
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import { useLang } from "@/lib/i18n";
@@ -45,8 +46,7 @@ export function ProviderChildrenSection({
     <section className={cn("space-y-2 rounded-xl bg-card p-3", className)}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <div className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
-          <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
+          <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground"><SectionHeading icon={Network}>{title}</SectionHeading></h3>
           <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
             {providerChildren.length}
           </span>

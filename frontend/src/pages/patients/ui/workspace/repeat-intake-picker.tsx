@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { LoaderCircle, Trash2 } from "lucide-react";
+import { ClipboardPlus, LoaderCircle, Trash2 } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Button } from "@/components/ui/button";
 import { formatAppDate } from "@/lib/app-time-zone";
 import {
@@ -72,7 +73,7 @@ export function RepeatIntakePicker({ patientId, lang, onPick, onClose }: {
   return <>
     <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
       <DialogContent className="sm:max-w-xl">
-        <DialogHeader><DialogTitle>{tx("Повторное обращение", "Erneute Anfrage")}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle><SectionHeading icon={ClipboardPlus}>{tx("Повторное обращение", "Erneute Anfrage")}</SectionHeading></DialogTitle></DialogHeader>
         {error ? <div role="alert" className="space-y-3 text-sm text-destructive">{error}<Button variant="outline" onClick={() => setAttempt(value => value + 1)}>{tx("Повторить", "Erneut versuchen")}</Button></div>
           : !drafts ? <p role="status" className="text-sm text-muted-foreground">{tx("Проверяем сохранённые обращения…", "Gespeicherte Anfragen werden geprüft…")}</p>
           : drafts.length === 0 ? <p className="rounded-lg border p-4 text-sm text-muted-foreground">{tx("Сохранённых черновиков нет.", "Keine gespeicherten Entwürfe vorhanden.")}</p>
@@ -101,7 +102,7 @@ export function RepeatIntakePicker({ patientId, lang, onPick, onClose }: {
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{tx("Удалить черновик?", "Entwurf löschen?")}</DialogTitle>
+          <DialogTitle><SectionHeading icon={Trash2}>{tx("Удалить черновик?", "Entwurf löschen?")}</SectionHeading></DialogTitle>
           <DialogDescription>
             {tx(
               "Черновик будет удалён из списка. Это действие нельзя отменить.",

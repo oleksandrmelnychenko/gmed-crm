@@ -1,7 +1,9 @@
 import * as React from "react"
 import { createPortal } from "react-dom"
+import { FileQuestion, TriangleAlert } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { SectionHeading } from "@/components/ui/section-heading"
 
 type DirtyDismissConfirmDialogProps = {
   cancelLabel: string
@@ -117,7 +119,7 @@ export function DirtyDismissConfirmDialog({
             id="dirty-dismiss-confirm-title"
             className="text-sm font-semibold text-foreground"
           >
-            {title}
+            <SectionHeading icon={destructive ? TriangleAlert : FileQuestion}>{title}</SectionHeading>
           </h2>
           <p
             id="dirty-dismiss-confirm-message"

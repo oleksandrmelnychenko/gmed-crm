@@ -46,7 +46,7 @@ export type ImportedTemplatesResponse = {
 const BASE = "/documents/template-imports";
 
 export function fetchImportedTemplates() {
-  return apiFetch<ImportedTemplatesResponse>(BASE);
+  return apiFetch<ImportedTemplatesResponse>(BASE, { cache: "no-store" });
 }
 
 export function importTemplateFile(input: {

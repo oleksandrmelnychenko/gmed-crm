@@ -14,6 +14,12 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  CalendarClock,
+  CalendarPlus,
+  ConciergeBell,
+  NotebookPen,
+  UserRoundCheck,
+  WalletCards,
   ChevronLeft,
   ChevronRight,
   ListChecks,
@@ -1860,6 +1866,7 @@ function useStaffServicesPageContent() {
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           {selectedService ? (
             <AdminSheetScaffold
+              icon={ConciergeBell}
               title={selectedService.title}
               description={`${selectedService.patient_name} · ${serviceKindLabel(selectedService.service_kind, t)}`}
               bodyClassName="space-y-3 px-4 py-3"
@@ -1887,7 +1894,7 @@ function useStaffServicesPageContent() {
               ) : null}
               {editMode && editForm ? (
                 <>
-                  <Section title={t.staff_services_create_section_service}>
+                  <Section icon={ConciergeBell} title={t.staff_services_create_section_service}>
                     <div className="grid gap-3 md:grid-cols-2">
                       {canEditProtectedServiceFields ? (
                         <label className="space-y-1.5 text-sm">
@@ -1959,7 +1966,7 @@ function useStaffServicesPageContent() {
                   </Section>
 
                   {canEditProtectedServiceFields ? (
-                    <Section title={t.staff_services_create_section_assignment}>
+                    <Section icon={UserRoundCheck} title={t.staff_services_create_section_assignment}>
                       <div className="grid gap-3 md:grid-cols-2">
                         <label className="space-y-1.5 text-sm md:col-span-2">
                           <span className="text-xs font-medium text-muted-foreground">
@@ -2020,7 +2027,7 @@ function useStaffServicesPageContent() {
                     </Section>
                   ) : null}
 
-                  <Section title={t.staff_services_create_section_schedule}>
+                  <Section icon={CalendarClock} title={t.staff_services_create_section_schedule}>
                     <div className="grid gap-3 md:grid-cols-2">
                       <label className="space-y-1.5 text-sm">
                         <span className="text-xs font-medium text-muted-foreground">
@@ -2055,7 +2062,7 @@ function useStaffServicesPageContent() {
                     </div>
                   </Section>
 
-                  <Section title={t.staff_services_create_section_finance}>
+                  <Section icon={WalletCards} title={t.staff_services_create_section_finance}>
                     <div className="grid gap-3 md:grid-cols-2">
                       {canEditProtectedServiceFields ? (
                         <>
@@ -2242,7 +2249,7 @@ function useStaffServicesPageContent() {
                     ) : null}
                   </Section>
 
-                  <Section title={t.staff_services_create_section_vendor_notes}>
+                  <Section icon={NotebookPen} title={t.staff_services_create_section_vendor_notes}>
                     <div className="grid gap-3 md:grid-cols-2">
                       <label className="space-y-1.5 text-sm">
                         <span className="text-xs font-medium text-muted-foreground">
@@ -2363,7 +2370,7 @@ function useStaffServicesPageContent() {
                       </Button>
                     ) : null}
                   </div>
-                  <Section title={t.staff_services_create_section_service}>
+                  <Section icon={ConciergeBell} title={t.staff_services_create_section_service}>
                     <div className="grid gap-1.5 md:grid-cols-2">
                       <ServiceMiniMetric label={t.staff_services_column_status} value={serviceStatusLabel(selectedService.status, t)} />
                       <ServiceMiniMetric label={t.staff_services_column_billing} value={billingStatusLabel(selectedService.billing_status, t)} />
@@ -2382,21 +2389,21 @@ function useStaffServicesPageContent() {
                     </div>
                   </Section>
 
-                  <Section title={t.staff_services_create_section_schedule}>
+                  <Section icon={CalendarClock} title={t.staff_services_create_section_schedule}>
                     <div className="grid gap-1">
                       <ServiceDetailField label={t.staff_services_form_start} value={selectedService.starts_at ? formatPortalDateTime(selectedService.starts_at) : null} />
                       <ServiceDetailField label={t.staff_services_form_end} value={selectedService.ends_at ? formatPortalDateTime(selectedService.ends_at) : null} />
                     </div>
                   </Section>
 
-                  <Section title={t.staff_services_create_section_assignment}>
+                  <Section icon={UserRoundCheck} title={t.staff_services_create_section_assignment}>
                     <div className="grid gap-1">
                       <ServiceDetailField label={t.staff_services_form_provider} value={selectedService.provider_name} />
                       <ServiceDetailField label={t.staff_services_form_concierge} value={selectedService.assigned_concierge_name} />
                     </div>
                   </Section>
 
-                  <Section title={t.staff_services_create_section_finance}>
+                  <Section icon={WalletCards} title={t.staff_services_create_section_finance}>
                     <div className="grid gap-1.5 md:grid-cols-3">
                       <ServiceMiniMetric label={t.providers_services} value={selectedService.provider_service_name} />
                       <ServiceMiniMetric label={t.invoices_workspace_quantity} value={selectedService.quantity} />
@@ -2407,7 +2414,7 @@ function useStaffServicesPageContent() {
                     </div>
                   </Section>
 
-                  <Section title={t.staff_services_create_section_vendor_notes}>
+                  <Section icon={NotebookPen} title={t.staff_services_create_section_vendor_notes}>
                     <div className="grid gap-1">
                       <ServiceDetailField label={t.staff_services_form_booking_reference} value={selectedService.booking_reference} />
                       <ServiceDetailField label={t.staff_services_form_vendor} value={selectedService.vendor_name} />
@@ -2427,6 +2434,7 @@ function useStaffServicesPageContent() {
             <AdminDialogScaffold
               onSubmit={handleCreateService}
               maxWidthClassName="sm:max-w-[760px]"
+              icon={CalendarPlus}
               title={t.staff_services_create_title}
               description={
                 selectedPatient
@@ -2451,7 +2459,7 @@ function useStaffServicesPageContent() {
                   </div>
                 ) : null}
 
-                <AdminFormSection title={t.staff_services_create_section_service}>
+                <AdminFormSection icon={ConciergeBell} title={t.staff_services_create_section_service}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <label className="space-y-1.5 text-sm">
                       <span className="text-xs font-medium text-muted-foreground">
@@ -2507,7 +2515,7 @@ function useStaffServicesPageContent() {
                   </label>
                 </AdminFormSection>
 
-                <AdminFormSection title={t.staff_services_create_section_assignment}>
+                <AdminFormSection icon={UserRoundCheck} title={t.staff_services_create_section_assignment}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <label className="space-y-1.5 text-sm">
                       <span className="text-xs font-medium text-muted-foreground">
@@ -2534,7 +2542,7 @@ function useStaffServicesPageContent() {
                   </div>
                 </AdminFormSection>
 
-                <AdminFormSection title={t.staff_services_create_section_schedule}>
+                <AdminFormSection icon={CalendarClock} title={t.staff_services_create_section_schedule}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <label className="space-y-1.5 text-sm">
                       <span className="text-xs font-medium text-muted-foreground">
@@ -2565,7 +2573,7 @@ function useStaffServicesPageContent() {
                   </div>
                 </AdminFormSection>
 
-                <AdminFormSection title={t.staff_services_create_section_finance}>
+                <AdminFormSection icon={WalletCards} title={t.staff_services_create_section_finance}>
                   <div className="grid gap-3 sm:grid-cols-3">
                     <label className="space-y-1.5 text-sm sm:col-span-3">
                       <span className="text-xs font-medium text-muted-foreground">
@@ -2742,7 +2750,7 @@ function useStaffServicesPageContent() {
                   </div>
                 </AdminFormSection>
 
-                <AdminFormSection title={t.staff_services_create_section_vendor_notes}>
+                <AdminFormSection icon={NotebookPen} title={t.staff_services_create_section_vendor_notes}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <label className="space-y-1.5 text-sm">
                       <span className="text-xs font-medium text-muted-foreground">

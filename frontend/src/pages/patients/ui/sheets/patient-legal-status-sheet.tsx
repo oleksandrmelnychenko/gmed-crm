@@ -1,6 +1,6 @@
 import { hasFormChanges } from "@/lib/form-changes";
 import { useReducer, useState, type FormEvent, type SetStateAction } from "react";
-import { Check, FileSignature, LoaderCircle } from "lucide-react";
+import { Check, FileSignature, ListChecks, LoaderCircle, NotebookPen, Scale } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -136,7 +136,7 @@ function PatientLegalStatusSheetContent({
   }
 
   return (
-    <PatientSheetScaffold requireChanges dirty={hasFormChanges(form, initial)}
+    <PatientSheetScaffold icon={Scale} requireChanges dirty={hasFormChanges(form, initial)}
       open={open}
       onOpenChange={onOpenChange}
       title={t.patient_legal_sheet_title}
@@ -161,7 +161,7 @@ function PatientLegalStatusSheetContent({
         </>
       }
     >
-      <FormSection title={l("patients_contract")}>
+      <FormSection icon={FileSignature} title={l("patients_contract")}>
         <FormField
           label={t.patient_legal_sheet_contract_status}
           htmlFor="patient-legal-contract-status"
@@ -186,7 +186,7 @@ function PatientLegalStatusSheetContent({
         </FormField>
       </FormSection>
 
-      <FormSection title={t.patient_legal_sheet_checklist}>
+      <FormSection icon={ListChecks} title={t.patient_legal_sheet_checklist}>
         <div className="space-y-2">
           {documentBoundItems.map((item) => {
             const itemEvidence = evidence[item.kind];
@@ -266,7 +266,7 @@ function PatientLegalStatusSheetContent({
         </div>
       </FormSection>
 
-      <FormSection title={l("patients_additional")}>
+      <FormSection icon={NotebookPen} title={l("patients_additional")}>
         <FormField label={t.patient_legal_sheet_notes} htmlFor="patient-legal-notes">
           <textarea
             id="patient-legal-notes"

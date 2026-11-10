@@ -1,5 +1,7 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ListTodo,
   CalendarClock,
   Eye,
   LoaderCircle,
@@ -282,9 +284,9 @@ export function LinkedTasksSection({
     >
       <div className="flex flex-col gap-2 border-b border-border/70 bg-card px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-2">
-          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" />
+
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-            <h3 className="text-sm font-semibold tracking-tight text-foreground">{labels.title}</h3>
+            <h3 className="text-sm font-semibold tracking-tight text-foreground"><SectionHeading icon={ListTodo}>{labels.title}</SectionHeading></h3>
             <p className="rounded-full border border-border bg-muted/25 px-2 py-0.5 text-xs text-muted-foreground">
               {loading ? (
                 <span className="inline-flex items-center gap-1.5">

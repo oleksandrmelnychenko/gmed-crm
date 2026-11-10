@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { LoaderCircle, Lock } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Banner, textareaClass, tokens } from "@/components/ui-shell";
+import { Banner, textareaClass } from "@/components/ui-shell";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useLang } from "@/lib/i18n";
 import { INTERNAL_NOTE_MAX_LENGTH } from "@/lib/internal-note";
 
@@ -66,10 +67,7 @@ export function InternalNoteEditor({
 
   return (
     <div className="space-y-2.5" data-testid={testId}>
-      <h2 className={`${tokens.text.sectionTitle} flex items-center gap-1.5`}>
-        <Lock className="size-3.5 text-muted-foreground" aria-hidden />
-        {t.finance_internal_note}
-      </h2>
+      <h2><SectionHeading icon={Lock}>{t.finance_internal_note}</SectionHeading></h2>
       <p className="text-xs leading-5 text-muted-foreground">{t.finance_internal_note_hint}</p>
       {canEdit ? (
         <>

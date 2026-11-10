@@ -1,5 +1,6 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useCallback, useEffect, useId, useState } from "react";
-import { CheckCircle2, FilePlus2, LoaderCircle, OctagonAlert } from "lucide-react";
+import { CircleCheck, CheckCircle2, FilePlus2, LoaderCircle, OctagonAlert } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
 import { Button } from "@/components/ui/button";
@@ -203,7 +204,7 @@ function ForceSettleDialog({
       {settlement ? (
         <DialogContent className="sm:max-w-[480px]">
           <DialogHeader>
-            <DialogTitle>{tx("Закрыть расчёт с остатком", "Abrechnung mit Restbetrag schließen")}</DialogTitle>
+            <DialogTitle><SectionHeading icon={CircleCheck}>{tx("Закрыть расчёт с остатком", "Abrechnung mit Restbetrag schließen")}</SectionHeading></DialogTitle>
             <DialogDescription>
               {tx(
                 "Расчёт ещё не сведён. Принудительное закрытие списывает остаток: пациенту больше не будет выставлено и не будет возвращено ничего по этому заказу.",
@@ -414,10 +415,9 @@ export function TerminationSettlementCard({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <OctagonAlert className="size-4 text-rose-600" aria-hidden />
-            {settlement.order_status === "cancelled" && !settlement.contract_number
+            <SectionHeading icon={OctagonAlert}>{settlement.order_status === "cancelled" && !settlement.contract_number
               ? tx("Расчёт по отменённому заказу", "Abrechnung des stornierten Auftrags")
-              : tx("Расчёт при расторжении договора", "Abrechnung bei Vertragskündigung")}
+              : tx("Расчёт при расторжении договора", "Abrechnung bei Vertragskündigung")}</SectionHeading>
           </h3>
           <p className="mt-1 text-xs text-muted-foreground">
             {tx("Заказ", "Auftrag")}{" "}

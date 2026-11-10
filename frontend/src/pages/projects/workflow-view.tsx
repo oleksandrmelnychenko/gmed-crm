@@ -1,6 +1,10 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { localizeTaskTitle } from "@/lib/task-labels";
 import { useEffect, useMemo, useState } from "react";
 import {
+  Unlink,
+  LogIn,
+  LogOut,
   AlertTriangle,
   ArrowRight,
   CalendarDays,
@@ -343,7 +347,7 @@ function WorkflowCanvas({
     <div className="overflow-hidden rounded-2xl border bg-muted/10" role="region" aria-label={labels.workflow}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-card px-4 py-3">
         <div>
-          <h3 className="flex items-center gap-2 text-sm font-semibold"><GitBranch className="size-4 text-orange-500" />{labels.workflow}</h3>
+          <h3 className="flex items-center gap-2 text-sm font-semibold"><SectionHeading icon={GitBranch}>{labels.workflow}</SectionHeading></h3>
           <p className="mt-0.5 text-xs text-muted-foreground">{labels.workflowHint}</p>
         </div>
         <div className="hidden items-center rounded-lg border bg-background p-0.5 md:flex" role="group" aria-label={labels.resetZoom}>
@@ -503,7 +507,7 @@ function DependencyDialog({
     <Dialog open={open} onOpenChange={changeOpen}>
       <DialogContent className="sm:max-w-xl" showCloseButton={!saving}>
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><span className="size-2 rounded-full bg-[var(--dot,var(--color-orange-500))]" />{labels.addDependency}</DialogTitle>
+          <DialogTitle><SectionHeading icon={Link2}>{labels.addDependency}</SectionHeading></DialogTitle>
         </DialogHeader>
         <div className="grid gap-4">
           {error || unavailableError ? <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{unavailableError || error}</div> : null}
@@ -731,7 +735,7 @@ export function ProjectWorkflowView({
                   ) : null}
 
                   <div className="mt-4 flex items-center justify-between gap-2">
-                    <h4 className="text-xs font-semibold text-muted-foreground">{labels.dependsOn}</h4>
+                    <h4 className="text-xs font-semibold text-muted-foreground"><SectionHeading icon={LogIn}>{labels.dependsOn}</SectionHeading></h4>
                     {canEditDependencies && tasks.length > 1 ? <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setDependencyDialogOpen(true)}><Plus />{labels.addDependency}</Button> : null}
                   </div>
                   <div className="mt-2 grid gap-2">
@@ -749,7 +753,7 @@ export function ProjectWorkflowView({
                     }) : <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">{labels.noDependencies}</p>}
                   </div>
 
-                  <h4 className="mt-4 text-xs font-semibold text-muted-foreground">{labels.unlocks}</h4>
+                  <h4 className="mt-4 text-xs font-semibold text-muted-foreground"><SectionHeading icon={LogOut}>{labels.unlocks}</SectionHeading></h4>
                   <div className="mt-2 grid gap-1.5">
                     {outgoing.length ? outgoing.map((dependency) => {
                       const task = tasksById.get(dependency.task_id);
@@ -792,7 +796,7 @@ export function ProjectWorkflowView({
 
       <Dialog open={Boolean(deleteCandidate)} onOpenChange={(open) => { if (!open && !deleteBusy) setDeleteCandidate(null); }}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><span className="size-2 rounded-full bg-rose-500" />{labels.removeTitle}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle><SectionHeading icon={Unlink}>{labels.removeTitle}</SectionHeading></DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">{labels.removeHint}</p>
           {localError ? <div role="alert" className="text-sm text-destructive">{localError}</div> : null}
           <DialogFooter>

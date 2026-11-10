@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LoaderCircle, RefreshCw, X } from "lucide-react";
+import { ListTree, LoaderCircle, RefreshCw, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -50,7 +50,7 @@ export function OrderIntakeWorkTypes({ data, specializations, workTypes, loading
   const labels = new Map([...(data.catalog_snapshot?.specializations ?? []), ...specializations].map(item => [item.id, intakeSpecializationName(item, lang)]));
   const knownWorkTypes = new Map([...(data.catalog_snapshot?.work_types ?? []), ...workTypes].map(item => [item.id, item]));
   const unavailable = selected.filter(id => !workTypes.some(item => item.id === id));
-  return <Section title={tx("Специализации и виды работ", "Fachrichtungen und Leistungsarten")} className="rounded-xl border border-border/70 bg-card p-4">
+  return <Section icon={ListTree} title={tx("Специализации и виды работ", "Fachrichtungen und Leistungsarten")} className="rounded-xl border border-border/70 bg-card p-4">
     <Field label={tx("Специализации", "Fachrichtungen")}>
       <NativeComboboxSelect aria-label={tx("Добавить специализацию", "Fachrichtung hinzufügen")} className="w-full sm:max-w-xl" disabled={disabled || loading} value="" onChange={event => {
         if (event.target.value && !ids.includes(event.target.value)) onChange({ specialization_ids: [...ids, event.target.value] });

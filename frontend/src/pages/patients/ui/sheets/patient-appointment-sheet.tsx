@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { LoaderCircle } from "lucide-react";
+import { CalendarDays, CalendarPlus, LoaderCircle, MapPin, NotebookPen } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -152,7 +152,7 @@ function PatientAppointmentBasicsSection({
   l: PatientAppointmentText;
 }) {
   return (
-    <FormSection title={l("patients_appointment")}>
+    <FormSection icon={CalendarDays} title={l("patients_appointment")}>
       <FormField label={l("patients_title")} htmlFor="patient-appointment-title">
         <Input
           id="patient-appointment-title"
@@ -258,7 +258,7 @@ function PatientAppointmentScheduleSection({
   l: PatientAppointmentText;
 }) {
   return (
-    <FormSection title={l("patients_time_and_place")}>
+    <FormSection icon={MapPin} title={l("patients_time_and_place")}>
       <div className="grid gap-3 md:grid-cols-3">
         <FormField label={l("patients_date")} htmlFor="patient-appointment-date">
           <Input
@@ -428,7 +428,7 @@ function PatientAppointmentAdditionalSection({
   l: PatientAppointmentText;
 }) {
   return (
-    <FormSection title={l("patients_additional")}>
+    <FormSection icon={NotebookPen} title={l("patients_additional")}>
       <FormField label={l("appointments_notes")} htmlFor="patient-appointment-notes">
         <textarea
           id="patient-appointment-notes"
@@ -583,6 +583,7 @@ function PatientAppointmentSheetContent({
 
   return (
     <PatientSheetScaffold
+      icon={CalendarPlus}
       open={open}
       onOpenChange={onOpenChange}
       width="default"

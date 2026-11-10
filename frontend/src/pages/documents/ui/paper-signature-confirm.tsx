@@ -1,4 +1,3 @@
-import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useState } from "react";
 import { FileCheck2, CheckCheck } from "lucide-react";
 
@@ -108,7 +107,8 @@ export function PaperSignatureConfirmButton({
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <AdminDialogScaffold
-          title={<SectionHeading icon={CheckCheck}>{tx("Подтверждение подписи", "Unterschrift bestätigen")}</SectionHeading>}
+          icon={CheckCheck}
+          title={tx("Подтверждение подписи", "Unterschrift bestätigen")}
           description={title}
           maxWidthClassName="sm:max-w-2xl"
         >

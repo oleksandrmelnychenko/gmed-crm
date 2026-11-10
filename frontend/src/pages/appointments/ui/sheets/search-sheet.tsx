@@ -1,3 +1,4 @@
+import { Search } from "lucide-react";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
@@ -90,6 +91,7 @@ function SearchSheet({
   return (
     <WritableScope>
     <AppointmentEditorSheet
+      icon={Search}
       open={open}
       onOpenChange={onOpenChange}
       title={t.common_search}

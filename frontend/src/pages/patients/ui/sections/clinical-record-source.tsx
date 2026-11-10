@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, Eye, FileWarning, LoaderCircle } from "lucide-react";
+import { Download, Eye, FileSearch, FileWarning, LoaderCircle } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -161,7 +162,7 @@ export function ClinicalRecordSource({
             <div className="flex min-w-0 flex-wrap items-start justify-between gap-4 pr-10">
               <div className="min-w-0">
                 <DialogTitle className="truncate text-base">
-                  {preview?.title ?? tx("Предпросмотр документа", "Dokumentvorschau")}
+                  <SectionHeading icon={FileSearch}>{preview?.title ?? tx("Предпросмотр документа", "Dokumentvorschau")}</SectionHeading>
                 </DialogTitle>
                 <DialogDescription className="truncate">
                   {previewBusy

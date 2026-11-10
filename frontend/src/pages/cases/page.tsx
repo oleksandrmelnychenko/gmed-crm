@@ -10,13 +10,20 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  BriefcaseMedical,
+  ContactRound,
+  History,
   LoaderCircle,
   NotebookPen,
+  NotebookTabs,
   RefreshCw,
   Search,
+  Stethoscope,
+  type LucideIcon,
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -124,6 +131,7 @@ type CasePermissions = {
 };
 
 type PanelProps = {
+  icon?: LucideIcon;
   title: string;
   description?: string;
   action?: ReactNode;
@@ -204,6 +212,7 @@ function buildCasesPath(filters: CaseFilters) {
   if (filters.search.trim()) params.set("search", filters.search.trim());
   if (filters.status) params.set("status", filters.status);
   if (filters.patientId) params.set("patient_id", filters.patientId);
+
   const query = params.toString();
   return `/cases${query ? `?${query}` : ""}`;
 }
@@ -211,7 +220,6 @@ function buildCasesPath(filters: CaseFilters) {
 function runtimeTranslations(): Translations {
   return translateCatalog(getLang());
 }
-
 
 function caseText(key: string) {
   return runtimeTranslations().uiText[key] ?? key;
@@ -1061,6 +1069,7 @@ function useCasesPageContent() {
         <SheetContent side="right" className="w-full overflow-y-auto border-l border-border p-0 sm:max-w-[640px]">
           <form onSubmit={handleCreateCase} className="flex min-h-0 flex-1 flex-col">
             <AdminSheetScaffold
+              icon={BriefcaseMedical}
               title={t.cases_new}
               description={t.cases_subtitle}
               footer={(
@@ -1075,7 +1084,7 @@ function useCasesPageContent() {
               )}
           >
             {createError ? <Banner tone="error">{createError}</Banner> : null}
-              <Panel title={t.patients_profile}>
+              <Panel icon={ContactRound} title={t.patients_profile}>
                 <Field label={t.cases_patient} required>
                   <NativeComboboxSelect
                     value={createForm.patientId || "__none__"}
@@ -1095,7 +1104,7 @@ function useCasesPageContent() {
                 </Field>
               </Panel>
 
-              <Panel title={t.cases_core_anamnesis}>
+              <Panel icon={History} title={t.cases_core_anamnesis}>
                 <Field label={t.cases_reason}>
                   <Input
                     value={createForm.hauptanfragegrund}
@@ -1124,7 +1133,7 @@ function useCasesPageContent() {
                 </Field>
               </Panel>
 
-              <Panel title={t.common_doctor}>
+              <Panel icon={Stethoscope} title={t.common_doctor}>
                 <Field label={t.cases_referrer}>
                   <NativeComboboxSelect
                     value={caseDoctorSelectValue(createForm.zuweiserDoctorId, null, doctors)}
@@ -1172,6 +1181,7 @@ function useCasesPageContent() {
       <Sheet open={snippetDialogOpen} onOpenChange={setSnippetDialogOpen}>
         <SheetContent side="right" className="w-full overflow-y-auto border-l border-border p-0 sm:max-w-[960px]">
           <AdminSheetScaffold
+            icon={NotebookTabs}
             title={t.cases_snippets_title}
             description={t.cases_snippets_description}
             className="h-full"
@@ -1179,6 +1189,7 @@ function useCasesPageContent() {
             {snippetsError ? <Banner tone="error">{snippetsError}</Banner> : null}
             <div className="grid gap-6 lg:grid-cols-[1.15fr,0.85fr]">
               <Panel
+                icon={NotebookTabs}
                 title={t.cases_snippets_title}
                 action={
                   <Button
@@ -1239,7 +1250,7 @@ function useCasesPageContent() {
                   </div>
                 )}
               </Panel>
-              <Panel title={snippetForm.id ? t.common_edit : t.cases_snippets_new}>
+              <Panel icon={NotebookPen} title={snippetForm.id ? t.common_edit : t.cases_snippets_new}>
               <form onSubmit={handleSaveSnippet} className="space-y-4">
                 {snippetSaveError ? (
                   <Banner tone="error">{snippetSaveError}</Banner>
@@ -1352,19 +1363,13 @@ export function CasesPage() {
   return useCasesPageContent();
 }
 
-function Panel({ title, description, action, children, className }: PanelProps) {
+function Panel({ icon, title, description, action, children, className }: PanelProps) {
   return (
     <section className={cardClass(cn("p-6", className))}>
       <header className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span
-              aria-hidden
-              className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]"
-            />
-            <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-              {title}
-            </h3>
+            <h3 className="text-[13px] font-semibold tracking-tight text-foreground"><SectionHeading icon={icon}>{title}</SectionHeading></h3>
           </div>
           {description ? (
             <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">

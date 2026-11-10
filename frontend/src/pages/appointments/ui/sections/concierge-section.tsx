@@ -8,7 +8,7 @@ import {
   type SetStateAction,
 } from "react";
 
-import { LoaderCircle } from "lucide-react";
+import { ConciergeBell, LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -356,6 +356,7 @@ function useAppointmentConciergeSectionContent({
     <section className={sectionCardClass}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <AppointmentSectionHeading
+          icon={ConciergeBell}
           title={t.appointments_concierge_title}
           description={t.appointments_concierge_description}
         />

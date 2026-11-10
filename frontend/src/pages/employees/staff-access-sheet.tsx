@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ContactRound,
+  Network,
+  Globe,
+  UserRoundKey,
+  Hospital,
+  UsersRound,
+  Files,
+  ShieldUser,
   AlertTriangle,
   Copy,
   FileText,
@@ -820,6 +828,7 @@ export function StaffAccessSheet({
         className="!inset-[10px] !h-[calc(100dvh-20px)] !w-[calc(100vw-20px)] !max-w-none !rounded-xl !border !border-border !p-0 !shadow-xl"
       >
         <AdminSheetScaffold
+          icon={ShieldUser}
           title={`${copy.title} — ${employee?.name ?? ""}`}
           footer={(
             <SheetFormFooter
@@ -872,7 +881,7 @@ export function StaffAccessSheet({
               <section className="space-y-3 rounded-xl border border-border bg-card/60 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="space-y-1">
-                    <AdminSectionTitle>{copy.profile}</AdminSectionTitle>
+                    <AdminSectionTitle icon={ContactRound}>{copy.profile}</AdminSectionTitle>
                   </div>
                   <div className="flex gap-2">
                     <Button type="button" size="sm" variant="outline" onClick={() => openProfileForm("create")}>
@@ -966,7 +975,7 @@ export function StaffAccessSheet({
               </section>
 
               <section className="space-y-2 rounded-xl border border-border bg-card/60 p-4">
-                <AdminSectionTitle>{copy.inherited}</AdminSectionTitle>
+                <AdminSectionTitle icon={Network}>{copy.inherited}</AdminSectionTitle>
                 {selectedProfile?.rules.length ? (
                   <div className="flex flex-wrap gap-1.5">
                     {selectedProfile.rules.map((rule, index) => (
@@ -988,7 +997,7 @@ export function StaffAccessSheet({
 
               {globalDirectRules.length ? (
                 <section className="space-y-2 rounded-xl border border-border bg-card/60 p-4">
-                  <AdminSectionTitle>{copy.globalRules}</AdminSectionTitle>
+                  <AdminSectionTitle icon={Globe}>{copy.globalRules}</AdminSectionTitle>
                   <div className="flex flex-wrap gap-2">
                     {globalDirectRules.map((rule, index) => (
                       <span
@@ -1011,15 +1020,15 @@ export function StaffAccessSheet({
               ) : null}
 
               <section className="space-y-3 rounded-xl border border-border bg-card/60 p-4">
-                <AdminSectionTitle>{copy.personal}</AdminSectionTitle>
+                <AdminSectionTitle icon={UserRoundKey}>{copy.personal}</AdminSectionTitle>
                 <Tabs
                   value={activeTab}
                   onValueChange={(value) => setActiveTab(value as StaffAccessResourceType)}
                 >
-                  <TabsList className="w-full justify-start overflow-x-auto" variant="line">
-                    <TabsTrigger value="provider">{copy.providers}</TabsTrigger>
-                    <TabsTrigger value="patient">{copy.patients}</TabsTrigger>
-                    <TabsTrigger value="document">{copy.documents}</TabsTrigger>
+                  <TabsList className="w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto">
+                    <TabsTrigger value="provider"><Hospital aria-hidden="true" />{copy.providers}</TabsTrigger>
+                    <TabsTrigger value="patient"><UsersRound aria-hidden="true" />{copy.patients}</TabsTrigger>
+                    <TabsTrigger value="document"><Files aria-hidden="true" />{copy.documents}</TabsTrigger>
                   </TabsList>
                   {activeTab === "provider" ? renderResourceTab("provider") : null}
                   {activeTab === "patient" ? renderResourceTab("patient") : null}

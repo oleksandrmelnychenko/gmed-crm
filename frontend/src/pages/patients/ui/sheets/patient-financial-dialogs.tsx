@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 
-import { LoaderCircle } from "lucide-react";
+import { BellRing, FilePenLine, FileSignature, LoaderCircle, NotebookPen, ReceiptText } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -213,7 +213,7 @@ function ContractCreateDialog({
 }: ContractCreateDialogProps) {
   const { t } = useLang();
   return (
-    <PatientSheetScaffold presentation="dialog" open={contractCreateOpen} onOpenChange={onContractCreateOpenChange} width="narrow" onSubmit={onContractCreateSubmit}
+    <PatientSheetScaffold icon={FileSignature} presentation="dialog" open={contractCreateOpen} onOpenChange={onContractCreateOpenChange} width="narrow" onSubmit={onContractCreateSubmit}
       title={l("patients_create_framework_contract")}
       bodyClassName="space-y-4 px-5 py-4"
       footer={
@@ -225,7 +225,7 @@ function ContractCreateDialog({
         />
       }
     >
-      <PatientFormSection title={l("patients_contract")}>
+      <PatientFormSection icon={FileSignature} title={l("patients_contract")}>
         <div className="grid gap-3 md:grid-cols-2">
           <FormField label={t.contracts_valid_from} htmlFor="contract-valid-from" className="md:col-span-2">
             <Input
@@ -298,6 +298,7 @@ function ContractStatusDialog({
 }: ContractStatusDialogProps) {
   return (
     <PatientSheetScaffold
+      icon={FilePenLine}
       requireChanges
       open={Boolean(contractStatusId)}
       onOpenChange={(open) => {
@@ -326,7 +327,7 @@ function ContractStatusDialog({
         </>
       }
     >
-      <FormSection title={l("patients_contract")}>
+      <FormSection icon={FileSignature} title={l("patients_contract")}>
         <div className="grid gap-3 md:grid-cols-2">
           <FormField label={l("patients_status")} htmlFor="contract-status-edit">
             <NativeComboboxSelect
@@ -420,6 +421,7 @@ function InvoiceManagerDialog({
   const dunningDeadline = dunningDeadlineRunning(dunningEvents, nextDunningLevel(dunningEvents));
   return (
     <PatientSheetScaffold
+      icon={ReceiptText}
       requireChanges
       open={Boolean(invoiceManageId)}
       onOpenChange={onInvoiceManageOpenChange}
@@ -446,7 +448,7 @@ function InvoiceManagerDialog({
         </>
       }
     >
-      <FormSection title={l("patients_invoice")}>
+      <FormSection icon={ReceiptText} title={l("patients_invoice")}>
         <div className="grid gap-3 md:grid-cols-2">
           <FormField label={l("patients_status")} htmlFor="invoice-status-edit">
             <NativeComboboxSelect
@@ -486,7 +488,7 @@ function InvoiceManagerDialog({
         </div>
       </FormSection>
 
-      <FormSection title={l("patients_additional")}>
+      <FormSection icon={NotebookPen} title={l("patients_additional")}>
         <FormField
           label={invoiceNotesAreReason ? t.revenue_invoices_status_reason : l("appointments_notes")}
           htmlFor="invoice-notes-edit"
@@ -503,6 +505,7 @@ function InvoiceManagerDialog({
       </FormSection>
 
       <FormSection
+        icon={BellRing}
         title={l("patients_dunning")}
         accessory={
           canManageInvoices && nextDunningLevel(dunningEvents) ? (

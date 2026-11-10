@@ -1,5 +1,5 @@
 import { useReducer, useState, type FormEvent } from "react";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, NotebookPen } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
@@ -80,7 +80,7 @@ function PatientNotesSheetContent({
   }
 
   return (
-    <PatientSheetScaffold requireChanges dirty={value.trim() !== initial.trim()}
+    <PatientSheetScaffold icon={NotebookPen} requireChanges dirty={value.trim() !== initial.trim()}
       open={open}
       onOpenChange={onOpenChange}
       title={l("patients_edit_notes")}
@@ -105,7 +105,7 @@ function PatientNotesSheetContent({
         </>
       }
     >
-      <FormSection title={l("patients_additional")}>
+      <FormSection icon={NotebookPen} title={l("patients_additional")}>
         <FormField label={l("appointments_notes")} htmlFor="patient-notes">
         <textarea
           id="patient-notes"

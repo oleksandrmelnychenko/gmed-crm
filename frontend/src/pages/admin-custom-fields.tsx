@@ -245,6 +245,7 @@ function AdminCustomFieldCreateSheet({
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
         <form onSubmit={onCreate} className="flex min-h-0 flex-1 flex-col">
           <AdminSheetScaffold
+            icon={ListPlus}
             title={t.cf_new}
             description={t.cf_subtitle}
             footer={(

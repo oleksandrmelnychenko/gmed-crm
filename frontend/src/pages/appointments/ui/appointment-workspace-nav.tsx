@@ -114,12 +114,8 @@ export function AppointmentWorkspaceNav() {
                 replace
                 to={to}
                 aria-current={isActive ? "page" : undefined}
-                className={cn(
-                  "group relative flex items-center gap-3 rounded-lg px-3 h-10 text-sm transition-colors",
-                  isActive
-                    ? "bg-muted/60 text-foreground font-semibold before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-r-full before:bg-[var(--brand)]"
-                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-                )}
+                data-workspace-tab
+                className="group relative flex items-center gap-3 rounded-lg px-3 h-10 text-sm transition-colors"
               >
                 <Icon
                   className={cn(

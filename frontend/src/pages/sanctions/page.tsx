@@ -6,6 +6,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  Scale,
+  ShieldMinus,
   ContactRound,
   ExternalLink,
   Gauge,
@@ -339,6 +341,7 @@ export function HitCard({
       )}
 
       <SanctionsReasonDialog
+        icon={Scale}
         open={decision !== null}
         title={decision === "confirmed" ? t.sanctions_decide_confirm_title : t.sanctions_decide_false_positive_title}
         description={decision === "confirmed" ? t.sanctions_decide_confirm_hint : t.sanctions_decide_false_positive_hint}
@@ -565,6 +568,7 @@ function CountriesTab() {
         </section>
       ) : null}
       <SanctionsReasonDialog
+        icon={ShieldCheck}
         open={lifting !== null}
         title={liftingPatient ? t.sanctions_country_lift_patient_title : t.sanctions_country_lift_title}
         description={liftingPatient ? t.sanctions_country_lift_patient_hint : t.sanctions_country_lift_hint}
@@ -618,6 +622,7 @@ function CountriesTab() {
         ) : null}
       </SanctionsReasonDialog>
       <SanctionsReasonDialog
+        icon={ShieldMinus}
         open={revoking !== null}
         title={t.sanctions_country_revoke_title}
         confirmLabel={t.sanctions_country_revoke}
@@ -736,7 +741,8 @@ export function SanctionsPage() {
             key={entry}
             type="button"
             size="sm"
-            variant={entry === tab ? "default" : "ghost"}
+            variant="ghost"
+            data-workspace-tab
             aria-current={entry === tab ? "page" : undefined}
             className="h-9 min-w-0 flex-1 rounded-lg px-3 text-xs"
             onClick={() => setParams(entry === "open" ? {} : { tab: entry }, { replace: true })}

@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ExternalLink, FileSearch } from "lucide-react";
+import {
+  ExternalLink,
+  FileSearch,
+  LibraryBig,
+  ListMinus,
+  Pill,
+  ScanLine,
+  ShieldCheck,
+  type LucideIcon,
+} from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { AiMark } from "@/components/ui/ai-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -585,10 +595,7 @@ function SourcesSection({
     <details className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 border-b border-border/60 bg-muted/20 px-3.5 py-2.5 marker:hidden">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--color-orange-500))]" />
-          <span className="text-[13px] font-semibold text-foreground">
-            {tx("Официальные открытые источники", "Offizielle offene Quellen")}
-          </span>
+          <SectionHeading icon={LibraryBig}>{tx("Официальные открытые источники", "Offizielle offene Quellen")}</SectionHeading>
         </div>
         <span className="flex shrink-0 flex-wrap items-center justify-end gap-2 text-[10px] text-muted-foreground">
           <span className="font-mono">{data.sources.length}</span>
@@ -725,10 +732,12 @@ function SourcesSection({
 }
 
 function SectionCard({
+  icon,
   title,
   count,
   children,
 }: {
+  icon?: LucideIcon;
   title: string;
   count?: number;
   children: React.ReactNode;
@@ -737,8 +746,7 @@ function SectionCard({
     <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/60 bg-muted/20 px-3.5 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--color-orange-500))]" />
-          <h3 className="min-w-0 break-words text-[13px] font-semibold text-foreground">{title}</h3>
+          <h3 className="min-w-0 break-words text-[13px] font-semibold text-foreground"><SectionHeading icon={icon}>{title}</SectionHeading></h3>
         </div>
         {typeof count === "number" ? (
           <span className="font-mono text-[10px] text-muted-foreground">{count}</span>
@@ -802,9 +810,9 @@ export function MedicationIntelligencePanelContent({
       <header className="flex flex-col gap-2 border-b border-border/60 bg-muted/15 px-3.5 py-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <AiMark className="size-4 text-foreground" />
+
             <h2 className="text-[13px] font-semibold text-foreground">
-              {tx("Интеллектуальная проверка медикации", "Intelligente Medikationsprüfung")}
+              <SectionHeading icon={AiMark}>{tx("Интеллектуальная проверка медикации", "Intelligente Medikationsprüfung")}</SectionHeading>
             </h2>
           </div>
         </div>
@@ -851,10 +859,10 @@ export function MedicationIntelligencePanelContent({
               </div>
             ) : (
               <>
-                <SectionCard title={tx("Проверяемые сигналы", "Prüfhinweise")} count={data.findings.length}>
+                <SectionCard icon={ShieldCheck} title={tx("Проверяемые сигналы", "Prüfhinweise")} count={data.findings.length}>
                   <FindingsSection data={data} lang={lang} tx={tx} />
                 </SectionCard>
-                <SectionCard title={tx("Идентификация медикации", "Identität der Medikation")} count={data.medications.length}>
+                <SectionCard icon={ScanLine} title={tx("Идентификация медикации", "Identität der Medikation")} count={data.medications.length}>
                   <MedicationsTable
                     data={data}
                     tx={tx}
@@ -863,7 +871,7 @@ export function MedicationIntelligencePanelContent({
                     onOpenBenefitEvidence={onOpenBenefitEvidence}
                   />
                 </SectionCard>
-                <SectionCard title={tx("Недостающие данные", "Fehlende Daten")} count={data.missing_data.length}>
+                <SectionCard icon={ListMinus} title={tx("Недостающие данные", "Fehlende Daten")} count={data.missing_data.length}>
                   <MissingDataSection data={data} lang={lang} tx={tx} />
                 </SectionCard>
               </>
@@ -1112,7 +1120,7 @@ export function MedicationIntelligencePanel({
         <DialogContent className="sm:max-w-5xl">
           <DialogHeader className="border-b border-border/60 pb-3">
             <DialogTitle>
-              {lang === "de" ? "Medikament identifizieren" : "Идентифицировать медикамент"}
+              <SectionHeading icon={Pill}>{lang === "de" ? "Medikament identifizieren" : "Идентифицировать медикамент"}</SectionHeading>
             </DialogTitle>
             <DialogDescription>
               {identityMedicationName} · {lang === "de"
@@ -1149,8 +1157,7 @@ export function MedicationIntelligencePanel({
         <DialogContent className="sm:max-w-4xl">
           <DialogHeader className="border-b border-border/60 pb-3">
             <DialogTitle className="flex items-center gap-2">
-              <FileSearch aria-hidden="true" className="size-4" strokeWidth={1.7} />
-              {lang === "de" ? "Amtliche G-BA-Nutzenbewertung" : "Официальная оценка пользы G-BA"}
+              <SectionHeading icon={FileSearch}>{lang === "de" ? "Amtliche G-BA-Nutzenbewertung" : "Официальная оценка пользы G-BA"}</SectionHeading>
             </DialogTitle>
             <DialogDescription>
               {currentState.data?.medications.find((item) => item.id === benefitMedicationId)?.name || "—"}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { LoaderCircle, Save, Trash2 } from "lucide-react";
+import { Archive, FileX2, CalendarRange, Hourglass, LoaderCircle, Save, Trash2 } from "lucide-react";
 
 import { AdminTableCard } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -275,7 +275,7 @@ export function SettingsTab({
       {error ? <Banner tone="error">{error}</Banner> : null}
 
       {settings ? (
-        <Section title={t.personnel_settings_archive} className="max-w-2xl">
+        <Section icon={Archive} title={t.personnel_settings_archive} className="max-w-2xl">
           <Field label={t.personnel_late_days} htmlFor="personnel-late-days">
             <Input
               id="personnel-late-days"
@@ -327,7 +327,7 @@ export function SettingsTab({
         </Section>
       ) : null}
 
-      <AdminTableCard title={t.personnel_retention_periods} count={categories.length}>
+      <AdminTableCard icon={CalendarRange} title={t.personnel_retention_periods} count={categories.length}>
         <p className="px-1 text-xs text-muted-foreground">{t.personnel_retention_periods_hint}</p>
         <DataTableSurface
           rows={categories}
@@ -353,7 +353,7 @@ export function SettingsTab({
         />
       </AdminTableCard>
 
-      <AdminTableCard title={t.personnel_retention_due} count={due?.documents.length ?? 0}>
+      <AdminTableCard icon={Hourglass} title={t.personnel_retention_due} count={due?.documents.length ?? 0}>
         {due && !due.deletion_enabled ? (
           <p className="px-1 text-xs text-muted-foreground">{t.personnel_retention_due_disabled}</p>
         ) : null}
@@ -382,6 +382,7 @@ export function SettingsTab({
       </AdminTableCard>
 
       <ReasonDialog
+        icon={FileX2}
         open={Boolean(deleting)}
         title={t.personnel_delete_title}
         description={

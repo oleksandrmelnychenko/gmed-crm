@@ -1,3 +1,5 @@
+import { BadgeCheck } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -25,7 +27,7 @@ export function DatevActionButton({ title, description, context, contextKey = ""
     }}>{children}</Button>
     <Dialog open={open} onOpenChange={(next) => { if (!next) setPending(null); }}>
       <DialogContent className="left-1/2 right-auto top-1/2 bottom-auto w-[calc(100vw-1rem)] -translate-x-1/2 -translate-y-1/2 sm:max-w-lg" initialFocus={cancel}>
-        <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle><SectionHeading icon={BadgeCheck}>{title}</SectionHeading></DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
         {context ? <div className="min-w-0 break-words rounded-md border bg-muted/30 p-3 text-sm">{context}</div> : null}
         <DialogFooter>
           <Button ref={cancel} type="button" variant="outline" onClick={() => setPending(null)}>{de ? "Abbrechen" : "Отмена"}</Button>

@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import {
   useCallback,
   useEffect,
@@ -8,6 +9,7 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  UserRoundPen,
   Check,
   ContactRound,
   Copy,
@@ -202,10 +204,7 @@ function OneTimePasswordReveal({
       role="status"
       data-testid="one-time-password-panel"
     >
-      <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-amber-900">
-        <KeyRound className="size-4" />
-        {title}
-      </h3>
+      <h3><SectionHeading icon={KeyRound}>{title}</SectionHeading></h3>
       <div className="flex flex-wrap items-center gap-2">
         <code
           className="select-all rounded-lg border border-amber-200 bg-card px-3 py-2 font-mono text-base tracking-wide text-foreground"
@@ -1121,6 +1120,7 @@ function useAdminUsersPageContent() {
       >
           {createdUser ? (
               <AdminDialogScaffold
+                icon={UserRoundCheck}
                 title={t.users_created_title}
                 description={`${createdUser.name} · ${createdUser.email}`}
                 footer={(
@@ -1142,6 +1142,7 @@ function useAdminUsersPageContent() {
               </AdminDialogScaffold>
           ) : (
               <AdminDialogScaffold
+                icon={UserRoundPlus}
                 onSubmit={onSubmitCreate}
                 title={t.users_create_title}
                 description={t.users_subtitle}
@@ -1312,6 +1313,7 @@ function useAdminUsersPageContent() {
         dirty={editDirty}
       >
             <AdminDialogScaffold
+              icon={UserRoundPen}
               title={`${t.patients_edit} - ${editUser?.name ?? ""}`}
               description={editUser?.email}
               footer={(

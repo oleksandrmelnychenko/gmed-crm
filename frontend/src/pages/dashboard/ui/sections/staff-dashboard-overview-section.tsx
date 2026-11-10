@@ -1,5 +1,7 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { lazy, Suspense } from "react";
 import {
+  UserRoundPlus,
   ArrowRight,
   CircleDollarSign,
   ClipboardList,
@@ -209,9 +211,8 @@ export function StaffDashboardOverviewSection({
       <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
           <div className="flex min-w-0 items-center gap-2.5">
-            <CircleDollarSign className="size-4 shrink-0 text-[var(--brand)]" />
             <div className="min-w-0">
-              <h2 className="text-[14px] font-semibold text-foreground">{financeCopy.title}</h2>
+              <h2><SectionHeading icon={CircleDollarSign}>{financeCopy.title}</SectionHeading></h2>
               <p className="text-[11px] text-muted-foreground">{financeCopy.period}</p>
             </div>
             {finance?.reconciliation_required ? (
@@ -281,9 +282,7 @@ export function StaffDashboardOverviewSection({
       <div className="rounded-lg border border-border/70 bg-card p-4">
         <div className="mb-3 flex items-center justify-between">
           <div>
-            <h3 className="text-[14px] font-semibold text-foreground">
-              {tr.leads_title ?? tr.common_unknown} - {tr.dash_this_year ?? tr.common_unknown}
-            </h3>
+            <h3><SectionHeading icon={UserRoundPlus}>{tr.leads_title ?? tr.common_unknown} - {tr.dash_this_year ?? tr.common_unknown}</SectionHeading></h3>
             <p className="mt-0.5 text-[11.5px] text-muted-foreground">
               {tr.dash_leads_monthly_hint ?? tr.common_unknown}
             </p>

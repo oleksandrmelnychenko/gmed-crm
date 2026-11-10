@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import {
   useCallback,
   useEffect,
@@ -6,9 +7,9 @@ import {
   type ChangeEvent,
   type ReactNode,
 } from "react";
-import { CircleAlert, CircleCheck, Eye, FileUp, LoaderCircle } from "lucide-react";
+import { FileInput, Files, Braces, ChevronDown, FilePenLine, FileText, RefreshCw, CircleAlert, CircleCheck, Eye, FileUp, LoaderCircle } from "lucide-react";
 
-import { AdminSheetScaffold } from "@/components/admin-page-patterns";
+import { AdminDialogScaffold, AdminFormSection } from "@/components/admin-dialog-scaffold";
 import {
   inputClass,
   selectClass,
@@ -20,8 +21,8 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { FilePicker } from "@/components/ui/file-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { ApiRequestError } from "@/lib/api";
+import { Dialog } from "@/components/ui/dialog";
+import { ApiRequestError, isLocalizedApiError } from "@/lib/api";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useLang, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -85,11 +86,11 @@ function texts(lang: Lang) {
   return {
     title: ru ? "Импорт шаблона" : "Vorlage importieren",
     intro: ru
-      ? "Загрузите файл Word (.docx) или текстовый файл (.txt). Из файла берётся текст; документ печатается на фирменном бланке GMED. Оформление Word (таблицы, шрифты, картинки) не переносится."
-      : "Laden Sie eine Word-Datei (.docx) oder Textdatei (.txt) hoch. Übernommen wird der Text; das Dokument wird auf dem GMED-Briefbogen gedruckt. Die Word-Gestaltung (Tabellen, Schriften, Bilder) wird nicht übernommen.",
+      ? "На бланк GMED переносится текст без таблиц, шрифтов и изображений."
+      : "Der Text erscheint auf dem GMED-Briefbogen, ohne Tabellen, Schriftformatierung und Bilder.",
     legalNote: ru
-      ? "Встроенные юридические шаблоны (договор, согласия, GwG, смета) импортом не заменяются."
-      : "Die eingebauten rechtlichen Vorlagen (Vertrag, Einwilligungen, GwG, Kostenvoranschlag) werden durch den Import nicht ersetzt.",
+      ? "Импорт создаёт отдельный шаблон. Встроенные договоры, согласия, формы GwG и сметы сохраняются."
+      : "Der Import erstellt eine eigene Vorlage. Integrierte Verträge, Einwilligungen, GwG-Formulare und Kostenvoranschläge bleiben erhalten.",
     file: ru ? "Файл шаблона" : "Vorlagendatei",
     name: ru ? "Название шаблона" : "Name der Vorlage",
     description: ru ? "Описание" : "Beschreibung",
@@ -105,7 +106,12 @@ function texts(lang: Lang) {
     list: ru ? "Импортированные шаблоны" : "Importierte Vorlagen",
     empty: ru ? "Импортированных шаблонов пока нет." : "Noch keine importierten Vorlagen.",
     loadFailed: ru ? "Не удалось загрузить шаблоны." : "Vorlagen konnten nicht geladen werden.",
-    failed: ru ? "Не удалось выполнить действие." : "Die Aktion ist fehlgeschlagen.",
+    retry: ru ? "Повторить" : "Erneut laden",
+    importFailed: ru ? "Не удалось импортировать файл." : "Die Datei konnte nicht importiert werden.",
+    saveFailed: ru ? "Не удалось сохранить изменения." : "Die Änderungen konnten nicht gespeichert werden.",
+    activateFailed: ru ? "Не удалось активировать шаблон." : "Die Vorlage konnte nicht aktiviert werden.",
+    disableFailed: ru ? "Не удалось отключить шаблон." : "Die Vorlage konnte nicht deaktiviert werden.",
+    previewFailed: ru ? "Не удалось открыть предпросмотр PDF." : "Die PDF-Vorschau konnte nicht geöffnet werden.",
     version: ru ? "версия" : "Version",
     status: {
       draft: ru ? "Черновик" : "Entwurf",
@@ -163,7 +169,10 @@ function texts(lang: Lang) {
 }
 
 function errorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiRequestError && error.message.trim()) return error.message;
+  if (isLocalizedApiError(error)) return error.message;
+  if (error instanceof ApiRequestError && (error.body?.message?.trim() || !error.status)) {
+    return error.message.trim() || fallback;
+  }
   return fallback;
 }
 
@@ -210,6 +219,8 @@ export function TemplateImportDialog({
   const [templates, setTemplates] = useState<ImportedTemplate[]>([]);
   const [variables, setVariables] = useState<ImportedTemplateVariable[]>([]);
   const [loading, setLoading] = useState(false);
+  const [listError, setListError] = useState("");
+  const listRequest = useRef(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -262,15 +273,18 @@ export function TemplateImportDialog({
   );
 
   const reload = useCallback(async () => {
+    const request = ++listRequest.current;
     setLoading(true);
+    setListError("");
     try {
       const response = await fetchImportedTemplates();
+      if (request !== listRequest.current) return;
       setTemplates(response.templates);
       setVariables(response.variables);
     } catch (nextError) {
-      setError(errorMessage(nextError, texts(lang).loadFailed));
+      if (request === listRequest.current) setListError(errorMessage(nextError, texts(lang).loadFailed));
     } finally {
-      setLoading(false);
+      if (request === listRequest.current) setLoading(false);
     }
   }, [lang]);
 
@@ -284,6 +298,7 @@ export function TemplateImportDialog({
     setNewVersionOf(null);
     select(null);
     void reload();
+    return () => { listRequest.current += 1; };
   }, [open, reload, select]);
 
   useEffect(() => dropPreview, [dropPreview]);
@@ -302,14 +317,14 @@ export function TemplateImportDialog({
     }
   }
 
-  async function run(action: () => Promise<void>) {
+  async function run(failureMessage: string, action: () => Promise<void>) {
     setBusy(true);
     setError("");
     setNotice("");
     try {
       await action();
     } catch (nextError) {
-      setError(errorMessage(nextError, tx.failed));
+      setError(errorMessage(nextError, failureMessage));
     } finally {
       setBusy(false);
     }
@@ -320,7 +335,7 @@ export function TemplateImportDialog({
       setError(tx.chooseFile);
       return;
     }
-    void run(async () => {
+    void run(tx.importFailed, async () => {
       const response = await importTemplateFile({
         file,
         label,
@@ -339,7 +354,7 @@ export function TemplateImportDialog({
 
   function handleSave() {
     if (!selected) return;
-    void run(async () => {
+    void run(tx.saveFailed, async () => {
       const response = await updateImportedTemplate(selected.id, {
         label: draftLabel,
         body: draftBody,
@@ -355,8 +370,9 @@ export function TemplateImportDialog({
       setError(tx.unsaved);
       return;
     }
-    void run(async () => {
-      await activateImportedTemplate(selected.id);
+    void run(tx.activateFailed, async () => {
+      const response = await activateImportedTemplate(selected.id);
+      applyTemplate(response.template);
       // The version that was active before steps back: reload the list.
       await reload();
       onCatalogChanged();
@@ -366,7 +382,7 @@ export function TemplateImportDialog({
 
   function handleDisable() {
     if (!selected) return;
-    void run(async () => {
+    void run(tx.disableFailed, async () => {
       const response = await disableImportedTemplate(selected.id);
       applyTemplate(response.template);
       onCatalogChanged();
@@ -380,7 +396,7 @@ export function TemplateImportDialog({
       setError(tx.unsaved);
       return;
     }
-    void run(async () => {
+    void run(tx.previewFailed, async () => {
       dropPreview();
       const url = await createImportedTemplatePreviewUrl(selected.id);
       previewUrlRef.current = url;
@@ -401,317 +417,325 @@ export function TemplateImportDialog({
   const languageLabel = (code: string) => LANGUAGE_LABELS[code]?.[language] ?? code;
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[860px]">
-        <AdminSheetScaffold
-          title={tx.title}
-          footer={(
-            <div className="flex shrink-0 justify-end border-t border-border bg-popover px-4 py-3">
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                {tx.close}
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <AdminDialogScaffold
+        icon={FileInput}
+        title={tx.title}
+        testId="template-import-dialog"
+        maxWidthClassName="sm:w-[calc(100vw-2rem)] sm:max-w-2xl"
+        footer={(
+          <div className="flex flex-wrap justify-end gap-2 px-4 py-2.5">
+            <Button type="button" size="sm" variant="outline" onClick={() => onOpenChange(false)}>
+              {tx.close}
+            </Button>
+            {!selected || file || newVersionOf ? (
+              <Button type="button" size="sm" onClick={handleImport} disabled={busy || !file}>
+                {busy ? <LoaderCircle className="animate-spin" /> : <FileUp />}
+                {busy ? tx.importing : tx.importAction}
+              </Button>
+            ) : null}
+          </div>
+        )}
+      >
+        {error ? <Notice tone="error">{error}</Notice> : null}
+        {notice ? <Notice tone="success">{notice}</Notice> : null}
+
+        <AdminFormSection icon={FileText} title={tx.file}>
+          {newVersionOf ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <span>
+                <span className="text-muted-foreground">{tx.newVersionOf}: </span>
+                <span className="font-medium">{newVersionOf.label}</span>
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setNewVersionOf(null)}
+              >
+                {tx.cancelNewVersion}
               </Button>
             </div>
-          )}
-        >
-          <div className="space-y-5" data-testid="template-import-dialog">
-            <div className="space-y-1 text-sm text-muted-foreground">
-              <p>{tx.intro}</p>
-              <p>{tx.legalNote}</p>
-            </div>
-            {error ? <Notice tone="error">{error}</Notice> : null}
-            {notice ? <Notice tone="success">{notice}</Notice> : null}
-
-            <section className="space-y-3 rounded-xl border border-border p-4">
-              {newVersionOf ? (
-                <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                  <span>
-                    <span className="text-muted-foreground">{tx.newVersionOf}: </span>
-                    <span className="font-medium">{newVersionOf.label}</span>
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setNewVersionOf(null)}
-                  >
-                    {tx.cancelNewVersion}
-                  </Button>
-                </div>
-              ) : null}
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="flex flex-col gap-1.5 md:col-span-2">
-                  <Label htmlFor="template-import-file" className={fieldLabelClass}>
-                    {tx.file}
-                  </Label>
-                  <FilePicker
-                    id="template-import-file"
-                    accept={TEMPLATE_IMPORT_ACCEPT}
-                    selected={file}
-                    onChange={handleFileChange}
-                    disabled={busy}
-                  />
-                </div>
-                {!newVersionOf ? (
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="template-import-label" className={fieldLabelClass}>
-                      {tx.name}
-                    </Label>
-                    <Input
-                      id="template-import-label"
-                      value={label}
-                      maxLength={200}
-                      onChange={(event) => setLabel(event.target.value)}
-                      className={inputClass}
-                    />
-                  </div>
-                ) : null}
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="template-import-language" className={fieldLabelClass}>
-                    {tx.language}
-                  </Label>
-                  <NativeComboboxSelect
-                    id="template-import-language"
-                    value={templateLanguage}
-                    onChange={(event) => setTemplateLanguage(event.target.value)}
-                    className={selectClass}
-                  >
-                    {TEMPLATE_LANGUAGES.map((code) => (
-                      <option key={code} value={code}>
-                        {languageLabel(code)}
-                      </option>
-                    ))}
-                  </NativeComboboxSelect>
-                </div>
-                <div className="flex flex-col gap-1.5 md:col-span-2">
-                  <Label htmlFor="template-import-description" className={fieldLabelClass}>
-                    {tx.description}
-                  </Label>
-                  <Input
-                    id="template-import-description"
-                    value={description}
-                    maxLength={1000}
-                    onChange={(event) => setDescription(event.target.value)}
-                    className={inputClass}
-                  />
-                </div>
+          ) : null}
+          <div className="space-y-1.5">
+            <FilePicker
+              id="template-import-file"
+              aria-label={tx.file}
+              accept={TEMPLATE_IMPORT_ACCEPT}
+              selected={file}
+              emptyLabel=".docx, .txt"
+              onChange={handleFileChange}
+              disabled={busy}
+              className="rounded-lg border border-dashed border-border bg-muted/30 p-2 [&_[data-slot=file-picker-selection]]:text-xs"
+              buttonClassName="h-8"
+            />
+            <p className="text-xs leading-5 text-muted-foreground">{tx.intro}</p>
+          </div>
+          <div className="grid gap-x-3 gap-y-2.5 sm:grid-cols-2">
+            {!newVersionOf ? (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="template-import-label" className={fieldLabelClass}>
+                  {tx.name}
+                </Label>
+                <Input
+                  id="template-import-label"
+                  value={label}
+                  maxLength={200}
+                  onChange={(event) => setLabel(event.target.value)}
+                  className={inputClass}
+                />
               </div>
-              <div className="flex justify-end">
-                <Button type="button" onClick={handleImport} disabled={busy || !file} className="gap-1.5">
-                  {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileUp className="size-3.5" />}
-                  {busy ? tx.importing : tx.importAction}
-                </Button>
-              </div>
-            </section>
-
-            {selected ? (
-              <section
-                className="space-y-4 rounded-xl border border-border p-4"
-                data-testid="template-import-selected"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="truncate font-semibold">{selected.label}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {tx.version} {selected.version_number} · {languageLabel(selected.language)}
-                      {selected.source_filename ? ` · ${selected.source_filename}` : ""}
-                      {selected.created_by_name
-                        ? ` · ${tx.importedBy}: ${selected.created_by_name}`
-                        : ""}
-                      {selected.created_at ? `, ${formatAppDateTime(selected.created_at)}` : ""}
-                    </p>
-                  </div>
-                  <Badge variant="outline" className={statusTone(selected.status)}>
-                    {tx.status[selected.status]}
-                  </Badge>
-                </div>
-
-                {selected.unknown_variables.length > 0 || selected.unclosed_variable ? (
-                  <Notice tone="error">
-                    <span className="flex items-start gap-2">
-                      <CircleAlert className="mt-0.5 size-4 shrink-0" />
-                      <span className="space-y-1">
-                        {selected.unknown_variables.length > 0 ? (
-                          <span className="block">
-                            {tx.unknown}{" "}
-                            <span className="font-mono font-semibold">
-                              {selected.unknown_variables.join(", ")}
-                            </span>
-                          </span>
-                        ) : null}
-                        {selected.unclosed_variable ? (
-                          <span className="block">{tx.unclosed}</span>
-                        ) : null}
-                      </span>
-                    </span>
-                  </Notice>
-                ) : (
-                  <Notice tone="success">
-                    <span className="flex items-start gap-2">
-                      <CircleCheck className="mt-0.5 size-4 shrink-0" />
-                      <span>
-                        {selected.used_variables.length > 0 ? tx.checkOk : tx.checkNone}
-                        {selected.used_variables.length > 0 ? (
-                          <span className="block text-xs">
-                            {tx.used}:{" "}
-                            {selected.used_variables.map(variableLabel).join(", ")}
-                          </span>
-                        ) : null}
-                      </span>
-                    </span>
-                  </Notice>
-                )}
-
-                {selected.status === "draft" ? (
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="template-import-draft-label" className={fieldLabelClass}>
-                      {tx.name}
-                    </Label>
-                    <Input
-                      id="template-import-draft-label"
-                      value={draftLabel}
-                      maxLength={200}
-                      onChange={(event) => setDraftLabel(event.target.value)}
-                      className={inputClass}
-                    />
-                  </div>
-                ) : null}
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="template-import-body" className={fieldLabelClass}>
-                    {tx.text}
-                  </Label>
-                  <textarea
-                    id="template-import-body"
-                    value={draftBody}
-                    readOnly={selected.status !== "draft"}
-                    onChange={(event) => setDraftBody(event.target.value)}
-                    className={cn(textareaClass, "min-h-[220px] font-mono text-[12.5px] leading-relaxed")}
-                  />
-                  {selected.status !== "draft" ? (
-                    <p className="text-xs text-muted-foreground">{tx.textReadOnly}</p>
-                  ) : null}
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <span className={fieldLabelClass}>{tx.sample}</span>
-                  <div
-                    className="max-h-[260px] overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm"
-                    data-testid="template-import-sample"
-                  >
-                    {selected.preview_text}
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  {selected.status === "draft" ? (
-                    <Button type="button" variant="outline" onClick={handleSave} disabled={busy || !dirty}>
-                      {tx.saveText}
-                    </Button>
-                  ) : null}
-                  <Button type="button" variant="outline" onClick={handlePdfPreview} disabled={busy} className="gap-1.5">
-                    <Eye className="size-3.5" />
-                    {tx.pdfPreview}
-                  </Button>
-                  {selected.status !== "active" ? (
-                    <Button
-                      type="button"
-                      onClick={handleActivate}
-                      disabled={busy || !selected.can_activate}
-                      title={tx.activateHint}
-                    >
-                      {tx.activate}
-                    </Button>
-                  ) : null}
-                  {selected.status !== "disabled" ? (
-                    <Button type="button" variant="ghost" onClick={handleDisable} disabled={busy}>
-                      {selected.status === "draft" ? tx.discard : tx.disable}
-                    </Button>
-                  ) : null}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => startNewVersion(selected)}
-                    disabled={busy}
-                  >
-                    {tx.uploadNewVersion}
-                  </Button>
-                </div>
-                {selected.status !== "active" ? (
-                  <p className="text-xs text-muted-foreground">{tx.activateHint}</p>
-                ) : null}
-                {previewUrl ? (
-                  <iframe
-                    title={tx.pdfPreview}
-                    src={previewUrl}
-                    className="h-[560px] w-full rounded-lg border border-border bg-white"
-                  />
-                ) : null}
-              </section>
             ) : null}
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="template-import-language" className={fieldLabelClass}>
+                {tx.language}
+              </Label>
+              <NativeComboboxSelect
+                id="template-import-language"
+                value={templateLanguage}
+                onChange={(event) => setTemplateLanguage(event.target.value)}
+                className={selectClass}
+              >
+                {TEMPLATE_LANGUAGES.map((code) => (
+                  <option key={code} value={code}>
+                    {languageLabel(code)}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+            </div>
+            <div className="flex flex-col gap-1.5 sm:col-span-2">
+              <Label htmlFor="template-import-description" className={fieldLabelClass}>
+                {tx.description}
+              </Label>
+              <Input
+                id="template-import-description"
+                value={description}
+                maxLength={1000}
+                onChange={(event) => setDescription(event.target.value)}
+                className={inputClass}
+              />
+            </div>
+          </div>
+          <p className="border-t border-border/60 pt-2 text-xs leading-5 text-muted-foreground">{tx.legalNote}</p>
+        </AdminFormSection>
 
-            <section className="space-y-2">
-              <h3 className="text-sm font-semibold">{tx.list}</h3>
-              {loading ? (
-                <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <LoaderCircle className="size-4 animate-spin" />
+        {selected ? (
+          <section
+            className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3"
+            data-testid="template-import-selected"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0">
+                <h3><SectionHeading icon={FilePenLine}>{selected.label}</SectionHeading></h3>
+                <p className="text-xs text-muted-foreground">
+                  {tx.version} {selected.version_number} · {languageLabel(selected.language)}
+                  {selected.source_filename ? ` · ${selected.source_filename}` : ""}
+                  {selected.created_by_name
+                    ? ` · ${tx.importedBy}: ${selected.created_by_name}`
+                    : ""}
+                  {selected.created_at ? `, ${formatAppDateTime(selected.created_at)}` : ""}
                 </p>
-              ) : templates.length === 0 ? (
-                <p className="text-sm text-muted-foreground">{tx.empty}</p>
-              ) : (
-                <ul className="divide-y divide-border rounded-xl border border-border">
-                  {templates.map((template) => (
-                    <li
-                      key={template.id}
-                      className={cn(
-                        "flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm",
-                        template.id === selectedId ? "bg-muted/50" : "",
-                      )}
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate font-medium">{template.label}</span>
-                        <span className="block text-xs text-muted-foreground">
-                          {tx.version} {template.version_number} · {languageLabel(template.language)}
-                          {template.created_at ? ` · ${formatAppDateTime(template.created_at)}` : ""}
+              </div>
+              <Badge variant="outline" className={statusTone(selected.status)}>
+                {tx.status[selected.status]}
+              </Badge>
+            </div>
+
+            {selected.unknown_variables.length > 0 || selected.unclosed_variable ? (
+              <Notice tone="error">
+                <span className="flex items-start gap-2">
+                  <CircleAlert className="mt-0.5 size-4 shrink-0" />
+                  <span className="space-y-1">
+                    {selected.unknown_variables.length > 0 ? (
+                      <span className="block">
+                        {tx.unknown}{" "}
+                        <span className="font-mono font-semibold">
+                          {selected.unknown_variables.join(", ")}
                         </span>
                       </span>
-                      <span className="flex items-center gap-2">
-                        <Badge variant="outline" className={statusTone(template.status)}>
-                          {tx.status[template.status]}
-                        </Badge>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setError("");
-                            setNotice("");
-                            select(template);
-                          }}
-                        >
-                          {tx.open}
-                        </Button>
+                    ) : null}
+                    {selected.unclosed_variable ? (
+                      <span className="block">{tx.unclosed}</span>
+                    ) : null}
+                  </span>
+                </span>
+              </Notice>
+            ) : (
+              <Notice tone="success">
+                <span className="flex items-start gap-2">
+                  <CircleCheck className="mt-0.5 size-4 shrink-0" />
+                  <span>
+                    {selected.used_variables.length > 0 ? tx.checkOk : tx.checkNone}
+                    {selected.used_variables.length > 0 ? (
+                      <span className="block text-xs">
+                        {tx.used}:{" "}
+                        {selected.used_variables.map(variableLabel).join(", ")}
                       </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+                    ) : null}
+                  </span>
+                </span>
+              </Notice>
+            )}
 
-            <details className="rounded-xl border border-border p-4 text-sm">
-              <summary className="cursor-pointer font-semibold">{tx.variables}</summary>
-              <p className="mt-2 text-muted-foreground">{tx.variablesHint}</p>
-              <ul className="mt-3 grid gap-x-6 gap-y-1 md:grid-cols-2">
-                {variables.map((variable) => (
-                  <li key={variable.key} className="flex items-baseline justify-between gap-3">
-                    <code className="font-mono text-[12.5px]">{`{{${variable.key}}}`}</code>
-                    <span className="text-right text-muted-foreground">
-                      {variableLabel(variable.key)}
+            {selected.status === "draft" ? (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="template-import-draft-label" className={fieldLabelClass}>
+                  {tx.name}
+                </Label>
+                <Input
+                  id="template-import-draft-label"
+                  value={draftLabel}
+                  maxLength={200}
+                  onChange={(event) => setDraftLabel(event.target.value)}
+                  className={inputClass}
+                />
+              </div>
+            ) : null}
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="template-import-body" className={fieldLabelClass}>
+                {tx.text}
+              </Label>
+              <textarea
+                id="template-import-body"
+                value={draftBody}
+                readOnly={selected.status !== "draft"}
+                onChange={(event) => setDraftBody(event.target.value)}
+                className={cn(textareaClass, "min-h-[220px] font-mono text-[12.5px] leading-relaxed")}
+              />
+              {selected.status !== "draft" ? (
+                <p className="text-xs text-muted-foreground">{tx.textReadOnly}</p>
+              ) : null}
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <span className={fieldLabelClass}>{tx.sample}</span>
+              <div
+                className="max-h-[260px] overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm"
+                data-testid="template-import-sample"
+              >
+                {selected.preview_text}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {selected.status === "draft" ? (
+                <Button type="button" variant="outline" onClick={handleSave} disabled={busy || !dirty}>
+                  {tx.saveText}
+                </Button>
+              ) : null}
+              <Button type="button" variant="outline" onClick={handlePdfPreview} disabled={busy} className="gap-1.5">
+                <Eye className="size-3.5" />
+                {tx.pdfPreview}
+              </Button>
+              {selected.status !== "active" ? (
+                <Button
+                  type="button"
+                  onClick={handleActivate}
+                  disabled={busy || !selected.can_activate}
+                  title={tx.activateHint}
+                >
+                  {tx.activate}
+                </Button>
+              ) : null}
+              {selected.status !== "disabled" ? (
+                <Button type="button" variant="ghost" onClick={handleDisable} disabled={busy}>
+                  {selected.status === "draft" ? tx.discard : tx.disable}
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => startNewVersion(selected)}
+                disabled={busy}
+              >
+                {tx.uploadNewVersion}
+              </Button>
+            </div>
+            {selected.status !== "active" ? (
+              <p className="text-xs text-muted-foreground">{tx.activateHint}</p>
+            ) : null}
+            {previewUrl ? (
+              <iframe
+                title={tx.pdfPreview}
+                src={previewUrl}
+                className="h-[min(560px,55dvh)] w-full rounded-lg border border-border bg-white"
+              />
+            ) : null}
+          </section>
+        ) : null}
+
+        <AdminFormSection icon={Files} title={tx.list}>
+          {listError ? (
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <span className="min-w-0 break-words text-destructive">{listError}</span>
+              <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => void reload()}>
+                <RefreshCw />{tx.retry}
+              </Button>
+            </div>
+          ) : loading ? (
+            <p role="status" className="text-muted-foreground">
+              <LoaderCircle className="size-4 animate-spin" />
+            </p>
+          ) : templates.length === 0 ? (
+            <p className="text-xs leading-5 text-muted-foreground">{tx.empty}</p>
+          ) : null}
+          {templates.length > 0 ? (
+            <ul className="divide-y divide-border/60">
+              {templates.map((template) => (
+                <li
+                  key={template.id}
+                  className={cn(
+                    "flex flex-wrap items-center justify-between gap-2 rounded-md px-2 py-2 text-sm",
+                    template.id === selectedId ? "bg-muted/50" : "",
+                  )}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium">{template.label}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {tx.version} {template.version_number} · {languageLabel(template.language)}
+                      {template.created_at ? ` · ${formatAppDateTime(template.created_at)}` : ""}
                     </span>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          </div>
-        </AdminSheetScaffold>
-      </SheetContent>
-    </Sheet>
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <Badge variant="outline" className={statusTone(template.status)}>
+                      {tx.status[template.status]}
+                    </Badge>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setError("");
+                        setNotice("");
+                        select(template);
+                      }}
+                    >
+                      {tx.open}
+                    </Button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </AdminFormSection>
+
+        <details className="group min-w-0 rounded-xl border border-border/50 bg-card text-sm">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-xl px-3 py-2.5 focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+            <SectionHeading icon={Braces}>{tx.variables}</SectionHeading>
+            <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180 motion-reduce:transition-none" />
+          </summary>
+          <p className="border-t border-border/60 px-3 pt-2 text-xs leading-5 text-muted-foreground">{tx.variablesHint}</p>
+          <ul className="grid gap-x-4 gap-y-1 px-3 pb-3 pt-2 text-xs sm:grid-cols-2">
+            {variables.map((variable) => (
+              <li key={variable.key} className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-2 rounded-md bg-muted/40 px-2 py-1">
+                <code className="font-mono text-[12.5px]">{`{{${variable.key}}}`}</code>
+                <span className="text-right text-muted-foreground">
+                  {variableLabel(variable.key)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      </AdminDialogScaffold>
+    </Dialog>
   );
 }

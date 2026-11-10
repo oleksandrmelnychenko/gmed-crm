@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import {
+  DatabaseBackup,
+  History,
   ArrowLeft,
   CalendarRange,
   Download,
@@ -263,7 +265,7 @@ export function PersonnelEmployeePage() {
           {file?.health_hidden ? <MutedNote icon={EyeOff}>{t.personnel_health_hidden}</MutedNote> : null}
 
           {importable.length > 0 ? (
-            <Section title={t.personnel_import_section} accessory={<CountBadge>{importable.length}</CountBadge>}>
+            <Section icon={DatabaseBackup} title={t.personnel_import_section} accessory={<CountBadge>{importable.length}</CountBadge>}>
               <p className="text-xs text-muted-foreground">{t.personnel_import_hint}</p>
               <div className="grid gap-2 md:grid-cols-2">
                 {importable.map((document) => (
@@ -336,6 +338,7 @@ export function PersonnelEmployeePage() {
         note={t.personnel_access_logged}
       />
       <ReasonDialog
+        icon={Scale}
         open={Boolean(holdTarget)}
         title={holdTarget?.legal_hold ? t.personnel_legal_hold_release : t.personnel_legal_hold_set}
         description={
@@ -353,6 +356,7 @@ export function PersonnelEmployeePage() {
         onClose={() => setHoldTarget(null)}
       />
       <ReasonDialog
+        icon={Trash2}
         open={Boolean(deleteTarget)}
         title={t.personnel_delete_title}
         description={
@@ -467,7 +471,7 @@ function JournalTable({ events, tr }: { events: PersonnelEvent[]; tr: Record<str
       mobilePrimaryColumnId="action"
       mobileDetailColumnIds={["created_at", "actor", "archive_file_name"]}
       pagination={{ pageSize: 25 }}
-      toolbarStart={<TableTitle count={events.length}>{tr.personnel_tab_journal}</TableTitle>}
+      toolbarStart={<TableTitle icon={History} count={events.length}>{tr.personnel_tab_journal}</TableTitle>}
       emptyState={<EmptyCell>{tr.personnel_journal_empty}</EmptyCell>}
     />
   );

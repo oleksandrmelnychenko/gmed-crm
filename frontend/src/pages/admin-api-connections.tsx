@@ -1,12 +1,10 @@
 import { FileSignature, Mail } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
-import { buttonVariants } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/ui-shell";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
 import { SignatureConnectionForm } from "@/pages/documents/ui/signature-connection-dialog";
 import { SignatureDefaultsSettings } from "@/pages/documents/ui/signature-defaults-settings";
 import { MailConnectionForm } from "@/pages/admin/ui/mail-connection-form";
@@ -51,10 +49,7 @@ export function AdminApiConnectionsPage() {
             <TabsTrigger
               key={value}
               value={value}
-              className={cn(
-                buttonVariants({ variant: tab === value ? "default" : "ghost", size: "sm" }),
-                "h-9 min-w-0 rounded-md px-3 text-xs text-foreground data-active:!bg-primary data-active:!text-primary-foreground data-active:shadow-none sm:h-8",
-              )}
+              className="h-9 min-w-0 px-3 text-xs sm:h-8"
             >
               <Icon />
               <span>{label}</span>

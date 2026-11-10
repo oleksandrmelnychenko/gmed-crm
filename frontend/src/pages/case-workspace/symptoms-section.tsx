@@ -1,3 +1,4 @@
+import { Stethoscope } from "lucide-react";
 import { useMemo } from "react";
 
 import { Input } from "@/components/ui/input";
@@ -75,6 +76,7 @@ export function SymptomsSection() {
 
   return (
     <CaseItemList<SymptomItem>
+      icon={Stethoscope}
       columns={columns}
       title={tri(lang, "case_ws_symptoms")}
       description={tri(lang, "case_ws_clinical_complaints_and_related_specialty")}
@@ -97,7 +99,7 @@ export function SymptomsSection() {
       addFirstLabel={tri(lang, "case_ws_add_first_entry_3")}
       missingPrimaryMessage={tri(lang, "case_ws_please_enter_a_description")}
       formContent={({ form, updateField, disabled }) => (
-        <Panel title={tri(lang, "case_ws_symptoms")}>
+        <Panel icon={Stethoscope} title={tri(lang, "case_ws_symptoms")}>
           <Field
             label={tri(lang, "case_ws_description")}
             required

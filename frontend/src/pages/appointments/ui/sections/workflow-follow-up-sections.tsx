@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
@@ -6,7 +7,7 @@ import {
   type FormEvent,
 } from "react";
 
-import { LoaderCircle, Plus } from "lucide-react";
+import { LoaderCircle, PackageCheck, Plus, Stethoscope } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -226,8 +227,7 @@ function AppointmentDoctorFollowUpSectionContent({
     <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b sm:flex-nowrap sm:overflow-x-auto border-border/70 bg-card px-3 py-2">
         <span className="flex shrink-0 items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-          {t.appointments_doctor_directed_followup_title}
+              <SectionHeading icon={Stethoscope}>{t.appointments_doctor_directed_followup_title}</SectionHeading>
         </span>
         {canManageReminders ? (
           <>
@@ -253,6 +253,7 @@ function AppointmentDoctorFollowUpSectionContent({
       </div>
       {canManageReminders ? (
         <AppointmentEditorSheet
+          icon={Stethoscope}
           open={sheetOpen}
           onOpenChange={setSheetOpen}
           title={t.appointments_doctor_directed_followup_title}
@@ -564,6 +565,7 @@ function AppointmentPackageEndSectionContent({
     <section className={sectionCardClass}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <AppointmentSectionHeading
+          icon={PackageCheck}
           title={t.appointments_package_follow_up_title}
           description={t.appointments_package_follow_up_description}
         />

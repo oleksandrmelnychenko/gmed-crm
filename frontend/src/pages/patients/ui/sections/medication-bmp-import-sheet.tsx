@@ -5,12 +5,17 @@ import {
 } from "react";
 import {
   CheckCircle2,
+  CodeXml,
   FileUp,
   LoaderCircle,
+  Pill,
+  PillBottle,
   RefreshCw,
   ScanLine,
+  TriangleAlert,
 } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiRequestError } from "@/lib/api";
@@ -361,7 +366,7 @@ export function MedicationBmpImportPreviewContent({
 
       {preview.warnings.length > 0 ? (
         <section className="rounded-xl border border-amber-200 bg-amber-50/50 p-3">
-          <h3 className="text-sm font-semibold text-foreground">{tx("Предупреждения BMP", "BMP-Hinweise")}</h3>
+          <h3 className="text-sm font-semibold text-foreground"><SectionHeading icon={TriangleAlert}>{tx("Предупреждения BMP", "BMP-Hinweise")}</SectionHeading></h3>
           <div className="mt-2">
             <IssueChips issues={preview.warnings} language={language} />
           </div>
@@ -371,8 +376,7 @@ export function MedicationBmpImportPreviewContent({
       <section className="overflow-hidden rounded-xl border bg-muted/50">
         <header className="flex flex-wrap items-center justify-between gap-2 border-b bg-card px-3 py-2.5">
           <div className="flex items-center gap-2">
-            <span aria-hidden className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />
-            <h3 className="text-sm font-semibold text-foreground">{tx("Медикаменты в BMP", "Medikamente im BMP")}</h3>
+            <h3 className="text-sm font-semibold text-foreground"><SectionHeading icon={Pill}>{tx("Медикаменты в BMP", "Medikamente im BMP")}</SectionHeading></h3>
           </div>
           <div className="flex flex-wrap gap-1.5">
             <Badge variant="outline" className="rounded-full text-[10px]">
@@ -645,6 +649,7 @@ export function MedicationBmpImportAction({
       </Button>
 
       <PatientSheetScaffold
+        icon={PillBottle}
         open={open}
         onOpenChange={(nextOpen) => {
           if (nextOpen) setOpen(true);
@@ -716,7 +721,7 @@ export function MedicationBmpImportAction({
             <section className="rounded-xl border bg-card p-3">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <h3 className="text-sm font-semibold text-foreground">{tx("Декодированный XML", "Dekodiertes XML")}</h3>
+                  <h3 className="text-sm font-semibold text-foreground"><SectionHeading icon={CodeXml}>{tx("Декодированный XML", "Dekodiertes XML")}</SectionHeading></h3>
                   <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
                     {tx(
                       "XML анализируется на сервере. Сам план не применяется до отдельного подтверждения.",

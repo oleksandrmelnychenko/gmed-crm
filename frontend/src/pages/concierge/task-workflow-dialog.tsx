@@ -82,7 +82,7 @@ export function TaskWorkflowDialog({ rootId, tasks, lang, busy, availableStatuse
   return <Dialog open allowImplicitDismissal onOpenChange={open => { if (!open) onClose(); }}>
     <DialogContent data-testid="task-workflow-dialog" className="flex max-h-[min(42rem,calc(100dvh-1rem))] flex-col gap-0 overflow-hidden rounded-xl p-0 pb-0 sm:max-w-[34rem] sm:pb-0" finalFocus={() => document.querySelector<HTMLButtonElement>(`[data-workflow-task-id="${CSS.escape(rootId)}"]`)}>
       <div className="shrink-0">
-        <ConciergeDialogHeader icon={Workflow} tone="plain" title={labels.title} description={labels.description} />
+        <ConciergeDialogHeader icon={Workflow} title={labels.title} description={labels.description} />
       </div>
       {children.length ? (
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/70 bg-muted/20 px-4 py-3 sm:px-5" aria-label={`${labels.total}: ${children.length}`}>

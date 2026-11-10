@@ -1,3 +1,5 @@
+import { Hotel } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import type { Lang } from "@/lib/i18n";
@@ -38,7 +40,7 @@ export function HotelTable({ groups, lang, currency, resetKey, onOpen }: { group
     <DataTableSurface rows={groups} columns={columns} rowId={row => row.key} storageKey="hotels:table" onRowClick={row => onOpen(row.key)}
       defaultSort={[{ field: "volume", dir: "desc" }]} defaultDensity="compact" rowHeightOverrides={{ compact: 44 }}
       pagination={{ pageSize: 50, resetKey }} tableClassName="sm:max-h-[640px]" mobilePrimaryColumnId="hotel" mobileDetailColumnIds={["city", "breakfastTerms", "patients", "bookings", "nights", "volume", "direct", "company"]}
-      toolbarStart={<h2 className="flex shrink-0 items-center gap-2 self-center text-sm font-semibold"><span className="size-1.5 rounded-full bg-[var(--dot,var(--primary))]" />{labels.table}</h2>}
+      toolbarStart={<h2 className="flex shrink-0 items-center gap-2 self-center text-sm font-semibold"><SectionHeading icon={Hotel}>{labels.table}</SectionHeading></h2>}
       emptyState={<p className="px-4 py-8 text-center text-sm text-muted-foreground">{labels.noStays}</p>} />
   </section>;
 }

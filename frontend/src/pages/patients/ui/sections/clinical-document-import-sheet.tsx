@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import {
   Activity,
@@ -11,6 +12,7 @@ import {
   ChevronRight,
   ClipboardList,
   Clock3,
+  FileInput,
   FileText,
   FileUp,
   FlaskConical,
@@ -23,14 +25,15 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  ScanText,
   Stethoscope,
-  XCircle,
   Trash2,
+  XCircle,
   type LucideIcon,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { CountrySelect } from "@/components/ui/country-select";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Input } from "@/components/ui/input";
@@ -125,11 +128,7 @@ const IMPORT_MIME_TYPES = new Set(["application/pdf", "image/png", "image/jpeg"]
 const IMPORT_POLL_BASE_DELAY_MS = 1_800;
 const IMPORT_POLL_MAX_DELAY_MS = 15_000;
 const IMPORT_HISTORY_POLL_DELAY_MS = 4_000;
-const builderTabClassName = (active: boolean) =>
-  cn(
-    buttonVariants({ variant: active ? "default" : "ghost", size: "sm" }),
-    "h-9 min-w-0 shrink-0 rounded-md px-3 text-xs text-foreground data-active:!bg-primary data-active:!text-primary-foreground data-active:shadow-none data-active:[&_[data-count]]:bg-white/20 data-active:[&_[data-count]]:text-primary-foreground sm:h-8",
-  );
+const builderTabClassName = "h-9 min-w-0 shrink-0 rounded-md px-3 text-xs sm:h-8";
 
 export type ExistingClinicalImportItem = {
   id: string;
@@ -2432,18 +2431,12 @@ export function ClinicalDocumentImportSheet({
 
   return (
     <PatientSheetScaffold
+      icon={FileInput}
       open={open}
       onOpenChange={handleOpenChange}
       dirty={importKeepsRunningOnServer ? false : undefined}
       maxWidthClassName="overflow-hidden sm:!top-1 sm:!bottom-1 sm:!right-1 sm:!w-[calc(100vw-8px)] sm:!max-w-[calc(100vw-8px)] sm:!rounded-2xl"
-      title={(
-        <span className="flex min-w-0 items-center gap-2">
-          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-          <span className="min-w-0 break-words">
-            {tx("Конструктор импорта медицинского документа", "Assistent für den Import medizinischer Dokumente")}
-          </span>
-        </span>
-      )}
+      title={tx("Конструктор импорта медицинского документа", "Assistent für den Import medizinischer Dokumente")}
       description={tx(
         "Проверяйте предложения системы рядом с оригиналом.",
         "Systemvorschläge direkt neben dem Original prüfen.",
@@ -2576,11 +2569,11 @@ export function ClinicalDocumentImportSheet({
                   aria-label={tx("Разделы конструктора импорта", "Bereiche des Importassistenten")}
                   className="h-auto w-max max-w-none flex-nowrap gap-1 rounded-none bg-transparent p-0"
                 >
-                  <TabsTrigger value="source" className={builderTabClassName(activeTab === "source")}>
+                  <TabsTrigger value="source" className={builderTabClassName}>
                     <FileText aria-hidden="true" className="size-4" />
                     <span>{tx("Полный текст", "Volltext")}</span>
                   </TabsTrigger>
-                  <TabsTrigger value="all" className={builderTabClassName(activeTab === "all")}>
+                  <TabsTrigger value="all" className={builderTabClassName}>
                     <ListChecks aria-hidden="true" className="size-4" />
                     <span>{tx("Все", "Alle")}</span>
                     <span
@@ -2596,7 +2589,7 @@ export function ClinicalDocumentImportSheet({
                       <TabsTrigger
                         key={target}
                         value={target}
-                        className={builderTabClassName(activeTab === target)}
+                        className={builderTabClassName}
                       >
                         <TargetIcon aria-hidden="true" className="size-4" />
                         <span>{targetLabels[target][lang === "de" ? "de" : "ru"]}</span>
@@ -2648,10 +2641,7 @@ export function ClinicalDocumentImportSheet({
               <div className="mx-auto w-full max-w-3xl space-y-4">
                 <section className="space-y-3">
                   <div className="flex items-center gap-2">
-                    <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-                    <h3 className="text-sm font-semibold text-foreground">
-                      {tx("Добавить данные из документа", "Daten aus Dokument übernehmen")}
-                    </h3>
+                    <h3 className="text-sm font-semibold text-foreground"><SectionHeading icon={FileInput}>{tx("Добавить данные из документа", "Daten aus Dokument übernehmen")}</SectionHeading></h3>
                   </div>
 
                   <button
@@ -2724,7 +2714,7 @@ export function ClinicalDocumentImportSheet({
                       <History className="size-4 shrink-0 text-muted-foreground" />
                       <div className="min-w-0">
                         <h4 className="text-sm font-semibold">
-                          {tx("История обработки", "Verarbeitungsverlauf")}
+                          <SectionHeading icon={History}>{tx("История обработки", "Verarbeitungsverlauf")}</SectionHeading>
                         </h4>
                       </div>
                     </div>
@@ -3148,7 +3138,7 @@ export function ClinicalDocumentImportSheet({
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <h4 className="text-sm font-semibold">
-                          {tx("Распознанный текст по страницам", "Erkannter Text nach Seiten")}
+                          <SectionHeading icon={ScanText}>{tx("Распознанный текст по страницам", "Erkannter Text nach Seiten")}</SectionHeading>
                         </h4>
                         <p className="mt-1 text-xs text-muted-foreground">
                           {tx(
@@ -3187,12 +3177,8 @@ export function ClinicalDocumentImportSheet({
                               <button
                                 key={page.pageNumber}
                                 type="button"
-                                className={cn(
-                                  "inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-colors",
-                                  selected
-                                    ? "border-primary bg-primary text-primary-foreground"
-                                    : "border-border bg-card text-foreground hover:border-input hover:bg-accent",
-                                )}
+                                data-workspace-tab
+                                className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-colors"
                                 aria-pressed={selected}
                                 onClick={() => {
                                   setActiveCandidateId(null);
@@ -3369,10 +3355,8 @@ export function ClinicalDocumentImportSheet({
                           key={grouping}
                           type="button"
                           aria-pressed={candidateGrouping === grouping}
-                          className={cn(
-                            "h-7 rounded-md px-2.5 text-xs font-medium transition-colors",
-                            candidateGrouping === grouping ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
-                          )}
+                          data-workspace-tab
+                          className="h-7 rounded-md px-2.5 text-xs font-medium transition-colors"
                           onClick={() => setCandidateGrouping(grouping)}
                         >
                           {grouping === "type" ? tx("По типу", "Nach Typ") : tx("По страницам", "Nach Seiten")}
@@ -3432,7 +3416,7 @@ export function ClinicalDocumentImportSheet({
                       <div className="flex items-center justify-between gap-3">
                         <div>
                           <h4 className="text-sm font-semibold">
-                            {targetLabels[target][lang === "de" ? "de" : "ru"]}
+                            <SectionHeading icon={targetIcons[target]}>{targetLabels[target][lang === "de" ? "de" : "ru"]}</SectionHeading>
                           </h4>
                           <p className="text-[11px] text-muted-foreground">
                             {currentItems.length} {tx("уже у пациента", "bereits beim Patienten")}

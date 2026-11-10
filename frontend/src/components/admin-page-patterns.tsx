@@ -243,6 +243,7 @@ export function AdminSectionTitle({
 
 export function AdminSheetScaffold({
   title,
+  icon,
   description,
   children,
   footer,
@@ -253,6 +254,7 @@ export function AdminSheetScaffold({
   hideHeader = false,
 }: {
   title: ReactNode;
+  icon?: LucideIcon;
   description?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
@@ -271,7 +273,7 @@ export function AdminSheetScaffold({
     <div className={cn("flex flex-1 min-h-0 flex-col", className)}>
       {hideHeader ? null : (
         <SheetHeader className={cn("shrink-0 px-4 pt-3 pb-1", headerClassName, "pr-14")}>
-          <SheetTitle>{title}</SheetTitle>
+          <SheetTitle>{icon ? <SectionHeading icon={icon}>{title}</SectionHeading> : title}</SheetTitle>
         </SheetHeader>
       )}
       <div

@@ -1,5 +1,6 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import type { ElementType, ReactNode } from "react";
-import { ArrowRight } from "lucide-react";
+import { type LucideIcon, ArrowRight } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { PERIOD_OPTIONS, type Period } from "../../model/staff-dashboard-types";
@@ -105,17 +106,17 @@ export function EmptyChart({ label }: { label: string }) {
 
 export function SectionHeader({
   title,
+  icon,
   hint,
 }: {
   title: string;
+  icon: LucideIcon;
   hint?: string;
 }) {
   return (
     <div className="mb-1 mt-2 flex items-end justify-between px-1">
       <div>
-        <h2 className="text-[11px] font-semibold text-muted-foreground">
-          {title}
-        </h2>
+        <h2><SectionHeading icon={icon}>{title}</SectionHeading></h2>
         {hint ? <p className="mt-0.5 text-[13px] text-foreground">{hint}</p> : null}
       </div>
     </div>
@@ -124,11 +125,13 @@ export function SectionHeader({
 
 export function ChartCard({
   title,
+  icon,
   hint,
   children,
   compact,
 }: {
   title: string;
+  icon: LucideIcon;
   hint?: string;
   children: ReactNode;
   compact?: boolean;
@@ -136,7 +139,7 @@ export function ChartCard({
   return (
     <div className={cn("min-w-0 rounded-xl border border-border bg-card", compact ? "p-3" : "p-4")}>
       <div>
-        <h3 className="text-[14px] font-semibold text-foreground">{title}</h3>
+        <h3><SectionHeading icon={icon}>{title}</SectionHeading></h3>
         {hint ? <p className="mt-0.5 text-[11.5px] text-muted-foreground">{hint}</p> : null}
       </div>
       <div className="mt-3 min-w-0">{children}</div>
@@ -167,13 +170,10 @@ export function PeriodSwitcher({
         <button
           key={option}
           type="button"
+          data-workspace-tab
+          aria-pressed={value === option}
           onClick={() => onChange(option)}
-          className={cn(
-            "h-7 rounded-md px-2.5 transition-colors",
-            value === option
-              ? "bg-primary font-medium text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground",
-          )}
+          className="h-7 rounded-md px-2.5 transition-colors"
         >
           {labels[option]}
         </button>

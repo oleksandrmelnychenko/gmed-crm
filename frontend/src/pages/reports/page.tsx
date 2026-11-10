@@ -1992,7 +1992,8 @@ function useReportsPageContent() {
             {allowedSections.has("clinics") ? (
               <AdminTableCard
                 className={reportPanel}
-                title={<SectionHeading icon={Hospital}>{text.clinicReport.title}</SectionHeading>}
+                icon={Hospital}
+                title={text.clinicReport.title}
                 description={text.clinicReport.description}
                 count={data.clinics.length}
                 accessory={
@@ -2042,7 +2043,8 @@ function useReportsPageContent() {
             {allowedSections.has("service_types") ? (
               <AdminTableCard
                 className={reportPanel}
-                title={<SectionHeading icon={Layers3}>{text.serviceTypeReport.title}</SectionHeading>}
+                icon={Layers3}
+                title={text.serviceTypeReport.title}
                 description={text.serviceTypeReport.description}
                 count={data.service_types.length}
                 accessory={
@@ -2071,7 +2073,8 @@ function useReportsPageContent() {
             {allowedSections.has("medical_providers") ? (
               <AdminTableCard
                 className={reportPanel}
-                title={<SectionHeading icon={Stethoscope}>{text.medicalProviders.title}</SectionHeading>}
+                icon={Stethoscope}
+                title={text.medicalProviders.title}
                 description={text.medicalProviders.description}
                 count={data.medical_providers.length}
                 accessory={
@@ -2106,7 +2109,8 @@ function useReportsPageContent() {
             {allowedSections.has("provider_costs") ? (
               <AdminTableCard
                 className={reportPanel}
-                title={<SectionHeading icon={Coins}>{text.providerCosts.title}</SectionHeading>}
+                icon={Coins}
+                title={text.providerCosts.title}
                 description={text.providerCosts.description}
                 count={visibleProviderCosts.length}
                 accessory={
@@ -2152,7 +2156,8 @@ function useReportsPageContent() {
             {allowedSections.has("non_medical_providers") ? (
               <AdminTableCard
                 className={reportPanel}
-                title={<SectionHeading icon={Handshake}>{text.nonMedicalProviders.title}</SectionHeading>}
+                icon={Handshake}
+                title={text.nonMedicalProviders.title}
                 description={text.nonMedicalProviders.description}
                 count={data.non_medical_providers.length}
                 accessory={
@@ -2187,7 +2192,8 @@ function useReportsPageContent() {
             {allowedSections.has("countries") ? (
               <AdminTableCard
                 className={reportPanel}
-                title={<SectionHeading icon={Globe2}>{text.countries.title}</SectionHeading>}
+                icon={Globe2}
+                title={text.countries.title}
                 description={text.countries.description}
                 count={data.countries.length}
                 accessory={
@@ -2216,7 +2222,8 @@ function useReportsPageContent() {
             {allowedSections.has("doctors") ? (
               <AdminTableCard
                 className={reportPanel}
-                title={<SectionHeading icon={ContactRound}>{text.doctors.title}</SectionHeading>}
+                icon={ContactRound}
+                title={text.doctors.title}
                 description={text.doctors.description}
                 count={visibleDoctors.length}
                 accessory={
@@ -2257,7 +2264,8 @@ function useReportsPageContent() {
 
             <AdminTableCard
               className={reportPanel}
-              title={<SectionHeading icon={Eye}>{text.visibility.title}</SectionHeading>}
+              icon={Eye}
+              title={text.visibility.title}
               description={text.visibility.description}
             >
               <div className="flex flex-wrap gap-2 p-3">
@@ -2277,14 +2285,13 @@ function useReportsPageContent() {
             <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
               {detail ? (
                 <AdminSheetScaffold
+                  icon={detail.kind === "clinic" ? Hospital : detail.kind === "doctor" ? ContactRound : Coins}
                   title={
-                    <SectionHeading icon={detail.kind === "clinic" ? Hospital : detail.kind === "doctor" ? ContactRound : Coins}>
-                      {detail.kind === "clinic"
-                        ? detail.row.name
-                        : detail.kind === "doctor"
-                          ? [detail.row.title, detail.row.name].filter(Boolean).join(" ")
-                          : reportBackendLabel(detail.row.service_label, text, t)}
-                    </SectionHeading>
+                    detail.kind === "clinic"
+                      ? detail.row.name
+                      : detail.kind === "doctor"
+                        ? [detail.row.title, detail.row.name].filter(Boolean).join(" ")
+                        : reportBackendLabel(detail.row.service_label, text, t)
                   }
                   description={
                     detail.kind === "clinic"
@@ -2296,7 +2303,7 @@ function useReportsPageContent() {
                 >
                   {detail.kind === "clinic" ? (
                     <>
-                      <AdminTableCard title={<SectionHeading icon={Hospital}>{text.clinicReport.title}</SectionHeading>}>
+                      <AdminTableCard icon={Hospital} title={text.clinicReport.title}>
                         <div className="grid gap-2.5 p-3 sm:grid-cols-2">
                           <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.common.services}</p>
@@ -2348,7 +2355,7 @@ function useReportsPageContent() {
 
                   {detail.kind === "doctor" ? (
                     <>
-                      <AdminTableCard title={<SectionHeading icon={ContactRound}>{text.doctors.title}</SectionHeading>}>
+                      <AdminTableCard icon={ContactRound} title={text.doctors.title}>
                         <div className="grid gap-2.5 p-3 sm:grid-cols-2">
                           <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.medicalProviders.title}</p>
@@ -2388,7 +2395,7 @@ function useReportsPageContent() {
 
                   {detail.kind === "provider_cost" ? (
                     <>
-                      <AdminTableCard title={<SectionHeading icon={Coins}>{text.providerCosts.title}</SectionHeading>}>
+                      <AdminTableCard icon={Coins} title={text.providerCosts.title}>
                         <div className="grid gap-2.5 p-3 sm:grid-cols-2">
                           <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.medicalProviders.title}</p>
@@ -2425,7 +2432,7 @@ function useReportsPageContent() {
                         </div>
                       </AdminTableCard>
                       {detail.row.trend_points.length > 0 ? (
-                        <AdminTableCard title={<SectionHeading icon={Funnel}>{text.forecast.pipelineTitle}</SectionHeading>}>
+                        <AdminTableCard icon={Funnel} title={text.forecast.pipelineTitle}>
                           <div className="flex flex-wrap gap-2 p-3">
                             {detail.row.trend_points.map((point) => (
                               <Badge key={`${detail.row.provider_id}-${detail.row.service_label}-${point.month}`} variant="secondary">

@@ -1,5 +1,5 @@
 import { memo, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { CalendarDays, LoaderCircle } from "lucide-react";
 
 import { AdminSheetScaffold } from "@/components/admin-page-patterns";
 import { Banner } from "@/components/ui-shell";
@@ -215,6 +215,7 @@ function useAppointmentMobileDetailSheetContentContent({
   return (
     <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[860px]">
       <AdminSheetScaffold
+        icon={CalendarDays}
         title={t.appointments_title}
         headerClassName="px-4 py-3"
         bodyClassName="flex-1 overflow-y-auto overscroll-y-contain space-y-4 px-5 py-4"

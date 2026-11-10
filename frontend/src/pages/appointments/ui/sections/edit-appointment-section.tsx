@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
@@ -11,7 +12,18 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
-import { LoaderCircle, Pencil } from "lucide-react";
+import {
+  CalendarClock,
+  CalendarCog,
+  CalendarDays,
+  ClipboardList,
+  Hospital,
+  LoaderCircle,
+  MapPin,
+  NotebookPen,
+  Pencil,
+  Repeat2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -214,24 +226,6 @@ function formatEditAppointmentError(
 
 const selectClassName = appointmentSelectControlClassName;
 const inputClassName = appointmentSlateInputClassName;
-
-function editSheetSectionTitle(label: string) {
-  return (
-    <h3 className="inline-flex items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
-      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />
-      <span>{label}</span>
-    </h3>
-  );
-}
-
-function editOverviewTitle(title: ReactNode) {
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--brand))]" />
-      <span>{title}</span>
-    </span>
-  );
-}
 
 function EditOverviewLine({
   label,
@@ -825,7 +819,7 @@ function useEditAppointmentSectionContentContent({
       <section className="rounded-lg border border-border/70 bg-card p-6">
         <div className="flex items-start justify-between gap-4">
           <h2 className={tokens.text.sectionTitle}>
-            {editOverviewTitle(appointmentText("appointments_appointment"))}
+            <SectionHeading icon={CalendarDays}>{appointmentText("appointments_appointment")}</SectionHeading>
           </h2>
           {/* The server refuses changes to a completed or cancelled appointment. */}
           {editLocked ? null : (
@@ -888,7 +882,7 @@ function useEditAppointmentSectionContentContent({
 
           <div className="space-y-3">
             <h3 className={tokens.text.sectionTitle}>
-              {editOverviewTitle(t.appointments_location)}
+              <SectionHeading icon={MapPin}>{t.appointments_location}</SectionHeading>
             </h3>
             <div className="rounded-xl border border-border bg-background/60 p-4 text-sm font-medium leading-snug text-foreground">
               {form.location.trim() || t.common_not_set}
@@ -899,6 +893,7 @@ function useEditAppointmentSectionContentContent({
       ) : null}
 
       <AppointmentEditorSheet
+        icon={CalendarCog}
         open={sheetOpen}
         onOpenChange={handleSheetOpenChange}
         allowImplicitDismissal
@@ -938,7 +933,7 @@ function useEditAppointmentSectionContentContent({
       >
         <div className="space-y-4 rounded-xl">
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
-        {editSheetSectionTitle(appointmentText("appointments_appointment_and_timing"))}
+        <h3><SectionHeading icon={CalendarClock}>{appointmentText("appointments_appointment_and_timing")}</SectionHeading></h3>
         <div className="grid gap-4 md:grid-cols-3">
         <Field compact required label={t.appointments_title_col}>
           <Input
@@ -1059,7 +1054,7 @@ function useEditAppointmentSectionContentContent({
         </div>
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
-        {editSheetSectionTitle(appointmentText("appointments_status_and_responsibilities"))}
+        <h3><SectionHeading icon={ClipboardList}>{appointmentText("appointments_status_and_responsibilities")}</SectionHeading></h3>
         <div className="grid gap-4">
           <Field compact label={t.orders_phase}>
             <NativeComboboxSelect
@@ -1083,7 +1078,7 @@ function useEditAppointmentSectionContentContent({
         </div>
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
-        {editSheetSectionTitle(appointmentText("appointments_provider_and_doctor"))}
+        <h3><SectionHeading icon={Hospital}>{appointmentText("appointments_provider_and_doctor")}</SectionHeading></h3>
         {providersError ? (
           <Banner tone="error">{providersError}</Banner>
         ) : null}
@@ -1194,7 +1189,7 @@ function useEditAppointmentSectionContentContent({
         ) : null}
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
-        {editSheetSectionTitle(appointmentText("appointments_coordination_and_notes"))}
+        <h3><SectionHeading icon={NotebookPen}>{appointmentText("appointments_coordination_and_notes")}</SectionHeading></h3>
         <div className="grid gap-4 md:grid-cols-2">
           <Field compact label={t.patients_assign_owner}>
             <NativeComboboxSelect
@@ -1296,7 +1291,7 @@ function useEditAppointmentSectionContentContent({
         </section>
         {detail.recurrence_frequency ? (
           <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
-          {editSheetSectionTitle(appointmentText("appointments_repeat_frequency"))}
+          <h3><SectionHeading icon={Repeat2}>{appointmentText("appointments_repeat_frequency")}</SectionHeading></h3>
           <div className="space-y-3 rounded-lg border border-border/60 bg-card p-3">
             <Field compact label={t.appointments_scope_apply_schedule}>
               <NativeComboboxSelect

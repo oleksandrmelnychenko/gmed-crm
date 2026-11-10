@@ -1,3 +1,5 @@
+import { NotebookPen } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { memo, useMemo } from "react";
 
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -94,8 +96,7 @@ function AppointmentNotesSection({
       toolbarStart={
         <>
           <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-            {t.patients_notes}
+            <SectionHeading icon={NotebookPen}>{t.patients_notes}</SectionHeading>
           </span>
           <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
         </>

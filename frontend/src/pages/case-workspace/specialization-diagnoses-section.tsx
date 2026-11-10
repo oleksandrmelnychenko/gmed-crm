@@ -1,3 +1,6 @@
+import { specializationIcons } from "@/lib/specialization-icons";
+import { SectionHeading } from "@/components/ui/section-heading";
+import { Microscope, NotebookPen, Stethoscope } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
@@ -71,6 +74,7 @@ export function SpecializationDiagnosesSection({
 
   return (
     <Panel
+      icon={specializationIcons.get(specialization.code)}
       title={specializationLabelForItem(specialization, labelLang)}
       description={labels.description}
     >
@@ -83,7 +87,7 @@ export function SpecializationDiagnosesSection({
           {diagnoses.length > 0 ? (
             <section className="space-y-2">
               <h3 className="text-xs font-semibold text-muted-foreground">
-                {labels.diagnoses}
+                <SectionHeading icon={Stethoscope}>{labels.diagnoses}</SectionHeading>
               </h3>
               {diagnoses.map((diagnosis, index) => (
             <article
@@ -131,7 +135,7 @@ export function SpecializationDiagnosesSection({
           {examinations.length > 0 ? (
             <section className="space-y-2">
               <h3 className="text-xs font-semibold text-muted-foreground">
-                {labels.examinations}
+                <SectionHeading icon={Microscope}>{labels.examinations}</SectionHeading>
               </h3>
               {examinations.map((examination, index) => (
                 <article
@@ -166,7 +170,7 @@ export function SpecializationDiagnosesSection({
           {narratives.length > 0 ? (
             <section className="space-y-2">
               <h3 className="text-xs font-semibold text-muted-foreground">
-                {labels.narratives}
+                <SectionHeading icon={NotebookPen}>{labels.narratives}</SectionHeading>
               </h3>
               {narratives.map((narrative, index) => {
                 const details = narrative.specializations?.find(

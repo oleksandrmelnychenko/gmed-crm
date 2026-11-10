@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, LoaderCircle } from "lucide-react";
+import { ArrowLeft, ArrowLeftRight, ArrowRight, CalendarDays, LoaderCircle, WalletCards } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import { WritableScope } from "@/components/read-only-scope";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -133,7 +134,7 @@ export function PatientFinanceTab({ patientId, onOpenInvoices }: { patientId: st
     <div className="mt-3 min-w-0 space-y-3" data-testid="patient-finance">
       <section className="overflow-hidden rounded-lg bg-card">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
-          <h2 className="flex items-center gap-2 text-sm font-semibold"><span role="status" className="flex size-3 shrink-0 items-center justify-center">{busy ? <><LoaderCircle className="size-3 animate-spin text-muted-foreground" /><span className="sr-only">{data ? l.updating : l.loading}</span></> : <span className="size-2 rounded-full bg-[var(--dot,var(--heading-marker))]" />}</span>{l.title}</h2>
+          <h2 className="flex items-center gap-2 text-sm font-semibold"><SectionHeading icon={WalletCards}>{l.title}</SectionHeading><span role="status">{busy ? <><LoaderCircle className="size-3 animate-spin text-muted-foreground" /><span className="sr-only">{data ? l.updating : l.loading}</span></> : null}</span></h2>
           <Button type="button" size="sm" variant="outline" onClick={onOpenInvoices}>{l.invoicesLink}<ArrowRight /></Button>
         </div>
         {/* The period and the currency are reading: usable on a read-only patient. */}
@@ -169,10 +170,10 @@ export function PatientFinanceTab({ patientId, onOpenInvoices }: { patientId: st
             })}
           </div>
           {!data.movements.length ? <p className="px-3 py-2 text-sm text-muted-foreground">{l.empty}</p> : null}
-          <DataTableSurface rows={periods} columns={periodColumns} rowId={row => row.month} dictionary={t as unknown as Record<string, string>} defaultFrozenColumns={["month"]} mobilePrimaryColumnId="month" mobileDetailColumnIds={["opening", "invoices", "payments", "refunds", "adjustments", "closing"]} rowHeightOverrides={{ comfortable: 44, compact: 40, condensed: 36 }} pagination={{ pageSize: 12, resetKey: requestPath }} toolbarStart={<h3 className="flex items-center gap-2 text-sm font-semibold"><span className="size-2 rounded-full bg-[var(--dot,var(--heading-marker))]" />{l.monthly}</h3>} />
+          <DataTableSurface rows={periods} columns={periodColumns} rowId={row => row.month} dictionary={t as unknown as Record<string, string>} defaultFrozenColumns={["month"]} mobilePrimaryColumnId="month" mobileDetailColumnIds={["opening", "invoices", "payments", "refunds", "adjustments", "closing"]} rowHeightOverrides={{ comfortable: 44, compact: 40, condensed: 36 }} pagination={{ pageSize: 12, resetKey: requestPath }} toolbarStart={<h3 className="flex items-center gap-2 text-sm font-semibold"><SectionHeading icon={CalendarDays}>{l.monthly}</SectionHeading></h3>} />
           <p className="text-xs leading-relaxed text-muted-foreground">{l.explanation}</p>
           <div ref={movementSection} className="scroll-mt-4">
-          <DataTableSurface rows={movements} columns={movementColumns} rowId={row => row.id} dictionary={t as unknown as Record<string, string>} mobilePrimaryColumnId="kind" mobileDetailColumnIds={["date", "document", "debit", "credit", "balance_after"]} rowHeightOverrides={{ comfortable: 44, compact: 40, condensed: 36 }} pagination={{ pageSize: 20, resetKey: `${requestPath}:${selectedMonth}` }} emptyState={<p className="px-4 py-8 text-center text-sm text-muted-foreground">{l.noMovements}</p>} toolbarStart={<div className="flex flex-wrap items-center gap-3"><h3 className="flex items-center gap-2 text-sm font-semibold"><span className="size-2 rounded-full bg-[var(--dot,var(--heading-marker))]" />{selectedPeriod ? monthLabel(selectedMonth) : l.movements}</h3>{selectedPeriod ? <Button type="button" size="sm" variant="outline" onClick={() => setSelectedMonth("")}><ArrowLeft />{l.back}</Button> : null}</div>} />
+          <DataTableSurface rows={movements} columns={movementColumns} rowId={row => row.id} dictionary={t as unknown as Record<string, string>} mobilePrimaryColumnId="kind" mobileDetailColumnIds={["date", "document", "debit", "credit", "balance_after"]} rowHeightOverrides={{ comfortable: 44, compact: 40, condensed: 36 }} pagination={{ pageSize: 20, resetKey: `${requestPath}:${selectedMonth}` }} emptyState={<p className="px-4 py-8 text-center text-sm text-muted-foreground">{l.noMovements}</p>} toolbarStart={<div className="flex flex-wrap items-center gap-3"><h3 className="flex items-center gap-2 text-sm font-semibold"><SectionHeading icon={ArrowLeftRight}>{selectedPeriod ? monthLabel(selectedMonth) : l.movements}</SectionHeading></h3>{selectedPeriod ? <Button type="button" size="sm" variant="outline" onClick={() => setSelectedMonth("")}><ArrowLeft />{l.back}</Button> : null}</div>} />
           </div>
         </>
       ) : null}

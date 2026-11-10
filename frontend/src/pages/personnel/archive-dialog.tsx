@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { FileCheck2, Lock, Upload } from "lucide-react";
+import { ContactRound, FileText, Paperclip, Archive, FileCheck2, Lock, Upload } from "lucide-react";
 
 import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
 import { Field, textareaClass, tokens } from "@/components/ui-shell";
@@ -259,6 +259,7 @@ export function ArchiveDialog({
             }}
           >
             <AdminSheetScaffold
+              icon={Archive}
               title={dialogTitle}
               footer={
                 <SheetFormFooter
@@ -272,7 +273,7 @@ export function ArchiveDialog({
               }
             >
               {mode?.kind === "intake" ? (
-                <FormSection title={t.personnel_employee}>
+                <FormSection icon={ContactRound} title={t.personnel_employee}>
                   <p className="text-xs text-muted-foreground">
                     {t.personnel_intake_original_name}: <ArchiveName name={mode.item.original_file_name} />
                   </p>
@@ -309,6 +310,7 @@ export function ArchiveDialog({
               ) : null}
 
               <FormSection
+                icon={FileText}
                 title={t.personnel_section_document}
                 hint={isCorrection ? t.personnel_correction_hint : t.personnel_upload_hint}
               >
@@ -385,7 +387,7 @@ export function ArchiveDialog({
               </FormSection>
 
               {needsFile ? (
-                <FormSection title={t.personnel_file} hint={t.personnel_file_hint}>
+                <FormSection icon={Paperclip} title={t.personnel_file} hint={t.personnel_file_hint}>
                   <label
                     className={cn(
                       "flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted/40",
@@ -408,12 +410,8 @@ export function ArchiveDialog({
               ) : null}
 
               <FormSection
-                title={
-                  <span className="inline-flex items-center gap-1.5">
-                    <FileCheck2 className="size-3.5" />
-                    {t.personnel_will_be_archived_as}
-                  </span>
-                }
+                icon={FileCheck2}
+                title={t.personnel_will_be_archived_as}
               >
                 <div className="space-y-1 text-xs">
                   {preview?.name ? (

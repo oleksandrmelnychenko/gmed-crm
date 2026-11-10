@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Ban, CheckCircle2, FilePlus2, LoaderCircle, RefreshCw, Undo2 } from "lucide-react";
+import { Ban, CheckCircle2, FilePlus2, LoaderCircle, ReceiptText, RefreshCw, Undo2, Wallet } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -380,7 +381,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     <PatientTerminationSettlements patientId={patientId} lang={lang} onChanged={() => setRevision(value => value + 1)} />
     <section className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 px-4 py-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold"><span className="size-2 rounded-full bg-[var(--dot,var(--brand))]" />{copy.title}</h2>
+        <h2 className="flex items-center gap-2 text-sm font-semibold"><SectionHeading icon={Wallet}>{copy.title}</SectionHeading></h2>
         <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setRevision(value => value + 1)}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />{copy.retry}</Button>
       </div>
       <form className="space-y-4 p-4" onSubmit={submit}>
@@ -424,7 +425,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
       <DialogContent className="sm:max-w-lg">
         <form className="space-y-4" onSubmit={submitWaiverAction} data-testid="rebilling-waiver-dialog">
           <DialogHeader>
-            <DialogTitle>{waiverAction?.kind === "reverse" ? copy.unwaiveTitle : copy.waiveTitle}</DialogTitle>
+            <DialogTitle><SectionHeading icon={ReceiptText}>{waiverAction?.kind === "reverse" ? copy.unwaiveTitle : copy.waiveTitle}</SectionHeading></DialogTitle>
             <DialogDescription>
               {waiverAction?.expense.external_invoice_number}
               {waiverAction?.expense.provider_name ? ` · ${waiverAction.expense.provider_name}` : ""}

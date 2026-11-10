@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { LoaderCircle, Trash2 } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -294,7 +295,7 @@ export function PatientOrdersTab({
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {labelLang === "de" ? "Entwurf löschen?" : "Удалить черновик?"}
+              <SectionHeading icon={Trash2}>{labelLang === "de" ? "Entwurf löschen?" : "Удалить черновик?"}</SectionHeading>
             </DialogTitle>
             <DialogDescription>
               {labelLang === "de"

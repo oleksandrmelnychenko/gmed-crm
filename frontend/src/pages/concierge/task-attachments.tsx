@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Download, FileImage, FileText, LoaderCircle, Paperclip, Trash2 } from "lucide-react";
 
@@ -227,7 +228,7 @@ export function ConciergeTaskAttachments({
     <section className="overflow-hidden rounded-lg bg-card" data-testid="concierge-task-attachments">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
         <div>
-          <div className="flex items-center gap-2"><span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" /><h3 className="text-[13px] font-semibold tracking-tight">{labels.title}</h3></div>
+          <h3><SectionHeading icon={Paperclip}>{labels.title}</SectionHeading></h3>
           <p className="mt-0.5 text-xs text-muted-foreground">{labels.allowed}</p>
         </div>
         {mayUpload ? (
@@ -299,7 +300,7 @@ export function ConciergeTaskStagedAttachments({
     <section className="overflow-hidden rounded-lg bg-card" data-testid="concierge-task-staged-attachments">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
         <div>
-          <div className="flex items-center gap-2"><span className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--heading-marker))]" /><h3 className="text-[13px] font-semibold tracking-tight">{labels.title}</h3></div>
+          <h3><SectionHeading icon={Paperclip}>{labels.title}</SectionHeading></h3>
           <p className="mt-0.5 text-xs text-muted-foreground">{labels.allowed}</p>
         </div>
         <input

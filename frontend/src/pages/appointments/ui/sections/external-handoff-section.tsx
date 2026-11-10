@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
@@ -10,7 +11,7 @@ import {
   type SetStateAction,
 } from "react";
 
-import { LoaderCircle, Plus } from "lucide-react";
+import { LoaderCircle, Plus, Send } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -549,8 +550,7 @@ function useAppointmentExternalHandoffSectionContent({
         toolbarStart={
           <>
             <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-              {t.appointments_external_handoff_title}
+              <SectionHeading icon={Send}>{t.appointments_external_handoff_title}</SectionHeading>
             </span>
             {canManageCommunications ? (
               <Button
@@ -609,6 +609,7 @@ function useAppointmentExternalHandoffSectionContent({
 
       {canManageCommunications ? (
         <AppointmentEditorSheet
+          icon={Send}
           open={sheetOpen}
           onOpenChange={setSheetOpen}
           title={t.appointments_external_handoff_title}

@@ -127,7 +127,8 @@ export function PersonnelPage() {
                 key={entry}
                 type="button"
                 size="sm"
-                variant={active ? "default" : "ghost"}
+                variant="ghost"
+                data-workspace-tab
                 aria-current={active ? "page" : undefined}
                 className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8"
                 onClick={() => openTab(entry)}

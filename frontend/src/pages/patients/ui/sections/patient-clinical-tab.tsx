@@ -1,5 +1,6 @@
 import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { apiFetch } from "@/lib/api";
 import { MedicationEditorFields, MEDICATION_EDITOR_CLASS_NAME } from "./medication-editor-fields";
 import { Badge } from "@/components/ui/badge";
@@ -23,9 +24,31 @@ import { toast } from "@/components/ui/toast";
 import { useLang, type Lang } from "@/lib/i18n";
 import { formatCount, type PluralWords } from "@/lib/i18n/plural";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
+import { specializationIcons } from "@/lib/specialization-icons";
 import { cn } from "@/lib/utils";
 import { appDateKey, appDateKeyOf, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
-import { LoaderCircle, PauseCircle, Pencil, PlayCircle, Plus, Trash2 } from "lucide-react";
+import {
+  LayoutGrid,
+  Activity,
+  BriefcaseMedical,
+  ClipboardCheck,
+  FileHeart,
+  FlaskConical,
+  Flower2,
+  Gauge,
+  LoaderCircle,
+  PauseCircle,
+  Pencil,
+  Pill,
+  PillBottle,
+  PlayCircle,
+  Plus,
+  Syringe,
+  TestTubes,
+  Trash2,
+  TriangleAlert,
+  type LucideIcon,
+} from "lucide-react";
 import { fetchProviders, fetchSpecializations } from "@/pages/providers/data/provider-api";
 import {
   specializationLabelForItem,
@@ -852,6 +875,7 @@ function ProviderDoctorFields({
 
 /** Generic add / edit / remove + replace-all-save list for one clinical section. */
 function ClinicalSection<T extends { id?: string | null }>({
+  icon,
   title,
   count,
   items,
@@ -872,6 +896,7 @@ function ClinicalSection<T extends { id?: string | null }>({
   editorClassName,
   editorHasSections = false,
 }: {
+  icon?: LucideIcon;
   title: string;
   count?: ReactNode;
   items: T[];
@@ -981,8 +1006,7 @@ function ClinicalSection<T extends { id?: string | null }>({
     <section className={cn("rounded-xl border", toneClasses.section, sectionClassName)}>
       <header className={cn("flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3", toneClasses.header)}>
         <div className="flex items-center gap-2">
-          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+          <h3 className="text-sm font-semibold text-foreground"><SectionHeading icon={icon}>{title}</SectionHeading></h3>
           {count ?? <Badge variant="outline" className="rounded-full text-[11px]">{list.length}</Badge>}
         </div>
         <div className={cn("flex flex-wrap items-center justify-end gap-2", headerAction && "w-full sm:w-auto")}>
@@ -1029,6 +1053,7 @@ function ClinicalSection<T extends { id?: string | null }>({
         ) : null}
 
         <PatientSheetScaffold
+          icon={icon}
           presentation="dialog"
           open={Boolean(editing)}
           onOpenChange={(open) => {
@@ -1161,7 +1186,7 @@ function MedicationHoldDialog({
       <DialogContent overlayClassName="bg-[color-mix(in_srgb,var(--overlay,#000)_40%,transparent)]" className="flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[560px] sm:pb-0">
         <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <DialogHeader className="shrink-0 border-b border-border/50 bg-card px-4 py-3 pr-14 text-left">
-            <DialogTitle className="text-[15px] font-semibold">{tx("На холд", "Auf Hold")}</DialogTitle>
+            <DialogTitle className="text-[15px] font-semibold"><SectionHeading icon={PauseCircle}>{tx("На холд", "Auf Hold")}</SectionHeading></DialogTitle>
             <DialogDescription>
               {medicationName || tx("Медикамент", "Medikament")}
             </DialogDescription>
@@ -1520,8 +1545,7 @@ export function PatientRecommendationsSection({
     <section className="rounded-xl border border-border/70 bg-card">
       <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
         <div className="flex items-center gap-2">
-          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-          <h3 className="text-sm font-semibold text-foreground">{tx("Рекомендации", "Empfehlungen")}</h3>
+          <h3 className="text-sm font-semibold text-foreground"><SectionHeading icon={ClipboardCheck}>{tx("Рекомендации", "Empfehlungen")}</SectionHeading></h3>
           <Badge variant="outline" className="rounded-full text-[11px]">{recommendations.length}</Badge>
         </div>
         {canManage ? (
@@ -1563,6 +1587,7 @@ export function PatientRecommendationsSection({
         ) : null}
 
         <PatientSheetScaffold
+          icon={ClipboardCheck}
           presentation="dialog"
           open={Boolean(editing)}
           onOpenChange={(open) => {
@@ -1940,7 +1965,7 @@ function PatientLabHistoryTable({
       <Dialog open={notePreview !== null} onOpenChange={(open) => !open && setNotePreview(null)}>
         <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>{tx("Примечание лаборатории", "Laborhinweis")}</DialogTitle>
+            <DialogTitle><SectionHeading icon={FlaskConical}>{tx("Примечание лаборатории", "Laborhinweis")}</SectionHeading></DialogTitle>
             <DialogDescription>
               {[notePreview?.analyte_name, notePreview?.reference_text].filter(Boolean).join(" · ")}
             </DialogDescription>
@@ -2370,10 +2395,7 @@ function MedicationHistoryTree({
       <header className="flex flex-wrap items-start justify-between gap-2 border-b border-border/60 px-4 py-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-            <h3 className="text-sm font-semibold text-foreground">
-              {tx("История медикаментов", "Medikationsverlauf")}
-            </h3>
+            <h3 className="text-sm font-semibold text-foreground"><SectionHeading icon={PillBottle}>{tx("История медикаментов", "Medikationsverlauf")}</SectionHeading></h3>
             <CountBadge>
               {formatCount(tx("ru", "de") as Lang, series.length, MEDICATION_SERIES_WORDS)}
             </CountBadge>
@@ -3202,32 +3224,27 @@ export function PatientClinicalTab({
         <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
-            className={cn(
-              "rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
-              activeSpecializationId === null
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-border bg-card text-foreground hover:bg-muted",
-            )}
+            data-workspace-tab
+            className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-colors"
             aria-pressed={activeSpecializationId === null}
             onClick={() => setSelectedSpecializationId(null)}
           >
+            <LayoutGrid aria-hidden="true" className="size-3.5 shrink-0" />
             {tx("Все специализации", "Alle Spezialisierungen")}
           </button>
           {attachedSpecializations.map((item) => {
             const selected = activeSpecializationId === item.id;
+            const SpecialtyIcon = specializationIcons.get(item.code);
             return (
               <button
                 key={item.id}
                 type="button"
-                className={cn(
-                  "rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
-                  selected
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border bg-card text-foreground hover:bg-muted",
-                )}
+                data-workspace-tab
+                className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-colors"
                 aria-pressed={selected}
                 onClick={() => setSelectedSpecializationId(item.id)}
               >
+                {SpecialtyIcon ? <SpecialtyIcon aria-hidden="true" className="size-3.5 shrink-0" /> : null}
                 {specializationLabelForItem(item, lang === "de" ? "de" : "ru")}
               </button>
             );
@@ -3237,6 +3254,7 @@ export function PatientClinicalTab({
 
       {/* ---- Allergien ---- */}
       <ClinicalSection<ClinicalWarning>
+        icon={Flower2}
         title={tx("Аллергии", "Allergien")}
         items={allergien}
         blank={() => blankWarning("allergie")}
@@ -3306,6 +3324,7 @@ export function PatientClinicalTab({
 
       {/* ---- CAVE ---- */}
       <ClinicalSection<ClinicalWarning>
+        icon={TriangleAlert}
         title={tx("CAVE", "CAVE")}
         items={cave}
         blank={() => blankWarning("cave")}
@@ -3450,6 +3469,7 @@ export function PatientClinicalTab({
 
       {/* ---- Therapie / Procedures (OPS) ---- */}
       <ClinicalSection<ClinicalProcedure>
+        icon={BriefcaseMedical}
         title={tx("Терапия / Процедуры", "Therapie / Eingriffe")}
         items={procedures}
         sectionClassName="bg-card"
@@ -3555,6 +3575,7 @@ export function PatientClinicalTab({
 
       {/* ---- Verlauf ---- */}
       <ClinicalSection<ClinicalVerlaufEntry>
+        icon={Activity}
         title={tx("Течение", "Verlauf")}
         sectionClassName="bg-card"
         rowClassName="border-border/40 bg-card"
@@ -3624,6 +3645,7 @@ export function PatientClinicalTab({
 
       {/* ---- Medications (Medikationsplan) ---- */}
       <ClinicalSection<ClinicalMedication>
+        icon={Pill}
         title={tx("Медикаменты", "Medikation")}
         editorClassName={MEDICATION_EDITOR_CLASS_NAME}
         editorHasSections
@@ -3726,6 +3748,7 @@ export function PatientClinicalTab({
 
       {/* ---- Examinations / Befunde ---- */}
       <ClinicalSection<ClinicalExamination>
+        icon={FileHeart}
         title={tx("Обследования", "Befunde")}
         sectionClassName="bg-card"
         rowClassName="border-border/40 bg-card"
@@ -3883,10 +3906,7 @@ export function PatientClinicalTab({
       <section className="rounded-xl border border-border/70 bg-card">
         <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
           <div className="flex items-center gap-2">
-            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-            <h3 className="text-sm font-semibold text-foreground">
-              {tx("Статус вакцинации", "Impfstatus")}
-            </h3>
+            <h3 className="text-sm font-semibold text-foreground"><SectionHeading icon={Syringe}>{tx("Статус вакцинации", "Impfstatus")}</SectionHeading></h3>
             {impfstatus?.updated_at ? (
               <span className="text-[11px] text-muted-foreground">
                 {formatAppDate(impfstatus.updated_at)}
@@ -3945,8 +3965,7 @@ export function PatientClinicalTab({
       <section className="rounded-xl border border-border/70 bg-card">
         <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
           <div className="flex items-center gap-2">
-            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-            <h3 className="text-sm font-semibold text-foreground">{tx("История показателей", "Vitalwerte-Verlauf")}</h3>
+            <h3 className="text-sm font-semibold text-foreground"><SectionHeading icon={Activity}>{tx("История показателей", "Vitalwerte-Verlauf")}</SectionHeading></h3>
             <Badge variant="outline" className="rounded-full border-border/60 bg-muted/25 text-foreground">
               {formatCount(lang, vitalsHistory.length, VITALS_ENTRY_WORDS)}
             </Badge>
@@ -3997,8 +4016,7 @@ export function PatientClinicalTab({
         <section className="rounded-xl border border-border/70 bg-card">
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
             <div className="flex items-center gap-2">
-              <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-              <h3 className="text-sm font-semibold text-foreground">{tx("История анализов", "Laborverlauf")}</h3>
+              <h3 className="text-sm font-semibold text-foreground"><SectionHeading icon={TestTubes}>{tx("История анализов", "Laborverlauf")}</SectionHeading></h3>
               <CountBadge>{formatCount(uiLang(tx), labResultGroups.length, PARAMETER_WORDS)}</CountBadge>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -4136,8 +4154,7 @@ export function PatientClinicalTab({
       <section className="rounded-xl border border-border/70 bg-card">
         <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
           <div className="flex items-center gap-2">
-            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-            <h3 className="text-sm font-semibold text-foreground">{tx("Риск-скоры", "Risikoscores")}</h3>
+            <h3 className="text-sm font-semibold text-foreground"><SectionHeading icon={Gauge}>{tx("Риск-скоры", "Risikoscores")}</SectionHeading></h3>
             <CountBadge>
               {formatCount(uiLang(tx), riskScores.length, SCORE_WORDS)}
             </CountBadge>

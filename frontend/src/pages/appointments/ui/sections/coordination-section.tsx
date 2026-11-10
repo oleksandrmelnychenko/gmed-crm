@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Network } from "lucide-react";
 
 import { EmptyCell, Section } from "@/components/ui-shell";
 import { appointmentSectionCardClassName } from "@/pages/appointments/appearance/surface-appearance";
@@ -32,7 +32,7 @@ function CoordinationLoadingState({
   text: string;
 }) {
   return (
-    <Section title={title}>
+    <Section icon={Network} title={title}>
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <LoaderCircle className="size-4 animate-spin" />
         {text}

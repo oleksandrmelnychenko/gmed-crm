@@ -1,3 +1,4 @@
+import { ListOrdered, Search } from "lucide-react";
 import { Suspense, lazy, type ComponentProps } from "react";
 
 import type { QueueSheetProps } from "@/pages/appointments/ui/sheets/queue-sheet";
@@ -67,6 +68,7 @@ export function AppointmentsSchedulerSurface({
     <Suspense
       fallback={
         <AppointmentPreviewSheetLoadingState
+          icon={ListOrdered}
           open={queueSheet.open}
           onOpenChange={queueSheet.onOpenChange}
           title={queueSheet.loadingTitle}
@@ -96,6 +98,7 @@ export function AppointmentsSchedulerSurface({
           <Suspense
             fallback={
               <AppointmentPreviewSheetLoadingState
+                icon={Search}
                 open={searchSheet.open}
                 onOpenChange={searchSheet.onOpenChange}
                 title={searchSheet.loadingTitle}

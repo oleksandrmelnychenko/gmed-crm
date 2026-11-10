@@ -1,5 +1,15 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { CheckCircle2, LoaderCircle, Pencil, Trash2 } from "lucide-react";
+import {
+  CheckCircle2,
+  FlaskConical,
+  Hash,
+  LoaderCircle,
+  MessageSquareText,
+  Pencil,
+  Ruler,
+  TestTubeDiagonal,
+  Trash2,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -586,7 +596,7 @@ export function PatientLabResultEditSheet({
   }
 
   return (
-    <PatientSheetScaffold presentation="dialog"
+    <PatientSheetScaffold icon={TestTubeDiagonal} presentation="dialog"
       open={open}
       onOpenChange={(nextOpen) => {
         if (!busy) onOpenChange(nextOpen);
@@ -616,7 +626,7 @@ export function PatientLabResultEditSheet({
     >
       {item && form ? (
         <>
-          <FormSection title={tx("Измерение", "Messung")}>
+          <FormSection icon={FlaskConical} title={tx("Измерение", "Messung")}>
             <div className="grid gap-3 md:grid-cols-2">
               <Field label={tx("Дата измерения", "Messdatum")} htmlFor="lab-correction-measured-at">
                 <Input
@@ -679,7 +689,7 @@ export function PatientLabResultEditSheet({
             </div>
           </FormSection>
 
-          <FormSection title={tx("Значение", "Wert")}>
+          <FormSection icon={Hash} title={tx("Значение", "Wert")}>
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_120px_minmax(0,1fr)]">
               <Field label={tx("Отображаемое значение", "Anzeigewert")} htmlFor="lab-correction-result-text">
                 <Input
@@ -735,7 +745,7 @@ export function PatientLabResultEditSheet({
             </Field>
           </FormSection>
 
-          <FormSection title={tx("Референс", "Referenz")}>
+          <FormSection icon={Ruler} title={tx("Референс", "Referenz")}>
             <Field label={tx("Референсный текст", "Referenztext")} htmlFor="lab-correction-reference-text">
               <Input
                 id="lab-correction-reference-text"
@@ -783,7 +793,7 @@ export function PatientLabResultEditSheet({
             </Field>
           </FormSection>
 
-          <FormSection title={tx("Причина исправления", "Korrekturgrund")}>
+          <FormSection icon={MessageSquareText} title={tx("Причина исправления", "Korrekturgrund")}>
             <Field
               label={tx("Комментарий для журнала", "Kommentar für das Protokoll")}
               htmlFor="lab-correction-note"
@@ -871,7 +881,7 @@ export function PatientLabResultDeleteSheet({
   }
 
   return (
-    <PatientSheetScaffold presentation="dialog"
+    <PatientSheetScaffold icon={Trash2} presentation="dialog"
       open={open}
       onOpenChange={(nextOpen) => {
         if (!busy) onOpenChange(nextOpen);

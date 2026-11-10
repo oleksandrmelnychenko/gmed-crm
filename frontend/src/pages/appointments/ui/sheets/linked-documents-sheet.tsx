@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { FileSearch, FolderOpen, LoaderCircle } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { DocumentsGrid } from "@/components/documents-grid";
 import {
   formatDocumentStatusLabel,
@@ -100,6 +101,7 @@ function LinkedDocumentsSheet({
   return (
     <>
       <AppointmentPreviewSheet
+        icon={FolderOpen}
         open={open}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) closePreview();
@@ -173,7 +175,7 @@ function LinkedDocumentsSheet({
         <DialogContent className="flex h-[86vh] w-[94vw] max-w-none flex-col overflow-hidden rounded-xl p-0 duration-0 data-closed:animate-none data-open:animate-none sm:w-[78vw] sm:max-w-[1500px]">
           <DialogHeader className="border-b border-border/70 px-5 py-4">
             <DialogTitle className="truncate text-base">
-              {preview?.title ?? t.documents_preview}
+              <SectionHeading icon={FileSearch}>{preview?.title ?? t.documents_preview}</SectionHeading>
             </DialogTitle>
             <DialogDescription className="truncate">
               {preview?.contentType ?? ""}

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { Timer } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { SectionHeading } from "@/components/ui/section-heading";
 import {
   Dialog,
   DialogContent,
@@ -93,7 +95,7 @@ export function IdleWarningDialog({ deadline, lang, onStay, onSignOut }: {
     <Dialog open={open} onOpenChange={(next) => { if (!next) onStay(); }} allowImplicitDismissal>
       <DialogContent showCloseButton={false} data-testid="idle-warning-dialog">
         <DialogHeader>
-          <DialogTitle>{text.title}</DialogTitle>
+          <DialogTitle><SectionHeading icon={Timer}>{text.title}</SectionHeading></DialogTitle>
           <DialogDescription>{text.body}</DialogDescription>
         </DialogHeader>
         <p role="timer" className="text-center text-2xl font-semibold tabular-nums">

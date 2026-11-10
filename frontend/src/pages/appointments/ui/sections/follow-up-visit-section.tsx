@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
@@ -9,7 +10,7 @@ import {
   type SetStateAction,
 } from "react";
 
-import { LoaderCircle, Plus } from "lucide-react";
+import { CalendarClock, LoaderCircle, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -608,8 +609,7 @@ function useAppointmentFollowUpVisitSectionContent({
     <section className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
       <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b sm:flex-nowrap sm:overflow-x-auto border-border/70 bg-card px-3 py-2">
         <span className="flex shrink-0 items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-          {t.appointments_follow_up_visit_title}
+              <SectionHeading icon={CalendarClock}>{t.appointments_follow_up_visit_title}</SectionHeading>
         </span>
         <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
         <Button
@@ -633,6 +633,7 @@ function useAppointmentFollowUpVisitSectionContent({
       />
 
       <AppointmentEditorSheet
+        icon={CalendarClock}
         open={sheetOpen}
         onOpenChange={setSheetOpen}
         title={t.appointments_follow_up_visit_title}

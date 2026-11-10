@@ -9,13 +9,7 @@ import {
   type FormEvent,
   type SetStateAction,
 } from "react";
-import {
-  CalendarClock,
-  LoaderCircle,
-  Mail,
-  Phone,
-  Save,
-} from "lucide-react";
+import { CalendarClock, ContactRound, IdCard, LoaderCircle, Mail, Phone, Save } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -216,7 +210,7 @@ function PatientProfileSection({
 
   return (
     <div className="space-y-3">
-      <PatientFormSection title={l("patients_identification")}>
+      <PatientFormSection icon={IdCard} title={l("patients_identification")}>
         <dl className="grid gap-3 sm:grid-cols-3">
           <div className="space-y-1.5">
             <dt className="text-xs text-muted-foreground">{t.patients_birth_date}</dt>
@@ -584,7 +578,7 @@ function PatientDetailSheet({
   }
 
   return (
-    <PatientSheetScaffold requireChanges dirty={dirty}
+    <PatientSheetScaffold icon={ContactRound} requireChanges dirty={dirty}
       open={open}
       onOpenChange={onOpenChange}
       title={

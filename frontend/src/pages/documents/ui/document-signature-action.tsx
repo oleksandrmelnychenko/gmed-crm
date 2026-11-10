@@ -1,6 +1,6 @@
 import { SectionHeading } from "@/components/ui/section-heading";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
-import { LoaderCircle, PenTool, ScanText } from "lucide-react";
+import {FileText, FileCheck2,  LoaderCircle, PenTool, ScanText } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
@@ -170,8 +170,8 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange, o
         <AdminSectionTitle icon={ScanText}>{relatedPreview?.kind === "review" ? tx("Приложение для ознакомления", "Anlage zur Kenntnisnahme") : relatedPreview?.kind === "signing" ? tx("Документ пакета на подпись", "Dokument des Signaturpakets") : displayedResult ? `${displayedResult.test_mode ? "TEST · " : ""}${tx("Подписанный PDF", "Signiertes PDF")}` : packageDocuments.length > 1 ? `${tx("Пакет на подпись", "Signaturpaket")} · ${packageDocuments.length} PDF` : tx("Документ для подписи", "Dokument zur Unterschrift")}</AdminSectionTitle>
         {relatedPreview ? <Button type="button" size="sm" variant="outline" onClick={() => setRelatedPreview(null)}>{hasPackage ? tx("Ко всему пакету", "Zum gesamten Paket") : tx("К основному документу", "Zum Hauptdokument")}</Button> : null}
         {availableResult && !relatedPreview ? <div className="flex w-full flex-wrap gap-2" aria-label={tx("Версия PDF", "PDF-Version")}>
-          <Button type="button" size="sm" variant={displayedResult ? "outline" : "default"} aria-pressed={!displayedResult} onClick={() => setShowOriginal(true)}>{tx("Исходный PDF", "Original-PDF")}</Button>
-          <Button type="button" size="sm" variant={displayedResult ? "default" : "outline"} aria-pressed={!!displayedResult} onClick={() => setShowOriginal(false)}>{availableResult.test_mode ? "TEST · " : ""}{tx("Подписанный PDF", "Signiertes PDF")}</Button>
+          <Button type="button" size="sm" variant="ghost" data-workspace-tab aria-pressed={!displayedResult} onClick={() => setShowOriginal(true)}><FileText aria-hidden="true" />{tx("Исходный PDF", "Original-PDF")}</Button>
+          <Button type="button" size="sm" variant="ghost" data-workspace-tab aria-pressed={!!displayedResult} onClick={() => setShowOriginal(false)}><FileCheck2 aria-hidden="true" />{availableResult.test_mode ? "TEST · " : ""}{tx("Подписанный PDF", "Signiertes PDF")}</Button>
         </div> : null}
       </div>
       {!documentId || error ? <div className="space-y-3 p-4">

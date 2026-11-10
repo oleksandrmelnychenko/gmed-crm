@@ -1,5 +1,6 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { CheckCircle2, LoaderCircle, Undo2 } from "lucide-react";
+import { type LucideIcon, HandCoins, Banknote, SquarePen, History, CheckCircle2, LoaderCircle, Undo2 } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
@@ -154,11 +155,11 @@ function formatDate(value: string) {
 const paymentFieldClassName = "grid min-w-0 gap-1 text-xs font-medium text-muted-foreground [&>span:first-child]:font-mono";
 const paymentInputClassName = "h-9 min-w-0 bg-field font-normal text-foreground";
 
-function SettlementSection({ title, action, children }: { title: ReactNode; action?: ReactNode; children: ReactNode }) {
+function SettlementSection({ icon, title, action, children }: { icon: LucideIcon; title: ReactNode; action?: ReactNode; children: ReactNode }) {
   return (
     <section className="min-w-0 overflow-hidden rounded-lg bg-card">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
-        <AdminSectionTitle>{title}</AdminSectionTitle>
+        <AdminSectionTitle icon={icon}>{title}</AdminSectionTitle>
         {action}
       </div>
       {children}
@@ -378,7 +379,7 @@ export function ProviderSettlementDialog({
     <Dialog open={Boolean(liability)} dirty={paymentDirty || reversalDirty || correctionDirty} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-h-[92dvh] sm:max-w-2xl sm:pb-0">
         <DialogHeader className="shrink-0 gap-1.5 border-b border-border/70 bg-muted/20 px-4 py-3.5 pr-12 sm:px-5 sm:pr-14">
-          <DialogTitle className="flex min-w-0 items-start gap-2 text-base"><span className="min-w-0 break-words">{text.title}</span></DialogTitle>
+          <DialogTitle className="flex min-w-0 items-start gap-2 text-base"><SectionHeading icon={HandCoins}>{text.title}</SectionHeading></DialogTitle>
           <DialogDescription className="break-words text-xs leading-5">
             <span className="font-mono text-foreground">{settlement?.external_invoice_number ?? liability?.external_invoice_number}</span> · {text.description}
           </DialogDescription>
@@ -408,7 +409,7 @@ export function ProviderSettlementDialog({
             </dl>
 
             {canPay ? (
-              <SettlementSection title={text.payment}>
+              <SettlementSection icon={Banknote} title={text.payment}>
               <form onSubmit={handlePayment} onChangeCapture={() => setPaymentDirty(true)}>
                 <div className="space-y-2.5 p-3">
                 {paymentError ? <ShellBanner tone="error">{paymentError}</ShellBanner> : null}
@@ -467,7 +468,7 @@ export function ProviderSettlementDialog({
             ) : null}
 
             {!readOnly && liability && canCorrectUnassignedInvoice({ ...liability, company_paid_gross: settlement.company_paid_gross, status: settlement.status, paid_by: settlement.paid_by }) ? (
-              <SettlementSection title={text.correction}>
+              <SettlementSection icon={SquarePen} title={text.correction}>
                 <UnassignedInvoiceCorrection
                   key={liability.id}
                   liability={liability}
@@ -481,7 +482,7 @@ export function ProviderSettlementDialog({
               </SettlementSection>
             ) : null}
 
-            <SettlementSection title={text.history} action={<Badge variant="secondary">{(settlement.transactions ?? []).length}</Badge>}>
+            <SettlementSection icon={History} title={text.history} action={<Badge variant="secondary">{(settlement.transactions ?? []).length}</Badge>}>
               {(settlement.transactions ?? []).length === 0 ? (
                 <p className="px-3 py-3 text-center text-xs text-muted-foreground">{text.noHistory}</p>
               ) : (
@@ -521,7 +522,7 @@ export function ProviderSettlementDialog({
             </SettlementSection>
 
             {reversal ? (
-              <SettlementSection title={text.reverse} action={<Badge variant="outline" className="text-rose-700 dark:text-rose-400">{formatMoney(reversal.amount_gross, reversal.currency, locale)}</Badge>}>
+              <SettlementSection icon={Undo2} title={text.reverse} action={<Badge variant="outline" className="text-rose-700 dark:text-rose-400">{formatMoney(reversal.amount_gross, reversal.currency, locale)}</Badge>}>
               <form onSubmit={handleReversal} onChangeCapture={() => setReversalDirty(true)}>
                 <div className="space-y-2.5 p-3">
                 {reversalError ? <ShellBanner tone="error">{reversalError}</ShellBanner> : null}

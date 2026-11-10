@@ -2,12 +2,14 @@ import { type LucideIcon } from "lucide-react";
 import type { FormEvent, ReactNode } from "react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 /** Opt-in form layout matching the clinical dialogs in the lead wizard. */
 export function AdminDialogScaffold({
   title,
+  icon,
   description,
   children,
   footer,
@@ -18,6 +20,7 @@ export function AdminDialogScaffold({
   testId,
 }: {
   title: ReactNode;
+  icon?: LucideIcon;
   description?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
@@ -30,7 +33,7 @@ export function AdminDialogScaffold({
   const content = (
     <>
       <DialogHeader className="shrink-0 border-b border-border/50 bg-card px-4 py-3 pr-14 text-left">
-        <DialogTitle className="text-[15px] font-semibold">{title}</DialogTitle>
+        <DialogTitle className="text-[15px] font-semibold">{icon ? <SectionHeading icon={icon}>{title}</SectionHeading> : title}</DialogTitle>
         {description ? <DialogDescription className="text-xs">{description}</DialogDescription> : null}
       </DialogHeader>
       <div className={cn("min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-muted px-3 py-3 sm:px-4", bodyClassName)}>

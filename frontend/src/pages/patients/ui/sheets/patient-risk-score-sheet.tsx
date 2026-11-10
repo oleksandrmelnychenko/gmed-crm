@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { LoaderCircle } from "lucide-react";
+import { ClipboardCheck, Gauge, LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -178,7 +178,7 @@ export function PatientRiskScoreSheet({
   }
 
   return (
-    <PatientSheetScaffold presentation="dialog" requireChanges={Boolean(initialScore?.id)}
+    <PatientSheetScaffold icon={Gauge} presentation="dialog" requireChanges={Boolean(initialScore?.id)}
       open={open}
       onOpenChange={onOpenChange}
       maxWidthClassName="sm:max-w-[540px]"
@@ -207,7 +207,7 @@ export function PatientRiskScoreSheet({
         </>
       }
     >
-      <FormSection title={l("patients_score")}>
+      <FormSection icon={Gauge} title={l("patients_score")}>
         <div className="grid gap-3 md:grid-cols-2">
           <FormField
             label={l("patients_computed_at")}
@@ -269,7 +269,7 @@ export function PatientRiskScoreSheet({
         </div>
       </FormSection>
 
-      <FormSection title={l("patients_interpretation")}>
+      <FormSection icon={ClipboardCheck} title={l("patients_interpretation")}>
         <FormField label={l("patients_source")} htmlFor="patient-risk-score-source">
           <Input
             id="patient-risk-score-source"

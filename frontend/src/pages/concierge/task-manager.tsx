@@ -1,5 +1,10 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useMemo, useState } from "react";
 import {
+  Inbox,
+  ClipboardCheck,
+  CircleCheck,
+  CircleX,
   Archive,
   ArchiveRestore,
   ArrowUpRight,
@@ -225,6 +230,15 @@ const copy = {
 } as const;
 
 const statuses = ["open", "in_progress", "on_hold", "review", "completed", "cancelled"] as const;
+
+const statusIcons = {
+  open: Inbox,
+  in_progress: Play,
+  on_hold: Pause,
+  review: ClipboardCheck,
+  completed: CircleCheck,
+  cancelled: CircleX,
+} as const;
 
 function dateKey(date: Date) {
   return taskCalendarDayKey(date);
@@ -614,6 +628,7 @@ export function ConciergeTaskManager({
     <section className="space-y-3" aria-label={labels.title}>
       {canManageTeam ? (
         <Section
+          icon={UsersRound}
           title={labels.teamWorkload}
           className="rounded-lg border border-border/70 bg-card p-3"
           accessory={(
@@ -638,7 +653,7 @@ export function ConciergeTaskManager({
                 type="button"
                 role="tab"
                 size="sm"
-                variant={filters.assignee === "all" ? "default" : "ghost"}
+                variant="ghost" data-workspace-tab
                 aria-selected={filters.assignee === "all"}
                 className="h-9 shrink-0 rounded-md px-3 text-xs"
                 onClick={() => setFilters((current) => ({ ...current, assignee: "all" }))}
@@ -649,7 +664,7 @@ export function ConciergeTaskManager({
                   className={cn(
                     "rounded-full px-1.5 text-[10px] tabular-nums",
                     filters.assignee === "all"
-                      ? "border-white/25 bg-white/15 text-primary-foreground"
+                      ? "border-border bg-background text-foreground"
                       : "border-border/70 bg-background text-muted-foreground",
                   )}
                 >
@@ -662,7 +677,7 @@ export function ConciergeTaskManager({
                 type="button"
                 role="tab"
                 size="sm"
-                variant={filters.assignee === assignee.id ? "default" : "ghost"}
+                variant="ghost" data-workspace-tab
                 aria-selected={filters.assignee === assignee.id}
                 aria-label={`${assignee.name}. ${labels.active}: ${assigneeActive}. ${labels.today}: ${today}. ${labels.overdue}: ${assigneeOverdue}.`}
                 className="h-9 shrink-0 rounded-md px-3 text-xs"
@@ -675,7 +690,7 @@ export function ConciergeTaskManager({
                   className={cn(
                     "rounded-full px-1.5 text-[10px] tabular-nums",
                     filters.assignee === assignee.id
-                      ? "border-white/25 bg-white/15 text-primary-foreground"
+                      ? "border-border bg-background text-foreground"
                       : "border-border/70 bg-background text-muted-foreground",
                   )}
                 >
@@ -719,7 +734,7 @@ export function ConciergeTaskManager({
       ) : null}
 
       <div className="mx-auto grid w-full grid-cols-2 gap-1 sm:flex sm:w-fit">
-        {([ ["board", ListChecks, labels.board], ["list", List, labels.list], ["calendar", CalendarDays, labels.calendar], ["timeline", ChartNoAxesGantt, labels.timeline] ] as const).map(([value, Icon, label]) => <Button key={value} type="button" size="sm" variant={view === value ? "default" : "ghost"} aria-pressed={view === value} className="h-9 min-w-0 rounded-md px-2 text-xs sm:h-8 sm:px-3" onClick={() => setView(value)}><Icon />{label}</Button>)}
+        {([ ["board", ListChecks, labels.board], ["list", List, labels.list], ["calendar", CalendarDays, labels.calendar], ["timeline", ChartNoAxesGantt, labels.timeline] ] as const).map(([value, Icon, label]) => <Button key={value} type="button" size="sm" variant="ghost" data-workspace-tab aria-pressed={view === value} className="h-9 min-w-0 rounded-md px-2 text-xs sm:h-8 sm:px-3" onClick={() => setView(value)}><Icon />{label}</Button>)}
       </div>
 
       {filtered.length === 0 && view !== "calendar" ? <div className="rounded-lg bg-card px-4 py-8 text-center text-sm text-muted-foreground">{hasCustomFilters ? labels.noTasks : labels.noActiveTasks}</div> : null}
@@ -728,7 +743,7 @@ export function ConciergeTaskManager({
         <div className={cn("grid items-start gap-3 md:grid-cols-2", visibleStatuses.length > 2 && "xl:grid-cols-3 2xl:grid-cols-6")}>
           {visibleStatuses.map((status) => {
             const rows = filtered.filter((task) => task.status === status);
-            return <section key={status} data-testid={`task-column-${status}`} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} parentTask={tasksById.get(task.parent_task_id ?? "")} subCount={subCounts.get(task.id)} assignedToRole={assigneeRoles.get(task.assigned_to)} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} canAddExpense={canAddExpenseToTask(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onExpense={onExpense} onStatusChange={onStatusChange} onWorkflow={(item) => setWorkflowTaskId(item.id)} />)}</div></section>;
+            return <section key={status} data-testid={`task-column-${status}`} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold text-muted-foreground"><SectionHeading icon={statusIcons[status]}>{labels[status]}</SectionHeading></h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} parentTask={tasksById.get(task.parent_task_id ?? "")} subCount={subCounts.get(task.id)} assignedToRole={assigneeRoles.get(task.assigned_to)} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} canAddExpense={canAddExpenseToTask(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onExpense={onExpense} onStatusChange={onStatusChange} onWorkflow={(item) => setWorkflowTaskId(item.id)} />)}</div></section>;
           })}
         </div>
       ) : null}

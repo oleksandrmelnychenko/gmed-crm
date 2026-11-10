@@ -1,5 +1,6 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { LoaderCircle } from "lucide-react";
+import { ArrowRightLeft, LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -316,7 +317,7 @@ export function CreditBalancePanel({
         <DialogContent className="sm:max-w-lg" data-testid="credit-transfer-recipient-confirmation">
           <DialogHeader>
             <DialogTitle>
-              {lang === "de" ? "Guthaben auf einen anderen Empfänger umbuchen?" : "Перенести переплату на счёт другого получателя?"}
+              <SectionHeading icon={ArrowRightLeft}>{lang === "de" ? "Guthaben auf einen anderen Empfänger umbuchen?" : "Перенести переплату на счёт другого получателя?"}</SectionHeading>
             </DialogTitle>
             <DialogDescription>
               {pendingMismatch

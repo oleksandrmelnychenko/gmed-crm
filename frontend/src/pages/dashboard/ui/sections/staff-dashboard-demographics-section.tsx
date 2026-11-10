@@ -1,3 +1,4 @@
+import { Globe, Cake, VenusAndMars, ShieldCheck, Languages, UsersRound } from "lucide-react";
 import {
   genderToChart,
   insuranceToChart,
@@ -25,12 +26,14 @@ export function StaffDashboardDemographicsSection({
   return (
     <>
       <SectionHeader
+        icon={UsersRound}
         title={tr.dash_sec_demographics ?? tr.common_unknown}
         hint={tr.dash_sec_demographics_hint ?? tr.common_unknown}
       />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard
+          icon={Globe}
           title={tr.dash_by_country ?? tr.common_unknown}
           hint={`${demographics?.total ?? 0} ${(tr.patients_title ?? tr.common_unknown).toLowerCase()}`}
         >
@@ -45,6 +48,7 @@ export function StaffDashboardDemographicsSection({
         </ChartCard>
 
         <ChartCard
+          icon={Cake}
           title={tr.dash_by_age ?? tr.common_unknown}
           hint={tr.dash_by_age_hint ?? tr.common_unknown}
         >
@@ -61,7 +65,7 @@ export function StaffDashboardDemographicsSection({
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
-        <ChartCard title={tr.dash_by_gender ?? tr.common_unknown} compact>
+        <ChartCard icon={VenusAndMars} title={tr.dash_by_gender ?? tr.common_unknown} compact>
           <MiniDonut
             loading={sectionsLoading}
             data={genderToChart(demographics?.by_gender, tr)}
@@ -69,7 +73,7 @@ export function StaffDashboardDemographicsSection({
           />
         </ChartCard>
 
-        <ChartCard title={tr.dash_insurance_mix ?? tr.common_unknown} compact>
+        <ChartCard icon={ShieldCheck} title={tr.dash_insurance_mix ?? tr.common_unknown} compact>
           <MiniDonut
             loading={sectionsLoading}
             data={insuranceToChart(demographics?.by_insurance, tr)}
@@ -77,7 +81,7 @@ export function StaffDashboardDemographicsSection({
           />
         </ChartCard>
 
-        <ChartCard title={tr.dash_top_languages ?? tr.common_unknown} compact>
+        <ChartCard icon={Languages} title={tr.dash_top_languages ?? tr.common_unknown} compact>
           <HorizontalBars
             loading={sectionsLoading}
             data={(demographics?.top_languages ?? []).map((language) => ({

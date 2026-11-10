@@ -61,7 +61,7 @@ export function DocumentWorkspaceNav({
     <nav
       data-workspace-tabs="documents"
       aria-label={t.nav_documents}
-      className="mx-auto flex w-fit max-w-full items-center justify-center gap-1 overflow-x-auto p-1"
+      className="mx-auto flex w-fit max-w-full items-center justify-start gap-1 overflow-x-auto p-1"
     >
       {items.map((item) => {
         const isActive = currentKey === item.key;
@@ -71,6 +71,7 @@ export function DocumentWorkspaceNav({
           <StaffLink
             key={item.key}
             to={item.to}
+            data-workspace-tab
             aria-current={isActive ? "page" : undefined}
             className={cn(
               buttonVariants({
@@ -78,9 +79,6 @@ export function DocumentWorkspaceNav({
                 variant: "ghost",
               }),
               "h-8 min-w-fit rounded-lg px-3 text-[13px] font-medium",
-              isActive
-                ? "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground"
-                : "text-foreground hover:bg-muted",
             )}
           >
             <Icon className="size-4 shrink-0" strokeWidth={1.8} />

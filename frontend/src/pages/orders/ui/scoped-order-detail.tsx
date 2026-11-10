@@ -1,5 +1,6 @@
-import { CheckCircle2, LoaderCircle } from "lucide-react";
+import { BriefcaseMedical, CheckCircle2, LoaderCircle } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui-shell";
 import { t as translationsFor, type Lang } from "@/lib/i18n";
@@ -124,7 +125,7 @@ export function ScopedOrderDetail({
       </section>
       <section className="overflow-hidden rounded-xl border border-border/70 bg-card">
         <h2 className="border-b border-border/70 bg-muted/20 px-4 py-2.5 text-[13px] font-semibold tracking-tight">
-          {labels.services}
+          <SectionHeading icon={BriefcaseMedical}>{labels.services}</SectionHeading>
         </h2>
         {detail.leistungen.length === 0 ? (
           <p className="p-5 text-center text-xs text-muted-foreground">{labels.empty}</p>

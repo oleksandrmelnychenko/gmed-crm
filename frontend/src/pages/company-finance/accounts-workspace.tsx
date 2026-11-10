@@ -1,5 +1,12 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useMemo, useState, type FormEvent } from "react";
 import {
+  ArrowLeftRight,
+  CornerUpLeft,
+  SquarePen,
+  ListPlus,
+  SlidersHorizontal,
+  History,
   ArrowRight,
   ArrowRightLeft,
   Banknote,
@@ -710,14 +717,14 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
         })}
       </div>
 
-      <DataTableSurface toolbarStart={<span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />{text.internalTransfers}</span>} rows={transferRows} columns={transferColumns} rowId={(row) => row.id} storageKey="company-finance-transfers" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} emptyState={text.noTransfers} pagination={{ pageSize: 25 }} />
+      <DataTableSurface toolbarStart={<SectionHeading icon={ArrowRightLeft}>{text.internalTransfers}</SectionHeading>} rows={transferRows} columns={transferColumns} rowId={(row) => row.id} storageKey="company-finance-transfers" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} emptyState={text.noTransfers} pagination={{ pageSize: 25 }} />
 
-      <DataTableSurface toolbarStart={<span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[var(--dot,var(--heading-marker))]" />{text.history}</span>} rows={payload.adjustments} columns={adjustmentColumns} rowId={(row) => row.id} storageKey="company-finance-adjustments" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} emptyState={text.noAdjustments} pagination={{ pageSize: 25 }} />
+      <DataTableSurface toolbarStart={<SectionHeading icon={History}>{text.history}</SectionHeading>} rows={payload.adjustments} columns={adjustmentColumns} rowId={(row) => row.id} storageKey="company-finance-adjustments" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} emptyState={text.noAdjustments} pagination={{ pageSize: 25 }} />
 
       <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{text.transferTitle}</DialogTitle>
+            <DialogTitle><SectionHeading icon={ArrowLeftRight}>{text.transferTitle}</SectionHeading></DialogTitle>
             <DialogDescription>{text.transferDescription}</DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={handleTransfer}>
@@ -801,7 +808,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
       <Dialog open={Boolean(reverseTransfer)} onOpenChange={(open) => { if (!open) setReverseTransfer(null); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{text.transferReversalTitle}</DialogTitle>
+            <DialogTitle><SectionHeading icon={CornerUpLeft}>{text.transferReversalTitle}</SectionHeading></DialogTitle>
             <DialogDescription>{text.transferReversalDescription}</DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={handleReverseTransfer}>
@@ -826,7 +833,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
 
       <Dialog open={editAccount !== null} onOpenChange={(open) => { if (!open) setEditAccount(null); }}>
         <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle>{text.editTitle}</DialogTitle><DialogDescription>{text.editDescription}</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle><SectionHeading icon={SquarePen}>{text.editTitle}</SectionHeading></DialogTitle><DialogDescription>{text.editDescription}</DialogDescription></DialogHeader>
           <form className="space-y-4" onSubmit={handleEdit}>
             {editError ? <ShellBanner tone="error">{editError}</ShellBanner> : null}
             <label className="block space-y-1.5 text-sm"><span>{text.name}</span><Input required maxLength={120} value={editForm.name} onChange={(event) => setEditForm((current) => ({ ...current, name: event.target.value }))} /></label>
@@ -844,7 +851,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
 
       <Dialog open={deleteAccount !== null} onOpenChange={(open) => { if (!open) setDeleteAccount(null); }}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>{text.deleteTitle}</DialogTitle><DialogDescription>{text.deleteDescription}</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle><SectionHeading icon={Trash2}>{text.deleteTitle}</SectionHeading></DialogTitle><DialogDescription>{text.deleteDescription}</DialogDescription></DialogHeader>
           {deleteError ? <ShellBanner tone="error">{deleteError}</ShellBanner> : null}
           <p className="text-sm font-medium">{deleteAccount?.name}</p>
           <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setDeleteAccount(null)}>{text.cancel}</Button><Button type="button" variant="destructive" data-action="write" disabled={deleteBusy} onClick={() => void handleDelete()}>{text.delete}</Button></div>
@@ -853,7 +860,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle>{text.createTitle}</DialogTitle><DialogDescription>{text.createDescription}</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle><SectionHeading icon={ListPlus}>{text.createTitle}</SectionHeading></DialogTitle><DialogDescription>{text.createDescription}</DialogDescription></DialogHeader>
           <form className="space-y-4" onSubmit={handleCreate}>
             {createError ? <ShellBanner tone="error">{createError}</ShellBanner> : null}
             <label className="block space-y-1.5 text-sm"><span>{text.name}</span><Input required maxLength={120} value={createForm.name} onChange={(event) => setCreateForm((current) => ({ ...current, name: event.target.value }))} /></label>
@@ -871,7 +878,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
 
       <Dialog open={Boolean(adjustAccount)} onOpenChange={(open) => { if (!open) setAdjustAccount(null); }}>
         <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle>{text.adjustmentTitle}</DialogTitle><DialogDescription>{adjustAccount ? `${adjustAccount.name} · ${text.currentBalance}: ${money(adjustAccount.current_balance)}` : ""}</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle><SectionHeading icon={SlidersHorizontal}>{text.adjustmentTitle}</SectionHeading></DialogTitle><DialogDescription>{adjustAccount ? `${adjustAccount.name} · ${text.currentBalance}: ${money(adjustAccount.current_balance)}` : ""}</DialogDescription></DialogHeader>
           <form className="space-y-4" onSubmit={handleAdjustment}>
             {adjustError ? <ShellBanner tone="error">{adjustError}</ShellBanner> : null}
             <div className="grid gap-3 sm:grid-cols-2">
@@ -891,7 +898,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
 
       <Dialog open={Boolean(reverseAdjustment)} onOpenChange={(open) => { if (!open) setReverseAdjustment(null); }}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>{text.reversalTitle}</DialogTitle><DialogDescription>{reverseAdjustment ? `${reverseAdjustment.account_name} · ${money(reverseAdjustment.amount)}` : ""}</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle><SectionHeading icon={Undo2}>{text.reversalTitle}</SectionHeading></DialogTitle><DialogDescription>{reverseAdjustment ? `${reverseAdjustment.account_name} · ${money(reverseAdjustment.amount)}` : ""}</DialogDescription></DialogHeader>
           <form className="space-y-4" onSubmit={handleReverse}>
             {reverseError ? <ShellBanner tone="error">{reverseError}</ShellBanner> : null}
             <label className="block space-y-1.5 text-sm"><span>{text.date}</span><Input required type="date" value={reverseForm.effectiveOn} onChange={(event) => setReverseForm((current) => ({ ...current, effectiveOn: event.target.value }))} /></label>

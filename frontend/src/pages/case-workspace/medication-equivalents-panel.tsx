@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { CountBadge } from "@/components/ui-shell";
 import type { GermanEquivalent } from "@/lib/api/clinical";
 import { useLang, type Translations } from "@/lib/i18n";
-import { Search } from "lucide-react";
+import { PillBottle, Search } from "lucide-react";
 
 import { Panel } from "./primitives";
 
@@ -52,6 +52,7 @@ export function MedicationEquivalentsPanel({
 
   return (
     <Panel
+      icon={PillBottle}
       title={t.cases_medications_equivalents_title}
       action={
         <>

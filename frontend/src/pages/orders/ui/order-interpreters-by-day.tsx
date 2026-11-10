@@ -336,6 +336,7 @@ export function OrderInterpretersByDay({
       </div>
 
       <AppointmentEditorSheet
+        icon={Languages}
         open={sheet !== null}
         onOpenChange={(open) => {
           if (!open && !busy) setSheet(null);

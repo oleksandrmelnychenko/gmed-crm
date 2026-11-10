@@ -5,7 +5,7 @@ import {
   type FormEvent,
   type SetStateAction,
 } from "react";
-import { LoaderCircle, Plus } from "lucide-react";
+import { LoaderCircle, Plus, UserRoundPlus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Banner } from "@/components/ui-shell";
@@ -213,6 +213,7 @@ function CreatePatientSheet({
 
   return (
     <PatientSheetScaffold
+      icon={UserRoundPlus}
       open={open}
       onOpenChange={onOpenChange}
       title={dictionary.patients_create}

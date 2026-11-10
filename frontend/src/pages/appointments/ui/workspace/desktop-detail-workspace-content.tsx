@@ -1,5 +1,5 @@
 import { Suspense, lazy, memo, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { CalendarDays, LoaderCircle } from "lucide-react";
 
 import { Banner, Section } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
@@ -73,7 +73,7 @@ const LazyServicesSection = lazy(async () => {
 
 function loadingSection(title: string, text: string) {
   return (
-    <Section title={title}>
+    <Section icon={CalendarDays} title={title}>
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <LoaderCircle className="size-4 animate-spin" />
         {text}

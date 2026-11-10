@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import {
+  ContactRound,
+  Paperclip,
+  History,
+  Wallet,
+  Scale,
+  ReceiptText,
   AlertCircle,
   Camera,
   Download,
@@ -403,7 +409,7 @@ export function ConciergeExpenseReceiptDialog({
     }}>
       <DialogContent className={conciergeDialogContentClassName}>
         <ConciergeDialogHeader
-          tone="plain"
+          icon={ReceiptText}
           title={labels.title}
           meta={<Badge variant="outline" className="rounded-full font-mono text-[10px]">{service.patient_pid}</Badge>}
         />
@@ -417,7 +423,7 @@ export function ConciergeExpenseReceiptDialog({
             ) : (
               <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,0.92fr)_minmax(20rem,1.08fr)]">
                 <div className="space-y-3">
-                  <ConciergeProfileDialogSection title={labels.context}>
+                  <ConciergeProfileDialogSection icon={ContactRound} title={labels.context}>
                     <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
                       <span className="text-xs text-muted-foreground">{labels.patient}</span>
                       <div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">
@@ -431,7 +437,7 @@ export function ConciergeExpenseReceiptDialog({
                     </div>
                   </ConciergeProfileDialogSection>
 
-                  <ConciergeProfileDialogSection title={labels.receipt}>
+                  <ConciergeProfileDialogSection icon={Paperclip} title={labels.receipt}>
                     <input ref={cameraInputRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={chooseFile} />
                     <input ref={fileInputRef} className="sr-only" type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" onChange={chooseFile} />
                     <div className="flex flex-wrap items-center gap-2">
@@ -484,7 +490,7 @@ export function ConciergeExpenseReceiptDialog({
                     ) : null}
                   </ConciergeProfileDialogSection>
 
-                  <ConciergeProfileDialogSection title={labels.history}>
+                  <ConciergeProfileDialogSection icon={History} title={labels.history}>
                     {expenses.length === 0 ? <p className="px-3 py-3 text-center text-xs text-muted-foreground">{labels.historyEmpty}</p> : (
                       <ol className="divide-y divide-border/60">
                         {expenses.map((item) => (
@@ -510,7 +516,7 @@ export function ConciergeExpenseReceiptDialog({
                 </div>
 
                 <div className="space-y-3 lg:sticky lg:top-0">
-                  <ConciergeProfileDialogSection title={labels.expense}>
+                  <ConciergeProfileDialogSection icon={Wallet} title={labels.expense}>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <ConciergeField label={labels.vendor} className="sm:col-span-2">
                         <NativeComboboxSelect
@@ -584,7 +590,7 @@ export function ConciergeExpenseReceiptDialog({
                     </div>
                   </ConciergeProfileDialogSection>
 
-                  <ConciergeProfileDialogSection title={labels.consequence}>
+                  <ConciergeProfileDialogSection icon={Scale} title={labels.consequence}>
                     <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">{labels.pendingWarning}</p>
                     <dl className="mt-2 divide-y divide-border/60">
                       {([

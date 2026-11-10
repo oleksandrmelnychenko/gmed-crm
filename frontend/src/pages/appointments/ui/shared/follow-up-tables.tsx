@@ -1,3 +1,5 @@
+import { BellRing, ListChecks, type LucideIcon } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useMemo, type ReactNode } from "react";
 
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -49,6 +51,7 @@ function taskPriorityChipClass(priority: string) {
 }
 
 function followUpTableToolbarStart(
+  icon: LucideIcon,
   title: string | undefined,
   extra?: ReactNode,
 ) {
@@ -57,8 +60,7 @@ function followUpTableToolbarStart(
     <>
       {title ? (
         <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-          {title}
+          <SectionHeading icon={icon}>{title}</SectionHeading>
         </span>
       ) : null}
       {extra}
@@ -213,7 +215,7 @@ export function AppointmentRemindersTable({
       rowId={(item) => item.id}
       dictionary={tr}
       emptyState={<EmptyCell>{emptyText}</EmptyCell>}
-      toolbarStart={followUpTableToolbarStart(title, toolbarExtra)}
+      toolbarStart={followUpTableToolbarStart(BellRing, title, toolbarExtra)}
       toolbarAfter={followUpTablePager(pagination, tr)}
       rowActions={rowActions}
       rowActionsWidth={rowActionsWidth}
@@ -368,7 +370,7 @@ export function AppointmentTasksTable({
       rowId={(item) => item.id}
       dictionary={tr}
       emptyState={<EmptyCell>{emptyText}</EmptyCell>}
-      toolbarStart={followUpTableToolbarStart(title, toolbarExtra)}
+      toolbarStart={followUpTableToolbarStart(ListChecks, title, toolbarExtra)}
       toolbarAfter={followUpTablePager(pagination, tr)}
       rowActions={rowActions}
       rowActionsWidth={rowActionsWidth}

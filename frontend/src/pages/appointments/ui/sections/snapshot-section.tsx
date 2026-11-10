@@ -1,3 +1,5 @@
+import { ClipboardList } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { memo } from "react";
 
 import { useLang } from "@/lib/i18n";
@@ -72,10 +74,7 @@ function AppointmentSnapshotSection({
   return (
     <section className="space-y-2.5 rounded-xl p-3.5 border border-border/50 bg-card/40">
       <div className="flex items-center gap-2">
-        <div className="size-2 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-        <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-          {summaryTitle}
-        </h3>
+        <h3 className="text-[13px] font-semibold tracking-tight text-foreground"><SectionHeading icon={ClipboardList}>{summaryTitle}</SectionHeading></h3>
       </div>
       <div className="mt-5 grid gap-x-14 gap-y-3 lg:grid-cols-2">
         {snapshotCards.map((card, index) => (

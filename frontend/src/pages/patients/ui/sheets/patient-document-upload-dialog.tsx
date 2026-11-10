@@ -1,3 +1,4 @@
+import { FileText, Link2, NotebookPen, Upload } from "lucide-react";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   memo,
@@ -178,6 +179,7 @@ function PatientDocumentUploadDialog({
 
   return (
     <PatientSheetScaffold
+      icon={Upload}
       open={open}
       onOpenChange={onOpenChange}
       width="form-heavy"
@@ -273,7 +275,7 @@ function DocumentFileSection({
   setForm,
 }: DocumentFileSectionProps) {
   return (
-    <FormSection title={l("patients_file")}>
+    <FormSection icon={Upload} title={l("patients_file")}>
       <div className="grid gap-3 md:grid-cols-2">
         <FormField label={copy.fileLabel} htmlFor="document-file">
           <FilePicker
@@ -334,7 +336,7 @@ function DocumentDetailsSection({
   statusLabel,
 }: DocumentDetailsSectionProps) {
   return (
-    <FormSection title={l("patients_document")}>
+    <FormSection icon={FileText} title={l("patients_document")}>
       <div className="grid gap-3 md:grid-cols-2">
         <FormField label={l("patients_type")} htmlFor="document-art">
           <Input
@@ -437,7 +439,7 @@ function DocumentContextSection({
   setForm,
 }: DocumentContextSectionProps) {
   return (
-    <FormSection title={l("patients_context")}>
+    <FormSection icon={Link2} title={l("patients_context")}>
       <div className="grid gap-3 md:grid-cols-2">
         <FormField label={l("patients_order")} htmlFor="document-order">
           <NativeComboboxSelect
@@ -499,7 +501,7 @@ function DocumentAdditionalSection({
   textareaClassName,
 }: DocumentAdditionalSectionProps) {
   return (
-    <FormSection title={l("patients_additional")}>
+    <FormSection icon={NotebookPen} title={l("patients_additional")}>
       <FormField label={l("appointments_notes")} htmlFor="document-notes">
         <textarea
           id="document-notes"

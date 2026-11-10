@@ -1,3 +1,4 @@
+import { Droplets } from "lucide-react";
 import { t as translateCatalog, useLang } from "@/lib/i18n";
 
 import { type UrologyAssessment, useCaseWorkspace } from "./context";
@@ -35,6 +36,7 @@ export function UrologySection() {
 
   return (
     <SpecialtySection<UrologyAssessment>
+      icon={Droplets}
       title={tri(lang, "case_ws_urology")}
       description={tri(lang, "case_ws_urologic_signs_and_history")}
       blankValue={BLANK}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { LoaderCircle } from "lucide-react";
+import { Activity, LoaderCircle, NotebookPen, Ruler } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -171,7 +171,7 @@ export function PatientVitalsSheet({
   }
 
   return (
-    <PatientSheetScaffold presentation="dialog" requireChanges={Boolean(initialMeasurement?.id)}
+    <PatientSheetScaffold icon={Activity} presentation="dialog" requireChanges={Boolean(initialMeasurement?.id)}
       open={open}
       onOpenChange={onOpenChange}
       maxWidthClassName="sm:max-w-[540px]"
@@ -210,7 +210,7 @@ export function PatientVitalsSheet({
         </>
       }
     >
-      <FormSection title={l("patients_measurement")}>
+      <FormSection icon={Activity} title={l("patients_measurement")}>
         <FormField
           label={l("patients_measured_at")}
           htmlFor="patient-vitals-measured-at"
@@ -320,7 +320,7 @@ export function PatientVitalsSheet({
         </div>
       </FormSection>
 
-      <FormSection title={l("patients_anthropometry")}>
+      <FormSection icon={Ruler} title={l("patients_anthropometry")}>
         <div className="grid gap-3 md:grid-cols-3">
           <FormField
             label={l("patients_weight_kg")}
@@ -368,7 +368,7 @@ export function PatientVitalsSheet({
         </div>
       </FormSection>
 
-      <FormSection title={l("patients_additional")}>
+      <FormSection icon={NotebookPen} title={l("patients_additional")}>
         <FormField label={l("appointments_notes")} htmlFor="patient-vitals-notes">
           <textarea
             id="patient-vitals-notes"

@@ -9,6 +9,8 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  FilePlus2,
+  ClipboardCheck,
   Download,
   FileDown,
   FileLock2,
@@ -1352,6 +1354,7 @@ function useAdminCompliancePageContent() {
           >
             <DialogContent overlayClassName="bg-[color-mix(in_srgb,var(--overlay,#000)_40%,transparent)]" className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden p-0 sm:max-w-[720px]">
               <AdminSheetScaffold
+                icon={FilePlus2}
                 headerClassName="border-b border-border bg-card py-3"
                 bodyClassName="bg-muted/35 p-4"
                 title={t.compliance_create_request}
@@ -1429,6 +1432,7 @@ function useAdminCompliancePageContent() {
             <DialogContent overlayClassName="bg-[color-mix(in_srgb,var(--overlay,#000)_40%,transparent)]" className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden p-0 sm:max-w-[720px]">
               {reviewSheetRecord ? (
                 <AdminSheetScaffold
+                icon={ClipboardCheck}
                 headerClassName="border-b border-border bg-card py-3"
                 bodyClassName="bg-muted/35 p-4"
                   title={t.compliance_privacy_review_queue}

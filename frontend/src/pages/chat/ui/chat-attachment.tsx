@@ -1,5 +1,6 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useRef, useState } from "react";
-import { Download, Eye, FileText, LoaderCircle, Shield, X } from "lucide-react";
+import { Paperclip, Download, Eye, FileText, LoaderCircle, Shield, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useLang } from "@/lib/i18n";
@@ -35,7 +36,7 @@ function AttachmentPreview({ blob, filename, onClose }: { blob: Blob; filename: 
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }} dirty={false}>
       <DialogContent className="flex max-h-[90dvh] flex-col sm:max-w-4xl">
         <DialogHeader>
-          <DialogTitle className="break-all">{filename}</DialogTitle>
+          <DialogTitle className="break-all"><SectionHeading icon={Paperclip}>{filename}</SectionHeading></DialogTitle>
           <DialogDescription>{formatSize(blob.size)}</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 overflow-auto rounded-lg border bg-muted/20">

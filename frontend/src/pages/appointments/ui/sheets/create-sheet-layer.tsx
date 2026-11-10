@@ -1,3 +1,4 @@
+import { CalendarPlus } from "lucide-react";
 import { Suspense, lazy } from "react";
 
 import type { CreateAppointmentSheetProps } from "@/pages/appointments/ui/sheets/create-appointment-sheet";
@@ -33,6 +34,7 @@ export function CreateSheetLayer({
     <Suspense
       fallback={
         <AppointmentPreviewSheetLoadingState
+          icon={CalendarPlus}
           open={open}
           onOpenChange={sheetProps.onOpenChange}
           title={title}

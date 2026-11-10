@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { hasFormChanges } from "@/lib/form-changes";
 import {
   useCallback,
@@ -8,7 +9,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
-import { Plus } from "lucide-react";
+import { Plus, type LucideIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { CountBadge } from "@/components/ui-shell";
@@ -27,6 +28,7 @@ type SheetState =
   | { mode: "edit"; index: number };
 
 export type CaseItemListProps<T> = {
+  icon?: LucideIcon;
   title: string;
   description: string;
   items: readonly T[];
@@ -72,6 +74,7 @@ function caseItemStableKey(item: unknown) {
 }
 
 export function CaseItemList<T>({
+  icon,
   title,
   description,
   items,
@@ -242,8 +245,7 @@ export function CaseItemList<T>({
             toolbarStart={
               <>
                 <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-                  <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-                  {title}
+                  <SectionHeading icon={icon}>{title}</SectionHeading>
                 </span>
                 {canEdit ? (
                   <Button
@@ -263,7 +265,7 @@ export function CaseItemList<T>({
           />
         </div>
 
-        <CaseItemEditSheet dirty={dirty}
+        <CaseItemEditSheet icon={icon} dirty={dirty}
           open={sheet.mode !== "closed"}
           onOpenChange={(nextOpen) => {
             if (!nextOpen) closeSheet();
@@ -294,6 +296,7 @@ export function CaseItemList<T>({
   return (
     <>
       <Panel
+        icon={icon}
         title={title}
         description={description}
         action={
@@ -363,7 +366,7 @@ export function CaseItemList<T>({
         )}
       </Panel>
 
-      <CaseItemEditSheet dirty={dirty}
+      <CaseItemEditSheet icon={icon} dirty={dirty}
         open={sheet.mode !== "closed"}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) closeSheet();

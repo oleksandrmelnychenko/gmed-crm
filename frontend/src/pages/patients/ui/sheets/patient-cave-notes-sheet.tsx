@@ -1,5 +1,5 @@
 import { useReducer, useState, type FormEvent } from "react";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, TriangleAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
@@ -83,7 +83,7 @@ function PatientCaveNotesSheetContent({
   }
 
   return (
-    <PatientSheetScaffold requireChanges dirty={value.trim() !== initial.trim()}
+    <PatientSheetScaffold icon={TriangleAlert} requireChanges dirty={value.trim() !== initial.trim()}
       open={open}
       onOpenChange={onOpenChange}
       title={l("patients_update_cave_notes")}
@@ -108,7 +108,7 @@ function PatientCaveNotesSheetContent({
         </>
       }
     >
-      <FormSection title={l("patients_warnings")}>
+      <FormSection icon={TriangleAlert} title={l("patients_warnings")}>
         <p className="text-[12.5px] text-muted-foreground">
           {l("patients_persistent_clinical_warnings_that_should_stay_visible_be")}
         </p>

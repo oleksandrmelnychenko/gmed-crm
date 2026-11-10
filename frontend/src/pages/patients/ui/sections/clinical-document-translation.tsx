@@ -1,3 +1,5 @@
+import { Languages } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Button } from "@/components/ui/button";
 import type { ClinicalDocumentTranslation } from "../../data/clinical-document-import";
 import { germanTranslationPage } from "../../data/clinical-document-translation";
@@ -16,7 +18,7 @@ export function ClinicalDocumentTranslationPanel({ translation, pageNumber, text
     <section className="mb-4 space-y-3 rounded-xl border border-blue-200 bg-blue-50/50 p-4" aria-label={tx("Перевод на немецкий", "Deutsche Übersetzung")}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h4 className="text-sm font-semibold">{tx("Английский → немецкий", "Englisch → Deutsch")}</h4>
+          <h4 className="text-sm font-semibold"><SectionHeading icon={Languages}>{tx("Английский → немецкий", "Englisch → Deutsch")}</SectionHeading></h4>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             {ready ? tx(
               "Машинный черновик. Проверьте медицинские термины, отрицания, дозировки и даты по оригиналу перед переносом в карту.",

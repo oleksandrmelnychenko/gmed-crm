@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import { hasFormChanges } from "@/lib/form-changes";
 import { seedTaxProfileText } from "@/lib/tax-profile-labels";
 import { ServiceDescriptionEditor } from "@/components/service-description-editor";
@@ -12,6 +13,21 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  Boxes,
+  BriefcaseBusiness,
+  CalendarDays,
+  CalendarRange,
+  FilePenLine,
+  FileText,
+  Fingerprint,
+  ListChecks,
+  ListTree,
+  NotebookPen,
+  Package,
+  ReceiptEuro,
+  ReceiptText,
+  StickyNote,
+  Tag,
   BadgeEuro,
   ChevronDown,
   CornerDownRight,
@@ -2940,11 +2956,7 @@ function useFinanceCatalogPageContent() {
         >
           <DialogHeader className="border-b border-border px-5 py-4">
             <DialogTitle>
-              {
-                priceVersionForm.versionId
-                  ? t.finance_catalog_edit_price_version
-                  : t.finance_catalog_add_price_version
-              }
+              <SectionHeading icon={BadgeEuro}>{priceVersionForm.versionId ? t.finance_catalog_edit_price_version : t.finance_catalog_add_price_version}</SectionHeading>
             </DialogTitle>
           </DialogHeader>
           <form
@@ -2957,7 +2969,7 @@ function useFinanceCatalogPageContent() {
                     {priceVersionForm.error}
                   </Banner>
                 ) : null}
-                <Section title={priceVersionForm.title}>
+                <Section icon={Tag} title={priceVersionForm.title}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="sm:col-span-2">
                       <Field
@@ -3158,6 +3170,7 @@ function useFinanceCatalogPageContent() {
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <form className="flex h-full min-h-0 flex-col" onSubmit={handleCreateTaxProfile}>
             <AdminSheetScaffold
+              icon={ReceiptEuro}
               title={t.finance_catalog_new_tax_profile}
               footer={
                 <SheetFormFooter
@@ -3175,7 +3188,7 @@ function useFinanceCatalogPageContent() {
                   </Banner>
                 ) : null}
 
-                <Section title={t.finance_catalog_tax_profile_identity}>
+                <Section icon={Fingerprint} title={t.finance_catalog_tax_profile_identity}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Field label={t.finance_catalog_profile_key} htmlFor="tax-profile-key">
                       <Input
@@ -3240,7 +3253,7 @@ function useFinanceCatalogPageContent() {
                   </div>
                 </Section>
 
-                <Section title={t.finance_catalog_tax_profile_rules}>
+                <Section icon={ListChecks} title={t.finance_catalog_tax_profile_rules}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Field label={t.finance_catalog_valid_from} htmlFor="tax-profile-valid-from">
                       <Input
@@ -3297,7 +3310,7 @@ function useFinanceCatalogPageContent() {
                   </div>
                 </Section>
 
-                <Section title={t.finance_catalog_tax_profile_notes}>
+                <Section icon={NotebookPen} title={t.finance_catalog_tax_profile_notes}>
                   <Field label={t.finance_catalog_description_label} htmlFor="tax-profile-description">
                     <textarea
                       id="tax-profile-description"
@@ -3331,6 +3344,7 @@ function useFinanceCatalogPageContent() {
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <form className="flex h-full min-h-0 flex-col" onSubmit={handleSaveTaxProfile}>
             <AdminSheetScaffold
+              icon={ReceiptText}
               title={t.finance_catalog_edit_tax_profile}
               footer={
                 <SheetFormFooter
@@ -3367,7 +3381,7 @@ function useFinanceCatalogPageContent() {
                   </Banner>
                 ) : null}
 
-                <Section title={t.finance_catalog_tax_profile_identity}>
+                <Section icon={Fingerprint} title={t.finance_catalog_tax_profile_identity}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Field label={t.finance_catalog_profile_key} htmlFor="tax-edit-profile-key">
                       <Input
@@ -3431,7 +3445,7 @@ function useFinanceCatalogPageContent() {
                   </div>
                 </Section>
 
-                <Section title={t.finance_catalog_tax_profile_rules}>
+                <Section icon={ListChecks} title={t.finance_catalog_tax_profile_rules}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Field label={t.finance_catalog_valid_from} htmlFor="tax-edit-valid-from">
                       <Input
@@ -3494,7 +3508,7 @@ function useFinanceCatalogPageContent() {
                   </div>
                 </Section>
 
-                <Section title={t.finance_catalog_tax_profile_notes}>
+                <Section icon={NotebookPen} title={t.finance_catalog_tax_profile_notes}>
                   <Field
                     label={t.finance_catalog_description_label}
                     htmlFor="tax-edit-profile-description"
@@ -3534,6 +3548,7 @@ function useFinanceCatalogPageContent() {
         >
           <form className="flex h-full min-h-0 flex-col" onSubmit={handleSaveAgencyService}>
             <AdminSheetScaffold
+              icon={BriefcaseBusiness}
               title={
                 agencyServiceForm.id
                   ? t.revenue_agency_service_edit_title
@@ -3592,7 +3607,7 @@ function useFinanceCatalogPageContent() {
                   </Banner>
                 ) : null}
 
-                <Section title={t.revenue_common_basic_data}>
+                <Section icon={FileText} title={t.revenue_common_basic_data}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="sm:col-span-2">
                       <Field label={t.revenue_agency_service_service_name}>
@@ -3639,7 +3654,7 @@ function useFinanceCatalogPageContent() {
                   </div>
                 </Section>
 
-                <Section
+                <Section icon={BadgeEuro}
                   title={t.finance_catalog_package_pricing}
                   accessory={
                     selectedAgencyService ? (
@@ -3728,7 +3743,7 @@ function useFinanceCatalogPageContent() {
                   )}
                 </Section>
 
-                <Section title={t.revenue_common_validity_period}>
+                <Section icon={CalendarRange} title={t.revenue_common_validity_period}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Field label={t.finance_catalog_valid_from}>
                       <Input
@@ -3776,7 +3791,7 @@ function useFinanceCatalogPageContent() {
                   </div>
                 </Section>
 
-                <Section title={t.revenue_agency_service_description_status}>
+                <Section icon={FilePenLine} title={t.revenue_agency_service_description_status}>
                   <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3 text-xs">
                     <p className="text-muted-foreground">
                       {lang === "de"
@@ -3874,6 +3889,7 @@ function useFinanceCatalogPageContent() {
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[840px]">
           <form className="flex h-full min-h-0 flex-col" onSubmit={handleSaveServicePackage}>
             <AdminSheetScaffold
+              icon={Boxes}
               title={
                 packageForm.id
                   ? t.finance_catalog_edit_package
@@ -3914,7 +3930,7 @@ function useFinanceCatalogPageContent() {
                   </Banner>
                 ) : null}
 
-                <Section title={t.finance_catalog_package_basics}>
+                <Section icon={Package} title={t.finance_catalog_package_basics}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Field label={t.finance_catalog_package_key} htmlFor="package-key">
                       <Input
@@ -3945,7 +3961,7 @@ function useFinanceCatalogPageContent() {
                   </div>
                 </Section>
 
-                <Section
+                <Section icon={BadgeEuro}
                   title={t.finance_catalog_package_pricing}
                   accessory={
                     selectedServicePackage ? (
@@ -4053,7 +4069,7 @@ function useFinanceCatalogPageContent() {
                   )}
                 </Section>
 
-                <Section title={t.finance_catalog_package_validity}>
+                <Section icon={CalendarDays} title={t.finance_catalog_package_validity}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Field label={t.finance_catalog_valid_from} htmlFor="package-valid-from">
                       <Input
@@ -4102,7 +4118,7 @@ function useFinanceCatalogPageContent() {
                   </div>
                 </Section>
 
-                <Section title={t.finance_catalog_package_notes}>
+                <Section icon={StickyNote} title={t.finance_catalog_package_notes}>
                   <Field label={t.finance_catalog_description_label} htmlFor="package-description">
                     <textarea
                       id="package-description"
@@ -4120,7 +4136,7 @@ function useFinanceCatalogPageContent() {
                   </Field>
                 </Section>
 
-                <Section title={t.finance_catalog_included_items}>
+                <Section icon={ListTree} title={t.finance_catalog_included_items}>
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <p className="text-xs text-muted-foreground">

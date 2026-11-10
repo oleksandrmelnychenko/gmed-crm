@@ -75,19 +75,26 @@
 .staff-portal-theme [data-slot="stat-card"] > p:first-child { font-size: 13px; }
 .staff-portal-theme [data-slot="stat-card"] > p:nth-child(2) { margin-top: 6px; font-size: 22px; }
 
-/* Regular segmented tabs share the selected action colour. Underlined tabs
-   retain their own navigation treatment. */
-.staff-portal-theme [data-slot="tabs-list"][data-variant="default"] > [data-slot="tabs-trigger"][data-active] {
-  background: var(--primary);
-  color: var(--primary-foreground);
-  box-shadow: none;
+/* Staff navigation uses the same selection treatment for routed links, buttons and Base UI tabs. */
+:is([data-workspace-tab], [data-slot="tabs-list"][data-variant="default"] [data-slot="tabs-trigger"]) {
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--muted-foreground);
 }
-.staff-portal-theme [data-slot="tabs-list"][data-variant="default"] > [data-slot="tabs-trigger"][data-active]:hover {
-  color: var(--primary-foreground);
+:is([data-workspace-tab], [data-slot="tabs-list"][data-variant="default"] [data-slot="tabs-trigger"]):hover:not(:disabled, [aria-disabled="true"]) {
+  background: var(--muted);
+  color: var(--foreground);
 }
-.staff-portal-theme nav[data-workspace-tabs] a[aria-current="page"] {
-  background: var(--primary);
-  color: var(--primary-foreground);
+:is([data-workspace-tab], [data-slot="tabs-list"][data-variant="default"] [data-slot="tabs-trigger"]):is([aria-current="page"], [aria-current="step"], [aria-pressed="true"], [aria-selected="true"], [data-active]) {
+  border-color: color-mix(in srgb, var(--border) 88%, var(--foreground));
+  background: color-mix(in srgb, var(--muted) 65%, var(--card));
+  color: var(--foreground);
+  font-weight: 600;
+}
+[data-workspace-tab]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 
 @layer components {

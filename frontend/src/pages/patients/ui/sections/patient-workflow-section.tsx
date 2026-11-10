@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { CheckCircle2, Plus } from "lucide-react";
+import { CalendarClock, CheckCircle2, ListChecks, ListPlus, Plus } from "lucide-react";
 
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -150,7 +150,7 @@ function WorkflowItemForm({
 }: WorkflowItemFormProps) {
   return (
     <div className="space-y-4">
-      <FormSection title={l("patients_task")}>
+      <FormSection icon={ListChecks} title={l("patients_task")}>
         <Field
           label={l("patients_checklist_item")}
           htmlFor="patient-workflow-item-text"
@@ -166,7 +166,7 @@ function WorkflowItemForm({
         </Field>
       </FormSection>
 
-      <FormSection title={l("patients_owner_and_due_date")}>
+      <FormSection icon={CalendarClock} title={l("patients_owner_and_due_date")}>
         <div className="grid gap-3 md:grid-cols-2">
           <Field
             label={l("patients_owner")}
@@ -260,6 +260,7 @@ function WorkflowCreateSheet({
 }: WorkflowCreateSheetProps) {
   return (
     <PatientSheetScaffold
+      icon={ListPlus}
       presentation="dialog"
       open={createOpen}
       onOpenChange={onOpenChange}

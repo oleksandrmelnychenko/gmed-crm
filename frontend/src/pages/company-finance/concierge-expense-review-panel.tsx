@@ -1,3 +1,4 @@
+import { SectionHeading } from "@/components/ui/section-heading";
 import {
   useCallback,
   useEffect,
@@ -6,6 +7,13 @@ import {
   useState,
 } from "react";
 import {
+  FileText,
+  Scale,
+  Link2,
+  Wallet,
+  FileInput,
+  History,
+  ClipboardCheck,
   CheckCircle2,
   Download,
   Eye,
@@ -842,8 +850,7 @@ export function ConciergeExpenseReviewPanel({
       <div className="flex min-w-0 flex-col gap-2 rounded-lg border border-border/70 bg-card p-3 shadow-xs sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-sm font-semibold">
-            <ReceiptText className="size-4 text-primary" />
-            {text.title}
+            <SectionHeading icon={ReceiptText}>{text.title}</SectionHeading>
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">{text.subtitle}</p>
         </div>
@@ -871,7 +878,7 @@ export function ConciergeExpenseReviewPanel({
               type="button"
               size="sm"
               className="h-8 rounded-md px-2.5 text-xs"
-              variant={statusFilter === value ? "default" : "ghost"}
+              variant="ghost" data-workspace-tab aria-pressed={statusFilter === value}
               onClick={() => setStatusFilter(value)}
             >
               {label} <span className="font-mono text-[10px] opacity-75">{count}</span>
@@ -948,21 +955,9 @@ export function ConciergeExpenseReviewPanel({
             <>
               <DialogHeader className="border-b border-border bg-muted/20 px-4 py-4 pr-14 sm:px-5">
                 <div className="flex min-w-0 items-start gap-3">
-                  <div className={cn(
-                    "flex size-10 shrink-0 items-center justify-center rounded-lg border",
-                    selected.status === "pending_review" && "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-500/10 dark:text-amber-300",
-                    selected.status === "posted" && "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-300",
-                    selected.status === "rejected" && "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-500/10 dark:text-rose-300",
-                    selected.status === "reversed" && "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-500/10 dark:text-slate-300",
-                  )}>
-                    {selected.status === "pending_review" ? <ReceiptText className="size-5" /> : null}
-                    {selected.status === "posted" ? <CheckCircle2 className="size-5" /> : null}
-                    {selected.status === "rejected" ? <XCircle className="size-5" /> : null}
-                    {selected.status === "reversed" ? <Undo2 className="size-5" /> : null}
-                  </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <DialogTitle>{selectedDetailCopy?.title}</DialogTitle>
+                      <DialogTitle><SectionHeading icon={ClipboardCheck}>{selectedDetailCopy?.title}</SectionHeading></DialogTitle>
                       {statusBadge(selected)}
                     </div>
                     <DialogDescription className="mt-1 max-w-3xl">{selectedDetailCopy?.description}</DialogDescription>
@@ -977,7 +972,7 @@ export function ConciergeExpenseReviewPanel({
                       {selected.receipt ? (
                         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
                           <div className="min-w-0">
-                            <h3 className="text-sm font-semibold">{text.receipt}</h3>
+                            <h3 className="text-sm font-semibold"><SectionHeading icon={FileText}>{text.receipt}</SectionHeading></h3>
                             <p className="truncate text-xs text-muted-foreground" title={selected.receipt.original_filename ?? undefined}>
                               {selected.receipt.original_filename || "receipt"} · {text.fileSize}: {formatFileSize(selected.receipt.file_size)}
                             </p>
@@ -995,7 +990,7 @@ export function ConciergeExpenseReviewPanel({
                         </div>
                       ) : (
                         <div>
-                          <h3 className="text-sm font-semibold">{text.receipt}</h3>
+                          <h3 className="text-sm font-semibold"><SectionHeading icon={FileText}>{text.receipt}</SectionHeading></h3>
                           <p className="mt-1 text-xs text-muted-foreground">{text.noReceipt}</p>
                         </div>
                       )}
@@ -1035,7 +1030,7 @@ export function ConciergeExpenseReviewPanel({
                     </section>
 
                     <section className="rounded-lg border border-border/70 bg-card p-3">
-                      <h3 className="text-sm font-semibold">{text.balance}</h3>
+                      <h3 className="text-sm font-semibold"><SectionHeading icon={Scale}>{text.balance}</SectionHeading></h3>
                       {selected.balance_consequence.posting_pending ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{text.postingPending}</p> : null}
                       <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
                         {([
@@ -1067,7 +1062,7 @@ export function ConciergeExpenseReviewPanel({
                       <>
                         {!queue?.complete ? <ShellBanner tone="error">{text.decisionBlocked}</ShellBanner> : null}
                         <section className="rounded-lg border border-border/70 bg-card p-3">
-                          <h3 className="text-sm font-semibold">{text.mapping}</h3>
+                          <h3 className="text-sm font-semibold"><SectionHeading icon={Link2}>{text.mapping}</SectionHeading></h3>
                           {(selected.order_id || selected.order_leistung_id) ? <p className="mt-1 text-xs text-muted-foreground">{text.lockedMapping}</p> : null}
                           <div className="mt-3 space-y-3">
                             <label className="block text-xs font-medium">
@@ -1102,7 +1097,7 @@ export function ConciergeExpenseReviewPanel({
 
                         {selected.paid_by === "agency" ? (
                           <section className="rounded-lg border border-border/70 bg-card p-3">
-                            <h3 className="text-sm font-semibold">{text.agencyPayment}</h3>
+                            <h3 className="text-sm font-semibold"><SectionHeading icon={Wallet}>{text.agencyPayment}</SectionHeading></h3>
                             <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
                               <label className="block text-xs font-medium">
                                 {text.paidOn} <span className="text-destructive">*</span>
@@ -1166,7 +1161,7 @@ export function ConciergeExpenseReviewPanel({
 
                     {selected.external_invoice ? (
                       <section className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-900 dark:bg-emerald-500/5">
-                        <h3 className="text-sm font-semibold">{text.externalInvoice}</h3>
+                        <h3 className="text-sm font-semibold"><SectionHeading icon={FileInput}>{text.externalInvoice}</SectionHeading></h3>
                         <div className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
                           <div className="min-w-0"><span className="block text-muted-foreground">ID</span><span className="block break-all font-mono">{selected.external_invoice.id}</span></div>
                           <div><span className="block text-muted-foreground">{text.invoiceStatus}</span>{selected.external_invoice.status || "—"}</div>
@@ -1180,8 +1175,7 @@ export function ConciergeExpenseReviewPanel({
                     {selected.status === "posted" ? (
                       <section className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
                         <h3 className="flex items-center gap-2 text-sm font-semibold">
-                          <Undo2 className="size-4 text-destructive" />
-                          {text.reverseTitle}
+                          <SectionHeading icon={Undo2}>{text.reverseTitle}</SectionHeading>
                         </h3>
                         <p className="mt-1 text-xs text-muted-foreground">{text.reverseDescription}</p>
                         {!queue?.complete ? <div className="mt-3"><ShellBanner tone="error">{text.decisionBlocked}</ShellBanner></div> : null}
@@ -1231,7 +1225,7 @@ export function ConciergeExpenseReviewPanel({
                     {selected.status !== "pending_review" && successMessage ? <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-300">{successMessage}</div> : null}
 
                     <section className="rounded-lg border border-border/70 bg-card p-3">
-                      <h3 className="text-sm font-semibold">{text.history}</h3>
+                      <h3 className="text-sm font-semibold"><SectionHeading icon={History}>{text.history}</SectionHeading></h3>
                       <ol className="mt-3 space-y-3">
                         {selected.history.map((event, index) => (
                           <li key={`${event.action}:${event.created_at ?? index}`} className="relative border-l border-border pl-3 text-xs">

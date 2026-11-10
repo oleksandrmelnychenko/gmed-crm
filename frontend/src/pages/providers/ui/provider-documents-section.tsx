@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, FileText, LoaderCircle, Paperclip, Plus, Search } from "lucide-react";
+import { Download, FileText, FileUp, FolderOpen, LoaderCircle, Paperclip, Plus, Search } from "lucide-react";
 
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -203,8 +204,7 @@ export function ProviderDocumentsSection({
     <section className="space-y-0 overflow-hidden rounded-lg bg-card">
       <div className="relative z-30 flex flex-wrap items-center gap-2 border-b border-border/70 bg-card p-2.5 sm:flex-nowrap sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">
         <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
-          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--dot,var(--brand))]" />
-          {labels.title}
+          <SectionHeading icon={FolderOpen}>{labels.title}</SectionHeading>
         </span>
         {canManage ? <Button type="button" size="sm" className="h-8 shrink-0 self-center rounded-lg" onClick={openUpload}><Plus className="size-3.5" />{labels.upload}</Button> : null}
         <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
@@ -237,6 +237,7 @@ export function ProviderDocumentsSection({
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <AdminDialogScaffold
+          icon={FileUp}
           title={labels.upload}
           maxWidthClassName="sm:max-w-[640px]"
           onSubmit={(event) => void submit(event)}

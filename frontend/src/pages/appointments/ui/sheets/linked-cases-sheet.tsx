@@ -1,3 +1,4 @@
+import { BriefcaseMedical } from "lucide-react";
 import { memo, useCallback, useState } from "react";
 
 import {
@@ -44,6 +45,7 @@ function LinkedCasesSheet({
   return (
     <>
       <AppointmentPreviewSheet
+        icon={BriefcaseMedical}
         open={open}
         onOpenChange={onOpenChange}
         title={t.cases_roster}

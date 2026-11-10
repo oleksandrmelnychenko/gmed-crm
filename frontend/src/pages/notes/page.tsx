@@ -1,6 +1,7 @@
 import { SectionHeading } from "@/components/ui/section-heading";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  NotebookPen,
   Archive,
   ArchiveRestore,
   Download,
@@ -527,13 +528,12 @@ export function InternalNotesPage() {
                   <button
                     key={value}
                     type="button"
+                    data-workspace-tab
                     aria-pressed={view === value}
-                    className={cn(
-                      "rounded-md px-3 py-1 text-xs font-medium transition-colors",
-                      view === value ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-                    )}
+                    className="inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors"
                     onClick={() => switchView(value)}
                   >
+                    {value === "active" ? <NotebookPen aria-hidden="true" className="size-3.5" /> : <Archive aria-hidden="true" className="size-3.5" />}
                     {value === "active" ? labels.viewActive : labels.viewArchive}
                   </button>
                 ))}
@@ -713,7 +713,7 @@ export function InternalNotesPage() {
       <Dialog open={newNoteOpen} onOpenChange={setNewNoteOpen}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>{labels.newNote}</DialogTitle>
+            <DialogTitle><SectionHeading icon={NotebookPen}>{labels.newNote}</SectionHeading></DialogTitle>
             <DialogDescription>{labels.subtitle}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">

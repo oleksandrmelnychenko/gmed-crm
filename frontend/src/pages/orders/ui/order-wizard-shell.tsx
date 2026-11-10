@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { CircleAlert, ClipboardList, FileSignature, Files, ReceiptText, ShieldCheck, UserRoundCheck } from "lucide-react";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import type { Lang } from "@/lib/i18n";
 
@@ -45,7 +46,7 @@ export function OrderWizardShell({ title, description, lang, steps, step, disabl
     <DialogContent data-testid="order-wizard" showCloseButton={!busy} className="flex h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0 pb-0 sm:h-[min(92dvh,55rem)] sm:w-[94vw] sm:max-w-[1440px] sm:pb-0">
       <header className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3 pr-14 sm:gap-4 sm:px-5 sm:pr-14">
         <div className="min-w-0">
-          <DialogTitle className="truncate text-base font-semibold text-foreground">{title}</DialogTitle>
+          <DialogTitle className="truncate text-base font-semibold text-foreground"><SectionHeading icon={ClipboardList}>{title}</SectionHeading></DialogTitle>
           <DialogDescription className="mt-1 text-xs text-muted-foreground">{description}</DialogDescription>
         </div>
       </header>
