@@ -25,19 +25,35 @@ pub fn router() -> Router<AppState> {
 /// staff and patient UI word it in the viewer's language from both
 /// (`frontend/src/lib/notification-copy.ts`). `title`/`body` are the English
 /// fallback for rows written before `params` existed.
+///
+/// A risk review notice is stored without facts (never a reason or a
+/// trigger); the reader, a reviewer, gets the lead's current name with it
+/// (`lead_name`), so that several notices can be told apart (QA 2026-11-10,
+/// E F-6). Nothing is stored: a purged lead has no name any more.
 async fn list_notifications(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
     match sqlx::query(
-        r#"SELECT id, kind, title, body, params, entity_type, entity_id, is_read, created_at
-           FROM user_notifications
-           WHERE user_id = $1
+        r#"SELECT n.id, n.kind, n.title, n.body,
+                  CASE
+                      WHEN n.kind = 'risk_review_required' AND n.entity_type = 'lead' THEN
+                          COALESCE(n.params, '{}'::jsonb) || jsonb_build_object(
+                              'lead_name',
+                              (SELECT NULLIF(btrim(concat_ws(' ', l.first_name, l.last_name)), '')
+                               FROM leads l
+                               WHERE l.id = n.entity_id)
+                          )
+                      ELSE n.params
+                  END AS params,
+                  n.entity_type, n.entity_id, n.is_read, n.created_at
+           FROM user_notifications n
+           WHERE n.user_id = $1
              -- The portal's selected child (QA 2026-10-31, R2-C).
              AND ($2::uuid IS NULL
-                  OR user_notification_patient(entity_type, entity_id) IS NULL
-                  OR user_notification_patient(entity_type, entity_id) = $2)
-           ORDER BY created_at DESC LIMIT 50"#,
+                  OR user_notification_patient(n.entity_type, n.entity_id) IS NULL
+                  OR user_notification_patient(n.entity_type, n.entity_id) = $2)
+           ORDER BY n.created_at DESC LIMIT 50"#,
     )
     .bind(auth.user_id)
     .bind(auth.selected_patient_id)

@@ -37,6 +37,16 @@ export function SignatureDefaultsSettings() {
     finally { saving.current = false; setBusy(false); }
   }
   const add = () => setDraft(current => [...current, { first_name: "", last_name: "", email: "", role: "agency" }]);
+  const draftInvalid = draft.length > 0 && !validSigners(draft);
+  const draftUnchanged = JSON.stringify(saved) === JSON.stringify(draft);
+  const saveHint = draftInvalid
+    ? tx(
+        "Чтобы сохранить, укажите у каждого представителя имя, фамилию и действующий адрес e-mail; адреса не должны повторяться.",
+        "Zum Speichern bitte für jede Vertretung Vorname, Nachname und eine gültige E-Mail-Adresse angeben; Adressen dürfen sich nicht wiederholen.",
+      )
+    : draftUnchanged
+      ? tx("Изменений нет — сохранять нечего.", "Keine Änderungen – nichts zu speichern.")
+      : "";
   return <section className="min-w-0 overflow-hidden rounded-lg border border-border/70 bg-card">
     <div className="flex items-center justify-between gap-2 border-b border-border/60 bg-muted/20 px-3.5 py-2.5">
       <AdminSectionTitle icon={UsersRound}>{tx("Представители GMED", "GMED-Vertretungen")}</AdminSectionTitle>
@@ -54,10 +64,12 @@ export function SignatureDefaultsSettings() {
         {notice ? <p role="status" className="text-xs text-emerald-700">{tx("Представители сохранены для новых запросов.", "Vertretungen für neue Anfragen gespeichert.")}</p> : null}
         {error ? <p role="alert" className="text-xs leading-5 text-destructive">{tx("Не удалось загрузить или сохранить представителей. Проверьте данные и повторите.", "Vertretungen konnten nicht geladen oder gespeichert werden. Angaben prüfen und erneut versuchen.")}</p> : null}
       </div>
-      <div className="flex flex-wrap justify-end gap-2 border-t border-border/60 bg-muted/20 px-3.5 py-3">
+      <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border/60 bg-muted/20 px-3.5 py-3">
         {editing ? <>
+          {/* Why the save is not available (QA 2026-11-10, E F-13: the button stayed grey without a word). */}
+          {saveHint ? <p role="status" className="mr-auto min-w-0 basis-full text-xs leading-5 text-muted-foreground sm:basis-0 sm:grow" data-testid="signature-defaults-save-hint">{saveHint}</p> : null}
           <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { setDraft(saved); setEditing(false); setError(false); }}>{tx("Отменить изменения", "Änderungen verwerfen")}</Button>
-          <Button type="submit" size="sm" disabled={busy || (draft.length > 0 && !validSigners(draft)) || JSON.stringify(saved) === JSON.stringify(draft)}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : null}{tx("Сохранить представителей", "Vertretungen speichern")}</Button>
+          <Button type="submit" size="sm" disabled={busy || draftInvalid || draftUnchanged}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : null}{tx("Сохранить представителей", "Vertretungen speichern")}</Button>
         </> : error ? <Button type="button" variant="outline" size="sm" disabled={loading} onClick={() => { setLoading(true); setRevision(value => value + 1); }}>{tx("Повторить", "Erneut versuchen")}</Button>
           : <Button type="button" variant="outline" size="sm" disabled={loading} onClick={() => { setDraft(saved.length ? saved : [{ first_name: "", last_name: "", email: "", role: "agency" }]); setEditing(true); setNotice(false); }}><Pencil className="size-3.5" />{tx("Настроить представителей", "Vertretungen einrichten")}</Button>}
       </div>

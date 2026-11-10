@@ -201,6 +201,117 @@ async fn concierge_services_legacy_service_kind_still_works_without_taxonomy() {
     );
 }
 
+async fn seed_user(pool: &PgPool, role: &str, tag: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO users (email, password_hash, name, role)
+           VALUES ($1, 'test-hash', $2, $3)
+           RETURNING id"#,
+    )
+    .bind(format!("{role}.{tag}@example.test"))
+    .bind(format!("Service Reader {tag}"))
+    .bind(role)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// The CEO assistant reads every concierge service and the staff directory
+/// (owner decision 2026-10-11) and changes nothing.
+#[tokio::test]
+async fn ceo_assistant_reads_concierge_services_and_changes_none() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("concierge-assistant");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let assistant_id = seed_user(&pool, "ceo_assistant", &tag).await;
+    let assistant = auth_header_for(assistant_id, "ceo_assistant");
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/concierge-services",
+        &bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "service_kind": "hotel",
+            "title": format!("Assistant view {tag}"),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let service_id = created["id"].as_str().expect("service id").to_string();
+    let updated_at = created["updated_at"].clone();
+
+    let (status, listed) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/concierge-services?search={tag}"),
+        &assistant,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    let row = listed
+        .as_array()
+        .expect("concierge services list")
+        .iter()
+        .find(|item| item["id"] == service_id.as_str())
+        .expect("the assistant sees the service without a patient assignment");
+    assert_eq!(
+        row["allowed_statuses"],
+        json!([row["status"].clone()]),
+        "no status move is offered to the read-only role"
+    );
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/concierge-services/{service_id}"),
+        &assistant,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["id"], service_id.as_str());
+
+    for (method, path, body) in [
+        (
+            "POST",
+            "/api/v1/concierge-services".to_string(),
+            json!({
+                "patient_id": patient_id,
+                "service_kind": "hotel",
+                "title": format!("Assistant write {tag}"),
+            }),
+        ),
+        (
+            "POST",
+            format!("/api/v1/concierge-services/{service_id}/update"),
+            json!({ "status": "in_service" }),
+        ),
+        (
+            "POST",
+            format!("/api/v1/concierge-services/{service_id}/update"),
+            json!({ "billing_notes": "assistant" }),
+        ),
+        (
+            "DELETE",
+            format!("/api/v1/concierge-services/{service_id}"),
+            json!({ "expected_updated_at": updated_at }),
+        ),
+    ] {
+        let (status, refused) = json_request(&app, method, &path, &assistant, Some(body)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}: {refused}");
+    }
+
+    let (status, directory) =
+        json_request(&app, "GET", "/api/v1/staff-directory", &assistant, None).await;
+    assert_eq!(status, StatusCode::OK, "{directory}");
+    assert!(directory.is_array(), "{directory}");
+}
+
 #[tokio::test]
 async fn concierge_services_reject_fractional_quantity() {
     let Some((app, pool, admin_id, bearer)) = test_context().await else {

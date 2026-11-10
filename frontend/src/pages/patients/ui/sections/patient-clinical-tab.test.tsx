@@ -659,6 +659,7 @@ describe("PatientRecommendationsSection", () => {
         patientId="patient-1"
         recommendations={[
           recommendation({
+            recommended_on: "2026-05-30",
             reminder_at: "2026-07-01",
             valid_from: "2026-06-01",
             valid_to: "2026-09-01",
@@ -668,6 +669,9 @@ describe("PatientRecommendationsSection", () => {
       />,
     );
 
+    // The recommendation date too is DD.MM.YYYY, never the stored ISO form.
+    expect(html).toContain("30.05.2026");
+    expect(html).not.toContain("2026-05-30");
     expect(html).toContain("Период: 01.06.2026 – 01.09.2026");
     expect(html).toContain("border-emerald-300 bg-emerald-50");
     expect(html).toContain("Дата напоминания: 01.07.2026");
@@ -727,12 +731,13 @@ describe("PatientRecommendationOverviewItem", () => {
     );
 
     expect(html).toContain("Thromboseprophylaxe");
-    expect(html).toContain("2026-06-03");
+    expect(html).toContain("03.06.2026");
+    expect(html).not.toContain("2026-06-03");
     expect(html).not.toContain("Контрольный визит");
     expect(html).not.toContain("Дата рекомендации");
     expect(html).not.toContain("follow_up");
-    expect(html.indexOf("2026-06-03")).toBeGreaterThan(html.indexOf("Thromboseprophylaxe"));
-    expect(html.indexOf("2026-06-03")).toBeLessThan(html.indexOf("bis zur"));
+    expect(html.indexOf("03.06.2026")).toBeGreaterThan(html.indexOf("Thromboseprophylaxe"));
+    expect(html.indexOf("03.06.2026")).toBeLessThan(html.indexOf("bis zur"));
   });
 
   it("shows the recommending doctor specialization", () => {

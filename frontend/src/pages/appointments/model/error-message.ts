@@ -5,6 +5,7 @@ import {
   APPOINTMENT_REPORT_BEFORE_DATE_CODE,
   APPOINTMENT_REPORT_STATUS_NOT_OPEN_CODE,
   APPOINTMENT_REPORTED_FUTURE_DATE_CODE,
+  INTERPRETER_REPORT_REJECTION_REASON_REQUIRED_CODE,
   INTERPRETER_REPORT_SELF_REVIEW_CODE,
 } from "@/pages/appointments/model/completion-rules";
 import { appointmentText } from "@/pages/appointments/model/labels";
@@ -28,6 +29,10 @@ const LOCALIZED_BODY_CODE_KEYS = new Map<string, string>([
     "appointments_reported_not_to_future_date",
   ],
   [INTERPRETER_REPORT_SELF_REVIEW_CODE, "appointments_report_self_review"],
+  [
+    INTERPRETER_REPORT_REJECTION_REASON_REQUIRED_CODE,
+    "appointments_report_rejection_reason_required",
+  ],
 ]);
 
 function bodyText(body: Record<string, unknown>, key: string): string {

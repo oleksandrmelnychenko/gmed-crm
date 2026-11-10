@@ -54,6 +54,7 @@ import {
   type PatientDetail,
   type PatientTrustedContactFormState,
 } from "../../model/list-model";
+import { identityDocumentLabels } from "../../model/identity-document-labels";
 import { createPatientLeadOrigin } from "../../model/patient-lead-origin";
 import {
   patientProfileFieldKey,
@@ -286,11 +287,14 @@ type PatientProfileEditorFormSectionsProps = {
   updateLegalStatusField: <K extends keyof PatientLegalStatus>(field: K, value: PatientLegalStatus[K]) => void;
   /** Why "compliance completed" is off after a revoked consent. */
   complianceNote: ComplianceRevocationNote | null;
+  /** Type of the stored identity document (`id_document_type`), for its labels. */
+  idDocumentType?: string | null;
 };
 
 function PatientProfileEditorFormSections({
   dictionary,
   lang,
+  idDocumentType,
   form,
   fieldErrors,
   trustedContacts,
@@ -304,6 +308,10 @@ function PatientProfileEditorFormSections({
 }: PatientProfileEditorFormSectionsProps) {
   const age = computeAge(form.birthDate);
   const isMinor = age !== null && age < 18;
+  const identityLabels = identityDocumentLabels(idDocumentType, lang, {
+    patient_profile_editor_passport: dictionary.patient_profile_editor_passport,
+    patient_profile_editor_passport_number: dictionary.patient_profile_editor_passport_number,
+  });
   const text = dictionary.uiText ?? {};
   const guardianLabel =
     dictionary.patient_relation_type_guardian ??
@@ -685,10 +693,10 @@ function PatientProfileEditorFormSections({
                   </FormField>
                 </div>
               </FormSection>
-              <FormSection title={dictionary.patient_profile_editor_passport}>
+              <FormSection title={identityLabels.title}>
                 <div className="grid gap-2.5 md:grid-cols-2">
                   <FormField
-                    label={dictionary.patient_profile_editor_passport_number}
+                    label={identityLabels.number}
                   >
                     <Input
                       value={form.passportNumber}
@@ -1374,6 +1382,7 @@ function PatientProfileEditorSheetContent({
           updateTrustedContacts={setTrustedContacts}
           updateLegalStatusField={updateLegalStatusField}
           complianceNote={detail ? complianceRevocationNote(detail.legal_status) : null}
+          idDocumentType={detail?.id_document_type}
         />
         </fieldset>
       ) : null}

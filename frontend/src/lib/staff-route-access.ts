@@ -89,7 +89,15 @@ const ROLES_INTERPRETERS = [
   "ceo",
 ] as const satisfies readonly StaffRole[];
 
-const ROLES_EMPLOYEES = ["ceo", "concierge"] as const satisfies readonly StaffRole[];
+// Work contacts of the staff (`list_staff_directory` in
+// `crates/server/src/routes/users.rs`). The CEO assistant reads them like the
+// CEO (owner decision 2026-10-11); the access rules behind the list stay
+// CEO-only (`canManageStaffAccess`).
+const ROLES_EMPLOYEES = [
+  "ceo",
+  "ceo_assistant",
+  "concierge",
+] as const satisfies readonly StaffRole[];
 const ROLES_SPECIALIZATIONS = ["ceo"] as const satisfies readonly StaffRole[];
 
 // CEO has full access by policy — `AuthUser::require_any_role` in

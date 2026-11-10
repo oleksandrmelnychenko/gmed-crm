@@ -22,6 +22,10 @@ export const APPOINTMENT_CANCEL_BILLED_REPORT_CODE = "appointment_cancel_billed_
 /** Error code the server returns when a team lead reviews its own report. */
 export const INTERPRETER_REPORT_SELF_REVIEW_CODE = "interpreter_report_self_review";
 
+/** Error code the server returns when a report is returned without a reason. */
+export const INTERPRETER_REPORT_REJECTION_REASON_REQUIRED_CODE =
+  "interpreter_report_rejection_reason_required";
+
 /**
  * Completed and cancelled appointments are closed: the server refuses to
  * reschedule them, to assign an interpreter or to change their checklist.

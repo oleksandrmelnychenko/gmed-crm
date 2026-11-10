@@ -597,6 +597,33 @@ describe("resolvePatientTimelineRoute", () => {
       ),
     ).toBe("/patients/patient-1?tab=timeline&entity_type=recommendation");
   });
+
+  it("opens a process task where it is worked off: the patient's list or the order", () => {
+    const access = {
+      patientId: "patient-1",
+      canOpenDocumentsWorkspace: true,
+      canViewContracts: true,
+      canViewInvoices: true,
+      canOpenComplianceWorkspace: true,
+    };
+
+    expect(
+      resolvePatientTimelineRoute(
+        { entity_type: "workflow_task", entity_id: "item-1", category: "patient_custom" },
+        access,
+      ),
+    ).toBe("/patients/patient-1?tab=workflow");
+    // Order checklist points are not in the patient's own list.
+    expect(
+      resolvePatientTimelineRoute(
+        { entity_type: "workflow_task", entity_id: "item-2", category: "order_intake" },
+        access,
+      ),
+    ).toBe("/patients/patient-1?tab=orders");
+    expect(
+      resolvePatientTimelineRoute({ entity_type: "workflow_task", entity_id: "item-3" }, access),
+    ).toBe("/patients/patient-1?tab=workflow");
+  });
 });
 
 describe("normalizePatientDetailTab", () => {

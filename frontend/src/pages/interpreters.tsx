@@ -51,7 +51,9 @@ import {
 import { ApiRequestError, apiFetch, downloadApiFile } from "@/lib/api";
 import { isValidEmailAddress } from "@/lib/contact-validation";
 import { useAuth } from "@/lib/auth";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
+import { formatCount, type PluralWords } from "@/lib/i18n/plural";
 import { hasCapability } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import { useAppointmentLabels } from "@/pages/appointments/model/labels";
@@ -404,7 +406,7 @@ function staffPageCopy(lang: "de" | "ru") {
         loadingWorkload: "Auslastung wird geladen...",
         assignedPatients: "Zugewiesene Patienten",
         noAssignedPatients: "Keine zugewiesenen Patienten",
-        appointments: "Termine",
+        hoursSuffix: " Std.",
         next: "nächster",
         upcomingAppointments: "Kommende Termine",
         noUpcomingAppointments: "Keine kommenden Termine",
@@ -585,7 +587,7 @@ function staffPageCopy(lang: "de" | "ru") {
       loadingWorkload: "Нагрузка загружается...",
       assignedPatients: "Привязанные пациенты",
       noAssignedPatients: "Нет привязанных пациентов",
-      appointments: "приёмов",
+      hoursSuffix: " ч",
       next: "следующий",
       upcomingAppointments: "Ближайшие приёмы",
       noUpcomingAppointments: "Нет ближайших приёмов",
@@ -651,9 +653,15 @@ function staffEmploymentKindLabel(employmentKind: string, copy: StaffPageCopy) {
   );
 }
 
+/** A date of the workload block as DD.MM.YYYY (the rule of the whole UI). */
 function compactDate(value: unknown) {
-  return typeof value === "string" && value ? value : "-";
+  return typeof value === "string" && value ? formatAppDate(value) || value : "-";
 }
+
+const WORKLOAD_APPOINTMENT_WORDS: PluralWords = {
+  ru: ["приём", "приёма", "приёмов"],
+  de: ["Termin", "Termine"],
+};
 
 function emptyCredential(): CredentialForm {
   return {
@@ -2441,14 +2449,14 @@ export function InterpretersPage() {
                     label={profileCopy.bookedThisWeek}
                     value={displayNumber(
                       operations?.summary.booked_hours_week,
-                      " h",
+                      profileCopy.hoursSuffix,
                     )}
                   />
                   <Metric
                     label={profileCopy.capacity}
                     value={displayNumber(
                       operations?.summary.capacity_hours_week,
-                      " h",
+                      profileCopy.hoursSuffix,
                     )}
                   />
                   <Metric
@@ -2501,8 +2509,12 @@ export function InterpretersPage() {
                             {displayValue(item.patient_name)}
                           </span>
                           <span className="mt-1 block text-muted-foreground">
-                            {displayValue(item.appointment_count)} {profileCopy.appointments} ·
-                            {profileCopy.next} {compactDate(item.next_appointment_date)}
+                            {formatCount(
+                              lang === "de" ? "de" : "ru",
+                              Number(item.appointment_count) || 0,
+                              WORKLOAD_APPOINTMENT_WORDS,
+                            )}{" "}
+                            · {profileCopy.next} {compactDate(item.next_appointment_date)}
                           </span>
                         </div>
                       )}
@@ -2549,7 +2561,7 @@ export function InterpretersPage() {
                       renderItem={(item) => (
                         <div>
                           <span className="font-medium">
-                            {displayNumber(item.hours, " h")} ·{" "}
+                            {displayNumber(item.hours, profileCopy.hoursSuffix)} ·{" "}
                             {reportApprovalLabel(String(item.approval_status ?? ""))}
                           </span>
                           <span className="mt-1 block text-muted-foreground">

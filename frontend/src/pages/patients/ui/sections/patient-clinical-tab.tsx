@@ -1461,7 +1461,9 @@ export function PatientRecommendationsSection({
           <Badge variant="outline" className={cn("rounded-full text-[10px]", lifecycleBadgeClass(rec.lifecycle_status))}>
             {lifecycleLabel(rec.lifecycle_status)}
           </Badge>
-          {rec.recommended_on ? <span className={datePillClass}>{rec.recommended_on}</span> : null}
+          {rec.recommended_on ? (
+            <span className={datePillClass}>{formatAppDate(rec.recommended_on) || rec.recommended_on}</span>
+          ) : null}
           {validityLabel(rec) ? (
             <span className={periodPillClass}>
               {tx("Период", "Zeitraum")}: {validityLabel(rec)}

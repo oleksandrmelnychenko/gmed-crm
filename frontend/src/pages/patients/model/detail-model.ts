@@ -503,7 +503,8 @@ export function normalizePatientDetailTab(tab: string | null | undefined, access
 }
 
 export function resolvePatientTimelineRoute(
-  item: Pick<PatientTimelineItem, "entity_type" | "entity_id">,
+  item: Pick<PatientTimelineItem, "entity_type" | "entity_id"> &
+    Partial<Pick<PatientTimelineItem, "category">>,
   access: PatientTimelineNavigationAccess
 ) {
   switch (item.entity_type) {
@@ -552,8 +553,15 @@ export function resolvePatientTimelineRoute(
     case "relation":
       return access.patientId ? `/patients/${access.patientId}?tab=relations` : null;
     case "task":
-    case "workflow_task":
       return access.patientId ? `/patients/${access.patientId}?tab=workflow` : null;
+    case "workflow_task":
+      // The category is the checklist key. A point of an order checklist
+      // (`order_intake`, …) is worked off in the order; the patient's own
+      // list ("Рабочий процесс") does not contain it (QA 2026-11-10).
+      if (!access.patientId) return null;
+      return item.category?.startsWith("order_")
+        ? `/patients/${access.patientId}?tab=orders`
+        : `/patients/${access.patientId}?tab=workflow`;
     case "service_package":
     case "service_package_consumption":
     case "service_package_change":

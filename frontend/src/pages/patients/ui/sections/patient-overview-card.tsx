@@ -295,13 +295,16 @@ export function PatientRecommendationOverviewItem({
   const doctor = recommendationDoctorLabel(rec, lang, tx);
   if (doctor) sub.push(doctor);
   sub.push(...splitLines(rec.description));
-  if (rec.due_at) sub.push(appDateKeyOf(rec.due_at) || rec.due_at);
+  // Dates as DD.MM.YYYY, like everywhere else on the card.
+  if (rec.due_at) sub.push(formatAppDate(appDateKeyOf(rec.due_at)) || rec.due_at);
 
   return (
     <li className="leading-snug">
       <span className="text-[13px] font-medium text-foreground">{rec.title}</span>
       {rec.recommended_on ? (
-        <span className={cn(datePillClass, "ml-1.5")}>{rec.recommended_on}</span>
+        <span className={cn(datePillClass, "ml-1.5")}>
+          {formatAppDate(rec.recommended_on) || rec.recommended_on}
+        </span>
       ) : null}
       {rec.lifecycle_status === "nicht_erfolgt" ? (
         <span className="ml-1 text-[10px] font-medium text-rose-600">

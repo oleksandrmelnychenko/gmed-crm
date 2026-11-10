@@ -308,6 +308,30 @@ export function leadFlagBadge(
   }
 }
 
+/** Server codes of a refused list file (`routes/sanctions.rs`, `sanctions::store::ImportError`). */
+const LIST_UPLOAD_ERROR_KEYS = {
+  list_format: "sanctions_list_error_format",
+  list_empty: "sanctions_list_error_empty",
+  list_size: "sanctions_list_error_size",
+  list_suspicious: "sanctions_list_error_suspicious",
+  file_required: "sanctions_list_error_file",
+  invalid_upload: "sanctions_list_error_file",
+  list_storage: "sanctions_list_error_storage",
+} as const satisfies Record<string, keyof Translations>;
+
+/**
+ * A refused list file in the reader's language. The server answers with an
+ * English sentence ("the file is not the EU consolidated sanctions list …",
+ * QA 2026-11-10, E F-8) and a stable code; unknown codes keep the message.
+ */
+export function listUploadErrorText(error: unknown, t: Translations, fallback: string): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === "string" && Object.hasOwn(LIST_UPLOAD_ERROR_KEYS, code)) {
+    return t[LIST_UPLOAD_ERROR_KEYS[code as keyof typeof LIST_UPLOAD_ERROR_KEYS]];
+  }
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 /** Errors the gate answers with (the wizard shows its own banner for them). */
 export function isSanctionsGateError(error: unknown): boolean {
   const code = (error as { code?: unknown } | null)?.code;

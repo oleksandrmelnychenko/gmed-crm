@@ -256,7 +256,7 @@ export function PatientTimelineTab({
                     </h3>
                     <span className="h-px flex-1 bg-border" aria-hidden="true" />
                   </div>
-                  {group.items.map((item) => {
+                  {group.items.map((item, itemIndex) => {
                     const route = resolvePatientTimelineRoute(item, {
                       patientId,
                       canOpenDocumentsWorkspace,
@@ -273,7 +273,9 @@ export function PatientTimelineTab({
 
                     return (
                       <button
-                        key={`${item.entity_type}-${item.entity_id}`}
+                        // One record can have several events: every save of the
+                        // clinical record is an entry of the same patient id.
+                        key={`${item.entity_type}-${item.entity_id}-${item.happened_at}-${itemIndex}`}
                         type="button"
                         onClick={() => {
                           if (route) {

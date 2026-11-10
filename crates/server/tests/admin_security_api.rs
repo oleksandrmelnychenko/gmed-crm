@@ -711,6 +711,61 @@ async fn activity_search_finds_rows_by_their_translated_labels() {
     assert_eq!(body["total"], 3, "{body}");
 }
 
+/// QA 2026-11-10 (E F-7): an account change names the affected person and
+/// carries its before/after values, and the person's e-mail or name finds
+/// every event about the account, not only the one that stored the address.
+#[tokio::test]
+async fn activity_names_the_affected_account_and_finds_it_by_name() {
+    let Some(app) = test_context().await else {
+        return;
+    };
+    let pool = app.suite.pool.clone();
+    let actor = app.it_admin_id;
+    let target = seed_user(&pool, "activity-target", "sales").await;
+    let (target_name, target_email): (String, String) =
+        sqlx::query_as("SELECT name, email FROM users WHERE id = $1")
+            .bind(target)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    sqlx::query(
+        r#"INSERT INTO audit_log
+               (user_id, action, entity_type, entity_id, old_value, new_value, context, created_at)
+           VALUES
+                ($1, 'update_user', 'user', $2,
+                 '{"name":"Old Name","role":"sales"}'::jsonb,
+                 '{"name":"New Name","role":"sales"}'::jsonb,
+                 '{}'::jsonb, now() - interval '1 minute'),
+                ($1, 'deactivate_user', 'user', $2, NULL, NULL, '{}'::jsonb, now() - interval '2 minute')"#,
+    )
+    .bind(actor)
+    .bind(target)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let bearer = auth_header_for("it_admin", actor);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/activity?user_id={actor}&search={target_email}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["total"], 2, "{body}");
+    let items = body["items"].as_array().expect("items");
+    assert_eq!(items[0]["action"], "update_user", "{body}");
+    assert_eq!(items[0]["entity_name"], target_name.as_str(), "{body}");
+    assert_eq!(items[0]["entity_email"], target_email.as_str(), "{body}");
+    assert_eq!(items[0]["old_value"]["name"], "Old Name", "{body}");
+    assert_eq!(items[0]["new_value"]["name"], "New Name", "{body}");
+    assert_eq!(items[1]["action"], "deactivate_user", "{body}");
+    assert_eq!(items[1]["entity_name"], target_name.as_str(), "{body}");
+    assert!(items[1]["old_value"].is_null(), "{body}");
+}
+
 /// QA E-45 (2026-10-11): the activity log does not hand the IT admin
 /// sanctions decisions, lead e-mails or other patient data; the CEO reads
 /// everything.

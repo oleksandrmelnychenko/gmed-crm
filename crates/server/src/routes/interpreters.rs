@@ -1222,6 +1222,9 @@ async fn load_interpreter_operations_payload(
                   ON pref.patient_id = p.id
                  AND pref.interpreter_id = $1
            WHERE a.interpreter_id = $1
+             -- A declined booking is not the interpreter's visit: the lists
+             -- follow the same rule as the summary counts above (QA D-17).
+             AND a.interpreter_response IS DISTINCT FROM 'declined'
            GROUP BY p.id, pref.preference
            ORDER BY active_relation DESC,
                     next_appointment_date ASC NULLS LAST,
@@ -1245,6 +1248,7 @@ async fn load_interpreter_operations_payload(
            WHERE a.interpreter_id = $1
              AND a.date >= CURRENT_DATE
              AND a.status <> 'cancelled'
+             AND a.interpreter_response IS DISTINCT FROM 'declined'
            ORDER BY a.date ASC, a.time_start ASC NULLS LAST
            LIMIT 8"#,
     )

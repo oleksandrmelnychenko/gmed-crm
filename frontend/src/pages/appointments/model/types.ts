@@ -134,6 +134,13 @@ export type AppointmentListItem = {
    * the ones it is booked on. Absent in older payloads: the role decides.
    */
   can_edit?: boolean;
+  /**
+   * Whether the caller may book or replace the interpreter: everybody who may
+   * change the appointment, and the interpreter team lead for every
+   * appointment of the team, where `can_edit` is false (owner decision
+   * 2026-11-10). Absent in older payloads: `can_edit` decides.
+   */
+  can_assign_interpreter?: boolean;
 };
 
 export type AppointmentRequestStatus =
@@ -200,6 +207,11 @@ export type RecurringLineageHistoryItem = {
 export type AppointmentDetail = AppointmentListItem & {
   /** The interpreter's note to a "needs clarification" or declined answer. */
   interpreter_response_comment?: string | null;
+  /**
+   * When the interpreter was booked or answered last (from the audit trail);
+   * absent for a booking made with the appointment itself.
+   */
+  interpreter_state_at?: string | null;
   category: string | null;
   preparation_notes: string | null;
   followup_notes: string | null;

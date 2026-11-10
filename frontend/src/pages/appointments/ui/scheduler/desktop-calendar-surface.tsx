@@ -5,7 +5,7 @@ import listPlugin from "@fullcalendar/list";
 import interactionPlugin from "@fullcalendar/interaction";
 import deLocale from "@fullcalendar/core/locales/de";
 import ruLocale from "@fullcalendar/core/locales/ru";
-import type { EventInput } from "@fullcalendar/core";
+import type { EventInput, LocaleInput } from "@fullcalendar/core";
 import {
   useEffect,
   useMemo,
@@ -47,6 +47,24 @@ const FULL_CALENDAR_EVENT_TIME_FORMAT = {
   hour12: false,
   omitZeroMinute: false,
 } as const;
+// FullCalendar's Russian locale has no accessibility texts: the list view
+// header read "Time / Event" and the arrows were named "Previous …" / "Next …"
+// in English (QA 2026-11-10, C S3 30). The German locale has its own.
+const RU_CALENDAR_LOCALE: LocaleInput = {
+  ...ruLocale,
+  buttonHints: {
+    prev: "Предыдущий период",
+    next: "Следующий период",
+    today: "Сегодня",
+  },
+  viewHint: "Вид: $0",
+  navLinkHint: "Перейти к $0",
+  moreLinkHint: (count: number) => `Показать ещё ${count}`,
+  closeHint: "Закрыть",
+  timeHint: "Время",
+  eventHint: "Приём",
+};
+
 // The calendar keeps FullCalendar's "local" zone and gets naive Berlin wall
 // times (events are `${date}T${time}` without an offset), so they render
 // unshifted in any browser zone. "Now" must be naive Berlin time as well, or
@@ -329,7 +347,7 @@ export function DesktopCalendarSurface({
         <FullCalendar
           ref={calendarRef}
           plugins={FULL_CALENDAR_PLUGINS}
-          locale={lang === "de" ? deLocale : ruLocale}
+          locale={lang === "de" ? deLocale : RU_CALENDAR_LOCALE}
           views={titleViews}
           eventTimeFormat={FULL_CALENDAR_EVENT_TIME_FORMAT}
           eventDisplay="block"

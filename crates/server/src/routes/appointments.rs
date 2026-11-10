@@ -2455,11 +2455,22 @@ async fn list_attention_items(
                     && interpreter_id.is_some()
                     && interpreter_response.as_deref() != Some("accepted")
                 {
-                    push_reason(
-                        "appointments_attention_reason_interpreter_confirmation_pending",
-                        "Interpreter confirmation is still pending".to_string(),
-                        serde_json::json!({}),
-                    );
+                    // A declined booking waits for nobody's confirmation: it
+                    // needs another interpreter (QA 2026-11-10, D-17).
+                    if interpreter_response.as_deref() == Some("declined") {
+                        push_reason(
+                            "appointments_attention_reason_interpreter_declined",
+                            "The interpreter declined the booking; another interpreter is needed"
+                                .to_string(),
+                            serde_json::json!({}),
+                        );
+                    } else {
+                        push_reason(
+                            "appointments_attention_reason_interpreter_confirmation_pending",
+                            "Interpreter confirmation is still pending".to_string(),
+                            serde_json::json!({}),
+                        );
+                    }
                 }
                 if status != "cancelled" && overdue_reminder_count > 0 {
                     push_reason(
@@ -3269,12 +3280,35 @@ async fn create_appointment(
         }
         None => Vec::new(),
     };
+    // The patient learns about a visit the portal shows at once (one without
+    // an order); the visits of an order are announced when its plan is
+    // released. One notification also for a whole series.
+    let patient_changes: Vec<PatientAppointmentChange> = created_appointments
+        .iter()
+        .map(|(appointment_id, _)| PatientAppointmentChange::new(*appointment_id))
+        .collect();
+    let patient_notifications = match insert_patient_appointment_notifications(
+        &mut tx,
+        PatientAppointmentNotice::Added,
+        &patient_changes,
+        auth.user_id,
+        true,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, "create appointment: notify patient");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
 
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, "create appointment: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     publish_appointment_notifications(&state, &booking_notifications).await;
+    publish_appointment_notifications(&state, &patient_notifications).await;
 
     for (appointment_id, occurrence_date) in &created_appointments {
         if appointment_type == "non_medical"
@@ -3691,6 +3725,10 @@ async fn reverse_billed_reports_in_tx(
 }
 
 const INTERPRETER_REPORT_SELF_REVIEW_CODE: &str = "interpreter_report_self_review";
+
+/// Error code of a report returned for revision without saying why.
+const INTERPRETER_REPORT_REJECTION_REASON_REQUIRED_CODE: &str =
+    "interpreter_report_rejection_reason_required";
 
 /// A team lead booked as the interpreter reports its own visit; approving or
 /// returning that report is left to another team lead, a patient manager or
@@ -5161,7 +5199,16 @@ async fn get_appointment(
                   d.name AS doctor_name,
                   u.name AS interpreter_name,
                   owner.name AS owner_name,
-                  owner.role AS owner_role
+                  owner.role AS owner_role,
+                  -- When the interpreter was booked or answered last, from
+                  -- the audit trail of this appointment: the timeline dates
+                  -- the booking with it, not with the visit (QA D-17).
+                  (SELECT max(trail.created_at)
+                   FROM audit_log trail
+                   WHERE trail.entity_type = 'appointment'
+                     AND trail.entity_id = a.id
+                     AND trail.action IN ('assign_interpreter', 'interpreter_response')
+                  ) AS interpreter_state_at
            FROM appointments a
            JOIN patients p ON p.id = a.patient_id
            LEFT JOIN providers pr ON pr.id = a.provider_id
@@ -5561,7 +5608,7 @@ async fn delete_appointment(
 
     // A booked interpreter learns that the visit is gone (a cancelled one was
     // announced when it was cancelled). The notification has no link.
-    let booking_notifications = if status == "cancelled" {
+    let mut booking_notifications = if status == "cancelled" {
         Vec::new()
     } else {
         let targets = match load_booked_interpreter_targets_in_tx(&mut tx, &[apt_id]).await {
@@ -5598,6 +5645,28 @@ async fn delete_appointment(
             }
         }
     };
+    // The patient learns that a visit shown in the portal is gone (a
+    // cancelled one was announced when it was cancelled); no link either.
+    if status != "cancelled" {
+        match insert_patient_appointment_notifications(
+            &mut tx,
+            PatientAppointmentNotice::Cancelled,
+            &[PatientAppointmentChange::new(apt_id)],
+            auth.user_id,
+            false,
+        )
+        .await
+        {
+            Ok(value) => booking_notifications.extend(value),
+            Err(error) => {
+                tracing::error!(error = %error, appointment_id = %apt_id, "notify patient before appointment delete");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to delete appointment",
+                );
+            }
+        }
+    }
 
     let deleted = match sqlx::query("DELETE FROM appointments WHERE id = $1")
         .bind(apt_id)
@@ -6322,6 +6391,29 @@ async fn update_appointment(
     let mut unbooked_notices: Vec<BookingNoticeTarget> = Vec::new();
     let mut rescheduled_notices: Vec<BookingNoticeTarget> = Vec::new();
     let target_ids: Vec<Uuid> = targets.iter().map(|target| target.id).collect();
+    // Visits the patient saw in the portal before this save. A move of one of
+    // them is announced to the patient; a visit that the portal shows only
+    // after this save (taken out of its order, or new in the series) is
+    // announced as a new one.
+    let portal_visible_before: HashSet<Uuid> = match sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT id
+           FROM appointments
+           WHERE id = ANY($1)
+             AND appointment_type <> 'internal'
+             AND portal_released_at IS NOT NULL"#,
+    )
+    .bind(&target_ids)
+    .fetch_all(&mut *tx)
+    .await
+    {
+        Ok(rows) => rows.into_iter().collect(),
+        Err(e) => {
+            tracing::error!(error = %e, appointment_id = %apt_id, "load portal-visible appointment targets");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let mut patient_moved: Vec<PatientAppointmentChange> = Vec::new();
+    let mut patient_added: Vec<PatientAppointmentChange> = Vec::new();
     // Completed appointments cannot be rescheduled at all. One with a
     // submitted or approved interpreter report counts as delivered too; moving
     // it to a day that has not come yet would undo the report date rule.
@@ -6559,6 +6651,15 @@ async fn update_appointment(
         {
             booked_pairs.push((target.patient_id, interpreter_id));
         }
+        if !portal_visible_before.contains(&target.id) {
+            // Kept only if the portal shows the visit after this save.
+            patient_added.push(PatientAppointmentChange::new(target.id));
+        } else if target.date != target_date || target.time_start != time_start {
+            patient_moved.push(PatientAppointmentChange {
+                appointment_id: target.id,
+                previous: Some((target.date, target.time_start)),
+            });
+        }
         updated_targets.push((target.id, target.patient_id, target_date));
     }
     if !recurrence_dates.is_empty() && recurrence_dates.len() > targets.len() {
@@ -6636,6 +6737,7 @@ async fn update_appointment(
                 booked_pairs.push((patient_id, interpreter_id));
                 booked_notices.push(BookingNoticeTarget::new(appointment_id, interpreter_id));
             }
+            patient_added.push(PatientAppointmentChange::new(appointment_id));
             updated_targets.push((appointment_id, patient_id, target_date));
             created_targets.push((appointment_id, patient_id, target_date));
         }
@@ -6818,6 +6920,42 @@ async fn update_appointment(
             Ok(value) => notifications.extend(value),
             Err(e) => {
                 tracing::error!(error = %e, appointment_id = %apt_id, notice = notice.kind(), "update appointment: notify interpreters");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    }
+    // One notification for the patient per save: a moved visit first, then
+    // the cancelled tail of a shortened series, then visits that are new in
+    // the portal. Title, place, notes or the interpreter notify nobody.
+    let patient_notice: Option<(PatientAppointmentNotice, Vec<PatientAppointmentChange>)> =
+        if !patient_moved.is_empty() {
+            Some((PatientAppointmentNotice::Rescheduled, patient_moved))
+        } else if !cancelled_target_ids.is_empty() {
+            Some((
+                PatientAppointmentNotice::Cancelled,
+                cancelled_target_ids
+                    .iter()
+                    .map(|id| PatientAppointmentChange::new(*id))
+                    .collect(),
+            ))
+        } else if !patient_added.is_empty() {
+            Some((PatientAppointmentNotice::Added, patient_added))
+        } else {
+            None
+        };
+    if let Some((patient_notice, patient_changes)) = patient_notice {
+        match insert_patient_appointment_notifications(
+            &mut tx,
+            patient_notice,
+            &patient_changes,
+            auth.user_id,
+            true,
+        )
+        .await
+        {
+            Ok(value) => notifications.extend(value),
+            Err(e) => {
+                tracing::error!(error = %e, appointment_id = %apt_id, notice = patient_notice.kind(), "update appointment: notify patient");
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         }
@@ -7299,6 +7437,35 @@ async fn update_status(
             Err(resp) => return resp,
         }
     }
+    // The patient is told that a visit of the own schedule was confirmed or
+    // cancelled: once per save, also for a series.
+    let patient_notice = match body.status.as_str() {
+        "confirmed" => Some(PatientAppointmentNotice::Confirmed),
+        "cancelled" => Some(PatientAppointmentNotice::Cancelled),
+        _ => None,
+    };
+    if let Some(patient_notice) = patient_notice {
+        let patient_changes: Vec<PatientAppointmentChange> = target_rows
+            .iter()
+            .filter(|(_, previous_status, _)| previous_status != &body.status)
+            .map(|(target_id, _, _)| PatientAppointmentChange::new(*target_id))
+            .collect();
+        match insert_patient_appointment_notifications(
+            &mut tx,
+            patient_notice,
+            &patient_changes,
+            auth.user_id,
+            true,
+        )
+        .await
+        {
+            Ok(value) => notifications.extend(value),
+            Err(e) => {
+                tracing::error!(error = %e, appointment_id = %apt_id, "update appointment status: notify patient");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    }
     let mut checklist_changes = Vec::new();
     if body.status == "cancelled" {
         match close_terminal_appointment_artifacts_in_tx(&mut tx, &target_ids, auth.user_id).await {
@@ -7503,7 +7670,16 @@ async fn assign_interpreter(
     {
         return e;
     }
-    match can_change_appointment(&state, &auth, apt_id, None, None, None).await {
+    // The interpreter team lead plans the team: it books or replaces the
+    // interpreter of every appointment of the team's scope (the appointments
+    // it can open), without the right to change anything else there (owner
+    // decision 2026-11-10). Everybody else needs the change scope.
+    let in_scope = if auth.role == Role::TeamleadInterpreter {
+        can_access_appointment(&state, &auth, apt_id, None, None, None).await
+    } else {
+        can_change_appointment(&state, &auth, apt_id, None, None, None).await
+    };
+    match in_scope {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -9041,8 +9217,10 @@ impl InterpreterWorkNotice {
 /// caller's transaction and returns `(notification_id, user_id)` pairs to
 /// publish after commit. Approvers are the patient managers and interpreter
 /// team leads who can open the appointment (its owner or assigned to the
-/// patient), falling back to the CEO; report decisions go to the report's
-/// interpreter. The actor is never notified about their own action.
+/// patient), falling back to the CEO; a declined booking also goes to every
+/// interpreter team lead, who may book another interpreter for it; report
+/// decisions go to the report's interpreter. The actor is never notified
+/// about their own action.
 async fn insert_interpreter_work_notifications(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     notice: InterpreterWorkNotice,
@@ -9093,6 +9271,10 @@ async fn insert_interpreter_work_notifications(
                               AND assignment.user_id = recipient.id
                               AND assignment.revoked_at IS NULL
                         )
+                        -- A declined booking is the interpreter team lead's
+                        -- work too: every team lead may book another
+                        -- interpreter (owner decision 2026-11-10).
+                        OR ($6::boolean AND recipient.role = 'teamlead_interpreter')
                     )
                    WHERE a.id = $1
                    RETURNING id, user_id"#,
@@ -9102,6 +9284,7 @@ async fn insert_interpreter_work_notifications(
             .bind(notice.title())
             .bind(&body)
             .bind(actor_id)
+            .bind(notice == InterpreterWorkNotice::BookingDeclined)
             .fetch_all(&mut **tx)
             .await?;
             if rows.is_empty() {
@@ -9376,6 +9559,214 @@ async fn publish_interpreter_work_notifications(
         )
         .await;
     }
+}
+
+/// A change of a visit that the patient sees in the portal (owner decision
+/// 2026-11-10: the patient is told about every change of the own schedule).
+/// Internal changes (notes, the booked interpreter) notify nobody, and a
+/// visit the portal does not show — an internal one, or one of a plan that is
+/// not released yet — is announced with the plan (`appointment_plan_released`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PatientAppointmentNotice {
+    /// A visit appeared in the patient's schedule.
+    Added,
+    /// The visit was confirmed.
+    Confirmed,
+    /// Date or time of the visit changed.
+    Rescheduled,
+    /// The visit no longer takes place (cancelled or deleted).
+    Cancelled,
+}
+
+impl PatientAppointmentNotice {
+    fn kind(self) -> &'static str {
+        match self {
+            PatientAppointmentNotice::Added => "patient_appointment_added",
+            PatientAppointmentNotice::Confirmed => "patient_appointment_confirmed",
+            PatientAppointmentNotice::Rescheduled => "patient_appointment_rescheduled",
+            PatientAppointmentNotice::Cancelled => "patient_appointment_cancelled",
+        }
+    }
+}
+
+/// One visit of a change the patient is told about; `previous` is the date
+/// and start time before a move.
+#[derive(Clone, Debug)]
+struct PatientAppointmentChange {
+    appointment_id: Uuid,
+    previous: Option<(chrono::NaiveDate, Option<chrono::NaiveTime>)>,
+}
+
+impl PatientAppointmentChange {
+    fn new(appointment_id: Uuid) -> Self {
+        Self {
+            appointment_id,
+            previous: None,
+        }
+    }
+}
+
+/// "17.12.2026 14:00", or "17.12.2026" for a visit without a time. Date and
+/// time of an appointment are stored as Berlin wall-clock values.
+fn patient_notice_slot(date: chrono::NaiveDate, time_start: Option<chrono::NaiveTime>) -> String {
+    match time_start {
+        Some(time) => format!("{} {}", date.format("%d.%m.%Y"), time.format("%H:%M")),
+        None => date.format("%d.%m.%Y").to_string(),
+    }
+}
+
+/// Title and text of a patient notification about a visit, in Russian and in
+/// German: `[title_ru, body_ru, title_de, body_de]`. The row keeps the
+/// wording of the recipient's language; `kind` and `params` carry the same
+/// facts for a portal that words them itself.
+fn patient_appointment_notice_texts(
+    notice: PatientAppointmentNotice,
+    title: &str,
+    slot: &str,
+    previous_slot: Option<&str>,
+    occurrence_count: usize,
+) -> [String; 4] {
+    let (title_ru, title_de) = match notice {
+        PatientAppointmentNotice::Added => (
+            "Новый приём в вашем расписании",
+            "Neuer Termin in Ihrem Terminplan",
+        ),
+        PatientAppointmentNotice::Confirmed => ("Приём подтверждён", "Termin bestätigt"),
+        PatientAppointmentNotice::Rescheduled => ("Приём перенесён", "Termin verschoben"),
+        PatientAppointmentNotice::Cancelled => ("Приём отменён", "Termin abgesagt"),
+    };
+    let when = match previous_slot {
+        Some(previous) if previous != slot => format!("{title}: {previous} → {slot}"),
+        _ => format!("{title} · {slot}"),
+    };
+    let (more_ru, more_de) = if occurrence_count > 1 {
+        let more = occurrence_count - 1;
+        (
+            format!(" (и ещё приёмов серии: {more})"),
+            format!(" (und weitere Termine der Serie: {more})"),
+        )
+    } else {
+        (String::new(), String::new())
+    };
+    [
+        title_ru.to_string(),
+        format!("{when}{more_ru}"),
+        title_de.to_string(),
+        format!("{when}{more_de}"),
+    ]
+}
+
+/// Writes the patient notifications of one change inside the caller's
+/// transaction, after the change itself (for a deletion: before it, with
+/// `link_appointment` off). Every portal login of the patient gets one
+/// notification about the earliest visit of the change, with the number of
+/// visits when a series changed. Only visits the portal shows count — the
+/// condition of `list_my_appointments` — and the acting user is never
+/// notified. Returns the rows to publish after commit.
+async fn insert_patient_appointment_notifications(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    notice: PatientAppointmentNotice,
+    changes: &[PatientAppointmentChange],
+    actor_id: Uuid,
+    link_appointment: bool,
+) -> Result<Vec<PendingAppointmentNotification>, sqlx::Error> {
+    if changes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let appointment_ids: Vec<Uuid> = changes.iter().map(|change| change.appointment_id).collect();
+    let visits = sqlx::query_as::<
+        _,
+        (
+            Uuid,
+            Uuid,
+            String,
+            chrono::NaiveDate,
+            Option<chrono::NaiveTime>,
+        ),
+    >(
+        r#"SELECT a.id, a.patient_id, a.title, a.date, a.time_start
+           FROM appointments a
+           WHERE a.id = ANY($1)
+             AND a.appointment_type <> 'internal'
+             AND a.portal_released_at IS NOT NULL
+           ORDER BY a.date, a.time_start NULLS FIRST, a.id"#,
+    )
+    .bind(&appointment_ids)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    let mut notifications = Vec::new();
+    let mut notified_patients: Vec<Uuid> = Vec::new();
+    for (appointment_id, patient_id, title, date, time_start) in &visits {
+        if notified_patients.contains(patient_id) {
+            continue;
+        }
+        notified_patients.push(*patient_id);
+        let occurrence_count = visits
+            .iter()
+            .filter(|(_, other_patient_id, _, _, _)| other_patient_id == patient_id)
+            .count();
+        let previous = changes
+            .iter()
+            .find(|change| change.appointment_id == *appointment_id)
+            .and_then(|change| change.previous);
+        let slot = patient_notice_slot(*date, *time_start);
+        let previous_slot = previous.map(|(date, time)| patient_notice_slot(date, time));
+        let [title_ru, body_ru, title_de, body_de] = patient_appointment_notice_texts(
+            notice,
+            title,
+            &slot,
+            previous_slot.as_deref(),
+            occurrence_count,
+        );
+        let params = serde_json::json!({
+            "appointment_title": title,
+            "appointment_date": date,
+            "time_start": time_start.map(|value| value.format("%H:%M").to_string()),
+            "previous_date": previous.map(|(date, _)| date),
+            "previous_time_start": previous
+                .and_then(|(_, time)| time)
+                .map(|value| value.format("%H:%M").to_string()),
+            "occurrence_count": occurrence_count,
+            "deleted": !link_appointment,
+        });
+        let linked_appointment_id = link_appointment.then_some(*appointment_id);
+        let rows = sqlx::query(
+            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+               SELECT DISTINCT u.id, $2::text,
+                      CASE WHEN u.preferred_language = 'de' THEN $3::text ELSE $4::text END,
+                      CASE WHEN u.preferred_language = 'de' THEN $5::text ELSE $6::text END,
+                      CASE WHEN $7::uuid IS NOT NULL THEN 'appointment' END,
+                      $7::uuid, $8::jsonb
+               FROM users u
+               JOIN patient_assignments pa ON pa.user_id = u.id
+               WHERE pa.patient_id = $1
+                 AND pa.revoked_at IS NULL
+                 AND u.is_active = true
+                 AND u.role = 'patient'
+                 AND u.id <> $9
+               RETURNING id, user_id"#,
+        )
+        .bind(patient_id)
+        .bind(notice.kind())
+        .bind(&title_de)
+        .bind(&title_ru)
+        .bind(&body_de)
+        .bind(&body_ru)
+        .bind(linked_appointment_id)
+        .bind(params)
+        .bind(actor_id)
+        .fetch_all(&mut **tx)
+        .await?;
+        for row in &rows {
+            notifications.push(PendingAppointmentNotification {
+                id: row.try_get("id")?,
+                user_id: row.try_get("user_id")?,
+                appointment_id: linked_appointment_id,
+            });
+        }
+    }
+    Ok(notifications)
 }
 
 async fn load_interpreter_hours_catalog_item(
@@ -10912,6 +11303,22 @@ async fn reject_report(
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
     }
+    // The interpreter has to know what to change: a report goes back only
+    // with a reason, which the interpreter reads in the notification and in
+    // the report (QA 2026-11-10, D-18).
+    let Some(reason) = body
+        .notes
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+    else {
+        return err_with_details(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "A reason is required to return an interpreter report for revision",
+            serde_json::json!({ "code": INTERPRETER_REPORT_REJECTION_REASON_REQUIRED_CODE }),
+        );
+    };
     let mut tx = match state.db.begin().await {
         Ok(value) => value,
         Err(e) => {
@@ -10949,13 +11356,13 @@ async fn reject_report(
            SET approval_status = 'rejected',
                approved_by = $2,
                approved_at = now(),
-               notes = COALESCE($3, notes)
+               notes = $3
            WHERE id = $1
              AND approval_status = 'pending'"#,
     )
     .bind(report_id)
     .bind(auth.user_id)
-    .bind(body.notes)
+    .bind(&reason)
     .execute(&mut *tx)
     .await;
     match result {
@@ -12012,6 +12419,16 @@ fn caller_can_edit_appointment(
         .unwrap_or(scope.via_patient_assignment && assigned_to_patient)
 }
 
+/// Whether the caller may book or replace the interpreter of an appointment
+/// it can open (`assign_interpreter`): everybody who may change the
+/// appointment, and the interpreter team lead for every appointment of the
+/// team's scope, where `can_edit` stays false (owner decision 2026-11-10).
+fn caller_can_assign_interpreter(auth: &AuthUser, appointment_type: &str, can_edit: bool) -> bool {
+    auth.can(Capability::AppointmentsAssignInterpreter)
+        && !is_blocked_slot(auth, appointment_type)
+        && (can_edit || auth.role == Role::TeamleadInterpreter)
+}
+
 /// List item of an appointment. The row carries `caller_has_assignment` (the
 /// caller's active assignment to the patient) for `can_edit`.
 fn build_appointment_list_json(
@@ -12034,6 +12451,7 @@ fn build_appointment_list_json(
         row.try_get::<bool, _>("caller_has_assignment")
             .unwrap_or(false),
     );
+    let can_assign_interpreter = caller_can_assign_interpreter(auth, &appointment_type, can_edit);
     let patient_name = format!(
         "{} {}",
         row.try_get::<String, _>("first_name").unwrap_or_default(),
@@ -12079,6 +12497,7 @@ fn build_appointment_list_json(
         "is_blocked": blocked,
         "visibility_mode": if blocked { "blocked" } else { "full" },
         "can_edit": can_edit,
+        "can_assign_interpreter": can_assign_interpreter,
     })
 }
 
@@ -12097,6 +12516,7 @@ fn build_appointment_detail_json(
         .try_get::<String, _>("appointment_type")
         .unwrap_or_default();
     let blocked = is_blocked_slot(auth, &appointment_type);
+    let can_assign_interpreter = caller_can_assign_interpreter(auth, &appointment_type, can_edit);
     let patient_name = format!(
         "{} {}",
         row.try_get::<String, _>("first_name").unwrap_or_default(),
@@ -12118,6 +12538,7 @@ fn build_appointment_detail_json(
         "interpreter_name": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("interpreter_name").unwrap_or_default() },
         "interpreter_response": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("interpreter_response").unwrap_or_default() },
         "interpreter_response_comment": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("interpreter_response_comment").unwrap_or_default() },
+        "interpreter_state_at": if blocked { None::<String> } else { row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("interpreter_state_at").unwrap_or_default().map(|v| v.to_rfc3339()) },
         "checklist_phase": if blocked { String::new() } else { row.try_get::<String, _>("checklist_phase").unwrap_or_default() },
         "preparation_notes": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("preparation_notes").unwrap_or_default() },
         "followup_notes": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("followup_notes").unwrap_or_default() },
@@ -12151,6 +12572,7 @@ fn build_appointment_detail_json(
         "is_blocked": blocked,
         "visibility_mode": if blocked { "blocked" } else { "full" },
         "can_edit": can_edit,
+        "can_assign_interpreter": can_assign_interpreter,
     })
 }
 
@@ -13639,6 +14061,53 @@ mod tests {
         assert_eq!(
             concierge_receipts_due_at(date, None).to_rfc3339(),
             "2026-09-26T16:00:00+00:00"
+        );
+    }
+
+    #[test]
+    fn patient_visit_notices_name_the_visit_and_its_slot_in_both_languages() {
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 12, 17).expect("valid date");
+        assert_eq!(
+            patient_notice_slot(date, Some(time(14, 0))),
+            "17.12.2026 14:00"
+        );
+        assert_eq!(patient_notice_slot(date, None), "17.12.2026");
+
+        let [title_ru, body_ru, title_de, body_de] = patient_appointment_notice_texts(
+            PatientAppointmentNotice::Rescheduled,
+            "MRT Knie",
+            "17.12.2026 14:00",
+            Some("15.12.2026 09:00"),
+            1,
+        );
+        assert_eq!(title_ru, "Приём перенесён");
+        assert_eq!(title_de, "Termin verschoben");
+        assert_eq!(body_ru, "MRT Knie: 15.12.2026 09:00 → 17.12.2026 14:00");
+        assert_eq!(body_de, body_ru);
+
+        // A series change is one notice that says how many visits follow.
+        let [_, body_ru, _, body_de] = patient_appointment_notice_texts(
+            PatientAppointmentNotice::Cancelled,
+            "Physiotherapie",
+            "17.12.2026 14:00",
+            None,
+            3,
+        );
+        assert_eq!(
+            body_ru,
+            "Physiotherapie · 17.12.2026 14:00 (и ещё приёмов серии: 2)"
+        );
+        assert_eq!(
+            body_de,
+            "Physiotherapie · 17.12.2026 14:00 (und weitere Termine der Serie: 2)"
+        );
+        assert_eq!(
+            PatientAppointmentNotice::Added.kind(),
+            "patient_appointment_added"
+        );
+        assert_eq!(
+            PatientAppointmentNotice::Confirmed.kind(),
+            "patient_appointment_confirmed"
         );
     }
 }

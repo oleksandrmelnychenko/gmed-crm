@@ -88,6 +88,26 @@ describe("appointment role contracts", () => {
     expect(teamContext.canApproveReport).toBe(true);
     expect(teamContext.canRejectReport).toBe(true);
 
+    // The team lead plans the team: where the server grants it, booking
+    // another interpreter stays while every other change is withheld (owner
+    // decision 2026-11-10).
+    const teamPlanning = appointmentRecordPermissions(teamlead, {
+      is_blocked: false,
+      can_edit: false,
+      can_assign_interpreter: true,
+    });
+    expect(teamPlanning.canAssignInterpreter).toBe(true);
+    expect(teamPlanning.canEditSchedule).toBe(false);
+    expect(teamPlanning.canManageStatus).toBe(false);
+    expect(teamPlanning.canDelete).toBe(false);
+    // A role without the capability gains nothing from the flag.
+    expect(
+      appointmentRecordPermissions(appointmentPermissions("interpreter"), {
+        can_edit: false,
+        can_assign_interpreter: true,
+      }).canAssignInterpreter,
+    ).toBe(false);
+
     // Own patients (or an older payload without the flag) keep the role's actions.
     expect(appointmentRecordPermissions(teamlead, { can_edit: true })).toEqual(teamlead);
     expect(appointmentRecordPermissions(teamlead, { is_blocked: false })).toEqual(teamlead);

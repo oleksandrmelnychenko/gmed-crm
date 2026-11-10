@@ -563,6 +563,10 @@ async fn list_activity(
                  OR al.entity_type = ANY(COALESCE($11::TEXT[], '{}'::TEXT[]))
                  OR COALESCE(al.entity_id::TEXT, '') ILIKE '%' || $6 || '%'
                  OR (
+                     ($8::bool OR COALESCE(target.role, '') <> 'patient')
+                     AND (target.name ILIKE '%' || $6 || '%' OR target.email ILIKE '%' || $6 || '%')
+                 )
+                 OR (
                      (
                          $8::bool
                          OR (al.entity_type = ANY($9) AND COALESCE(target.role, '') <> 'patient')
@@ -594,8 +598,15 @@ async fn list_activity(
     };
 
     match sqlx::query(
+        // The affected account by name, and the before/after values of an
+        // account change (`domain_diff_event` keeps them outside `context`):
+        // "user changed" without the changed field and with an id fragment
+        // as the object told the reader nothing (QA 2026-11-10, E F-7).
         r#"SELECT al.id, al.user_id, u.name AS user_name, u.email AS user_email,
                   u.role AS actor_role, COALESCE(target.role = 'patient', false) AS target_is_portal,
+                  target.name AS target_name, target.email AS target_email,
+                  CASE WHEN al.entity_type = 'user' THEN al.old_value END AS old_value,
+                  CASE WHEN al.entity_type = 'user' THEN al.new_value END AS new_value,
                   al.action, al.entity_type, al.entity_id, al.context, al.created_at
            FROM audit_log al
            LEFT JOIN users u ON u.id = al.user_id
@@ -634,6 +645,10 @@ async fn list_activity(
                  OR al.action = ANY(COALESCE($12::TEXT[], '{}'::TEXT[]))
                  OR al.entity_type = ANY(COALESCE($13::TEXT[], '{}'::TEXT[]))
                  OR COALESCE(al.entity_id::TEXT, '') ILIKE '%' || $6 || '%'
+                 OR (
+                     ($10::bool OR COALESCE(target.role, '') <> 'patient')
+                     AND (target.name ILIKE '%' || $6 || '%' OR target.email ILIKE '%' || $6 || '%')
+                 )
                  OR (
                      (
                          $10::bool
@@ -726,11 +741,40 @@ async fn list_activity(
                     // A patient or lead login acting in its portal stays
                     // anonymous for a reader without patient access.
                     let actor_hidden = !full_access && actor_role.as_deref() == Some("patient");
+                    let target_is_portal =
+                        r.try_get::<bool, _>("target_is_portal").unwrap_or(false);
                     let context = visible_activity_context(
                         full_access,
                         entity_type.as_deref(),
-                        r.try_get::<bool, _>("target_is_portal").unwrap_or(false),
+                        target_is_portal,
                         r.try_get::<Option<serde_json::Value>, _>("context")
+                            .unwrap_or_default(),
+                    );
+                    // A patient or lead login stays unnamed for a reader
+                    // without patient access, like its context.
+                    let target_hidden = !full_access && target_is_portal;
+                    let target_name: Option<String> = if target_hidden {
+                        None
+                    } else {
+                        r.try_get("target_name").unwrap_or_default()
+                    };
+                    let target_email: Option<String> = if target_hidden {
+                        None
+                    } else {
+                        r.try_get("target_email").unwrap_or_default()
+                    };
+                    let old_value = visible_activity_context(
+                        full_access,
+                        entity_type.as_deref(),
+                        target_is_portal,
+                        r.try_get::<Option<serde_json::Value>, _>("old_value")
+                            .unwrap_or_default(),
+                    );
+                    let new_value = visible_activity_context(
+                        full_access,
+                        entity_type.as_deref(),
+                        target_is_portal,
+                        r.try_get::<Option<serde_json::Value>, _>("new_value")
                             .unwrap_or_default(),
                     );
                     serde_json::json!({
@@ -742,7 +786,11 @@ async fn list_activity(
                         "action": r.try_get::<String, _>("action").unwrap_or_default(),
                         "entity_type": entity_type,
                         "entity_id": r.try_get::<Option<Uuid>, _>("entity_id").unwrap_or_default(),
+                        "entity_name": target_name,
+                        "entity_email": target_email,
                         "context": context,
+                        "old_value": old_value,
+                        "new_value": new_value,
                         "created_at": r.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                     })
                 })

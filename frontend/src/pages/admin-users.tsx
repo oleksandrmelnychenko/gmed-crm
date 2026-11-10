@@ -31,6 +31,7 @@ import {
 
 import { AdminGuideButton } from "@/components/admin-guide";
 import {
+  SheetActionsFooter,
   SheetFormFooter,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
@@ -85,6 +86,7 @@ import {
   getRequiredAdminPasswordError,
   generateAdminPassword,
   isAdminUserLocked,
+  isAdminUserLoginPaused,
   isPasswordConfirmationMismatch,
 } from "@/pages/admin-users.helpers";
 import { knownTwoFactorError } from "@/pages/two-factor-errors";
@@ -97,6 +99,8 @@ interface User {
   is_active: boolean;
   failed_login_attempts: number;
   locked_until: string | null;
+  /** End of a running sign-in pause at one address; the account is not locked. */
+  login_paused_until?: string | null;
   password_changed_at: string | null;
   password_reset_required: boolean;
   totp_enrolled: boolean;
@@ -387,6 +391,8 @@ function useAdminUsersPageContent() {
     name: string;
     result: UserDeactivationResult;
   } | null>(null);
+  const [confirmDeactivate, setConfirmDeactivate] = useState<User | null>(null);
+  const [togglingActiveUserId, setTogglingActiveUserId] = useState<string | null>(null);
   const setSearch = (value: SetStateAction<string>) =>
     setAdminUsersField("search", value);
   const setShowCreate = (value: SetStateAction<boolean>) =>
@@ -602,6 +608,9 @@ function useAdminUsersPageContent() {
         width: 210,
         render: (user) => {
           const locked = isAdminUserLocked(user);
+          // Paused at one address after wrong passwords: the account is not
+          // locked, yet the person cannot sign in there (QA 2026-11-10, E F-4).
+          const paused = !locked && user.is_active && isAdminUserLoginPaused(user);
           return (
             <div className="flex flex-wrap items-center gap-1">
               <Badge
@@ -637,6 +646,16 @@ function useAdminUsersPageContent() {
                     ? t.users_active
                     : t.users_inactive}
               </Badge>
+              {paused && user.login_paused_until ? (
+                <Badge
+                  variant="outline"
+                  title={t.users_login_paused_hint}
+                  className="rounded-full border-amber-300 bg-amber-50 text-amber-800"
+                  data-testid="login-paused"
+                >
+                  {t.users_login_paused_until} {formatDateTime(user.login_paused_until)}
+                </Badge>
+              ) : null}
               {user.password_reset_required ? (
                 <Badge
                   variant="outline"
@@ -949,9 +968,26 @@ function useAdminUsersPageContent() {
     try {
       await unlockAdminUser(user.id);
       clearApiCache("/users");
+      // The open dialog shows the lifted hold at once, like the ended sessions.
+      dispatchAdminUsersState((current) => ({
+        editUser:
+          current.editUser?.id === user.id
+            ? {
+                ...current.editUser,
+                locked_until: null,
+                login_paused_until: null,
+                failed_login_attempts: 0,
+              }
+            : current.editUser,
+      }));
       void loadUsers();
     } catch (e) {
-      setError(describeError(e, user.role));
+      const message = describeError(e, user.role);
+      if (editUser?.id === user.id) {
+        setEditError(message);
+      } else {
+        setError(message);
+      }
     } finally {
       setUnlockingUserId(null);
     }
@@ -987,6 +1023,7 @@ function useAdminUsersPageContent() {
   const toggleActive = async (user: User) => {
     setError(null);
     setDeactivationReport(null);
+    setTogglingActiveUserId(user.id);
     try {
       const result = await setAdminUserActive(user.id, !user.is_active);
       if (user.is_active && result && typeof result === "object") {
@@ -996,7 +1033,21 @@ function useAdminUsersPageContent() {
       void loadUsers();
     } catch (e) {
       setError(describeError(e, user.role));
+    } finally {
+      setTogglingActiveUserId(null);
+      setConfirmDeactivate(null);
     }
+  };
+
+  // Deactivation ends the person's sessions and revokes the patient
+  // assignments, so it is asked first like the lesser actions of this page
+  // (QA 2026-11-10, E F-12). Activation takes nothing away and stays one click.
+  const requestToggleActive = (user: User) => {
+    if (user.is_active) {
+      setConfirmDeactivate(user);
+      return;
+    }
+    void toggleActive(user);
   };
 
   // Asked first like the password reset; the open dialog shows the new state
@@ -1073,12 +1124,12 @@ function useAdminUsersPageContent() {
                 title={t.users_created_title}
                 description={`${createdUser.name} · ${createdUser.email}`}
                 footer={(
-                  <SheetFormFooter
-                    cancelLabel={t.users_done}
-                    submitLabel={t.users_done}
-                    onCancel={closeCreateSheet}
-                    onSubmit={closeCreateSheet}
-                  />
+                  // One way out: nothing is left to cancel or to save here.
+                  <SheetActionsFooter>
+                    <Button type="button" className="h-8 rounded-lg" onClick={closeCreateSheet}>
+                      {t.users_done}
+                    </Button>
+                  </SheetActionsFooter>
                 )}
               >
                 <OneTimePasswordReveal
@@ -1350,7 +1401,24 @@ function useAdminUsersPageContent() {
                       <dd className="tabular-nums text-red-700">{formatDateTime(editUser.locked_until)}</dd>
                     </>
                   ) : null}
+                  {editUser?.login_paused_until && isAdminUserLoginPaused(editUser) ? (
+                    <>
+                      <dt className="text-muted-foreground">{t.users_login_paused_until}</dt>
+                      <dd className="tabular-nums text-amber-800" data-testid="login-paused-until">
+                        {formatDateTime(editUser.login_paused_until)}
+                      </dd>
+                    </>
+                  ) : null}
+                  {editUser && editUser.failed_login_attempts > 0 ? (
+                    <>
+                      <dt className="text-muted-foreground">{t.users_failed_logins}</dt>
+                      <dd className="tabular-nums text-foreground">{editUser.failed_login_attempts}</dd>
+                    </>
+                  ) : null}
                 </dl>
+                {editUser && isAdminUserLoginPaused(editUser) ? (
+                  <p className="text-xs text-muted-foreground">{t.users_login_paused_hint}</p>
+                ) : null}
                 <div className="flex flex-wrap justify-end gap-2">
                   {editActions?.canUnlock ? (
                     <Button
@@ -1591,7 +1659,7 @@ function useAdminUsersPageContent() {
               const actions = actionsFor(user);
               return (
                 <>
-                  {actions.isLocked ? (
+                  {actions.isLocked || actions.isLoginPaused ? (
                     <Button
                       type="button"
                       variant="ghost"
@@ -1641,8 +1709,11 @@ function useAdminUsersPageContent() {
                         ? "hover:bg-rose-50 hover:text-rose-600"
                         : "hover:bg-emerald-50 hover:text-emerald-700",
                     )}
-                    disabled={user.is_active ? !actions.canDeactivate : !actions.canActivate}
-                    onClick={() => void toggleActive(user)}
+                    disabled={
+                      togglingActiveUserId === user.id ||
+                      (user.is_active ? !actions.canDeactivate : !actions.canActivate)
+                    }
+                    onClick={() => requestToggleActive(user)}
                     aria-label={user.is_active ? t.users_deactivate : t.users_activate}
                     title={user.is_active ? t.users_deactivate : t.users_activate}
                   >
@@ -1708,6 +1779,21 @@ function useAdminUsersPageContent() {
         confirmDisabled={revokingUserId !== null}
         onCancel={() => setConfirmRevokeSessions(null)}
         onConfirm={() => confirmRevokeSessions && void revokeSessions(confirmRevokeSessions)}
+      />
+      <DirtyDismissConfirmDialog
+        open={confirmDeactivate !== null}
+        title={t.users_deactivate_confirm_title}
+        message={
+          confirmDeactivate
+            ? `${confirmDeactivate.name} · ${confirmDeactivate.email}. ${t.users_deactivate_confirm}`
+            : t.users_deactivate_confirm
+        }
+        cancelLabel={t.common_cancel}
+        confirmLabel={t.users_deactivate}
+        destructive
+        confirmDisabled={togglingActiveUserId !== null}
+        onCancel={() => setConfirmDeactivate(null)}
+        onConfirm={() => confirmDeactivate && void toggleActive(confirmDeactivate)}
       />
     </div>
   );

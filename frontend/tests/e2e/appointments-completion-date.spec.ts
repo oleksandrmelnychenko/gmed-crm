@@ -296,6 +296,13 @@ test.describe("appointment completion date rule", () => {
       reportDateHint,
     );
 
+    // A return needs a reason the interpreter can act on (QA 2026-11-10, D-18).
+    await sheet.getByRole("button", { name: /Zur Überarbeitung zurückgeben/ }).click();
+    await expect(
+      sheet.getByText(/Ohne Begründung kann der Bericht nicht zur Überarbeitung/),
+    ).toBeVisible();
+    expect(reportPosts).toEqual([]);
+    await sheet.getByTestId("report-review-note").fill("Bitte nach dem Termin einreichen");
     await sheet.getByRole("button", { name: /Zur Überarbeitung zurückgeben/ }).click();
     await expect.poll(() => reportPosts).toEqual(["reject"]);
   });

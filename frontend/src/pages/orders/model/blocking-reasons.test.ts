@@ -238,6 +238,33 @@ describe("orderBlockingReasonSection", () => {
     expect(orderBlockingReasonAnchor("Doctor follow-up visit on 01.10.2026 is still open")).toBeNull();
   });
 
+  it("opens each planning blocker at the block that resolves it", () => {
+    expect(orderBlockingReasonAnchor("Treatment plan must be finalized before execution")).toBe(
+      "order-planning-plan-agreement",
+    );
+    for (const reason of [
+      "At least one confirmed medical appointment is required",
+      "Required non-medical services still need a confirmed booking",
+    ]) {
+      expect(orderBlockingReasonAnchor(reason), reason).toBe("order-planning-appointments");
+    }
+    for (const reason of [
+      "Interpreter is required but not assigned yet",
+      "Assigned interpreter has not confirmed yet",
+    ]) {
+      expect(orderBlockingReasonAnchor(reason), reason).toBe("order-planning-interpreters");
+    }
+    for (const reason of [
+      "Interpreter briefing is still pending",
+      "Preparation documents still need to be sent",
+    ]) {
+      expect(orderBlockingReasonAnchor(reason), reason).toBe("order-planning-control");
+    }
+    // Missing patient documents have no control inside the section.
+    expect(orderBlockingReasonAnchor("2 required patient document(s) are missing")).toBeNull();
+    expect(orderBlockingReasonAnchor("Order signatures are still incomplete")).toBeNull();
+  });
+
   it("sends planning blockers to planning and everything else to the gates", () => {
     expect(orderBlockingReasonSection("Assigned interpreter has not confirmed yet")).toBe("planning");
     expect(orderBlockingReasonSection("Treatment plan must be finalized before execution")).toBe("planning");

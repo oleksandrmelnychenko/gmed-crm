@@ -22,7 +22,7 @@ import { formatUiText, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { sanctionsApi, type ListStatusResponse } from "./api";
-import { countryList } from "./model";
+import { countryList, listUploadErrorText } from "./model";
 import { EU_COUNTRIES_SOURCE_URL, syncEuBlockedCountries } from "./country-sync";
 
 function errorText(error: unknown, fallback: string): string {
@@ -60,7 +60,13 @@ export function SanctionsListSettings({ className }: { className?: string }) {
       setFlash(await action());
       await load();
     } catch (actionError) {
-      setError(errorText(actionError, t.common_error));
+      // A refused list file is named in the reader's language, not in the
+      // server's English sentence.
+      setError(
+        kind === "upload"
+          ? listUploadErrorText(actionError, t, t.common_error)
+          : errorText(actionError, t.common_error),
+      );
     } finally {
       setBusy("");
     }

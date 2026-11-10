@@ -8,6 +8,7 @@ import {
   actionTone,
   activityLabelMatches,
   activityViewQuery,
+  entityDisplay,
   entityTypeLabel,
   isAccessActivity,
   isAiActivityAction,
@@ -58,6 +59,60 @@ describe("Every server audit action has a label (QA E-14)", () => {
     expect(entityTypeLabel("token_family", ru)).toBe("Сессия");
     expect(entityTypeLabel("lead", ru)).toBe("Лид");
     expect(entityTypeLabel("new_entity_kind", de)).toBe("New entity kind");
+  });
+});
+
+describe("Activity log after the QA of 2026-11-10 (E F-7)", () => {
+  // Shown as humanised English ("Credit transferred out") in the Russian log.
+  const qaActions = [
+    "lead_uncounted_parent_acknowledged",
+    "credit_transferred_out",
+    "credit_transferred_in",
+    "lead_portal_consent_choices_saved",
+    "lead_portal_trusted_persons_saved",
+    "lead_portal_representative_country_questions",
+    "staff_upload_representative_identity",
+    "update_lead_representative_details",
+    "lead_portal_update_services",
+    "update_lead_invoice_recipient",
+    // The other server actions that had no label on that day.
+    "staff_upload_representative_authority",
+    "lead_portal_follow_up_submit",
+    "lead_portal_plan_requested",
+    "payer_link_prepared",
+    "supersede_quote",
+    "update_quote_status",
+    "delete_agency_service",
+    "unassign_interpreter",
+    "release_appointment_to_portal",
+    "reset_order_client_signature",
+    "waive_external_invoice_rebilling",
+    "privacy_request_requeued",
+    "revoke_guardian_patient_access",
+    "link_request_login_to_patient",
+  ];
+
+  it("names the actions in Russian and German", () => {
+    for (const action of qaActions) {
+      const labelRu = actionLabel(action, ru);
+      const labelDe = actionLabel(action, de);
+      expect(labelRu, action).toMatch(/[А-Яа-яЁё]/);
+      expect(labelRu, action).not.toMatch(/^[A-Za-z ]+$/);
+      expect(labelDe, action).not.toContain("_");
+      expect(labelDe.toLowerCase(), action).not.toBe(action.replace(/_/g, " "));
+    }
+    expect(actionLabel("credit_transferred_out", ru)).toBe("Кредит перенесён с этого счёта");
+    expect(actionLabel("update_lead_invoice_recipient", de)).toBe("Rechnungsempfänger des Leads geändert");
+  });
+
+  it("names the affected account instead of an id fragment", () => {
+    const id = "649d7b93-5a88-426f-b93f-c34bc8e19638";
+    expect(entityDisplay("user", id, ru, "QA-E Manager Eins edited")).toBe(
+      "Пользователь: QA-E Manager Eins edited",
+    );
+    expect(entityDisplay("user", id, de, "  ")).toBe("Benutzer 649d7b93…");
+    expect(entityDisplay("user", id, ru)).toBe("Пользователь 649d7b93…");
+    expect(entityDisplay("user", id, ru, null)).toBe("Пользователь 649d7b93…");
   });
 });
 

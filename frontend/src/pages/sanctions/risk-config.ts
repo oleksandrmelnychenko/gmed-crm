@@ -227,6 +227,16 @@ export function normalizeRiskReviews(value: unknown): RiskReviewRow[] {
   });
 }
 
+/**
+ * How many queued leads wait for the reviewer (a decision, or an old
+ * proposal to confirm); a lead that waits for the client's answers is not
+ * the reviewer's turn. The counter of the «Оценка риска» tab (QA 2026-11-10,
+ * E F-6: nothing on the page said that a decision was waiting).
+ */
+export function riskReviewsAwaitingDecision(rows: readonly RiskReviewRow[]): number {
+  return rows.filter((row) => row.status === "review_required" || row.status === "proposed").length;
+}
+
 export const riskConfigApi = {
   get: async () => normalizeRiskConfigResponse(await apiFetch<unknown>("/compliance/risk-config", { forceFresh: true })),
   /** The caller reads the configuration again afterwards (the server bumped the version). */

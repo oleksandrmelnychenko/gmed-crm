@@ -10,6 +10,7 @@ import {
 import type { ConciergeTask } from "@/pages/concierge/model";
 
 import type {
+  ActiveOrderPhase,
   ClinicalPayload,
   DemographicsPayload,
   ExecutiveFinanceSnapshot,
@@ -184,6 +185,7 @@ async function fetchExecutiveFinanceSnapshot(): Promise<ExecutiveFinanceSnapshot
 
 type StaffDashboardDataState = {
   overview: OverviewStats | null;
+  activeOrderPhases: ActiveOrderPhase[];
   monthly: MonthlyEntry[];
   upcoming: UpcomingAppointment[];
   tasks: TaskItem[];
@@ -201,6 +203,7 @@ type StaffDashboardDataAction =
   | {
       type: "overview-success";
       overview: OverviewStats | null;
+      activeOrderPhases: ActiveOrderPhase[];
       monthly: MonthlyEntry[];
       upcoming: UpcomingAppointment[];
       tasks: TaskItem[];
@@ -219,6 +222,7 @@ type StaffDashboardDataAction =
 
 const STAFF_DASHBOARD_INITIAL_STATE: StaffDashboardDataState = {
   overview: null,
+  activeOrderPhases: [],
   monthly: [],
   upcoming: [],
   tasks: [],
@@ -241,6 +245,7 @@ function staffDashboardDataReducer(
       return {
         ...state,
         overview: action.overview,
+        activeOrderPhases: action.activeOrderPhases,
         monthly: action.monthly,
         upcoming: action.upcoming,
         tasks: action.tasks,
@@ -277,6 +282,7 @@ export function useStaffDashboardData(period: Period) {
   const [
     {
       overview,
+      activeOrderPhases,
       monthly,
       upcoming,
       tasks,
@@ -300,6 +306,12 @@ export function useStaffDashboardData(period: Period) {
       apiFetch<OverviewStats>("/stats/overview", {
         cacheTtlMs: DASHBOARD_CACHE_TTL_MS,
       }).catch(() => null),
+      // The phases of the same open orders `overview.orders` counts.
+      apiFetch<ActiveOrderPhase[]>("/stats/orders/by-phase", {
+        cacheTtlMs: DASHBOARD_CACHE_TTL_MS,
+      })
+        .then((rows) => (Array.isArray(rows) ? rows : []))
+        .catch(() => [] as ActiveOrderPhase[]),
       apiFetch<MonthlyEntry[]>("/stats/leads/monthly", {
         cacheTtlMs: DASHBOARD_CACHE_TTL_MS,
       }).catch(() => [] as MonthlyEntry[]),
@@ -317,12 +329,13 @@ export function useStaffDashboardData(period: Period) {
         cacheTtlMs: DASHBOARD_CACHE_TTL_MS,
       }).catch(() => [] as PatientSummary[]),
       fetchExecutiveFinanceSnapshot(),
-    ]).then(([ov, mm, up, tk, pts, financeSnapshot]) => {
+    ]).then(([ov, phases, mm, up, tk, pts, financeSnapshot]) => {
       if (cancelled) return;
       startTransition(() => {
         dispatchDashboardData({
           type: "overview-success",
           overview: ov,
+          activeOrderPhases: phases,
           monthly: mm,
           upcoming: up,
           tasks: tk,
@@ -390,6 +403,7 @@ export function useStaffDashboardData(period: Period) {
   };
 
   return {
+    activeOrderPhases,
     clinical,
     demographics,
     loading,

@@ -54,6 +54,18 @@ describe("notifications in the viewer's language (QA A-23, E-16, E-33)", () => {
     expect(notificationCopyFromFacts(proposed, "de")?.body).toContain("Vier-Augen-Prinzip");
   });
 
+  it("names the lead of a risk review when the server sends the name (QA 2026-11-10, E F-6)", () => {
+    const named = notice("risk_review_required", "Risk review required", null, { lead_name: "Darius Testiran-QAA" });
+    expect(notificationCopyFromFacts(named, "ru")).toEqual({
+      title: "Требуется проверка риска: Darius Testiran-QAA",
+      body: "Откройте лид и проверьте оценку риска.",
+    });
+    expect(notificationCopyFromFacts(named, "de")?.title).toBe("Risikoprüfung erforderlich: Darius Testiran-QAA");
+    // A purged lead has no name any more: the notice keeps its plain title.
+    const purged = notice("risk_review_required", "Risk review required", null, { lead_name: null });
+    expect(notificationCopyFromFacts(purged, "ru")?.title).toBe("Требуется проверка риска");
+  });
+
   it("translates the documents a lead added to the sent request", () => {
     const item = notice("lead_portal_documents_added", "Lead added documents", "The lead added documents to the sent request.");
     expect(notificationCopyFromFacts(item, "ru")?.title).toBe("Лид доложил документы");

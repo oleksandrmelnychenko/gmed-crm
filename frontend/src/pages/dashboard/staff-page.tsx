@@ -35,6 +35,7 @@ function ExecutiveStaffDashboard() {
   const { staffGo } = useStaffNavigate();
 
   const {
+    activeOrderPhases,
     finance,
     loading,
     monthly,
@@ -52,6 +53,7 @@ function ExecutiveStaffDashboard() {
 
   return (
     <ExecutiveBusinessMap
+      activeOrderPhases={activeOrderPhases}
       activePatientCount={activePatientCount}
       finance={finance}
       greeting={greeting}

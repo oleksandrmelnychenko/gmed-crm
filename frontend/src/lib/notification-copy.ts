@@ -108,6 +108,23 @@ function newLead(item: NotificationFacts, lang: Lang): NotificationCopy {
   };
 }
 
+/**
+ * Risk review: the title names the lead when the server sends its name
+ * (`lead_name`, added on reading — `routes/user_notifications.rs`), so that
+ * several waiting reviews can be told apart (QA 2026-11-10, E F-6). Still
+ * never a reason or a trigger.
+ */
+function riskReviewRequired(item: NotificationFacts, lang: Lang): NotificationCopy {
+  const fixed = FIXED_COPY.risk_review_required;
+  const name = text(item, "lead_name");
+  return {
+    title: name
+      ? fill({ ru: "Требуется проверка риска: {name}", de: "Risikoprüfung erforderlich: {name}" }, lang, { name })
+      : pick(fixed.title, lang),
+    body: fixed.body ? pick(fixed.body, lang) : null,
+  };
+}
+
 const FIXED_COPY: Record<string, { title: Texts; body: Texts | null }> = {
   // The order's plan was released to the patient's portal
   // (crates/server/src/routes/appointments.rs, owner decision 2026-11-02).
@@ -809,6 +826,7 @@ export function notificationCopyFromFacts(
   item: NotificationFacts,
   lang: Lang,
 ): NotificationCopy | null {
+  if (item.kind === "risk_review_required") return riskReviewRequired(item, lang);
   const fixed = FIXED_COPY[item.kind];
   if (fixed) {
     return { title: pick(fixed.title, lang), body: fixed.body ? pick(fixed.body, lang) : null };

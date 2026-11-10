@@ -114,6 +114,11 @@ export type AdminUserActionTarget = {
   role: string;
   is_active: boolean;
   locked_until: string | null;
+  /**
+   * End of a running sign-in pause at one client address (too many wrong
+   * passwords there); `locked_until` stays empty for it.
+   */
+  login_paused_until?: string | null;
   active_sessions?: number;
   totp_enrolled?: boolean;
 };
@@ -130,6 +135,8 @@ export type AdminUserActions = {
   /** The row may be changed at all (CEO rows are read-only for IT Admin). */
   canManage: boolean;
   isLocked: boolean;
+  /** Sign-ins from one address are paused; the account itself is not locked. */
+  isLoginPaused: boolean;
   canEdit: boolean;
   canUnlock: boolean;
   canRevokeSessions: boolean;
@@ -145,6 +152,21 @@ export function isAdminUserLocked(
   if (!user.locked_until) return false;
   const lockedUntil = new Date(user.locked_until).getTime();
   return Number.isFinite(lockedUntil) && lockedUntil > now;
+}
+
+/**
+ * Whether sign-ins of the account are paused at some address right now: after
+ * several wrong passwords the address that typed them is held for a while and
+ * even the right password is refused there. The account row stays "active"
+ * (`locked_until` empty), so the list has to say it and offer the unlock.
+ */
+export function isAdminUserLoginPaused(
+  user: Pick<AdminUserActionTarget, "login_paused_until">,
+  now = Date.now(),
+) {
+  if (!user.login_paused_until) return false;
+  const pausedUntil = new Date(user.login_paused_until).getTime();
+  return Number.isFinite(pausedUntil) && pausedUntil > now;
 }
 
 /**
@@ -180,11 +202,15 @@ export function getAdminUserActions(
     context.canManagePortalAccounts ?? false,
   );
   const isLocked = isAdminUserLocked(user, context.now);
+  const isLoginPaused = isAdminUserLoginPaused(user, context.now);
   return {
     canManage,
     isLocked,
+    isLoginPaused,
     canEdit: canManage,
-    canUnlock: canManage && isLocked,
+    // Any hold is lifted by the same unlock: the account-wide lock and the
+    // pause of one address.
+    canUnlock: canManage && (isLocked || isLoginPaused),
     canRevokeSessions: canManage && (user.active_sessions ?? 0) > 0,
     canResetTotp: canManage && user.totp_enrolled === true,
     canDeactivate: canManage && user.is_active && user.id !== context.currentUserId,
@@ -198,6 +224,7 @@ type AdminUserErrorMessages = {
   users_cannot_deactivate_self: string;
   users_portal_account_managed_elsewhere?: string;
   users_portal_role_change_forbidden?: string;
+  users_email_already_exists?: string;
 };
 
 /**
@@ -234,6 +261,13 @@ export function describeAdminUserError(
     typeof details.message === "string" ? details.message : String(error);
   if (message === "Cannot deactivate yourself") {
     return messages.users_cannot_deactivate_self;
+  }
+  // The code since 2026-11-10; the bare English text from an older server.
+  if (
+    (details.code === "email_already_exists" || message === "Email already exists") &&
+    messages.users_email_already_exists
+  ) {
+    return messages.users_email_already_exists;
   }
   return message;
 }

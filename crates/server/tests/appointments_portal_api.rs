@@ -1106,14 +1106,22 @@ async fn order_plan_reaches_the_portal_only_after_release() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body:?}");
     assert!(!body.to_string().contains(&planned), "{body}");
-    let patient_notifications: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM user_notifications WHERE user_id = $1 AND entity_type = 'appointment'",
+    // The patient was told about the visit outside the order, and about no
+    // visit of the plan that is not released yet (owner decision 2026-11-10).
+    let patient_notifications: Vec<(String, Option<Uuid>)> = sqlx::query_as(
+        "SELECT kind, entity_id FROM user_notifications WHERE user_id = $1 AND entity_type = 'appointment'",
     )
     .bind(patient_user_id)
-    .fetch_one(&pool)
+    .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(patient_notifications, 0);
+    assert_eq!(
+        patient_notifications,
+        vec![(
+            "patient_appointment_added".to_string(),
+            Some(Uuid::parse_str(&standalone).unwrap())
+        )]
+    );
 
     // Staff see the plan with its release state.
     let (status, body) = json_request(
@@ -1200,6 +1208,203 @@ async fn order_plan_reaches_the_portal_only_after_release() {
     assert_eq!(status, StatusCode::OK, "{body:?}");
     assert_eq!(body["released"], 0);
     assert_eq!(count_plan_notifications(&pool, patient_user_id).await, 1);
+}
+
+/// Kind, stored title, stored text and facts of the patient's visit notices.
+async fn patient_visit_notices(
+    pool: &PgPool,
+    user_id: Uuid,
+) -> Vec<(String, String, Option<String>, Value)> {
+    sqlx::query_as(
+        r#"SELECT kind, title, body, params
+           FROM user_notifications
+           WHERE user_id = $1 AND kind LIKE 'patient_appointment_%'
+           ORDER BY created_at, id"#,
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+/// Owner decision 2026-11-10: the patient is told when a visit of the own
+/// schedule is added, confirmed, moved or cancelled — once per save, in the
+/// patient's language, never about an internal change and never about a
+/// visit the portal does not show.
+#[tokio::test]
+async fn patient_is_told_about_changes_of_the_visits_the_portal_shows() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("portal-visit-notices");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+    let pm_bearer = auth_header_for(patient_manager_id, "patient_manager");
+
+    let visit_body = |date: &str, time_start: &str, time_end: &str, notes: Value| {
+        json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": patient_manager_id,
+            "appointment_type": "medical",
+            "title": "Cardiology check",
+            "date": date,
+            "time_start": time_start,
+            "time_end": time_end,
+            "notes": notes,
+        })
+    };
+
+    // A visit outside an order is in the portal at once: one notice.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(visit_body("2027-04-10", "10:00", "11:00", Value::Null)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+    let visit = body["id"].as_str().unwrap().to_string();
+    let notices = patient_visit_notices(&pool, patient_user_id).await;
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert_eq!(notices[0].0, "patient_appointment_added");
+    assert_eq!(notices[0].1, "Новый приём в вашем расписании");
+    assert_eq!(notices[0].3["appointment_date"], "2027-04-10");
+    assert_eq!(notices[0].3["time_start"], "10:00");
+
+    // An internal change (a note) tells the patient nothing.
+    let update_path = format!("/api/v1/appointments/{visit}/update");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &update_path,
+        &pm_bearer,
+        Some(visit_body(
+            "2027-04-10",
+            "10:00",
+            "11:00",
+            json!("Internal remark"),
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(patient_visit_notices(&pool, patient_user_id).await.len(), 1);
+
+    // Confirmed, then moved: one notice each, the move with the old slot.
+    let status_path = format!("/api/v1/appointments/{visit}/status");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &status_path,
+        &pm_bearer,
+        Some(json!({ "status": "confirmed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &update_path,
+        &pm_bearer,
+        Some(visit_body(
+            "2027-04-12",
+            "14:00",
+            "15:00",
+            json!("Internal remark"),
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let notices = patient_visit_notices(&pool, patient_user_id).await;
+    assert_eq!(notices.len(), 3, "{notices:?}");
+    assert_eq!(notices[1].0, "patient_appointment_confirmed");
+    assert_eq!(notices[2].0, "patient_appointment_rescheduled");
+    assert_eq!(notices[2].3["previous_date"], "2027-04-10");
+    assert_eq!(notices[2].3["previous_time_start"], "10:00");
+    assert_eq!(notices[2].3["appointment_date"], "2027-04-12");
+    assert_eq!(
+        notices[2].2.as_deref(),
+        Some("Cardiology check: 10.04.2027 10:00 → 12.04.2027 14:00")
+    );
+
+    // Cancelled: told in the language the patient chose.
+    sqlx::query("UPDATE users SET preferred_language = 'de' WHERE id = $1")
+        .bind(patient_user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &status_path,
+        &pm_bearer,
+        Some(json!({ "status": "cancelled" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let notices = patient_visit_notices(&pool, patient_user_id).await;
+    assert_eq!(notices.len(), 4, "{notices:?}");
+    assert_eq!(notices[3].0, "patient_appointment_cancelled");
+    assert_eq!(notices[3].1, "Termin abgesagt");
+    let linked: Option<Uuid> = sqlx::query_scalar(
+        "SELECT entity_id FROM user_notifications WHERE user_id = $1 AND kind = 'patient_appointment_cancelled'",
+    )
+    .bind(patient_user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(linked, Some(Uuid::parse_str(&visit).unwrap()));
+
+    // A visit of a plan that is not released, and an internal appointment,
+    // stay silent whatever happens to them.
+    let mut planned_body = visit_body("2027-04-20", "10:00", "11:00", Value::Null);
+    planned_body["order_id"] = json!(order_id);
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(planned_body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+    let planned = body["id"].as_str().unwrap().to_string();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{planned}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "confirmed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "owner_user_id": patient_manager_id,
+            "appointment_type": "internal",
+            "title": "Internal coordination",
+            "date": "2027-04-21",
+            "time_start": "09:00",
+            "time_end": "09:30"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+    assert_eq!(patient_visit_notices(&pool, patient_user_id).await.len(), 4);
 }
 
 #[allow(clippy::too_many_arguments)]

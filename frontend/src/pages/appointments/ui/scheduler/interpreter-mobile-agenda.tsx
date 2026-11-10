@@ -10,6 +10,8 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useLang } from "@/lib/i18n";
+import { formatCount, type PluralWords } from "@/lib/i18n/plural";
 import { cn } from "@/lib/utils";
 import {
   appointmentMobileAgendaCardClassName,
@@ -74,6 +76,17 @@ type InterpreterMobileAgendaProps = {
   sections: MobileAgendaSection[];
   emptyText: string;
   onOpenDetail: (id: string) => void;
+};
+
+/** "1 приём", "2 приёма", "5 приёмов" in the day header (QA D-17). */
+const APPOINTMENT_COUNT_WORDS: PluralWords = {
+  ru: ["приём", "приёма", "приёмов"],
+  de: ["Termin", "Termine"],
+};
+
+const PENDING_RESPONSE_WORDS: PluralWords = {
+  ru: ["ждёт ответа", "ждут ответа", "ждут ответа"],
+  de: ["wartet auf Antwort", "warten auf Antwort"],
 };
 
 function withEllipsis(value: string | null | undefined) {
@@ -256,7 +269,7 @@ export function InterpreterMobileAgenda({
   emptyText,
   onOpenDetail,
 }: InterpreterMobileAgendaProps) {
-  const { appointmentText } = useAppointmentLabels();
+  const { lang } = useLang();
   return (
     <div className="space-y-4">
       <section className={appointmentSectionCardClassName("p-4")}>
@@ -357,9 +370,9 @@ export function InterpreterMobileAgenda({
                   {section.label}
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  {section.itemCount} {appointmentText("appointments_appointments")}
+                  {formatCount(lang, section.itemCount, APPOINTMENT_COUNT_WORDS)}
                   {section.pendingResponseCount > 0
-                    ? ` - ${section.pendingResponseCount} ${appointmentText("appointments_pending_responses")}`
+                    ? ` - ${formatCount(lang, section.pendingResponseCount, PENDING_RESPONSE_WORDS)}`
                     : ""}
                 </p>
               </div>

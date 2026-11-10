@@ -49,6 +49,7 @@ import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import {
   activityActorLabel,
+  activityChangeEntries,
   activityContextEntries,
   activityContextSummary,
 } from "@/pages/admin-activity-context";
@@ -72,7 +73,13 @@ interface ActivityRow {
   action: string;
   entity_type: string | null;
   entity_id: unknown;
+  /** Name of the affected account (entity type `user`), when the reader may see it. */
+  entity_name?: string | null;
+  entity_email?: string | null;
   context: Record<string, unknown> | null;
+  /** Before/after values of an account change; other entity types send none. */
+  old_value?: Record<string, unknown> | null;
+  new_value?: Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -547,12 +554,23 @@ function ActivityActionBadge({
   );
 }
 
+type ActivityChangeSource = Pick<ActivityRow, "old_value" | "new_value">;
+
 function contextSummary(
   context: Record<string, unknown> | null,
   action: string,
   translations: Translations,
+  changeSource?: ActivityChangeSource,
 ): string {
-  if (!context || typeof context !== "object") return "\u2014";
+  // "Name: old \u2192 new" of an account change comes first (QA 2026-11-10, E F-7).
+  const changes = changeSource
+    ? activityChangeEntries(changeSource.old_value, changeSource.new_value, translations)
+    : [];
+  if (!context || typeof context !== "object") {
+    return changes.length
+      ? activityContextSummary(null, translations, changes)
+      : "\u2014";
+  }
   if (isRedactedContext(context)) return translations.activity_context_redacted;
   const method = typeof context.method === "string" ? context.method : "";
   const route = typeof context.route === "string" ? context.route : "";
@@ -575,7 +593,7 @@ function contextSummary(
   }
 
   // Known keys with translated labels and formatted values (QA E2-03).
-  return activityContextSummary(context, translations);
+  return activityContextSummary(context, translations, changes);
 }
 
 function entityTechnicalValue(
@@ -656,11 +674,16 @@ export function activityLabelMatches(
   };
 }
 
-function entityDisplay(
+export function entityDisplay(
   entityType: string | null,
   entityId: unknown,
   translations: Translations,
+  entityName?: string | null,
 ): string {
+  // The affected account by name; an id fragment says nothing to a reader
+  // (QA 2026-11-10, E F-7). Other records keep the fragment for the search.
+  const name = entityName?.trim();
+  if (name) return `${entityTypeLabel(entityType, translations)}: ${name}`;
   let idStr = "";
   if (typeof entityId === "string") {
     idStr = entityId.slice(0, 8);
@@ -687,9 +710,12 @@ function prettyContext(context: Record<string, unknown> | null) {
 /** Known context entries as a label/value list, raw JSON folded below (QA E2-03). */
 function ActivityContextDetails({
   context,
+  changes = [],
   t,
 }: {
   context: Record<string, unknown> | null;
+  /** "field: old → new" of a before/after row, shown before the context. */
+  changes?: ReturnType<typeof activityChangeEntries>;
   t: Translations;
 }) {
   if (isRedactedContext(context)) {
@@ -699,7 +725,7 @@ function ActivityContextDetails({
       </p>
     );
   }
-  const entries = activityContextEntries(context, t);
+  const entries = [...changes, ...activityContextEntries(context, t)];
   const hasRaw = Boolean(context && Object.keys(context).length > 0);
   return (
     <div className="space-y-2.5">
@@ -872,13 +898,19 @@ function AdminActivityDetailSheet({
                   <p className="text-[11.5px] text-muted-foreground">
                     {t.activity_entity}
                   </p>
-                  <p className="mt-1 text-sm font-medium text-foreground">
+                  <p className="mt-1 break-words text-sm font-medium text-foreground">
                     {entityDisplay(
                       selectedActivity.entity_type,
                       selectedActivity.entity_id,
                       t,
+                      selectedActivity.entity_name,
                     ) || "-"}
                   </p>
+                  {selectedActivity.entity_email ? (
+                    <p className="mt-1 break-words text-xs text-muted-foreground">
+                      {selectedActivity.entity_email}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
                   <p className="text-[11.5px] text-muted-foreground">
@@ -896,6 +928,11 @@ function AdminActivityDetailSheet({
               <h3><SectionHeading icon={ListTree}>{t.activity_details}</SectionHeading></h3>
               <ActivityContextDetails
                 context={selectedActivity.context}
+                changes={activityChangeEntries(
+                  selectedActivity.old_value,
+                  selectedActivity.new_value,
+                  t,
+                )}
                 t={t}
               />
             </section>
@@ -1419,22 +1456,42 @@ export function AdminActivityPage() {
         id: "entity",
         label: t.activity_entity,
         accessor: (activity) =>
-          entityTechnicalValue(activity.entity_type, activity.entity_id),
-        width: 180,
-        render: (activity) => (
-          <span className="font-mono text-xs text-foreground">
-            {entityDisplay(activity.entity_type, activity.entity_id, t)}
-          </span>
-        ),
+          [
+            entityTechnicalValue(activity.entity_type, activity.entity_id),
+            activity.entity_name ?? "",
+            activity.entity_email ?? "",
+          ]
+            .filter(Boolean)
+            .join(" "),
+        width: 220,
+        render: (activity) => {
+          const entity = entityDisplay(
+            activity.entity_type,
+            activity.entity_id,
+            t,
+            activity.entity_name,
+          );
+          return (
+            <span
+              className={cn(
+                "block truncate text-xs text-foreground",
+                activity.entity_name ? "" : "font-mono",
+              )}
+              title={[entity, activity.entity_email].filter(Boolean).join(" · ")}
+            >
+              {entity}
+            </span>
+          );
+        },
       },
       {
         id: "details",
         label: t.activity_details,
         accessor: (activity) =>
-          contextSummary(activity.context, activity.action, t),
+          contextSummary(activity.context, activity.action, t, activity),
         width: 360,
         render: (activity) => {
-          const details = contextSummary(activity.context, activity.action, t);
+          const details = contextSummary(activity.context, activity.action, t, activity);
           return (
             <span className="truncate text-xs text-foreground" title={details}>
               {details}

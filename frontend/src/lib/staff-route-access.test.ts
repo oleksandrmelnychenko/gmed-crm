@@ -207,10 +207,13 @@ describe("staff route access by capability", () => {
     ]) {
       expect(canAccessStaffRoute("ceo_assistant", path), path).toBe(true);
     }
-    for (const path of ["/admin/users", "/admin/settings", "/admin/access", "/employees"]) {
+    for (const path of ["/admin/users", "/admin/settings", "/admin/access"]) {
       expect(canAccessStaffRoute("ceo_assistant", path), path).toBe(false);
     }
     const assistant = nav("ceo_assistant");
+    // The staff directory is read-only for the assistant (QA 2026-11-10, E-F-2).
+    expect(canAccessStaffRoute("ceo_assistant", "/employees")).toBe(true);
+    expect(assistant).toContain("/employees");
     for (const path of ["/patients", "/orders", "/contracts", "/invoices", "/documents", "/reports"]) {
       expect(assistant, path).toContain(path);
     }

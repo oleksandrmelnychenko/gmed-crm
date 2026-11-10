@@ -250,6 +250,8 @@ describe("buildAppointmentTimelineEvents", () => {
         doctor_name: null,
         interpreter_name: "Iryna Kovalenko",
         interpreter_response: "accepted",
+        // The interpreter answered the day before the visit.
+        interpreter_state_at: "2026-09-27T14:44:00+00:00",
         // Created at 09:07 Berlin, after the 09:00 slot started.
         created_at: "2026-09-28T07:07:26.397183+00:00",
       },
@@ -265,7 +267,8 @@ describe("buildAppointmentTimelineEvents", () => {
     const interpreter = events.find((item) => item.id === "interpreter:apt-berlin");
     // 09:00 CEST is 07:00 UTC in any browser time zone (e.g. Europe/Kyiv).
     expect(slot?.occurredAt).toBe("2026-09-28T07:00:00.000Z");
-    expect(interpreter?.occurredAt).toBe("2026-09-28T07:00:00.000Z");
+    // The answer is dated when it was given, not with the visit (QA D-17).
+    expect(interpreter?.occurredAt).toBe("2026-09-27T14:44:00+00:00");
     expect(interpreter?.detail).toBe(
       `Iryna Kovalenko · ${t(getLang()).appointment_interpreter_response_accepted}`,
     );

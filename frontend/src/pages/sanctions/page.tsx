@@ -44,6 +44,7 @@ import {
 import { trustedContactRelationLabel } from "@/pages/leads/model/lead-trusted-contacts";
 import { SanctionsReasonDialog } from "./components";
 import { SanctionsListSettings } from "./list-settings";
+import { riskConfigApi, riskReviewsAwaitingDecision, type RiskReviewRow } from "./risk-config";
 import { RiskSettingsTab } from "./risk-settings";
 import {
   FISALIS_URL,
@@ -639,9 +640,17 @@ export function SanctionsPage() {
   const requested = params.get("tab") as Tab | null;
   const tab: Tab = requested && TABS.includes(requested) ? requested : "open";
   const [openCount, setOpenCount] = useState<number | null>(null);
+  // Leads that wait for a risk decision: counted on the tab and announced on
+  // the other tabs, where "Совпадений нет" used to be all the page said
+  // while a decision was waiting (QA 2026-11-10, E F-6).
+  const [riskWaiting, setRiskWaiting] = useState<number | null>(null);
   const navigationRef = useRef<HTMLElement>(null);
   const showsHits = tab === "open" || tab === "decided";
   const updateCounts = useCallback((counts: HitsResponse["counts"]) => setOpenCount(counts.open), []);
+  const updateRiskQueue = useCallback(
+    (rows: RiskReviewRow[]) => setRiskWaiting(riskReviewsAwaitingDecision(rows)),
+    [],
+  );
 
   useEffect(() => {
     const navigation = navigationRef.current;
@@ -681,12 +690,29 @@ export function SanctionsPage() {
     };
   }, [tab, showsHits]);
 
+  useEffect(() => {
+    // The risk tab reports its queue with every load of its own.
+    if (tab === "risk") return undefined;
+    let cancelled = false;
+    riskConfigApi
+      .reviews()
+      .then((rows) => {
+        if (!cancelled) setRiskWaiting(riskReviewsAwaitingDecision(rows));
+      })
+      .catch(() => {
+        if (!cancelled) setRiskWaiting(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab]);
+
   const labels: Record<Tab, string> = {
     open: labelWithCount(t.sanctions_tab_open, openCount),
     decided: t.sanctions_tab_decided,
     countries: t.sanctions_tab_countries,
     list: t.sanctions_tab_list,
-    risk: t.sanctions_tab_risk,
+    risk: labelWithCount(t.sanctions_tab_risk, riskWaiting),
   };
   const icons: Record<Tab, ReactNode> = {
     open: <ShieldAlert className="size-4" aria-hidden />,
@@ -721,12 +747,28 @@ export function SanctionsPage() {
         ))}
       </nav>
       </div>
+      {tab !== "risk" && riskWaiting !== null && riskWaiting > 0 ? (
+        <Banner tone="warning">
+          <div className="flex flex-wrap items-center justify-between gap-2" data-testid="risk-waiting-banner">
+            <span>{formatUiText(t.risk_queue_waiting, { count: riskWaiting })}</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 rounded-lg bg-card"
+              onClick={() => setParams({ tab: "risk" }, { replace: true })}
+            >
+              {t.risk_queue_open}
+            </Button>
+          </div>
+        </Banner>
+      ) : null}
       <TabShell className="mt-0 min-w-0 rounded-xl border border-border/50 bg-muted p-3 sm:p-4">
       {tab === "open" ? <HitsTab status="open" onCounts={updateCounts} /> : null}
       {tab === "decided" ? <HitsTab status="decided" onCounts={updateCounts} /> : null}
       {tab === "countries" ? <CountriesTab /> : null}
       {tab === "list" ? <SanctionsListSettings /> : null}
-      {tab === "risk" ? <RiskSettingsTab /> : null}
+      {tab === "risk" ? <RiskSettingsTab onQueueLoaded={updateRiskQueue} /> : null}
       </TabShell>
     </div>
   );

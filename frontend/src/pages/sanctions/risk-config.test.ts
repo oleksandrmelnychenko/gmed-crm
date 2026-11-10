@@ -10,6 +10,7 @@ import {
   normalizeRiskReviews,
   riskConfigErrors,
   riskConfigPayload,
+  riskReviewsAwaitingDecision,
   withListMove,
 } from "./risk-config";
 
@@ -108,6 +109,17 @@ describe("risk assessment configuration", () => {
     expect(rows[0].pending_proposal?.decided_by_name).toBe("Test CEO");
     expect(normalizeRiskReviews([{ lead_id: "lead-2", level: 7 }])[0].level).toBe(3);
     expect(normalizeRiskReviews(null)).toEqual([]);
+  });
+
+  it("counts for the tab only the leads that wait for the reviewer (QA 2026-11-10, E F-6)", () => {
+    const rows = normalizeRiskReviews([
+      { lead_id: "lead-1", level: 3, status: "review_required" },
+      { lead_id: "lead-2", level: 2, status: "awaiting_answers" },
+      { lead_id: "lead-3", level: 3, status: "proposed" },
+      { lead_id: "lead-4", level: 2 },
+    ]);
+    expect(riskReviewsAwaitingDecision(rows)).toBe(2);
+    expect(riskReviewsAwaitingDecision([])).toBe(0);
   });
 
   it("has every text of the tab in both languages", () => {

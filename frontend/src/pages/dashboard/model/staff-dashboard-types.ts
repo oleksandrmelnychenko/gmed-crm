@@ -9,6 +9,9 @@ export type OverviewStats = {
 
 export type MonthlyEntry = { month: string; count: number };
 
+/** Open orders of one phase (`/stats/orders/by-phase`): the orders `OverviewStats.orders` counts. */
+export type ActiveOrderPhase = { phase: string; count: number };
+
 export type UpcomingAppointment = {
   id: string;
   title: string;

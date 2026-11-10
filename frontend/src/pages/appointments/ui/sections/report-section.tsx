@@ -228,7 +228,15 @@ function useAppointmentReportSectionContent({
   }
 
   async function handleRejectReport() {
-    dispatchReportState({ busyAction: "report-reject" });
+    // The interpreter has to know what to change (QA 2026-11-10, D-18); the
+    // server refuses a return without a reason as well.
+    if (!rejectReason.trim()) {
+      dispatchReportState({
+        formError: appointmentText("appointments_report_rejection_reason_required"),
+      });
+      return;
+    }
+    dispatchReportState({ busyAction: "report-reject", formError: "" });
     try {
       await apiFetch<{ ok: boolean }>(`/appointments/${detail.id}/report/reject`, {
         method: "POST",
@@ -650,12 +658,18 @@ function useAppointmentReportSectionContent({
                   <textarea
                     value={rejectReason}
                     onChange={(event) =>
-                      dispatchReportState({ rejectReason: event.target.value })
+                      dispatchReportState({ rejectReason: event.target.value, formError: "" })
                     }
                     className={appointmentTextareaControlClassName}
                     rows={4}
                     placeholder={withEllipsis(tr.patients_notes)}
+                    data-testid="report-review-note"
                   />
+                  {canRejectReport ? (
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      {appointmentText("appointments_report_review_note_hint")}
+                    </span>
+                  ) : null}
                 </Field>
               </>
             ) : null}

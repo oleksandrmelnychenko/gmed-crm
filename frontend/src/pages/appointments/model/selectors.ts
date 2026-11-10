@@ -121,11 +121,21 @@ export function blockedSlotPermissions(
  * only as a blocked slot, and the server reports per appointment whether the
  * caller may change it (`can_edit`): the team lead reviews reports of the
  * team's appointments but changes only those of its own patients, so every
- * change action is withheld there while report review stays.
+ * change action is withheld there while report review stays — and booking
+ * another interpreter, which the server reports apart
+ * (`can_assign_interpreter`, owner decision 2026-11-10).
  */
 export function appointmentRecordPermissions(
   permissions: AppointmentPermissions,
-  record: { is_blocked?: boolean; can_edit?: boolean; status?: string | null } | null | undefined,
+  record:
+    | {
+        is_blocked?: boolean;
+        can_edit?: boolean;
+        can_assign_interpreter?: boolean;
+        status?: string | null;
+      }
+    | null
+    | undefined,
 ): AppointmentPermissions {
   if (!record) return permissions;
   const blockedScoped = record.is_blocked ? blockedSlotPermissions(permissions) : permissions;
@@ -140,7 +150,8 @@ export function appointmentRecordPermissions(
     canEditSchedule: false,
     canDelete: false,
     canManageStatus: false,
-    canAssignInterpreter: false,
+    canAssignInterpreter:
+      scoped.canAssignInterpreter && record.can_assign_interpreter === true,
     canManageChecklist: false,
     canManageReminders: false,
     canManageCommunications: false,
@@ -212,6 +223,8 @@ type TimelineDetail = {
   doctor_name: string | null;
   interpreter_name: string | null;
   interpreter_response: string | null;
+  /** When the interpreter was booked or answered last, if the server knows. */
+  interpreter_state_at?: string | null;
   created_at: string;
 };
 
@@ -714,7 +727,10 @@ export function buildAppointmentTimelineEvents(args: {
   if (detail.interpreter_name || detail.interpreter_response) {
     events.push({
       id: `interpreter:${detail.id}`,
-      occurredAt: slotAt,
+      // The booking or the answer happened when it was recorded, not at the
+      // time of the visit (QA D-17); a booking made with the appointment has
+      // the appointment's own creation time.
+      occurredAt: detail.interpreter_state_at || detail.created_at,
       title: !detail.interpreter_name
         ? labels.appointments_timeline_interpreter_pending
         : detail.interpreter_response === "accepted"

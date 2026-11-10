@@ -328,10 +328,36 @@ const FOLLOWUP_MILESTONE_REASONS = new Set([
 export const FOLLOWUP_MILESTONES_ANCHOR_ID = "order-followup-milestones";
 
 /**
+ * DOM ids of the blocks of the planning section that resolve a planning
+ * blocker: the appointments of the order, the plan agreement, the
+ * interpreters and the planning controls (preparation documents, briefing).
+ */
+export const PLANNING_ANCHOR_IDS = {
+  appointments: "order-planning-appointments",
+  planAgreement: "order-planning-plan-agreement",
+  interpreters: "order-planning-interpreters",
+  control: "order-planning-control",
+} as const;
+
+// A planning blocker opens the block where it is resolved, not the top of
+// the section (QA 2026-11-10: all "Open" links led to the same place).
+const PLANNING_REASON_ANCHORS: Record<string, string> = {
+  "Treatment plan must be finalized before execution": PLANNING_ANCHOR_IDS.planAgreement,
+  "At least one confirmed medical appointment is required": PLANNING_ANCHOR_IDS.appointments,
+  "Required non-medical services still need a confirmed booking": PLANNING_ANCHOR_IDS.appointments,
+  "Interpreter is required but not assigned yet": PLANNING_ANCHOR_IDS.interpreters,
+  "Assigned interpreter has not confirmed yet": PLANNING_ANCHOR_IDS.interpreters,
+  "Interpreter briefing is still pending": PLANNING_ANCHOR_IDS.control,
+  "Preparation documents still need to be sent": PLANNING_ANCHOR_IDS.control,
+};
+
+/**
  * Element inside the target section that resolves the blocker, if any: the
  * "Open" link scrolls to it after opening the section.
  */
 export function orderBlockingReasonAnchor(reason: string): string | null {
+  const planningAnchor = PLANNING_REASON_ANCHORS[reason];
+  if (planningAnchor) return planningAnchor;
   if (FOLLOWUP_MILESTONE_REASONS.has(reason)) return FOLLOWUP_MILESTONES_ANCHOR_ID;
   // The 1-week / 1-month / 6-month contacts are closed in the planner.
   const completion = reason.match(FOLLOWUP_VISIT_OPEN_REASON) ?? reason.match(FOLLOWUP_BEFORE_DATE_REASON);

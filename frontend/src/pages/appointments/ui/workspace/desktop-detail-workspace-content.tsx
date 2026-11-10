@@ -30,7 +30,10 @@ import { MemoizedAppointmentLinksSection } from "@/pages/appointments/ui/section
 import { MemoizedAppointmentOverviewSection } from "@/pages/appointments/ui/sections/overview-section";
 import { MemoizedAppointmentSnapshotSection } from "@/pages/appointments/ui/sections/snapshot-section";
 import { MemoizedAppointmentTimelineSection } from "@/pages/appointments/ui/sections/timeline-section";
-import { MemoizedAppointmentWorkflowTab } from "@/pages/appointments/ui/sections/workflow-surfaces";
+import {
+  MemoizedAppointmentInterpreterSection,
+  MemoizedAppointmentWorkflowTab,
+} from "@/pages/appointments/ui/sections/workflow-surfaces";
 import { EmptyState } from "@/pages/appointments/ui/shared/workspace-primitives";
 
 const loadClinicalSection = () =>
@@ -309,8 +312,10 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
         detail={detail}
         canEdit={permissions.canEditSchedule}
         canDelete={permissions.canDelete}
+        canCancel={permissions.canManageStatus}
         onEdit={() => setOverviewEditAppointmentId(detail.id)}
         onDelete={() => onDeleteAppointment(detail.id)}
+        onCancelled={onRefresh}
         onOpenDetail={onOpenDetail}
       />
       {permissions.canEditSchedule ? (
@@ -336,6 +341,20 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
 
       {showOverviewDetails ? (
         <>
+          {/* The booking notification opens this tab: the booked interpreter
+              answers here, not only under "Workflow" (QA D-16). */}
+          {permissions.canRespondToAssignment &&
+          detail.interpreter_id === currentUserId ? (
+            <MemoizedAppointmentInterpreterSection
+              detail={detail}
+              interpreters={interpreters}
+              currentUserId={currentUserId}
+              canAssign={false}
+              canRespond
+              onRefresh={onRefresh}
+              onError={onError}
+            />
+          ) : null}
           <MemoizedAppointmentSnapshotSection detail={detail} />
           {detailAttention ? (
             <MemoizedAppointmentAttentionSection attention={detailAttention} />

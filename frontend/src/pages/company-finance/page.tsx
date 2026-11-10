@@ -26,6 +26,7 @@ import {
 import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { pluralWord } from "@/lib/i18n/plural";
 import { hasCapability } from "@/lib/permissions";
 import { formatMoneyAmount } from "@/lib/money";
 import { ReadOnlyScope } from "@/components/read-only-scope";
@@ -67,6 +68,12 @@ const initialFilters: CompanyFinancialFilters = {
   search: "",
 };
 
+// "Нужно сверить 1 пациентский баланс / 2 пациентских баланса / 5 пациентских балансов".
+const RECONCILIATION_BALANCE_WORDS = {
+  ru: ["пациентский баланс", "пациентских баланса", "пациентских балансов"],
+  de: ["Patientensaldo muss abgestimmt werden", "Patientensalden müssen abgestimmt werden"],
+} as const;
+
 const textByLanguage = {
   ru: {
     title: "Баланс компании",
@@ -92,7 +99,7 @@ const textByLanguage = {
     actualCashBalance: "Фактический остаток",
     reconciliationRequired: "Требуется сверка",
     reconciliationMessage: (count: number, amount: string) =>
-      `Нужно сверить ${count} пациентских балансов. Нераспределенные расходы: ${amount}.`,
+      `Нужно сверить ${count} ${pluralWord("ru", count, RECONCILIATION_BALANCE_WORDS)}. Нераспределенные расходы: ${amount}.`,
     patients: "Пациенты",
     providers: "Поставщики",
     cash: "Движение денег",
@@ -188,7 +195,7 @@ const textByLanguage = {
     actualCashBalance: "Tatsächlicher Kontostand",
     reconciliationRequired: "Abstimmung erforderlich",
     reconciliationMessage: (count: number, amount: string) =>
-      `${count} Patientensalden müssen abgestimmt werden. Nicht zugeordnete Kosten: ${amount}.`,
+      `${count} ${pluralWord("de", count, RECONCILIATION_BALANCE_WORDS)}. Nicht zugeordnete Kosten: ${amount}.`,
     patients: "Patienten",
     providers: "Leistungserbringer",
     cash: "Geldbewegungen",

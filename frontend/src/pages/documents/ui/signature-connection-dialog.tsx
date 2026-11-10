@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   Check,
   ExternalLink,
@@ -31,6 +31,17 @@ function ConnectionSection({ icon, title, action, children }: { icon: LucideIcon
       {children}
     </section>
   );
+}
+
+/**
+ * Whether the typed API user name cannot belong to the chosen mode: a demo
+ * account is named "api_demo…", a live one "api_prod…" (the server refuses
+ * anything else). A name still being typed towards the prefix is no mismatch.
+ */
+function signatureUsernameMismatch(username: string, mode: "demo" | "live"): boolean {
+  const prefix = mode === "demo" ? "api_demo" : "api_prod";
+  const typed = username.trim();
+  return typed.length > 0 && !typed.startsWith(prefix) && !prefix.startsWith(typed);
 }
 
 export function SignatureConnectionDialog({ canConfigure, onChanged }: { canConfigure: boolean; onChanged: () => void }) {
@@ -68,6 +79,11 @@ export function SignatureConnectionForm({ canConfigure, onChanged, onDirtyChange
   const [error, setError] = useState("");
   const busyRef = useRef(false);
   const dirty = canConfigure && !loading && (username !== (connection?.username ?? "") || mode !== (connection?.mode ?? "demo") || apiKey.length > 0);
+  // The server's rule (`document_signatures::provider`): a demo account is
+  // named "api_demo…", a live one "api_prod…".
+  const usernamePrefix = mode === "demo" ? "api_demo" : "api_prod";
+  const usernameRuleId = useId();
+  const usernameMismatch = signatureUsernameMismatch(username, mode);
   useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
   useEffect(() => {
     if (!canConfigure) return;
@@ -184,8 +200,23 @@ export function SignatureConnectionForm({ canConfigure, onChanged, onDirtyChange
                 </label>
                 <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground">
                   <span>{tx("Имя API-пользователя", "API-Benutzername")}</span>
-                  <Input className="h-9 bg-field font-normal" autoComplete="off" maxLength={200} value={username} required placeholder={mode === "demo" ? "api_demo_…" : "api_production_…"} onChange={e => setUsername(e.target.value)} />
+                  <Input className="h-9 bg-field font-normal" autoComplete="off" maxLength={200} value={username} required aria-invalid={usernameMismatch || undefined} aria-describedby={usernameRuleId} placeholder={mode === "demo" ? "api_demo_…" : "api_production_…"} onChange={e => setUsername(e.target.value)} />
                 </label>
+                {/* The rule in words: the placeholder alone did not say it (QA 2026-11-10, E F-13). */}
+                <p id={usernameRuleId} className="text-xs leading-5 text-muted-foreground sm:col-span-2">
+                  {tx(
+                    "В тестовом режиме имя API-пользователя начинается с «api_demo», в рабочем — с «api_prod». Имя и ключ другого режима не пройдут проверку.",
+                    "Im Testbetrieb beginnt der API-Benutzername mit „api_demo“, im Echtbetrieb mit „api_prod“. Zugangsdaten der anderen Betriebsart bestehen die Prüfung nicht.",
+                  )}
+                  {usernameMismatch ? (
+                    <span role="alert" className="mt-1 block font-medium text-destructive" data-testid="signature-username-mismatch">
+                      {tx(
+                        `Это имя не подходит к выбранному режиму: оно должно начинаться с «${usernamePrefix}».`,
+                        `Dieser Name passt nicht zur gewählten Betriebsart: Er muss mit „${usernamePrefix}“ beginnen.`,
+                      )}
+                    </span>
+                  ) : null}
+                </p>
                 <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground sm:col-span-2">
                   <span>{tx("API-ключ", "API-Schlüssel")}</span>
                   <Input className="h-9 bg-field font-normal" type="password" autoComplete="new-password" maxLength={8192} value={apiKey} required onChange={e => setApiKey(e.target.value)} />

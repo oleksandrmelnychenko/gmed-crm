@@ -16,6 +16,7 @@ import {
   leadBanners,
   leadFlagBadge,
   listEntryNames,
+  listUploadErrorText,
   liveCheckInput,
   liveCheckKey,
   livePossibleMatch,
@@ -327,6 +328,24 @@ describe("lead banners and badges", () => {
     expect(isSanctionsGateError(null)).toBe(false);
     expect(reasonIsValid("  too short ")).toBe(false);
     expect(reasonIsValid("Passport checked, other person")).toBe(true);
+  });
+
+  it("names a refused list file in the reader's language (QA 2026-11-10, E F-8)", () => {
+    const refused = Object.assign(
+      new Error("the file is not the EU consolidated sanctions list (FSF XML 1.1): incomplete document"),
+      { code: "list_format", status: 422 },
+    );
+    expect(listUploadErrorText(refused, ru, "fallback")).toBe(ru.sanctions_list_error_format);
+    expect(listUploadErrorText(refused, ru, "fallback")).toMatch(/[А-Яа-я]/);
+    expect(listUploadErrorText(refused, de, "fallback")).toBe(de.sanctions_list_error_format);
+    for (const code of ["list_empty", "list_size", "list_suspicious", "file_required", "invalid_upload", "list_storage"]) {
+      expect(listUploadErrorText({ code }, ru, "fallback"), code).toMatch(/[А-Яа-я]/);
+    }
+    // Anything else keeps the server's message, or the fallback without one.
+    expect(listUploadErrorText(Object.assign(new Error("Failed"), { code: "sanctions_database_error" }), ru, "fallback")).toBe("Failed");
+    expect(listUploadErrorText(null, ru, "fallback")).toBe("fallback");
+    // A code that only looks like an object key is not a list code.
+    expect(listUploadErrorText({ code: "toString" }, ru, "fallback")).toBe("fallback");
   });
 });
 

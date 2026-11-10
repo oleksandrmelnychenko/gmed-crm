@@ -1,7 +1,9 @@
 import { memo, useState } from "react";
 import {
+  CalendarX2,
   ChevronDown,
   Clock3,
+  LoaderCircle,
   MapPin,
   Pencil,
   Stethoscope,
@@ -18,6 +20,11 @@ import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { hasCapability } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
+import { updateAppointmentStatus } from "@/pages/appointments/data/appointment-mutations";
+import {
+  billingReversalRequestFromError,
+  requestAppointmentBillingReversal,
+} from "@/pages/appointments/model/billing-reversal-request";
 import { isClosedAppointmentStatus } from "@/pages/appointments/model/completion-rules";
 import {
   useAppointmentLabels,
@@ -42,15 +49,21 @@ function AppointmentOverviewSection({
   detail,
   canEdit = false,
   canDelete = false,
+  canCancel = false,
   onEdit,
   onDelete,
+  onCancelled,
   onOpenDetail,
 }: {
   detail: AppointmentDetail;
   canEdit?: boolean;
   canDelete?: boolean;
+  /** The caller may change the status (`appointments.status`). */
+  canCancel?: boolean;
   onEdit?: () => void;
   onDelete?: () => Promise<void>;
+  /** After this appointment was cancelled (it stays, as "cancelled"). */
+  onCancelled?: () => void;
   onOpenDetail: (id: string) => void;
 }) {
   const {
@@ -69,6 +82,42 @@ function AppointmentOverviewSection({
   const tr = t as unknown as Record<string, string>;
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  // Cancelling keeps the appointment as "cancelled" (the patient still sees
+  // it as such); deleting removes it. This one visit only: a whole series is
+  // cancelled from the status block under "Workflow".
+  const cancelLabel = detail.recurrence_frequency
+    ? appointmentText("appointments_cancel_this_occurrence")
+    : appointmentText("appointments_cancel_confirmation_action");
+  async function handleCancelAppointment() {
+    setCancelBusy(true);
+    try {
+      await updateAppointmentStatus(detail.id, "cancelled", "single");
+      setCancelConfirmOpen(false);
+      toast.success(appointmentText("appointments_cancelled_notice"));
+      onCancelled?.();
+    } catch (error) {
+      setCancelConfirmOpen(false);
+      // A visit with a billed interpreter report: offer the cancellation with
+      // billing reversal instead of an error (decision 2026-09-29).
+      const reversal = billingReversalRequestFromError(error, detail.id, "single", () =>
+        onCancelled?.(),
+      );
+      if (reversal) {
+        requestAppointmentBillingReversal(reversal);
+        return;
+      }
+      toast.error(
+        appointmentActionErrorMessage(
+          error,
+          appointmentText("appointments_failed_to_change_status"),
+        ),
+      );
+    } finally {
+      setCancelBusy(false);
+    }
+  }
   const deletionLocked = detail.status === "in_progress" || detail.status === "completed";
   const deleteTitle = deletionLocked
     ? appointmentText("appointments_delete_locked")
@@ -146,6 +195,24 @@ function AppointmentOverviewSection({
               <Pencil className="size-3.5" />
             </Button>
           ) : null}
+          {canCancel && !detail.is_blocked && !isClosedAppointmentStatus(detail.status) ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 rounded-lg border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-700"
+              disabled={cancelBusy}
+              onClick={() => setCancelConfirmOpen(true)}
+              data-testid="appointment-cancel-action"
+            >
+              {cancelBusy ? (
+                <LoaderCircle className="size-3.5 animate-spin" />
+              ) : (
+                <CalendarX2 className="size-3.5" />
+              )}
+              {cancelLabel}
+            </Button>
+          ) : null}
           {canDelete && onDelete ? (
             <Button
               type="button"
@@ -211,6 +278,23 @@ function AppointmentOverviewSection({
       {!detail.is_blocked && detail.recurrence_frequency ? (
         <RecurringSeriesDetails detail={detail} onOpenDetail={onOpenDetail} />
       ) : null}
+      <DirtyDismissConfirmDialog
+        open={cancelConfirmOpen}
+        title={appointmentText("appointments_cancel_confirmation_title")}
+        message={appointmentText("appointments_cancel_single_confirmation_message", {
+          title: detail.title,
+        })}
+        cancelLabel={appointmentText("appointments_cancel_confirmation_keep")}
+        confirmLabel={appointmentText("appointments_cancel_confirmation_action")}
+        destructive
+        confirmDisabled={cancelBusy}
+        onCancel={() => {
+          if (!cancelBusy) setCancelConfirmOpen(false);
+        }}
+        onConfirm={() => {
+          if (!cancelBusy) void handleCancelAppointment();
+        }}
+      />
       <DirtyDismissConfirmDialog
         open={deleteConfirmOpen}
         title={appointmentText("appointments_delete_title")}

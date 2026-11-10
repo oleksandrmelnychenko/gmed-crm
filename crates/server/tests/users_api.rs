@@ -630,6 +630,80 @@ async fn users_list_exposes_second_factor_session_and_reset_state() {
     assert_eq!(detail["active_sessions"], 1);
 }
 
+/// QA 2026-11-10 (E F-4): a pause after wrong passwords at one address leaves
+/// `users.locked_until` empty; the administration still has to see it and the
+/// unlock has to lift it.
+#[tokio::test]
+async fn users_list_shows_a_sign_in_pause_and_the_unlock_lifts_it() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let bearer = auth_header_for(admin_id, "ceo");
+    let target_id = seed_user(&pool, "users-api-paused", "sales").await;
+    let email: String = sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
+        .bind(target_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"INSERT INTO login_attempt_throttle (subject_hash, ip_hash, lock_level, locked_until)
+           VALUES ($1, 'users-api-paused-address', 1, now() + interval '30 minutes')"#,
+    )
+    .bind(gmed_server::auth::login_throttle::subject_hash(&email))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/users/{target_id}"),
+        &bearer,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(detail["locked_until"].is_null(), "{detail}");
+    assert!(detail["login_paused_until"].is_string(), "{detail}");
+
+    let (status, listed) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/users?search={email}"),
+        &bearer,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    let row = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == target_id.to_string())
+        .expect("seeded user listed");
+    assert!(row["login_paused_until"].is_string(), "{row}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{target_id}/unlock"),
+        &bearer,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/users/{target_id}"),
+        &bearer,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(detail["login_paused_until"].is_null(), "{detail}");
+}
+
 #[tokio::test]
 async fn ceo_can_unlock_user_without_changing_password() {
     let Some((app, pool, admin_id)) = test_context().await else {
@@ -1119,6 +1193,9 @@ async fn user_email_edits_cannot_collide_by_case() {
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    // A stable code: the administration names the refusal in the viewer's
+    // language (QA 2026-11-10, E F-8).
+    assert_eq!(body["error"], "email_already_exists", "{body}");
 }
 
 async fn seed_pending_login(pool: &PgPool, user_id: Uuid) -> Uuid {

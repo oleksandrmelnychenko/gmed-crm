@@ -152,7 +152,12 @@ function ReviewQueue({ rows, tx }: { rows: RiskReviewRow[]; tx: (ru: string, de:
   );
 }
 
-export function RiskSettingsTab() {
+export function RiskSettingsTab({
+  onQueueLoaded,
+}: {
+  /** Reports the loaded queue, so the tab label counts the waiting decisions. */
+  onQueueLoaded?: (rows: RiskReviewRow[]) => void;
+} = {}) {
   const { t, lang } = useLang();
   const tx = useCallback((ru: string, de: string) => (lang === "de" ? de : ru), [lang]);
   const [saved, setSaved] = useState<RiskConfig | null>(null);
@@ -175,6 +180,7 @@ export function RiskSettingsTab() {
       setConfig(response.config);
       setReviewerCounts(response.reviewerCounts);
       setQueue(reviews);
+      onQueueLoaded?.(reviews);
       if (response.candidates) {
         setCandidates(response.candidates);
       } else {
@@ -184,7 +190,7 @@ export function RiskSettingsTab() {
     } catch (loadError) {
       setError(errorText(loadError, t.common_error));
     }
-  }, [t.common_error]);
+  }, [t.common_error, onQueueLoaded]);
 
   useEffect(() => {
     void load();
@@ -238,6 +244,9 @@ export function RiskSettingsTab() {
     <div className="space-y-4" data-testid="risk-settings">
       {error ? <Banner tone="error">{error}</Banner> : null}
       {flash ? <SuccessBanner>{flash}</SuccessBanner> : null}
+      {/* The daily work first: who waits for a decision. The settings below
+          change rarely and pushed the queue off the screen (QA 2026-11-10, E F-6). */}
+      <ReviewQueue rows={queue} tx={tx} />
       {config ? (
         <section className="space-y-4" data-testid="risk-config">
           <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border/50 bg-card p-4">
@@ -400,7 +409,6 @@ export function RiskSettingsTab() {
           </div>
         </section>
       ) : null}
-      <ReviewQueue rows={queue} tx={tx} />
     </div>
   );
 }

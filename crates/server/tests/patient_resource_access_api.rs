@@ -1463,14 +1463,112 @@ async fn interpreter_team_lead_reviews_team_reports_without_patient_assignment()
         assert_eq!(status, expected, "{id}");
     }
 
-    // The team context is a read and review scope: without a patient
-    // assignment the team lead does not re-plan or edit the visit.
+    // The team lead plans the team (owner decision 2026-11-10). An
+    // interpreter declines a team visit: the team lead is told like the
+    // patient manager ...
+    let replan_visit = seed_interpreter_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        interpreter_id,
+        admin_id,
+        &format!("Visit to re-plan {tag}"),
+        "Briefing",
+        "2026-05-11",
+    )
+    .await;
     let (status, body) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/appointments/{approved_visit}/assign-interpreter"),
+        &format!("/api/v1/appointments/{replan_visit}/interpreter-response"),
+        &auth_header_for(interpreter_id, "interpreter"),
+        Some(json!({ "response": "declined", "comment": "Booked elsewhere" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let decline_notices: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM user_notifications
+           WHERE user_id = $1 AND kind = 'interpreter_booking_declined' AND entity_id = $2"#,
+    )
+    .bind(teamlead_id)
+    .bind(replan_visit)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(decline_notices, 1);
+
+    // ... and books another interpreter without a patient assignment.
+    let replacement_id = seed_staff_user(&pool, &format!("{tag}-r"), "interpreter").await;
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{replan_visit}"),
         &bearer,
-        Some(json!({ "interpreter_id": teamlead_id })),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["can_assign_interpreter"], true, "{detail}");
+    assert_eq!(detail["can_edit"], false, "{detail}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{replan_visit}/assign-interpreter"),
+        &bearer,
+        Some(json!({ "interpreter_id": replacement_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let booked: (Option<Uuid>, Option<String>) = sqlx::query_as(
+        "SELECT interpreter_id, interpreter_response FROM appointments WHERE id = $1",
+    )
+    .bind(replan_visit)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(booked, (Some(replacement_id), Some("pending".to_string())));
+
+    // Nothing else of the visit is the team lead's to change: the team
+    // context stays a read and review scope for the schedule and the status.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{replan_visit}/update"),
+        &bearer,
+        Some(json!({
+            "title": "Renamed by the team lead",
+            "date": "2026-05-12",
+            "interpreter_id": replacement_id,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{replan_visit}/status"),
+        &bearer,
+        Some(json!({ "status": "cancelled" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let unchanged: (String, String) =
+        sqlx::query_as("SELECT title, status FROM appointments WHERE id = $1")
+            .bind(replan_visit)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        unchanged,
+        (format!("Visit to re-plan {tag}"), "confirmed".to_string())
+    );
+    // A visit outside the team's scope takes no interpreter from the team lead.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{unrelated_visit}/assign-interpreter"),
+        &bearer,
+        Some(json!({ "interpreter_id": replacement_id })),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");

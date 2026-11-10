@@ -5,11 +5,43 @@ import { ru } from "@/lib/i18n/ru";
 
 import {
   activityActorLabel,
+  activityChangeEntries,
   activityContextEntries,
   activityContextSummary,
 } from "./admin-activity-context";
 
 const CYRILLIC_OR_MARK = /^[^A-Za-z]*$|[А-Яа-яЁё]/;
+
+describe("activity log: what an account change changed (QA 2026-11-10, E F-7)", () => {
+  const before = { name: "QA-E Manager Eins", role: "patient_manager", email: "qa-e-pm1@gmx.de" };
+
+  it("names the changed field with its old and new value", () => {
+    const after = { ...before, name: "QA-E Manager Eins edited", revoked_profile_assignments: 0 };
+    expect(activityChangeEntries(before, after, ru)).toEqual([
+      { key: "change:name", label: "Имя", value: "QA-E Manager Eins → QA-E Manager Eins edited" },
+    ]);
+    // The table line starts with the change; "—" was all it showed before.
+    expect(activityContextSummary({}, ru, activityChangeEntries(before, after, ru))).toBe(
+      "Имя: QA-E Manager Eins → QA-E Manager Eins edited",
+    );
+  });
+
+  it("shows a role change in words and an e-mail change as typed", () => {
+    const after = { ...before, role: "billing", email: "qa-e-billing@gmx.de" };
+    expect(activityChangeEntries(before, after, de).map((entry) => `${entry.label}: ${entry.value}`)).toEqual([
+      "Rolle: Patientenmanager → Abrechnung",
+      "E-Mail: qa-e-pm1@gmx.de → qa-e-billing@gmx.de",
+    ]);
+  });
+
+  it("stays empty without both sides, without a difference and for a redacted row", () => {
+    expect(activityChangeEntries(null, before, ru)).toEqual([]);
+    expect(activityChangeEntries(before, undefined, ru)).toEqual([]);
+    expect(activityChangeEntries(before, { ...before }, ru)).toEqual([]);
+    expect(activityChangeEntries({ redacted: true }, { redacted: true }, ru)).toEqual([]);
+    expect(activityContextSummary({}, ru, [])).toBe("—");
+  });
+});
 
 describe("activity log details (QA E2-03)", () => {
   it("drops empty values instead of printing null", () => {

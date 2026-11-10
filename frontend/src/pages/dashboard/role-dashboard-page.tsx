@@ -49,6 +49,7 @@ import { apiFetch } from "@/lib/api";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { PortalDateChip } from "@/components/ui/portal-date-chip";
 import { navItemIcon } from "@/components/nav-item-icon";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { formatMoneyAmount } from "@/lib/money";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
@@ -66,6 +67,12 @@ import {
   type ConciergeTask,
 } from "@/pages/concierge/model";
 
+import {
+  dashboardBookingsPath,
+  roleDashboardBookingItems,
+  roleHasDashboardBookings,
+  type DashboardAppointmentRow,
+} from "./model/role-dashboard-bookings";
 import {
   dashboardTaskTitle,
   isConciergeTaskDueToday,
@@ -149,6 +156,8 @@ const ROLE_DASHBOARD_EVENTS = [
   "concierge_service.created",
   "concierge_service.updated",
   "concierge_service.billing_ready",
+  // An interpreter's booking or answer reaches the others as a notification.
+  "notification.created",
 ] as const;
 
 const METRIC_ROUTES: Record<string, string> = {
@@ -281,9 +290,13 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
   const [failed, setFailed] = useState(false);
   const [tasks, setTasks] = useState<ConciergeTask[]>([]);
   const [tasksLoading, setTasksLoading] = useState(!preview);
+  // Bookings that wait for the interpreter's answer or for another
+  // interpreter (QA 2026-11-10, D-16; owner decision on D-14).
+  const [bookingRows, setBookingRows] = useState<DashboardAppointmentRow[]>([]);
   const canUseTaskManager = Boolean(
     user?.id && TASK_MANAGER_ROLES.includes(role as (typeof TASK_MANAGER_ROLES)[number]),
   );
+  const loadsBookings = Boolean(user?.id && user.role === role && roleHasDashboardBookings(role));
 
   const refreshDashboard = useCallback(() => {
     if (preview) {
@@ -292,6 +305,7 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
       setFailed(false);
       setTasks([]);
       setTasksLoading(false);
+      setBookingRows([]);
       return () => undefined;
     }
 
@@ -338,12 +352,24 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
           }
         });
 
-    void Promise.all([kpiRequest, taskRequest]);
+    const bookingRequest = loadsBookings
+      ? apiFetch<DashboardAppointmentRow[]>(dashboardBookingsPath(), { forceFresh: true })
+          .then((rows) => {
+            if (!cancelled) setBookingRows(rows);
+          })
+          .catch(() => {
+            if (!cancelled) setBookingRows([]);
+          })
+      : Promise.resolve().then(() => {
+          if (!cancelled) setBookingRows([]);
+        });
+
+    void Promise.all([kpiRequest, taskRequest, bookingRequest]);
 
     return () => {
       cancelled = true;
     };
-  }, [canUseTaskManager, definition, hasScorecard, preview, user?.id]);
+  }, [canUseTaskManager, definition, hasScorecard, loadsBookings, preview, user?.id]);
 
   useEffect(() => refreshDashboard(), [refreshDashboard]);
   useDebouncedRealtimeSubscription(ROLE_DASHBOARD_EVENTS, refreshDashboard, 300);
@@ -371,7 +397,11 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
     () => roleDashboardFocusTasks(activeTasks, new Date(), 4),
     [activeTasks],
   );
-  const showLiveFocus = canUseTaskManager && !preview;
+  const bookingItems = useMemo(
+    () => roleDashboardBookingItems(bookingRows, user?.id, role, 4),
+    [bookingRows, role, user?.id],
+  );
+  const showLiveFocus = (canUseTaskManager || loadsBookings) && !preview;
   const secondaryMetrics = definition.metrics.slice(4);
   const copy = lang === "de"
     ? {
@@ -386,6 +416,9 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
         noDue: "Ohne Frist",
         patient: "Patient",
         provider: "Anbieter",
+        answerBooking: "Einsatz bestätigen oder ablehnen",
+        replaceInterpreter: "Dolmetscher hat abgelehnt – anderen buchen",
+        interpreter: "Dolmetscher",
       }
     : {
         priorities: "Фокус на сегодня",
@@ -399,13 +432,20 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
         noDue: "Без срока",
         patient: "Пациент",
         provider: "Провайдер",
+        answerBooking: "Подтвердите или отклоните участие",
+        replaceInterpreter: "Переводчик отказался — назначьте другого",
+        interpreter: "Переводчик",
       };
 
   return (
     <div className="grid min-w-0 gap-3">
       <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-[22px] font-semibold leading-tight tracking-tight text-foreground">
+        {/* A long unbroken name wraps instead of widening the block past a phone screen (QA D-21). */}
+        <div className="min-w-0 max-w-full">
+          <h1
+            className="text-[22px] font-semibold leading-tight tracking-tight text-foreground [overflow-wrap:anywhere]"
+            data-testid="role-dashboard-greeting"
+          >
             {greeting}
           </h1>
           <p className="mt-1 max-w-2xl text-[13px] leading-5 text-muted-foreground">
@@ -512,8 +552,65 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
                   <div className="h-4 w-full animate-pulse rounded bg-muted" />
                 </div>
               ))
-            ) : showLiveFocus && focusTasks.length > 0 ? (
-              focusTasks.map((task) => {
+            ) : showLiveFocus && (bookingItems.length > 0 || focusTasks.length > 0) ? (
+              <>
+              {bookingItems.map((item) => {
+                const when = [formatAppDate(item.date) || item.date, item.timeStart]
+                  .filter(Boolean)
+                  .join(" ");
+                const context = [
+                  item.patientName ? `${copy.patient}: ${item.patientName}` : "",
+                  item.kind === "replace_interpreter" && item.interpreterName
+                    ? `${copy.interpreter}: ${item.interpreterName}`
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
+                return (
+                  <button
+                    key={`booking:${item.id}`}
+                    type="button"
+                    data-testid={`dashboard-booking-${item.kind}`}
+                    onClick={() =>
+                      staffGo(`/appointments?appointment=${encodeURIComponent(item.id)}`)
+                    }
+                    className="group flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  >
+                    <span
+                      className={cn(
+                        "mt-1.5 size-2 shrink-0 rounded-full",
+                        item.kind === "replace_interpreter" ? "bg-rose-500" : "bg-amber-500",
+                      )}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+                        <span
+                          className={cn(
+                            "font-medium",
+                            item.kind === "replace_interpreter" ? "text-rose-600" : "text-amber-700",
+                          )}
+                        >
+                          {item.kind === "replace_interpreter"
+                            ? copy.replaceInterpreter
+                            : copy.answerBooking}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <span>{when}</span>
+                      </span>
+                      <span className="mt-1 block break-words text-[12.5px] font-medium leading-5 text-foreground">
+                        {item.title}
+                      </span>
+                      {context ? (
+                        <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                          {context}
+                        </span>
+                      ) : null}
+                    </span>
+                    <ArrowUpRight className="mt-1 size-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
+                  </button>
+                );
+              })}
+              {focusTasks.map((task) => {
                 const now = new Date();
                 const scheduledAt = conciergeTaskScheduledAt(task);
                 const overdue = isConciergeTaskOverdue(task, now);
@@ -561,7 +658,8 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
                     <ArrowUpRight className="mt-1 size-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
                   </button>
                 );
-              })
+              })}
+              </>
             ) : showLiveFocus ? (
               <div className="flex items-center gap-3 px-4 py-5">
                 <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />

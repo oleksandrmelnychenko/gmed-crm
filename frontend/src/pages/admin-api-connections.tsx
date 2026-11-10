@@ -40,7 +40,10 @@ export function AdminApiConnectionsPage() {
         onValueChange={(value) => setParams(value === "email" ? { tab: "email" } : {}, { replace: true })}
         className="min-w-0 max-w-3xl gap-3"
       >
-        <TabsList className="h-auto w-max max-w-full flex-wrap justify-start gap-1 rounded-none bg-transparent p-0">
+        {/* The list's own height rule is `group-data-horizontal/tabs:h-8`; a plain
+            `h-auto` does not override it, so on a phone the second tab wrapped
+            out of the 32px row and lay over the card heading (QA 2026-11-10, E F-9). */}
+        <TabsList className="w-max max-w-full flex-wrap justify-start gap-1 rounded-none bg-transparent p-0 group-data-horizontal/tabs:h-auto">
           {([
             ["signature", FileSignature, tx("Электронная подпись · Skribble", "Elektronische Signatur · Skribble")],
             ["email", Mail, "E-Mail · Mittaro"],

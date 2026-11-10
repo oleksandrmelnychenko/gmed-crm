@@ -15,6 +15,12 @@ export interface AccessSecurityTranslations {
   users_portal_account_managed_elsewhere: string;
   users_portal_role_change_forbidden: string;
   users_portal_role_locked: string;
+  users_login_paused_until: string;
+  users_login_paused_hint: string;
+  users_failed_logins: string;
+  users_email_already_exists: string;
+  users_deactivate_confirm_title: string;
+  users_deactivate_confirm: string;
   settings_ceo_only_hint: string;
   settings_iban_invalid: string;
   settings_bic_invalid: string;
@@ -42,6 +48,14 @@ export const accessSecurityRu: AccessSecurityTranslations = {
   users_portal_role_change_forbidden:
     "Роль портального входа (пациент или лид) нельзя сменить на роль сотрудника, и наоборот.",
   users_portal_role_locked: "Роль портального входа не меняется.",
+  users_login_paused_until: "Вход приостановлен до",
+  users_login_paused_hint:
+    "После нескольких неверных паролей вход с того устройства, с которого их вводили, приостановлен — даже с верным паролем. «Разблокировать» снимает паузу сразу.",
+  users_failed_logins: "Неудачных попыток входа подряд",
+  users_email_already_exists: "Пользователь с такой электронной почтой уже есть.",
+  users_deactivate_confirm_title: "Деактивировать пользователя?",
+  users_deactivate_confirm:
+    "Пользователь больше не сможет войти: все его сессии будут завершены, назначения на пациентов отозваны. Открытые задачи и приёмы останутся за аккаунтом. Аккаунт можно активировать снова.",
   settings_ceo_only_hint:
     "Эти данные (реквизиты и банковский счёт агентства, налоговые данные, сроки хранения и доступа, правила документов) изменяет только CEO.",
   settings_iban_invalid:
@@ -75,6 +89,14 @@ export const accessSecurityDe: AccessSecurityTranslations = {
   users_portal_role_change_forbidden:
     "Ein Portalzugang (Patient oder Lead) kann nicht in einen Mitarbeiterzugang umgewandelt werden und umgekehrt.",
   users_portal_role_locked: "Die Rolle eines Portalzugangs ändert sich nicht.",
+  users_login_paused_until: "Anmeldung pausiert bis",
+  users_login_paused_hint:
+    "Nach mehreren falschen Passwörtern ist die Anmeldung von dem Gerät, an dem sie eingegeben wurden, vorübergehend ausgesetzt – auch mit dem richtigen Passwort. „Entsperren“ hebt die Pause sofort auf.",
+  users_failed_logins: "Fehlgeschlagene Anmeldungen in Folge",
+  users_email_already_exists: "Ein Benutzer mit dieser E-Mail-Adresse existiert bereits.",
+  users_deactivate_confirm_title: "Benutzer deaktivieren?",
+  users_deactivate_confirm:
+    "Der Benutzer kann sich nicht mehr anmelden: Alle Sitzungen werden beendet, Patientenzuweisungen entzogen. Offene Aufgaben und Termine bleiben beim Konto. Das Konto kann wieder aktiviert werden.",
   settings_ceo_only_hint:
     "Diese Angaben (Agenturdaten und Bankverbindung, Steuerdaten, Aufbewahrungs- und Zugriffsfristen, Dokumentregeln) ändert nur der CEO.",
   settings_iban_invalid:

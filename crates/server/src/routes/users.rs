@@ -36,6 +36,10 @@ struct UserResponse {
     is_active: bool,
     failed_login_attempts: i32,
     locked_until: Option<chrono::DateTime<chrono::Utc>>,
+    /// End of the latest running sign-in pause of the account at one client
+    /// address (`auth::login_throttle`); such a pause leaves `locked_until`
+    /// empty. Filled by the list and detail endpoints ([`fill_login_pauses`]).
+    login_paused_until: Option<chrono::DateTime<chrono::Utc>>,
     password_changed_at: Option<chrono::DateTime<chrono::Utc>>,
     /// The person must replace the password at the next login (onboarding
     /// with a one-time password or an administrator reset).
@@ -81,6 +85,7 @@ fn user_response_from_row(r: &sqlx::postgres::PgRow) -> UserResponse {
         is_active: r.try_get("is_active").unwrap_or(false),
         failed_login_attempts: r.try_get("failed_login_attempts").unwrap_or(0),
         locked_until: r.try_get("locked_until").unwrap_or(None),
+        login_paused_until: None,
         password_changed_at: r.try_get("password_changed_at").unwrap_or(None),
         password_reset_required: r.try_get("password_reset_required").unwrap_or(false),
         totp_enrolled: r.try_get("totp_enrolled").unwrap_or(false),
@@ -93,6 +98,48 @@ fn user_response_from_row(r: &sqlx::postgres::PgRow) -> UserResponse {
             .try_get("updated_at")
             .unwrap_or_else(|_| chrono::Utc::now()),
         one_time_password: None,
+    }
+}
+
+/// Fills `login_paused_until`: after too many wrong passwords the account is
+/// paused for the address that typed them (`auth::login_throttle`, QA E-19)
+/// while `users.locked_until` stays empty, so the administration showed a
+/// person who cannot sign in as simply "active" and offered no unlock
+/// (QA 2026-11-10, E F-4). A failed lookup leaves the field empty.
+async fn fill_login_pauses(db: &sqlx::PgPool, users: &mut [UserResponse]) {
+    if users.is_empty() {
+        return;
+    }
+    let subjects: Vec<String> = users
+        .iter()
+        .map(|user| crate::auth::login_throttle::subject_hash(&user.email))
+        .collect();
+    let rows = match sqlx::query(
+        "SELECT subject_hash, max(locked_until) AS paused_until
+         FROM login_attempt_throttle
+         WHERE subject_hash = ANY($1) AND locked_until > now()
+         GROUP BY subject_hash",
+    )
+    .bind(&subjects)
+    .fetch_all(db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(%error, "Failed to load sign-in pauses");
+            return;
+        }
+    };
+    let pauses: std::collections::HashMap<String, chrono::DateTime<chrono::Utc>> = rows
+        .iter()
+        .filter_map(|row| {
+            let subject: String = row.try_get("subject_hash").ok()?;
+            let until: Option<chrono::DateTime<chrono::Utc>> = row.try_get("paused_until").ok()?;
+            Some((subject, until?))
+        })
+        .collect();
+    for (user, subject) in users.iter_mut().zip(&subjects) {
+        user.login_paused_until = pauses.get(subject).copied();
     }
 }
 
@@ -287,6 +334,16 @@ where
     .await
 }
 
+/// The address already belongs to another account. The code lets the UI say
+/// so in the viewer's language (QA 2026-11-10, E F-8).
+fn email_already_exists() -> axum::response::Response {
+    err_code(
+        StatusCode::CONFLICT,
+        "email_already_exists",
+        "Email already exists",
+    )
+}
+
 /// Assigning the `ceo` role is reserved to the CEO (`users.manage_ceo`); a
 /// technical admin manages every other role.
 #[allow(clippy::result_large_err)]
@@ -455,7 +512,8 @@ async fn list_users(
         .await
     {
         Ok(rows) => {
-            let users: Vec<UserResponse> = rows.iter().map(user_response_from_row).collect();
+            let mut users: Vec<UserResponse> = rows.iter().map(user_response_from_row).collect();
+            fill_login_pauses(&state.db, &mut users).await;
             Ok(Json(users))
         }
         Err(e) => {
@@ -473,7 +531,10 @@ async fn list_staff_directory(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListUsersQuery>,
 ) -> Result<Json<Vec<StaffDirectoryEntry>>, axum::response::Response> {
-    auth.require_any_role(&[Role::Ceo, Role::Concierge])?;
+    // Work contacts, read-only. The CEO assistant reads what the CEO reads
+    // (owner decision 2026-10-11) and changes nothing here: the individual
+    // access rules behind the list stay with the CEO (`routes/staff_access`).
+    auth.require_any_role(&[Role::Ceo, Role::CeoAssistant, Role::Concierge])?;
 
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
     let rows = sqlx::query(
@@ -524,7 +585,11 @@ async fn get_user(
         .fetch_optional(&state.db)
         .await
     {
-        Ok(Some(r)) => Ok(Json(user_response_from_row(&r))),
+        Ok(Some(r)) => {
+            let mut user = user_response_from_row(&r);
+            fill_login_pauses(&state.db, std::slice::from_mut(&mut user)).await;
+            Ok(Json(user))
+        }
         Ok(None) => Err(err(StatusCode::NOT_FOUND, "User not found")),
         Err(e) => {
             tracing::error!(error = %e, "Failed to get user");
@@ -556,7 +621,7 @@ async fn create_user(
     }
     match email_taken(&state.db, &body.email, None).await {
         Ok(false) => {}
-        Ok(true) => return Err(err(StatusCode::CONFLICT, "Email already exists")),
+        Ok(true) => return Err(email_already_exists()),
         Err(e) => {
             tracing::error!(error = %e, "Failed to check e-mail uniqueness");
             return Err(err(
@@ -641,9 +706,7 @@ async fn create_user(
             }
             Ok((StatusCode::CREATED, Json(created)))
         }
-        Err(e) if e.to_string().contains("unique") => {
-            Err(err(StatusCode::CONFLICT, "Email already exists"))
-        }
+        Err(e) if e.to_string().contains("unique") => Err(email_already_exists()),
         Err(e) => {
             tracing::error!(error = %e, "Failed to create user");
             Err(err(
@@ -713,7 +776,7 @@ async fn update_user(
     if new_email != current_email.as_str() {
         match email_taken(&mut *tx, new_email, Some(user_id)).await {
             Ok(false) => {}
-            Ok(true) => return Err(err(StatusCode::CONFLICT, "Email already exists")),
+            Ok(true) => return Err(email_already_exists()),
             Err(e) => {
                 tracing::error!(error = %e, user_id = %user_id, "Failed to check e-mail uniqueness");
                 return Err(err(
@@ -757,7 +820,7 @@ async fn update_user(
     .map_err(|e| {
         tracing::error!(error = %e, user_id = %user_id, "Failed to update user");
         if e.to_string().contains("unique") {
-            err(StatusCode::CONFLICT, "Email already exists")
+            email_already_exists()
         } else {
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user")
         }
@@ -1137,13 +1200,15 @@ async fn unlock_user(
     ensure_can_manage_target(&state, &auth, user_id).await?;
     clear_login_holds(&state, user_id).await;
 
+    // Every unlock of an existing account is recorded: a pause at one address
+    // (`login_attempt_throttle`) leaves the account row untouched, and lifting
+    // it must not go without an audit entry (QA 2026-11-10, E F-4).
     let result = sqlx::query(
         r#"UPDATE users
            SET failed_login_attempts = 0,
                locked_until = NULL,
                updated_at = now()
-           WHERE id = $1
-             AND (failed_login_attempts > 0 OR locked_until IS NOT NULL)"#,
+           WHERE id = $1"#,
     )
     .bind(user_id)
     .execute(&state.db)

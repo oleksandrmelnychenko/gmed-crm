@@ -187,10 +187,84 @@ export function useAppointmentSchedulerActions({
     ],
   );
 
+  // A cancellation from a list row or the calendar menu asks first, like the
+  // one in the appointment's own status block (QA 2026-11-10, C-F5 / S3 30):
+  // it closes checklists, tasks and reminders and tells the interpreter.
+  const [pendingCancellation, setPendingCancellation] =
+    useState<PendingAppointmentCancellation | null>(null);
+
+  const requestStatusChange = useCallback(
+    async (
+      appointmentId: string,
+      status: AppointmentStatus,
+      recurrenceScope: AppointmentRecurringActionScope = "single",
+    ) => {
+      if (status !== "cancelled") {
+        await performStatusChange(appointmentId, status, recurrenceScope);
+        return;
+      }
+      onDismissQuickActionMenu();
+      setPendingCancellation({
+        appointmentId,
+        recurrenceScope,
+        title: appointmentsIndex.get(appointmentId)?.title ?? "",
+      });
+    },
+    [appointmentsIndex, onDismissQuickActionMenu, performStatusChange],
+  );
+
+  const dismissPendingCancellation = useCallback(() => {
+    setPendingCancellation(null);
+  }, []);
+
+  const confirmPendingCancellation = useCallback(() => {
+    const pending = pendingCancellation;
+    setPendingCancellation(null);
+    if (pending) {
+      void performStatusChange(pending.appointmentId, "cancelled", pending.recurrenceScope);
+    }
+  }, [pendingCancellation, performStatusChange]);
+
   return {
     actionBusy,
     resetAppointmentSchedulerActionState,
     handleInlineReschedule,
     performStatusChange,
+    requestStatusChange,
+    pendingCancellation,
+    dismissPendingCancellation,
+    confirmPendingCancellation,
+  };
+}
+
+/** A cancellation that waits for the user's confirmation. */
+export type PendingAppointmentCancellation = {
+  appointmentId: string;
+  recurrenceScope: AppointmentRecurringActionScope;
+  /** Title of the appointment the action was started on. */
+  title: string;
+};
+
+/** Title and text of the confirmation of a cancellation, by its scope. */
+export function appointmentCancellationConfirmation(
+  pending: Pick<PendingAppointmentCancellation, "recurrenceScope" | "title">,
+  text: (key: string, values?: Record<string, string | number>) => string,
+): { title: string; message: string } {
+  const values = { title: pending.title };
+  if (pending.recurrenceScope === "following") {
+    return {
+      title: text("appointments_cancel_following_confirmation_title"),
+      message: text("appointments_cancel_following_confirmation_message", values),
+    };
+  }
+  if (pending.recurrenceScope === "series") {
+    return {
+      title: text("appointments_cancel_series_confirmation_title"),
+      message: text("appointments_cancel_series_confirmation_message", values),
+    };
+  }
+  return {
+    title: text("appointments_cancel_confirmation_title"),
+    message: text("appointments_cancel_single_confirmation_message", values),
   };
 }

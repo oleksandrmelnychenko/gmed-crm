@@ -955,7 +955,7 @@ function useQueueSheetContent({
         </div>
       ) : null}
       {!hasAppointments && !hasAppointmentRequests ? (
-        <EmptyCell>{tr.common_not_set}</EmptyCell>
+        <EmptyCell>{appointmentText("appointments_queue_empty")}</EmptyCell>
       ) : hasAppointments ? (
         <div className="space-y-2.5">
           {hasAppointmentRequests ? (
@@ -1060,7 +1060,29 @@ function useQueueSheetContent({
                     {actionBusy === statusActionKey(item.id, "completed") ? (
                       <LoaderCircle className="size-3.5 animate-spin" />
                     ) : null}
-                    {t.dash_completed}
+                    {appointmentText("appointments_complete_action")}
+                  </Button>
+                ) : null}
+                {/* A single appointment is cancelled here too: it stays in the
+                    schedule as "cancelled" (the page asks before it does). */}
+                {canManageStatus &&
+                !item.recurrence_frequency &&
+                !item.is_blocked &&
+                item.can_edit !== false &&
+                item.status !== "completed" &&
+                item.status !== "cancelled" ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 rounded-lg border-rose-200 text-rose-700 hover:bg-rose-50"
+                    disabled={Boolean(actionBusy)}
+                    onClick={() => void onStatusChange(item.id, "cancelled")}
+                  >
+                    {actionBusy === statusActionKey(item.id, "cancelled") ? (
+                      <LoaderCircle className="size-3.5 animate-spin" />
+                    ) : null}
+                    {appointmentText("appointments_cancel_confirmation_action")}
                   </Button>
                 ) : null}
                 {canManageStatus &&

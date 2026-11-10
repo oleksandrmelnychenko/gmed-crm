@@ -24,6 +24,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/lib/auth";
 import { AppointmentBillingReversalDialog } from "@/pages/appointments/ui/shared/appointment-billing-reversal-dialog";
 import { ReadOnlyScope } from "@/components/read-only-scope";
+import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { formatUiText, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import {
@@ -74,7 +75,10 @@ import { useAppointmentLinkedPatientAssignment } from "@/pages/appointments/data
 import { useAppointmentLinkedRecords } from "@/pages/appointments/data/use-appointment-linked-records";
 import { useAppointmentLinkedPatient } from "@/pages/appointments/data/use-appointment-linked-patient";
 import { useAppointmentsMetadata } from "@/pages/appointments/data/use-appointments-metadata";
-import { useAppointmentSchedulerActions } from "@/pages/appointments/data/use-appointment-scheduler-actions";
+import {
+  appointmentCancellationConfirmation,
+  useAppointmentSchedulerActions,
+} from "@/pages/appointments/data/use-appointment-scheduler-actions";
 import { useAppointmentRequestsQueue } from "@/pages/appointments/data/use-appointment-requests-queue";
 import { useAppointmentsSchedulerData } from "@/pages/appointments/data/use-appointments-scheduler-data";
 import { useProviderDoctorOptions } from "@/pages/appointments/data/use-provider-doctor-options";
@@ -1456,7 +1460,10 @@ function useStaffAppointmentsPageContent() {
     actionBusy,
     resetAppointmentSchedulerActionState,
     handleInlineReschedule,
-    performStatusChange,
+    requestStatusChange,
+    pendingCancellation,
+    dismissPendingCancellation,
+    confirmPendingCancellation,
   } = useAppointmentSchedulerActions({
     appointments,
     appointmentsIndex,
@@ -1470,6 +1477,11 @@ function useStaffAppointmentsPageContent() {
     onRefreshDetail: refreshDetail,
     onDismissQuickActionMenu: dismissCalendarQuickActionMenu,
   });
+
+  const cancellationConfirmation = appointmentCancellationConfirmation(
+    pendingCancellation ?? { recurrenceScope: "single", title: "" },
+    appointmentText,
+  );
 
   useEffect(() => {
     if (detailOpen) return;
@@ -1859,7 +1871,7 @@ function useStaffAppointmentsPageContent() {
             requestActionBusy,
             scheduleDraft: queueScheduleDraft,
             onScheduleDraftChange: setQueueScheduleDraft,
-            onStatusChange: performStatusChange,
+            onStatusChange: requestStatusChange,
             onReviewRequest: handleReviewAppointmentRequest,
             onConvertRequest: handleConvertAppointmentRequest,
             onCancelRequest: handleCancelAppointmentRequest,
@@ -1904,7 +1916,7 @@ function useStaffAppointmentsPageContent() {
             onCalendarQuickActionScopeChange:
               handleCalendarQuickActionScopeChange,
             onOpenDetail: openDetailSheet,
-            onStatusChange: performStatusChange,
+            onStatusChange: requestStatusChange,
           }}
         />
       </div>
@@ -2096,6 +2108,18 @@ function useStaffAppointmentsPageContent() {
           onDeleteAppointment={handleDeleteAppointment}
         />
       ) : null}
+      {/* A cancellation started in the queue or the calendar menu asks first. */}
+      <DirtyDismissConfirmDialog
+        open={pendingCancellation !== null}
+        title={cancellationConfirmation.title}
+        message={cancellationConfirmation.message}
+        cancelLabel={appointmentText("appointments_cancel_confirmation_keep")}
+        confirmLabel={appointmentText("appointments_cancel_confirmation_action")}
+        destructive
+        confirmDisabled={Boolean(actionBusy)}
+        onCancel={dismissPendingCancellation}
+        onConfirm={confirmPendingCancellation}
+      />
     </>
   );
 }

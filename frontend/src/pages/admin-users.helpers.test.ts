@@ -10,6 +10,7 @@ import {
   getOptionalAdminPasswordError,
   getRequiredAdminPasswordError,
   generateAdminPassword,
+  isAdminUserLoginPaused,
   isPasswordConfirmationMismatch,
   type AdminUserActionTarget,
 } from "./admin-users.helpers";
@@ -230,6 +231,29 @@ describe("admin users page model", () => {
     expect(expiredLock.canUnlock).toBe(false);
   });
 
+  it("offers the unlock for a sign-in pause at one address although the account is not locked", () => {
+    const now = Date.parse("2026-11-10T15:00:00Z");
+    const paused = user({ login_paused_until: "2026-11-10T15:30:00Z" });
+    expect(isAdminUserLoginPaused(paused, now)).toBe(true);
+    expect(isAdminUserLoginPaused(user({ login_paused_until: "2026-11-10T14:59:00Z" }), now)).toBe(false);
+    expect(isAdminUserLoginPaused(user({ login_paused_until: null }), now)).toBe(false);
+    expect(isAdminUserLoginPaused(user(), now)).toBe(false);
+
+    const actions = getAdminUserActions(paused, { canManageCeo: false, currentUserId: "it-admin", now });
+    expect(actions).toMatchObject({ isLocked: false, isLoginPaused: true, canUnlock: true });
+    // A paused CEO stays with the CEO.
+    const ceoPaused = getAdminUserActions(
+      user({ role: "ceo", login_paused_until: "2026-11-10T15:30:00Z" }),
+      { canManageCeo: false, currentUserId: "it-admin", now },
+    );
+    expect(ceoPaused).toMatchObject({ isLoginPaused: true, canUnlock: false });
+    const over = getAdminUserActions(
+      user({ login_paused_until: "2026-11-10T14:00:00Z" }),
+      { canManageCeo: false, currentUserId: "it-admin", now },
+    );
+    expect(over).toMatchObject({ isLoginPaused: false, canUnlock: false });
+  });
+
   it("never offers self-deactivation and offers activation for inactive rows", () => {
     const self = getAdminUserActions(user({ id: "me" }), { canManageCeo: true, currentUserId: "me" });
     expect(self.canDeactivate).toBe(false);
@@ -251,9 +275,22 @@ describe("admin users page model", () => {
     expect(
       describeAdminUserError(new Error("Cannot deactivate yourself"), guardMessages),
     ).toBe("You cannot deactivate yourself");
+    expect(describeAdminUserError(new Error("Invalid role"), guardMessages)).toBe("Invalid role");
+    expect(describeAdminUserError("boom", guardMessages)).toBe("boom");
+  });
+
+  it("names a taken e-mail address in the viewer's language", () => {
+    const withEmailText = { ...guardMessages, users_email_already_exists: "Адрес уже занят" };
+    expect(
+      describeAdminUserError(
+        { code: "email_already_exists", status: 409, message: "Email already exists" },
+        withEmailText,
+      ),
+    ).toBe("Адрес уже занят");
+    // An older server sends only the English sentence.
+    expect(describeAdminUserError(new Error("Email already exists"), withEmailText)).toBe("Адрес уже занят");
     expect(describeAdminUserError(new Error("Email already exists"), guardMessages)).toBe(
       "Email already exists",
     );
-    expect(describeAdminUserError("boom", guardMessages)).toBe("boom");
   });
 });

@@ -98,6 +98,12 @@ export interface SanctionsTranslations {
   sanctions_list_versions: string;
   sanctions_list_source_download: string;
   sanctions_list_source_upload: string;
+  sanctions_list_error_format: string;
+  sanctions_list_error_empty: string;
+  sanctions_list_error_size: string;
+  sanctions_list_error_suspicious: string;
+  sanctions_list_error_file: string;
+  sanctions_list_error_storage: string;
   sanctions_blocked_countries: string;
   sanctions_blocked_countries_placeholder: string;
   sanctions_blocked_countries_saved: string;
@@ -160,6 +166,8 @@ export interface SanctionsTranslations {
   risk_queue_empty: string;
   risk_queue_since: string;
   risk_queue_proposal: string;
+  risk_queue_waiting: string;
+  risk_queue_open: string;
 }
 
 export const sanctionsRu: SanctionsTranslations = {
@@ -264,6 +272,14 @@ export const sanctionsRu: SanctionsTranslations = {
   sanctions_list_versions: "Версии",
   sanctions_list_source_download: "загрузка",
   sanctions_list_source_upload: "вручную",
+  sanctions_list_error_format:
+    "Это не консолидированный санкционный список ЕС (FSF XML 1.1). Загрузите XML-файл списка или ZIP-архив с ним с сайта Еврокомиссии.",
+  sanctions_list_error_empty: "В файле нет ни одного лица или организации под санкциями. Список не загружен.",
+  sanctions_list_error_size: "Файл слишком большой или пустой. Список не загружен.",
+  sanctions_list_error_suspicious:
+    "В файле намного меньше записей, чем в действующем списке — похоже, он неполный. Действующий список оставлен без изменений.",
+  sanctions_list_error_file: "Файл не удалось прочитать. Выберите файл списка и повторите загрузку.",
+  sanctions_list_error_storage: "Список не удалось сохранить. Повторите загрузку позже.",
   sanctions_blocked_countries: "Заблокированные страны",
   sanctions_blocked_countries_placeholder: "Страны",
   sanctions_blocked_countries_saved: "Список заблокированных стран сохранён",
@@ -327,6 +343,8 @@ export const sanctionsRu: SanctionsTranslations = {
   risk_queue_empty: "Нет обращений на проверке",
   risk_queue_since: "с {date}",
   risk_queue_proposal: "Старое предложение: {decision} — {name}, {date}",
+  risk_queue_waiting: "Ждут вашего решения по оценке риска — обращений: {count}.",
+  risk_queue_open: "Открыть очередь",
 };
 
 export const sanctionsDe: SanctionsTranslations = {
@@ -431,6 +449,14 @@ export const sanctionsDe: SanctionsTranslations = {
   sanctions_list_versions: "Versionen",
   sanctions_list_source_download: "Download",
   sanctions_list_source_upload: "manuell",
+  sanctions_list_error_format:
+    "Das ist nicht die konsolidierte EU-Sanktionsliste (FSF XML 1.1). Bitte die XML-Datei der Liste oder ein ZIP-Archiv damit von der Seite der Europäischen Kommission hochladen.",
+  sanctions_list_error_empty: "Die Datei enthält keine sanktionierten Personen oder Organisationen. Die Liste wurde nicht geladen.",
+  sanctions_list_error_size: "Die Datei ist zu groß oder leer. Die Liste wurde nicht geladen.",
+  sanctions_list_error_suspicious:
+    "Die Datei enthält deutlich weniger Einträge als die aktuelle Liste – sie ist vermutlich unvollständig. Die aktuelle Liste bleibt unverändert.",
+  sanctions_list_error_file: "Die Datei konnte nicht gelesen werden. Bitte die Listendatei auswählen und erneut hochladen.",
+  sanctions_list_error_storage: "Die Liste konnte nicht gespeichert werden. Bitte später erneut hochladen.",
   sanctions_blocked_countries: "Gesperrte Länder",
   sanctions_blocked_countries_placeholder: "Länder",
   sanctions_blocked_countries_saved: "Gesperrte Länder gespeichert",
@@ -494,4 +520,6 @@ export const sanctionsDe: SanctionsTranslations = {
   risk_queue_empty: "Keine Anfragen in Prüfung",
   risk_queue_since: "seit {date}",
   risk_queue_proposal: "Alter Vorschlag: {decision} – {name}, {date}",
+  risk_queue_waiting: "Auf Ihre Entscheidung zur Risikobewertung warten – Anfragen: {count}.",
+  risk_queue_open: "Warteschlange öffnen",
 };

@@ -237,8 +237,10 @@ function useAppointmentMobileDetailSheetContentContent({
                 detail={detail}
                 canEdit={permissions.canEditSchedule}
                 canDelete={permissions.canDelete}
+                canCancel={permissions.canManageStatus}
                 onEdit={() => setOverviewEditAppointmentId(detail.id)}
                 onDelete={() => onDeleteAppointment(detail.id)}
+                onCancelled={onRefresh}
                 onOpenDetail={openDetailSheet}
               />
               {permissions.canEditSchedule ? (

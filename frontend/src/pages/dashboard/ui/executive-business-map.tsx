@@ -23,11 +23,13 @@ import {
 import { PortalDateChip } from "@/components/ui/portal-date-chip";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { useLang } from "@/lib/i18n";
+import { pluralWord } from "@/lib/i18n/plural";
 import { formatMoneyAmount } from "@/lib/money";
 import { localizeTimelineTitle } from "@/lib/timeline-labels";
 import { cn } from "@/lib/utils";
 
 import type {
+  ActiveOrderPhase,
   ExecutiveFinanceSnapshot,
   MonthlyEntry,
   OperationsPayload,
@@ -129,10 +131,41 @@ const ExecutiveCashChart = lazy(async () => {
   };
 });
 
+const ATTENTION_WORDS = {
+  ru: ["действие требует", "действия требуют", "действий требуют"],
+  de: ["offene Aktion benötigt", "offene Aktionen benötigen"],
+} as const;
+const NEW_PATIENT_WORDS = {
+  ru: ["новый", "новых", "новых"],
+  de: ["neu", "neu"],
+} as const;
+// Prepositional case: "в 1 фазе", "в 2 фазах", "в 5 фазах".
+const PHASE_WORDS = {
+  ru: ["фазе", "фазах", "фазах"],
+  de: ["Phase", "Phasen"],
+} as const;
+const PROVIDER_WORDS = {
+  ru: ["провайдер", "провайдера", "провайдеров"],
+  de: ["Anbieter", "Anbieter"],
+} as const;
+const UNASSIGNED_WORDS = {
+  ru: ["операция", "операции", "операций"],
+  de: ["Buchung", "Buchungen"],
+} as const;
+
+/** Order phases in the order the pipeline runs them. */
+const ORDER_PHASE_SEQUENCE = ["discovery", "intake", "execution", "closure", "followup"];
+
+function phaseRank(phase: string) {
+  const index = ORDER_PHASE_SEQUENCE.indexOf(phase);
+  return index === -1 ? ORDER_PHASE_SEQUENCE.length : index;
+}
+
 const COPY = {
   ru: {
     stable: "Компания работает стабильно",
-    attention: (count: number) => `${count} ${count === 1 ? "действие требует" : "действия требуют"} внимания`,
+    attention: (count: number) =>
+      `${count} ${pluralWord("ru", count, ATTENTION_WORDS)} внимания`,
     allMetrics: "Все показатели",
     cash: "Денежные средства",
     receivables: "К получению от пациентов",
@@ -148,14 +181,17 @@ const COPY = {
     netFlow: "Чистый денежный поток",
     thisMonth: "Текущий месяц",
     patientCount: "Активные пациенты",
-    newThisMonth: "новых в этом месяце",
+    newThisMonth: (count: number) =>
+      `${pluralWord("ru", count, NEW_PATIENT_WORDS)} в этом месяце`,
     orderCount: "Открытые заказы",
-    pipeline: "По текущему пайплайну",
-    phases: "фаз",
-    openActionsShort: "открытых действий",
+    pipeline: "Открытые заказы по фазам",
+    // "в 1 фазе", "в 3 фазах".
+    phases: (count: number) => `в ${count} ${pluralWord("ru", count, PHASE_WORDS)}`,
+    noOrders: "открытых заказов нет",
     providerPayables: "К оплате провайдерам",
     network: "Активная сеть",
-    providersInSelection: "провайдеров в текущей выборке",
+    providersInSelection: (count: number) =>
+      `${count} ${pluralWord("ru", count, PROVIDER_WORDS)} в текущей выборке`,
     follow: "Следить",
     patientFinanceHint: "ожидается от пациентов",
     patientAction: "Открыть пациентов",
@@ -163,6 +199,9 @@ const COPY = {
     providerAction: "Открыть расчёты с провайдерами",
     moneyAction: "Открыть баланс компании",
     decisions: "Требует решения",
+    // The queue lists the most urgent open actions; the badge says how many of all.
+    queueCount: (shown: number, total: number) =>
+      shown < total ? `${shown} из ${total}` : String(total),
     noDecisions: "Срочных управленческих действий нет",
     today: "Сегодня",
     noDue: "Без срока",
@@ -175,14 +214,16 @@ const COPY = {
     milestones: "Ближайшие события",
     calendar: "Календарь",
     noEvents: "Ближайших событий нет",
-    unassigned: "операций без счёта",
+    unassigned: (count: number) =>
+      `${count} ${pluralWord("ru", count, UNASSIGNED_WORDS)} без счёта`,
     reconciliation: "Нужна сверка",
     upToDate: "Сверка актуальна",
     loading: "Загрузка данных",
   },
   de: {
     stable: "Das Unternehmen arbeitet stabil",
-    attention: (count: number) => `${count} offene Aktion${count === 1 ? "" : "en"} benötigen Aufmerksamkeit`,
+    attention: (count: number) =>
+      `${count} ${pluralWord("de", count, ATTENTION_WORDS)} Aufmerksamkeit`,
     allMetrics: "Alle Kennzahlen",
     cash: "Zahlungsmittel",
     receivables: "Patientenforderungen",
@@ -198,14 +239,16 @@ const COPY = {
     netFlow: "Netto-Cashflow",
     thisMonth: "Aktueller Monat",
     patientCount: "Aktive Patienten",
-    newThisMonth: "neu in diesem Monat",
+    newThisMonth: (count: number) =>
+      `${pluralWord("de", count, NEW_PATIENT_WORDS)} in diesem Monat`,
     orderCount: "Offene Aufträge",
-    pipeline: "Aktuelle Pipeline",
-    phases: "Phasen",
-    openActionsShort: "offene Aktionen",
+    pipeline: "Offene Aufträge nach Phasen",
+    phases: (count: number) => `in ${count} ${pluralWord("de", count, PHASE_WORDS)}`,
+    noOrders: "keine offenen Aufträge",
     providerPayables: "Anbieterverbindlichkeiten",
     network: "Aktives Netzwerk",
-    providersInSelection: "Anbieter in der aktuellen Auswahl",
+    providersInSelection: (count: number) =>
+      `${count} ${pluralWord("de", count, PROVIDER_WORDS)} in der aktuellen Auswahl`,
     follow: "Beobachten",
     patientFinanceHint: "von Patienten erwartet",
     patientAction: "Patienten öffnen",
@@ -213,6 +256,8 @@ const COPY = {
     providerAction: "Anbieterabrechnung öffnen",
     moneyAction: "Unternehmenssaldo öffnen",
     decisions: "Entscheidung erforderlich",
+    queueCount: (shown: number, total: number) =>
+      shown < total ? `${shown} von ${total}` : String(total),
     noDecisions: "Keine dringenden Management-Aktionen",
     today: "Heute",
     noDue: "Ohne Frist",
@@ -225,7 +270,8 @@ const COPY = {
     milestones: "Nächste Termine",
     calendar: "Kalender",
     noEvents: "Keine anstehenden Termine",
-    unassigned: "Buchungen ohne Konto",
+    unassigned: (count: number) =>
+      `${count} ${pluralWord("de", count, UNASSIGNED_WORDS)} ohne Konto`,
     reconciliation: "Abstimmung nötig",
     upToDate: "Abstimmung aktuell",
     loading: "Daten werden geladen",
@@ -352,6 +398,7 @@ function BusinessDomain({
 }
 
 export function ExecutiveBusinessMap({
+  activeOrderPhases,
   activePatientCount,
   finance,
   greeting,
@@ -365,6 +412,8 @@ export function ExecutiveBusinessMap({
   upcoming,
   go,
 }: {
+  /** Open orders by phase: the same orders the "open orders" number counts. */
+  activeOrderPhases: ActiveOrderPhase[];
   activePatientCount: number;
   finance: ExecutiveFinanceSnapshot | null;
   greeting: string;
@@ -411,13 +460,22 @@ export function ExecutiveBusinessMap({
   const payables = safeNumber(finance?.provider_payables);
   const moneyTone = signalTone(netCashFlow);
   const providerTone = signalTone(payables, true);
+  // The number, its sparkline and the phase count describe the same open
+  // orders; the 30-day statistic counts the orders created in the period.
+  const orderPhases = useMemo(
+    () =>
+      activeOrderPhases
+        .filter((row) => row.count > 0)
+        .sort((a, b) => phaseRank(a.phase) - phaseRank(b.phase)),
+    [activeOrderPhases],
+  );
   const ordersTotal = overview?.orders
-    ?? operations?.orders_by_phase_valued?.reduce((sum, row) => sum + row.count, 0)
-    ?? 0;
+    ?? orderPhases.reduce((sum, row) => sum + row.count, 0);
   const orderTone = ordersTotal > 0 ? "warning" : "good";
   const patientTone = activePatientCount > 0 ? "good" : "warning";
   const patientTrend = monthly.map((item) => ({ label: item.month, value: item.count }));
-  const orderTrend = operations?.orders_by_phase_valued?.map((item) => ({ label: item.phase, value: item.count })) ?? [];
+  const orderTrend = orderPhases.map((item) => ({ label: item.phase, value: item.count }));
+  const providerCount = operations?.top_providers?.length ?? 0;
   const providerTrend = operations?.top_providers?.slice(0, 8).map((item) => ({ label: item.name, value: item.appointment_count })) ?? [];
   const cashTrend = cashData.map((item) => ({ label: item.label, value: item.net }));
 
@@ -433,8 +491,9 @@ export function ExecutiveBusinessMap({
     <div className="executive-dashboard grid min-w-0 gap-3">
       <header className="staff-overview-card p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-[24px] font-semibold leading-tight tracking-tight text-foreground">{greeting}</h1>
+          {/* A long unbroken name wraps instead of widening the page (QA D-21). */}
+          <div className="min-w-0 max-w-full">
+            <h1 className="text-[24px] font-semibold leading-tight tracking-tight text-foreground [overflow-wrap:anywhere]">{greeting}</h1>
             <p className="mt-1 text-[12px] text-muted-foreground first-letter:uppercase">{date}</p>
           </div>
           <button type="button" onClick={() => go("/reports")} className="inline-flex items-center gap-1 pt-1 text-[13px] font-medium text-[var(--brand)] hover:underline">
@@ -445,7 +504,7 @@ export function ExecutiveBusinessMap({
         <div className="mt-3 grid grid-cols-2 gap-y-2 border-t border-border pt-3 sm:grid-cols-4">
           <MetricSignal label={copy.cash} value={loading ? "—" : money.format(safeNumber(finance?.actual_cash_balance))} note={finance?.reconciliation_required ? copy.reconciliation : copy.upToDate} tone={finance?.reconciliation_required ? "danger" : "neutral"} />
           <MetricSignal label={copy.receivables} value={loading ? "—" : money.format(receivables)} note={`${money.format(safeNumber(finance?.cash_inflow))} ${copy.inflow.toLowerCase()}`} tone={receivables > 0 ? "good" : "neutral"} />
-          <MetricSignal label={copy.activePatients} value={loading ? "—" : String(activePatientCount)} note={`+${newPatientsThisMonth} ${copy.newThisMonth}`} tone={newPatientsThisMonth > 0 ? "good" : "neutral"} />
+          <MetricSignal label={copy.activePatients} value={loading ? "—" : String(activePatientCount)} note={`+${newPatientsThisMonth} ${copy.newThisMonth(newPatientsThisMonth)}`} tone={newPatientsThisMonth > 0 ? "good" : "neutral"} />
           <MetricSignal label={copy.openActions} value={loading ? "—" : String(openTasksCount)} note={openTasksCount > 0 ? copy.attention(openTasksCount) : copy.stable} tone={openTasksCount > 0 ? "danger" : "good"} />
         </div>
       </header>
@@ -460,7 +519,7 @@ export function ExecutiveBusinessMap({
             label={copy.netFlow}
             value={loading ? "—" : money.format(netCashFlow)}
             chart={<Suspense fallback={null}><ExecutiveSparkline data={cashTrend} tone={moneyTone} /></Suspense>}
-            detail={<><span className="font-medium text-foreground">{copy.follow}:</span> {money.format(receivables)} {copy.patientFinanceHint}. {finance?.unassigned_movement_count ? `${finance.unassigned_movement_count} ${copy.unassigned}.` : ""}</>}
+            detail={<><span className="font-medium text-foreground">{copy.follow}:</span> {money.format(receivables)} {copy.patientFinanceHint}. {finance?.unassigned_movement_count ? `${copy.unassigned(finance.unassigned_movement_count)}.` : ""}</>}
             action={copy.moneyAction}
             onClick={() => go("/company-finance")}
           />
@@ -472,7 +531,7 @@ export function ExecutiveBusinessMap({
             label={copy.patientCount}
             value={loading ? "—" : String(activePatientCount)}
             chart={<Suspense fallback={null}><ExecutiveSparkline data={patientTrend} tone={patientTone} /></Suspense>}
-            detail={<><span className="font-medium text-foreground">{newPatientsThisMonth}</span> {copy.newThisMonth}; {money.format(receivables)} {copy.patientFinanceHint}.</>}
+            detail={<><span className="font-medium text-foreground">{newPatientsThisMonth}</span> {copy.newThisMonth(newPatientsThisMonth)}; {money.format(receivables)} {copy.patientFinanceHint}.</>}
             action={copy.patientAction}
             onClick={() => go("/patients")}
           />
@@ -484,7 +543,7 @@ export function ExecutiveBusinessMap({
             label={copy.orderCount}
             value={loading ? "—" : String(ordersTotal)}
             chart={<Suspense fallback={null}><ExecutiveSparkline data={orderTrend} tone={orderTone} /></Suspense>}
-            detail={<><span className="font-medium text-foreground">{copy.pipeline}:</span> {operations?.orders_by_phase_valued?.length ?? 0} {copy.phases}, {openTasksCount} {copy.openActionsShort}.</>}
+            detail={<><span className="font-medium text-foreground">{copy.pipeline}:</span> {orderPhases.length > 0 ? copy.phases(orderPhases.length) : copy.noOrders}.</>}
             action={copy.orderAction}
             onClick={() => go("/orders")}
           />
@@ -496,7 +555,7 @@ export function ExecutiveBusinessMap({
             label={copy.providerPayables}
             value={loading ? "—" : money.format(payables)}
             chart={<Suspense fallback={null}><ExecutiveSparkline data={providerTrend} tone={providerTone} /></Suspense>}
-            detail={<><span className="font-medium text-foreground">{copy.network}:</span> {operations?.top_providers?.length ?? 0} {copy.providersInSelection}.</>}
+            detail={<><span className="font-medium text-foreground">{copy.network}:</span> {copy.providersInSelection(providerCount)}.</>}
             action={copy.providerAction}
             onClick={() => go("/company-finance?tab=providers")}
           />
@@ -507,7 +566,7 @@ export function ExecutiveBusinessMap({
             <div>
               <h2><SectionHeading icon={ListTodo}>{copy.decisions}</SectionHeading></h2>
             </div>
-            <span className="rounded-full border border-border px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">{decisionTasks.length}</span>
+            <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground" data-testid="executive-queue-count">{copy.queueCount(decisionTasks.length, openTasksCount)}</span>
           </div>
           <div className="mt-3 divide-y divide-border">
             {loading ? (

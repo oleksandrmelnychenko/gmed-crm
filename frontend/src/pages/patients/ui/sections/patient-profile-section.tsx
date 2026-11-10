@@ -32,6 +32,7 @@ import { isOtherPersonUploadArt } from "@/pages/leads/model/gwg-identification";
 import { idDocumentTypeLabel } from "@/pages/leads/model/lead-gwg-statements";
 import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
 import { LinkedTasksSection, OPEN_PATIENT_TASK_CREATOR_EVENT } from "@/pages/concierge/linked-tasks-section";
+import { identityDocumentLabels } from "../../model/identity-document-labels";
 import { nationalityNameForDisplay } from "../../model/nationalities";
 import { PATIENT_RELATIONS_UPDATED_EVENT } from "../../data/patient-detail-mutations";
 
@@ -758,6 +759,8 @@ function usePatientProfileTabContent({
   // or a legal status that looks unstarted (QA B-14, 2026-10-11).
   const isHidden = (group: string) => patientFieldHidden(detail, group);
   const hiddenOr = (group: string, value: ReactNode) => (isHidden(group) ? t.access_hidden : value);
+  // An ID card or a residence permit is not labelled "passport".
+  const identityLabels = identityDocumentLabels(detail.id_document_type, lang, t);
   const legalStatusHidden = isHidden("legal_status");
 
   return (
@@ -1141,7 +1144,7 @@ function usePatientProfileTabContent({
           </ProfileSummaryCard>
         ) : null}
 
-        <ProfileSummaryCard title={t.patient_profile_editor_passport}>
+        <ProfileSummaryCard title={identityLabels.title}>
           {canViewDocuments ? (
             <ProfileSummaryLine
               label={l("required_doc_passport_scan")}
@@ -1179,7 +1182,7 @@ function usePatientProfileTabContent({
             />
           ) : null}
           <ProfileSummaryLine
-            label={t.patient_profile_editor_passport_number}
+            label={identityLabels.number}
             value={hiddenOr("passport", fieldValue(detail.passport_number, t.common_not_set))}
           />
           {detail.id_issuing_authority ? (
@@ -1217,8 +1220,8 @@ function usePatientProfileTabContent({
                       )}
                     >
                       {detail.passport_status === "expired"
-                        ? t.patient_passport_expired
-                        : t.patient_passport_expiring}
+                        ? identityLabels.expired
+                        : identityLabels.expiring}
                     </span>
                   ) : null}
                 </span>

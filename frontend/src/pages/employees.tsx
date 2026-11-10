@@ -32,8 +32,8 @@ export function EmployeesPage() {
   const [error, setError] = useState("");
   const [accessEmployee, setAccessEmployee] = useState<StaffDirectoryEntry | null>(null);
   const canManageAccess = canManageStaffAccess(user?.role);
-  const accessLabel = lang === "de" ? "Zugriffe" : "Доступи";
-  const fullAccessLabel = lang === "de" ? "Vollständiger Systemzugriff" : "Повний системний доступ";
+  const accessLabel = lang === "de" ? "Zugriffe" : "Доступы";
+  const fullAccessLabel = lang === "de" ? "Vollständiger Systemzugriff" : "Полный системный доступ";
 
   useEffect(() => {
     let cancelled = false;
@@ -139,7 +139,7 @@ export function EmployeesPage() {
         ? "Arbeitskontakte und individuelle Ressourcenzugriffe."
         : "Arbeitskontakte für die operative Koordination. Nur Lesen."
       : canManageAccess
-        ? "Робочі контакти та індивідуальні доступи до ресурсів."
+        ? "Рабочие контакты и индивидуальные доступы к ресурсам."
         : "Рабочие контакты для оперативной координации. Только просмотр.";
 
   return (

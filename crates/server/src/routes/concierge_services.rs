@@ -990,7 +990,7 @@ async fn list_concierge_services(
         let assigned_concierge_id = row
             .try_get::<Option<Uuid>, _>("assigned_concierge_id")
             .unwrap_or_default();
-        match can_access_service(&state, &auth, patient_id, assigned_concierge_id).await {
+        match can_read_service(&state, &auth, patient_id, assigned_concierge_id).await {
             Ok(true) => items.push(build_service_json_for_actor(&row, &auth)),
             Ok(false) => {}
             Err(resp) => return resp,
@@ -1007,6 +1007,7 @@ async fn get_concierge_service(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::Concierge,
         Role::Billing,
@@ -1023,7 +1024,7 @@ async fn get_concierge_service(
             let assigned_concierge_id = row
                 .try_get::<Option<Uuid>, _>("assigned_concierge_id")
                 .unwrap_or_default();
-            match can_access_service(&state, &auth, patient_id, assigned_concierge_id).await {
+            match can_read_service(&state, &auth, patient_id, assigned_concierge_id).await {
                 Ok(true) => Json(build_service_json_for_actor(&row, &auth)).into_response(),
                 Ok(false) => err(StatusCode::FORBIDDEN, "Insufficient permissions"),
                 Err(resp) => resp,
@@ -5212,6 +5213,7 @@ async fn update_concierge_service(
     let final_billing = service
         .try_get::<String, _>("billing_status")
         .unwrap_or_default();
+    notify_patient_of_service_change(&state, &existing, &service, auth.user_id).await;
     state.audit_sender.try_send(audit::domain_event(
         "update_concierge_service",
         Some(auth.user_id),
@@ -5295,6 +5297,179 @@ async fn update_concierge_service(
         .await;
     }
     Json(build_service_json_for_actor(&service, &auth)).into_response()
+}
+
+/// The status of a service as the patient reads it, Russian and German.
+fn patient_service_status_labels(status: &str) -> (&'static str, &'static str) {
+    match status {
+        "planned" => ("запланирован", "geplant"),
+        "in_service" => ("в работе", "in Bearbeitung"),
+        "completed" => ("выполнен", "abgeschlossen"),
+        "cancelled" => ("отменён", "storniert"),
+        _ => ("обновлён", "aktualisiert"),
+    }
+}
+
+/// "17.12.2026 14:00" in German time, or nothing for a service without a time.
+fn patient_service_time(value: Option<chrono::DateTime<chrono::Utc>>) -> Option<String> {
+    value.map(|instant| {
+        crate::app_time::local(instant)
+            .format("%d.%m.%Y %H:%M")
+            .to_string()
+    })
+}
+
+/// Title and text of the patient notification about a changed service, in
+/// Russian and German: `[title_ru, body_ru, title_de, body_de]`. The status
+/// leads when both the status and the time changed in one save.
+fn patient_service_notice_texts(
+    title: &str,
+    status_changed: bool,
+    status: &str,
+    starts_at: Option<&str>,
+    previous_starts_at: Option<&str>,
+) -> [String; 4] {
+    if status_changed {
+        let (status_ru, status_de) = patient_service_status_labels(status);
+        let when = starts_at
+            .map(|value| format!(" · {value}"))
+            .unwrap_or_default();
+        return [
+            "Статус сервиса изменён".to_string(),
+            format!("{title}: {status_ru}{when}"),
+            "Status des Services geändert".to_string(),
+            format!("{title}: {status_de}{when}"),
+        ];
+    }
+    let (when_ru, when_de) = match (previous_starts_at, starts_at) {
+        (Some(previous), Some(current)) if previous != current => (
+            format!("{previous} → {current}"),
+            format!("{previous} → {current}"),
+        ),
+        (_, Some(current)) => (current.to_string(), current.to_string()),
+        (_, None) => (
+            "время уточняется".to_string(),
+            "Zeit wird noch abgestimmt".to_string(),
+        ),
+    };
+    [
+        "Время сервиса изменено".to_string(),
+        format!("{title}: {when_ru}"),
+        "Zeit des Services geändert".to_string(),
+        format!("{title}: {when_de}"),
+    ]
+}
+
+/// Tells the patient that the status or the time of a service changed (owner
+/// decision 2026-11-10): one notification per save for every portal login of
+/// the patient, never for the acting user. Only a service the portal shows
+/// counts — the condition of `list_my_concierge_services`: a service of a
+/// visit whose plan is not released yet stays silent. The change is already
+/// saved; a failure here is logged and changes nothing.
+async fn notify_patient_of_service_change(
+    state: &AppState,
+    before: &sqlx::postgres::PgRow,
+    after: &sqlx::postgres::PgRow,
+    actor_id: Uuid,
+) {
+    type Instant = Option<chrono::DateTime<chrono::Utc>>;
+    let status_before = before.try_get::<String, _>("status").unwrap_or_default();
+    let status_after = after.try_get::<String, _>("status").unwrap_or_default();
+    let starts_before = before
+        .try_get::<Instant, _>("starts_at")
+        .unwrap_or_default();
+    let starts_after = after.try_get::<Instant, _>("starts_at").unwrap_or_default();
+    let ends_before = before.try_get::<Instant, _>("ends_at").unwrap_or_default();
+    let ends_after = after.try_get::<Instant, _>("ends_at").unwrap_or_default();
+    let status_changed = status_before != status_after;
+    let time_changed = starts_before != starts_after || ends_before != ends_after;
+    if !status_changed && !time_changed {
+        return;
+    }
+    let (Ok(service_id), Ok(patient_id)) = (
+        after.try_get::<Uuid, _>("id"),
+        after.try_get::<Uuid, _>("patient_id"),
+    ) else {
+        return;
+    };
+    let title = after.try_get::<String, _>("title").unwrap_or_default();
+    let starts_text = patient_service_time(starts_after);
+    let previous_starts_text = patient_service_time(starts_before);
+    let [title_ru, body_ru, title_de, body_de] = patient_service_notice_texts(
+        &title,
+        status_changed,
+        &status_after,
+        starts_text.as_deref(),
+        previous_starts_text.as_deref(),
+    );
+    let kind = if status_changed {
+        "patient_service_status_changed"
+    } else {
+        "patient_service_rescheduled"
+    };
+    let params = serde_json::json!({
+        "service_title": title,
+        "status": status_after,
+        "previous_status": status_before,
+        "starts_at": starts_after.map(|value| value.to_rfc3339()),
+        "ends_at": ends_after.map(|value| value.to_rfc3339()),
+        "previous_starts_at": starts_before.map(|value| value.to_rfc3339()),
+        "previous_ends_at": ends_before.map(|value| value.to_rfc3339()),
+    });
+    let inserted = sqlx::query(
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+           SELECT DISTINCT u.id, $2::text,
+                  CASE WHEN u.preferred_language = 'de' THEN $3::text ELSE $4::text END,
+                  CASE WHEN u.preferred_language = 'de' THEN $5::text ELSE $6::text END,
+                  'concierge_service'::text, cs.id, $7::jsonb
+           FROM concierge_services cs
+           LEFT JOIN appointments a ON a.id = cs.appointment_id
+           JOIN patient_assignments pa ON pa.patient_id = cs.patient_id
+           JOIN users u ON u.id = pa.user_id
+           WHERE cs.id = $1
+             AND (a.id IS NULL OR a.portal_released_at IS NOT NULL)
+             AND pa.revoked_at IS NULL
+             AND u.is_active = true
+             AND u.role = 'patient'
+             AND u.id <> $8
+           RETURNING id, user_id"#,
+    )
+    .bind(service_id)
+    .bind(kind)
+    .bind(&title_de)
+    .bind(&title_ru)
+    .bind(&body_de)
+    .bind(&body_ru)
+    .bind(params)
+    .bind(actor_id)
+    .fetch_all(&state.db)
+    .await;
+    let rows = match inserted {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(error = %error, service_id = %service_id, patient_id = %patient_id, "notify patient about a changed concierge service");
+            return;
+        }
+    };
+    for row in &rows {
+        let (Ok(notification_id), Ok(user_id)) = (
+            row.try_get::<Uuid, _>("id"),
+            row.try_get::<Uuid, _>("user_id"),
+        ) else {
+            continue;
+        };
+        crate::realtime::publish_notification_event(
+            state,
+            user_id,
+            "notification.created",
+            Some(notification_id),
+            serde_json::json!({
+                "entity_type": "concierge_service",
+                "entity_id": service_id,
+            }),
+        )
+        .await;
+    }
 }
 
 fn conflict_with_code(code: &str, message: &str) -> axum::response::Response {
@@ -6263,6 +6438,23 @@ async fn ensure_patient_access(
         Ok(false) => Err(err(StatusCode::FORBIDDEN, "Insufficient permissions")),
         Err(resp) => Err(resp),
     }
+}
+
+/// Whether the actor may read a service (list and detail). The CEO assistant
+/// reads every service and changes none (owner decision 2026-10-11, matrix
+/// column "VIP-сервіси": "Перегляд"); for everybody else reading follows
+/// [`can_access_service`]. Every write keeps its own role gate and
+/// [`can_access_service`], neither of which admits the assistant.
+async fn can_read_service(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+    assigned_concierge_id: Option<Uuid>,
+) -> Result<bool, axum::response::Response> {
+    if auth.role == Role::CeoAssistant {
+        return Ok(true);
+    }
+    can_access_service(state, auth, patient_id, assigned_concierge_id).await
 }
 
 async fn can_access_service(

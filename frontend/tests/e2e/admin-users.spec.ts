@@ -8,6 +8,7 @@ type MockUser = {
   is_active: boolean;
   failed_login_attempts: number;
   locked_until: string | null;
+  login_paused_until?: string | null;
   password_changed_at: string | null;
   password_reset_required: boolean;
   totp_enrolled: boolean;
@@ -190,7 +191,9 @@ test("IT admin creates a user with a one-time password that is shown once", asyn
   await expect(sheet.getByRole("button", { name: "Скопировано", exact: true })).toBeVisible();
 
   // Closing the sheet discards the secret; reopening starts a fresh form.
-  await sheet.getByRole("button", { name: "Готово", exact: true }).first().click();
+  // One "Готово" only: nothing is left to cancel here.
+  await expect(sheet.getByRole("button", { name: "Готово", exact: true })).toHaveCount(1);
+  await sheet.getByRole("button", { name: "Готово", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.getByRole("button", { name: "Новый пользователь", exact: true }).click();
   await expect(page.getByRole("dialog").getByTestId("one-time-password-panel")).toHaveCount(0);
@@ -296,6 +299,12 @@ test("last-CEO guard is shown as readable text", async ({ page }) => {
   const ceoRow = page.getByRole("row").filter({ hasText: "Chief Executive" });
   await expect(ceoRow.getByRole("button", { name: "Редактировать" })).toBeEnabled();
   await ceoRow.getByRole("button", { name: "Деактивировать" }).click();
+  // Deactivation is asked first; nothing is sent before the confirmation.
+  const confirmDeactivation = page.getByRole("alertdialog");
+  await expect(confirmDeactivation).toContainText("Деактивировать пользователя?");
+  await expect(confirmDeactivation).toContainText("Chief Executive");
+  expect(state.deactivated).toEqual([]);
+  await confirmDeactivation.getByRole("button", { name: "Деактивировать", exact: true }).click();
   await expect(page.getByText("Нельзя деактивировать или понизить последний активный аккаунт CEO.")).toBeVisible();
   expect(state.deactivated).toEqual(["ceo-1"]);
 });

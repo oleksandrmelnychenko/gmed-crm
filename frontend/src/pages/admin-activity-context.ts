@@ -124,12 +124,46 @@ export function activityContextEntries(
   return entries;
 }
 
+type ActivityValues = Record<string, unknown> | null | undefined;
+
+function isValueRecord(value: ActivityValues): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * What a before/after audit row changed, as "field: old → new" (QA
+ * 2026-11-10, E F-7: "Пользователь изменён" named no field). Only fields
+ * that have a label (`activity_change_key_<field>`), are stored on both
+ * sides and differ; an empty side reads "—".
+ */
+export function activityChangeEntries(
+  oldValue: ActivityValues,
+  newValue: ActivityValues,
+  t: Translations,
+): ActivityContextEntry[] {
+  if (!isValueRecord(oldValue) || !isValueRecord(newValue)) return [];
+  const entries: ActivityContextEntry[] = [];
+  for (const [key, after] of Object.entries(newValue)) {
+    if (!(key in oldValue)) continue;
+    const label = t.uiText[`activity_change_key_${key}`];
+    if (!label) continue;
+    const before = oldValue[key];
+    if (JSON.stringify(before ?? null) === JSON.stringify(after ?? null)) continue;
+    const from = formatContextValue(key, before, t) ?? "—";
+    const to = formatContextValue(key, after, t) ?? "—";
+    if (from === to) continue;
+    entries.push({ key: `change:${key}`, label, value: `${from} → ${to}` });
+  }
+  return entries;
+}
+
 /** One line for the table: up to three entries, "—" when nothing is left. */
 export function activityContextSummary(
   context: Record<string, unknown> | null | undefined,
   t: Translations,
+  changes: ActivityContextEntry[] = [],
 ): string {
-  const entries = activityContextEntries(context, t).slice(0, 3);
+  const entries = [...changes, ...activityContextEntries(context, t)].slice(0, 3);
   return entries.length
     ? entries.map((entry) => `${entry.label}: ${entry.value}`).join(" · ")
     : "—";

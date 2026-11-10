@@ -139,6 +139,7 @@ import {
   joinBlockingReasons,
   orderBlockingReasonAnchor,
   orderBlockingReasonSection,
+  PLANNING_ANCHOR_IDS,
   resolveOrderBlockingReason,
 } from "./model/blocking-reasons";
 import {
@@ -1748,7 +1749,9 @@ function useOrdersPageContent() {
     const tick = () => {
       if (pendingOrderAnchorRef.current !== elementId) return;
       const element = document.getElementById(elementId);
-      if (element) {
+      // A block that has rendered nothing yet is hidden (`empty:hidden`) and
+      // cannot be scrolled to: keep waiting for its content.
+      if (element && element.getClientRects().length > 0) {
         pendingOrderAnchorRef.current = null;
         element.scrollIntoView?.({ behavior: "smooth", block: "start" });
         return;
@@ -5008,6 +5011,9 @@ function useOrdersPageContent() {
                     </div>
                     <div className="mt-3 space-y-3">
                       <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+                        {/* This gate is only the signatures and the debt hold;
+                            the move to execution also needs the planning, so
+                            its label names what it checks (QA 2026-11-10). */}
                         <OrderSummaryLine
                           label={l("orders_durchfuhrungsfreigabe")}
                           value={
@@ -5415,6 +5421,9 @@ function useOrdersPageContent() {
                         />
                       </div>
 
+                      {/* The blocks below carry the ids an open point of
+                          «Что ещё нужно сделать» scrolls to (blocking-reasons.ts). */}
+                      <div id={PLANNING_ANCHOR_IDS.appointments} className="scroll-mt-4 empty:hidden">
                       <OrderPlannedAppointments
                         orderId={orderDetail.id}
                         lang={lang}
@@ -5425,7 +5434,9 @@ function useOrdersPageContent() {
                         patientId={detailPatientId}
                         onChanged={() => setReloadNonce((current) => current + 1)}
                       />
+                      </div>
 
+                      <div id={PLANNING_ANCHOR_IDS.planAgreement} className="scroll-mt-4 empty:hidden">
                       <OrderPlanAgreement
                         orderId={orderDetail.id}
                         patientId={detailPatientId}
@@ -5449,7 +5460,9 @@ function useOrdersPageContent() {
                         reloadNonce={reloadNonce}
                         onChanged={triggerReload}
                       />
+                      </div>
 
+                      <div id={PLANNING_ANCHOR_IDS.interpreters} className="scroll-mt-4 space-y-2 empty:hidden">
                       {/* «Переводчики по дням» replaces the older hint for
                           whoever may assign; the hint stays for the others
                           and while the order has no appointment yet. */}
@@ -5474,6 +5487,7 @@ function useOrdersPageContent() {
                         onChanged={() => setReloadNonce((current) => current + 1)}
                         onEmptyChange={setInterpreterDaysEmpty}
                       />
+                      </div>
 
                       {planningReadinessApplicable ? (
                         orderDetail.planning_preparation.blocking_reasons
@@ -5505,7 +5519,7 @@ function useOrdersPageContent() {
 
                       {permissions.canManagePhase ? (
                         <div className="grid gap-2">
-                          <div className="rounded-lg border border-border p-3">
+                          <div id={PLANNING_ANCHOR_IDS.control} className="scroll-mt-4 rounded-lg border border-border p-3">
                             <div className="text-[13px] font-semibold text-foreground">
                               {titleWithDot(
                                 l("orders_planungssteuerung"),

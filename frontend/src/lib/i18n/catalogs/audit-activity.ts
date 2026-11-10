@@ -104,8 +104,106 @@ const ACTIONS: Record<string, Pair> = {
   set_lead_custody: ["Опека по лиду изменена", "Sorgerecht zum Lead geändert"],
   set_lead_step1_fill_mode: ["Выбрано, кто заполняет шаг 1", "Ausfüller von Schritt 1 festgelegt"],
   remove_lead_representative: ["Представитель удалён", "Vertreter entfernt"],
+  // QA 2026-11-10 (E F-7): these reached the Russian log as humanised English.
+  update_lead_representative_details: ["Данные представителя изменены", "Angaben zum Vertreter geändert"],
+  staff_upload_representative_identity: [
+    "Документ представителя загружен сотрудником",
+    "Ausweis des Vertreters durch Mitarbeitende hochgeladen",
+  ],
+  staff_upload_representative_authority: [
+    "Подтверждение полномочий представителя загружено сотрудником",
+    "Vertretungsnachweis durch Mitarbeitende hochgeladen",
+  ],
+  lead_guardian_access_revoked: [
+    "Вход родителя/опекуна отозван (изменилась опека)",
+    "Zugang für Eltern/Vormund entzogen (Sorgerecht geändert)",
+  ],
+  update_lead_trusted_contact: ["Доверенный контакт изменён", "Vertrauenskontakt geändert"],
+  remove_lead_trusted_contact: ["Доверенный контакт удалён", "Vertrauenskontakt entfernt"],
+  lead_trusted_person_corrected: [
+    "Доверенное лицо исправлено или отозвано",
+    "Vertrauensperson berichtigt oder widerrufen",
+  ],
+  update_lead_invoice_recipient: ["Получатель счёта лида изменён", "Rechnungsempfänger des Leads geändert"],
+  lead_invoice_recipient_cleared: ["Получатель счёта лида сброшен", "Rechnungsempfänger des Leads zurückgesetzt"],
+  lead_uncounted_parent_acknowledged: [
+    "Родитель без оплаты: уведомление принято к сведению",
+    "Nicht zahlender Elternteil: Hinweis zur Kenntnis genommen",
+  ],
+  lead_staff_payer_contact_consent: [
+    "Согласие на контакт с плательщиком записано сотрудником",
+    "Einwilligung zur Kontaktaufnahme mit dem Zahler durch Mitarbeitende erfasst",
+  ],
+  reuse_guardian_for_own_lead: [
+    "Вход родителя использован для его собственной заявки",
+    "Zugang des Elternteils für die eigene Anfrage übernommen",
+  ],
+  reactivate_guardian_for_own_lead: [
+    "Вход родителя снова включён для его собственной заявки",
+    "Zugang des Elternteils für die eigene Anfrage reaktiviert",
+  ],
+  reuse_guardian_for_own_patient: [
+    "Вход родителя использован для его собственной карты пациента",
+    "Zugang des Elternteils für die eigene Patientenakte übernommen",
+  ],
+  link_guardian_own_patient: [
+    "Родитель связан со своей картой пациента",
+    "Elternteil mit der eigenen Patientenakte verknüpft",
+  ],
+  link_lead_guardian_to_patient: [
+    "Вход родителя/опекуна привязан к пациенту",
+    "Zugang für Eltern/Vormund mit dem Patienten verknüpft",
+  ],
+  link_request_login_to_patient: [
+    "Вход из заявки привязан к пациенту",
+    "Zugang aus der Anfrage mit dem Patienten verknüpft",
+  ],
+  link_parent_relation_by_email: [
+    "Связь с родителем привязана по e-mail",
+    "Elternbeziehung über die E-Mail-Adresse verknüpft",
+  ],
+  link_source_relation_to_patient: [
+    "Связь из заявки привязана к пациенту",
+    "Beziehung aus der Anfrage mit dem Patienten verknüpft",
+  ],
+  link_source_contact_to_patient: [
+    "Контакт из заявки привязан к пациенту",
+    "Kontakt aus der Anfrage mit dem Patienten verknüpft",
+  ],
+  add_reverse_relation_from_source_person: [
+    "Обратная связь между пациентами добавлена",
+    "Gegenbeziehung zwischen den Patienten ergänzt",
+  ],
+  share_released_documents_with_portal_logins: [
+    "Открытые документы переданы входам кабинета",
+    "Freigegebene Dokumente für die Portalzugänge geteilt",
+  ],
+  set_contracting_party_on_conversion: [
+    "Сторона договора задана при конвертации",
+    "Vertragspartei bei der Umwandlung gesetzt",
+  ],
+  backfill_contracting_party: ["Сторона договора дополнена автоматически", "Vertragspartei automatisch ergänzt"],
   review_lead_portal_upload: ["Загрузка из кабинета проверена", "Upload aus dem Portal geprüft"],
+  lead_portal_upload_moved: ["Загрузка из кабинета перенесена", "Upload aus dem Portal umgehängt"],
   lead_portal_submit: ["Заявка отправлена из кабинета", "Anfrage aus dem Portal gesendet"],
+  lead_portal_follow_up_submit: [
+    "Кабинет: дополнительные сведения отправлены",
+    "Portal: ergänzende Angaben gesendet",
+  ],
+  lead_portal_consent_choices_saved: [
+    "Кабинет: выбор в согласии сохранён",
+    "Portal: Auswahl in der Einwilligung gespeichert",
+  ],
+  lead_portal_trusted_persons_saved: [
+    "Кабинет: доверенные лица сохранены",
+    "Portal: Vertrauenspersonen gespeichert",
+  ],
+  lead_portal_representative_country_questions: [
+    "Кабинет: ответы представителя о странах сохранены",
+    "Portal: Länderangaben des Vertreters gespeichert",
+  ],
+  lead_portal_update_services: ["Кабинет: услуги изменены", "Portal: Leistungen geändert"],
+  lead_portal_plan_requested: ["Кабинет: запрос по тарифу отправлен", "Portal: Tarifanfrage gesendet"],
   lead_portal_consent_given: ["Согласие дано в кабинете", "Einwilligung im Portal erteilt"],
   lead_portal_consent_revoked: ["Согласие отозвано в кабинете", "Einwilligung im Portal widerrufen"],
   lead_portal_payer_cost_estimate_consent: [
@@ -145,6 +243,7 @@ const ACTIONS: Record<string, Pair> = {
   lead_portal_update_representative: ["Кабинет: представитель изменён", "Portal: Vertreter geändert"],
   update_lead_payer_declaration: ["Сведения о плательщике изменены", "Angaben zum Zahler geändert"],
   lead_payer_payment_route_updated_by_staff: ["Способ оплаты плательщика внесён сотрудником", "Zahlungsweg des Zahlers von GMED eingetragen"],
+  payer_link_prepared: ["Ссылка плательщику подготовлена", "Zahlerlink vorbereitet"],
   payer_link_sent: ["Ссылка плательщику отправлена", "Zahlerlink gesendet"],
   payer_link_send_failed: ["Ссылку плательщику не удалось отправить", "Zahlerlink nicht gesendet"],
   payer_questionnaire_reopened: ["Ответы плательщика открыты для исправления", "Zahlerangaben zur Korrektur geöffnet"],
@@ -305,6 +404,12 @@ const ACTIONS: Record<string, Pair> = {
     "Erinnerung ohne Erledigung geschlossen",
   ],
   assign_interpreter: ["Переводчик назначен", "Dolmetscher gebucht"],
+  unassign_interpreter: ["Переводчик снят с приёма", "Dolmetscher vom Termin abgezogen"],
+  release_appointment_to_portal: ["Приём показан пациенту в кабинете", "Termin im Portal freigegeben"],
+  medical_order_leistung_already_covered: [
+    "Приём уже покрыт услугой заказа",
+    "Termin bereits durch eine Auftragsleistung gedeckt",
+  ],
   interpreter_response: ["Ответ переводчика на назначение", "Antwort des Dolmetschers auf die Buchung"],
   submit_interpreter_report: ["Отчёт переводчика отправлен", "Dolmetscherbericht eingereicht"],
   approve_interpreter_report: ["Отчёт переводчика подтверждён", "Dolmetscherbericht bestätigt"],
@@ -379,6 +484,21 @@ const ACTIONS: Record<string, Pair> = {
   migrate_expired_framework_contract: ["Истёкший рамочный договор переведён", "Abgelaufener Rahmenvertrag überführt"],
   migrate_expired_patient_contract_status: ["Статус истёкшего договора переведён", "Status eines abgelaufenen Vertrags überführt"],
   create_quote: ["Предложение создано", "Angebot angelegt"],
+  update_quote_status: ["Статус предложения изменён", "Angebotsstatus geändert"],
+  supersede_quote: ["Предложение заменено новым", "Angebot durch ein neues ersetzt"],
+  reset_order_client_signature: [
+    "Подпись клиента по заказу сброшена",
+    "Kundenunterschrift des Auftrags zurückgesetzt",
+  ],
+  open_cancelled_order_settlement: [
+    "Открыт расчёт по отменённому заказу",
+    "Abrechnung zum stornierten Auftrag eröffnet",
+  ],
+  update_package_overage_approval: [
+    "Согласование превышения пакета изменено",
+    "Freigabe der Paketüberschreitung geändert",
+  ],
+  delete_agency_service: ["Услуга агентства удалена", "Agenturleistung gelöscht"],
   delete_quote: ["Предложение удалено", "Angebot gelöscht"],
   auto_expire_quote: ["Срок предложения истёк", "Angebot automatisch abgelaufen"],
   close_quote_for_cancelled_order: ["Предложение закрыто для отменённого заказа", "Angebot zum stornierten Auftrag geschlossen"],
@@ -417,7 +537,17 @@ const ACTIONS: Record<string, Pair> = {
   refund_reversed: ["Возврат сторнирован", "Erstattung storniert"],
   credit_note_created: ["Кредит-нота создана", "Gutschrift erstellt"],
   credit_note_reversed: ["Кредит-нота сторнирована", "Gutschrift storniert"],
+  credit_transferred_out: ["Кредит перенесён с этого счёта", "Guthaben von dieser Rechnung übertragen"],
+  credit_transferred_in: ["Кредит перенесён на этот счёт", "Guthaben auf diese Rechnung übertragen"],
   credit_transfer_reversed: ["Перенос кредита сторнирован", "Guthabenübertrag storniert"],
+  waive_external_invoice_rebilling: [
+    "Расход исключён из перевыставления",
+    "Kosten von der Weiterberechnung ausgenommen",
+  ],
+  reverse_external_invoice_rebilling_waiver: [
+    "Исключение из перевыставления отменено",
+    "Ausnahme von der Weiterberechnung zurückgenommen",
+  ],
   apply_invoice_prepayment: ["Аванс зачтён в счёт", "Anzahlung verrechnet"],
   release_invoice_prepayment: ["Зачёт аванса снят", "Verrechnung der Anzahlung aufgehoben"],
   advance_paid: ["Аванс оплачен", "Anzahlung bezahlt"],
@@ -577,6 +707,11 @@ const ACTIONS: Record<string, Pair> = {
 
   // DSGVO, incidents, SOP, personnel, GwG training
   privacy_request_decision_revised: ["Решение по запросу DSGVO пересмотрено", "Entscheidung zum Datenschutzantrag überarbeitet"],
+  privacy_request_requeued: ["Запрос DSGVO возвращён в очередь", "Datenschutzantrag erneut eingereiht"],
+  revoke_guardian_patient_access: [
+    "Доступ родителя/опекуна отозван (совершеннолетие)",
+    "Zugang für Eltern/Vormund entzogen (Volljährigkeit)",
+  ],
   security_incident_reopened: ["Инцидент с данными открыт снова", "Datenschutzvorfall wieder geöffnet"],
   create_sop: ["SOP создан", "SOP angelegt"],
   update_sop: ["SOP изменён", "SOP geändert"],
@@ -648,6 +783,17 @@ const ENTITIES: Record<string, Pair> = {
   token_family: ["Сессия", "Sitzung"],
 };
 
+/**
+ * Fields of a before/after audit row (`domain_diff_event`) the log names as
+ * "field: old → new" (`activity_change_key_<field>`). So far the account
+ * change: "Пользователь изменён" showed no changed field (QA 2026-11-10, E F-7).
+ */
+const CHANGE_KEYS: Record<string, Pair> = {
+  name: ["Имя", "Name"],
+  email: ["Электронная почта", "E-Mail"],
+  role: ["Роль", "Rolle"],
+};
+
 function catalog(index: 0 | 1): Record<string, string> {
   const text: Record<string, string> = {};
   for (const [code, labels] of Object.entries(ACTIONS)) {
@@ -655,6 +801,9 @@ function catalog(index: 0 | 1): Record<string, string> {
   }
   for (const [type, labels] of Object.entries(ENTITIES)) {
     text[`activity_entity_${type}`] = labels[index];
+  }
+  for (const [key, labels] of Object.entries(CHANGE_KEYS)) {
+    text[`activity_change_key_${key}`] = labels[index];
   }
   return text;
 }
