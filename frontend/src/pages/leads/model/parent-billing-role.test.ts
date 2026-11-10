@@ -10,6 +10,7 @@ import {
   parentBillingRoleChip,
   parentBillingRoleErrorText,
   parentBillingRoleOf,
+  representativeCountsForRisk,
 } from "./parent-billing-role";
 
 const tx = (ru: string) => ru;
@@ -74,5 +75,19 @@ describe("parent billing role", () => {
     expect(parentBillingRoleErrorText(refusal("recipient_not_contracting"), tx)).toContain("сторона договора");
     expect(parentBillingRoleErrorText(refusal("lead_converted"), tx)).toBeNull();
     expect(parentBillingRoleErrorText(new Error("x"), tx)).toBeNull();
+  });
+});
+
+describe("representativeCountsForRisk", () => {
+  const motherPays = { payer_kind: "representative" as const, payer_representative_id: MOTHER };
+  it("counts a minor's parent only with a role, an adult's representative always (owner 2026-11-02)", () => {
+    expect(representativeCountsForRisk(MOTHER, true, billing("self", FATHER), motherPays)).toBe(true);
+    expect(representativeCountsForRisk(FATHER, true, billing("self", FATHER), motherPays)).toBe(true);
+    expect(representativeCountsForRisk(FATHER, true, billing("self", MOTHER), motherPays)).toBe(false);
+    // Nobody answered yet: no role, like the server.
+    expect(representativeCountsForRisk(FATHER, true, null, null)).toBe(false);
+    // Not loaded: unknown.
+    expect(representativeCountsForRisk(FATHER, true, undefined, motherPays)).toBeNull();
+    expect(representativeCountsForRisk(FATHER, false, undefined, undefined)).toBe(true);
   });
 });

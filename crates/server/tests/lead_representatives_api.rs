@@ -1567,7 +1567,7 @@ async fn staff_correct_a_parents_details_without_overwriting_the_cabinet() {
         "{entry}"
     );
 
-    // The cabinet's rules; names and contacts are not changed here.
+    // The cabinet's rules; the contacts are not changed here.
     let (status, error) = json_request(
         router,
         "PUT",
@@ -1583,7 +1583,7 @@ async fn staff_correct_a_parents_details_without_overwriting_the_cabinet() {
         "PUT",
         &staff_path,
         &staff,
-        Some(json!({ "values": { "first_name": "Eve" } })),
+        Some(json!({ "values": { "email": "eve@example.com" } })),
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
@@ -1609,6 +1609,34 @@ async fn staff_correct_a_parents_details_without_overwriting_the_cabinet() {
     .await;
     assert_eq!(audits.len(), 2, "{audits:?}");
     assert_eq!(audits[0]["fields"], json!(["street"]), "{audits:?}");
+
+    // The name parts as the identity document gives them: a surname of
+    // several words stays whole (owner 2026-11-10), the contact follows.
+    let (status, body) = json_request(
+        router,
+        "PUT",
+        &staff_path,
+        &staff,
+        Some(json!({ "values": { "first_name": "Olena", "last_name": "von Muster" } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let person = representative(&body, mother);
+    assert_eq!(person["first_name"], "Olena", "{person}");
+    assert_eq!(person["last_name"], "von Muster", "{person}");
+    let contacts: Value = sqlx::query_scalar("SELECT trusted_contacts FROM leads WHERE id = $1")
+        .bind(lead_id)
+        .fetch_one(&app.suite.pool)
+        .await
+        .unwrap();
+    let entry = contacts
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["id"] == json!(mother))
+        .cloned()
+        .unwrap();
+    assert_eq!(entry["name"], "Olena von Muster", "{entry}");
 }
 
 #[tokio::test]

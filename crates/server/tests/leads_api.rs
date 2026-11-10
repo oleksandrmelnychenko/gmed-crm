@@ -10579,8 +10579,8 @@ async fn renaming_a_parent_in_the_wizard_renames_the_parents_login_and_follows_t
     .unwrap();
     assert_eq!(names, vec!["Anna Mustermann", "Benjamin Muster"]);
 
-    // The representative details route does not take names (staff change
-    // them in the wizard's contact list): the login keeps its name.
+    // The representative details route takes the name parts too, as the
+    // identity scan gives them (owner 2026-11-10): the login follows.
     let (status, details) = json_request(
         &app,
         "PUT",
@@ -10592,14 +10592,13 @@ async fn renaming_a_parent_in_the_wizard_renames_the_parents_login_and_follows_t
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{details}");
-    assert_eq!(details["field"], "last_name", "{details}");
+    assert_eq!(status, StatusCode::OK, "{details}");
     let anna_login: String = sqlx::query_scalar("SELECT name FROM users WHERE id = $1")
         .bind(logins[0])
         .fetch_one(pool)
         .await
         .unwrap();
-    assert_eq!(anna_login, "Anna Mustermann");
+    assert_eq!(anna_login, "Anna Musterfrau");
 }
 
 /// Owner 2026-11-04 (QA D-5): the guardian of two siblings is picked on the

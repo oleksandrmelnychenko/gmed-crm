@@ -138,3 +138,22 @@ export function parentBillingRoleErrorText(error: unknown, tx: Tx): string | nul
   }
   return null;
 }
+
+/**
+ * Whether a representative counts for the risk triggers and the enhanced
+ * check, as the server's `risk::inputs` reads it: an adult's representative
+ * always does; a minor's parent only while it receives the invoices or pays
+ * (owner 2026-11-02). Null while the lead's billing or payer are not loaded.
+ */
+export function representativeCountsForRisk(
+  contactId: string,
+  minor: boolean,
+  billing: LeadPortalBilling | null | undefined,
+  payer: PayerParty | null | undefined,
+  person?: ParentPerson | null,
+): boolean | null {
+  if (!minor) return true;
+  if (billing === undefined || payer === undefined) return null;
+  const role = parentBillingRole(contactId, billing, payer, person);
+  return role !== null && role !== "none";
+}

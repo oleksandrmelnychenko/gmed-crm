@@ -184,13 +184,14 @@ import { medicalStepHasContent } from "../model/medical-step-content";
 import { uploadEach } from "../model/upload-each";
 import { LEAD_UPLOAD_ACCEPT } from "@/pages/patient-lead/lead-request-model";
 import { useLeadIdentificationStatus } from "../model/use-lead-identification-status";
-import { removeLeadRepresentativeData, removeLeadTrustedContact, updateLeadRepresentativeDetails, type RepresentativeDetails } from "../data/lead-representation-api";
-import { EMPTY_REPRESENTATIVE_DETAILS, fillEmptyRepresentativeDetails, guardianCandidateDetails, pendingRepresentativeDetailsReady, representativeDetailsChanged, representativeDetailsErrors, representativeDetailsOf } from "../model/lead-representative-details";
+import { removeLeadRepresentativeData, removeLeadTrustedContact, updateLeadRepresentativeDetails, updateLeadRepresentativeFromScan, type RepresentativeDetails, type RepresentativeScanDetails } from "../data/lead-representation-api";
+import { EMPTY_REPRESENTATIVE_DETAILS, fillEmptyRepresentativeDetails, guardianCandidateDetails, pendingRepresentativeDetailsReady, representativeDetailsChanged, representativeDetailsErrors } from "../model/lead-representative-details";
 import { saveLeadParentBillingRole } from "../data/lead-payer-api";
 import {
   PARENT_BILLING_ROLES,
   isParentBillingRole,
   parentBillingRole,
+  representativeCountsForRisk,
   parentBillingRoleBody,
   parentBillingRoleChip,
   parentBillingRoleErrorText,
@@ -4768,12 +4769,17 @@ export function LeadWizard({
     () => new Set((risk.assessment?.uncounted_parents ?? []).map((parent) => parent.representative_id)),
     [risk.assessment],
   );
-  const representativeAmlCountries = useMemo(
-    () => (step1Portal.intake?.representation?.representatives ?? [])
+  // On every step, before the assessment is loaded, the parent's role decides it too.
+  const payerDeclarationForRisk = payer.data ? payer.data.declaration ?? null : undefined;
+  const representativeAmlCountries = useMemo(() => {
+    const intake = step1Portal.intake && step1Portal.intake.lead_id === leadId ? step1Portal.intake : null;
+    const representation = intake?.representation;
+    const minor = Boolean(representation && representation.custody !== null);
+    return (representation?.representatives ?? [])
       .filter((person) => person.slot !== null && !uncountedParentIds.has(person.id))
-      .flatMap((person) => [...person.citizenships, ...(person.country ? [person.country] : [])]),
-    [step1Portal.intake, uncountedParentIds],
-  );
+      .filter((person) => representativeCountsForRisk(person.id, minor, intake ? intake.billing ?? null : undefined, payerDeclarationForRisk, person) !== false)
+      .flatMap((person) => [...person.citizenships, ...(person.country ? [person.country] : [])]);
+  }, [step1Portal.intake, leadId, uncountedParentIds, payerDeclarationForRisk]);
   // A decision or a request of block D lifts the risk hold of the payer link: its panel follows.
   const riskPayerLinkKey = risk.assessment
     ? [risk.assessment.level, risk.assessment.status, risk.assessment.requested_blocks.join("")].join("|")
@@ -11127,14 +11133,23 @@ ${serviceCommentLines.join("\n")}`
                               : contact),
                           } : current);
                         }
-                        if (next.citizenship && !person.citizenships.includes(next.citizenship) && leadId) {
-                          const loaded = representativeDetailsOf(person);
-                          void updateLeadRepresentativeDetails(
-                            leadId,
-                            person.id,
-                            { ...loaded, citizenships: [...loaded.citizenships, next.citizenship] },
-                            loaded,
-                          ).then(
+                        // The name parts and a citizenship go to the person at once: a
+                        // surname of several words stays whole (the contact's one-line
+                        // name alone would split it at the last word).
+                        const loaded: RepresentativeScanDetails = {
+                          first_name: person.first_name ?? "",
+                          last_name: person.last_name ?? "",
+                          citizenships: [...person.citizenships],
+                        };
+                        const values: RepresentativeScanDetails = {
+                          first_name: next.firstName ?? loaded.first_name,
+                          last_name: next.lastName ?? loaded.last_name,
+                          citizenships: next.citizenship && !person.citizenships.includes(next.citizenship)
+                            ? [...person.citizenships, next.citizenship]
+                            : loaded.citizenships,
+                        };
+                        if (leadId && JSON.stringify(values) !== JSON.stringify(loaded)) {
+                          void updateLeadRepresentativeFromScan(leadId, person.id, values, loaded).then(
                             (representation) => {
                               applyStep1Representation(representation);
                               void risk.controller.reload();

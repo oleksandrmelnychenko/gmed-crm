@@ -75,6 +75,32 @@ export async function updateLeadRepresentativeDetails(
   );
 }
 
+/** What a representative's identity scan gives (owner 2026-11-10): the name parts and a citizenship list. */
+export type RepresentativeScanDetails = {
+  first_name?: string;
+  last_name?: string;
+  citizenships?: string[];
+};
+
+/**
+ * Saves what staff took from a representative's identity scan. The name
+ * goes as its parts, so a surname of several words stays whole; only what
+ * differs from `loaded` is written (as in [`updateLeadRepresentativeDetails`]).
+ */
+export async function updateLeadRepresentativeFromScan(
+  leadId: string,
+  representativeId: string,
+  values: RepresentativeScanDetails,
+  loaded: RepresentativeScanDetails,
+): Promise<LeadRepresentation | null> {
+  return representationOf(
+    await apiFetch<unknown>(`${base(leadId)}/representatives/${encodeURIComponent(representativeId)}/details`, {
+      method: "PUT",
+      body: JSON.stringify({ values, base: loaded }),
+    }),
+  );
+}
+
 /** Removes a contact and its access to this request in one server transaction. */
 export async function removeLeadTrustedContact(
   leadId: string,

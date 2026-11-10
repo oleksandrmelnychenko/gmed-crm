@@ -4603,10 +4603,14 @@ pub(crate) async fn notify_custody_access_ended(state: &AppState, lead_id: Uuid)
 }
 
 /// The data of a representative staff may correct in the wizard (owner
-/// 2026-10-24): birth place and country, citizenships and the address. The
-/// name, date of birth, e-mail and phone are the trusted contact's (saved with
-/// the contact list); the identity document has its own route.
-const STAFF_DETAIL_FIELDS: [&str; 7] = [
+/// 2026-10-24): birth place and country, citizenships and the address; the
+/// name parts too, as the identity document gives them (owner 2026-11-10: a
+/// surname of several words stays whole). The date of birth, e-mail and
+/// phone are the trusted contact's (saved with the contact list); the
+/// identity document has its own route.
+const STAFF_DETAIL_FIELDS: [&str; 9] = [
+    "first_name",
+    "last_name",
     "birth_place",
     "birth_country",
     "citizenships",
