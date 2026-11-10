@@ -56,6 +56,9 @@ export function LeadSigningPackagePanel({
         ? tx("Заказ", "Auftrag")
         : tx("Документы обращения", "Unterlagen der Anfrage"));
 
+  const currentRequest = summary && source && summary.document_id === source.id && source.terms_current !== false
+    ? summary
+    : undefined;
   const contractApplies = currentContractSigned || (!contractDocument && inheritedContract);
   const description = source
     ? tx("Проверьте состав пакета в окне подписи.", "Prüfen Sie den Paketinhalt im Unterschriftsfenster.")
@@ -63,54 +66,19 @@ export function LeadSigningPackagePanel({
 
   return (
     <section
-      className="grid min-w-0 gap-2 rounded-xl border border-border/50 bg-card p-3 sm:grid-cols-[minmax(0,1fr)_auto]"
+      className="min-w-0 space-y-1.5 rounded-xl border border-border/50 bg-card p-3"
       data-testid="lead-signing-package"
     >
-      <div className="min-w-0 space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <AdminSectionTitle icon={FileKey2}>
-            {tx("Электронная подпись пакета", "Elektronische Unterschrift des Pakets")}
-          </AdminSectionTitle>
-        </div>
-        <div className="flex flex-wrap gap-1.5" data-signing-document-statuses>
-          {contractApplies ? (
-            <StatusChip tone="success">{contractDocument?.ursprung === "paper_signature" && contractDocument.signed_at
-              ? tx("Рамочный договор: подписан на бумаге", "Rahmenvertrag: auf Papier unterzeichnet")
-              : tx("Рамочный договор: подписан", "Rahmenvertrag: unterzeichnet")}</StatusChip>
-          ) : contractOutdated ? (
-            <StatusChip tone="warning">{tx("Рамочный договор: устарел, нужна новая версия", "Rahmenvertrag: veraltet, neue Version nötig")}</StatusChip>
-          ) : contractDocument ? (
-            <StatusChip tone={demoChecks.includes("contract_signed") ? "info" : "warning"}>{demoChecks.includes("contract_signed")
-              ? tx("Рамочный договор: DEMO-подпись", "Rahmenvertrag: DEMO-Unterschrift")
-              : tx("Рамочный договор: не подписан", "Rahmenvertrag: nicht unterzeichnet")}</StatusChip>
-          ) : null}
-          {orderOutdated ? (
-            <StatusChip tone="warning">{tx("Заказ: устарел, нужна новая версия", "Auftrag: veraltet, neue Version nötig")}</StatusChip>
-          ) : orderDocument ? (
-            <StatusChip tone={orderDocument.signed_at ? "success" : demoChecks.includes("order_signed_patient") ? "info" : "warning"}>{orderDocument.signed_at
-              ? tx("Заказ: подписан", "Auftrag: unterzeichnet")
-              : demoChecks.includes("order_signed_patient")
-                ? tx("Заказ: DEMO-подпись", "Auftrag: DEMO-Unterschrift")
-                : tx("Заказ: не подписан", "Auftrag: nicht unterzeichnet")}</StatusChip>
-          ) : null}
-        </div>
-        {summary && summary.document_id === source?.id && source.terms_current !== false ? <div className="flex flex-wrap items-center gap-1.5" data-current-package-status>
-          <StatusChip tone={summary.status === "completed" ? "success" : ["declined", "error", "needs_review"].includes(summary.status) ? "error" : "warning"}>
-            {summary.test_mode ? "DEMO · " : ""}{summary.status === "pending"
-              ? tx("Запрос принят Skribble", "Anfrage von Skribble angenommen")
-              : signatureStatusText(summary.status, lang)}
-          </StatusChip>
-          {summary.status === "pending" && summary.progress && summary.progress.total > 0
-            ? <SignatureProgressChips progress={summary.progress} testMode={summary.test_mode} lang={lang} /> : null}
-        </div> : null}
-        {description ? <p className="max-w-2xl text-xs leading-5 text-muted-foreground">{description}</p> : null}
-      </div>
-      <div className="min-w-0 justify-self-start sm:justify-self-end">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+        <AdminSectionTitle icon={FileKey2}>
+          {tx("Электронная подпись пакета", "Elektronische Unterschrift des Pakets")}
+        </AdminSectionTitle>
         <OutdatedSignatureDocuments.Provider value={outdatedDocumentIds}>
           {source ? (
             <DocumentSignatureAction
               documentId={source.id}
               title={title}
+              triggerLabel={currentRequest ? tx("Открыть запрос", "Anfrage öffnen") : undefined}
               signed={Boolean(source.signed_at)}
               onDone={onDone}
             />
@@ -119,6 +87,40 @@ export function LeadSigningPackagePanel({
           )}
         </OutdatedSignatureDocuments.Provider>
       </div>
+      <div className="flex flex-wrap items-center gap-1.5 empty:hidden [&>[data-signature-progress]]:contents" data-signing-document-statuses>
+        {contractApplies ? (
+          <StatusChip tone="success">{contractDocument?.ursprung === "paper_signature" && contractDocument.signed_at
+            ? tx("Рамочный договор: подписан на бумаге", "Rahmenvertrag: auf Papier unterzeichnet")
+            : tx("Рамочный договор: подписан", "Rahmenvertrag: unterzeichnet")}</StatusChip>
+        ) : contractOutdated ? (
+          <StatusChip tone="warning">{tx("Рамочный договор: устарел, нужна новая версия", "Rahmenvertrag: veraltet, neue Version nötig")}</StatusChip>
+        ) : contractDocument ? (
+          <StatusChip tone={demoChecks.includes("contract_signed") ? "info" : "warning"}>{demoChecks.includes("contract_signed")
+            ? tx("Рамочный договор: DEMO-подпись", "Rahmenvertrag: DEMO-Unterschrift")
+            : tx("Рамочный договор: не подписан", "Rahmenvertrag: nicht unterzeichnet")}</StatusChip>
+        ) : null}
+        {orderOutdated ? (
+          <StatusChip tone="warning">{tx("Заказ: устарел, нужна новая версия", "Auftrag: veraltet, neue Version nötig")}</StatusChip>
+        ) : orderDocument ? (
+          <StatusChip tone={orderDocument.signed_at ? "success" : demoChecks.includes("order_signed_patient") ? "info" : "warning"}>{orderDocument.signed_at
+            ? tx("Заказ: подписан", "Auftrag: unterzeichnet")
+            : demoChecks.includes("order_signed_patient")
+              ? tx("Заказ: DEMO-подпись", "Auftrag: DEMO-Unterschrift")
+              : tx("Заказ: не подписан", "Auftrag: nicht unterzeichnet")}</StatusChip>
+        ) : null}
+        {currentRequest ? (
+          <>
+            <StatusChip data-current-package-status tone={currentRequest.status === "completed" ? "success" : ["declined", "error", "needs_review"].includes(currentRequest.status) ? "error" : "warning"}>
+              {currentRequest.test_mode ? "DEMO · " : ""}{currentRequest.status === "pending"
+                ? tx("Запрос принят Skribble", "Anfrage von Skribble angenommen")
+                : signatureStatusText(currentRequest.status, lang)}
+            </StatusChip>
+            {currentRequest.status === "pending" && currentRequest.progress && currentRequest.progress.total > 0
+              ? <SignatureProgressChips progress={currentRequest.progress} testMode={currentRequest.test_mode} lang={lang} /> : null}
+          </>
+        ) : null}
+      </div>
+      {description ? <p className="max-w-2xl text-xs leading-5 text-muted-foreground">{description}</p> : null}
     </section>
   );
 }

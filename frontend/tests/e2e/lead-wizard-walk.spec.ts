@@ -100,6 +100,48 @@ async function mount(page: Page, lead: Json, handlers: Record<string, Handler> =
   return { wizard, calls };
 }
 
+test("the commercial step groups package statuses and opens its withdrawn request", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const documents = ["framework_contract", "single_order"].map((template, index) => ({
+    id: index === 0 ? "00000000-0000-0000-0000-000000000401" : "00000000-0000-0000-0000-000000000402",
+    generated_template_id: template, original_filename: template + ".pdf", auto_name: template,
+    lead_id: leadId, signed_at: null, version_number: 1, is_latest_version: true, has_stored_file: true,
+    created_at: "2026-10-20T08:00:00Z", updated_at: "2026-10-20T08:00:00Z",
+  }));
+  const contractId = documents[0].id;
+  const request = { id: "00000000-0000-0000-0000-000000000403", document_id: contractId, status: "withdrawn",
+    test_mode: false, result_document_id: null, signers: [], evidence: {}, created_at: "2026-10-20T08:15:00Z" };
+  const { wizard } = await mount(page, adultLead(), {
+    "/documents": () => documents,
+    "/document-signatures/statuses": () => [request],
+    "/signature-packages/candidates": () => ({
+      scope: { lead_id: leadId, patient_id: null }, documents: [], attachments: [], preset_document_ids: [],
+      suggested_signers: [], suggested_language: "de", languages: ["de"],
+      limits: { max_documents: 10, max_bundle_bytes: 18 * 1024 * 1024, max_expiry_days: 180, max_message_chars: 500 },
+    }),
+    ["/documents/" + contractId + "/signature-requests"]: () => ({
+      enabled: true, region: "DE", can_send: true, can_configure: false, suggested_signers: [], requests: [request],
+    }),
+  });
+  await wizard.getByRole("tab", { name: /Договор и смета/ }).click();
+  const card = wizard.getByTestId("lead-signing-package");
+  const chips = card.locator("[data-signing-document-statuses] > span");
+  await expect(chips).toHaveText(["Рамочный договор: не подписан", "Заказ: не подписан", "Запрос отозван"]);
+  await expect(card.getByText("Запрос отозван", { exact: true })).toHaveCount(1);
+  const rowCount = () => chips.evaluateAll(items => new Set(items.map(item => Math.round(item.getBoundingClientRect().top))).size);
+  await expect.poll(rowCount).toBe(1);
+  const open = card.getByRole("button", { name: "Открыть запрос: framework_contract.pdf" });
+  await expect(open).toHaveAccessibleDescription("Запрос отозван");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(rowCount).toBeGreaterThan(1);
+  expect(await card.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  await open.click();
+  const signing = page.getByRole("dialog", { name: "Электронная подпись", exact: true });
+  await expect(signing).toBeVisible();
+  await expect(signing.getByText("Запрос отозван", { exact: true }).first()).toBeVisible();
+});
+
 test("each commercial blocker of the release list leads to its own field", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   const reasons: [string, string, string][] = [

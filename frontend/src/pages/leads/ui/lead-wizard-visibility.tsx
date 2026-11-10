@@ -1,4 +1,6 @@
+import { Tooltip } from "@base-ui/react/tooltip";
 import { Eye, Lock } from "lucide-react";
+import { useId, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -10,21 +12,34 @@ type Tx = (ru: string, de: string) => string;
  * пацієнти»). One component for every such field, next to its label.
  */
 export function ClientVisibleNote({ tx, className }: { tx: Tx; className?: string }) {
+  const label = tx("Видно клиенту в кабинете", "Für den Kunden im Portal sichtbar");
+  const tooltipId = useId();
+  const [open, setOpen] = useState(false);
   return (
-    <span
-      data-testid="client-visible-note"
-      title={tx(
-        "Этот текст клиент видит в своём кабинете и может изменить",
-        "Diesen Text sieht der Kunde in seinem Portal und kann ihn ändern",
-      )}
-      className={cn(
-        "inline-flex items-center gap-1 text-[11px] font-medium leading-4 text-amber-700 dark:text-amber-400",
-        className,
-      )}
-    >
-      <Eye aria-hidden="true" className="size-3 shrink-0" />
-      {tx("Видно клиенту в кабинете", "Für den Kunden im Portal sichtbar")}
-    </span>
+    <Tooltip.Root open={open} onOpenChange={setOpen}>
+      <Tooltip.Trigger
+        render={<span role="img" tabIndex={0} />}
+        data-testid="client-visible-note"
+        aria-label={label}
+        aria-describedby={open ? tooltipId : undefined}
+        aria-description={tx(
+          "Этот текст клиент видит в своём кабинете и может изменить",
+          "Diesen Text sieht der Kunde in seinem Portal und kann ihn ändern",
+        )}
+        closeOnClick={false}
+        onClick={() => setOpen(true)}
+        className={cn("inline-flex size-5 shrink-0 cursor-help items-center justify-center rounded text-amber-700 focus-visible:outline-2 focus-visible:outline-ring dark:text-amber-400", className)}
+      >
+        <Eye aria-hidden="true" className="size-3.5" />
+      </Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Positioner side="top" sideOffset={4} className="z-[100]">
+          <Tooltip.Popup id={tooltipId} role="tooltip" className="rounded-md border border-border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-sm">
+            {label}
+          </Tooltip.Popup>
+        </Tooltip.Positioner>
+      </Tooltip.Portal>
+    </Tooltip.Root>
   );
 }
 

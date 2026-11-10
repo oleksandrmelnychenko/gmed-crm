@@ -11,10 +11,10 @@ vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: { id: "synthetic-staff", 
 vi.mock("@/pages/documents/data/use-signature-summary", () => ({ useSignatureSummary: () => summary.value }));
 beforeEach(() => { language.lang = "ru"; summary.value = undefined; });
 vi.mock("@/pages/documents/ui/document-signature-action", () => ({
-  DocumentSignatureAction: ({ documentId, scope, signed, title }: {
-    documentId?: string; scope?: { leadId?: string }; signed?: boolean; title: string;
+  DocumentSignatureAction: ({ documentId, scope, signed, title, triggerLabel }: {
+    documentId?: string; scope?: { leadId?: string }; signed?: boolean; title: string; triggerLabel?: string;
   }) => <button data-document-signature-id={documentId} data-scope-lead={scope?.leadId}
-    data-signed={Boolean(signed)} aria-label={title} />,
+    data-signed={Boolean(signed)} aria-label={title}>{triggerLabel}</button>,
 }));
 
 function document(id: string, signed: boolean, filename: string | null = `${id}.pdf`): DocumentItem {
@@ -141,7 +141,10 @@ for (const lang of ["ru", "de"]) {
       expect(html).toContain(lang === "ru" ? "Заказ: не подписан" : "Auftrag: nicht unterzeichnet");
       expect(html).toContain('data-signed="false"');
       summary.value.status = "withdrawn";
-      expect(render(null, document("new-order", false))).not.toContain("data-signature-progress");
+      const withdrawn = render(null, document("new-order", false));
+      expect(withdrawn).not.toContain(" data-signature-progress=");
+      expect(withdrawn).toContain(lang === "ru" ? "DEMO · Запрос отозван" : "DEMO · Anfrage zurückgezogen");
+      expect(withdrawn).toContain(lang === "ru" ? "Открыть запрос" : "Anfrage öffnen");
       summary.value.status = "submission_unknown";
       expect(render(null, document("new-order", false))).toContain(lang === "ru" ? "Проверяем отправку" : "Versand wird geprüft");
       expect(render(null, document("new-order-v2", false))).not.toContain("data-current-package-status");

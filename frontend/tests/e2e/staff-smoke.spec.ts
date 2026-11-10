@@ -3682,7 +3682,13 @@ test.describe("lead onboarding wizard", () => {
       },
     });
     // The client sees these comments in the cabinet; the internal one stays with staff (owner 2026-11-02).
-    await expect(driverComment.locator("..").getByTestId("client-visible-note")).toHaveText("Für den Kunden im Portal sichtbar");
+    const visibilityNote = driverComment.locator("..").getByTestId("client-visible-note");
+    await expect(visibilityNote).toHaveText("");
+    await expect(visibilityNote).toHaveAccessibleName("Für den Kunden im Portal sichtbar");
+    await visibilityNote.hover();
+    await expect(page.getByRole("tooltip")).toHaveText("Für den Kunden im Portal sichtbar");
+    await driverComment.hover();
+    await expect(page.getByRole("tooltip")).toBeHidden();
     await expect(wizard.getByRole("textbox", { name: "Individuelle Wünsche", exact: true })).toBeVisible();
     const internalNoteRequest = page.waitForRequest((request) => {
       if (request.method() !== "POST" || !request.url().endsWith(`/leads/${readyLeadId}/update`)) return false;

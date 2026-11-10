@@ -1,6 +1,6 @@
 import { SectionHeading } from "@/components/ui/section-heading";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
-import {FileText, FileCheck2,  LoaderCircle, PenTool, ScanText } from "lucide-react";
+import { FileCheck2, FileText, LoaderCircle, PenTool, ScanText } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
@@ -28,6 +28,7 @@ function signatureOptionName(name: string | null | undefined): string {
 export const SIGNING_ROLES: string[] = ["ceo", "patient_manager"];
 type Props = {
   title: string;
+  triggerLabel?: string;
   iconOnly?: boolean;
   disabled?: boolean;
   signed?: boolean;
@@ -36,7 +37,7 @@ type Props = {
 
 // Opening a dialog is read-only. The existing signing API remains the authority
 // for document ACLs, PDF eligibility and permission to send invitations.
-export function DocumentSignatureAction({ documentId, scope, title, iconOnly, disabled, signed = false, onDone }: Props) {
+export function DocumentSignatureAction({ documentId, scope, title, triggerLabel, iconOnly, disabled, signed = false, onDone }: Props) {
   const { user } = useAuth();
   const { lang } = useLang();
   const [open, setOpen] = useState(false);
@@ -48,6 +49,7 @@ export function DocumentSignatureAction({ documentId, scope, title, iconOnly, di
   if (!user || !SIGNING_ROLES.includes(user.role)) return null;
   if (!documentId && !scope?.patientId && !scope?.orderId && !scope?.leadId) return null;
   const label = lang === "de" ? "Elektronische Unterschrift" : "Электронная подпись";
+  const buttonText = triggerLabel ?? presentation.label;
 
   function changeOpen(nextOpen: boolean) {
     setOpen(nextOpen);
@@ -70,14 +72,14 @@ export function DocumentSignatureAction({ documentId, scope, title, iconOnly, di
   return <>
     <Button
       type="button" variant={iconOnly ? "ghost" : "default"} size={iconOnly ? "icon-sm" : "sm"}
-      title={presentation.label} aria-label={`${label}: ${title}`} disabled={disabled}
+      title={presentation.label} aria-label={`${triggerLabel ?? label}: ${title}`} disabled={disabled}
       aria-description={summary ? presentation.label : undefined}
       className={iconOnly ? presentation.className : undefined} data-signature-status={outdated ? "document-outdated" : signed ? "document-signed" : summary?.status ?? "none"}
       data-document-signature-id={documentId}
       onClick={event => { event.stopPropagation(); setOpen(true); }}
       onKeyDown={event => event.stopPropagation()}
     >
-      <presentation.Icon aria-hidden="true" className="size-4" />{!iconOnly ? presentation.label : null}
+      <presentation.Icon aria-hidden="true" className="size-4" />{!iconOnly ? buttonText : null}
     </Button>
     <Dialog open={open} onOpenChange={changeOpen} dirty={dirty}>
       <DialogContent className="grid h-[min(940px,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 sm:pb-0 sm:h-[min(92dvh,940px)] sm:w-[96vw] sm:max-w-[1480px]" onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => {
