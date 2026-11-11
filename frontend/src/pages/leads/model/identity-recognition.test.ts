@@ -6,6 +6,7 @@ import {
   normalizeIdentityRecognition,
   recognitionDocumentPatch,
   recognitionDocumentRows,
+  recognitionErrorText,
   recognitionFailedChecks,
   recognitionHolderPatch,
   recognitionHolderRows,
@@ -169,5 +170,13 @@ describe("recognitionHolderRows", () => {
     const result = normalizeIdentityRecognition(answer())!;
     const rows = recognitionHolderRows(result, { lastName: "Eriksson", firstName: "Anna", birthDate: "", citizenships: [] }, tx, "ru");
     expect(rows.map((row) => row.field)).not.toContain("legalSex");
+  });
+});
+
+describe("recognitionErrorText (QA 2026-11-11, B-11)", () => {
+  it("does not ask for a PDF when the refused file is called .pdf", () => {
+    const text = recognitionErrorText("unsupported_file", tx);
+    expect(text).not.toContain("нужен PDF");
+    expect(text).toContain("Введите данные вручную");
   });
 });

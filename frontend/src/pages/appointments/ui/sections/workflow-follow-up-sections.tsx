@@ -225,7 +225,7 @@ function AppointmentDoctorFollowUpSectionContent({
 
   return (
     <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
-      <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b sm:flex-nowrap sm:overflow-x-auto border-border/70 bg-card px-3 py-2">
+      <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b border-border/70 bg-card px-3 py-2">
         <span className="flex shrink-0 items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
               <SectionHeading icon={Stethoscope}>{t.appointments_doctor_directed_followup_title}</SectionHeading>
         </span>
@@ -384,7 +384,7 @@ function DoctorFollowUpCreateForm({
           placeholder={withEllipsis(tr.patients_notes)}
         />
       </Field>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
+      <div className="flex flex-wrap gap-4 [&>*:first-child]:min-w-0 [&>*:first-child]:flex-[1_1_16rem] [&>*:last-child]:flex-[0_1_180px]">
         <label className={appointmentToggleCardClassName}>
           <input
             type="checkbox"
@@ -692,7 +692,7 @@ function AppointmentPackageEndSectionContent({
                 placeholder={withEllipsis(tr.patients_notes)}
               />
             </Field>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
+            <div className="flex flex-wrap gap-4 [&>*:first-child]:min-w-0 [&>*:first-child]:flex-[1_1_16rem] [&>*:last-child]:flex-[0_1_180px]">
               <label className={appointmentToggleCardClassName}>
                 <input
                   type="checkbox"

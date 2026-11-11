@@ -1647,6 +1647,8 @@ async fn an_outdated_signed_estimate_blocks_execution_until_a_new_one_is_signed(
     add_service("Second gate service", 50.0).await;
     let stale = outdated().await;
     assert_eq!(stale["quote_id"], json!(first), "{stale}");
+    // The blocker names what changed (QA 2026-11-11, B-17).
+    assert_eq!(stale["reasons"], json!(["lines"]), "{stale}");
     let (status, body) = start_execution().await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["code"], "estimate_outdated", "{body}");

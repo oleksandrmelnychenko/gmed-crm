@@ -1814,7 +1814,7 @@ function useStaffServicesPageContent() {
       ) : null}
 
       <div className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
-        <div className="relative z-30 flex flex-wrap items-end gap-2 border-b border-border/70 bg-card px-3 py-2 sm:flex-nowrap sm:gap-1.5 sm:overflow-x-auto">
+        <div className="relative z-30 flex flex-wrap items-end gap-2 border-b border-border/70 bg-card px-3 py-2 sm:gap-1.5">
           <ToolbarField label={t.common_search} className="min-w-0 flex-[1_1_12rem] sm:min-w-[220px] sm:flex-1 sm:max-w-sm">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -2641,7 +2641,8 @@ function useStaffServicesPageContent() {
                 ) : null}
 
                 <AdminFormSection icon={ContactRound} title={t.staff_services_create_section_service}>
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  {/* One column never wider than the form: a long patient name no longer scrolls the form sideways on a phone (QA 2026-11-11, B-19). */}
+                  <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
                     <label className="space-y-1.5 text-sm">
                       <span className="text-xs font-medium text-muted-foreground">
                         {t.staff_services_form_patient}

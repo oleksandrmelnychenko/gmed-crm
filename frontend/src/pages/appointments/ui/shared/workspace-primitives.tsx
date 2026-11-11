@@ -116,7 +116,7 @@ export function AppointmentEditorSheet({
       title={title}
       description={description}
       headerClassName="px-4 py-3"
-      bodyClassName="min-h-0 overscroll-y-contain space-y-4 px-5 py-4"
+      bodyClassName="@container min-h-0 overscroll-y-contain space-y-4 px-5 py-4"
       footer={
         <SheetActionsFooter error={footerError}>{footer}</SheetActionsFooter>
       }

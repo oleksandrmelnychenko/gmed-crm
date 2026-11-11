@@ -1920,9 +1920,13 @@ const ESTIMATE_OUTDATED_CODE: &str = "estimate_outdated";
 /// and VAT rates (so the sum and the VAT): a renamed service or a note leaves
 /// the estimate current (owner 2026-11-11). Every quoted line must still be
 /// a line of the order, and every open (not invoiced, not cancelled) line of
-/// the order must be quoted. The terms are the prepayment and the
+/// the order must be quoted. A quoted line without a VAT rate counts as 0 %,
+/// as on the invoice (QA 2026-11-11, B-17: such a quote was reported as
+/// outdated with an equal sum). The terms are the prepayment and the
 /// contracting party (`prepayment_terms_changed_at`,
-/// `contracting_party_changed_at`). `None` while the estimate is current.
+/// `contracting_party_changed_at`). `reasons` names what changed: `lines`
+/// (a line, a quantity or a price), `vat` (only a VAT rate), `prepayment`,
+/// `contracting_party`. `None` while the estimate is current.
 async fn load_estimate_outdated(
     state: &AppState,
     order_id: Uuid,
@@ -1939,7 +1943,8 @@ async fn load_estimate_outdated(
                                  THEN (line.value ->> 'quantity')::numeric END, 4) AS quantity,
                       ROUND(CASE WHEN line.value ->> 'unit_price' ~ '^-?[0-9]+(\.[0-9]+)?$'
                                  THEN (line.value ->> 'unit_price')::numeric END, 2) AS unit_price,
-                      ROUND(CASE WHEN line.value ->> 'vat_rate' ~ '^-?[0-9]+(\.[0-9]+)?$'
+                      ROUND(CASE WHEN line.value ->> 'vat_rate' IS NULL THEN 0
+                                 WHEN line.value ->> 'vat_rate' ~ '^-?[0-9]+(\.[0-9]+)?$'
                                  THEN (line.value ->> 'vat_rate')::numeric END, 2) AS vat_rate
                FROM current_quote q
                CROSS JOIN LATERAL jsonb_array_elements(
@@ -1965,30 +1970,51 @@ async fn load_estimate_outdated(
                  AND d.file_deleted_at IS NULL
                ORDER BY d.created_at DESC, d.id DESC
                LIMIT 1
+           ), checks AS (
+               SELECT
+                   (EXISTS (
+                        SELECT quantity, unit_price, vat_rate FROM quoted
+                        EXCEPT ALL
+                        SELECT quantity, unit_price, vat_rate FROM order_lines)
+                    OR EXISTS (
+                        SELECT quantity, unit_price, vat_rate FROM order_lines
+                        WHERE status <> 'invoiced'
+                        EXCEPT ALL
+                        SELECT quantity, unit_price, vat_rate FROM quoted)) AS money_changed,
+                   (EXISTS (
+                        SELECT quantity, unit_price FROM quoted
+                        EXCEPT ALL
+                        SELECT quantity, unit_price FROM order_lines)
+                    OR EXISTS (
+                        SELECT quantity, unit_price FROM order_lines
+                        WHERE status <> 'invoiced'
+                        EXCEPT ALL
+                        SELECT quantity, unit_price FROM quoted)) AS lines_changed,
+                   EXISTS (
+                       SELECT 1 FROM estimate e JOIN orders po ON po.id = $1
+                       WHERE po.prepayment_terms_changed_at > e.generated_at)
+                       AS prepayment_changed,
+                   EXISTS (
+                       SELECT 1 FROM estimate e JOIN orders po ON po.id = $1
+                       WHERE po.contracting_party_changed_at > e.generated_at)
+                       AS party_changed
            )
            SELECT jsonb_build_object(
                       'quote_id', q.id,
                       'quote_number', q.quote_number,
                       'quote_total_gross', q.total_gross::text,
-                      'order_total_gross', COALESCE(order_service_total_gross(o.id), o.total_estimated)::text)
+                      'order_total_gross', COALESCE(order_service_total_gross(o.id), o.total_estimated)::text,
+                      'reasons', to_jsonb(array_remove(ARRAY[
+                          CASE WHEN c.lines_changed THEN 'lines'
+                               WHEN c.money_changed THEN 'vat' END,
+                          CASE WHEN c.prepayment_changed THEN 'prepayment' END,
+                          CASE WHEN c.party_changed THEN 'contracting_party' END
+                      ]::text[], NULL)))
            FROM current_quote q
            JOIN orders o ON o.id = $1
+           CROSS JOIN checks c
            WHERE q.status = 'accepted'
-             AND (
-                 EXISTS (
-                     SELECT quantity, unit_price, vat_rate FROM quoted
-                     EXCEPT ALL
-                     SELECT quantity, unit_price, vat_rate FROM order_lines)
-                 OR EXISTS (
-                     SELECT quantity, unit_price, vat_rate FROM order_lines
-                     WHERE status <> 'invoiced'
-                     EXCEPT ALL
-                     SELECT quantity, unit_price, vat_rate FROM quoted)
-                 OR EXISTS (
-                     SELECT 1 FROM estimate e
-                     WHERE GREATEST(o.prepayment_terms_changed_at, o.contracting_party_changed_at)
-                           > e.generated_at)
-             )"#,
+             AND (c.money_changed OR c.prepayment_changed OR c.party_changed)"#,
     )
     .bind(order_id)
     .fetch_optional(&state.db)

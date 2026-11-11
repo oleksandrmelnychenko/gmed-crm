@@ -1466,6 +1466,54 @@ html[data-native-platform] {
   padding-right: 1.05rem;
 }
 
+/* Month view: the wrapping title keeps the button's room all the time, so a
+   hover never makes the tile taller and pushes the day (QA 2026-11-11, B-03). */
+.appointments-calendar-shell .fc .fc-dayGridMonth-view .fc-apt-event-card:has(.fc-apt-event-menu-button) .fc-apt-event-row-primary {
+  padding-right: 1.05rem;
+}
+
+/* A visit of 15 minutes or less in the week and day view: one line with the
+   start time and the title, no taller than its 15 minutes (QA 2026-11-11,
+   B-01/B-02). */
+.appointments-calendar-shell .fc .fc-timegrid-event .fc-event-main:has(> .fc-apt-event-card-compact) {
+  display: flex;
+  align-items: center;
+  padding: 0 0.45rem;
+}
+.appointments-calendar-shell .fc .fc-timegrid-event .fc-apt-event-card-compact {
+  flex-direction: row;
+  align-items: center;
+  min-height: 0;
+}
+.appointments-calendar-shell .fc .fc-timegrid-event .fc-apt-event-card-compact > :not(.fc-apt-event-row-primary, .fc-apt-event-menu-button) {
+  display: none;
+}
+.appointments-calendar-shell .fc .fc-timegrid-event .fc-apt-event-card-compact .fc-apt-event-row-primary {
+  min-width: 0;
+  flex: 1 1 auto;
+  line-height: 1.2;
+}
+.appointments-calendar-shell .fc .fc-timegrid-event .fc-apt-event-card-compact .fc-apt-event-row-primary::before {
+  content: attr(data-event-time);
+  margin-right: 0.35rem;
+  font-weight: 500;
+  color: var(--color-muted-foreground);
+}
+.appointments-calendar-shell .fc .fc-timegrid-event .fc-apt-event-card-compact .fc-apt-event-menu-button {
+  top: 50%;
+  translate: 0 -50%;
+}
+
+/* Week and day view: the all-day row keeps no month-cell height when empty
+   (QA 2026-11-11, B-04: 150 px of blank space above 6:00). */
+.appointments-calendar-shell .fc .fc-timegrid .fc-daygrid-day-frame {
+  min-height: 1.75rem;
+  padding: 0;
+}
+.appointments-calendar-shell .fc .fc-timegrid .fc-daygrid-day-events {
+  margin-top: 0;
+}
+
 @media (hover: none) {
   .appointments-calendar-shell .fc-apt-event-menu-button {
     opacity: 1;

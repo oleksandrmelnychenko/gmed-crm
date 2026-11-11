@@ -202,7 +202,7 @@ export function ProviderDocumentsSection({
 
   return (
     <section className="space-y-0 overflow-hidden rounded-lg bg-card">
-      <div className="relative z-30 flex flex-wrap items-center gap-2 border-b border-border/70 bg-card p-2.5 sm:flex-nowrap sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">
+      <div className="relative z-30 flex flex-wrap items-center gap-2 border-b border-border/70 bg-card p-2.5 sm:gap-1.5 sm:px-3 sm:py-2">
         <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
           <SectionHeading icon={FolderOpen}>{labels.title}</SectionHeading>
         </span>

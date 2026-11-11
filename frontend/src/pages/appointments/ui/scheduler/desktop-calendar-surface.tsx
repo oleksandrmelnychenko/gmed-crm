@@ -117,7 +117,10 @@ function computeAdaptiveEventHeights(
     };
   }
 
-  const eventMinHeight = Math.round(clamp(slotHeightPx * 0.72, 34, 72));
+  // The height of 15 minutes (a slot is 30): a short visit is drawn as one
+  // line and no taller than its time, so back-to-back 15-minute visits never
+  // cover each other (QA 2026-11-11, B-01). Longer visits are taller anyway.
+  const eventMinHeight = Math.max(18, Math.round(slotHeightPx / 2));
   const eventShortHeight = Math.round(
     Math.max(eventMinHeight + 8, clamp(slotHeightPx * 0.98, 44, 92)),
   );

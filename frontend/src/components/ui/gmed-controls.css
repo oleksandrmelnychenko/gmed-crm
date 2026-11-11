@@ -8,6 +8,10 @@
 .gmed-theme .gmed-picker-paper :is(.MuiButtonBase-root, .MuiClockNumber-root) {
   color: var(--foreground);
 }
+/* «Отмена» / «ОК» in sentence case like every other button (QA 2026-11-11, B-08). */
+.gmed-picker-paper .MuiPickersLayout-actionBar .MuiButton-root {
+  text-transform: none;
+}
 .gmed-theme .gmed-picker-paper :is(.MuiDayCalendar-weekDayLabel, .MuiDayCalendar-weekNumberLabel, .MuiDayCalendar-weekNumber, .MuiPickersToolbarText-root, .MuiPickersToolbar-root > .MuiTypography-root) {
   color: var(--muted-foreground);
 }

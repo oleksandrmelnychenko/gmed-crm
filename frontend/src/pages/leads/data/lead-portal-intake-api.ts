@@ -340,6 +340,11 @@ export type LeadPortalIntake = {
   identification_hidden: boolean;
   identity_documents: LeadIdentityDocument[];
   /**
+   * The lead's identity copies staff uploaded in the wizard (no cabinet
+   * upload row); empty from an older server (QA 2026-11-11, B-21).
+   */
+  staff_identity_documents?: LeadIdentityDocument[];
+  /**
    * Who acts for the lead; null when the server does not send it (an older
    * backend, or a role that may not read the payer block).
    */
@@ -463,6 +468,8 @@ export function normalizeLeadPortalIntake(value: unknown): LeadPortalIntake | nu
     identification_updated_by: raw.identification_updated_by === "self" || raw.identification_updated_by === "staff" ? raw.identification_updated_by : null,
     identification_hidden: Boolean(raw.identification_hidden),
     identity_documents: normalizeIdentityDocuments(raw.identity_documents),
+    staff_identity_documents: normalizeIdentityDocuments((raw as Record<string, unknown>).staff_identity_documents)
+      .map((file) => ({ ...file, uploaded_by_staff: true })),
     representation: normalizeLeadRepresentation(raw.representation),
     representation_updated_at: textOrNull(raw.representation_updated_at),
     billing: normalizeLeadPortalBilling(raw.billing),

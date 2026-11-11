@@ -257,7 +257,13 @@ export function recognitionFailedChecks(result: IdentityRecognition, tx: Tx): st
 export function recognitionErrorText(code: string | null | undefined, tx: Tx): string {
   switch (code) {
     case "unsupported_file":
-      return tx("Этот файл нельзя распознать: нужен PDF, JPG или PNG.", "Diese Datei kann nicht gelesen werden: PDF, JPG oder PNG erforderlich.");
+      // The server looks at the content, not the name: a file called «….pdf»
+      // whose content is no PDF or image (damaged, or another format renamed)
+      // lands here (QA 2026-11-11, B-11).
+      return tx(
+        "Содержимое файла не читается как PDF или изображение (возможно, файл повреждён). Введите данные вручную или загрузите скан заново.",
+        "Der Inhalt der Datei ist kein lesbares PDF oder Bild (die Datei ist möglicherweise beschädigt). Bitte manuell eingeben oder den Scan neu hochladen.",
+      );
     case "not_an_identity_document":
       return tx("Распознаются только документы, удостоверяющие личность.", "Nur Ausweisdokumente werden gelesen.");
     case "recognition_unavailable":

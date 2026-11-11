@@ -101,10 +101,16 @@ export function renderStaticCalendarEventContent(
     .filter((value) => value.trim())
     .join(" - ");
 
+  const durationMinutes = resolveCalendarEventDurationMinutes(arg);
+  // A visit of 15 minutes or less gets one line in the week and day view:
+  // the start time (`data-event-time`, drawn by CSS) and the title, so the
+  // tile fits its 15 minutes and never runs under the next one (QA
+  // 2026-11-11, B-01/B-02).
+  const compact = durationMinutes <= 15;
   return {
     html: [
-      `<div class="fc-apt-event-card group relative" data-event-duration-minutes="${resolveCalendarEventDurationMinutes(arg)}">`,
-      `<div class="fc-apt-event-row-primary">${escapeCalendarEventHtml(resolveCalendarEventPrimaryTitle(arg.event.title, props))}</div>`,
+      `<div class="fc-apt-event-card group relative${compact ? " fc-apt-event-card-compact" : ""}" data-event-duration-minutes="${durationMinutes}">`,
+      `<div class="fc-apt-event-row-primary"${compact && arg.timeText ? ` data-event-time="${escapeCalendarEventHtml(arg.timeText)}"` : ""}>${escapeCalendarEventHtml(resolveCalendarEventPrimaryTitle(arg.event.title, props))}</div>`,
       secondaryLine
         ? `<div class="fc-apt-event-row-secondary">${escapeCalendarEventHtml(secondaryLine)}</div>`
         : "",

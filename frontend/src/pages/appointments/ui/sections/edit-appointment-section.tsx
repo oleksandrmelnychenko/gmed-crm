@@ -934,7 +934,7 @@ function useEditAppointmentSectionContentContent({
         <div className="space-y-4 rounded-xl">
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
         <h3><SectionHeading icon={CalendarClock}>{appointmentText("appointments_appointment_and_timing")}</SectionHeading></h3>
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 @lg:grid-cols-3">
         <Field compact required label={t.appointments_title_col}>
           <Input
             value={form.title}
@@ -1003,7 +1003,7 @@ function useEditAppointmentSectionContentContent({
           </NativeComboboxSelect>
         </Field>
         </div>
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 @lg:grid-cols-3">
           <Field compact required label={t.appointments_date}>
             <Input
               type="date"
@@ -1082,9 +1082,11 @@ function useEditAppointmentSectionContentContent({
         {providersError ? (
           <Banner tone="error">{providersError}</Banner>
         ) : null}
-        <div className="grid gap-4 md:grid-cols-3">
-          <div className="md:col-span-2">
+        <div className="grid gap-4 @lg:grid-cols-3">
+          <div className="@container min-w-0 @lg:col-span-2">
             <ProviderSelectWithTaxonomyFilter
+              // Narrow sheet (tablet): one column, so provider and category stay readable.
+              containerClassName="sm:grid-cols-1 @sm:grid-cols-[repeat(auto-fit,minmax(8rem,1fr))]"
               value={form.providerId}
               providers={providers}
               taxonomyNodes={taxonomyNodes}
@@ -1190,7 +1192,7 @@ function useEditAppointmentSectionContentContent({
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
         <h3><SectionHeading icon={NotebookPen}>{appointmentText("appointments_coordination_and_notes")}</SectionHeading></h3>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 @sm:grid-cols-2">
           <Field compact label={t.patients_assign_owner}>
             <NativeComboboxSelect
               value={form.ownerUserId}
@@ -1278,7 +1280,7 @@ function useEditAppointmentSectionContentContent({
             </span>
           </label>
         ) : null}
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 @sm:grid-cols-2">
           <Field compact label={t.appointments_location}>
             <Input
               value={form.location}
@@ -1342,7 +1344,7 @@ function useEditAppointmentSectionContentContent({
             <p className="text-xs text-muted-foreground">
               {t.appointments_scope_following_hint}
             </p>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-4 @sm:grid-cols-2 @2xl:grid-cols-4">
               <Field
                 compact
                 label={appointmentText("appointments_repeat_frequency")}

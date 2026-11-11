@@ -47,6 +47,8 @@ pub(crate) enum RecognitionError {
 }
 
 /// The file type by its first bytes; the extension for the temporary file.
+/// A PDF may carry a few bytes before its `%PDF-` header (the format allows
+/// it within the first 1024 bytes, and readers accept it).
 fn file_extension(bytes: &[u8]) -> Option<&'static str> {
     match bytes {
         [b'%', b'P', b'D', b'F', ..] => Some("pdf"),
@@ -69,7 +71,10 @@ fn file_extension(bytes: &[u8]) -> Option<&'static str> {
             b'P',
             ..,
         ] => Some("webp"),
-        _ => None,
+        _ => bytes[..bytes.len().min(1024)]
+            .windows(5)
+            .any(|window| window == b"%PDF-")
+            .then_some("pdf"),
     }
 }
 
@@ -256,6 +261,9 @@ mod tests {
         assert_eq!(file_extension(&[0x89, b'P', b'N', b'G', 0x0D]), Some("png"));
         assert_eq!(file_extension(&[0xFF, 0xD8, 0xFF, 0xE0]), Some("jpg"));
         assert_eq!(file_extension(b"RIFF\0\0\0\0WEBPVP8 "), Some("webp"));
+        assert_eq!(file_extension(b"\xEF\xBB\xBF\n%PDF-1.4 ..."), Some("pdf"));
+        // A text file named «….pdf» (QA 2026-11-11, B-11) is no PDF.
+        assert_eq!(file_extension(b"GMED live E2E lead fixture\n"), None);
         assert_eq!(file_extension(b"PK\x03\x04"), None);
         assert_eq!(file_extension(b""), None);
     }

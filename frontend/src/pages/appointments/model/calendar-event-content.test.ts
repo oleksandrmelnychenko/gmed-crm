@@ -50,4 +50,18 @@ describe("renderStaticCalendarEventContent", () => {
     expect(rendered.html).toContain("Отмен");
     expect(rendered.html).not.toContain("undefined");
   });
+
+  it("gives a 15-minute visit the one-line tile with its time (QA 2026-11-11, B-01/B-02)", () => {
+    const short = {
+      ...eventContentArg({ title: "Kontrolle" }),
+    } as EventContentArg;
+    (short.event as unknown as { end: Date }).end = new Date("2026-06-05T10:15:00");
+    const rendered = renderStaticCalendarEventContent(short, {});
+    expect(rendered.html).toContain("fc-apt-event-card-compact");
+    expect(rendered.html).toContain('data-event-time="10:00"');
+
+    const regular = renderStaticCalendarEventContent(eventContentArg({ title: "Kontrolle" }), {});
+    expect(regular.html).not.toContain("fc-apt-event-card-compact");
+    expect(regular.html).not.toContain("data-event-time");
+  });
 });

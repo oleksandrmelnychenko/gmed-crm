@@ -1,5 +1,6 @@
 import type { SpecializationItem } from "@/pages/providers/model/types";
 
+import type { EstimateOutdatedReason } from "./estimate-outdated";
 import type { OrderPrepaymentTerms } from "./order-prepayment";
 import type { PartnerCostAmounts } from "./partner-cost-amounts";
 
@@ -432,6 +433,8 @@ export type OrderProcessGates = {
     quote_number: string;
     quote_total_gross: string;
     order_total_gross: string | null;
+    /** What changed (QA 2026-11-11, B-17). */
+    reasons?: EstimateOutdatedReason[] | null;
   } | null;
 };
 

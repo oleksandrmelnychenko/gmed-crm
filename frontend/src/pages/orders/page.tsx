@@ -183,6 +183,7 @@ import {
   resolveCreateOrderSubmitBlock,
 } from "./model/create-order-gate";
 import { mergeOrderDraft } from "./model/order-draft";
+import { estimateOutdatedMessage } from "./model/estimate-outdated";
 import {
   orderPrepaymentError,
   orderPrepaymentErrorMessage,
@@ -4352,9 +4353,11 @@ function useOrdersPageContent() {
                       <div className="mt-3">
                         <Banner tone="warning" withIcon>
                           <span data-testid="order-estimate-outdated">
-                            {lang === "de"
-                              ? `Der angenommene Kostenvoranschlag ${orderDetail.process_gates.estimate_outdated.quote_number} (${formatMoney(orderDetail.process_gates.estimate_outdated.quote_total_gross)}) entspricht nicht mehr dem Auftrag${orderDetail.process_gates.estimate_outdated.order_total_gross ? ` (jetzt ${formatMoney(orderDetail.process_gates.estimate_outdated.order_total_gross)})` : ""}. Bitte ein neues Angebot erstellen und den neuen Kostenvoranschlag unterschreiben lassen.`
-                              : `Принятая смета ${orderDetail.process_gates.estimate_outdated.quote_number} (${formatMoney(orderDetail.process_gates.estimate_outdated.quote_total_gross)}) устарела: она не совпадает с заказом${orderDetail.process_gates.estimate_outdated.order_total_gross ? ` (сейчас ${formatMoney(orderDetail.process_gates.estimate_outdated.order_total_gross)})` : ""}. Создайте новое предложение и получите подпись новой сметы.`}{" "}
+                            {estimateOutdatedMessage(
+                              orderDetail.process_gates.estimate_outdated,
+                              lang === "de" ? "de" : "ru",
+                              formatMoney,
+                            )}{" "}
                             {detailContractsHref ? (
                               <StaffLink to={detailContractsHref} className="font-medium underline">
                                 {lang === "de" ? "Zu den Angeboten" : "К предложениям"}

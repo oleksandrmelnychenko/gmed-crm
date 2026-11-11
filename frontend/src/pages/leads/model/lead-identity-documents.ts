@@ -68,7 +68,14 @@ export function identityDocumentGroups(
     kind: "patient",
     title: tx("Пациент", "Patient"),
     subtitle: "",
-    files: (intake?.identity_documents ?? []).map(leadFile),
+    // The cabinet's copies and the ones staff uploaded in the wizard (QA
+    // 2026-11-11, B-21: Sales saw none of the latter).
+    files: [
+      ...(intake?.identity_documents ?? []),
+      ...(intake?.staff_identity_documents ?? []).filter(
+        (file) => !(intake?.identity_documents ?? []).some((own) => own.id === file.id),
+      ),
+    ].map(leadFile),
     authority: [],
   }];
   for (const person of intake?.representation?.representatives ?? []) {

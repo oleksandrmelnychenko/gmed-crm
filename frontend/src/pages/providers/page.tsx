@@ -3827,7 +3827,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         {catalogMode === "providers" ? (
           <>
         <div className="overflow-hidden rounded-lg bg-card">
-        <div className="relative z-30 grid grid-cols-2 items-end gap-2 border-b border-border/70 bg-card p-2.5 sm:flex sm:flex-nowrap sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">
+        <div className="relative z-30 grid grid-cols-2 items-end gap-2 border-b border-border/70 bg-card p-2.5 sm:flex sm:flex-wrap sm:gap-1.5 sm:px-3 sm:py-2">
             <ToolbarField label={t.common_search} className="col-span-2 w-full sm:col-auto sm:w-[220px]">
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />

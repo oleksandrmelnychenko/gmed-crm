@@ -372,7 +372,7 @@ function formatBirthDate(value: string | null | undefined): string {
 function DemoItem({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="min-w-0">
-      <p className="text-[10px] text-muted-foreground/70">{label}</p>
+      <p className="text-[10px] text-muted-foreground">{label}</p>
       <p className="min-w-0 max-w-full break-words text-[13px] font-semibold text-foreground">
         {value && String(value).trim() ? value : <span className="text-muted-foreground">—</span>}
       </p>

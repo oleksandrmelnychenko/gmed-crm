@@ -9283,15 +9283,21 @@ ${serviceCommentLines.join("\n")}`
         <header className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-3 pr-14 sm:gap-4 sm:px-5 sm:pr-14">
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-              <h2 className="truncate text-base font-semibold text-foreground">
-                {lead
+              {(() => {
+                const headerName = lead
                   ? leadDisplayName(lead, tx)
                   : existingPatient
                     ? [existingPatient.first_name, existingPatient.last_name].filter(Boolean).join(" ")
                   : createMode
                     ? tx("Новый лид", "Neuer Lead")
-                    : tx("Оформление обращения", "Lead-Aufnahme")}
-              </h2>
+                    : tx("Оформление обращения", "Lead-Aufnahme");
+                // A long name is cut: the whole name on hover (QA 2026-11-11, B-10/B-15).
+                return (
+                  <h2 className="max-w-full truncate text-base font-semibold text-foreground" title={headerName}>
+                    {headerName}
+                  </h2>
+                );
+              })()}
               {/* The countdown sits after the name: date, days left and what stops it (2026-10-23); the rule is in the tooltip. */}
               {retentionDays != null && retentionDeadline ? (
                 <StatusChip
@@ -9385,7 +9391,9 @@ ${serviceCommentLines.join("\n")}`
 
         <nav
           ref={stepNavRef}
-          className="shrink-0 overflow-x-auto overscroll-x-contain border-b border-border bg-card [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          // A thin scrollbar shows only when steps lie outside (1024 px): the
+          // hint that more steps exist (QA 2026-11-11, B-09).
+          className="shrink-0 overflow-x-auto overscroll-x-contain border-b border-border bg-card [scrollbar-width:thin]"
           aria-label={tx("Этапы оформления", "Schritte der Lead-Aufnahme")}
         >
           <div className="flex w-max min-w-full justify-center px-3 py-2 max-sm:w-full max-sm:px-2">

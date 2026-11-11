@@ -8318,6 +8318,41 @@ async fn get_lead_portal_intake(
         .filter(|_| statements_visible)
         .map(staff_file)
         .collect();
+    // The copies staff uploaded in the wizard (`POST /documents` with the
+    // lead and `art = identity`) have no cabinet upload row: listed apart, so
+    // the lead card shows them to Sales too (QA 2026-11-11, B-21; owner
+    // 2026-10-24: Sales opens the lead's identity scans).
+    let staff_identity_documents: Vec<Value> = if statements_visible {
+        match sqlx::query(
+            r#"SELECT d.id AS document_id, d.created_at, d.original_filename, d.auto_name,
+                      d.signed_at, NULL::timestamptz AS reviewed_at
+               FROM documents d
+               WHERE d.lead_id = $1
+                 AND (d.art = 'identity' OR d.compliance_kind = 'identity')
+                 AND d.status = 'active'
+                 AND d.file_deleted_at IS NULL
+                 AND NOT d.is_medical
+                 AND NOT EXISTS (
+                     SELECT 1 FROM lead_portal_uploads u WHERE u.document_id = d.id)
+               ORDER BY d.created_at"#,
+        )
+        .bind(lead_id)
+        .fetch_all(&state.db)
+        .await
+        {
+            Ok(rows) => rows
+                .iter()
+                .map(|row| {
+                    let mut file = staff_file(&row);
+                    file["uploaded_by_staff"] = json!(true);
+                    file
+                })
+                .collect(),
+            Err(error) => return internal(error, "load staff identity documents"),
+        }
+    } else {
+        Vec::new()
+    };
     // Who acts for the lead, for the same roles as the statements; with it
     // where the invoice goes and how the payer will pay (sections 7 and 8),
     // and the answers of the extra step with the self-payer's proofs: whether
@@ -8694,6 +8729,7 @@ async fn get_lead_portal_intake(
         "patient_request_reason": patient_request_reason,
         "identification_hidden": !statements_visible,
         "identity_documents": identity_documents,
+        "staff_identity_documents": staff_identity_documents,
         "representation": representation,
         "representation_updated_at": representation_updated_at,
         "billing": billing,

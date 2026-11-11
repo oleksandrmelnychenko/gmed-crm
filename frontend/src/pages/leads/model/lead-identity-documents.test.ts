@@ -56,6 +56,19 @@ describe("the identity copies the lead detail lists", () => {
     expect(identityDocumentCount(groups)).toBe(5);
   });
 
+  it("lists the copies staff uploaded in the wizard with the lead's own (QA 2026-11-11, B-21)", () => {
+    const withStaff = {
+      ...intake,
+      staff_identity_documents: [file("wizard-scan", { uploaded_by_staff: true, reviewed: true }), file("pass-front")],
+    } as unknown as LeadPortalIntake;
+    const [patient] = identityDocumentGroups(withStaff, null, ru);
+    expect(patient.files.map((item) => [item.id, item.origin])).toEqual([
+      ["pass-front", "cabinet"],
+      ["pass-back", "cabinet"],
+      ["wizard-scan", "staff"],
+    ]);
+  });
+
   it("always lists the lead's own group, and the payer only with a file", () => {
     const groups = identityDocumentGroups(null, null, ru);
     expect(groups).toHaveLength(1);

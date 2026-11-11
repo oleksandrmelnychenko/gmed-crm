@@ -131,7 +131,7 @@ export function PatientsListToolbar({
 
   return (
     <div className="relative z-30 border-b border-border/70 bg-card p-2.5 sm:px-3 sm:py-2">
-      <div className="grid grid-cols-2 items-end gap-2 sm:flex sm:flex-nowrap sm:gap-1.5 sm:overflow-x-auto">
+      <div className="grid grid-cols-2 items-end gap-2 sm:flex sm:flex-wrap sm:gap-1.5">
         <ToolbarField label={t.common_search} className="col-span-2 w-full sm:col-auto sm:min-w-[170px] sm:flex-1 sm:max-w-[220px]">
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />

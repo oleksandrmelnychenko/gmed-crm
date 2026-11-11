@@ -710,7 +710,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
         </div>
         <div className="min-w-[180px] flex-1 sm:min-w-[220px]">
           <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-xl font-semibold tracking-tight text-foreground truncate">{patientName(detail)}</h1>
+            <h1 className="text-xl font-semibold tracking-tight text-foreground truncate" title={patientName(detail)}>{patientName(detail)}</h1>
             <StatusActionPill
               isActive={detail.is_active}
               activeLabel={t.common_active}
