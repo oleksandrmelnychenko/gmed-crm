@@ -210,9 +210,9 @@ export function StepFrame({
   ];
   // Every item leads to its field (owner report 2026-10-21).
   const fields = [...extraMissing.map((item) => item.field), ...shownMissing];
-  // The yellow list of what is missing appears only after "Next" (owner 2026-10-09): the first
-  // press with something missing shows it and stays, the next press goes on. The page keeps
-  // which steps showed it, for the badges of the step bar.
+  // The yellow list of what is missing appears only after "Next" (owner 2026-10-09). "Next" with
+  // something missing shows it and stays, on every press (owner 2026-11-11; staff and a sent
+  // request go on with the second press). The page keeps which steps showed it, for the badges.
   const showMissing = nav.missingShown && !locked;
   // The empty required fields say so below themselves too, once "Next" was pressed. A payer key
   // of the recipient who pays (`payer_email`) marks the recipient's field, where it is answered.

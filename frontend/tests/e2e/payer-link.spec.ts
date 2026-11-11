@@ -848,6 +848,13 @@ for (const status of [422, 503]) {
     await page.getByTestId("payer-link-summary-funds").getByRole("button").click();
     await page.getByTestId("payer-link-step-funds").getByRole("textbox", { name: /Beruf/ }).fill("Neue Tätigkeit");
     await expect.poll(() => calls.patches.some((patch) => patch.occupation === "Neue Tätigkeit")).toBe(true);
+    // Each press waits for its step: a press while the one before still saves is not counted.
+    const walkToSummary = async () => {
+      for (const reached of ["payment", "declarations", "summary"]) {
+        await next(page);
+        await expect(page.getByTestId("payer-link-form")).toHaveAttribute("data-step", reached);
+      }
+    };
     if (status === 422) {
       // An entry the server refuses holds "Weiter" on its step, on every press, with the cursor
       // in the field (owner report 2026-11-11): it never reaches the summary unsaved.
@@ -864,14 +871,11 @@ for (const status of [422, 503]) {
       expect(q.answers.occupation).toBe("Ingenieur");
       writeFailure.status = null;
       await occupation.fill("Korrigierte Tätigkeit");
-      await next(page);
-      await next(page);
-      await next(page);
+      await walkToSummary();
       await page.getByTestId("payer-link-confirm").check();
     } else {
-      await next(page);
-      await next(page);
-      await next(page);
+      // A save that fails without naming a field (the connection) holds no step: "send" refuses.
+      await walkToSummary();
       await page.getByTestId("payer-link-confirm").check();
       await page.getByTestId("payer-link-submit").click();
       await expect(page.getByTestId("payer-link-step-summary").getByRole("alert")).toHaveText("Nicht gespeichert");
@@ -914,6 +918,12 @@ test("payer recheck: a refused send keeps the answer saved just before it", asyn
   await page.getByTestId("payer-link-submit").click();
   await expect(page.getByTestId("payer-link-step-summary").getByRole("alert")).toBeVisible();
   expect(q.answers.occupation).toBe("Neue Tätigkeit");
+  // The summary lists what the server still asks for, with the way to it (since 2026-11-11 the
+  // only way to see this list: "Weiter" no longer reaches the summary with an open answer).
+  const open = page.getByTestId("payer-link-missing");
+  await expect(open).toContainText("Bitte noch ergänzen:");
+  await expect(open.locator("[data-missing-key]")).toHaveCount(1);
+  await expect(open.getByRole("button", { name: "Ergänzen" })).toBeVisible();
   // The page shows what is stored, not the answers from before the save.
   await expect(page.getByTestId("payer-link-summary-funds")).toContainText("Neue Tätigkeit");
   await page.getByTestId("payer-link-summary-funds").getByRole("button").click();
@@ -1557,44 +1567,27 @@ test.describe("payer link", () => {
     await expect(stepTitle(page)).toHaveText("Beziehung und Herkunft der Mittel");
     // Required: the `*` says it, no word chip next to it (labels audit 2026-10-26, A7).
     await expect(page.getByTestId("payer-link-funds-upload-badge")).toHaveCount(0);
-    // Nothing yellow before "Weiter"; the first press names what the step misses and stays,
-    // the second goes on (owner rule, QA 2026-10-10).
+    // Nothing yellow before "Weiter" (QA 2026-10-10); "Weiter" names what the step misses and
+    // stays — on every press, until the answer is there (owner 2026-11-11, replacing "the
+    // second press goes on").
     await expect(page.getByTestId("payer-link-step-missing")).toHaveCount(0);
-    await next(page);
-    await expect(stepTitle(page)).toHaveText("Beziehung und Herkunft der Mittel");
-    await expect(page.getByTestId("payer-link-step-missing")).toContainText("Bitte noch ergänzen:");
-    await expect(page.getByTestId("payer-link-step-missing")).toContainText("Nachweis der Herkunft der Mittel");
-    // The held press itself leads to the first missing field of the step (owner 2026-11-11).
-    const firstMissing = page.getByTestId("payer-link-missing-item").first();
-    const heldFocus = await page.evaluate(() => document.activeElement?.closest("[data-testid]")?.getAttribute("data-testid") ?? document.activeElement?.id ?? "");
-    expect(heldFocus, `focus after the held press (first missing: ${await firstMissing.textContent()})`).not.toBe("payer-link-next");
-    await expect(page.locator(":focus")).toBeInViewport();
+    for (let press = 1; press <= 3; press += 1) {
+      await next(page);
+      await expect(stepTitle(page)).toHaveText("Beziehung und Herkunft der Mittel");
+      await expect(page.getByTestId("payer-link-step-missing")).toContainText("Bitte noch ergänzen:");
+      await expect(page.getByTestId("payer-link-step-missing").getByRole("listitem")).toHaveText(["Nachweis der Herkunft der Mittel"]);
+      await expect(page.getByTestId("payer-link-funds-upload").locator("button").first()).toBeFocused();
+      await page.getByTestId("payer-link-step-title").click();
+    }
+    await expect(page.getByTestId("payer-link-funds-upload").locator("button").first()).toBeInViewport();
     // Each missing item leads to its field: the hidden upload's button gets the focus.
     await page.getByTestId("payer-link-missing-item").filter({ hasText: "Nachweis der Herkunft der Mittel" }).click();
     await expect(page.getByTestId("payer-link-funds-upload").locator("button").first()).toBeFocused();
-    await next(page);
-    await expect(stepTitle(page)).toHaveText("Zahlungsweg");
-    await expect(page.getByTestId("payer-link-step-missing")).toHaveCount(0);
-    await next(page);
-    await expect(stepTitle(page)).toHaveText("Erklärungen");
-    // A private person's questions come without an intro (no filler, QA 2026-10-10).
-    await expect(page.getByTestId("payer-link-step-declarations")).not.toContainText("Geldwäschegesetz");
-    const declarations = page.getByTestId("payer-link-step-declarations");
-    await choose(page, declarations.getByRole("combobox", { name: /hochrangiges öffentliches Amt/ }), "Nein");
-    await expect.poll(() => merged(calls.patches)).toMatchObject({ pep_self: false });
-    await next(page);
 
-    // Level 2: the proof is missing, "send" waits for it; the page never says why.
-    const missing = page.getByTestId("payer-link-missing");
+    // Level 2: the proof is required, the step waits for it; the page never says why. (The
+    // summary's own list of open items, with "Ergänzen", now shows only when the server
+    // refuses the send: see "a refused send keeps the answer saved just before it".)
     await expect(page.getByTestId("payer-link-page")).not.toContainText("Blacklist");
-    await expect(missing).toContainText("Bitte noch ergänzen:");
-    await expect(missing.locator("[data-missing-key]")).toHaveText(["Nachweis der Herkunft der Mittel"]);
-    await page.getByTestId("payer-link-confirm").check();
-    await expect(page.getByTestId("payer-link-submit")).toBeDisabled();
-    await expect(page.getByText("Bitte ergänzen Sie zuerst die fehlenden Angaben.")).toBeVisible();
-
-    await missing.getByRole("button", { name: "Ergänzen" }).click();
-    await expect(stepTitle(page)).toHaveText("Beziehung und Herkunft der Mittel");
     // Required: the `*` says it, no word chip next to it (labels audit 2026-10-26, A7).
     await expect(page.getByTestId("payer-link-funds-upload-badge")).toHaveCount(0);
     await page.locator("#payer-link-funds-files").setInputFiles({
@@ -1604,8 +1597,23 @@ test.describe("payer link", () => {
     });
     await expect(page.getByTestId("payer-link-funds-upload")).toContainText("kontoauszug.pdf");
     expect(calls.payer.filter((call) => call.path.endsWith("/funds-proof")).map((call) => call.body)).toEqual([{ file: "kontoauszug.pdf" }]);
-
-    for (let index = 0; index < 3; index += 1) await next(page);
+    // With the proof the step is left.
+    await next(page);
+    await expect(stepTitle(page)).toHaveText("Zahlungsweg");
+    await expect(page.getByTestId("payer-link-step-missing")).toHaveCount(0);
+    await next(page);
+    await expect(stepTitle(page)).toHaveText("Erklärungen");
+    // A private person's questions come without an intro (no filler, QA 2026-10-10).
+    await expect(page.getByTestId("payer-link-step-declarations")).not.toContainText("Geldwäschegesetz");
+    const declarations = page.getByTestId("payer-link-step-declarations");
+    // The open question holds this step as well.
+    await next(page);
+    await expect(stepTitle(page)).toHaveText("Erklärungen");
+    await expect(declarations.getByRole("combobox", { name: /hochrangiges öffentliches Amt/ })).toBeFocused();
+    await choose(page, declarations.getByRole("combobox", { name: /hochrangiges öffentliches Amt/ }), "Nein");
+    await expect.poll(() => merged(calls.patches)).toMatchObject({ pep_self: false });
+    await next(page);
+    await expect(page.getByTestId("payer-link-missing")).toHaveCount(0);
     await expect(page.getByTestId("payer-link-complete")).toBeVisible();
     await page.getByTestId("payer-link-confirm").check();
     await page.getByTestId("payer-link-submit").click();
@@ -1738,7 +1746,7 @@ test.describe("payer link", () => {
 
   test("every step fits a wide screen and a phone without scrolling sideways", async ({ page }) => {
     const long = "Gemeinnützige-Beispielstiftung-für-internationale-Kostenübernahme";
-    await setup(page, {
+    const { q } = await setup(page, {
       payerType: "company",
       acknowledged: true,
       answers: {
@@ -1761,6 +1769,9 @@ test.describe("payer link", () => {
         // A new visit of the tab without its session: the code step again (the code mailed before still works).
         await page.evaluate(() => sessionStorage.removeItem("gmed-payer-session"));
         await page.goto("about:blank");
+        // The phone starts where the wide screen started: the register court is missing again.
+        q.answers.register_court = null;
+        q.missing_for_submit = ["register_court"];
       }
       await page.goto(`/payer#${TOKEN}`);
       await expect(page.getByTestId("payer-link-code-step")).toBeVisible(lazyPageLoad);
@@ -1785,14 +1796,21 @@ test.describe("payer link", () => {
         if (width === 390) await page.screenshot({ path: test.info().outputPath(`payer-${width}-${guard}.png`), fullPage: true });
         if ((await page.getByTestId("payer-link-next").count()) === 0) break;
         await next(page);
-        // A step that misses something shows its list at the first "Weiter" and stays (owner rule):
-        // the list must fit too, then the second press goes on.
+        // A step that misses something shows its list at "Weiter" and stays, on every press
+        // (owner 2026-11-11): the list must fit too; the step is left once the answer is in.
         const stepMissing = page.getByTestId("payer-link-step-missing");
         await expect(stepMissing.or(stepTitle(page).filter({ hasNotText: title }))).toBeVisible();
         if ((await stepMissing.count()) > 0) {
           expect(await overflow(page), `${width}px ${title} missing`).toBeLessThanOrEqual(1);
           expect(await widestOverhang(page), `${width}px ${title} missing`).toBeLessThanOrEqual(1);
           await next(page);
+          await expect(stepTitle(page), `${width}px: a second press stays too`).toHaveText(title);
+          expect(title, `${width}px: the only step that misses something`).toBe("Angaben zur Organisation");
+          await expect(stepMissing.getByRole("listitem")).toHaveText(["Registergericht"]);
+          await page.getByTestId("payer-link-step-details").getByRole("textbox", { name: "Registergericht" }).fill("Amtsgericht Berlin-Charlottenburg");
+          await expect.poll(() => q.answers.register_court).toBe("Amtsgericht Berlin-Charlottenburg");
+          await next(page);
+          await expect(stepTitle(page)).not.toHaveText(title);
         }
       }
       expect(titles).toEqual([
@@ -1806,7 +1824,9 @@ test.describe("payer link", () => {
         "Zusammenfassung",
       ]);
       await expect(page.getByTestId("payer-link-summary-details")).toContainText(long);
-      await expect(page.getByTestId("payer-link-missing")).toContainText("Registergericht");
+      // The summary is reached only with every step complete: nothing is listed as missing.
+      await expect(page.getByTestId("payer-link-summary-details")).toContainText("Amtsgericht Berlin-Charlottenburg");
+      await expect(page.getByTestId("payer-link-missing")).toHaveCount(0);
       // A list opens inside the screen.
       await page.getByTestId("payer-link-summary-payment").getByRole("button", { name: "Ändern" }).click();
       await expect(stepTitle(page)).toHaveText("Zahlungsweg");

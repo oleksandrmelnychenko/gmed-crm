@@ -9,10 +9,13 @@ import {
   initialStep,
   missingByStep,
   nextHeldByMissing,
+  nextHoldKeys,
+  nextIsStrict,
   refusedIdentityUploadKeys,
   stepDone,
   stepMissingCount,
   stepMissingKeys,
+  stepReadOnly,
   stepOfField,
   visibleSteps,
 } from "./lead-request-steps";
@@ -232,7 +235,45 @@ describe("lead cabinet steps", () => {
     expect(stepMissingKeys(followed, "follow_up")).toEqual(["A:funds_source"]);
   });
 
-  it("holds \"Next\" for what is missing the same way on every press (owner report 2026-11-11)", () => {
+  it("holds \"Next\" for good while a required field of the step is empty — the client's own request before it is sent (owner 2026-11-11)", () => {
+    expect(nextIsStrict({ staff: false, submitted: false })).toBe(true);
+    // Staff take the answers in several calls; a sent request is read-only and never traps.
+    expect(nextIsStrict({ staff: true, submitted: false })).toBe(false);
+    expect(nextIsStrict({ staff: false, submitted: true })).toBe(false);
+    expect(nextIsStrict({ staff: true, submitted: true })).toBe(false);
+
+    const open = request({
+      // `former_names`, the document's number and a legal question have no field in the base form.
+      progress: { filled: 0, total: 0, missing_for_submit: ["city", "legal_sex", "former_names", "id_document_number", "id_document_upload", "pep_self", "payer_kind", "rep1_last_name"] },
+      consents: { lead_inquiry_processing: { type: "lead_inquiry_processing", version: "1", texts: {}, given_at: null } },
+    });
+    expect(nextHoldKeys(open, "person")).toEqual(["legal_sex", "city", "rep1_last_name", "inquiry_consent"]);
+    expect(nextHoldKeys(open, "identity")).toEqual(["id_document_upload"]);
+    expect(nextHoldKeys(open, "billing")).toEqual(["payer_kind"]);
+    // Nothing is required on the optional steps: they never hold.
+    for (const step of ["documents", "disclosure", "services", "send"] as const) expect(nextHoldKeys(open, step)).toEqual([]);
+    // Complete: nothing holds.
+    expect(nextHoldKeys(request(), "person")).toEqual([]);
+    // A sent request: its steps are read-only, but for the follow-up and a refused identity copy.
+    const sent = request({ submitted_at: "2026-10-07T09:00:00Z" });
+    expect(stepReadOnly(request(), "person")).toBe(false);
+    expect(stepReadOnly(sent, "person")).toBe(true);
+    expect(stepReadOnly(sent, "billing")).toBe(true);
+    expect(stepReadOnly(sent, "identity")).toBe(true);
+    expect(stepReadOnly(sent, "follow_up")).toBe(false);
+    const refused = {
+      ...request({ submitted_at: "2026-10-25T08:30:00Z", follow_up: followUp({ required: false, refused_identity_documents: [{ document_id: "id-1", file_name: null, reason: "expired", representative_id: null }] }) }),
+      identity_documents: [{ id: "id-1", file_name: "pass.jpg", uploaded_at: "2026-10-25T08:00:00Z" }],
+    } as unknown as LeadRequest;
+    expect(refusedIdentityUploadKeys(refused)).toEqual(["id_document_upload"]);
+    expect(stepReadOnly(refused, "identity")).toBe(false);
+    expect(stepReadOnly(refused, "person")).toBe(true);
+    // The follow-up step answers every key of its blocks.
+    const followed = request({ follow_up: followUp({ before_submit: true, blocks: ["A", "L"], missing: { A: ["funds_source"], L: ["pep_self"] } }) });
+    expect(nextHoldKeys(followed, "follow_up")).toEqual(["L:pep_self", "A:funds_source"]);
+  });
+
+  it("where \"Next\" is not strict, holds for what is missing the same way on every press (rule of 2026-10-09)", () => {
     // Nothing missing never holds.
     expect(nextHeldByMissing([], null)).toBe(false);
     expect(nextHeldByMissing([], new Set(["legal_sex"]))).toBe(false);

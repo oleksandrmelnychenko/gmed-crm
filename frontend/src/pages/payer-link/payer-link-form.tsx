@@ -92,7 +92,7 @@ function useAnswersForm({
   onQuestionnaire: (questionnaire: PayerQuestionnaire) => void;
   onSaveState: (state: SaveState) => void;
   onFailure: (error: PayerLinkError | null) => void;
-}): AnswersForm & { flush: () => Promise<boolean>; hasUnsaved: () => boolean } {
+}): AnswersForm & { flush: () => Promise<boolean>; hasUnsaved: () => boolean; /** The fields whose entry the server (or the form) refused and that still show it. */ refusedFields: () => string[] } {
   const [draft, setDraft] = useState<PayerDraft>(() => draftFromQuestionnaire(questionnaire));
   const draftRef = useRef(draft);
   draftRef.current = draft;
@@ -198,6 +198,7 @@ function useAnswersForm({
       return (code ? text.idDocumentRules[code] : undefined) ?? text.invalidField;
     },
     flush: () => save(draftRef.current),
+    refusedFields: () => Object.keys(stillRejected(refusedRef.current.values, draftRef.current)),
     hasUnsaved: () => Object.keys(answersPatch(savedRef.current, draftRef.current, contextRef.current)).length > 0,
   };
 }
@@ -321,6 +322,7 @@ export function PayerLinkForm({
   text,
   lang,
   signature = null,
+  softNext = false,
   onQuestionnaire,
   onLinkProblem,
 }: {
@@ -330,6 +332,11 @@ export function PayerLinkForm({
   lang: string;
   /** Where the documents for the payer's signature stand (phase 3b); shown once the details were sent. */
   signature?: PayerSignaturePackage | null;
+  /**
+   * "Next" lets a step with a missing answer be left on the second press (the rule of
+   * 2026-10-09): for staff who copy the payer's signed paper form. The payer's own link holds.
+   */
+  softNext?: boolean;
   onQuestionnaire: (questionnaire: PayerQuestionnaire) => void;
   onLinkProblem: (problem: LinkProblem) => void;
 }) {
@@ -346,6 +353,7 @@ export function PayerLinkForm({
       client={client}
       text={text}
       lang={lang}
+      softNext={softNext}
       onQuestionnaire={onQuestionnaire}
       onLinkProblem={onLinkProblem}
     />
@@ -358,6 +366,7 @@ function DraftForm({
   client,
   text,
   lang,
+  softNext,
   onQuestionnaire,
   onLinkProblem,
 }: {
@@ -366,6 +375,7 @@ function DraftForm({
   client: PayerLinkClient;
   text: PayerLinkText;
   lang: string;
+  softNext: boolean;
   onQuestionnaire: (questionnaire: PayerQuestionnaire) => void;
   onLinkProblem: (problem: LinkProblem) => void;
 }) {
@@ -391,7 +401,6 @@ function DraftForm({
   // Sent, or the session or the link is gone: the last autosave must not write any more.
   const closedRef = useRef(false);
   const advancingRef = useRef(false);
-  const formRef = useRef<HTMLFieldSetElement | null>(null);
   // What the last held press of "next" listed as missing, for the step on screen.
   const warnedRef = useRef<{ step: PayerStep; keys: ReadonlySet<string> } | null>(null);
 
@@ -591,9 +600,9 @@ function DraftForm({
   const previous = steps[position - 1];
   const following = steps[position + 1];
   const progress = Math.round(((position + 1) / steps.length) * 100);
-  // What this step still misses, as the server names it. Like the lead cabinet (owner
-  // 2026-10-09, QA 2026-10-10): the first "next" with something missing shows the list and
-  // stays, the next press goes on; nothing is shown before.
+  // What this step still misses, as the server names it. Like the lead cabinet: nothing is shown
+  // before "next" (owner 2026-10-09, QA 2026-10-10); "next" with something missing shows the list
+  // and stays, on every press (owner 2026-11-11).
   const stepMissing = missingByStep(questionnaire.missing_for_submit ?? [], payerType, steps).find((group) => group.step === step)?.keys ?? [];
   const missingShown = missingShownSteps.has(step);
   // Why "next" stayed on the beneficial owners, read from the list as it is now: it goes once the list is right.
@@ -620,17 +629,25 @@ function DraftForm({
         // the step stays and leads to it. Before, "next" went on and the entry stayed unsaved
         // until the summary (owner report 2026-11-11). An entry refused on another step does
         // not hold this one: there is nothing here to put right.
-        const refused = await afterRender(() => formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]') ?? null);
-        if (refused) {
+        // A save that failed without a refused field (the connection) holds nothing here: "send" retries it.
+        const refused = form.refusedFields();
+        if (await afterRender(() => refused.some((key) => revealPayerField(key)))) {
           setNotice(text.notSaved);
-          revealCabinetTarget({ element: refused, field: true });
           return;
         }
       }
       const open = missingByStep(questionnaireRef.current.missing_for_submit ?? [], payerType, steps).find((group) => group.step === step)?.keys ?? [];
-      // Like the lead cabinet: the first press with something missing shows the list, leads to
-      // the first field and stays; the next press goes on, unless something is missing that
-      // the list of that press did not name. A step opened again starts anew.
+      // Like the lead cabinet (owner 2026-11-11): "next" does not leave a step while a required
+      // answer of it is missing — every press shows the list, leads to the first field and stays.
+      // A key the step shows no field for holds nobody here; the summary still lists it.
+      const holding = softNext ? [] : open.filter((key) => payerFieldTarget(key) !== null);
+      if (consented && holding.length > 0) {
+        setMissingShownSteps((current) => new Set(current).add(step));
+        void afterRender(() => holding.some((key) => revealPayerField(key)));
+        return;
+      }
+      // Staff who copy the payer's signed paper form keep the rule of 2026-10-09: the first press
+      // shows the list and stays, the next goes on (the paper may leave an answer open).
       const warned = warnedRef.current?.step === step ? warnedRef.current.keys : null;
       if (consented && nextHeldByMissing(open, warned)) {
         warnedRef.current = { step, keys: new Set(open) };
@@ -692,7 +709,7 @@ function DraftForm({
   }
 
   return (
-    <fieldset ref={formRef} disabled={submitting} aria-busy={submitting} className="min-w-0 space-y-5 border-0 p-0" data-testid="payer-link-form" data-step={step}>
+    <fieldset disabled={submitting} aria-busy={submitting} className="min-w-0 space-y-5 border-0 p-0" data-testid="payer-link-form" data-step={step}>
       <div ref={topRef} className="scroll-mt-4 space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span data-testid="payer-link-step-of">{text.stepOf(position + 1, steps.length)}</span>
@@ -793,10 +810,14 @@ function revealOwnerProblem(blocker: OwnersBlocker, owners: readonly OwnerDraft[
 }
 
 /** Leads to the field of a missing key: scrolled into view, the cursor in it. False when the step does not show it. */
-function revealPayerField(key: string): boolean {
+function payerFieldTarget(key: string): HTMLElement | null {
   const id = UPLOAD_IDS[key] ?? `payer-link-${key}`;
-  const label = document.getElementById(`${id}-label`);
-  const target = document.getElementById(id) ?? label;
+  return document.getElementById(id) ?? document.getElementById(`${id}-label`);
+}
+
+/** Scrolls that element into view and puts the cursor into it. False when the step does not show it. */
+function revealPayerField(key: string): boolean {
+  const target = payerFieldTarget(key);
   if (!target) return false;
   // An upload's input is hidden: its button gets the focus; a group's label its first choice;
   // a date field its day (`revealCabinetTarget` knows them).

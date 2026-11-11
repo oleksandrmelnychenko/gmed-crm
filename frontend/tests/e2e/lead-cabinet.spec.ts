@@ -772,6 +772,25 @@ async function setup(
   return { request, calls };
 }
 
+/** The first step complete but for what the test leaves out; the request consent is given. */
+function filledFirstStep(except: string[] = []) {
+  return (request: ReturnType<typeof leadRequest>) => {
+    request.consents.lead_inquiry_processing.given_at = "2026-10-03T09:15:00Z";
+    Object.assign(request.personal_data, {
+      date_of_birth: "1988-05-01",
+      legal_sex: "female",
+      citizenships: ["DE"],
+      street_address: "Musterstraße 1",
+      zip_code: "10115",
+      city: "Berlin",
+      country: "DE",
+      phone: "+491701234567",
+    });
+    for (const field of except) request.personal_data[field] = field === "citizenships" ? [] : null;
+    if (request.representation && !except.includes("has_representative")) request.representation.has_representative = false;
+  };
+}
+
 test.describe("lead cabinet", () => {
   test("an inherited portal theme follows the server until the user chooses their own", async ({ page }) => {
     await setup(page, "lead");
@@ -2361,18 +2380,24 @@ test.describe("lead cabinet", () => {
     // The form is longer than the screen; "Weiter" must not need scrolling.
     await expect(page.locator("#lead-request-first_name")).toBeInViewport();
     await expect(next).toBeInViewport();
-    // The first press shows what is missing and stays (owner 2026-10-09); without the consent
-    // the second stays too and says so at the box (owner 2026-10-29); with it, it goes on.
+    // "Weiter" shows what is missing and stays, on every press (owner 2026-11-11, replacing "the
+    // next press goes on" of 2026-10-09); without the consent it says so at the box (owner 2026-10-29).
+    const missingItems = page.getByTestId("lead-request-step-person").getByTestId("lead-request-step-missing").getByRole("listitem");
     await next.click();
     await expect(page.getByTestId("lead-request-step-person").getByTestId("lead-request-step-missing")).toBeVisible();
     await expect(next).toBeInViewport();
+    const listed = await missingItems.count();
     await next.click();
     await expect(page.getByTestId("lead-request-step-person")).toBeVisible();
     await expect(page.locator("#lead-request-inquiry-consent-error")).toBeVisible();
+    await expect(next).toBeInViewport();
     await page.getByTestId("lead-request-inquiry-consent").getByRole("checkbox").click();
     await expect(page.getByTestId("lead-request-inquiry-consent").getByRole("checkbox")).toBeChecked();
+    // With the consent the step still misses its required fields: it stays, the list is one shorter.
     await next.click();
-    await expect(page.getByTestId("lead-request-step-identity")).toBeVisible();
+    await expect(missingItems).toHaveCount(listed - 1);
+    await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "person");
+    await expect(next).toBeInViewport();
   });
 
   test("every missing item leads straight to its step and field, whichever step is open (owner 2026-10-21)", async ({ page }) => {
@@ -2415,7 +2440,8 @@ test.describe("lead cabinet", () => {
   });
 
   test("the last entry is saved when the step is left at once", async ({ page }) => {
-    const { calls } = await setup(page, "lead");
+    // The step's required fields are filled: "Weiter" leaves it (owner 2026-11-11: not otherwise).
+    const { calls } = await setup(page, "lead", { prepare: filledFirstStep() });
     // The page's timers are the test's from the start, so that they can be stopped below.
     await page.clock.install();
     await page.goto("/");
@@ -2428,11 +2454,7 @@ test.describe("lead cabinet", () => {
     await messenger.check();
     expect(calls.personalData).toEqual([]);
     const next = page.getByTestId("lead-request-step-person").getByRole("button", { name: "Weiter" });
-    // The first press shows what is missing and stays; with the consent the second leaves the step.
-    await next.click();
-    await expect(page.getByTestId("lead-request-step-person").getByTestId("lead-request-step-missing")).toBeVisible();
-    await page.getByTestId("lead-request-inquiry-consent").getByRole("checkbox").click();
-    await expect(page.getByTestId("lead-request-inquiry-consent").getByRole("checkbox")).toBeChecked();
+    // Nothing is missing: the press saves the entries and leaves the step.
     await next.click();
     await expect(page.getByTestId("lead-request-step-identity")).toBeVisible();
     await expect.poll(() => calls.personalData).toEqual([{ middle_name: "Maria" }]);
@@ -2672,75 +2694,65 @@ test.describe("lead cabinet", () => {
   }
 });
 
-// Owner report 2026-11-11: "Weiter" must hold a step the same way however often it was pressed,
-// and take the person to what holds it.
+// Owner 2026-11-11: "Weiter" must not let the person leave a step while a required field of it is
+// empty or invalid — on every press (this replaces "the next press goes on" of 2026-10-09) — and
+// takes the person to what holds it. The step tabs stay free.
 test.describe("Weiter holds a step the same way on every press", () => {
-  /** The first step complete but for what the test leaves out; the request consent is given. */
-  const filled = (except: string[] = []) => (request: ReturnType<typeof leadRequest>) => {
-    request.consents.lead_inquiry_processing.given_at = "2026-10-03T09:15:00Z";
-    Object.assign(request.personal_data, {
-      date_of_birth: "1988-05-01",
-      legal_sex: "female",
-      citizenships: ["DE"],
-      street_address: "Musterstraße 1",
-      zip_code: "10115",
-      city: "Berlin",
-      country: "DE",
-      phone: "+491701234567",
-    });
-    for (const field of except) request.personal_data[field] = field === "citizenships" ? [] : null;
-    if (request.representation && !except.includes("has_representative")) request.representation.has_representative = false;
-  };
+  const filled = filledFirstStep;
   const current = (page: Page) => page.getByTestId("lead-request-step");
   const next = (page: Page) => current(page).getByRole("button", { name: "Weiter" }).click();
   const list = (page: Page) => page.getByTestId("lead-request-step-person").getByTestId("lead-request-step-missing");
 
-  test("an empty required select: the first press stays and leads to it, the next goes on, and a step opened again starts anew", async ({ page }) => {
+  test("an empty required select holds every press of Weiter and the browser's Forward; the tabs stay free", async ({ page }) => {
     await setup(page, "lead", { prepare: filled(["legal_sex"]) });
     await page.goto("/");
     const sex = page.getByRole("combobox", { name: "Geschlecht laut Ausweis" });
     await expect(sex).toBeVisible();
     await expect(list(page)).toHaveCount(0);
 
-    // The first press: the list, the mark at the field, the cursor in the select.
-    await next(page);
-    await expect(current(page)).toHaveAttribute("data-current-step", "person");
-    await expect(list(page).getByRole("listitem")).toHaveText(["Geschlecht laut Ausweis"]);
-    await expect(page.locator("#lead-request-legal_sex-error")).toHaveText("Pflichtfeld");
-    await expect(sex).toBeFocused();
-    await expect(sex).toBeInViewport();
+    // Every press: the list, the mark at the field, the cursor in the select — the step stays.
+    for (let press = 1; press <= 3; press += 1) {
+      await next(page);
+      await expect(current(page)).toHaveAttribute("data-current-step", "person");
+      await expect(list(page).getByRole("listitem")).toHaveText(["Geschlecht laut Ausweis"]);
+      await expect(page.locator("#lead-request-legal_sex-error")).toHaveText("Pflichtfeld");
+      await expect(sex).toBeFocused();
+      await expect(sex).toBeInViewport();
+      await page.locator("#lead-request-city").focus();
+    }
     // The item of the list leads there as well.
-    await page.locator("#lead-request-city").focus();
     await list(page).getByRole("button", { name: "Geschlecht laut Ausweis" }).click();
     await expect(sex).toBeFocused();
-    // The next press goes on: the person has read what is missing (owner 2026-10-09).
-    await next(page);
-    await expect(current(page)).toHaveAttribute("data-current-step", "identity");
 
-    // Opened again, the step holds the first press again — by the tab, …
-    await step(page, "person");
-    await expect(sex).toBeVisible();
-    await next(page);
-    await expect(current(page)).toHaveAttribute("data-current-step", "person");
-    await expect(sex).toBeFocused();
-    await next(page);
+    // A tab opens another step: the person may look around. Back on the step it holds as before.
+    await step(page, "identity");
     await expect(current(page)).toHaveAttribute("data-current-step", "identity");
-    // … by the browser's Back, …
     await page.goBack();
     await expect(current(page)).toHaveAttribute("data-current-step", "person");
     await next(page);
     await expect(current(page)).toHaveAttribute("data-current-step", "person");
     await expect(sex).toBeFocused();
-    // … and after the page was loaded again.
+    // The browser's Forward is "Weiter" by another button: held, and the address names the step.
+    await page.locator("#lead-request-city").focus();
+    await page.goForward();
+    await expect(sex).toBeFocused();
+    await expect(current(page)).toHaveAttribute("data-current-step", "person");
+    await expect(page).not.toHaveURL(/step=identity/);
+    // After the page was loaded again: the same.
     await page.reload();
     await expect(sex).toBeVisible();
     await next(page);
     await expect(current(page)).toHaveAttribute("data-current-step", "person");
     await expect(list(page).getByRole("listitem")).toHaveText(["Geschlecht laut Ausweis"]);
     await expect(sex).toBeFocused();
+
+    // Answered: the step is left.
+    await choose(page, sex, "Weiblich");
+    await next(page);
+    await expect(current(page)).toHaveAttribute("data-current-step", "identity");
   });
 
-  test("a field that became required after the list was shown holds the next press too", async ({ page }) => {
+  test("the hold follows what is missing now: a question an answer opens holds as well", async ({ page }) => {
     await setup(page, "lead", { prepare: filled(["legal_sex"]) });
     await page.goto("/");
     await next(page);
@@ -2749,8 +2761,29 @@ test.describe("Weiter holds a step the same way on every press", () => {
     await choose(page, page.getByRole("combobox", { name: ACTS }), "Ja");
     await next(page);
     await expect(current(page)).toHaveAttribute("data-current-step", "person");
-    await expect(list(page)).toContainText(APPOINTED);
-    // Now everything missing was listed: the press goes on.
+    await expect(list(page).getByRole("listitem")).toHaveText(["Geschlecht laut Ausweis", APPOINTED]);
+    // One of the two answered: the other one holds, with the cursor in it.
+    await choose(page, page.getByRole("combobox", { name: "Geschlecht laut Ausweis" }), "Weiblich");
+    await next(page);
+    await expect(current(page)).toHaveAttribute("data-current-step", "person");
+    await expect(list(page).getByRole("listitem")).toHaveText([APPOINTED]);
+    await expect(page.getByRole("combobox", { name: APPOINTED })).toBeFocused();
+    // Everything required is there: the press goes on.
+    await choose(page, page.getByRole("combobox", { name: APPOINTED }), "Nein");
+    await next(page);
+    await expect(current(page)).toHaveAttribute("data-current-step", "identity");
+  });
+
+  test("a request that is sent is never held by Weiter (QA 2026-11-10, A-1)", async ({ page }) => {
+    await setup(page, "lead", {
+      prepare: (request) => {
+        filled(["legal_sex"])(request);
+        request.submitted_at = "2026-10-03T09:30:00Z";
+      },
+    });
+    await page.goto("/?lead=lead-1&step=person");
+    await expect(page.getByTestId("lead-request-step-locked")).toBeVisible();
+    // The step is read-only: nothing could be put right here, so the first press goes on.
     await next(page);
     await expect(current(page)).toHaveAttribute("data-current-step", "identity");
   });
@@ -2782,14 +2815,19 @@ test.describe("Weiter holds a step the same way on every press", () => {
     await expect(current(page)).toHaveAttribute("data-current-step", "person");
     await expect(date.getByRole("spinbutton").first()).toBeFocused();
 
-    // The date put right: the select is still empty and was listed, so the step holds once
-    // for it — with the cursor in the select — and the press after that goes on.
+    // The date put right: the select is still empty and holds every press, the cursor in it.
     await date.getByRole("spinbutton").first().click();
     await page.keyboard.type("01051988", { delay: 80 });
     await expect(page.getByTestId("lead-request-save-blocked")).toHaveCount(0);
-    await next(page);
-    await expect(current(page)).toHaveAttribute("data-current-step", "person");
-    await expect(page.getByRole("combobox", { name: "Geschlecht laut Ausweis" })).toBeFocused();
+    const sex = page.getByRole("combobox", { name: "Geschlecht laut Ausweis" });
+    for (let press = 1; press <= 2; press += 1) {
+      await page.locator("#lead-request-phone").focus();
+      await next(page);
+      await expect(current(page)).toHaveAttribute("data-current-step", "person");
+      await expect(list(page).getByRole("listitem")).toHaveText(["Geschlecht laut Ausweis"]);
+      await expect(sex).toBeFocused();
+    }
+    await choose(page, sex, "Weiblich");
     await next(page);
     await expect(current(page)).toHaveAttribute("data-current-step", "identity");
   });
@@ -2835,13 +2873,19 @@ test.describe("Weiter holds a step the same way on every press", () => {
         return field && bar ? bar.y - (field.y + field.height) : -1;
       }).toBeGreaterThan(0);
 
-      // The step after it: the upload's button gets the cursor (the file input is hidden).
+      // Answered, the step is left. The step after it holds for its upload, whose button gets
+      // the cursor (the file input is hidden) — on the second press as on the first.
+      await choose(page, acts, "Nein");
       await next(page);
       await expect(current(page)).toHaveAttribute("data-current-step", "identity");
-      await next(page);
-      await expect(current(page)).toHaveAttribute("data-current-step", "identity");
-      await expect(page.getByTestId("lead-request-identity-upload").locator("button").first()).toBeFocused();
-      await expect(page.getByTestId("lead-request-identity-upload").locator("button").first()).toBeInViewport();
+      const upload = page.getByTestId("lead-request-identity-upload").locator("button").first();
+      for (let press = 1; press <= 2; press += 1) {
+        await next(page);
+        await expect(current(page)).toHaveAttribute("data-current-step", "identity");
+        await expect(upload).toBeFocused();
+        await expect(upload).toBeInViewport();
+        await page.getByTestId("lead-request-step-identity").getByRole("button", { name: "Zurück" }).focus();
+      }
     });
   }
 
@@ -2930,6 +2974,23 @@ test.describe("the client's form filled in by staff", () => {
     await expect.poll(() => calls.personalData).toEqual([{ middle_name: "Maria" }]);
     await step(page, "send");
     await expect(page.getByTestId("lead-request-submit")).toHaveCount(0);
+  });
+
+  test("staff go on past an empty required field with the second press of Weiter (owner 2026-10-29: the answers come in several calls)", async ({ page }) => {
+    await setup(page, "lead", { prepare: filledFirstStep(["legal_sex"]) });
+    await signInAsStaff(page);
+    await page.goto("/leads/lead-1/client-form");
+    await expect(page.getByTestId("lead-request-staff-mode")).toBeVisible();
+    const current = page.getByTestId("lead-request-step");
+    const next = current.getByRole("button", { name: "Weiter" });
+    // The first press shows what the client's form still misses, with the cursor in the field …
+    await next.click();
+    await expect(current).toHaveAttribute("data-current-step", "person");
+    await expect(page.getByTestId("lead-request-step-person").getByTestId("lead-request-step-missing").getByRole("listitem")).toHaveText(["Geschlecht laut Ausweis"]);
+    await expect(page.getByRole("combobox", { name: "Geschlecht laut Ausweis" })).toBeFocused();
+    // … and the next one goes on: the hard stop of 2026-11-11 is the client's, not staff's.
+    await next.click();
+    await expect(current).toHaveAttribute("data-current-step", "identity");
   });
 
   test("staff record the client's consent form options with how the client gave them", async ({ page }) => {

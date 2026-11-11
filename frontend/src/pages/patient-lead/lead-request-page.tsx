@@ -75,9 +75,12 @@ import {
   inquiryConsentMissing,
   missingByStep,
   nextHeldByMissing,
+  nextHoldKeys,
+  nextIsStrict,
   stepDone,
   stepMissingCount,
   stepMissingKeys,
+  stepReadOnly,
   visibleSteps,
   type StepId,
 } from "./lead-request-steps";
@@ -751,6 +754,16 @@ function LeadRequestView({
   const warned = useRef<{ step: StepId; keys: ReadonlySet<string> } | null>(null);
 
   const staffMode = useCabinetStaffMode();
+  // What holds "Next" (and the browser's Forward) on a step for good: the required fields of the
+  // step that are still empty and that the step shows. Not for staff, who take the client's
+  // answers in several calls (owner 2026-10-29), and not once the request is sent (it is
+  // read-only then and must never trap anybody, QA 2026-11-10, A-1).
+  const heldKeys = useRef<(current: LeadRequest, id: StepId) => string[]>(() => []);
+  heldKeys.current = (current, id) => {
+    if (!nextIsStrict({ staff: staffMode, submitted: Boolean(current.submitted_at) })) return [];
+    const root = stepRef.current ?? document;
+    return nextHoldKeys(current, id).filter((key) => findCabinetTarget({ field: key }, root) !== null);
+  };
   const go = useCallback((next: StepId, validateCurrent = false, target?: CabinetTarget) => {
     if (validateCurrent) setNextPressed(true);
     // A link into the step on screen needs no saving and no step change: it only shows the field.
@@ -759,12 +772,21 @@ function LeadRequestView({
       return;
     }
     void switchAfterSave(request.lead_id, () => {
-      // All sections have now saved: the fresh answer says what the step still misses. The first
-      // press with something missing shows the list, leads to the first field and stays; the
-      // next press goes on (owner 2026-10-09) — unless something is missing that the list of
-      // that press did not name.
+      // All sections have now saved: the fresh answer says what the step still misses. "Next"
+      // does not leave a step while a required field of it is empty (owner 2026-11-11, replacing
+      // the rule of 2026-10-09): every press shows the list, leads to the first field and stays.
       if (validateCurrent) {
-        const keys = stepMissingKeys(latestRequest.current, step);
+        const holding = heldKeys.current(latestRequest.current, step);
+        if (holding.length > 0) {
+          showMissingOf(step);
+          setPendingHold({ missing: holding });
+          return;
+        }
+        // Staff filling in the client's form, a request already sent, and a key the step has no
+        // field for keep the rule of 2026-10-09: the first press shows the list and stays, the
+        // next goes on — unless something is missing that the list of that press did not name.
+        // A step of a sent request is read-only and shows no list: nothing holds it at all.
+        const keys = stepReadOnly(latestRequest.current, step) ? [] : stepMissingKeys(latestRequest.current, step);
         if (nextHeldByMissing(keys, warned.current?.step === step ? warned.current.keys : null)) {
           warned.current = { step, keys: new Set(keys) };
           showMissingOf(step);
@@ -783,7 +805,7 @@ function LeadRequestView({
       // The payer's consents are needed to send, and a changed name or date of birth of the payer
       // unticks them: Next does not leave step 3 without them, the box is shown (QA 2026-11-10,
       // finding 11). The step tabs stay free, as with the consent of the first step.
-      if (validateCurrent && step === "billing" && !staffMode) {
+      if (validateCurrent && step === "billing" && !staffMode && !stepReadOnly(latestRequest.current, step)) {
         const consent = missingByStep(latestRequest.current).billing.find(
           (key) => key === "payer_contact_consent" || key === "payer_cost_estimate_consent",
         );
@@ -840,6 +862,23 @@ function LeadRequestView({
     const target = addressStep ? visibleSteps(current).find((id) => id === addressStep) : initialStep(current);
     if (!target || target === chosenStepRef.current) return;
     void switchAfterSave(current.lead_id, () => {
+      // Forward is "Next" by another button: it does not pass a step with an empty required
+      // field either. Back, and Forward over a complete step, follow the address.
+      const order = visibleSteps(latestRequest.current);
+      const from = chosenStepRef.current;
+      const holding = order.indexOf(target) > order.indexOf(from) ? heldKeys.current(latestRequest.current, from) : [];
+      if (holding.length > 0) {
+        setNextPressed(true);
+        showMissingOf(from);
+        setPendingHold({ missing: holding });
+        setSearchParams((params) => {
+          const next = new URLSearchParams(params);
+          next.set("lead", current.lead_id);
+          next.set("step", from);
+          return next;
+        }, { replace: true });
+        return;
+      }
       warned.current = null;
       setChosenStep(target);
       setSentRefused((notice) => (notice === "fresh" ? "seen" : null));
@@ -854,7 +893,7 @@ function LeadRequestView({
         return next;
       }, { replace: true });
     });
-  }, [addressStep, setSearchParams, startStep, switchAfterSave, syncAddress]);
+  }, [addressStep, setSearchParams, showMissingOf, startStep, switchAfterSave, syncAddress]);
 
   const nav: StepNav = {
     index: position + 1,

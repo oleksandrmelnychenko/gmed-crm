@@ -103,6 +103,8 @@ export function LeadPayerPaperQuestionnaireDialog({
                 // No code went out on paper: the address is staff's entry (QA 2026-10-31).
                 text={{ ...text, emailConfirmed: tx("указан сотрудником", "von Mitarbeitenden erfasst") }}
                 lang={lang}
+                // Staff copy what the paper says and may go on past an answer it leaves open.
+                softNext
                 onQuestionnaire={changed}
                 onLinkProblem={() => setError(tx("Анкета сейчас недоступна — обновите страницу", "Fragebogen derzeit nicht verfügbar – Seite neu laden"))}
               />

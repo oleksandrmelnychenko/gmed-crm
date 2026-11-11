@@ -243,8 +243,49 @@ export function stepMissingKeys(
 }
 
 /**
- * Whether "Next" stays on the step because of what is missing (owner 2026-10-09: the first press
- * with something missing shows the list and stays, the next press goes on). `warned` is what the
+ * Whether "Next" holds a step for good while a required field of it is empty (owner 2026-11-11:
+ * "Next" must not let the person leave such a step; this replaces the rule of 2026-10-09 for the
+ * client). Not for staff who fill in the client's form — they take the answers in several calls
+ * and go through the steps with what they have (owner 2026-10-29) — and not for a request that
+ * is sent: it is read-only and never traps anybody (QA 2026-11-10, A-1). Those two keep
+ * `nextHeldByMissing`.
+ */
+export function nextIsStrict({ staff, submitted }: { staff: boolean; submitted: boolean }): boolean {
+  return !staff && !submitted;
+}
+
+/**
+ * Whether a step of the request is read-only: the request is sent (owner 2026-10-26), and the
+ * step is neither the follow-up nor the identity step that waits for a new copy of a document
+ * GMED refused. Such a step shows no list of what is missing and holds nobody.
+ */
+export function stepReadOnly(
+  request: Pick<LeadRequest, "follow_up"> & Partial<Pick<LeadRequest, "submitted_at" | "identity_documents" | "representation">>,
+  step: StepId,
+): boolean {
+  if (!request.submitted_at || step === "follow_up") return false;
+  return !(step === "identity" && refusedIdentityUploadKeys(request).length > 0);
+}
+
+/**
+ * The missing keys that hold "Next" for good: those the step can answer. A key without a field
+ * in the base form (an older server's `former_names`, the identity document's data, the legal
+ * questions of follow-up block L) is listed in the summary but holds no step — nobody could put
+ * it right there. The follow-up step answers all of its keys.
+ */
+export function nextHoldKeys(
+  request: Pick<LeadRequest, "progress" | "follow_up" | "consents"> & Partial<Pick<LeadRequest, "submitted_at">>,
+  step: StepId,
+  missing: Record<StepId, string[]> = missingByStep(request),
+): string[] {
+  return stepMissingKeys(request, step, missing).filter(
+    (key) => step === "follow_up" || key === "inquiry_consent" || hasBaseFormInput(key),
+  );
+}
+
+/**
+ * The rule of 2026-10-09, kept where "Next" is not strict (`nextIsStrict`): the first press
+ * with something missing shows the list and stays, the next press goes on. `warned` is what the
  * last held press showed during this visit of the step, null without one. The press goes on only
  * when everything still missing was on that list: a field that became required since (another
  * answer opened it), a step opened again or a page loaded again is shown first, like the first
