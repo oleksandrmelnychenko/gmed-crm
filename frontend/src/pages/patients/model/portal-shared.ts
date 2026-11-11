@@ -582,6 +582,8 @@ export type PortalConciergeServiceItem = {
   currency: string;
   /** The patient's own note from the request. */
   patient_note: string | null;
+  /** The patient's own budget from the request (decimal string); never the internal estimate. */
+  patient_budget?: string | null;
   /** The note staff wrote for the patient; the internal staff note never reaches the portal. */
   patient_visible_note: string | null;
   request_source: string;

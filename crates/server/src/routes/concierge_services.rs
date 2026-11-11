@@ -238,7 +238,11 @@ struct CreateMyConciergeServiceRequest {
     vendor_contact: Option<String>,
     starts_at: Option<String>,
     ends_at: Option<String>,
-    cost_estimate: Option<f64>,
+    /// The patient's own budget (owner 2026-11-11): stored apart from the
+    /// internal `cost_estimate`, which staff overwrite; the patient sees it
+    /// back. `cost_estimate` is the name older clients send.
+    #[serde(alias = "cost_estimate")]
+    patient_budget: Option<f64>,
     currency: Option<String>,
     /// The patient's own note; stored apart from every staff note so staff
     /// never overwrite it (`service_notes` is the name older clients send).
@@ -544,7 +548,7 @@ async fn list_my_concierge_services(
                   cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
                   cs.vendor_contact, cs.service_address, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
                   cs.quantity, cs.unit_price, cs.currency, cs.billing_status,
-                  cs.patient_request_note, cs.patient_visible_note,
+                  cs.patient_request_note, cs.patient_visible_note, cs.patient_budget,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at, cs.request_source,
                   p.patient_id AS patient_code, p.first_name, p.last_name,
                   pr.name AS provider_name,
@@ -641,6 +645,17 @@ async fn create_my_concierge_service(
             "currency must be 3 letters",
         );
     }
+    // NUMERIC(12, 2) and never negative (migration 20261111170015); NaN and
+    // infinity fall outside the range too.
+    if body
+        .patient_budget
+        .is_some_and(|value| !(0.0..10_000_000_000.0).contains(&value))
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "patient_budget must be a non-negative amount",
+        );
+    }
 
     let assigned_concierge_id = match load_first_assigned_concierge_id(&state, patient_id).await {
         Ok(value) => value,
@@ -659,7 +674,7 @@ async fn create_my_concierge_service(
         r#"INSERT INTO concierge_services (
                 patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind, taxonomy_node_id,
                 title, status, booking_reference, vendor_name, vendor_contact,
-                starts_at, ends_at, cost_estimate, actual_cost, currency,
+                starts_at, ends_at, patient_budget, actual_cost, currency,
                 billing_status, patient_request_note, billing_notes, request_source, created_by
            ) VALUES (
                 $1, NULL, NULL, $2, $3, $4,
@@ -678,7 +693,7 @@ async fn create_my_concierge_service(
     .bind(normalized_vendor_contact.clone())
     .bind(starts_at)
     .bind(ends_at)
-    .bind(body.cost_estimate)
+    .bind(body.patient_budget)
     .bind(currency.to_uppercase())
     .bind(normalized_notes.clone())
     .bind(auth.user_id)
@@ -5688,7 +5703,7 @@ const SERVICE_ROW_SELECT: &str = r#"SELECT cs.id, cs.patient_id, cs.appointment_
                   cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
                   cs.vendor_contact, cs.service_address, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
                   cs.quantity, cs.unit_price, cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes, cs.request_source,
-                  cs.patient_request_note, cs.patient_visible_note,
+                  cs.patient_request_note, cs.patient_visible_note, cs.patient_budget,
                   cs.key_status, cs.key_responsible_user_id, cs.key_status_at,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at,
                   cs.booking_decision_required_at,
@@ -6994,7 +7009,8 @@ fn can_patient_cancel_service(row: &sqlx::postgres::PgRow) -> bool {
 /// what is meant for the patient — booking reference, vendor, address, time.
 /// The internal staff note, the billing note, the vendor's contact and every
 /// amount of the internal calculation (estimate, quantity, unit price) stay
-/// with staff.
+/// with staff; the patient sees only the budget they typed into their own
+/// request (`patient_budget`, owner 2026-11-11).
 fn build_portal_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
     serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
@@ -7019,6 +7035,8 @@ fn build_portal_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "ends_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("ends_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
         "patient_note": row.try_get::<Option<String>, _>("patient_request_note").unwrap_or_default(),
+        // The patient's own budget from the request; never the internal estimate.
+        "patient_budget": row.try_get::<Option<rust_decimal::Decimal>, _>("patient_budget").unwrap_or_default().map(|value| value.round_cents().to_string()),
         "patient_visible_note": row.try_get::<Option<String>, _>("patient_visible_note").unwrap_or_default(),
         "request_source": row.try_get::<String, _>("request_source").unwrap_or_else(|_| "staff".to_string()),
         "completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
@@ -7077,6 +7095,8 @@ fn build_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "service_notes": row.try_get::<Option<String>, _>("service_notes").unwrap_or_default(),
         // The patient's own request text, read-only for staff.
         "patient_note": row.try_get::<Option<String>, _>("patient_request_note").unwrap_or_default(),
+        // The patient's own budget from the request, read-only for staff.
+        "patient_budget": row.try_get::<Option<rust_decimal::Decimal>, _>("patient_budget").unwrap_or_default().map(|value| value.round_cents().to_string()),
         // The only staff text the patient portal shows.
         "patient_visible_note": row.try_get::<Option<String>, _>("patient_visible_note").unwrap_or_default(),
         "billing_notes": row.try_get::<Option<String>, _>("billing_notes").unwrap_or_default(),

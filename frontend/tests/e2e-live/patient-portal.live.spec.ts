@@ -585,6 +585,7 @@ test.describe("patient portal live workflows", () => {
         vendor_name: string | null;
         vendor_contact?: string | null;
         cost_estimate?: string | number | null;
+        patient_budget?: string | null;
         service_notes?: string | null;
         patient_note: string | null;
         request_source: string | null;
@@ -599,6 +600,8 @@ test.describe("patient portal live workflows", () => {
       // Release QA S2-1: the portal API carries no internal staff fields.
       expect(created!.vendor_contact).toBeUndefined();
       expect(created!.cost_estimate).toBeUndefined();
+      // The patient's own budget is theirs to see (owner 2026-11-11).
+      expect(created!.patient_budget).toBe("240.00");
       expect(created!.service_notes).toBeUndefined();
       expect(created!.request_source).toBe("patient_portal");
     }).toPass({ timeout: 15_000 });

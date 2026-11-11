@@ -156,6 +156,8 @@ type StaffConciergeService = {
   service_notes: string | null;
   /** The patient's own request text; read-only for staff. */
   patient_note?: string | null;
+  /** The patient's own budget from the portal request; read-only for staff, shown to the patient. */
+  patient_budget?: string | null;
   /** The only staff text the patient portal shows. */
   patient_visible_note?: string | null;
   billing_notes: string | null;
@@ -2344,6 +2346,18 @@ function useStaffServicesPageContent() {
                           <p className="text-xs text-muted-foreground">{t.staff_services_patient_request_note_hint}</p>
                         </div>
                       ) : null}
+                      {selectedService.patient_budget ? (
+                        <div className="space-y-1.5 text-sm md:col-span-2">
+                          <span className="text-xs font-medium text-muted-foreground">
+                            {t.staff_services_form_patient_budget}
+                            <PatientVisibilityMark visible label={t.staff_services_visible_to_patient} />
+                          </span>
+                          <p className="rounded-md border bg-muted/40 px-3 py-2 tabular-nums">
+                            {formatPortalCurrency(selectedService.patient_budget, selectedService.currency)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">{t.staff_services_patient_budget_hint}</p>
+                        </div>
+                      ) : null}
                       <label className="space-y-1.5 text-sm">
                         <span className="text-xs font-medium text-muted-foreground">
                           {t.staff_services_form_service_notes}
@@ -2486,6 +2500,10 @@ function useStaffServicesPageContent() {
                       <ServiceDetailField label={`${t.staff_services_form_vendor} · ${t.staff_services_visible_to_patient}`} value={selectedService.vendor_name} />
                       <ServiceDetailField label={t.staff_services_form_vendor_contact} value={selectedService.vendor_contact} />
                       <ServiceDetailField label={t.staff_services_form_patient_request_note} value={selectedService.patient_note ?? null} multiline />
+                      <ServiceDetailField
+                        label={`${t.staff_services_form_patient_budget} · ${t.staff_services_visible_to_patient}`}
+                        value={selectedService.patient_budget ? formatPortalCurrency(selectedService.patient_budget, selectedService.currency) : null}
+                      />
                       <ServiceDetailField label={`${t.staff_services_form_service_notes} · ${t.staff_services_hidden_from_patient}`} value={localizeTaskNote(selectedService.service_notes, lang) || null} multiline />
                       <ServiceDetailField label={`${t.staff_services_form_patient_visible_note} · ${t.staff_services_visible_to_patient}`} value={selectedService.patient_visible_note ?? null} multiline />
                       <ServiceDetailField label={t.staff_services_form_billing_notes} value={selectedService.billing_notes} multiline />

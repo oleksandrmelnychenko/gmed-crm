@@ -1816,6 +1816,7 @@ export const de = {
   services_booking_reference: "Buchungsreferenz",
   services_own_note: "Ihre Notiz",
   services_care_team_note: "Notiz des GMED-Teams",
+  services_your_budget: "Ihr Budget",
   services_created_at: "Erstellt",
   services_cancel_request: "Anfrage stornieren",
   services_request_title: "Service anfragen",

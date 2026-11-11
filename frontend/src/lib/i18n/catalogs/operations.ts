@@ -182,6 +182,8 @@ export interface OperationsTranslations {
   staff_services_form_service_notes: string;
   staff_services_form_patient_visible_note: string;
   staff_services_form_patient_request_note: string;
+  staff_services_form_patient_budget: string;
+  staff_services_patient_budget_hint: string;
   staff_services_visible_to_patient: string;
   staff_services_hidden_from_patient: string;
   staff_services_patient_request_note_hint: string;
@@ -797,6 +799,8 @@ export const operationsRu: OperationsTranslations = {
   staff_services_form_service_notes: "Внутренняя заметка",
   staff_services_form_patient_visible_note: "Заметка для пациента",
   staff_services_form_patient_request_note: "Текст пациента из запроса",
+  staff_services_form_patient_budget: "Бюджет пациента из запроса",
+  staff_services_patient_budget_hint: "Указал пациент в портале и видит его как «Ваш бюджет»; сотрудники его не меняют. Внутренняя оценка — отдельное поле.",
   staff_services_visible_to_patient: "Видно пациенту в портале",
   staff_services_hidden_from_patient: "Пациенту не видно",
   staff_services_patient_request_note_hint: "Написал пациент в портале; сотрудники этот текст не меняют.",
@@ -1464,6 +1468,8 @@ export const operationsDe: OperationsTranslations = {
   staff_services_form_service_notes: "Interne Notiz",
   staff_services_form_patient_visible_note: "Notiz für den Patienten",
   staff_services_form_patient_request_note: "Text des Patienten aus der Anfrage",
+  staff_services_form_patient_budget: "Budget des Patienten aus der Anfrage",
+  staff_services_patient_budget_hint: "Vom Patienten im Portal angegeben und dort als «Ihr Budget» sichtbar; das Team ändert es nicht. Die interne Schätzung ist ein eigenes Feld.",
   staff_services_visible_to_patient: "Für den Patienten im Portal sichtbar",
   staff_services_hidden_from_patient: "Für den Patienten nicht sichtbar",
   staff_services_patient_request_note_hint: "Vom Patienten im Portal geschrieben; das Team ändert diesen Text nicht.",

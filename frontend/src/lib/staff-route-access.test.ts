@@ -278,7 +278,7 @@ describe("staff route access by capability", () => {
 
   it("keeps interpreters on assignments, documents and the calendar", () => {
     for (const role of ["interpreter", "teamlead_interpreter"] as const) {
-      for (const path of ["/patients", "/appointments", "/documents", "/providers", "/chat", "/task-manager", "/sops"]) {
+      for (const path of ["/patients/patient-1", "/appointments", "/documents", "/providers", "/chat", "/task-manager", "/sops"]) {
         expect(canAccessStaffRoute(role, path), `${role} -> ${path}`).toBe(true);
       }
       for (const path of ["/leads", "/invoices", "/admin/users", "/reports"]) {
@@ -289,6 +289,19 @@ describe("staff route access by capability", () => {
     // has no order access.
     expect(canAccessStaffRoute("teamlead_interpreter", "/orders")).toBe(true);
     expect(canAccessStaffRoute("interpreter", "/orders")).toBe(false);
+  });
+
+  it("gives the interpreter team lead no patient list and no «Пациенты» menu item", () => {
+    // Owner 2026-11-11: the list is always empty for the role. A patient record
+    // opened from an appointment stays reachable; the server decides per patient.
+    expect(canAccessStaffRoute("teamlead_interpreter", "/patients")).toBe(false);
+    expect(canAccessStaffRoute("teamlead_interpreter", "/patients", ["patients.view"])).toBe(false);
+    expect(staffHrefIfAllowed("teamlead_interpreter", "/patients?patient=patient-1")).toBe("/");
+    expect(canAccessStaffRoute("teamlead_interpreter", "/patients/patient-1")).toBe(true);
+    expect(nav("teamlead_interpreter")).not.toContain("/patients");
+    // The interpreter keeps both.
+    expect(canAccessStaffRoute("interpreter", "/patients")).toBe(true);
+    expect(nav("interpreter")).toContain("/patients");
   });
 
   it("locks the P0 operations workspaces to their capability contracts", () => {

@@ -49,6 +49,7 @@ import { fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { ProviderTaxonomyCascadeSelect } from "@/pages/providers/ui/provider-taxonomy-cascade-select";
 import { cn } from "@/lib/utils";
+import { formatMoneyLabel } from "@/lib/money";
 import { portalServiceContext } from "./model/portal-service-context";
 import { portalServiceNotes } from "./model/portal-service-notes";
 
@@ -433,7 +434,8 @@ export function PatientServicesPage() {
         vendor_contact: form.vendorContact || undefined,
         starts_at: toIsoDateTime(form.startsAt),
         ends_at: toIsoDateTime(form.endsAt),
-        cost_estimate: form.costEstimate ? Number(form.costEstimate) : undefined,
+        // The patient's own budget: shown back to the patient, never replaced by staff.
+        patient_budget: form.costEstimate ? Number(form.costEstimate) : undefined,
         // Stored as the patient's own note; staff never overwrite it.
         patient_note: form.serviceNotes || undefined,
       });
@@ -561,6 +563,9 @@ export function PatientServicesPage() {
                     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                       {item.vendor_name && <InfoRow label={t.services_vendor} value={item.vendor_name} />}
                       {item.booking_reference && <InfoRow label={t.services_booking_reference} value={item.booking_reference} />}
+                      {item.patient_budget != null && item.patient_budget !== "" ? (
+                        <InfoRow label={t.services_your_budget} value={formatMoneyLabel(item.patient_budget, item.currency)} />
+                      ) : null}
                       <InfoRow label={t.services_created_at} value={<PortalDateChip timestamp={item.created_at} />} />
                     </div>
 

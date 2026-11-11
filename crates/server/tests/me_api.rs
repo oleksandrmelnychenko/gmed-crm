@@ -1695,12 +1695,17 @@ async fn portal_service_api_never_carries_internal_staff_text() {
         Some(json!({
             "service_kind": "hotel",
             "title": "Hotel near the clinic",
-            "patient_note": "Ground floor room, please."
+            "patient_note": "Ground floor room, please.",
+            "patient_budget": 450
         })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{requested}");
     assert_eq!(requested["patient_note"], "Ground floor room, please.");
+    // The patient's budget has its own field (owner 2026-11-11); the internal
+    // estimate is not prefilled from it.
+    assert_eq!(requested["patient_budget"], "450.00");
+    assert!(requested.get("cost_estimate").is_none(), "{requested}");
     let request_id = requested["id"].as_str().expect("request id").to_string();
 
     let (status, staff_view) = json_request(
@@ -1714,6 +1719,8 @@ async fn portal_service_api_never_carries_internal_staff_text() {
     assert_eq!(status, StatusCode::OK, "{staff_view}");
     assert_eq!(staff_view["patient_note"], "Ground floor room, please.");
     assert!(staff_view["service_notes"].is_null());
+    assert_eq!(staff_view["patient_budget"], "450.00");
+    assert!(staff_view["cost_estimate"].is_null(), "{staff_view}");
 
     let (status, saved) = json_request(
         &app,
@@ -1723,6 +1730,7 @@ async fn portal_service_api_never_carries_internal_staff_text() {
         Some(json!({
             "service_notes": "INTERNAL-NOTE second request",
             "patient_note": "INTERNAL-OVERWRITE attempt",
+            "patient_budget": 1.11,
             "cost_estimate": 123.45
         })),
     )
@@ -1730,6 +1738,21 @@ async fn portal_service_api_never_carries_internal_staff_text() {
     assert_eq!(status, StatusCode::OK, "{saved}");
     assert_eq!(saved["service_notes"], "INTERNAL-NOTE second request");
     assert_eq!(saved["patient_note"], "Ground floor room, please.");
+    // Staff set their own estimate; the patient's budget stays as requested.
+    assert_eq!(saved["cost_estimate"], "123.45");
+    assert_eq!(saved["patient_budget"], "450.00");
+    let stored_patient_budget: Option<rust_decimal::Decimal> =
+        sqlx::query_scalar("SELECT patient_budget FROM concierge_services WHERE id = $1")
+            .bind(Uuid::parse_str(&request_id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        stored_patient_budget
+            .map(|value| value.to_string())
+            .as_deref(),
+        Some("450.00")
+    );
     let stored_patient_note: Option<String> =
         sqlx::query_scalar("SELECT patient_request_note FROM concierge_services WHERE id = $1")
             .bind(Uuid::parse_str(&request_id).unwrap())
@@ -1788,6 +1811,9 @@ async fn portal_service_api_never_carries_internal_staff_text() {
         .expect("patient request");
     assert_eq!(hotel["patient_note"], "Ground floor room, please.");
     assert!(hotel["patient_visible_note"].is_null());
+    // «Ваш бюджет»: the patient's own amount, unchanged by the staff save.
+    assert_eq!(hotel["patient_budget"], "450.00");
+    assert!(transfer["patient_budget"].is_null());
 }
 
 #[tokio::test]

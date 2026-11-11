@@ -192,6 +192,12 @@ type RouteRule = {
    * user's capabilities from `/me`, or the role mirror in `@/lib/permissions`.
    */
   capability?: string | readonly string[];
+  /**
+   * Roles that never get this route (nor its menu entry), whatever capability
+   * they hold: a page that is always empty for them. Navigation only; the
+   * server keeps its own rights.
+   */
+  excludedRoles?: readonly StaffRole[];
   nav?: {
     section: StaffNavSection;
     labelKey: string;
@@ -549,12 +555,25 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     capability: "leads.edit",
   },
   {
+    // The patient list. The interpreter team lead has no list and no menu item
+    // (owner 2026-11-11: it is empty for the role); the role reads its
+    // assigned patients through the appointments.
     id: "patients",
+    match: "exact",
+    path: "/patients",
+    roles: ROLES_PATIENTS,
+    capability: "patients.view",
+    excludedRoles: ["teamlead_interpreter"],
+    nav: { section: "crm", labelKey: "patients_title" },
+  },
+  {
+    // A patient record, e.g. opened from an appointment's patient tile (the
+    // server decides per patient, `can_open_patient`).
+    id: "patients/record",
     match: "prefix",
     path: "/patients",
     roles: ROLES_PATIENTS,
     capability: "patients.view",
-    nav: { section: "crm", labelKey: "patients_title" },
   },
   {
     id: "orders",
@@ -692,6 +711,9 @@ function ruleAllows(
   role: string,
   capabilities: readonly string[] | null | undefined,
 ): boolean {
+  if ((rule.excludedRoles as readonly string[] | undefined)?.includes(role)) {
+    return false;
+  }
   if (rule.capability === undefined) {
     return STAFF_ROUTE_ROLE_SETS.get(rule.id)?.has(role) ?? false;
   }

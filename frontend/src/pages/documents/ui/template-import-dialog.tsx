@@ -63,8 +63,7 @@ const FILE_INPUT_ID = "template-import-file";
 
 /** What each `{{field}}` stands for; keys mirror the server catalog. */
 const VARIABLE_LABELS: Record<string, { de: string; ru: string }> = {
-  patient_id: { de: "Patientennummer", ru: "Номер пациента" },
-  lead_number: { de: "Anfragenummer (Lead)", ru: "Номер обращения (лид)" },
+  patient_id: { de: "Patientennummer (beim Lead: Anfragenummer)", ru: "Номер пациента (у лида — номер обращения)" },
   patient_name: { de: "Vor- und Nachname", ru: "Имя и фамилия" },
   patient_first_name: { de: "Vorname", ru: "Имя" },
   patient_last_name: { de: "Nachname", ru: "Фамилия" },

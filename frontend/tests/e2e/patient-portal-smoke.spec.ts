@@ -297,7 +297,7 @@ async function installPatientPortalMocks(page: Page, patients?: Array<{ id: stri
         vendor_contact?: string;
         starts_at?: string;
         ends_at?: string;
-        cost_estimate?: number;
+        patient_budget?: number;
         patient_note?: string;
       };
       const createdService = {
@@ -316,6 +316,7 @@ async function installPatientPortalMocks(page: Page, patients?: Array<{ id: stri
         ends_at: payload.ends_at ?? null,
         currency: "EUR",
         patient_note: payload.patient_note ?? null,
+        patient_budget: payload.patient_budget == null ? null : payload.patient_budget.toFixed(2),
         patient_visible_note: null,
         request_source: "patient_portal",
         completed_at: null,
@@ -1216,6 +1217,9 @@ test.describe("patient portal smoke flows", () => {
     const createdCard = page.locator("article").filter({ hasText: "Hotel near clinic" });
     await expect(createdCard).toBeVisible();
     await expect(createdCard.getByText(/^Ausstehend$|^Pending$/i)).toBeVisible();
+    // The patient's own budget comes back as «Ihr Budget» (owner 2026-11-11).
+    await expect(createdCard.getByText(/^Ihr Budget$|^Ваш бюджет$/i)).toBeVisible();
+    await expect(createdCard.getByText(/240,00\s€/)).toBeVisible();
     await createdCard
       .getByRole("button", {
         name: /Anfrage stornieren|Отменить запрос|Cancel request/i,
