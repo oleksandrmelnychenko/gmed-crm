@@ -3072,7 +3072,7 @@ test.describe("lead onboarding wizard", () => {
       if (path === `/api/v1/leads/${createdId}/update`) updates.push(request.postDataJSON());
     });
     await page.goto("/leads");
-    await page.getByRole("button", { name: "Neuer Lead" }).click();
+    await page.getByRole("button", { name: "Neuer Lead", exact: true }).click();
     const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
     await wizard.locator("#lead-wizard-first-name").fill("Anna");
     await wizard.locator("#lead-wizard-last-name").fill("Mother");
@@ -3265,7 +3265,7 @@ test.describe("lead onboarding wizard", () => {
         }
       });
       await page.goto("/leads");
-      await page.getByRole("button", { name: "Neuer Lead" }).click();
+      await page.getByRole("button", { name: "Neuer Lead", exact: true }).click();
       const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme", exact: true });
       await wizard.locator("#lead-wizard-first-name").fill("Mia");
       await wizard.locator("#lead-wizard-last-name").fill("Example");
@@ -3321,7 +3321,7 @@ test.describe("lead onboarding wizard", () => {
     });
 
     await page.goto("/leads");
-    await page.getByRole("button", { name: "Neuer Lead" }).click();
+    await page.getByRole("button", { name: "Neuer Lead", exact: true }).click();
 
     const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
     await expect(wizard).toBeVisible();

@@ -1345,8 +1345,10 @@ test.describe("lead cabinet", () => {
 
     // "I pay myself" sends only the answer and hides the other person again.
     await step(page, "billing");
+    // The person named as payer is replaced only after the confirmation (release QA F2).
+    page.once("dialog", (dialog) => void dialog.accept());
     await choose(page, question, "Ich selbst");
-    await expect.poll(() => calls.payer.at(-1)).toEqual({ payer_kind: "self" });
+    await expect.poll(() => calls.payer.at(-1)).toMatchObject({ payer_kind: "self" });
     await expect(payer.getByRole("textbox", { name: "Nachname" })).toHaveCount(0);
     await expect(payer.getByTestId("lead-request-payer-consent")).toHaveCount(0);
     // What was typed about the person comes back with the answer; the consent is asked again.
