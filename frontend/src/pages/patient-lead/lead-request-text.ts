@@ -225,6 +225,8 @@ export type LeadRequestText = {
   notStated: string;
   insuranceAnswerOptions: { yes: string; no: string };
   insuranceTypeOptions: { private: string; public: string; foreign: string };
+  /** The self-payer type staff may set with an insurance (not offered in the cabinet): its name in the list. */
+  insuranceTypeSelfPay: string;
   insuranceCoverageOptions: { yes: string; no: string; not_sure: string };
   /** After sending, when the request was changed: why to send again. */
   changedAfterSend: string;
@@ -314,6 +316,8 @@ export type LeadRequestText = {
     vormundSelf: string;
     isPayerVormund: string;
     confirmPayerChange: string;
+    /** Under the disabled confirmation: why it cannot be pressed yet. */
+    confirmPayerNeedsFields: string;
     /**
      * Asked before the invoice (and with it the payment) moves from one parent to the other
      * (owner 2026-11-10): who receives and pays from now on, and that what the other parent
@@ -1325,6 +1329,7 @@ const de: LeadRequestText = {
   notStated: "Keine Angabe",
   insuranceAnswerOptions: { yes: "Ja", no: "Nein" },
   insuranceTypeOptions: { private: "Privat", public: "Gesetzlich", foreign: "Ausländische Versicherung" },
+  insuranceTypeSelfPay: "Selbstzahler",
   insuranceCoverageOptions: { yes: "Ja", no: "Nein", not_sure: "Weiß ich nicht" },
   changedAfterSend:
     "Sie haben Ihre Anfrage nach dem Senden geändert. Senden Sie sie erneut, damit Ihre Ansprechperson die Änderungen erhält.",
@@ -1400,6 +1405,7 @@ const de: LeadRequestText = {
     section: "Rechnungsempfänger",
     changedMeanwhile: "Der Rechnungsempfänger wurde inzwischen geändert. Wir haben die aktuellen Angaben geladen – bitte prüfen Sie sie und geben Sie Ihre Änderung erneut ein.",
     confirmPayerChange: "Diesen Rechnungsempfänger als Zahler bestätigen",
+    confirmPayerNeedsFields: "Bitte füllen Sie zuerst die mit * markierten Angaben des Rechnungsempfängers aus.",
     parentChangeConfirm: (from, to, pays) => `Die Rechnung erhält künftig ${to} statt ${from}${pays ? " – und zahlt sie auch" : ""}. Was ${from} als Zahler angegeben hat (die Zahlungsart), gilt dann nicht mehr und wird neu abgefragt. Möchten Sie das ändern?`,
     replacePayerHint: "Ihre bisherigen Angaben zum Zahler werden ersetzt.",
     payerReplaceConfirm: (name) => `Als Zahler ist derzeit ${name || "eine andere Person oder Organisation"} angegeben. Wenn Sie den Zahler ändern, werden dessen Angaben (auch ein bereits ausgefüllter Fragebogen) sowie die für ihn vorbereiteten Formulare und Dokumente archiviert; Ihre Einwilligungen zu diesem Zahler gelten nicht mehr. Zahler wirklich ändern?`,
@@ -2000,6 +2006,7 @@ const ru: LeadRequestText = {
   notStated: "Не указано",
   insuranceAnswerOptions: { yes: "Да", no: "Нет" },
   insuranceTypeOptions: { private: "Частное", public: "Государственное", foreign: "Иностранное" },
+  insuranceTypeSelfPay: "Самооплата",
   insuranceCoverageOptions: { yes: "Да", no: "Нет", not_sure: "Не знаю" },
   changedAfterSend:
     "После отправки вы изменили заявку. Отправьте её ещё раз, чтобы ваш контакт в GMED получил изменения.",
@@ -2073,6 +2080,7 @@ const ru: LeadRequestText = {
     section: "Получатель счёта",
     changedMeanwhile: "Получатель счёта тем временем изменился. Мы загрузили актуальные данные — проверьте их и при необходимости введите изменение ещё раз.",
     confirmPayerChange: "Подтвердить этого получателя как плательщика",
+    confirmPayerNeedsFields: "Сначала заполните отмеченные * данные получателя счёта.",
     parentChangeConfirm: (from, to, pays) => `Счёт теперь будет получать ${to}, а не ${from}${pays ? ", и оплачивать его тоже" : ""}. То, что указано от имени ${from} как плательщика (способ оплаты), перестанет действовать и будет запрошено заново. Изменить?`,
     replacePayerHint: "Прежние данные о плательщике будут заменены.",
     payerReplaceConfirm: (name) => `Сейчас плательщиком указан(а) ${name || "другое лицо или организация"}. Если сменить плательщика, его данные (в том числе уже заполненная анкета), а также подготовленные для него формы и документы будут перенесены в архив, а ваши согласия в отношении этого плательщика перестанут действовать. Сменить плательщика?`,
@@ -2670,6 +2678,7 @@ const uk: LeadRequestText = {
   notStated: "Не вказано",
   insuranceAnswerOptions: { yes: "Так", no: "Ні" },
   insuranceTypeOptions: { private: "Приватне", public: "Державне", foreign: "Іноземне" },
+  insuranceTypeSelfPay: "Самооплата",
   insuranceCoverageOptions: { yes: "Так", no: "Ні", not_sure: "Не знаю" },
   changedAfterSend:
     "Після надсилання ви змінили заявку. Надішліть її ще раз, щоб ваш контакт у GMED отримав зміни.",
@@ -2743,6 +2752,7 @@ const uk: LeadRequestText = {
     section: "Отримувач рахунку",
     changedMeanwhile: "Отримувача рахунку тим часом змінено. Ми завантажили актуальні дані — перевірте їх і за потреби введіть зміну ще раз.",
     confirmPayerChange: "Підтвердити цього отримувача як платника",
+    confirmPayerNeedsFields: "Спочатку заповніть позначені * дані отримувача рахунку.",
     parentChangeConfirm: (from, to, pays) => `Рахунок тепер отримуватиме ${to}, а не ${from}${pays ? ", і оплачуватиме його також" : ""}. Те, що вказано від імені ${from} як платника (спосіб оплати), більше не діятиме і буде запитано знову. Змінити?`,
     replacePayerHint: "Попередні дані про платника буде замінено.",
     payerReplaceConfirm: (name) => `Зараз платником указано ${name || "іншу особу або організацію"}. Якщо змінити платника, його дані (зокрема вже заповнена анкета), а також підготовлені для нього форми й документи буде перенесено до архіву, а ваші згоди щодо цього платника перестануть діяти. Змінити платника?`,
@@ -3340,6 +3350,7 @@ const en: LeadRequestText = {
   notStated: "Not specified",
   insuranceAnswerOptions: { yes: "Yes", no: "No" },
   insuranceTypeOptions: { private: "Private", public: "Statutory (public)", foreign: "Foreign" },
+  insuranceTypeSelfPay: "Self-payer",
   insuranceCoverageOptions: { yes: "Yes", no: "No", not_sure: "Not sure" },
   changedAfterSend:
     "You changed your request after sending it. Send it again so that your contact person receives the changes.",
@@ -3413,6 +3424,7 @@ const en: LeadRequestText = {
     section: "Invoice recipient",
     changedMeanwhile: "The invoice recipient was changed in the meantime. We loaded the current details — please check them and enter your change again.",
     confirmPayerChange: "Confirm this recipient as the payer",
+    confirmPayerNeedsFields: "Please first fill in the invoice recipient's details marked with *.",
     parentChangeConfirm: (from, to, pays) => `From now on ${to} receives the invoice instead of ${from}${pays ? " and pays it" : ""}. What ${from} entered as the payer (the payment method) will no longer apply and will be asked again. Change it?`,
     replacePayerHint: "Your previous payer details will be replaced.",
     payerReplaceConfirm: (name) => `${name || "Another person or organisation"} is currently named as the payer. If you change the payer, their details (including a questionnaire already filled in) and the forms and documents prepared for them are archived, and your consents about this payer no longer apply. Change the payer?`,

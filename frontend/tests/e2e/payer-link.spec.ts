@@ -253,6 +253,14 @@ type Options = {
   enhancedCheckRequired?: boolean;
   /** Signed in already (a session from an earlier visit of this tab). */
   answers?: Partial<Answers>;
+  /**
+   * Answers the server shows from what the patient entered about the payer while
+   * the payer has none of its own (`effective_answers`). `keepsEmptied`: the server
+   * remembers an emptied default (since 2026-11-11); without it, an older server
+   * offers the default again after the payer emptied it (recheck N2).
+   */
+  defaults?: Partial<Answers>;
+  keepsEmptied?: boolean;
   afterAnswersWrite?: (answers: Answers, patch: Record<string, unknown>) => Promise<void> | void;
   beforeSubmit?: () => Promise<void>;
   beforeUpload?: (count: number) => Promise<void> | void;
@@ -335,8 +343,18 @@ async function setup(page: Page, options: Options = {}) {
     extracts: 0,
   };
 
+  /** Defaults the payer emptied, remembered by the server (`cleared_defaults`). */
+  const cleared = new Set<string>();
+  const effectiveAnswers = (): Answers => {
+    const answers = { ...q.answers };
+    for (const [key, value] of Object.entries(options.defaults ?? {})) {
+      if (empty(answers[key]) && !cleared.has(key)) answers[key] = value;
+    }
+    return answers;
+  };
+
   const recompute = () => {
-    const a = q.answers;
+    const a = effectiveAnswers();
     const r = q.payment_route;
     const organisation = payerType !== "person";
     // Like the server (owner rule 2026-10-07): only the black list and a
@@ -420,7 +438,7 @@ async function setup(page: Page, options: Options = {}) {
     if (r.via_third_party !== true) r.via_third_party_details = null;
   };
 
-  const view = () => JSON.parse(JSON.stringify(q)) as Questionnaire;
+  const view = () => JSON.parse(JSON.stringify({ ...q, answers: effectiveAnswers() })) as Questionnaire;
   const refuse = (route: Route, status: number, code: string, extra: Record<string, unknown> = {}) =>
     route.fulfill({ status, json: { error: "refused", code, message: code, ...extra } });
 
@@ -534,6 +552,10 @@ async function setup(page: Page, options: Options = {}) {
         const stored = value === "" ? null : value;
         if (JSON.stringify(target[key] ?? null) === JSON.stringify(stored)) calls.unchanged.push(key);
         target[key] = stored;
+        if (options.defaults && key in options.defaults) {
+          if (!empty(stored)) cleared.delete(key);
+          else if (options.keepsEmptied) cleared.add(key);
+        }
       }
       clearDependents();
       recompute();
@@ -981,6 +1003,52 @@ test.describe("payer hard stop: every required field of a step holds every press
     await next(page);
     await expect(form(page)).toHaveAttribute("data-step", "identity");
   });
+
+  // Recheck 2026-11-11 N2: an answer shown from what the patient entered about the payer
+  // (the street, the first name) came back about a second after the payer emptied it, and
+  // "next" went on. The server now remembers the emptied default; the page keeps the field
+  // empty also when an older server answers with the default again.
+  for (const keepsEmptied of [true, false]) {
+    test(`an emptied answer that was prefilled stays empty and holds every press (${keepsEmptied ? "server remembers it" : "older server offers it again"})`, async ({ page }) => {
+      const { q, calls } = await setup(page, {
+        ...person({ street: null, first_name: null }),
+        defaults: { street: "Zahlerweg 3", first_name: "Paul" },
+        keepsEmptied,
+      });
+      await signIn(page);
+      await page.getByTestId("payer-link-summary-details").getByRole("button").click();
+      await expect(form(page)).toHaveAttribute("data-step", "details");
+      const details = page.getByTestId("payer-link-step-details");
+      const street = details.getByRole("textbox", { name: "Straße und Hausnummer" });
+      const firstName = details.getByRole("textbox", { name: "Vorname" });
+      await expect(street).toHaveValue("Zahlerweg 3");
+      await expect(firstName).toHaveValue("Paul");
+      await street.fill("");
+      await firstName.fill("");
+      // The save went out and its answer came back: the fields stay empty.
+      await expect.poll(() => calls.patches.some((patch) => patch.street === "" && patch.first_name === "")).toBe(true);
+      await page.waitForTimeout(1500);
+      await expect(street).toHaveValue("");
+      await expect(firstName).toHaveValue("");
+      const sent = calls.patches.length;
+      for (let press = 1; press <= 3; press += 1) {
+        await page.getByTestId("payer-link-step-title").click();
+        await next(page);
+        await expect(form(page)).toHaveAttribute("data-step", "details");
+        await expect(page.getByTestId("payer-link-notice").or(page.getByTestId("payer-link-step-missing")).first()).toContainText("Vorname");
+        await expect(firstName).toBeFocused();
+        await expect(firstName).toBeInViewport();
+        await expect(street).toHaveValue("");
+      }
+      // The emptied answers are not sent again and again.
+      expect(calls.patches.length - sent).toBeLessThanOrEqual(1);
+      await firstName.fill("Paula");
+      await street.fill("Neue Gasse 1");
+      await expect.poll(() => [q.answers.first_name, q.answers.street]).toEqual(["Paula", "Neue Gasse 1"]);
+      await next(page);
+      await expect(form(page)).toHaveAttribute("data-step", "identity");
+    });
+  }
 });
 
 test("payer recheck: a refused send keeps the answer saved just before it", async ({ page }) => {

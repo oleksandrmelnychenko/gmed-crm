@@ -16,16 +16,19 @@ import {
   fieldValue,
   fundsSourceOptions,
   isOrganisation,
+  keptEmpty,
   missingByStep,
   ownersBlocker,
   PAYER_FIELDS,
   payerSteps,
+  refilledFields,
   refusedField,
   industryRequired,
   occupationRequired,
   requiredFields,
   splitIdentityDocuments,
   stillRejected,
+  withEmptiedKept,
   withRejectedField,
   type OwnerDraft,
   type OwnerField,
@@ -101,6 +104,9 @@ function useAnswersForm({
   const queuedDraftRef = useRef(savedRef.current);
   const refusedRef = useRef<RefusedValues>({ values: {}, codes: {} });
   const [refused, setRefused] = useState<RefusedValues>(refusedRef.current);
+  // Fields the payer emptied that the server answered with a value (a default it offers again):
+  // they stay empty on the page and are not sent again until typed (recheck 2026-11-11 N2).
+  const emptiedRef = useRef<Set<PayerField>>(new Set());
   const failedRef = useRef(false);
   const context: PatchContext = { payerType: questionnaire.payer_type, routeAsked: Boolean(questionnaire.payment_route?.asked) };
   const contextRef = useRef(context);
@@ -132,7 +138,8 @@ function useAnswersForm({
         const codes = { ...refusedRef.current.codes };
         // Each round either saves or sets one more refused field aside.
         for (;;) {
-          const patch = scopedDraftPatch(answersPatch(savedRef.current, snapshot, contextRef.current, rejected), fields);
+          const held = { ...keptEmpty(emptiedRef.current, snapshot), ...rejected };
+          const patch = scopedDraftPatch(answersPatch(savedRef.current, snapshot, contextRef.current, held), fields);
           const keys = Object.keys(patch);
           if (keys.length === 0) break;
           // A new phone that is no phone number is not sent: the field says so at once (owner 2026-10-22).
@@ -150,8 +157,14 @@ function useAnswersForm({
             const previous = savedRef.current;
             const stored = draftFromQuestionnaire(next);
             savedRef.current = stored;
-            queuedDraftRef.current = mergeSavedDraft(queuedDraftRef.current, snapshot, stored, previous, keys, fields);
-            setDraft((current) => mergeSavedDraft(current, snapshot, stored, previous, keys, fields));
+            // A value typed again and saved ends it; emptied again, it is sent again.
+            for (const field of emptiedRef.current) if (keys.includes(field)) emptiedRef.current.delete(field);
+            for (const field of refilledFields(keys, snapshot, stored)) emptiedRef.current.add(field);
+            const emptied = [...emptiedRef.current];
+            const merge = (current: PayerDraft) =>
+              withEmptiedKept(mergeSavedDraft(current, snapshot, stored, previous, keys, fields), current, emptied);
+            queuedDraftRef.current = merge(queuedDraftRef.current);
+            setDraft(merge);
             saved = true;
             onQuestionnaire(next);
             break;
@@ -200,7 +213,8 @@ function useAnswersForm({
     },
     flush: () => save(draftRef.current),
     refusedFields: () => Object.keys(stillRejected(refusedRef.current.values, draftRef.current)),
-    hasUnsaved: () => Object.keys(answersPatch(savedRef.current, draftRef.current, contextRef.current)).length > 0,
+    hasUnsaved: () =>
+      Object.keys(answersPatch(savedRef.current, draftRef.current, contextRef.current, keptEmpty(emptiedRef.current, draftRef.current))).length > 0,
   };
 }
 

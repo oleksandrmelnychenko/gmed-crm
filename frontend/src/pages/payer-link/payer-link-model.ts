@@ -611,6 +611,37 @@ export function reconcileDraft(
   return next ?? current;
 }
 
+/**
+ * The sent fields the payer emptied and the server answered with a value: an
+ * answer shown from a default (what the patient entered about the payer) that
+ * an older server offers again. The page keeps such a field empty and does not
+ * send it again until it is typed (recheck 2026-11-11 N2: the old street came
+ * back a second later and "next" went on).
+ */
+export function refilledFields(sent: readonly string[], snapshot: PayerDraft, stored: PayerDraft): PayerField[] {
+  return sent.filter(
+    (field): field is PayerField => isPayerField(field) && fieldValue(field, snapshot) === "" && fieldValue(field, stored) !== "",
+  );
+}
+
+/** Of `fields`, those the draft still shows empty: as refused values, so that they are not sent again. */
+export function keptEmpty(fields: Iterable<PayerField>, draft: PayerDraft): RejectedFields {
+  const kept: RejectedFields = {};
+  for (const field of fields) if (fieldValue(field, draft) === "") kept[field] = "";
+  return kept;
+}
+
+/** `merged` with the fields that `current` shows empty put back to empty. */
+export function withEmptiedKept(merged: PayerDraft, current: PayerDraft, fields: Iterable<PayerField>): PayerDraft {
+  let next: PayerDraft | null = null;
+  for (const field of fields) {
+    if (fieldValue(field, current) !== "" || fieldValue(field, merged) === "") continue;
+    next ??= { ...merged };
+    (next as Record<string, unknown>)[field] = current[field];
+  }
+  return next ?? merged;
+}
+
 /** The fields another write changed on the server since the last save. */
 export function changedOnServer(saved: PayerDraft, incoming: PayerDraft): PayerField[] {
   return PAYER_FIELDS.filter((field) => fieldValue(field, saved) !== fieldValue(field, incoming));

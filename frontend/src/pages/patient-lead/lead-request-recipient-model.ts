@@ -402,12 +402,16 @@ export function payerFitsFlow(
   return false;
 }
 
-/** A complete recipient identity is needed before it can replace the payer. */
+/**
+ * A complete recipient identity is needed before it can replace the payer: the fields the form
+ * stars. Not the phone: it is optional for a payer, here and on the server (2026-10-24); asking
+ * it kept the button disabled without a word until a phone was typed (recheck 2026-11-11 N4).
+ */
 export function recipientPayerReady(recipient: RecipientDraft): boolean {
   const named = recipient.type === "organisation"
     ? Boolean(recipient.organisation_name.trim() && recipient.legal_form.trim() && recipient.contact_name.trim())
     : recipient.type === "person" && Boolean(recipient.first_name.trim() && recipient.last_name.trim()
-      && recipient.relationship_kind && (recipient.relationship_kind !== "other" || recipient.relationship.trim()) && recipient.phone.trim());
+      && recipient.relationship_kind && (recipient.relationship_kind !== "other" || recipient.relationship.trim()));
   return named && Boolean(recipient.country && recipient.street.trim() && recipient.zip.trim() && recipient.city.trim() && recipient.email.trim());
 }
 

@@ -1721,6 +1721,27 @@ test.describe("lead cabinet", () => {
     await expect(missing).toContainText("Zahler: Einwilligung zur Weitergabe des Kostenvoranschlags");
   });
 
+  // Recheck 2026-11-11 N5: the summary listed the payer's cost-estimate consent while the tab
+  // «Versicherung & Rechnung» said neither what is missing nor that it is complete.
+  test("the tab of step 3 counts the payer's open cost-estimate consent like the step and the summary", async ({ page }) => {
+    await setup(page, "lead", {
+      prepare: (prepared) => completeRequestWithPayer(prepared, { cost_estimate_consent_at: null }),
+    });
+    await page.goto("/");
+    await page.locator('[data-step="send"]').click();
+    await expect(page.getByTestId("lead-request-missing").getByRole("listitem")).toHaveText(["Zahler: Einwilligung zur Weitergabe des Kostenvoranschlags"]);
+    const tab = page.locator('[data-step="billing"]');
+    await expect(tab.getByTestId("lead-request-step-badge")).toHaveText("1");
+    await expect(tab.locator("[data-step-state]")).toHaveAttribute("data-step-state", "pending");
+    // The step itself holds «Weiter» and names it in its list.
+    await step(page, "billing");
+    const current = page.getByTestId("lead-request-step");
+    await current.getByRole("button", { name: "Weiter" }).click();
+    await expect(current).toHaveAttribute("data-current-step", "billing");
+    await expect(page.getByTestId("lead-request-step-billing").getByTestId("lead-request-step-missing")).toContainText("Einwilligung zur Weitergabe des Kostenvoranschlags");
+    await expect(tab.getByTestId("lead-request-step-badge")).toHaveText("1");
+  });
+
   test("after the payer answered, the consent to pass the cost estimate on stays the patient's to give", async ({ page }) => {
     const { calls } = await setup(page, "lead", {
       prepare: (prepared) => completeRequestWithPayer(prepared, { answered_by_payer: true, cost_estimate_consent_at: null }),
@@ -2819,6 +2840,30 @@ test.describe("Weiter holds a step the same way on every press", () => {
     await date.getByRole("spinbutton").first().click();
     await page.keyboard.type("01012090", { delay: 80 });
     await next(page);
+    await expect(page.locator("#lead-request-date_of_birth-error")).toContainText("Zukunft");
+    await expect(page.getByTestId("lead-request-save-state")).toHaveText("Nicht gespeichert");
+  });
+
+  // Recheck 2026-11-11 N1: the message and «Nicht gespeichert» came only with the first «Weiter»;
+  // the wish date of the services step says it as soon as the field is left.
+  test("a refused date of birth says so as soon as the field is left, before any press of Weiter", async ({ page }) => {
+    await setup(page, "lead", { prepare: filled() });
+    await page.goto("/");
+    await page.locator("#lead-request-city").fill("Hamburg");
+    await expect(page.getByTestId("lead-request-save-state")).toHaveText("Gespeichert");
+    const date = page.getByRole("group", { name: /Geburtsdatum/ });
+    await date.getByRole("spinbutton").first().click();
+    await page.keyboard.type("01012090", { delay: 80 });
+    // Tab goes to the field's calendar button first: the date is left all the same.
+    await page.keyboard.press("Tab");
+    await expect(date.getByRole("spinbutton").last()).not.toBeFocused();
+    await expect(page.locator("#lead-request-date_of_birth-error")).toContainText("Zukunft");
+    await expect(page.getByTestId("lead-request-save-state")).toHaveText("Nicht gespeichert");
+    await expect(current(page)).toHaveAttribute("data-current-step", "person");
+    // Left by a click elsewhere as well.
+    await date.getByRole("spinbutton").last().click();
+    await page.keyboard.type("2091", { delay: 80 });
+    await page.locator("#lead-request-city").click();
     await expect(page.locator("#lead-request-date_of_birth-error")).toContainText("Zukunft");
     await expect(page.getByTestId("lead-request-save-state")).toHaveText("Nicht gespeichert");
   });

@@ -336,7 +336,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     [hasInsuranceLabel(text, request), yesNo(data.has_insurance)],
     ...(data.has_insurance
       ? ([
-          [text.fields.insurance_type, option(text.insuranceTypeOptions, data.insurance_type)],
+          [text.fields.insurance_type, data.insurance_type === "self_pay" ? text.insuranceTypeSelfPay : option(text.insuranceTypeOptions, data.insurance_type)],
           [text.fields.insurance_provider, data.insurance_provider],
           [text.fields.insurance_number, data.insurance_number],
           [text.fields.insurance_covers_germany, option(text.insuranceCoverageOptions, data.insurance_covers_germany)],

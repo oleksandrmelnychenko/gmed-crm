@@ -166,6 +166,29 @@ const ANSWER_KEYS: [&str; 47] = [
     "representative_citizenships",
 ];
 
+/// The answer keys [`effective_answers`] may complete with a default from
+/// the declaration (or the organisation's mask). Once the writer empties one,
+/// its default is not offered again (`Answers::cleared`; recheck 2026-11-11
+/// N2: an emptied street came back a second later and «Weiter» went on).
+const DEFAULTED_KEYS: [&str; 16] = [
+    "first_name",
+    "last_name",
+    "date_of_birth",
+    "citizenships",
+    "street",
+    "city",
+    "zip",
+    "country",
+    "phone",
+    "organisation_name",
+    "register_number",
+    "representative_first_name",
+    "representative_last_name",
+    "relationship",
+    "legal_form",
+    "payment_reason",
+];
+
 /// Keys only a natural person answers.
 const PERSON_KEYS: [&str; 10] = [
     "salutation",
@@ -633,9 +656,17 @@ struct Answers {
     legal_form: Option<String>,
     vat_id: Option<String>,
     payment_reason: Option<String>,
+    /// Keys of [`DEFAULTED_KEYS`] the writer emptied, sorted
+    /// (`cleared_defaults`): no default fills them again.
+    cleared: Vec<String>,
 }
 
 impl Answers {
+    /// Whether the writer emptied `key`, so that no default fills it.
+    fn is_cleared(&self, key: &str) -> bool {
+        self.cleared.iter().any(|cleared| cleared == key)
+    }
+
     /// The value of one answer key as the API shows it.
     fn value(&self, key: &str) -> Value {
         match key {
@@ -766,8 +797,8 @@ const STATEMENT_COLUMNS: &str = "source, link_id, privacy_ack_at, privacy_text_v
      relationship, occupation, industry, funds_sources, funds_description, pep_self, \
      pep_self_details, pep_related, pep_related_details, high_risk_country, \
      high_risk_country_code, sanctions_links, sanctions_links_details, legal_form, vat_id, \
-     payment_reason, representative_citizenships, declared_correct_at, submitted_at, \
-     adopted_at, updated_at";
+     payment_reason, representative_citizenships, cleared_defaults, declared_correct_at, \
+     submitted_at, adopted_at, updated_at";
 
 /// `lead_payer_statements.source` of the answers staff entered from the
 /// signed paper Selbstauskunft (owner 2026-10-30).
@@ -860,6 +891,7 @@ impl Statement {
                 legal_form: text("legal_form"),
                 vat_id: text("vat_id"),
                 payment_reason: text("payment_reason"),
+                cleared: list("cleared_defaults"),
             },
             declared_correct_at: time("declared_correct_at"),
             submitted_at: time("submitted_at"),
@@ -915,7 +947,7 @@ async fn store_answers(
                high_risk_country_code = $42, sanctions_links = $43,
                sanctions_links_details = $44, legal_form = $45, vat_id = $46,
                payment_reason = $47, answered_by_user = $48,
-               representative_citizenships = $49, updated_at = now()
+               representative_citizenships = $49, cleared_defaults = $50, updated_at = now()
            WHERE lead_id = $1"#,
     )
     .bind(lead_id)
@@ -967,6 +999,7 @@ async fn store_answers(
     .bind(&answers.payment_reason)
     .bind(answered_by)
     .bind(&answers.representative_citizenships)
+    .bind(&answers.cleared)
     .execute(&mut *conn)
     .await
     .map(|_| ())
@@ -1138,35 +1171,60 @@ fn effective_answers(
         answers.payment_reason = None;
         return answers;
     }
-    for (target, fallback, max) in [
+    // An answer the payer emptied stays empty: its default is not offered
+    // again (recheck 2026-11-11 N2).
+    let offered = |key: &str| !stored.is_cleared(key);
+    for (key, target, fallback, max) in [
         (
+            "first_name",
             &mut answers.first_name,
             declaration.first_name.as_ref(),
             100,
         ),
-        (&mut answers.last_name, declaration.last_name.as_ref(), 100),
         (
+            "last_name",
+            &mut answers.last_name,
+            declaration.last_name.as_ref(),
+            100,
+        ),
+        (
+            "organisation_name",
             &mut answers.organisation_name,
             declaration.organisation_name.as_ref(),
             200,
         ),
         (
+            "relationship",
             &mut answers.relationship,
             declaration.relationship.as_ref(),
             200,
         ),
     ] {
-        fill(target, fallback, max);
+        if offered(key) {
+            fill(target, fallback, max);
+        }
     }
     if declaration.identity_adopted_at.is_none() {
-        for (target, fallback, max) in [
-            (&mut answers.street, declaration.street.as_ref(), 200),
-            (&mut answers.zip, declaration.zip.as_ref(), 20),
-            (&mut answers.city, declaration.city.as_ref(), 200),
-            (&mut answers.country, declaration.country.as_ref(), 2),
-            (&mut answers.phone, declaration.phone.as_ref(), 200),
+        for (key, target, fallback, max) in [
+            (
+                "street",
+                &mut answers.street,
+                declaration.street.as_ref(),
+                200,
+            ),
+            ("zip", &mut answers.zip, declaration.zip.as_ref(), 20),
+            ("city", &mut answers.city, declaration.city.as_ref(), 200),
+            (
+                "country",
+                &mut answers.country,
+                declaration.country.as_ref(),
+                2,
+            ),
+            ("phone", &mut answers.phone, declaration.phone.as_ref(), 200),
         ] {
-            fill(target, fallback, max);
+            if offered(key) {
+                fill(target, fallback, max);
+            }
         }
         if declaration.is_organisation() {
             let (first, last) = mask
@@ -1174,28 +1232,47 @@ fn effective_answers(
                 .as_deref()
                 .map(split_name)
                 .unwrap_or_default();
-            for (target, fallback, max) in [
-                (&mut answers.legal_form, mask.legal_form.as_ref(), 100),
+            for (key, target, fallback, max) in [
                 (
+                    "legal_form",
+                    &mut answers.legal_form,
+                    mask.legal_form.as_ref(),
+                    100,
+                ),
+                (
+                    "register_number",
                     &mut answers.register_number,
                     mask.register_number.as_ref(),
                     60,
                 ),
-                (&mut answers.representative_first_name, first.as_ref(), 100),
-                (&mut answers.representative_last_name, last.as_ref(), 100),
                 (
+                    "representative_first_name",
+                    &mut answers.representative_first_name,
+                    first.as_ref(),
+                    100,
+                ),
+                (
+                    "representative_last_name",
+                    &mut answers.representative_last_name,
+                    last.as_ref(),
+                    100,
+                ),
+                (
+                    "payment_reason",
                     &mut answers.payment_reason,
                     mask.payment_reason.as_ref(),
                     STATEMENT_TEXT_MAX,
                 ),
             ] {
-                fill(target, fallback, max);
+                if offered(key) {
+                    fill(target, fallback, max);
+                }
             }
         } else {
-            if answers.date_of_birth.is_none() {
+            if answers.date_of_birth.is_none() && offered("date_of_birth") {
                 answers.date_of_birth = declaration.date_of_birth;
             }
-            if answers.citizenships.is_empty() {
+            if answers.citizenships.is_empty() && offered("citizenships") {
                 answers.citizenships =
                     normalize_citizenships(&declaration.citizenships).unwrap_or_default();
             }
@@ -1804,6 +1881,21 @@ fn apply_answers_patch(
     if next.beneficial_owners_none == Some(true) {
         next.beneficial_owners.clear();
     }
+    // A sent key with a default is remembered as emptied while it is empty,
+    // so that no default fills it again (recheck 2026-11-11 N2); an answer
+    // given again forgets it.
+    for key in DEFAULTED_KEYS {
+        if !patch.contains_key(key) {
+            continue;
+        }
+        let value = next.value(key);
+        let empty = value.is_null() || value.as_array().is_some_and(Vec::is_empty);
+        next.cleared.retain(|cleared| cleared != key);
+        if empty {
+            next.cleared.push(key.to_string());
+        }
+    }
+    next.cleared.sort();
     // The document's dates fit together and the payer's birth, checked only
     // when one of them changes (an old stored answer still loads).
     if ["id_issued_on", "id_valid_until"]
@@ -3019,7 +3111,12 @@ async fn save_patch(
     let mut changed: Vec<&'static str> = ANSWER_KEYS
         .iter()
         .copied()
-        .filter(|key| statement.answers.value(key) != next.value(key))
+        .filter(|key| {
+            // Emptying an answer shown from a default changes no stored value,
+            // but its default must not come back (recheck 2026-11-11 N2).
+            statement.answers.value(key) != next.value(key)
+                || statement.answers.is_cleared(key) != next.is_cleared(key)
+        })
         .collect();
     if let Some((_, route_changed)) = &route {
         changed.extend(route_changed.iter().copied());
@@ -6297,6 +6394,7 @@ async fn reset_statement(
                    high_risk_country = NULL, high_risk_country_code = NULL,
                    sanctions_links = NULL, sanctions_links_details = NULL,
                    legal_form = NULL, vat_id = NULL, payment_reason = NULL,
+                   cleared_defaults = '{}',
                    declared_correct_at = NULL, submitted_at = NULL, adopted_at = NULL,
                    payment_route_marker = NULL, updated_at = now()
                WHERE lead_id = $1
@@ -7468,6 +7566,91 @@ mod tests {
             )
             .last_name
             .is_none()
+        );
+    }
+
+    #[test]
+    fn an_emptied_default_is_not_offered_again() {
+        // Recheck 2026-11-11 N2: the payer empties the street and the first
+        // name shown from the declaration; a second later both were back.
+        let declaration = Declaration {
+            street: Some("Zahlerweg 3".into()),
+            zip: Some("1010".into()),
+            ..person_payer()
+        };
+        let none = OrganisationMask::default();
+        let emptied = apply_answers_patch(
+            &Answers::default(),
+            &patch(json!({ "street": "", "first_name": "", "citizenships": [] })),
+            false,
+            today(),
+        )
+        .unwrap();
+        assert_eq!(emptied.cleared, ["citizenships", "first_name", "street"]);
+        let answers = effective_answers(&emptied, &declaration, None, &none);
+        assert_eq!((&answers.street, &answers.first_name), (&None, &None));
+        assert!(answers.citizenships.is_empty());
+        // The defaults not touched stay offered.
+        assert_eq!(answers.zip.as_deref(), Some("1010"));
+        assert_eq!(answers.last_name.as_deref(), Some("Zahler"));
+        let required = Requirements {
+            privacy_acknowledged: true,
+            payer_type: "person",
+            id_uploaded: true,
+            register_extract: false,
+            funds_required: false,
+            funds_proof_required: false,
+            funds_proof_uploaded: false,
+            payment_route: None,
+            organisation_follow_up: false,
+            today: today(),
+        };
+        let missing = missing_for_submit(&answers, &required);
+        assert!(missing.contains(&"street") && missing.contains(&"first_name"));
+        // Given again, the key is forgotten; emptied again, it is remembered.
+        let given = apply_answers_patch(
+            &emptied,
+            &patch(json!({ "street": "Neue Gasse 1" })),
+            false,
+            today(),
+        )
+        .unwrap();
+        assert_eq!(given.cleared, ["citizenships", "first_name"]);
+        assert_eq!(
+            effective_answers(&given, &declaration, None, &none)
+                .street
+                .as_deref(),
+            Some("Neue Gasse 1")
+        );
+        // A key without a default is never remembered.
+        let other = apply_answers_patch(
+            &Answers::default(),
+            &patch(json!({ "birth_place": "" })),
+            false,
+            today(),
+        )
+        .unwrap();
+        assert!(other.cleared.is_empty());
+        // An organisation's legal form from the cabinet's mask.
+        let company = Declaration {
+            payer_type: Some("company".into()),
+            organisation_name: Some("Beispiel GmbH".into()),
+            ..person_payer()
+        };
+        let mask = OrganisationMask {
+            legal_form: Some("GmbH".into()),
+            ..OrganisationMask::default()
+        };
+        let emptied = apply_answers_patch(
+            &Answers::default(),
+            &patch(json!({ "legal_form": "" })),
+            true,
+            today(),
+        )
+        .unwrap();
+        assert_eq!(
+            effective_answers(&emptied, &company, None, &mask).legal_form,
+            None
         );
     }
 

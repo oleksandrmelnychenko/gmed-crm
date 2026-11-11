@@ -1168,6 +1168,8 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
                       {text.insuranceTypeOptions[value]}
                     </option>
                   ))}
+                  {/* Staff may set the self-payer type with an insurance: it is named, not "value unavailable" (recheck 2026-11-11). */}
+                  {draft.insurance_type === "self_pay" ? <option value="self_pay">{text.insuranceTypeSelfPay}</option> : null}
                 </NativeComboboxSelect>
               </FormField>
               <FormField field="insurance_provider" text={text} error={errorFor("insurance_provider")} required={draft.insurance_type !== "self_pay"}>

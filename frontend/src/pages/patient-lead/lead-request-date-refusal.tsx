@@ -59,6 +59,9 @@ function shown(dateKey: string): string {
 
 export type DateLimits = { min?: string; max?: string };
 
+/** Where a date is typed: its day, month and year, and the list holding them (MUI pickers). */
+const DATE_SECTIONS = '[role="spinbutton"], .MuiPickersSectionList-root';
+
 /**
  * Why a typed date is not taken, in words: `reason` is the picker's own ("minDate", "maxDate",
  * "invalidDate", …); the field's limits say which date is the first or last allowed one.
@@ -145,9 +148,13 @@ export function useDateRefusal(lang: string, value: string, limits: DateLimits =
     reportRefused(key, refusalShown);
     return () => reportRefused(key, false);
   }, [reportRefused, refusalShown]);
+  // The date is left when the cursor leaves its day, month and year. Tab from the year goes to
+  // the field's own calendar button first: counting that as still in the field kept the message
+  // (and «Не сохранено») back until the first «Далее» (recheck 2026-11-11 N1).
   const onBlur = (event: FocusEvent<HTMLElement>) => {
     const next = event.relatedTarget;
-    if (next instanceof Node && event.currentTarget.contains(next)) return;
+    const typing = next instanceof Element && event.currentTarget.contains(next) && next.closest(DATE_SECTIONS) !== null;
+    if (typing) return;
     setLeft(true);
   };
   return {

@@ -19,7 +19,9 @@ import {
   payerSteps,
   reconcileDraft,
   industryRequired,
+  keptEmpty,
   occupationRequired,
+  refilledFields,
   refusedField,
   relationshipKindsFor,
   requiredFields,
@@ -29,6 +31,7 @@ import {
   stillRejected,
   vatIdLooksUnusual,
   withFundsSource,
+  withEmptiedKept,
   withLegalAnswer,
   withOwnersNone,
   withRejectedField,
@@ -794,6 +797,26 @@ describe("autosave body", () => {
 });
 
 describe("after a save", () => {
+  it("keeps an emptied answer empty when the server offers its default again (recheck 2026-11-11 N2)", () => {
+    const previous = draftFromQuestionnaire(questionnaire("person", { street: "Zahlerweg 3", first_name: "Paul" }));
+    const snapshot = { ...previous, street: "", first_name: "" };
+    // An older server: the emptied answers come back with the patient's values.
+    const stored = draftFromQuestionnaire(questionnaire("person", { street: "Zahlerweg 3", first_name: "Paul" }));
+    const refilled = refilledFields(["street", "first_name", "zip"], snapshot, stored);
+    expect(refilled).toEqual(["street", "first_name"]);
+    // The draft keeps them empty; one typed again meanwhile is left to the merge of the save.
+    const current = { ...snapshot, first_name: "Pa" };
+    const kept = withEmptiedKept(stored, current, refilled);
+    expect(kept.street).toBe("");
+    expect(kept.first_name).toBe("Paul");
+    // Not sent again while empty; sent once typed.
+    expect(answersPatch(stored, snapshot, { payerType: "person", routeAsked: false }, keptEmpty(refilled, snapshot))).toEqual({});
+    expect(keptEmpty(refilled, { ...snapshot, street: "Neu 1" })).toEqual({ first_name: "" });
+    // A server that remembers the emptied answer: nothing to keep.
+    const remembered = draftFromQuestionnaire(questionnaire("person", { street: null, first_name: null }));
+    expect(refilledFields(["street", "first_name"], snapshot, remembered)).toEqual([]);
+  });
+
   it("takes over what the server changed and keeps what was typed since", () => {
     const previous = draftFromQuestionnaire(questionnaire("person", { country: "AT", habitual_residence_country: "DE" }));
     const snapshot = { ...previous, country: "DE", first_name: "Viktor " };

@@ -1133,6 +1133,10 @@ test("changing the default checked recipient cannot replace an existing payer un
   expect(calls.payer).toEqual([]);
   const replacement = page.getByTestId("lead-request-payer-replacement");
   await expect(replacement.getByRole("button")).toBeDisabled();
+  // Disabled with a word why (recheck 2026-11-11 N4).
+  await expect(replacement.getByTestId("lead-request-payer-replacement-needs")).toHaveText(
+    "Bitte füllen Sie zuerst die mit * markierten Angaben des Rechnungsempfängers aus.",
+  );
   const extras = page.getByTestId("lead-request-recipient-payer");
   await expect(extras.locator("#lead-request-payer_contact_consent")).not.toBeChecked();
   await expect(page.getByTestId("lead-request-payer-cost-estimate-consent")).toHaveCount(0);
@@ -1144,6 +1148,9 @@ test("changing the default checked recipient cannot replace an existing payer un
   await party.getByRole("textbox", { name: "Ort" }).fill("Berlin");
   await choose(page, party.getByRole("combobox", { name: "Land" }), "Deutschland");
   await party.getByRole("textbox", { name: "E-Mail" }).fill("another@example.com");
+  // The phone is optional for a payer (as on the server): the button does not wait for it (N4).
+  await expect(replacement.getByRole("button")).toBeEnabled();
+  await expect(replacement.getByTestId("lead-request-payer-replacement-needs")).toHaveCount(0);
   await party.getByRole("textbox", { name: "Telefon" }).fill("+4915100000000");
   await expect.poll(() => request.billing.recipient.phone).toBe("+4915100000000");
   expect(calls.payer).toEqual([]);
@@ -1160,8 +1167,11 @@ test("changing the default checked recipient cannot replace an existing payer un
   expect(asked[0]).toContain("Old Payer");
   expect(asked[0]).toContain("archiviert");
   expect(calls.payer).toEqual([]);
+  // Declined: said in the form (recheck 2026-11-11 N3).
+  await expect(replacement.getByTestId("lead-request-payer-kept")).toHaveText("Der bisherige Zahler bleibt angegeben – Ihre Änderung wurde nicht gespeichert.");
   page.once("dialog", (dialog) => void dialog.accept());
   await replacement.getByRole("button").click();
+  await expect(page.getByTestId("lead-request-payer-kept")).toHaveCount(0);
   await expect.poll(() => calls.payer.at(-1)).toMatchObject({ first_name: "Another", last_name: "Recipient", contact_consent: false });
   expect(calls.payer.at(-1)).toMatchObject({ payer_replacement_confirmed: true });
   expect(calls.payer.at(-1)).not.toHaveProperty("date_of_birth");
@@ -1195,6 +1205,8 @@ test("'Ich' keeps the third-party payer on file; 'Ich zahle selbst' replaces it 
   await expect.poll(() => asked.length).toBe(1);
   expect(asked[0]).toContain("Kamran Zahler");
   await expect(isPayer).not.toBeChecked();
+  // Declined: the form says that the payer on file stays (recheck 2026-11-11 N3).
+  await expect(page.getByTestId("lead-request-payer-kept")).toHaveText("Der bisherige Zahler bleibt angegeben – Ihre Änderung wurde nicht gespeichert.");
   await page.waitForTimeout(1200);
   expect(calls.billing.length).toBe(saves);
   expect(request.payer?.payer_kind).toBe("third_party");

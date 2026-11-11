@@ -179,8 +179,13 @@ export function InvoiceRecipientSection({
   const payerOnFile = answered ? null : thirdPartyPayerOnFile(request.payer, parentPays, request.representation?.representatives);
   const payerReplaceConfirmedRef = useRef(false);
   const [payerKept, setPayerKept] = useState(false);
-  const confirmPayerReplacement = () =>
-    window.confirm(text.recipient.payerReplaceConfirm(payerOnFileName(payerOnFile)));
+  // Declined, the form says that the payer on file stays and nothing was saved (recheck 2026-11-11
+  // N3: the box only stayed as it was, without a word).
+  const confirmPayerReplacement = () => {
+    const confirmed = window.confirm(text.recipient.payerReplaceConfirm(payerOnFileName(payerOnFile)));
+    setPayerKept(!confirmed);
+    return confirmed;
+  };
 
   const save = useCallback(
     (snapshot: RecipientDraft) => {
@@ -417,11 +422,7 @@ export function InvoiceRecipientSection({
               {text.recipient.changedMeanwhile}
             </p>
           )}
-          {payerKept && (
-            <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-5 text-amber-900 sm:col-span-2 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200" data-testid="lead-request-payer-kept">
-              {text.recipient.payerReplaceKept}
-            </p>
-          )}
+          {payerKept && <PayerKeptNotice text={text} className="sm:col-span-2" />}
           <div role="radiogroup" aria-labelledby="lead-request-invoice_recipient-label" className="space-y-1.5 sm:col-span-2">
             <p id="lead-request-invoice_recipient-label" className={cn(tokens.text.label, "block")}>
               {text.recipient.question}
@@ -781,6 +782,18 @@ export function InvoiceRecipientSection({
  * parent: with the own data on file at once, otherwise the parent names
  * himself as a person.
  */
+/**
+ * The payer on file stays: the replacement was declined in the dialog or refused by the server
+ * (release QA 2026-11-11 F2; recheck N3: a declined dialog said nothing).
+ */
+function PayerKeptNotice({ text, className }: { text: LeadRequestText; className?: string }) {
+  return (
+    <p role="alert" className={cn("rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200", className)} data-testid="lead-request-payer-kept">
+      {text.recipient.payerReplaceKept}
+    </p>
+  );
+}
+
 function PatientSidePayer({
   request,
   editsRef,
@@ -964,6 +977,7 @@ function RecipientPayer({
   );
   const [base] = useState<PayerDraft>(() => fits ? draftFromPayer(request.payer) : unansweredPayerDraft(request.payer));
   const [replacementConfirmed, setReplacementConfirmed] = useState(false);
+  const [replacementDeclined, setReplacementDeclined] = useState(false);
   // This block starts anew with every change of the recipient's name. A corrected name (a typo) is
   // the same person: what was entered about the payer stays, only the consents — they belong to the
   // person named — are asked again, and the block says so (QA 2026-11-10, finding 11).
@@ -1037,13 +1051,21 @@ function RecipientPayer({
         {replacementPending ? <div className="space-y-3" data-testid="lead-request-payer-replacement">
           {/* A corrected name keeps what was entered; another payer replaces it. */}
           <StatusChip tone="warning" className="items-start whitespace-normal">{kept ? text.payerRenamedHint : text.recipient.replacePayerHint}</StatusChip>
-          <Button type="button" disabled={!readyToReplace} onClick={() => {
+          <Button type="button" disabled={!readyToReplace} aria-describedby={readyToReplace ? undefined : "lead-request-payer-replacement-needs"} onClick={() => {
             // Says who pays now and what goes with the change (release QA 2026-11-11, F2).
             if (request.payer?.payer_kind === "third_party"
-              && !window.confirm(text.recipient.payerReplaceConfirm(payerOnFileName(request.payer)))) return;
+              && !window.confirm(text.recipient.payerReplaceConfirm(payerOnFileName(request.payer)))) {
+              // Declined: said, not only left as it was (recheck 2026-11-11 N3).
+              setReplacementDeclined(true);
+              return;
+            }
+            setReplacementDeclined(false);
             editsRef.current.made += 1;
             setReplacementConfirmed(true);
           }}>{text.recipient.confirmPayerChange}</Button>
+          {/* Why the button cannot be pressed yet (recheck 2026-11-11 N4). */}
+          {!readyToReplace ? <p id="lead-request-payer-replacement-needs" className="text-xs text-muted-foreground" data-testid="lead-request-payer-replacement-needs">{text.recipient.confirmPayerNeedsFields}</p> : null}
+          {replacementDeclined ? <PayerKeptNotice text={text} /> : null}
         </div> : null}
         <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
           {organisation ? (
