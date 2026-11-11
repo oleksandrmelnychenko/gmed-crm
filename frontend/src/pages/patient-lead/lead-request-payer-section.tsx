@@ -30,6 +30,7 @@ import { PERSON_CITY_MAX, PERSON_NAME_MAX } from "@/lib/person-fields";
 import {
   NO_THIRD_PARTY_PAYER,
   PAYER_ANSWERED_BY_PAYER,
+  PAYER_REPLACEMENT_UNCONFIRMED,
   fetchMyLeadRequest,
   rememberPayerContactConsentRecord,
   saveLeadPayer,
@@ -81,7 +82,15 @@ import {
   runDraftSave,
   type RequestQueue,
 } from "./lead-request-parts";
-import { payerFitsFlow, type PayerChoice, type RecipientDraft, type RecipientFlow } from "./lead-request-recipient-model";
+import {
+  payerFitsFlow,
+  payerOnFileName,
+  replacesThirdPartyPayer,
+  thirdPartyPayerOnFile,
+  type PayerChoice,
+  type RecipientDraft,
+  type RecipientFlow,
+} from "./lead-request-recipient-model";
 import { useServerDraftSync } from "./lead-request-server-sync";
 import { useDateRefusal } from "./lead-request-date-refusal";
 import { SummaryRows } from "./lead-request-send-step";
@@ -118,11 +127,20 @@ export function usePayerAutosave({
   onSaveState,
   enabled = true,
   ownAccountOnly = false,
+  text,
+  replacementConfirmed = false,
 }: {
   request: LeadRequest;
   draft: PayerDraft;
   editsRef: PayerEdits;
   enabled?: boolean;
+  /**
+   * The texts of the confirmation asked before a third party on file as payer is replaced
+   * (release QA 2026-11-11, F2). Without them nothing is asked and the server's refusal stands.
+   */
+  text?: LeadRequestText;
+  /** The person already confirmed the replacement where the answer was given. */
+  replacementConfirmed?: boolean;
   /** Follow-up block L: the own economic interest is sent also after the payer answered. */
   ownAccountOnly?: boolean;
   enqueue: RequestQueue;
@@ -155,6 +173,17 @@ export function usePayerAutosave({
   // A parent of the minor who pays is the contracting party (owner decision
   // 2026-10-19): no consent is asked about that parent in any login.
   const parentPaying = request.payer?.payer_kind === "representative";
+  // The payer on file as the save finds it, and how the person is asked before it is replaced.
+  const payerRef = useRef(request.payer);
+  payerRef.current = request.payer;
+  const parentsRef = useRef(request.representation?.representatives);
+  parentsRef.current = request.representation?.representatives;
+  const templateRef = useRef(request.access_kind === "guardian" ? request.payer_self_template ?? null : null);
+  templateRef.current = request.access_kind === "guardian" ? request.payer_self_template ?? null : null;
+  const confirmedRef = useRef(replacementConfirmed);
+  confirmedRef.current = replacementConfirmed;
+  const textRef = useRef(text);
+  textRef.current = text;
 
   const save = useCallback(
     (snapshot: PayerDraft) => {
@@ -214,9 +243,36 @@ export function usePayerAutosave({
           onSaveState("error");
           return false;
         }
+        // The third party on file is replaced only after the person read who pays now and what
+        // goes with the change (release QA 2026-11-11, F2); declined, nothing is sent.
+        const askReplacement = () => {
+          const words = textRef.current;
+          return Boolean(words) && window.confirm(words!.recipient.payerReplaceConfirm(payerOnFileName(payerRef.current)));
+        };
+        const keptPayer = () => {
+          rejectedRef.current = key;
+          setFieldError("payer");
+          setFieldErrorCode(PAYER_REPLACEMENT_UNCONFIRMED);
+          onSaveState("error");
+          return false;
+        };
+        let confirmed = confirmedRef.current;
+        const parentPays = payerAnswer(payerRef.current, templateRef.current) === "guardian";
+        if (!confirmed && replacesThirdPartyPayer(thirdPartyPayerOnFile(payerRef.current, parentPays, parentsRef.current), input)) {
+          if (!askReplacement()) return keptPayer();
+          confirmed = true;
+        }
         onSaveState("saving");
         try {
-          const next = await saveLeadPayer(request.lead_id, input);
+          let next: LeadRequest;
+          try {
+            next = await saveLeadPayer(request.lead_id, input, confirmed);
+          } catch (refusal) {
+            // Another third party with answers, files or prepared papers is on file: asked here.
+            if (confirmed || errorBody(refusal)?.code !== PAYER_REPLACEMENT_UNCONFIRMED) throw refusal;
+            if (!askReplacement()) return keptPayer();
+            next = await saveLeadPayer(request.lead_id, input, true);
+          }
           savedRef.current = draftFromPayer(next.payer);
           editsRef.current.handled = edition;
           rejectedRef.current = null;
@@ -331,7 +387,7 @@ export function PayerSection({
     editsRef.current.made += 1;
     setDraftState(change);
   };
-  const { fieldError, fieldErrorCode, savedRef, queuedDraftRef } = usePayerAutosave({ request, draft, editsRef, enqueue, onChange, onSaveState, ownAccountOnly });
+  const { fieldError, fieldErrorCode, savedRef, queuedDraftRef } = usePayerAutosave({ request, draft, editsRef, enqueue, onChange, onSaveState, ownAccountOnly, text });
   // The other parent saved the payer meanwhile (the request was re-read): the untouched fields
   // follow, a field being typed in keeps its value and says so. Not once the payer answered.
   useServerDraftSync({
@@ -501,8 +557,8 @@ export function PayerSection({
             </NativeComboboxSelect>
           </LabeledField>
           {fieldError === "payer" ? (
-            <p role="alert" className="text-xs text-destructive sm:col-span-2 lg:col-span-3">
-              {text.notSaved}
+            <p role="alert" className="text-xs text-destructive sm:col-span-2 lg:col-span-3" data-testid="lead-request-payer-not-saved">
+              {fieldErrorCode === PAYER_REPLACEMENT_UNCONFIRMED ? text.recipient.payerReplaceKept : text.notSaved}
             </p>
           ) : null}
         </div>

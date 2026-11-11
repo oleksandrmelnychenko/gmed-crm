@@ -4520,8 +4520,64 @@ async fn step_three_asks_the_invoice_recipient_first_and_derives_section_seven()
         !missing_for_step_three(&body).contains(&"payer_kind"),
         "{body}"
     );
-    // "I receive and pay it": the patient is the payer at once.
-    let body = save(json!({ "invoice_recipient_is_payer": true })).await;
+    // The patient's consents about the organisation that pays, both on record.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{payer}/cost-estimate-consent"),
+        &patient,
+        Some(json!({ "consent": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let contact_consent_at = body["payer"]["contact_consent_at"].clone();
+    let cost_consent_at = body["payer"]["cost_estimate_consent_at"].clone();
+    assert!(contact_consent_at.is_string(), "{body}");
+    assert!(cost_consent_at.is_string(), "{body}");
+    // "I receive and pay it" would replace the organisation on file as the
+    // payer (release QA 2026-11-11, F2): refused without the confirmation —
+    // the payer, the recipient's answer and both consents stay as they are.
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        &billing,
+        &patient,
+        Some(json!({ "invoice_recipient_is_payer": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(
+        refused["code"], "payer_replacement_unconfirmed",
+        "{refused}"
+    );
+    // Choosing who receives the invoice anew never names the payer by itself:
+    // with a payer on file the recipient "does not pay" by default.
+    let body = save(json!({ "invoice_recipient": null })).await;
+    assert_eq!(body["payer"]["payer_kind"], "third_party", "{body}");
+    let body = save(json!({ "invoice_recipient": "self" })).await;
+    assert_eq!(
+        body["billing"]["invoice_recipient_is_payer"], false,
+        "{body}"
+    );
+    assert_eq!(body["payer"]["payer_kind"], "third_party", "{body}");
+    assert_eq!(
+        body["payer"]["organisation_name"], "Beispiel GmbH",
+        "{body}"
+    );
+    assert_eq!(
+        body["payer"]["contact_consent_at"], contact_consent_at,
+        "{body}"
+    );
+    assert_eq!(
+        body["payer"]["cost_estimate_consent_at"], cost_consent_at,
+        "{body}"
+    );
+    // Confirmed: the patient is the payer at once.
+    let body = save(json!({
+        "invoice_recipient_is_payer": true,
+        "payer_replacement_confirmed": true
+    }))
+    .await;
     assert_eq!(body["payer"]["payer_kind"], "self", "{body}");
     assert_eq!(body["billing"]["invoice_to"], "self", "{body}");
     let open = missing_for_step_three(&body);

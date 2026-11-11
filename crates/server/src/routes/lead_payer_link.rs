@@ -6192,6 +6192,69 @@ pub(crate) async fn payer_changed_in_tx(
     .await
 }
 
+/// Whether something of the payer on file would go with another payer
+/// ([`payer_changed_in_tx`]): a link not yet revoked, a statement the payer
+/// sent (on the link or on paper through staff), the payer's files, or an
+/// unsigned GwG sheet or paper prepared for that payer. The cabinet replaces
+/// such a payer only with the person's confirmation (release QA 2026-11-11,
+/// F2); read before the save, which clears all of it.
+pub(crate) async fn payer_has_records(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (SELECT 1 FROM lead_payer_links k
+                          WHERE k.lead_id = $1 AND k.revoked_at IS NULL)
+               OR EXISTS (SELECT 1 FROM lead_payer_statements s
+                          WHERE s.lead_id = $1
+                            AND (s.submitted_at IS NOT NULL OR s.adopted_at IS NOT NULL))
+               OR EXISTS (SELECT 1 FROM lead_portal_uploads u
+                          WHERE u.lead_id = $1
+                            AND u.kind IN ('payer_identity', 'payer_funds_proof')
+                            AND u.withdrawn_at IS NULL)
+               OR EXISTS (SELECT 1 FROM documents d
+                          WHERE (d.lead_id = $1
+                                 OR d.order_id IN (SELECT o.id FROM orders o
+                                                   WHERE o.source_lead_id = $1))
+                            AND d.status = 'active'
+                            AND d.signed_at IS NULL
+                            AND ((d.generated_template_id LIKE 'gwg_%'
+                                  AND d.generated_bindings -> 'gwg_identification' ->> 'subject' = 'payer')
+                                 OR d.generated_template_id IN ('cost_coverage_declaration',
+                                                                'patient_payer_statement',
+                                                                'payer_cost_estimate',
+                                                                'payer_self_disclosure')))"#,
+    )
+    .bind(lead_id)
+    .fetch_one(&mut *conn)
+    .await
+}
+
+/// Whether `next` names another payer than the third party `previous` named,
+/// by the rule of [`payer_changed_in_tx`]: another kind, another parent, or
+/// another person or organisation — but not the minor's parent a third-party
+/// row of before named, now recorded as that representative.
+pub(crate) async fn names_another_payer(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    previous: &Declaration,
+    next: &Declaration,
+) -> Result<bool, sqlx::Error> {
+    let changed = previous.payer_kind != next.payer_kind
+        || previous.payer_representative_id != next.payer_representative_id
+        || (next.is_third_party() && !previous.same_payer(next));
+    if changed && previous.is_third_party() && next.is_representative() {
+        let loaded = lead_representatives::load(&mut *conn, lead_id)
+            .await?
+            .unwrap_or_default();
+        return Ok(
+            lead_representatives::payer_same_person(&loaded.representation, Some(previous))
+                != next.payer_representative_id,
+        );
+    }
+    Ok(changed)
+}
+
 /// Clears the payer's answers (all but staff's expected total, with the
 /// privacy acknowledgement, the confirmed address and the submit), withdraws
 /// the payer's files and audits the reset with the field names of section 8

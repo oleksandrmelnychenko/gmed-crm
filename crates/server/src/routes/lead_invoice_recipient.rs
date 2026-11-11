@@ -77,6 +77,16 @@ pub(crate) const RECIPIENT_KEYS: [&str; 18] = [
 /// `recipient_changed` once staff or the other parent named another one.
 pub(crate) const RECIPIENT_EXPECTED_KEY: &str = "recipient_expected";
 
+/// The cabinet's confirmation, sent with the save (`true`), that the third
+/// party on file as payer may be replaced by the recipient who pays (release
+/// QA 2026-11-11, F2: choosing "Ich" ticked "Ich zahle selbst" and replaced
+/// the payer staff had entered, with the payer's questionnaire and GwG sheet
+/// archived). Without it such a save is refused with 409
+/// [`PAYER_REPLACEMENT_UNCONFIRMED`]; `POST …/payer` takes the same key.
+pub(crate) const PAYER_REPLACEMENT_CONFIRMED_KEY: &str = "payer_replacement_confirmed";
+
+pub(crate) const PAYER_REPLACEMENT_UNCONFIRMED: &str = "payer_replacement_unconfirmed";
+
 /// Whether the recipient the cabinet showed (`expected`) is no longer the
 /// stored one. A patch that answers who receives the invoice is a new choice,
 /// never a stale one. The parent compares with the row as stored and as
@@ -1393,6 +1403,21 @@ pub(crate) fn payer_input_for_recipient(
     }
 }
 
+/// Whether recording the patient side as the payer ([`payer_input_for_recipient`])
+/// would take the place of a third party on file as payer: never done by the
+/// choice of a recipient alone, only with the cabinet's confirmation
+/// ([`PAYER_REPLACEMENT_CONFIRMED_KEY`]). A third-party recipient never
+/// replaces another third party here (the cabinet does, through `…/payer`).
+pub(crate) fn replaces_third_party_payer(
+    recipient: &Recipient,
+    representation: &super::lead_representatives::Representation,
+    stored: Option<&Declaration>,
+) -> bool {
+    stored.is_some_and(Declaration::is_third_party)
+        && !recipient.is_third_party()
+        && payer_input_for_recipient(recipient, representation, stored).is_some()
+}
+
 /// Records the recipient who pays as the payer ([`payer_input_for_recipient`])
 /// through the cabinet's own save of "who pays"
 /// ([`lead_payer::save_from_portal`], with its audit event and the payer of
@@ -2337,5 +2362,54 @@ mod tests {
         for input in [first, input] {
             assert!(serde_json::from_value::<lead_payer::PortalPayerInput>(input).is_ok());
         }
+    }
+
+    /// Release QA 2026-11-11, F2: the patient side as recipient who pays
+    /// would replace a third party on file as payer — said so, for the
+    /// confirmation the save needs; nothing to replace otherwise.
+    #[test]
+    fn the_patient_side_replaces_a_third_party_payer_only_when_it_would_pay() {
+        let adult = super::super::lead_representatives::Representation::default();
+        let third = third_party_payer("Old", "Payer");
+        let self_declaration = Declaration {
+            payer_kind: lead_payer::PAYER_KIND_SELF.into(),
+            ..Declaration::default()
+        };
+        let self_pays = apply(
+            &Recipient::default(),
+            &body(json!({ "invoice_recipient": "self" })),
+        )
+        .unwrap();
+        assert!(replaces_third_party_payer(&self_pays, &adult, Some(&third)));
+        // No third party on file: the default names the payer as before.
+        assert!(!replaces_third_party_payer(&self_pays, &adult, None));
+        assert!(!replaces_third_party_payer(
+            &self_pays,
+            &adult,
+            Some(&self_declaration)
+        ));
+        // The recipient does not pay: the third party stays the payer.
+        let not_paying = apply(
+            &Recipient::default(),
+            &body(json!({ "invoice_recipient": "self", "invoice_recipient_is_payer": false })),
+        )
+        .unwrap();
+        assert!(!replaces_third_party_payer(
+            &not_paying,
+            &adult,
+            Some(&third)
+        ));
+        // A third-party recipient is confirmed in the cabinet's own block.
+        let other = apply(
+            &Recipient::default(),
+            &body(json!({
+                "invoice_recipient": "third_party",
+                "recipient_type": "person",
+                "recipient_first_name": "Olga",
+                "recipient_last_name": "Muster",
+            })),
+        )
+        .unwrap();
+        assert!(!replaces_third_party_payer(&other, &adult, Some(&third)));
     }
 }

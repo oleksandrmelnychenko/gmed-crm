@@ -22,7 +22,7 @@ import { isKnownNoMailEmail } from "@/lib/email-domain-check";
 import { cn } from "@/lib/utils";
 
 import { actsAsGuardian, staffForChild } from "./lead-request-access";
-import { fetchMyLeadRequest, saveLeadInvoiceRecipient, type LeadRequest } from "./lead-request-api";
+import { PAYER_REPLACEMENT_UNCONFIRMED, fetchMyLeadRequest, saveLeadInvoiceRecipient, type LeadRequest } from "./lead-request-api";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import type { IdentificationForm } from "./lead-request-identification";
 import { useDateRefusal } from "./lead-request-date-refusal";
@@ -74,7 +74,9 @@ import {
   draftFromRecipient,
   flowOf,
   payerFitsFlow,
+  payerOnFileName,
   payerPartyOf,
+  thirdPartyPayerOnFile,
   recipientFieldOf,
   recipientExpected,
   recipientPatch,
@@ -169,6 +171,16 @@ export function InvoiceRecipientSection({
   const [refusedCodes, setRefusedCodes] = useState<Refused>({});
   // Someone changed the recipient after this tab read it (QA 2026-11-03, F2).
   const [changedMeanwhile, setChangedMeanwhile] = useState(false);
+  // A third party on file as payer (named by the lead, entered by staff, or answered on the
+  // payer's link or paper questionnaire) is replaced only after the person confirmed it (release
+  // QA 2026-11-11, F2): choosing "me" ticked "I pay myself" and replaced it in one click.
+  const parentPays =
+    payerAnswer(request.payer, template) === "guardian" || request.billing?.payment_route_by === "guardian";
+  const payerOnFile = answered ? null : thirdPartyPayerOnFile(request.payer, parentPays, request.representation?.representatives);
+  const payerReplaceConfirmedRef = useRef(false);
+  const [payerKept, setPayerKept] = useState(false);
+  const confirmPayerReplacement = () =>
+    window.confirm(text.recipient.payerReplaceConfirm(payerOnFileName(payerOnFile)));
 
   const save = useCallback(
     (snapshot: RecipientDraft) => {
@@ -198,7 +210,11 @@ export function InvoiceRecipientSection({
           onRecipientState("saving");
           try {
             const baseline = savedRef.current;
-            const next = await saveLeadInvoiceRecipient(request.lead_id, patch, recipientExpected(baseline));
+            // The confirmation goes only with the answer "the recipient pays" it was given for.
+            const replacing = payerReplaceConfirmedRef.current && (patch as Record<string, unknown>).invoice_recipient_is_payer === true;
+            const next = await saveLeadInvoiceRecipient(request.lead_id, patch, recipientExpected(baseline), replacing);
+            if (replacing) payerReplaceConfirmedRef.current = false;
+            setPayerKept(false);
             const fresh = draftFromRecipient(next.billing);
             const written = Object.keys(patch).map(recipientFieldOf).filter((field): field is keyof RecipientDraft => field !== null);
             savedRef.current = fresh;
@@ -212,7 +228,10 @@ export function InvoiceRecipientSection({
             const body = errorBody(cause);
             // Another parent or staff named another recipient after this tab read it: nothing is
             // written onto that person; the current answers are read again and shown.
-            if (cause instanceof ApiRequestError && cause.status === 409 && body?.code === "recipient_changed") {
+            // "The recipient pays" would replace the third party on file, not confirmed (another
+            // tab, or the payer was named meanwhile): nothing was written; the answers are read again.
+            const payerRefused = cause instanceof ApiRequestError && cause.status === 409 && body?.code === PAYER_REPLACEMENT_UNCONFIRMED;
+            if (payerRefused || (cause instanceof ApiRequestError && cause.status === 409 && body?.code === "recipient_changed")) {
               try {
                 const current = await fetchMyLeadRequest(request.lead_id);
                 const fresh = draftFromRecipient(current.billing);
@@ -224,7 +243,9 @@ export function InvoiceRecipientSection({
                 // The notice still asks to check the answers.
               }
               for (const field of Object.keys(rejected)) delete rejected[field as keyof RecipientDraft];
-              setChangedMeanwhile(true);
+              payerReplaceConfirmedRef.current = false;
+              if (payerRefused) setPayerKept(true);
+              else setChangedMeanwhile(true);
               failed = true;
               break;
             }
@@ -271,9 +292,9 @@ export function InvoiceRecipientSection({
   const locked = answered;
   const lockedParty = answered && third && recipientPays;
   // Who pays when a third-party recipient does not: the answer chosen here, else what the stored payer says.
-  const parentPays =
-    payerAnswer(request.payer, template) === "guardian" || request.billing?.payment_route_by === "guardian";
   const [partyChoice, setPartyChoice] = useState<PayerParty | null>(null);
+  // "The patient pays" was confirmed in place of the third party on file.
+  const [patientPaysConfirmed, setPatientPaysConfirmed] = useState(false);
   const storedParty =
     third && flow.isPayer === "no" && payerFitsFlow(flow, request.payer, draft, parentPays, request.representation?.representatives)
       ? payerPartyOf(request.payer, parentPays)
@@ -340,6 +361,12 @@ export function InvoiceRecipientSection({
   /** "The recipient is also the payer": an organisation's reason moves with it (the payer's is `payment_background`). */
   const answerIsPayer = (answer: string) => {
     if (answer === draft.is_payer) return;
+    // The patient side pays in place of the third party on file: only after the confirmation.
+    // A third-party recipient who pays is confirmed in its own block (`RecipientPayer`).
+    if (answer === "yes" && flow.recipient === "self" && payerOnFile) {
+      if (!confirmPayerReplacement()) return;
+      payerReplaceConfirmedRef.current = true;
+    }
     setPartyChoice(null);
     if (third && organisation && identification) {
       if (answer === "yes") {
@@ -390,6 +417,11 @@ export function InvoiceRecipientSection({
               {text.recipient.changedMeanwhile}
             </p>
           )}
+          {payerKept && (
+            <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-5 text-amber-900 sm:col-span-2 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200" data-testid="lead-request-payer-kept">
+              {text.recipient.payerReplaceKept}
+            </p>
+          )}
           <div role="radiogroup" aria-labelledby="lead-request-invoice_recipient-label" className="space-y-1.5 sm:col-span-2">
             <p id="lead-request-invoice_recipient-label" className={cn(tokens.text.label, "block")}>
               {text.recipient.question}
@@ -414,10 +446,12 @@ export function InvoiceRecipientSection({
                       checked={checked}
                       disabled={locked}
                       onChange={() => {
-                        if (!confirmParentChange(withOwnParent(withRecipientAnswer(draft, answer), ownParent?.id))) return;
+                        // With a third party on file as payer the new recipient does not pay by default.
+                        const keep = Boolean(payerOnFile);
+                        if (!confirmParentChange(withOwnParent(withRecipientAnswer(draft, answer, keep), ownParent?.id))) return;
                         setPartyChoice(null);
                         if (identification && third && organisation && recipientPays) identification.set("payment_background", "");
-                        update((current) => withOwnParent(withRecipientAnswer(current, answer), ownParent?.id));
+                        update((current) => withOwnParent(withRecipientAnswer(current, answer, keep), ownParent?.id));
                       }}
                     />
                     <span className={cn(
@@ -633,6 +667,11 @@ export function InvoiceRecipientSection({
                       className={cn(checkboxClass, "mt-0.5 rounded-full")}
                       checked={checked}
                       onChange={() => {
+                        // The patient pays in place of the third party on file: only after the confirmation.
+                        if (value === "patient" && payerOnFile) {
+                          if (!confirmPayerReplacement()) return;
+                          setPatientPaysConfirmed(true);
+                        }
                         partyEditsRef.current.made += 1;
                         setPartyChoice(value);
                       }}
@@ -693,6 +732,7 @@ export function InvoiceRecipientSection({
           key="payer-patient"
           request={request}
           editsRef={partyEditsRef}
+          replacementConfirmed={patientPaysConfirmed}
           text={text}
           lang={lang}
           identification={identification}
@@ -745,6 +785,7 @@ function PatientSidePayer({
   request,
   editsRef,
   parentSelected = false,
+  replacementConfirmed = false,
   text,
   lang,
   identification,
@@ -755,6 +796,8 @@ function PatientSidePayer({
   request: LeadRequest;
   editsRef: PayerEdits;
   parentSelected?: boolean;
+  /** The person confirmed that the patient side pays in place of the third party on file. */
+  replacementConfirmed?: boolean;
   text: LeadRequestText;
   lang: string;
   identification?: IdentificationForm;
@@ -784,7 +827,7 @@ function PatientSidePayer({
       />
     );
   }
-  return <OwnPayer request={request} editsRef={editsRef} parentSelected={parentSelected} enqueue={enqueue} onChange={onChange} onSaveState={onSaveState} />;
+  return <OwnPayer request={request} editsRef={editsRef} parentSelected={parentSelected} text={text} replacementConfirmed={replacementConfirmed} enqueue={enqueue} onChange={onChange} onSaveState={onSaveState} />;
 }
 
 /**
@@ -797,6 +840,8 @@ function OwnPayer({
   request,
   editsRef,
   parentSelected = false,
+  text,
+  replacementConfirmed = false,
   enqueue,
   onChange,
   onSaveState,
@@ -804,6 +849,8 @@ function OwnPayer({
   request: LeadRequest;
   editsRef: PayerEdits;
   parentSelected?: boolean;
+  text: LeadRequestText;
+  replacementConfirmed?: boolean;
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
@@ -816,7 +863,7 @@ function OwnPayer({
     const payer = parentSelected && !sameParent ? null : request.payer;
     return withPayerChoice(draftFromPayer(payer, template), guardian && template ? "guardian" : "self", template);
   });
-  usePayerAutosave({ request, draft, editsRef, enqueue, onChange, onSaveState });
+  usePayerAutosave({ request, draft, editsRef, enqueue, onChange, onSaveState, text, replacementConfirmed });
   return null;
 }
 
@@ -843,7 +890,7 @@ function ParentPayer({
   const [draft, setDraft] = useState<PayerDraft>(() =>
     request.payer?.payer_kind === "representative" ? draftFromPayer(request.payer) : unansweredPayerDraft(request.payer));
   const editsRef = usePayerEdits();
-  usePayerAutosave({ request, draft, editsRef, enqueue, onChange, onSaveState });
+  usePayerAutosave({ request, draft, editsRef, enqueue, onChange, onSaveState, text });
   const chosen = draft.payer_kind === "third_party" && parents.some((person) => person.id === draft.representative_id)
     ? draft.representative_id ?? ""
     : "";
@@ -967,7 +1014,7 @@ function RecipientPayer({
   const replacementPending = Boolean(request.payer) && request.payer?.payer_kind !== "self" && !fits && !replacementConfirmed;
   const readyToReplace = recipientPayerReady(recipient);
   const sameIdentity = fits && payerIdentityKey(draftFromPayer(request.payer)) === payerIdentityKey(draft);
-  const { fieldError, fieldErrorCode } = usePayerAutosave({ request, draft, editsRef, enqueue, onChange, onSaveState, enabled: !replacementPending && (fits || readyToReplace) });
+  const { fieldError, fieldErrorCode } = usePayerAutosave({ request, draft, editsRef, enqueue, onChange, onSaveState, enabled: !replacementPending && (fits || readyToReplace), text, replacementConfirmed });
   const payerType = organisation ? "organisation" : "person";
   const errorFor = (field: string) => (fieldError === field
     ? field === "payer_date_of_birth" && fieldErrorCode === PAYER_BORN_AFTER_PATIENT ? text.payerBornAfterPatient : text.invalidField
@@ -991,6 +1038,9 @@ function RecipientPayer({
           {/* A corrected name keeps what was entered; another payer replaces it. */}
           <StatusChip tone="warning" className="items-start whitespace-normal">{kept ? text.payerRenamedHint : text.recipient.replacePayerHint}</StatusChip>
           <Button type="button" disabled={!readyToReplace} onClick={() => {
+            // Says who pays now and what goes with the change (release QA 2026-11-11, F2).
+            if (request.payer?.payer_kind === "third_party"
+              && !window.confirm(text.recipient.payerReplaceConfirm(payerOnFileName(request.payer)))) return;
             editsRef.current.made += 1;
             setReplacementConfirmed(true);
           }}>{text.recipient.confirmPayerChange}</Button>
@@ -1079,7 +1129,7 @@ function RecipientPayer({
         ) : null}
         {fieldError === "payer" ? (
           <p role="alert" className="text-xs text-destructive">
-            {text.notSaved}
+            {fieldErrorCode === PAYER_REPLACEMENT_UNCONFIRMED ? text.recipient.payerReplaceKept : text.notSaved}
           </p>
         ) : null}
       </div>

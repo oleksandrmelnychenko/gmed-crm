@@ -16,12 +16,15 @@ import {
   flowOf,
   payerChoices,
   payerFitsFlow,
+  payerOnFileName,
   payerPartyOf,
   recipientFieldOf,
   recipientKey,
   recipientExpected,
   recipientPatch,
   recipientPayerOpenKeys,
+  replacesThirdPartyPayer,
+  thirdPartyPayerOnFile,
   withOwnParent,
   withRecipientAnswer,
   withRecipientRelationship,
@@ -132,6 +135,35 @@ describe("step 3: the invoice recipient first (owner spec 2026-10-11)", () => {
     expect(payerPartyOf(viktor, true)).toBe("patient");
     expect(PAYER_PARTIES).toEqual(["patient", "other"]);
     expect(OTHER_PAYER_CHOICES).toEqual(["person", "organisation"]);
+  });
+
+  it("never names the recipient as payer by itself while a third party is on file (release QA 2026-11-11, F2)", () => {
+    const saved = draftFromRecipient(billing());
+    // The default "I pay myself" only while no third party is named as payer.
+    const own = withRecipientAnswer(saved, "self", true);
+    expect(own.is_payer).toBe("no");
+    expect(recipientPatch(saved, own)).toEqual({ invoice_recipient: "self", invoice_recipient_is_payer: false });
+    // A third-party recipient keeps the default: its own block asks before it replaces the payer.
+    expect(withRecipientAnswer(saved, "third_party", true).is_payer).toBe("yes");
+    expect(withRecipientAnswer(saved, "", true).is_payer).toBe("");
+    // The payer on file: a third party, not the paying parent of the minor.
+    expect(thirdPartyPayerOnFile(viktor, false)).toBe(viktor);
+    expect(thirdPartyPayerOnFile(viktor, true)).toBeNull();
+    expect(thirdPartyPayerOnFile({ ...viktor, payer_kind: "self" }, false)).toBeNull();
+    expect(thirdPartyPayerOnFile(null, false)).toBeNull();
+    // A third-party row that is one of the minor's parents is that parent (the server's `payer_same_person`).
+    const parent = { slot: "rep1" as const, email: "VIKTOR@example.com", first_name: "Viktor", last_name: "Zahler", date_of_birth: "1960-02-03" };
+    expect(thirdPartyPayerOnFile({ ...viktor, email: "viktor@example.com" }, false, [parent])).toBeNull();
+    expect(thirdPartyPayerOnFile({ ...viktor, email: null }, false, [{ ...parent, email: null }])).toBeNull();
+    expect(thirdPartyPayerOnFile({ ...viktor, email: "other@example.com" }, false, [parent])).not.toBeNull();
+    expect(payerOnFileName(viktor)).toBe("Viktor Zahler");
+    expect(payerOnFileName({ ...viktor, payer_type: "organisation", organisation_name: "Muster GmbH" })).toBe("Muster GmbH");
+    expect(payerOnFileName(null)).toBe("");
+    // The patient or a parent in its place is asked first; another third party where it is named.
+    expect(replacesThirdPartyPayer(viktor, { payer_kind: "self" })).toBe(true);
+    expect(replacesThirdPartyPayer(viktor, { payer_kind: "representative" })).toBe(true);
+    expect(replacesThirdPartyPayer(viktor, { payer_kind: "third_party" })).toBe(false);
+    expect(replacesThirdPartyPayer(null, { payer_kind: "self" })).toBe(false);
   });
 
   it("drops what belongs to another answer", () => {

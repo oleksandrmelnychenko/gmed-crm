@@ -1048,18 +1048,30 @@ export function rememberPayerContactConsentRecord(recorded: StaffConsentRecord |
   payerContactConsentRecord = recorded;
 }
 
-/** Saves the answer "who pays"; 409 `payer_answered_by_payer` after the payer answered on the own link. */
-export async function saveLeadPayer(leadId: string, payer: LeadRequestPayerInput): Promise<LeadRequest> {
+/**
+ * The refusal of a save that would replace the third party on file as payer (named by the lead,
+ * entered by staff, or answered on the payer's link or paper questionnaire) without the person's
+ * confirmation (release QA 2026-11-11, F2). The confirmed save carries `payer_replacement_confirmed`.
+ */
+export const PAYER_REPLACEMENT_UNCONFIRMED = "payer_replacement_unconfirmed";
+
+/**
+ * Saves the answer "who pays"; 409 `payer_answered_by_payer` after the payer answered on the own
+ * link, 409 `payer_replacement_unconfirmed` when another payer with answers, files or prepared
+ * papers is on file and `replacementConfirmed` is not set.
+ */
+export async function saveLeadPayer(leadId: string, payer: LeadRequestPayerInput, replacementConfirmed = false): Promise<LeadRequest> {
   const recorded = payer.contact_consent === true ? payerContactConsentRecord : null;
+  const answer = recorded
+    ? {
+      ...payer,
+      contact_consent_recorded_how: recorded.how,
+      contact_consent_recorded_note: recorded.note.trim().slice(0, STAFF_CONSENT_NOTE_MAX) || null,
+    }
+    : payer;
   const saved = await apiFetch<LeadRequest>(`${base(leadId)}/payer`, {
     method: "POST",
-    body: JSON.stringify(recorded
-      ? {
-        ...payer,
-        contact_consent_recorded_how: recorded.how,
-        contact_consent_recorded_note: recorded.note.trim().slice(0, STAFF_CONSENT_NOTE_MAX) || null,
-      }
-      : payer),
+    body: JSON.stringify(replacementConfirmed ? { ...answer, payer_replacement_confirmed: true } : answer),
   });
   if (recorded && payerContactConsentRecord === recorded) payerContactConsentRecord = null;
   return saved;
@@ -1283,10 +1295,20 @@ export type RecipientExpected = { invoice_recipient: string | null; representati
  * a tab opened before another parent was named is refused (409
  * `recipient_changed`) instead of writing onto that parent.
  */
-export function saveLeadInvoiceRecipient(leadId: string, patch: RecipientPatch, expected?: RecipientExpected): Promise<LeadRequest> {
+export function saveLeadInvoiceRecipient(
+  leadId: string,
+  patch: RecipientPatch,
+  expected?: RecipientExpected,
+  /** The person confirmed that the recipient who pays replaces the third party on file as payer. */
+  payerReplacementConfirmed = false,
+): Promise<LeadRequest> {
   return apiFetch<LeadRequest>(`${base(leadId)}/billing`, {
     method: "POST",
-    body: JSON.stringify(expected ? { ...patch, recipient_expected: expected } : patch),
+    body: JSON.stringify({
+      ...patch,
+      ...(expected ? { recipient_expected: expected } : {}),
+      ...(payerReplacementConfirmed ? { payer_replacement_confirmed: true } : {}),
+    }),
   });
 }
 

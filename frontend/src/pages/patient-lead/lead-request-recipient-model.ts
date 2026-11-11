@@ -3,6 +3,7 @@ import type {
   LeadRequest,
   LeadRequestBilling,
   LeadRequestPayer,
+  LeadRequestPayerInput,
   LeadRequestRepresentative,
   PayerSelfTemplate,
   RecipientPatch,
@@ -185,11 +186,60 @@ function withoutParty(draft: RecipientDraft): RecipientDraft {
  * The draft after "who receives the invoice?": another recipient keeps
  * nothing of the one before. "The recipient is also the payer" is ticked as
  * soon as a recipient is chosen (owner 2026-10-11; the server stores the same
- * default) and keeps an answer given before.
+ * default) and keeps an answer given before — but never while a third party
+ * is on file as payer (`payerOnFile`; release QA 2026-11-11, F2: choosing "me"
+ * ticked "I pay myself" and replaced the payer staff had entered): the patient
+ * side then does not pay until the person says so and confirms it. A
+ * third-party recipient keeps the default: it replaces the payer only through
+ * its own confirmation (`RecipientPayer`), never by being named.
  */
-export function withRecipientAnswer(draft: RecipientDraft, answer: string): RecipientDraft {
+export function withRecipientAnswer(draft: RecipientDraft, answer: string, payerOnFile = false): RecipientDraft {
   if (answer === draft.recipient) return draft;
-  return { ...withoutParty(draft), recipient: answer, email: "", is_payer: answer ? draft.is_payer || "yes" : "" };
+  const isPayer = !answer ? "" : payerOnFile && answer === "self" ? "no" : draft.is_payer || "yes";
+  return { ...withoutParty(draft), recipient: answer, email: "", is_payer: isPayer };
+}
+
+/**
+ * The third party on file as payer — named by the lead, entered by staff, or
+ * answered on the payer's own link or paper questionnaire —, whom nothing but
+ * a confirmed answer replaces; `null` when the patient or a parent pays
+ * (`parentPays`: the stored third party is the paying parent) or nobody is named.
+ * A third-party row that is one of the minor's parents (same e-mail, else the
+ * same name and date of birth) is that parent, as the server reads it
+ * (`payer_same_person`).
+ */
+export function thirdPartyPayerOnFile(
+  payer: LeadRequestPayer | null | undefined,
+  parentPays: boolean,
+  representatives: readonly Pick<LeadRequestRepresentative, "slot" | "email" | "first_name" | "last_name" | "date_of_birth">[] = [],
+): LeadRequestPayer | null {
+  if (!payer || payer.payer_kind !== "third_party" || parentPays) return null;
+  const organisation = payer.payer_type != null && payer.payer_type !== "person";
+  const address = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
+  const parent = !organisation && representatives.some((person) => {
+    if (person.slot !== "rep1" && person.slot !== "rep2") return false;
+    if (address(person.email) && address(payer.email)) return address(person.email) === address(payer.email);
+    return Boolean(person.date_of_birth) && person.date_of_birth === payer.date_of_birth
+      && sameName(payerName(payer), [person.first_name, person.last_name].filter(Boolean).join(" "));
+  });
+  return parent ? null : payer;
+}
+
+/** The name of the payer on file for the confirmation: the organisation's or "First Last"; "" without one. */
+export function payerOnFileName(payer: LeadRequestPayer | null | undefined): string {
+  return payer ? payerName(payer) : "";
+}
+
+/**
+ * Whether the answer "who pays" puts the patient or a parent in the place of
+ * the third party on file: asked before it is sent. Another third party is
+ * confirmed where it is named, or on the server's refusal.
+ */
+export function replacesThirdPartyPayer(
+  onFile: LeadRequestPayer | null,
+  input: Pick<LeadRequestPayerInput, "payer_kind">,
+): boolean {
+  return Boolean(onFile) && input.payer_kind !== "third_party";
 }
 
 /**

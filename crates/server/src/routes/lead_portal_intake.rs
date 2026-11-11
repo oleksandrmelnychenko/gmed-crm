@@ -4019,6 +4019,13 @@ async fn update_my_payer(
     }
     // The organisation mask (trigger flow 2026-10-07) is stored apart.
     let mask = crate::risk::cabinet::take_keys(&mut body, &crate::risk::cabinet::ORGANISATION_KEYS);
+    // The person confirmed that the payer on file is replaced (release QA
+    // 2026-11-11, F2).
+    let payer_replacement_confirmed = body
+        .as_object_mut()
+        .and_then(|object| object.remove(lead_invoice_recipient::PAYER_REPLACEMENT_CONFIRMED_KEY))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
     let input: PortalPayerInput = match serde_json::from_value(body) {
         Ok(input) => input,
         Err(error) => {
@@ -4100,6 +4107,18 @@ async fn update_my_payer(
             Ok(parents) => parents,
             Err(error) => return internal(error, "load contracting parents"),
         };
+    // A third party on file whose link, answers, files or prepared papers
+    // would go with another payer: replaced only with the confirmation
+    // (release QA 2026-11-11, F2). Read before the save clears them.
+    let replacement_guarded = !payer_replacement_confirmed
+        && !own_account_after_payer
+        && declared
+            .as_ref()
+            .is_some_and(lead_payer::Declaration::is_third_party)
+        && match crate::routes::lead_payer_link::payer_has_records(&mut tx, lead_id).await {
+            Ok(recorded) => recorded,
+            Err(error) => return internal(error, "load payer records"),
+        };
     let saved = if own_account_after_payer {
         lead_payer::save_own_account_from_portal(&mut tx, lead_id, auth.user_id, &input).await
     } else {
@@ -4125,6 +4144,24 @@ async fn update_my_payer(
         }
         Err(PortalPayerError::Database(error)) => return internal(error, "save payer"),
     };
+    // Refused as a whole: the transaction is dropped, nothing is archived.
+    if replacement_guarded && let (Some(before), Some(after)) = (declared.as_ref(), saved.as_ref())
+    {
+        match crate::routes::lead_payer_link::names_another_payer(&mut tx, lead_id, before, after)
+            .await
+        {
+            Ok(false) => {}
+            Ok(true) => {
+                return coded(
+                    StatusCode::CONFLICT,
+                    lead_invoice_recipient::PAYER_REPLACEMENT_UNCONFIRMED,
+                    "Another payer is on file; replacing it needs a confirmation",
+                    json!({}),
+                );
+            }
+            Err(error) => return internal(error, "compare payers"),
+        }
+    }
     if saved.is_some()
         && let Err(error) =
             lead_invoice_recipient::follow_paying_parent(&mut tx, lead_id, auth.user_id).await
@@ -4475,6 +4512,13 @@ async fn update_my_billing(
     let recipient_expected = body
         .as_object_mut()
         .and_then(|object| object.remove(lead_invoice_recipient::RECIPIENT_EXPECTED_KEY));
+    // The person confirmed that the third party on file as payer is replaced
+    // (release QA 2026-11-11, F2); without it the recipient never does that.
+    let payer_replacement_confirmed = body
+        .as_object_mut()
+        .and_then(|object| object.remove(lead_invoice_recipient::PAYER_REPLACEMENT_CONFIRMED_KEY))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
     // The invoice recipient of step 3 (2026-10-11) is stored apart.
     let recipient_body =
         crate::risk::cabinet::take_keys(&mut body, &lead_invoice_recipient::RECIPIENT_KEYS);
@@ -4655,6 +4699,37 @@ async fn update_my_billing(
             let _ =
                 lead_invoice_recipient::resolve_parent(&mut next, &representation.representation);
         }
+        // A third party is on file as payer (named by the lead, entered by
+        // staff, or answered on the payer's link or paper questionnaire): the
+        // patient side as recipient takes that place only with the person's
+        // confirmation (release QA 2026-11-11, F2). "I pay myself" without it
+        // is refused; the default of a newly chosen recipient is "does not
+        // pay", and the payer stays as it is.
+        let keeps_payer = !payer_replacement_confirmed
+            && lead_invoice_recipient::replaces_third_party_payer(
+                &next,
+                &representation.representation,
+                payer.as_ref(),
+            );
+        if keeps_payer {
+            if recipient_body
+                .get("invoice_recipient_is_payer")
+                .and_then(Value::as_bool)
+                == Some(true)
+            {
+                return coded(
+                    StatusCode::CONFLICT,
+                    lead_invoice_recipient::PAYER_REPLACEMENT_UNCONFIRMED,
+                    "Another payer is on file; replacing it needs a confirmation",
+                    json!({}),
+                );
+            }
+            if recipient_body.contains_key("invoice_recipient")
+                || recipient_body.contains_key("recipient_representative_id")
+            {
+                next.is_payer = Some(false);
+            }
+        }
         let changed = lead_invoice_recipient::changed_keys(&current, &next);
         if !changed.is_empty() || stored.is_none() {
             if let Err(error) =
@@ -4678,19 +4753,24 @@ async fn update_my_billing(
         }
         // "The recipient pays": the recipient is the payer at once (owner
         // decision 2026-10-23), no separate answer "who pays" is needed.
-        payer_recorded = match lead_invoice_recipient::record_as_payer(
-            &mut tx,
-            lead_id,
-            auth.user_id,
-            kind.as_str(),
-            &next,
-            &representation.representation,
-            payer.as_ref(),
-        )
-        .await
-        {
-            Ok(recorded) => recorded,
-            Err(error) => return internal(error, "record invoice recipient as payer"),
+        // Never in place of a third party on file without the confirmation.
+        payer_recorded = if keeps_payer {
+            None
+        } else {
+            match lead_invoice_recipient::record_as_payer(
+                &mut tx,
+                lead_id,
+                auth.user_id,
+                kind.as_str(),
+                &next,
+                &representation.representation,
+                payer.as_ref(),
+            )
+            .await
+            {
+                Ok(recorded) => recorded,
+                Err(error) => return internal(error, "record invoice recipient as payer"),
+            }
         };
     }
     // Section 7 is derived from the recipient's answers.

@@ -321,6 +321,13 @@ export type LeadRequestText = {
      */
     parentChangeConfirm: (from: string, to: string, pays: boolean) => string;
     replacePayerHint: string;
+    /**
+     * Asked before a third party on file as payer is replaced (release QA 2026-11-11, F2): who
+     * pays now and what is archived with the change (the payer's answers, GwG sheet, papers).
+     */
+    payerReplaceConfirm: (name: string) => string;
+    /** The server kept the payer on file: the change was not saved. */
+    payerReplaceKept: string;
     question: string;
     options: Record<InvoiceRecipient, string>;
     /** A parent's login of a minor: the parent is the recipient. */
@@ -1395,6 +1402,8 @@ const de: LeadRequestText = {
     confirmPayerChange: "Diesen Rechnungsempfänger als Zahler bestätigen",
     parentChangeConfirm: (from, to, pays) => `Die Rechnung erhält künftig ${to} statt ${from}${pays ? " – und zahlt sie auch" : ""}. Was ${from} als Zahler angegeben hat (die Zahlungsart), gilt dann nicht mehr und wird neu abgefragt. Möchten Sie das ändern?`,
     replacePayerHint: "Ihre bisherigen Angaben zum Zahler werden ersetzt.",
+    payerReplaceConfirm: (name) => `Als Zahler ist derzeit ${name || "eine andere Person oder Organisation"} angegeben. Wenn Sie den Zahler ändern, werden dessen Angaben (auch ein bereits ausgefüllter Fragebogen) sowie die für ihn vorbereiteten Formulare und Dokumente archiviert; Ihre Einwilligungen zu diesem Zahler gelten nicht mehr. Zahler wirklich ändern?`,
+    payerReplaceKept: "Der bisherige Zahler bleibt angegeben – Ihre Änderung wurde nicht gespeichert.",
     question: "Wer ist Rechnungsempfänger?",
     parentQuestion: "Welcher Elternteil erhält die Rechnung?",
     parentQuestionVormund: "Wer vom Vormund oder den Vormündern erhält die Rechnung?",
@@ -2066,6 +2075,8 @@ const ru: LeadRequestText = {
     confirmPayerChange: "Подтвердить этого получателя как плательщика",
     parentChangeConfirm: (from, to, pays) => `Счёт теперь будет получать ${to}, а не ${from}${pays ? ", и оплачивать его тоже" : ""}. То, что указано от имени ${from} как плательщика (способ оплаты), перестанет действовать и будет запрошено заново. Изменить?`,
     replacePayerHint: "Прежние данные о плательщике будут заменены.",
+    payerReplaceConfirm: (name) => `Сейчас плательщиком указан(а) ${name || "другое лицо или организация"}. Если сменить плательщика, его данные (в том числе уже заполненная анкета), а также подготовленные для него формы и документы будут перенесены в архив, а ваши согласия в отношении этого плательщика перестанут действовать. Сменить плательщика?`,
+    payerReplaceKept: "Прежний плательщик остаётся — ваше изменение не сохранено.",
     question: "Кто является получателем счёта?",
     parentQuestion: "Кто из родителей получит счёт?",
     parentQuestionVormund: "Кто из опекунов получит счёт?",
@@ -2734,6 +2745,8 @@ const uk: LeadRequestText = {
     confirmPayerChange: "Підтвердити цього отримувача як платника",
     parentChangeConfirm: (from, to, pays) => `Рахунок тепер отримуватиме ${to}, а не ${from}${pays ? ", і оплачуватиме його також" : ""}. Те, що вказано від імені ${from} як платника (спосіб оплати), більше не діятиме і буде запитано знову. Змінити?`,
     replacePayerHint: "Попередні дані про платника буде замінено.",
+    payerReplaceConfirm: (name) => `Зараз платником указано ${name || "іншу особу або організацію"}. Якщо змінити платника, його дані (зокрема вже заповнена анкета), а також підготовлені для нього форми й документи буде перенесено до архіву, а ваші згоди щодо цього платника перестануть діяти. Змінити платника?`,
+    payerReplaceKept: "Попередній платник залишається — вашу зміну не збережено.",
     question: "Хто є отримувачем рахунку?",
     parentQuestion: "Хто з батьків отримає рахунок?",
     parentQuestionVormund: "Хто з опікунів отримає рахунок?",
@@ -3402,6 +3415,8 @@ const en: LeadRequestText = {
     confirmPayerChange: "Confirm this recipient as the payer",
     parentChangeConfirm: (from, to, pays) => `From now on ${to} receives the invoice instead of ${from}${pays ? " and pays it" : ""}. What ${from} entered as the payer (the payment method) will no longer apply and will be asked again. Change it?`,
     replacePayerHint: "Your previous payer details will be replaced.",
+    payerReplaceConfirm: (name) => `${name || "Another person or organisation"} is currently named as the payer. If you change the payer, their details (including a questionnaire already filled in) and the forms and documents prepared for them are archived, and your consents about this payer no longer apply. Change the payer?`,
+    payerReplaceKept: "The previous payer stays named – your change was not saved.",
     question: "Who is the invoice recipient?",
     parentQuestion: "Which parent will receive the invoice?",
     parentQuestionVormund: "Which guardian will receive the invoice?",

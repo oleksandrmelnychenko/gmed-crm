@@ -7,6 +7,7 @@ import {
   giveLeadConsent,
   rememberPayerContactConsentRecord,
   saveLeadConsentFormChoices,
+  saveLeadInvoiceRecipient,
   saveLeadPayer,
   saveLeadPayerCostEstimateConsent,
   saveLeadTrustedPersons,
@@ -105,6 +106,13 @@ describe("consent saves recorded by staff", () => {
     await saveLeadPayer("lead-1", { ...payer, contact_consent: false });
     expect(lastBody()).toEqual({ ...payer, contact_consent: false });
     rememberPayerContactConsentRecord(null);
+    // Release QA 2026-11-11, F2: a confirmed replacement of the payer on file says so.
+    await saveLeadPayer("lead-1", { payer_kind: "self" }, true);
+    expect(lastBody()).toEqual({ payer_kind: "self", payer_replacement_confirmed: true });
+    await saveLeadInvoiceRecipient("lead-1", { invoice_recipient_is_payer: true }, undefined, true);
+    expect(lastBody()).toEqual({ invoice_recipient_is_payer: true, payer_replacement_confirmed: true });
+    await saveLeadInvoiceRecipient("lead-1", { invoice_recipient: "self" }, { invoice_recipient: null, representative_id: null });
+    expect(lastBody()).toEqual({ invoice_recipient: "self", recipient_expected: { invoice_recipient: null, representative_id: null } });
   });
 
   it("follow-up send: the client's send has no body, staff say how the client confirmed it", async () => {

@@ -411,6 +411,11 @@ async fn name_payer(app: &PayerApp, lead_id: Uuid, patient: &str, payer: Value) 
         .execute(app.pool())
         .await
         .unwrap();
+    // Another payer in place of one with a link or answers is the person's
+    // confirmed choice, as the cabinet sends it after its dialog (release QA
+    // 2026-11-11, F2); the first naming ignores the key.
+    let mut payer = payer;
+    payer["payer_replacement_confirmed"] = json!(true);
     let (status, body) = with_login(
         app,
         "POST",

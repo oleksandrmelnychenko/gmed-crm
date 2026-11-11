@@ -421,9 +421,23 @@ async function setup(page: Page, options: {
     if (path === "/me/lead-requests") return route.fulfill({ json: { requests: [answer()] } });
     if (path === base && method === "GET") return route.fulfill({ json: answer() });
     if (path === `${base}/billing` && method === "POST") {
-      const { recipient_expected: expected, ...patch } = req.postDataJSON() as Record<string, unknown>;
-      calls.billing.push(patch);
+      const { recipient_expected: expected, payer_replacement_confirmed: confirmed, ...patch } = req.postDataJSON() as Record<string, unknown>;
+      calls.billing.push(confirmed === true ? { ...patch, payer_replacement_confirmed: true } : patch);
       calls.expected.push(expected);
+      // Like the server (release QA 2026-11-11, F2): the patient side never takes the place of a
+      // third party on file as payer without the confirmation; chosen anew, it does not pay.
+      // A third-party row with a parent's e-mail is that parent (`payer_same_person`), not another payer.
+      const parentEmails = (request.representation?.representatives ?? [])
+        .map((rep: { email?: string | null }) => (rep.email ?? "").toLowerCase()).filter(Boolean);
+      const thirdPartyOnFile = request.payer?.payer_kind === "third_party" && confirmed !== true
+        && !parentEmails.includes((request.payer.email ?? "").toLowerCase());
+      const patientSide = (patch.invoice_recipient ?? request.billing.invoice_recipient) === "self";
+      if (thirdPartyOnFile && patientSide && patch.invoice_recipient_is_payer === true) {
+        return route.fulfill({ status: 409, json: { code: "payer_replacement_unconfirmed", message: "payer" } });
+      }
+      if (thirdPartyOnFile && patch.invoice_recipient === "self" && !("invoice_recipient_is_payer" in patch)) {
+        patch.invoice_recipient_is_payer = false;
+      }
       // Like the server: a tab that shows another recipient than the stored one is refused.
       if (expected && !("invoice_recipient" in patch) && !("recipient_representative_id" in patch)) {
         const shown = expected as { invoice_recipient: string | null; representative_id: string | null };
@@ -1134,10 +1148,61 @@ test("changing the default checked recipient cannot replace an existing payer un
   await expect.poll(() => request.billing.recipient.phone).toBe("+4915100000000");
   expect(calls.payer).toEqual([]);
   await expect(replacement.getByRole("button")).toBeEnabled();
+  // The confirmation names the payer on file and what goes with it (release QA 2026-11-11, F2):
+  // declined, nothing is sent.
+  const asked: string[] = [];
+  page.once("dialog", (dialog) => {
+    asked.push(dialog.message());
+    void dialog.dismiss();
+  });
+  await replacement.getByRole("button").click();
+  await expect.poll(() => asked.length).toBe(1);
+  expect(asked[0]).toContain("Old Payer");
+  expect(asked[0]).toContain("archiviert");
+  expect(calls.payer).toEqual([]);
+  page.once("dialog", (dialog) => void dialog.accept());
   await replacement.getByRole("button").click();
   await expect.poll(() => calls.payer.at(-1)).toMatchObject({ first_name: "Another", last_name: "Recipient", contact_consent: false });
+  expect(calls.payer.at(-1)).toMatchObject({ payer_replacement_confirmed: true });
   expect(calls.payer.at(-1)).not.toHaveProperty("date_of_birth");
   expect(calls.payer.at(-1)).not.toHaveProperty("citizenships");
+});
+
+test("'Ich' keeps the third-party payer on file; 'Ich zahle selbst' replaces it only after the confirmation (release QA 2026-11-11, F2)", async ({ page }) => {
+  const { request, calls } = await setup(page, { prepare: (request) => {
+    request.payer = { ...selfPayer(), payer_kind: "third_party", payer_type: "person", first_name: "Kamran", last_name: "Zahler", date_of_birth: "1960-01-01", citizenships: ["DE"], contact_consent_at: "2026-10-11T09:00:00Z", cost_estimate_consent_at: "2026-10-11T09:00:00Z" };
+  } });
+  await page.goto("/");
+  await step(page, "billing");
+  const box = page.getByTestId("lead-request-step-billing");
+  await checkLabelledRadio(box.getByRole("radio", { name: "Ich" }));
+  await expect.poll(() => request.billing.invoice_recipient).toBe("self");
+  // The recipient is named; "I pay myself" is not ticked and the payer stays with its consents.
+  expect(calls.billing.at(-1)).toMatchObject({ invoice_recipient: "self", invoice_recipient_is_payer: false });
+  const isPayer = box.getByRole("checkbox", { name: "Ich zahle selbst" });
+  await expect(isPayer).not.toBeChecked();
+  expect(calls.payer).toEqual([]);
+  expect(request.payer).toMatchObject({ payer_kind: "third_party", first_name: "Kamran", contact_consent_at: "2026-10-11T09:00:00Z" });
+  await expect(page.getByTestId("lead-request-payer").locator("#lead-request-payer_first_name")).toHaveValue("Kamran");
+  // Ticking it asks first, naming the payer on file; declined, nothing is sent.
+  const asked: string[] = [];
+  page.once("dialog", (dialog) => {
+    asked.push(dialog.message());
+    void dialog.dismiss();
+  });
+  const saves = calls.billing.length;
+  await isPayer.click();
+  await expect.poll(() => asked.length).toBe(1);
+  expect(asked[0]).toContain("Kamran Zahler");
+  await expect(isPayer).not.toBeChecked();
+  await page.waitForTimeout(1200);
+  expect(calls.billing.length).toBe(saves);
+  expect(request.payer?.payer_kind).toBe("third_party");
+  // Confirmed: the save says so and the patient pays.
+  page.once("dialog", (dialog) => void dialog.accept());
+  await isPayer.click();
+  await expect.poll(() => calls.billing.at(-1)).toMatchObject({ invoice_recipient_is_payer: true, payer_replacement_confirmed: true });
+  await expect.poll(() => request.payer?.payer_kind).toBe("self");
 });
 
 test("the other parent pays: named as that representative, never as a third party (QA 2026-10-22)", async ({ page }) => {
