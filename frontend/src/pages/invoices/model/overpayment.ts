@@ -32,56 +32,22 @@ export type InvoiceCreditTransferTarget = {
   balance_due: string;
   /** Recipient of the target invoice (QA D3-04). */
   recipient_name?: string | null;
-  /** False when the target is addressed to another recipient than the source. */
+  /** False when the target is addressed to another recipient than the source (never offered since 2026-11-12). */
   same_recipient?: boolean;
-};
-
-/**
- * What the server names when credit would move to another recipient's invoice
- * (`credit_transfer_recipient_mismatch`): both invoices, both recipients and
- * the amount, so billing confirms a move between two debtors knowingly.
- */
-export type CreditTransferRecipientMismatch = {
-  sourceInvoiceNumber: string;
-  sourceRecipientName: string;
-  targetInvoiceNumber: string;
-  targetRecipientName: string;
-  amountGross: string;
-  currency: string;
 };
 
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-/** The mismatch details of a 409 body, null for any other answer. */
-export function creditTransferRecipientMismatch(body: unknown): CreditTransferRecipientMismatch | null {
-  if (!body || typeof body !== "object") return null;
-  const record = body as Record<string, unknown>;
-  if (record.error !== "credit_transfer_recipient_mismatch") return null;
-  return {
-    sourceInvoiceNumber: text(record.source_invoice_number),
-    sourceRecipientName: text(record.source_recipient_name),
-    targetInvoiceNumber: text(record.target_invoice_number),
-    targetRecipientName: text(record.target_recipient_name),
-    amountGross: text(record.amount_gross),
-    currency: text(record.currency) || "EUR",
-  };
-}
-
-/** The question of the confirmation dialog, in the UI language. */
-export function creditTransferMismatchQuestion(
-  mismatch: CreditTransferRecipientMismatch,
-  lang: string,
-  money: (value: unknown, currency: string) => string,
-): string {
-  const amountText = money(mismatch.amountGross, mismatch.currency);
-  const unknown = lang === "de" ? "unbekannt" : "не указан";
-  const source = mismatch.sourceRecipientName || unknown;
-  const target = mismatch.targetRecipientName || unknown;
-  return lang === "de"
-    ? `${amountText} Guthaben von ${source} (Rechnung ${mismatch.sourceInvoiceNumber || "—"}) werden auf die Rechnung ${mismatch.targetInvoiceNumber || "—"} von ${target} umgebucht. Das Geld eines Zahlers begleicht damit die Rechnung eines anderen Empfängers.`
-    : `Переплата ${amountText} получателя «${source}» (счёт ${mismatch.sourceInvoiceNumber || "—"}) будет зачтена в счёт ${mismatch.targetInvoiceNumber || "—"} получателя «${target}». Деньги одного плательщика закроют счёт другого получателя.`;
+/**
+ * The invoices a credit may go to: the same invoice recipient person only.
+ * Credit never moves to another person's invoice, not even with a
+ * confirmation (owner decision 2026-11-12, QA L12); the server leaves such
+ * invoices out and refuses them with `credit_transfer_other_person`.
+ */
+export function creditTransferTargets(targets: readonly InvoiceCreditTransferTarget[] | undefined): InvoiceCreditTransferTarget[] {
+  return (targets ?? []).filter((target) => target.same_recipient !== false);
 }
 
 /** Option text of a target invoice, with its recipient. */

@@ -3,7 +3,8 @@
 //! A credit balance arises when the patient paid more than an invoice asks
 //! for after credit notes and applied advances (an overpayment, or a credit
 //! note issued after payment). Billing either refunds it (the refund journal)
-//! or moves it to another open invoice of the same patient and currency. A
+//! or moves it to another open invoice of the same patient, currency and
+//! invoice recipient person (never another person's, 2026-11-12). A
 //! move is a `credit_transfer` refund leg on the source invoice and a
 //! `credit_transfer` payment leg on the target, written in one transaction
 //! and linked in `invoice_credit_transfers`, so every balance, status, ledger
@@ -43,10 +44,8 @@ pub(crate) struct CreateCreditTransferRequest {
     amount_gross: MoneyInput,
     transferred_on: Option<String>,
     note: Option<String>,
-    /// Moves credit between invoices addressed to different recipients
-    /// (e.g. the patient and a paying parent) after billing confirmed it.
-    #[serde(default)]
-    confirm_recipient_mismatch: bool,
+    // `confirm_recipient_mismatch` is gone: credit never moves to another
+    // person's invoice (owner decision 2026-11-12); serde ignores the field.
 }
 
 #[derive(Deserialize)]
@@ -190,9 +189,10 @@ fn recipient_value(alias: &str) -> String {
     )
 }
 
-/// Open invoices of the same patient and currency a credit balance can settle,
-/// each with its recipient and whether it is the source invoice's recipient
-/// (a move to another recipient needs billing's confirmation, QA D3-04).
+/// Open invoices of the same patient, currency and invoice recipient person a
+/// credit balance can settle, each with its recipient. Invoices of another
+/// recipient are left out: credit never moves to another person (owner
+/// decision 2026-11-12).
 pub(crate) async fn load_credit_transfer_targets(
     state: &AppState,
     invoice_id: Uuid,
@@ -276,6 +276,8 @@ pub(crate) async fn load_credit_transfer_targets(
                 "same_recipient": same_recipient,
             })
         })
+        // Another person's invoice is no target (owner decision 2026-11-12).
+        .filter(|target| target["same_recipient"] == true)
         .collect())
 }
 
@@ -440,8 +442,10 @@ pub(crate) async fn create_credit_transfer(
             "Credit transfers require released invoices",
         );
     }
-    // Credit belongs to whoever paid it: it moves between invoices of the same
-    // recipient, otherwise only with billing's explicit confirmation.
+    // Credit belongs to whoever paid it: it moves only between invoices of the
+    // same patient and the same invoice recipient person, also when its
+    // invoice belongs to a cancelled order (owner decision 2026-11-12, QA
+    // L12; before, billing could confirm a move to another recipient).
     let recipients = match sqlx::query(&format!(
         r#"SELECT invoice_recipient_identity(source.recipient_snapshot)
                   IS NOT DISTINCT FROM invoice_recipient_identity(target.recipient_snapshot)
@@ -490,15 +494,13 @@ pub(crate) async fn create_credit_transfer(
                 .unwrap_or_default()
                 .as_deref(),
         );
-    if !same_recipient && !body.confirm_recipient_mismatch {
-        // Both recipients and the amount, so the confirmation names what
-        // billing moves between two debtors (QA D3-04).
+    if !same_recipient {
+        // Both recipients, so the refusal names whose credit it is (QA D3-04).
         return coded_err(
-            StatusCode::CONFLICT,
-            "credit_transfer_recipient_mismatch",
-            "The invoices are addressed to different recipients; confirm to move the credit anyway",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "credit_transfer_other_person",
+            "Credit can only be moved to an invoice of the same patient and the same invoice recipient",
             json!({
-                "confirm_field": "confirm_recipient_mismatch",
                 "source_invoice_number": source.context.invoice_number,
                 "source_recipient_name": recipients
                     .try_get::<Option<String>, _>("source_recipient_name")
@@ -680,7 +682,6 @@ pub(crate) async fn create_credit_transfer(
         "amount_gross": decimal_to_string(amount_gross),
         "currency": source.context.currency,
         "transferred_on": transferred_on.to_string(),
-        "recipient_mismatch_confirmed": !same_recipient,
         "patient_id": patient_id,
     });
     // Both legs are audited in the transfer's transaction.

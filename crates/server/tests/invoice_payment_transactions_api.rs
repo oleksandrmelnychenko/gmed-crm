@@ -1281,15 +1281,17 @@ async fn credit_transfer_to_another_recipient_names_both_recipients() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{overpaid:?}");
+    // Owner decision 2026-11-12 (QA L12): another person's invoice is no
+    // target, and the move is refused even with the old confirmation.
     let targets = overpaid["invoice"]["credit_transfer_targets"]
         .as_array()
         .unwrap();
-    let listed = targets
-        .iter()
-        .find(|item| item["invoice_id"] == target.to_string())
-        .unwrap();
-    assert_eq!(listed["recipient_name"], "Beispiel GmbH");
-    assert_eq!(listed["same_recipient"], false);
+    assert!(
+        targets
+            .iter()
+            .all(|item| item["invoice_id"] != target.to_string()),
+        "{targets:?}"
+    );
 
     let request = json!({
         "request_id": Uuid::new_v4(),
@@ -1297,27 +1299,51 @@ async fn credit_transfer_to_another_recipient_names_both_recipients() {
         "amount_gross": "30",
         "transferred_on": today,
     });
+    let mut confirmed = request.clone();
+    confirmed["confirm_recipient_mismatch"] = json!(true);
+    for body in [request, confirmed] {
+        let (status, refused) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/invoices/{source}/credit-transfers"),
+            &billing,
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused:?}");
+        assert_eq!(refused["error"], "credit_transfer_other_person");
+        assert_eq!(refused["target_recipient_name"], "Beispiel GmbH");
+        assert_eq!(refused["target_invoice_number"], format!("INV-{tag}-b"));
+        assert_eq!(refused["source_invoice_number"], format!("INV-{tag}-a"));
+        assert!(
+            refused["source_recipient_name"]
+                .as_str()
+                .is_some_and(|name| !name.is_empty()),
+            "{refused:?}"
+        );
+    }
+
+    // Also when the credit comes from a cancelled order.
+    sqlx::query("UPDATE orders SET status = 'cancelled' WHERE id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
     let (status, refused) = json_request(
         &app,
         "POST",
         &format!("/api/v1/invoices/{source}/credit-transfers"),
         &billing,
-        Some(request.clone()),
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "target_invoice_id": target,
+            "amount_gross": "30",
+            "transferred_on": today,
+        })),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{refused:?}");
-    assert_eq!(refused["error"], "credit_transfer_recipient_mismatch");
-    assert_eq!(refused["confirm_field"], "confirm_recipient_mismatch");
-    assert_eq!(refused["target_recipient_name"], "Beispiel GmbH");
-    assert_eq!(refused["target_invoice_number"], format!("INV-{tag}-b"));
-    assert_eq!(refused["source_invoice_number"], format!("INV-{tag}-a"));
-    assert_eq!(refused["amount_gross"], "30");
-    assert!(
-        refused["source_recipient_name"]
-            .as_str()
-            .is_some_and(|name| !name.is_empty()),
-        "{refused:?}"
-    );
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused:?}");
+    assert_eq!(refused["error"], "credit_transfer_other_person");
 
     let statement_path = format!("/api/v1/patients/{patient_id}/account-statement");
     let (status, before) = json_request(&app, "GET", &statement_path, &billing, None).await;

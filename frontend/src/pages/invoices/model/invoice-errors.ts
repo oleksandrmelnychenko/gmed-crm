@@ -381,9 +381,10 @@ const CODES: Record<string, Pair> = {
     "Anzahlungsrechnungen dieses Auftrags gingen an einen anderen Rechnungsempfänger. Mit der Bestätigung rechnet diese Schlussrechnung genau diese Anzahlungen ab: Gezahltes wird abgezogen, der offene Rest mit einer Gutschrift geschlossen. Spätere Anzahlungen anderer Empfänger bleiben unberührt.",
     "Авансовые счета по этому заказу выставлены другому получателю. При подтверждении этот финальный счёт закрывает именно эти авансы: оплаченное зачитывается, неоплаченный остаток закрывается кредит-нотой. Последующие авансы других получателей не затрагиваются.",
   ],
-  credit_transfer_recipient_mismatch: [
-    "Die Rechnungen haben unterschiedliche Rechnungsempfänger. Guthaben nur nach Bestätigung umbuchen.",
-    "У счетов разные получатели. Перенести переплату можно только после подтверждения.",
+  // Owner decision 2026-11-12 (QA L12): no confirmation any more.
+  credit_transfer_other_person: [
+    "Guthaben gehört dem, der es gezahlt hat: Es kann nur auf eine Rechnung desselben Patienten und desselben Rechnungsempfängers umgebucht werden, auch aus einem stornierten Auftrag. Für eine andere Person das Guthaben erstatten.",
+    "Переплата принадлежит тому, кто её внёс: её можно перенести только на счёт того же пациента и того же получателя счёта, в том числе из отменённого заказа. Другому лицу переплату нужно вернуть (возврат).",
   ],
   prepayment_recipient_mismatch: [
     "Die Anzahlungsrechnung ist an einen anderen Rechnungsempfänger adressiert. Das Geld eines Zahlers nur nach Bestätigung auf die Rechnung eines anderen anrechnen.",

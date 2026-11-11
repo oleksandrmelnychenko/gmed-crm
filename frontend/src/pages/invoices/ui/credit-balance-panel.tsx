@@ -1,17 +1,8 @@
-import { SectionHeading } from "@/components/ui/section-heading";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ArrowRightLeft, LoaderCircle } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { MoneyInput } from "@/components/ui/money-input";
 import { Banner, StatusBadge, inputClass, selectClass, tokens } from "@/components/ui-shell";
@@ -23,17 +14,15 @@ import { cn } from "@/lib/utils";
 import { createCreditTransfer, reverseCreditTransfer } from "../data/invoice-api";
 import {
   creditTransferDefaultAmount,
-  creditTransferMismatchQuestion,
   creditTransferProblem,
-  creditTransferRecipientMismatch,
   creditTransferTargetLabel,
+  creditTransferTargets,
   type CreditTransferProblem,
-  type CreditTransferRecipientMismatch,
   type InvoiceCreditTransfer,
   type InvoiceCreditTransferTarget,
 } from "../model/overpayment";
 import { formatDate } from "../model/invoice-model";
-import { invoiceConfirmationField, localizeInvoiceError } from "../model/invoice-errors";
+import { localizeInvoiceError } from "../model/invoice-errors";
 import { GuardedDateInput } from "./guarded-date-input";
 
 function Field({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
@@ -82,7 +71,8 @@ export function CreditBalancePanel({
   const locale = lang === "de" ? "de-DE" : "ru-RU";
   const money = (value: unknown) => formatMoneyAmount(value, currency);
   const credit = Number(creditBalance ?? 0);
-  const openTargets = useMemo(() => targets ?? [], [targets]);
+  // Only invoices of the same recipient person (owner decision 2026-11-12).
+  const openTargets = useMemo(() => creditTransferTargets(targets), [targets]);
   const [targetId, setTargetId] = useState("");
   const [amountGross, setAmountGross] = useState("");
   const [transferredOn, setTransferredOn] = useState(() => appDateKey());
@@ -93,12 +83,6 @@ export function CreditBalancePanel({
   const [error, setError] = useState<string | null>(null);
   const [reversingId, setReversingId] = useState("");
   const [reversalReason, setReversalReason] = useState("");
-  // A move to another recipient's invoice waits for billing's confirmation
-  // in an app dialog naming both recipients and the amount (QA D3-04).
-  const [pendingMismatch, setPendingMismatch] = useState<{
-    payload: Parameters<typeof createCreditTransfer>[1];
-    mismatch: CreditTransferRecipientMismatch;
-  } | null>(null);
 
   const target = openTargets.find((item) => item.invoice_id === targetId);
   useEffect(() => {
@@ -115,20 +99,9 @@ export function CreditBalancePanel({
     setBusy(true);
     setError(null);
     try {
-      try {
-        await createCreditTransfer(invoiceId, payload);
-      } catch (cause) {
-        // Credit moves between invoices of different recipients (e.g. the
-        // patient and a paying parent) only after billing confirms it.
-        const mismatch = invoiceConfirmationField(cause) === "confirm_recipient_mismatch"
-          && !payload.confirm_recipient_mismatch
-          ? creditTransferRecipientMismatch((cause as { body?: unknown }).body)
-          : null;
-        if (!mismatch) throw cause;
-        setPendingMismatch({ payload, mismatch });
-        return;
-      }
-      setPendingMismatch(null);
+      // Another person's invoice is refused with a 422 that the error banner
+      // words (`credit_transfer_other_person`, owner decision 2026-11-12).
+      await createCreditTransfer(invoiceId, payload);
       setRequestId(crypto.randomUUID());
       setNote("");
       // The reload derives the amount for the new credit; nothing of the
@@ -137,7 +110,6 @@ export function CreditBalancePanel({
       setTransferredOn(appDateKey());
       onChanged();
     } catch (cause) {
-      setPendingMismatch(null);
       setError(localizeInvoiceError(cause, lang, t.common_error));
     } finally {
       setBusy(false);
@@ -317,52 +289,6 @@ export function CreditBalancePanel({
           ))}
         </div>
       ) : null}
-
-      <Dialog open={pendingMismatch !== null} onOpenChange={(open) => { if (!open && !busy) setPendingMismatch(null); }}>
-        <DialogContent className="sm:max-w-lg" data-testid="credit-transfer-recipient-confirmation">
-          <DialogHeader>
-            <DialogTitle>
-              <SectionHeading icon={ArrowRightLeft}>{lang === "de" ? "Guthaben auf einen anderen Empfänger umbuchen?" : "Перенести переплату на счёт другого получателя?"}</SectionHeading>
-            </DialogTitle>
-            <DialogDescription>
-              {pendingMismatch
-                ? creditTransferMismatchQuestion(pendingMismatch.mismatch, lang, (value, currencyCode) => formatMoneyAmount(value, currencyCode))
-                : null}
-            </DialogDescription>
-          </DialogHeader>
-          {pendingMismatch ? (
-            <dl className="grid gap-2 rounded-md border bg-muted/30 p-3 text-sm sm:grid-cols-[auto_minmax(0,1fr)]">
-              <dt className="text-muted-foreground">{lang === "de" ? "Von" : "Откуда"}</dt>
-              <dd className="min-w-0 break-words">
-                {pendingMismatch.mismatch.sourceInvoiceNumber || "—"} · {pendingMismatch.mismatch.sourceRecipientName || "—"}
-              </dd>
-              <dt className="text-muted-foreground">{lang === "de" ? "Auf" : "Куда"}</dt>
-              <dd className="min-w-0 break-words">
-                {pendingMismatch.mismatch.targetInvoiceNumber || "—"} · {pendingMismatch.mismatch.targetRecipientName || "—"}
-              </dd>
-              <dt className="text-muted-foreground">{lang === "de" ? "Betrag" : "Сумма"}</dt>
-              <dd className="font-mono font-semibold tabular-nums">
-                {formatMoneyAmount(pendingMismatch.mismatch.amountGross, pendingMismatch.mismatch.currency)}
-              </dd>
-            </dl>
-          ) : null}
-          <DialogFooter>
-            <Button type="button" variant="outline" disabled={busy} onClick={() => setPendingMismatch(null)}>
-              {t.common_cancel}
-            </Button>
-            <Button
-              type="button"
-              disabled={busy || pendingMismatch === null}
-              onClick={() => {
-                if (pendingMismatch) void send({ ...pendingMismatch.payload, confirm_recipient_mismatch: true });
-              }}
-            >
-              {busy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-              {lang === "de" ? "Umbuchung bestätigen" : "Подтвердить перенос"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
