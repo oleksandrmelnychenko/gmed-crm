@@ -90,12 +90,20 @@ const ExecutiveCashChart = lazy(async () => {
       currency: "EUR",
       maximumFractionDigits: 0,
     });
+    // The axis is as wide as its longest tick label ("12.000.000 €" needs
+    // about 70 px at 10 px font); a fixed width cut the millions (QA C-4).
+    const largest = data.reduce(
+      (max, datum) => Math.max(max, Math.abs(datum.inflow), Math.abs(datum.outflow), Math.abs(datum.net)),
+      0,
+    );
+    const yAxisWidth = Math.max(48, Math.ceil(currency.format(-largest * 1.25).length * 6.2) + 8);
     return (
       <ResponsiveContainer width="100%" height={178}>
-        <ComposedChart data={data} margin={{ top: 10, right: 10, bottom: 0, left: -8 }}>
+        <ComposedChart data={data} margin={{ top: 10, right: 10, bottom: 0, left: 0 }}>
           <CartesianGrid stroke="var(--border)" strokeDasharray="2 4" vertical={false} />
           <XAxis dataKey="label" axisLine={false} tickLine={false} fontSize={10} stroke="var(--muted-foreground)" />
           <YAxis
+            width={yAxisWidth}
             axisLine={false}
             tickLine={false}
             fontSize={10}
@@ -503,7 +511,7 @@ export function ExecutiveBusinessMap({
         </div>
         <div className="mt-3 grid grid-cols-2 gap-y-2 border-t border-border pt-3 sm:grid-cols-4">
           <MetricSignal label={copy.cash} value={loading ? "—" : money.format(safeNumber(finance?.actual_cash_balance))} note={finance?.reconciliation_required ? copy.reconciliation : copy.upToDate} tone={finance?.reconciliation_required ? "danger" : "neutral"} />
-          <MetricSignal label={copy.receivables} value={loading ? "—" : money.format(receivables)} note={`${money.format(safeNumber(finance?.cash_inflow))} ${copy.inflow.toLowerCase()}`} tone={receivables > 0 ? "good" : "neutral"} />
+          <MetricSignal label={copy.receivables} value={loading ? "—" : money.format(receivables)} note={`${money.format(safeNumber(finance?.cash_inflow))} ${lang === "de" ? copy.inflow : copy.inflow.toLowerCase()}`} tone={receivables > 0 ? "good" : "neutral"} />
           <MetricSignal label={copy.activePatients} value={loading ? "—" : String(activePatientCount)} note={`+${newPatientsThisMonth} ${copy.newThisMonth(newPatientsThisMonth)}`} tone={newPatientsThisMonth > 0 ? "good" : "neutral"} />
           <MetricSignal label={copy.openActions} value={loading ? "—" : String(openTasksCount)} note={openTasksCount > 0 ? copy.attention(openTasksCount) : copy.stable} tone={openTasksCount > 0 ? "danger" : "good"} />
         </div>

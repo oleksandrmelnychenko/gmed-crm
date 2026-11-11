@@ -679,11 +679,13 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
               </div>
               <p className="mt-2 text-xs text-muted-foreground">{text.currentBalance}</p>
               <p className={cn("mt-0.5 break-words font-mono text-lg font-semibold tabular-nums", Number(account.current_balance) < 0 && "text-rose-700 dark:text-rose-400")}>{money(account.current_balance)}</p>
-              <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-xs sm:grid-cols-4">
-                <div><dt className="text-muted-foreground">{text.opening}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.opening_balance)}</dd></div>
-                <div><dt className="text-muted-foreground">{text.movements}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.movement_balance)}</dd></div>
-                <div><dt className="text-muted-foreground">{text.transferBalance}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.transfer_balance ?? "0")}</dd></div>
-                <div><dt className="text-muted-foreground">{text.corrections}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.adjustment_balance)}</dd></div>
+              {/* Each figure is as wide as its amount and the row wraps per
+                  figure, so «10.011.347,41 €» never runs into the next one (QA C-2). */}
+              <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-xs" data-testid="company-account-figures">
+                <div className="min-w-[calc(50%-0.5rem)] flex-auto sm:min-w-0"><dt className="text-muted-foreground">{text.opening}</dt><dd className="mt-1 whitespace-nowrap font-medium tabular-nums">{money(account.opening_balance)}</dd></div>
+                <div className="min-w-[calc(50%-0.5rem)] flex-auto sm:min-w-0"><dt className="text-muted-foreground">{text.movements}</dt><dd className="mt-1 whitespace-nowrap font-medium tabular-nums">{money(account.movement_balance)}</dd></div>
+                <div className="min-w-[calc(50%-0.5rem)] flex-auto sm:min-w-0"><dt className="text-muted-foreground">{text.transferBalance}</dt><dd className="mt-1 whitespace-nowrap font-medium tabular-nums">{money(account.transfer_balance ?? "0")}</dd></div>
+                <div className="min-w-[calc(50%-0.5rem)] flex-auto sm:min-w-0"><dt className="text-muted-foreground">{text.corrections}</dt><dd className="mt-1 whitespace-nowrap font-medium tabular-nums">{money(account.adjustment_balance)}</dd></div>
               </dl>
               <p className="mt-2 text-[11px] text-muted-foreground">
                 {formatDate(account.opening_balance_on)} · {account.movement_count + (account.transfer_count ?? 0)} {text.movementCount}

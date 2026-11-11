@@ -1157,6 +1157,7 @@ export const de = {
   ann_subtitle: "Banner und Benachrichtigungen für alle Benutzer",
   ann_new: "Neue Ankündigung",
   ann_message: "Nachricht",
+  ann_field_title: "Titel",
   ann_variant: "Typ",
   ann_starts: "Start",
   ann_ends: "Ende",

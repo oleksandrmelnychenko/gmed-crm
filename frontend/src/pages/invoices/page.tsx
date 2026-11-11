@@ -217,6 +217,7 @@ import {
   DEFAULT_INVOICE_PAYMENT_TERM_DAYS,
   invoiceRecipientAddressLines,
   payerFormToPayload,
+  knownPayerRole,
   payerRoleLabel,
   invoicePaidByOtherThanRecipient,
   invoicePayerRelationshipLabel,
@@ -258,6 +259,36 @@ import type {
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
 const INVOICE_DEFAULT_FROZEN_COLUMNS = ["invoice_number", "patient_name"];
+/** Amount cells wrap their sub-lines instead of cutting them (QA C-3). */
+const INVOICE_AMOUNT_CELL_CLASS = "min-w-0";
+
+/**
+ * A small line under an amount ("в т.ч. предоплата 500,00 €"): the label may
+ * wrap, the amount never breaks, so a cell never shows a cut, different-looking
+ * number (QA C-3). The row grows with the extra line.
+ */
+function InvoiceSubAmount({
+  label,
+  amount,
+  title,
+  className,
+}: {
+  label: string;
+  amount: string;
+  title?: string;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn("block whitespace-normal break-words text-xs text-muted-foreground", className)}
+      title={title ?? `${label} ${amount}`}
+      data-testid="invoice-sub-amount"
+    >
+      {label}{" "}
+      <span className="whitespace-nowrap">{amount}</span>
+    </span>
+  );
+}
 // The patient id and the quote repeat what the patient and order columns say;
 // hidden by default so the amounts come into view without sideways scrolling.
 const INVOICE_DEFAULT_HIDDEN_COLUMNS = ["patient_pid", "quote_number"];
@@ -1443,16 +1474,17 @@ function useStaffInvoicesPageContent() {
         group: "finance",
         sortable: true,
         width: 150,
+        cellClassName: INVOICE_AMOUNT_CELL_CLASS,
         render: (row) => {
           const amounts = invoiceListAmounts(row);
           return (
             <span className="block text-right tabular-nums text-foreground">
               {formatMoney(amounts.settled, row.currency)}
               {amounts.prepayment > 0 ? (
-                <span className="block text-xs text-muted-foreground">
-                  {lang === "de" ? "davon Vorauszahlung" : "в т.ч. предоплата"}{" "}
-                  {formatMoney(amounts.prepayment, row.currency)}
-                </span>
+                <InvoiceSubAmount
+                  label={lang === "de" ? "davon Vorauszahlung" : "в т.ч. предоплата"}
+                  amount={formatMoney(amounts.prepayment, row.currency)}
+                />
               ) : null}
             </span>
           );
@@ -1466,22 +1498,23 @@ function useStaffInvoicesPageContent() {
         group: "finance",
         sortable: true,
         width: 140,
+        cellClassName: INVOICE_AMOUNT_CELL_CLASS,
         render: (row) => (
           <span className="block text-right tabular-nums text-foreground">
             {formatMoney(row.balance_due, row.currency)}
             {Number(row.advance_credit_available ?? 0) > 0 ? (
-              <span
-                className="block text-xs text-muted-foreground"
+              <InvoiceSubAmount
+                label={`${t.finance_invoice_amount_to_pay}:`}
+                amount={formatMoney(row.amount_to_pay, row.currency)}
                 title={t.finance_invoice_advance_credit}
-              >
-                {t.finance_invoice_amount_to_pay}: {formatMoney(row.amount_to_pay, row.currency)}
-              </span>
+              />
             ) : null}
             {invoiceListAmounts(row).credit > 0 ? (
-              <span className="block text-xs text-amber-700">
-                {lang === "de" ? "Guthaben" : "Переплата"}{" "}
-                {formatMoney(invoiceListAmounts(row).credit, row.currency)}
-              </span>
+              <InvoiceSubAmount
+                className="text-amber-700"
+                label={lang === "de" ? "Guthaben" : "Переплата"}
+                amount={formatMoney(invoiceListAmounts(row).credit, row.currency)}
+              />
             ) : null}
           </span>
         ),
@@ -1494,16 +1527,17 @@ function useStaffInvoicesPageContent() {
         group: "finance",
         sortable: true,
         width: 150,
+        cellClassName: INVOICE_AMOUNT_CELL_CLASS,
         render: (row) => {
           const amounts = invoiceListAmounts(row);
           return (
             <span className="block text-right tabular-nums text-foreground">
               {formatMoney(amounts.total, row.currency)}
               {amounts.credited > 0 ? (
-                <span className="block text-xs text-muted-foreground">
-                  {formatMoney(amounts.issuedTotal, row.currency)} − {lang === "de" ? "Gutschriften" : "кредит-ноты"}{" "}
-                  {formatMoney(amounts.credited, row.currency)}
-                </span>
+                <InvoiceSubAmount
+                  label={`${formatMoney(amounts.issuedTotal, row.currency)} − ${lang === "de" ? "Gutschriften" : "кредит-ноты"}`}
+                  amount={formatMoney(amounts.credited, row.currency)}
+                />
               ) : null}
             </span>
           );
@@ -2570,6 +2604,7 @@ function useStaffInvoicesPageContent() {
             columns={invoiceTableColumns}
             rowId={(row) => row.id}
             defaultDensity="compact"
+            rowsGrowWithContent
             defaultFrozenColumns={INVOICE_DEFAULT_FROZEN_COLUMNS}
             dictionary={t as unknown as Record<string, string>}
             groupLabels={invoiceColumnGroups}
@@ -3491,14 +3526,15 @@ function useStaffInvoicesPageContent() {
                                       </StatusBadge>
                                     ) : null}
                                   </div>
-                                  <div className="mt-1 text-xs text-muted-foreground">
+                                  {/* Long references and payer names break inside the sheet (QA C-8). */}
+                                  <div className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">
                                     {formatDate(payment.received_on, locale, t.common_not_set)} · {text.paymentMethods[payment.payment_method] ?? payment.payment_method}
                                     {payment.payment_reference
                                       ? ` · ${payment.payment_reference}`
                                       : ""}
                                   </div>
                                   {payment.payer_name ? (
-                                    <div className="mt-1 text-xs text-foreground">
+                                    <div className="mt-1 text-xs text-foreground [overflow-wrap:anywhere]">
                                       {lang === "de" ? "Zahler" : "Плательщик"}: {payment.payer_name}
                                     </div>
                                   ) : null}
@@ -4322,7 +4358,10 @@ function useStaffInvoicesPageContent() {
                             t.common_not_set
                           }
                         />
-                        <MiniMetric
+                        {/* Without a stored payer role the recipient block below
+                            already names the recipient; «Получатель счёта: Не указано»
+                            next to it contradicted it (QA C-9). */}
+                        {paidByOther || knownPayerRole(detail.payer?.role) || !detail.recipient ? <MiniMetric
                           label={text.payerRole}
                           value={paidByOther ? text.payerRoleRecipientOnly.replace("{name}", paidByOther) : payerRoleLabel(
                             detail.payer?.role,
@@ -4333,7 +4372,7 @@ function useStaffInvoicesPageContent() {
                             },
                             t.common_not_set,
                           )}
-                        />
+                        /> : null}
                         <MiniMetric
                           label={t.revenue_invoices_relationship}
                           value={invoicePayerRelationshipLabel(
@@ -4353,7 +4392,7 @@ function useStaffInvoicesPageContent() {
                         />
                       </div>
                       {detail.recipient ? (
-                        <div className="mt-4 space-y-1 text-sm" data-testid="invoice-recipient">
+                        <div className="mt-4 space-y-1 text-sm [overflow-wrap:anywhere]" data-testid="invoice-recipient">
                           <p className="text-xs text-muted-foreground">
                             {paidByOther
                               ? text.payerRole
@@ -5553,9 +5592,11 @@ function SectionCard({ icon, title, description, action, children }: { icon: Luc
 
 function MiniMetric({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="flex min-w-[210px] flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-4 py-2">
-      <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">{label}</span>
-      <span className="shrink-0 text-sm font-semibold leading-none text-foreground">{value}</span>
+    // At 375 px a long e-mail or name breaks inside the pill instead of
+    // running out of the sheet (QA C-8).
+    <div className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-4 py-2 sm:min-w-[210px]">
+      <span className="min-w-0 truncate text-xs font-medium text-muted-foreground" title={label}>{label}</span>
+      <span className="min-w-0 text-right text-sm font-semibold leading-tight text-foreground [overflow-wrap:anywhere]">{value}</span>
     </div>
   );
 }

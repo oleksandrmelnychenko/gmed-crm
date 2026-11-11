@@ -123,8 +123,11 @@ export function TerminationSettlementQueue({
       label: tx("Действия", "Aktionen"),
       accessor: () => "",
       // Both buttons side by side ("Создать финальный счёт · 1.000,00 €" and
-      // "Закрыть расчёт"); a narrower column wraps them past the compact row.
-      width: 430,
+      // "Закрыть расчёт"). When they wrap anyway (a larger amount, German, a
+      // narrowed column, an error banner) the row grows with them: a wrapped
+      // button must never lie over the next patient's row (QA C-1).
+      width: 440,
+      cellClassName: "min-w-0",
       render: (row) => (
         <SettlementActions settlement={row} lang={lang} onChanged={reload} onInvoiceCreated={onOpenInvoice} size="xs" />
       ),
@@ -176,6 +179,7 @@ export function TerminationSettlementQueue({
         rowId={(row) => row.id}
         dictionary={t as unknown as Record<string, string>}
         defaultDensity="compact"
+        rowsGrowWithContent
         storageKey="invoices-termination-settlements"
         mobilePrimaryColumnId="patient"
         mobileDetailColumnIds={["order", "balance", "uninvoiced", "final_invoice", "actions"]}

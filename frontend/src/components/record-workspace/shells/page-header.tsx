@@ -79,6 +79,8 @@ export function PageHeader({ title, actions, pageAction }: PageHeaderProps) {
   const InPageTitle = topbarOwnsHeading ? "div" : "h1";
   const TopbarTitle = topbarOwnsHeading ? "h1" : "div";
   const actionsInTopbar = hasActions && actionsFitTopbar;
+  // A truncated title can still be read in full on hover (QA C-7).
+  const titleText = typeof title === "string" || typeof title === "number" ? String(title) : undefined;
 
   return (
     <>
@@ -90,12 +92,11 @@ export function PageHeader({ title, actions, pageAction }: PageHeaderProps) {
         )}
       >
         <div className={cn("min-w-0", pageAction && "flex w-full flex-wrap items-center justify-between gap-2", !portal && topbarSlot && "lg:hidden")}>
-          {/* A cut title (a long name in the greeting) can still be read in full (QA 2026-11-10, A-13). */}
-          <InPageTitle className="min-w-0 truncate text-lg font-semibold tracking-tight text-foreground" title={typeof title === "string" ? title : undefined}>{title}</InPageTitle>
+          <InPageTitle className="min-w-0 truncate text-lg font-semibold tracking-tight text-foreground" title={titleText}>{title}</InPageTitle>
           {pageAction}
         </div>
         {actions && !(portal && topbarTitleShown && topbarSlot && actionsInTopbar) ? (
-          <div className="grid w-full grid-cols-2 items-center gap-2 lg:flex lg:w-auto lg:flex-wrap max-lg:[&>*]:min-w-0 max-lg:[&>[data-slot=badge]]:col-span-2 max-lg:[&>[data-slot=badge]]:h-auto max-lg:[&>[data-slot=badge]]:min-h-6 max-lg:[&>[data-slot=badge]]:w-full max-lg:[&>[data-slot=badge]]:whitespace-normal max-lg:[&>button:only-child]:col-span-2 max-lg:[&_:is(button,a)]:min-h-10">{actions}</div>
+          <div className="grid w-full grid-cols-2 items-center gap-2 lg:flex lg:w-auto lg:flex-wrap max-lg:[&>*]:min-w-0 max-lg:[&>[data-slot=badge]]:col-span-2 max-lg:[&>[data-slot=badge]]:h-auto max-lg:[&>[data-slot=badge]]:min-h-6 max-lg:[&>[data-slot=badge]]:w-full max-lg:[&>[data-slot=badge]]:whitespace-normal max-lg:[&>button:only-child]:col-span-2 max-lg:[&_:is(button,a)]:min-h-10 max-lg:[&>:is(button,a)]:h-auto max-lg:[&>:is(button,a)]:whitespace-normal max-lg:[&>:is(button,a)]:py-1.5 max-lg:[&>:is(button,a)]:text-center">{actions}</div>
         ) : null}
       </div>
       {topbarSlot && (!portal || hasActions)
@@ -108,7 +109,7 @@ export function PageHeader({ title, actions, pageAction }: PageHeaderProps) {
                 hasActions && !actionsInTopbar && "overflow-hidden",
               )}
             >
-              {!portal && <TopbarTitle className="min-w-0 truncate text-[15px] font-medium tracking-tight text-foreground">
+              {!portal && <TopbarTitle className="min-w-0 truncate text-[15px] font-medium tracking-tight text-foreground" title={titleText}>
                 {title}
               </TopbarTitle>}
               {actions ? (

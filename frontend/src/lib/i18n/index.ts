@@ -995,6 +995,7 @@ export interface Translations
   ann_subtitle: string;
   ann_new: string;
   ann_message: string;
+  ann_field_title: string;
   ann_variant: string;
   ann_starts: string;
   ann_ends: string;

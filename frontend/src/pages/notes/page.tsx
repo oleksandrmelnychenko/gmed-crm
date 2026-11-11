@@ -555,7 +555,7 @@ export function InternalNotesPage() {
                 onClick={() => setSelectedId(note.id)}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <p className="line-clamp-1 text-[13px] font-semibold">{note.title}</p>
+                  <p className="line-clamp-1 text-[13px] font-semibold" title={note.title}>{note.title}</p>
                   <div className="flex shrink-0 items-center gap-1">
                     <span
                       className={cn("inline-flex items-center rounded-md border px-1.5 py-0.5 text-[9px] font-medium", visibilityTone(note.visibility ?? "staff"))}
@@ -608,7 +608,9 @@ export function InternalNotesPage() {
             <div className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain">
               <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/70 px-4 py-3.5 sm:px-5">
                 <div className="min-w-0">
-                  <h2 className="truncate text-base font-semibold text-foreground">{activeNote?.title ?? labels.untitled}</h2>
+                  {/* The open note shows its whole title, also on a phone where
+                      no tooltip can be hovered (QA C-15). */}
+                  <h2 className="text-base font-semibold text-foreground [overflow-wrap:anywhere]" title={activeNote?.title ?? labels.untitled}>{activeNote?.title ?? labels.untitled}</h2>
                   <p className="mt-1 text-xs text-muted-foreground">{`${labels.updated} ${activeNote ? formatDate(activeNote.updated_at) : ""}`}</p>
                   {activeNote ? <p className="mt-1 text-xs text-muted-foreground">{labels.by} {activeNote.updated_by_name}</p> : null}
                 </div>

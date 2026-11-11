@@ -711,10 +711,11 @@ function useAdminSecurityPageContent() {
         width: 220,
         render: (event) => (
           <div className="min-w-0">
-            <div className="text-xs text-foreground">
+            {/* Long names end in an ellipsis and read in full on hover (QA C-13). */}
+            <div className="truncate text-xs text-foreground" title={securityActorName(event, t)}>
               {securityActorName(event, t)}
             </div>
-            <div className="mt-0.5 text-[11px] text-muted-foreground">
+            <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
               {event.user_role
                 ? roleLabel(event.user_role)
                 : securityActionLabel(event.action)}
@@ -734,7 +735,7 @@ function useAdminSecurityPageContent() {
           // The action is named only when it says more than the reason.
           return (
             <div className="min-w-0">
-              <div className="truncate text-xs text-foreground">{reason}</div>
+              <div className="truncate text-xs text-foreground" title={reason}>{reason}</div>
               <div className="text-xs text-muted-foreground">
                 {action === reason
                   ? securityEntityLabel(event.entity_type)
@@ -915,7 +916,7 @@ function useAdminSecurityPageContent() {
         width: 240,
         render: (entry) => (
           <div className="min-w-0">
-            <div className="text-xs text-foreground">{entry.user_name}</div>
+            <div className="truncate text-xs text-foreground" title={entry.user_name}>{entry.user_name}</div>
             <div
               className="mt-0.5 truncate text-[11px] text-muted-foreground"
               title={entry.user_email}

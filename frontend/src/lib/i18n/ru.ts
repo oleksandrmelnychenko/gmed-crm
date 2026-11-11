@@ -1152,6 +1152,7 @@ export const ru = {
   ann_subtitle: "Баннеры и уведомления для всех пользователей",
   ann_new: "Новое объявление",
   ann_message: "Сообщение",
+  ann_field_title: "Заголовок",
   ann_variant: "Тип",
   ann_starts: "Начало",
   ann_ends: "Конец",

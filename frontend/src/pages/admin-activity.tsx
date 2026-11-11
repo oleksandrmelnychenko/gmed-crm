@@ -545,11 +545,14 @@ function ActivityActionBadge({
           ? "info"
           : (actionTone(action) as "success" | "warning" | "error" | "neutral")
       }
+      title={actionLabel(action, translations)}
     >
       {isAiActivityAction(action) ? (
         <AiMark className="size-3" aria-hidden="true" />
       ) : null}
-      {actionLabel(action, translations)}
+      {/* A long German label ends in an ellipsis in a narrow cell and wraps
+          in the phone card instead of running out of it (QA C-14). */}
+      <span className="min-w-0 truncate [overflow-wrap:anywhere]">{actionLabel(action, translations)}</span>
     </StatusChip>
   );
 }

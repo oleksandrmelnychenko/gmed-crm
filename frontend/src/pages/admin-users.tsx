@@ -649,10 +649,13 @@ function useAdminUsersPageContent() {
                 <Badge
                   variant="outline"
                   title={t.users_login_paused_hint}
-                  className="rounded-full border-amber-300 bg-amber-50 text-amber-800"
+                  // The end time wraps onto its own line inside the cell
+                  // instead of being cut off (QA C-5); the row grows with it.
+                  className="h-auto max-w-full flex-wrap justify-start whitespace-normal rounded-xl border-amber-300 bg-amber-50 text-left text-amber-800"
                   data-testid="login-paused"
                 >
-                  {t.users_login_paused_until} {formatDateTime(user.login_paused_until)}
+                  <span>{t.users_login_paused_until}</span>{" "}
+                  <span className="whitespace-nowrap tabular-nums">{formatDateTime(user.login_paused_until)}</span>
                 </Badge>
               ) : null}
               {user.password_reset_required ? (
@@ -1239,7 +1242,7 @@ function useAdminUsersPageContent() {
                               required
                               minLength={8}
                               maxLength={256}
-                              placeholder={t.users_password_policy_hint}
+                              aria-describedby="new-user-password-policy"
                               value={newPassword}
                               onChange={(e) => {
                                 setNewPassword(e.target.value);
@@ -1256,15 +1259,16 @@ function useAdminUsersPageContent() {
                               {newPasswordVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                             </button>
                           </div>
+                          {/* The rules stay readable while typing and at 375 px:
+                              help text, not a cut placeholder (QA C-12). */}
+                          <p id="new-user-password-policy" className="text-xs text-muted-foreground">
+                            {t.users_password_policy_hint}
+                          </p>
                           {newPasswordError ? (
                             <p className="text-xs text-rose-600">
                               {newPasswordError}
                             </p>
-                          ) : (
-                            <p className="text-xs text-muted-foreground">
-                              {t.users_password_policy_hint}
-                            </p>
-                          )}
+                          ) : null}
                         </div>
                         <div className="space-y-1.5">
                           <Label className={fieldLabelClass}>
@@ -1275,7 +1279,7 @@ function useAdminUsersPageContent() {
                             required
                             minLength={8}
                             maxLength={256}
-                            placeholder={t.users_password_policy_hint}
+                            placeholder={t.users_confirm_password}
                             value={newPasswordConfirm}
                             onChange={(e) => {
                               setNewPasswordConfirm(e.target.value);
@@ -1486,7 +1490,7 @@ function useAdminUsersPageContent() {
                       type={euPasswordVisible ? "text" : "password"}
                       minLength={8}
                       maxLength={256}
-                      placeholder={t.users_password_policy_hint}
+                      aria-describedby="edit-user-password-policy"
                       value={euPassword}
                       onChange={(e) => {
                         setEuPassword(e.target.value);
@@ -1504,15 +1508,16 @@ function useAdminUsersPageContent() {
                       {euPasswordVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                     </button>
                   </div>
+                  {/* The rules stay readable while typing and at 375 px:
+                      help text, not a cut placeholder (QA C-12). */}
+                  <p id="edit-user-password-policy" className="text-xs text-muted-foreground">
+                    {t.users_password_policy_hint}
+                  </p>
                   {euPasswordError ? (
                     <p className="text-xs text-rose-600">
                       {euPasswordError}
                     </p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      {t.users_password_policy_hint}
-                    </p>
-                  )}
+                  ) : null}
                 </div>
                   <div className="space-y-1.5">
                     <Label className={fieldLabelClass}>
@@ -1651,6 +1656,7 @@ function useAdminUsersPageContent() {
               />
             }
             defaultDensity="compact"
+            rowsGrowWithContent
             defaultFrozenColumns={["name", "email"]}
             defaultSort={[{ field: "created_at", dir: "desc" }]}
             dictionary={tr}

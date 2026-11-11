@@ -69,6 +69,12 @@ export type DataTableProps<T> = {
   rowActionsLabel?: ReactNode;
   rowActionsWidth?: number;
   rowHeightOverrides?: Partial<Record<DensityLevel, number>>;
+  /**
+   * The density height becomes a minimum: a row whose cells wrap (two buttons,
+   * an amount with a sub-line, a long badge) grows to fit them instead of
+   * spilling into the neighbouring rows. Rows are measured.
+   */
+  rowsGrowWithContent?: boolean;
   mobilePrimaryColumnId?: string;
   mobileDetailColumnIds?: readonly string[];
   disableRowHover?: boolean;
@@ -144,6 +150,7 @@ function useDataTableContent<T>({
   rowActionsLabel,
   rowActionsWidth = 44,
   rowHeightOverrides,
+  rowsGrowWithContent = false,
   mobilePrimaryColumnId,
   mobileDetailColumnIds,
   disableRowHover = false,
@@ -264,7 +271,7 @@ function useDataTableContent<T>({
 
   // A row detail panel stays in view while the columns scroll sideways, so it
   // is as wide as the visible part of the table, not as the column grid.
-  const measuredRows = Boolean(renderRowDetail);
+  const measuredRows = Boolean(renderRowDetail) || rowsGrowWithContent;
   const [viewportWidth, setViewportWidth] = useState(0);
   useEffect(() => {
     const element = scrollRef.current;
@@ -602,7 +609,9 @@ function useDataTableContent<T>({
                   )}
                   style={{
                     ...(measuredRows
-                      ? { height: rowHeight }
+                      ? rowsGrowWithContent
+                        ? { minHeight: rowHeight }
+                        : { height: rowHeight }
                       : { top: vRow.start, height: vRow.size }),
                     gridTemplateColumns: gridTemplate,
                     ...effectiveRowTone,
@@ -637,6 +646,7 @@ function useDataTableContent<T>({
                         data-frozen-opaque={isPinned ? "true" : undefined}
                         className={cn(
                           "data-table-cell flex h-full items-center overflow-hidden px-2 text-xs text-foreground transition-colors",
+                          rowsGrowWithContent && "py-0.5",
                           pinStyle.className,
                           isPinned && "z-20 shadow-[1px_0_0_color-mix(in_oklch,var(--border)_65%,transparent)]",
                         )}

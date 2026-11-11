@@ -229,7 +229,7 @@ function AdminAnnouncementCreateSheet({
             <section className={cn("space-y-3 rounded-xl p-3.5", tokens.surface.softCard)}>
               <AdminSectionTitle icon={SquarePen}>{t.ann_new}</AdminSectionTitle>
               <div className="grid gap-3 md:grid-cols-2">
-                <Field label={`${t.field_name} *`} htmlFor="announcement-title">
+                <Field label={`${t.ann_field_title} *`} htmlFor="announcement-title">
                   <Input
                     id="announcement-title"
                     required
@@ -530,7 +530,7 @@ function useAdminAnnouncementsController(t: AdminAnnouncementsTranslations) {
   const columns = useMemo<ColumnDef<Announcement>[]>(() => [
     {
       id: "title",
-      label: t.field_name,
+      label: t.ann_field_title,
       accessor: (announcement) => announcement.title,
       sortable: true,
       width: 220,

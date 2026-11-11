@@ -92,6 +92,7 @@ const copy = {
     amountExceeds: (remaining: string) =>
       `Сумма больше, чем осталось выплатить по счёту (${remaining}).`,
     amountInvalid: "Введите сумму больше нуля, например 119,00.",
+    amountUnreadable: "Введите сумму числом, например 119,00 или 1.234,56.",
     reversalReasonShown: "Причина отмены",
   },
   de: {
@@ -135,6 +136,7 @@ const copy = {
     amountExceeds: (remaining: string) =>
       `Der Betrag übersteigt den noch zu zahlenden Rest der Rechnung (${remaining}).`,
     amountInvalid: "Bitte einen Betrag größer als null eingeben, z. B. 119,00.",
+    amountUnreadable: "Bitte den Betrag als Zahl eingeben, z. B. 119,00 oder 1.234,56.",
     reversalReasonShown: "Stornogrund",
   },
 } as const;
@@ -430,7 +432,10 @@ export function ProviderSettlementDialog({
                     <span>{text.amount}</span>
                     <Input className={paymentInputClassName} required inputMode="decimal" aria-invalid={paymentExceedsRemaining || paymentAmountInvalid || undefined} value={paymentForm.amount} onChange={(event) => setPaymentForm((current) => ({ ...current, amount: event.target.value }))} />
                     {paymentAmountInvalid ? (
-                      <span role="alert" className="font-normal text-rose-700 dark:text-rose-400">{text.amountInvalid}</span>
+                      <span role="alert" className="font-normal text-rose-700 dark:text-rose-400">
+                        {/* "1400,009999999,99" is not a number at all, not a zero (QA C-10). */}
+                        {Number.isNaN(paymentAmount) ? text.amountUnreadable : text.amountInvalid}
+                      </span>
                     ) : paymentExceedsRemaining ? (
                       <span role="alert" className="font-normal text-rose-700 dark:text-rose-400">
                         {text.amountExceeds(formatMoney(settlement.remaining_provider_liability_gross, currency, locale))}
