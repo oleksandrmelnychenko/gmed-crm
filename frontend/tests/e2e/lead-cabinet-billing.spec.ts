@@ -577,8 +577,12 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     const details = route.getByRole("textbox", { name: "Bitte beschreiben", exact: true });
     const note = page.getByTestId("lead-request-payment-method-note");
     await method.click();
+    // The list is there before it is read: without options the check for "Sonstiges" proves nothing.
+    await expect(page.getByRole("option", { name: "Bar", exact: true })).toBeVisible();
     await expect(page.getByRole("option", { name: /Sonstiges/ })).toHaveCount(0);
     await page.keyboard.press("Escape");
+    // The list fades out: opened again before it is gone, the click meets the options of the closing list.
+    await expect(page.getByRole("option")).toHaveCount(0);
     await choose(page, method, "Bar");
     await expect(details).toHaveCount(0);
     await expect(note).toHaveCount(0);
