@@ -23737,12 +23737,33 @@ fn build_cost_coverage_pdf(
                 false,
             );
         }
-        if let Some(gross) = context
+        // The rows above are net; the VAT row makes them add up to the gross
+        // total, as in the annex below and in the estimate (QA 2026-11-11, F8:
+        // net rows with a gross «Gesamtsumme» and no VAT did not add up).
+        let gross = context
             .total_gross
             .as_deref()
             .map(str::trim)
-            .filter(|value| !value.is_empty())
+            .filter(|value| !value.is_empty());
+        if gross.is_some()
+            && let Some(vat) = context
+                .total_vat
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
         {
+            let vat_label =
+                contract_vat_total_label(&context.line_items.iter().collect::<Vec<_>>());
+            layout.table_row_aligned_middle(
+                &[
+                    (vat_label.as_str(), TYPE_WIDTH_MM, PdfCellAlign::Left),
+                    (vat, TOTAL_WIDTH_MM, PdfCellAlign::Right),
+                ],
+                false,
+                false,
+            );
+        }
+        if let Some(gross) = gross {
             layout.table_row_aligned_middle(
                 &[
                     ("Gesamtsumme", TYPE_WIDTH_MM, PdfCellAlign::Left),
@@ -45855,6 +45876,13 @@ mod tests {
                 "{expected}: {coverage_text}"
             );
         }
+        // Section 5's net rows add up to its gross total with a VAT row
+        // (QA 2026-11-11, F8); the annex names the VAT again.
+        let vat_rows = coverage_text.matches("212,80 €").count();
+        assert!(vat_rows >= 2, "{vat_rows}: {coverage_text}");
+        let table_vat = coverage_text.find("212,80 €").unwrap();
+        let table_gross = coverage_text.find("3.082,80 €").unwrap();
+        assert!(table_vat < table_gross, "{coverage_text}");
         for word in [
             "Organisation der Behandlung",
             "Airport transfer",
