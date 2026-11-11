@@ -5079,11 +5079,87 @@ pub(crate) async fn keep_represented_contacts(
         Some(base) => merge_with_base(stored.as_ref(), base, incoming),
         None => incoming,
     };
-    Ok(merge_represented_contacts(
+    Ok(drop_added_duplicates(
         stored.as_ref(),
-        &represented,
-        incoming,
+        merge_represented_contacts(stored.as_ref(), &represented, incoming),
     ))
+}
+
+/// The same person as a trusted contact entry: the same linked patient
+/// record, else the same name and the same date of birth.
+fn same_contact_person(left: &Value, right: &Value) -> bool {
+    if let (Some(a), Some(b)) = (
+        entry_text(left, "related_patient_id"),
+        entry_text(right, "related_patient_id"),
+    ) {
+        return a.eq_ignore_ascii_case(&b);
+    }
+    match (
+        entry_text(left, "name"),
+        entry_text(right, "name"),
+        entry_text(left, "birth_date"),
+        entry_text(right, "birth_date"),
+    ) {
+        (Some(left_name), Some(right_name), Some(left_birth), Some(right_birth)) => {
+            left_birth == right_birth && same_person_name(&left_name, &right_name)
+        }
+        _ => false,
+    }
+}
+
+/// A contact a save adds (its id is not stored) for a person the list
+/// already holds under a stored id is the same person, not a second one: a
+/// minor's repeat intake takes the parents over from the patient's relations
+/// and staff, not seeing them yet, picked them again — the request then held
+/// every parent twice (QA 2026-11-11, F2). The stored entry stays and takes
+/// the fields it lacks from the added one.
+fn drop_added_duplicates(stored: Option<&Value>, merged: Value) -> Value {
+    let Value::Array(mut contacts) = merged else {
+        return merged;
+    };
+    let stored_ids = stored
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(entry_id)
+        .collect::<Vec<_>>();
+    let is_stored = |entry: &Value| entry_id(entry).is_some_and(|id| stored_ids.contains(&id));
+    // (added entry, stored twin) pairs, in the order of the save.
+    let twins = (0..contacts.len())
+        .filter(|&added| !is_stored(&contacts[added]))
+        .filter_map(|added| {
+            (0..contacts.len())
+                .find(|&kept| {
+                    kept != added
+                        && is_stored(&contacts[kept])
+                        && same_contact_person(&contacts[kept], &contacts[added])
+                })
+                .map(|kept| (added, kept))
+        })
+        .collect::<Vec<_>>();
+    for &(added, kept) in &twins {
+        let source = contacts[added].clone();
+        if let Some(object) = contacts[kept].as_object_mut() {
+            for field in CONTACT_ENTRY_FIELDS {
+                let empty = object
+                    .get(field)
+                    .is_none_or(|value| value.is_null() || value.as_str() == Some(""));
+                if let Some(value) = source.get(field).filter(|value| !value.is_null())
+                    && empty
+                {
+                    object.insert(field.to_string(), value.clone());
+                }
+            }
+        }
+    }
+    let dropped = twins.iter().map(|&(added, _)| added).collect::<Vec<_>>();
+    let mut index = 0;
+    contacts.retain(|_| {
+        let keep = !dropped.contains(&index);
+        index += 1;
+        keep
+    });
+    Value::Array(contacts)
 }
 
 /// The keys of a trusted contact entry a wizard save writes.
@@ -6323,5 +6399,44 @@ mod tests {
         parent.email = Some("staff-checked@example.com".into());
         assert!(parent.email_set_by_staff());
         assert!(!parent.email_set_by_cabinet());
+    }
+
+    /// QA 2026-11-11, F2: a parent staff add again (new id, same name and
+    /// date of birth, or the same patient record) is the stored parent.
+    #[test]
+    fn an_added_twin_of_a_stored_contact_is_merged_into_it() {
+        let mut mother = contact(1, "Petra Muster", "mother");
+        mother["email"] = Value::Null;
+        let stored = json!([mother.clone(), contact(2, "Ivan Muster", "father")]);
+        let mut again = contact(3, "petra  Muster", "mother");
+        again["email"] = json!("petra@example.com");
+        let other_birth = {
+            let mut entry = contact(4, "Ivan Muster", "father");
+            entry["birth_date"] = json!("1990-01-01");
+            entry
+        };
+        let merged = drop_added_duplicates(
+            Some(&stored),
+            json!([
+                mother,
+                contact(2, "Ivan Muster", "father"),
+                again,
+                other_birth
+            ]),
+        );
+        let ids = merged
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(entry_id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec![id(1), id(2), id(4)]);
+        assert_eq!(merged[0]["email"], "petra@example.com");
+        // Stored entries never merge with each other.
+        let twice = json!([
+            contact(1, "Petra Muster", "mother"),
+            contact(5, "Petra Muster", "mother")
+        ]);
+        assert_eq!(drop_added_duplicates(Some(&twice), twice.clone()), twice);
     }
 }

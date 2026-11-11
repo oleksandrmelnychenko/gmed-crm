@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   TRUSTED_CONTACT_RELATIONS,
+  duplicateTrustedContact,
   emailChangedOnSave,
   guardianRelationOptionLabel,
   isParentOrGuardianRelation,
   leadUpdateWithChangedContacts,
   mergeTrustedContacts,
+  repeatIntakeParentContacts,
   representativeCabinetAddress,
   representativeMinorOnSave,
   storedTrustedContactDrafts,
@@ -467,5 +469,34 @@ describe("scope of information of a staff contact", () => {
     const stored = trustedContactsPayload([base]);
     expect(trustedContactsChanged(trustedContactsPayload([{ ...base, scopeCodes: ["medical"] }]), stored)).toBe(true);
     expect(trustedContactsChanged(trustedContactsPayload([{ ...base, scopeCodes: [] }]), stored)).toBe(false);
+  });
+});
+
+describe("repeat intake parents (QA 2026-11-11, F2)", () => {
+  const relations = [
+    {
+      id: "rel-mother", related_patient_id: null, related_name: "Petra Muster", relation_type: "mother",
+      email: "petra@example.com", phone: "+49 151 1", address_street: "Weg 7", address_zip: "20095",
+      address_city: "Hamburg", address_country: "DE", birth_date: "1986-08-12",
+    },
+    { id: "rel-spouse", related_name: "Other Person", relation_type: "spouse" },
+    { id: "rel-father", related_patient_id: "p-1", related_name: "", related_display_name: "Ivan Muster", relation_type: "father" },
+  ];
+
+  it("takes the parents over under the relation ids", () => {
+    const parents = repeatIntakeParentContacts(relations);
+    expect(parents.map((parent) => parent.id)).toEqual(["rel-mother", "rel-father"]);
+    expect(parents[0]).toMatchObject({ name: "Petra Muster", birthDate: "1986-08-12", address: "Weg 7, 20095 Hamburg, DE" });
+    expect(parents[1]).toMatchObject({ name: "Ivan Muster", relatedPatientId: "p-1", relatedPatientLabel: "Ivan Muster" });
+  });
+
+  it("finds the same person by record, else by name and birth date", () => {
+    const parents = repeatIntakeParentContacts(relations);
+    expect(duplicateTrustedContact({ id: "new", relatedPatientId: "", name: " petra  muster", birthDate: "1986-08-12" }, parents)?.id)
+      .toBe("rel-mother");
+    expect(duplicateTrustedContact({ id: "new", relatedPatientId: "", name: "Petra Muster", birthDate: "1986-08-13" }, parents)).toBeNull();
+    expect(duplicateTrustedContact({ id: "new", relatedPatientId: "p-1", name: "Iwan", birthDate: "" }, parents)?.id).toBe("rel-father");
+    // Editing the stored entry itself is no duplicate.
+    expect(duplicateTrustedContact({ id: "rel-mother", relatedPatientId: "", name: "Petra Muster", birthDate: "1986-08-12" }, parents)).toBeNull();
   });
 });

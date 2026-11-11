@@ -216,11 +216,14 @@ import {
   changedRepresentativeDetails,
   contactEmailLoginWarning,
   createContactEmailLoginCheck,
+  duplicateTrustedContact,
   emailChangedOnSave,
   isLegalGuardianRelation,
   isParentOrGuardianRelation,
   leadUpdateWithChangedContacts,
   mergeTrustedContacts,
+  repeatIntakeParentContacts,
+  type PatientRelationForContact,
   representativeCabinetAddress,
   representativeMinorOnSave,
   storedTrustedContactDrafts,
@@ -5188,6 +5191,26 @@ export function LeadWizard({
     return () => { active = false; };
   }, [createMode, leadId, open, sourcePerson]);
 
+  // A minor's repeat intake: the parents of the patient record are shown
+  // before the request exists, under the relation ids the server takes them
+  // over with, so staff do not add them again (QA 2026-11-11, F2).
+  useEffect(() => {
+    if (!open || !createMode || leadId || !existingPatient?.id) return;
+    if (!isMinor(existingPatient.birth_date?.trim() ?? "", new Date())) return;
+    let active = true;
+    void apiFetch<PatientRelationForContact[]>(`/patients/${existingPatient.id}/relations`)
+      .then((relations) => {
+        if (!active || hydrated.current !== "__new__") return;
+        const parents = repeatIntakeParentContacts(relations);
+        if (parents.length === 0) return;
+        setDraft((current) => current && current.trustedContacts.length === 0
+          ? { ...current, trustedContacts: parents }
+          : current);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [createMode, existingPatient?.id, existingPatient?.birth_date, leadId, open]);
+
   useEffect(() => {
     if (!open || !leadId) return;
     void reload(hydrated.current !== leadId);
@@ -6793,6 +6816,15 @@ export function LeadWizard({
       setTrustedContactEditorError(passportNameRuleText(tx));
       return;
     }
+    // The same person once only (QA 2026-11-11, F2: a repeat request held every parent twice).
+    const twin = duplicateTrustedContact({ ...trustedContactEditor, name }, draft?.trustedContacts ?? []);
+    if (twin) {
+      setTrustedContactEditorError(tx(
+        `${twin.name} уже есть в списке — откройте эту запись вместо новой`,
+        `${twin.name} ist bereits in der Liste — bitte diesen Eintrag öffnen statt einen neuen anzulegen`,
+      ));
+      return;
+    }
     if (trustedContactEditorGuardian && !["mother", "father", "guardian"].includes(trustedContactEditor.relation)) {
       setTrustedContactRelationError(tx("Укажите, кто представляет ребёнка: мать, отец или опекун", "Bitte Mutter, Vater oder Vormund auswählen"));
       return;
@@ -7741,7 +7773,10 @@ ${serviceCommentLines.join("\n")}`
         // A repeat draft's purpose comes from its intake form, and its documents
         // print it: the text built here from the lead would differ, so every
         // save asked to reset the signature with equal totals (QA 2026-10-31, R3-5).
-        ...(lead?.repeat_patient_id ? {} : { needs_description: needsDescription }),
+        // Until the client signed, the reason given in this repeat request is the
+        // order's purpose; without it the order said «Основная потребность: Не
+        // указано» (QA 2026-11-11, F5).
+        ...(lead?.repeat_patient_id && order?.signed_patient ? {} : { needs_description: needsDescription }),
         date_from: draft.programDateFrom,
         date_to: draft.programDateTo,
       });

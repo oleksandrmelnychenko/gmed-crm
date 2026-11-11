@@ -380,6 +380,69 @@ export function mergeTrustedContacts<T extends TrustedContactDraft>(
   return merged;
 }
 
+/** A relation of the patient record as `GET /patients/{id}/relations` returns it (the fields used here). */
+export type PatientRelationForContact = {
+  id: string;
+  related_patient_id?: string | null;
+  related_name: string;
+  related_display_name?: string | null;
+  relation_type: string;
+  phone?: string | null;
+  email?: string | null;
+  address_street?: string | null;
+  address_zip?: string | null;
+  address_city?: string | null;
+  address_country?: string | null;
+  birth_date?: string | null;
+};
+
+/**
+ * The parents and guardians of a minor patient as the trusted contacts of a
+ * repeat intake, under the relation's id — the server takes them over the
+ * same way when it creates the request (`prefill_minor_repeat_representation`),
+ * so the wizard shows them before the request exists and staff do not add
+ * them a second time (QA 2026-11-11, F2).
+ */
+export function repeatIntakeParentContacts(relations: readonly PatientRelationForContact[]): TrustedContactDraft[] {
+  const text = (value: string | null | undefined) => (value ?? "").trim();
+  return relations.flatMap((relation) => {
+    if (!["parent", "mother", "father", "guardian"].includes(text(relation.relation_type).toLowerCase())) return [];
+    const name = text(relation.related_display_name) || text(relation.related_name);
+    if (!name) return [];
+    const locality = [text(relation.address_zip), text(relation.address_city)].filter(Boolean).join(" ");
+    return [{
+      id: relation.id,
+      relatedPatientId: text(relation.related_patient_id),
+      relatedPatientLabel: relation.related_patient_id ? name : "",
+      name,
+      phone: text(relation.phone),
+      email: text(relation.email),
+      relation: text(relation.relation_type),
+      birthDate: text(relation.birth_date),
+      address: [text(relation.address_street), locality, text(relation.address_country)].filter(Boolean).join(", "),
+    }];
+  });
+}
+
+/**
+ * Another contact of the list that is the same person as `contact`: the same
+ * linked patient record, else the same name and date of birth (the server
+ * merges such an added twin into the stored entry).
+ */
+export function duplicateTrustedContact<T extends Pick<TrustedContactDraft, "id" | "relatedPatientId" | "name" | "birthDate">>(
+  contact: Pick<TrustedContactDraft, "id" | "relatedPatientId" | "name" | "birthDate">,
+  contacts: readonly T[],
+): T | null {
+  const name = (value: string) => value.trim().split(/\s+/).join(" ").toLowerCase();
+  return contacts.find((other) => {
+    if (other.id === contact.id) return false;
+    if (contact.relatedPatientId && other.relatedPatientId) return contact.relatedPatientId === other.relatedPatientId;
+    return Boolean(contact.birthDate && name(contact.name))
+      && contact.birthDate === other.birthDate
+      && name(contact.name) === name(other.name);
+  }) ?? null;
+}
+
 /** How long the contact editor waits after the last keystroke before it asks whose login an address is. */
 export const CONTACT_EMAIL_CHECK_DEBOUNCE_MS = 400;
 
