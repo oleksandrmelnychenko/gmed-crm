@@ -12,7 +12,7 @@ import { useLang } from "@/lib/i18n";
 import { ApiRequestError } from "@/lib/api";
 import { formatRecognizedMoney } from "@/lib/money";
 import type { OrderOption, PatientOption } from "../model/types";
-import { blankImportFields, importFieldsFromPreview, importTotalsMatch, invoiceSourceCanSave, isInvoiceXml, normalizeInvoiceFile, type InvoiceImportFields, type InvoiceImportPreview, type InvoiceImportScope } from "../model/import-model";
+import { blankImportFields, importFieldIsRecognized, importFieldsFromPreview, importTotalsMatch, invoiceSourceCanSave, isInvoiceXml, normalizeInvoiceFile, type InvoiceImportFields, type InvoiceImportPreview, type InvoiceImportScope } from "../model/import-model";
 import { confirmCompanyInvoiceImport, confirmInvoiceImport, discardInvoiceImportSource, parseInvoiceFile, uploadInvoiceSource } from "../data/invoice-import-api";
 import { matchInvoicePatient, matchInvoiceRecipient } from "../model/patient-match";
 import { XmlInvoiceOriginal } from "./xml-invoice-original";
@@ -355,7 +355,7 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                       onProviderChange={provider => { setSupplierProvider(provider); updateField("supplier_name", provider?.name ?? ""); }}
                     /> : <Input aria-label={labels[key]} value={fields[key]} required={key !== "due_date"} type={key.endsWith("date") ? "date" : "text"}
                       onChange={(event) => updateField(key, event.target.value)} />}
-                    {preview?.field_sources?.[key] && fields[key] === preview.fields[key] ? <p className="text-xs leading-4 text-muted-foreground" title={preview.field_sources[key].text}>
+                    {preview?.field_sources?.[key] && importFieldIsRecognized(key, fields[key], preview) ? <p className="text-xs leading-4 text-muted-foreground" title={preview.field_sources[key].text}>
                       {preview.field_sources[key].method === "document_without_vat"
                         ? tx("По фразе в счёте: «без НДС».", "Laut Rechnung: ohne Umsatzsteuer.")
                         : tx(`Рассчитано от даты счёта: +${preview.field_sources[key].days} дней. Проверьте срок.`, `Ab Rechnungsdatum berechnet: +${preview.field_sources[key].days} Tage. Frist prüfen.`)}

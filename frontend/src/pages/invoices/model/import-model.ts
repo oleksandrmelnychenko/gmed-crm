@@ -1,4 +1,6 @@
-import { normalizeMoneyInput } from "@/lib/money";
+import { moneyInputText, normalizeMoneyInput } from "@/lib/money";
+
+const IMPORT_AMOUNT_KEYS = new Set(["amount_net", "amount_vat", "amount_gross"]);
 
 export type InvoiceImportFields = {
   supplier_name: string;
@@ -75,11 +77,25 @@ export function blankImportFields(): InvoiceImportFields {
     amount_net: "", amount_vat: "", amount_gross: "", currency: "" };
 }
 
+/** Whether a form field still holds what was recognized (amounts compared by value, "42.50" = "42,50"). */
+export function importFieldIsRecognized(key: keyof InvoiceImportFields, value: string, preview: InvoiceImportPreview): boolean {
+  const recognized = preview.fields[key];
+  if (typeof recognized !== "string") return false;
+  if (!IMPORT_AMOUNT_KEYS.has(key)) return value === recognized;
+  const cents = importMoneyCents(value);
+  return cents !== null ? cents === importMoneyCents(recognized) : value === recognized;
+}
+
 export function importFieldsFromPreview(preview: InvoiceImportPreview): InvoiceImportFields {
-  return Object.fromEntries(Object.keys(blankImportFields()).map((key) => [
-    key, typeof preview.fields[key as keyof InvoiceImportFields] === "string"
-      ? preview.fields[key as keyof InvoiceImportFields] : "",
-  ])) as InvoiceImportFields;
+  return Object.fromEntries(Object.keys(blankImportFields()).map((key) => {
+    const value = preview.fields[key as keyof InvoiceImportFields];
+    if (typeof value !== "string") return [key, ""];
+    // Recognized amounts ("119.00") shown as staff type money ("119,00",
+    // owner 2026-11-11); anything unreadable stays as recognized.
+    return [key, IMPORT_AMOUNT_KEYS.has(key) && importMoneyCents(value) !== null
+      ? moneyInputText(importMoneyCents(value)! / 100)
+      : value];
+  })) as InvoiceImportFields;
 }
 
 // Form amounts are typed in the German money format like every money field

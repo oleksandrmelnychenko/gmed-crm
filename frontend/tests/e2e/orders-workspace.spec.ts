@@ -1101,7 +1101,7 @@ test("invoice allocation validates capacity, accepts commas and retries with the
   await page.getByRole("button", {name:"Связать со счётом пациента", exact:true}).click();
   const sheet = page.getByRole("dialog", {name:"Связать со счётом пациента", exact:true});
   const amount = sheet.getByLabel("Сумма требования к распределению", {exact:true});
-  await expect(amount).toHaveValue("25.00");
+  await expect(amount).toHaveValue("25,00");
   const save = sheet.getByRole("button", {name:"Сохранить распределение", exact:true});
   for (const invalid of ["", "0", "-5", "26", "bad"]) {
     await amount.fill(invalid);
@@ -1112,7 +1112,7 @@ test("invoice allocation validates capacity, accepts commas and retries with the
   await expect(sheet.getByRole("alert")).toContainText("Allocation temporarily unavailable");
   await expect(amount).toHaveValue("10,50");
   await save.click();
-  await expect(amount).toHaveValue("14.50");
+  await expect(amount).toHaveValue("14,50");
   expect(attempts).toHaveLength(2);
   expect(attempts[0]).toMatchObject({amount_gross:"10.50", patient_invoice_id:"patient-invoice-1"});
   expect(attempts[1].request_id).toBe(attempts[0].request_id);

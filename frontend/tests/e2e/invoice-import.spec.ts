@@ -388,7 +388,7 @@ for (const lang of ["ru", "de"] as const) {
     const gross = dialog.getByLabel(grossAmountLabel);
     const confirmed = dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ });
     const save = dialog.getByRole("button", { name: /Подтвердить и сохранить|Bestätigen und speichern/ });
-    await expect(gross).toHaveValue("119.00");
+    await expect(gross).toHaveValue("119,00");
     await expect(rate).toContainText(/По документу|Laut Dokument/);
     await confirmed.check();
     await rate.click();
@@ -396,11 +396,11 @@ for (const lang of ["ru", "de"] as const) {
     await expect(confirmed).not.toBeChecked();
     await expect(vat).toHaveAttribute("readonly", "");
     await net.fill("100,50");
-    await expect(vat).toHaveValue("19.10");
-    await expect(gross).toHaveValue("119.60");
+    await expect(vat).toHaveValue("19,10");
+    await expect(gross).toHaveValue("119,60");
     await gross.fill("119");
-    await expect(net).toHaveValue("100.00");
-    await expect(vat).toHaveValue("19.00");
+    await expect(net).toHaveValue("100,00");
+    await expect(vat).toHaveValue("19,00");
     if (process.env.INVOICE_VAT_QA) {
       await rate.scrollIntoViewIfNeeded();
       await expect(page.getByRole("listbox")).toHaveCount(0);
@@ -408,12 +408,12 @@ for (const lang of ["ru", "de"] as const) {
     }
     await rate.click();
     await page.getByRole("option", { name: "7 %", exact: true }).click();
-    await expect(net).toHaveValue("111.21");
-    await expect(vat).toHaveValue("7.79");
+    await expect(net).toHaveValue("111,21");
+    await expect(vat).toHaveValue("7,79");
     await rate.click();
     await page.getByRole("option", { name: "0 %", exact: true }).click();
-    await expect(net).toHaveValue("119.00");
-    await expect(vat).toHaveValue("0.00");
+    await expect(net).toHaveValue("119,00");
+    await expect(vat).toHaveValue("0,00");
     await rate.click();
     await page.getByRole("option", { name: /Другая ставка|Anderer Steuersatz/ }).click();
     const custom = dialog.getByLabel(/Другая ставка НДС, %|Anderer Umsatzsteuersatz, %/);
@@ -422,8 +422,8 @@ for (const lang of ["ru", "de"] as const) {
     await expect(save).toBeDisabled();
     await expect(custom).toHaveAttribute("aria-invalid", "true");
     await custom.fill("8,1");
-    await expect(net).toHaveValue("110.08");
-    await expect(vat).toHaveValue("8.92");
+    await expect(net).toHaveValue("110,08");
+    await expect(vat).toHaveValue("8,92");
     await expect(confirmed).not.toBeChecked();
     await confirmed.check();
     await save.click();
@@ -438,7 +438,7 @@ test("VAT calculator: mixed rates stay manual and replacing the document resets 
     tax_breakdown: [{ category: "S", rate: "19", amount: "19.00", base: "100" }, { category: "S", rate: "7", amount: "7.00", base: "100" }],
   } });
   const rate = dialog.getByRole("combobox", { name: vatRateLabel });
-  await expect(dialog.getByLabel(grossAmountLabel)).toHaveValue("226.00");
+  await expect(dialog.getByLabel(grossAmountLabel)).toHaveValue("226,00");
   await expect(rate).toContainText(/По документу|Laut Dokument/);
   await expect(dialog.getByLabel(vatAmountLabel)).toBeEditable();
   await dialog.getByLabel(vatAmountLabel).fill("27");
@@ -446,28 +446,28 @@ test("VAT calculator: mixed rates stay manual and replacing the document resets 
   await expect(dialog.getByRole("button", { name: /Подтвердить и сохранить|Bestätigen und speichern/ })).toBeDisabled();
   await rate.click();
   await page.getByRole("option", { name: "19 %", exact: true }).click();
-  await expect(dialog.getByLabel(vatAmountLabel)).toHaveValue("38.00");
+  await expect(dialog.getByLabel(vatAmountLabel)).toHaveValue("38,00");
   await rate.click();
   await page.getByRole("option", { name: /По документу|Laut Dokument/ }).click();
-  await expect(dialog.getByLabel(vatAmountLabel)).toHaveValue("38.00");
+  await expect(dialog.getByLabel(vatAmountLabel)).toHaveValue("38,00");
   await expect(dialog.getByLabel(vatAmountLabel)).toBeEditable();
   await rate.click();
   await page.getByRole("option", { name: "7 %", exact: true }).click();
   await dialog.getByLabel(/Файл инвойса|Rechnungsdatei/).setInputFiles({ name: "new.png", mimeType: "image/png", buffer: Buffer.from("new invoice") });
-  await expect(dialog.getByLabel(grossAmountLabel)).toHaveValue("226.00");
-  await expect(dialog.getByLabel(vatAmountLabel)).toHaveValue("26.00");
+  await expect(dialog.getByLabel(grossAmountLabel)).toHaveValue("226,00");
+  await expect(dialog.getByLabel(vatAmountLabel)).toHaveValue("26,00");
   await expect(rate).toContainText(/По документу|Laut Dokument/);
 });
 
 test("VAT calculator: gross-only recognition waits for an explicit rate before deriving net and VAT", async ({ page }) => {
   const { dialog } = await prepare(page, { scope: "company", preview: { fields: { ...invoice.fields, amount_net: null, amount_vat: null } } });
-  await expect(dialog.getByLabel(grossAmountLabel)).toHaveValue("119.00");
+  await expect(dialog.getByLabel(grossAmountLabel)).toHaveValue("119,00");
   await expect(dialog.getByLabel(netAmountLabel)).toHaveValue("");
   await expect(dialog.getByLabel(vatAmountLabel)).toHaveValue("");
   await dialog.getByRole("combobox", { name: vatRateLabel }).click();
   await page.getByRole("option", { name: "19 %", exact: true }).click();
-  await expect(dialog.getByLabel(netAmountLabel)).toHaveValue("100.00");
-  await expect(dialog.getByLabel(vatAmountLabel)).toHaveValue("19.00");
+  await expect(dialog.getByLabel(netAmountLabel)).toHaveValue("100,00");
+  await expect(dialog.getByLabel(vatAmountLabel)).toHaveValue("19,00");
 });
 
 test("accounting ledger exposes and opens an imported invoice original", async ({ page }) => {
@@ -512,7 +512,7 @@ test("XML original is escaped, buyer fills client and prepaid amount does not re
   await expect(dialog.getByRole("combobox", { name: /^(Клиент|Patient)$/ })).toContainText("Alpha");
   // Owner money format: "99,00 €".
   await expect(dialog.getByText(/К оплате по XML|Zahlbetrag laut XML/)).toContainText(/99,00\s€/);
-  await expect(dialog.getByLabel(grossAmountLabel)).toHaveValue("119.00");
+  await expect(dialog.getByLabel(grossAmountLabel)).toHaveValue("119,00");
   await dialog.getByRole("combobox", { name: /Заказ клиента|Auftrag des Patienten/ }).click();
   await page.getByRole("option", { name: "O-101", exact: true }).click();
   await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
@@ -551,7 +551,7 @@ test("hybrid invoice shows both conflicting values and keeps XML fields for revi
     source_differences: [{ field: "amount_gross", structured: "119.00", visible: "120.00" }], warnings: ["structured_pdf_mismatch"],
   } });
   await expect(dialog.getByText(/XML 119.00 · PDF 120.00/)).toBeVisible();
-  await expect(dialog.getByLabel(grossAmountLabel)).toHaveValue("119.00");
+  await expect(dialog.getByLabel(grossAmountLabel)).toHaveValue("119,00");
 });
 
 test("review links corrected invoice and original to selected patient, retry reuses original", async ({ page }) => {
@@ -682,7 +682,7 @@ test("explicit invoiced VAT and calculated due date show their sources without a
   await expect(dialog.getByText(/Распознавание завершено|Erkennung abgeschlossen/)).toBeVisible();
   await expect(dialog.getByText(/Часть данных не распознана|Einige Angaben wurden nicht sicher/)).toHaveCount(0);
   await expect(dialog.getByText(/Заполните поля:|Bitte ergänzen:/)).toHaveCount(0);
-  await expect(dialog.getByLabel(vatAmountLabel)).toHaveValue("0.00");
+  await expect(dialog.getByLabel(vatAmountLabel)).toHaveValue("0,00");
   await expect(dialog.getByText(/в самом счёте НДС не начислен|Rechnung weist keine Umsatzsteuer aus/)).toBeVisible();
   await expect(dialog.getByText(/\+30 (дней|Tage)/)).toBeVisible();
   await expect(dialog.getByText("Software-Lizenz", { exact: true })).toBeVisible();

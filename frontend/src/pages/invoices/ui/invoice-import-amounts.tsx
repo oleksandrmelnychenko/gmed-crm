@@ -3,7 +3,7 @@ import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { useLang } from "@/lib/i18n";
 import { applyInvoiceVatCalculation, invoiceVatRate, validInvoiceVatRate, type InvoiceVatCalculation } from "../model/import-amounts";
-import { importMoneyCents, type InvoiceImportFields, type InvoiceImportPreview } from "../model/import-model";
+import { importFieldIsRecognized, importMoneyCents, type InvoiceImportFields, type InvoiceImportPreview } from "../model/import-model";
 
 export function InvoiceImportAmounts({ fields, labels, calculation, preview, disabled, onChange }: {
   fields: InvoiceImportFields;
@@ -59,7 +59,7 @@ export function InvoiceImportAmounts({ fields, labels, calculation, preview, dis
         <Input aria-label={labels[key]} value={fields[key]} required inputMode="decimal" readOnly={automatic && key === "amount_vat"}
           className={key === "amount_gross" ? "font-mono font-semibold" : "font-mono"}
           onChange={event => changeAmount(key, event.target.value)} />
-        {preview?.field_sources?.[key]?.method === "document_without_vat" && fields[key] === preview.fields[key] ? <p className="text-xs leading-4 text-muted-foreground" title={preview.field_sources[key].text}>
+        {preview?.field_sources?.[key]?.method === "document_without_vat" && importFieldIsRecognized(key, fields[key], preview) ? <p className="text-xs leading-4 text-muted-foreground" title={preview.field_sources[key].text}>
           {tx("По фразе в счёте: «без НДС».", "Laut Rechnung: ohne Umsatzsteuer.")}
         </p> : null}
       </Field>)}

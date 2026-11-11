@@ -9,7 +9,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Banner, EmptyCell, Field, InfoRow, StatusBadge, tokens } from "@/components/ui-shell";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
-import { formatMoneyAmount, normalizeMoneyInput } from "@/lib/money";
+import { formatMoneyAmount, moneyInputText, normalizeMoneyInput } from "@/lib/money";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
@@ -33,7 +33,8 @@ function suggestedAmount(workspace: ExternalInvoiceAllocationWorkspace, invoiceI
   const remaining = Number(workspace.remaining_receivable_gross);
   const capacity = Number(candidate?.allocatable_capacity ?? 0);
   if (!Number.isFinite(remaining) || !Number.isFinite(capacity)) return "";
-  return Math.max(0, Math.min(remaining, capacity)).toFixed(2);
+  // Proposed as staff type money ("1234,50", owner 2026-11-11).
+  return moneyInputText(Math.max(0, Math.min(remaining, capacity)));
 }
 
 export function ExternalInvoiceAllocationSheet({

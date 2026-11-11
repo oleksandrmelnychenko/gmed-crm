@@ -18,7 +18,9 @@ describe("incoming invoice VAT calculation", () => {
     ["999999999999.99", "19", "amount_gross", "840336134453.77", "159663865546.22", "999999999999.99"],
   ] as const)("calculates %s at %s%% from %s with cent rounding", (value, rate, base, net, vat, gross) => {
     const amounts = calculateInvoiceAmounts(value, rate, base);
-    expect(amounts).toEqual({ amount_net: net, amount_vat: vat, amount_gross: gross });
+    // Shown as staff type money ("119,00", owner 2026-11-11).
+    const german = (amount: string) => amount.replace(".", ",");
+    expect(amounts).toEqual({ amount_net: german(net), amount_vat: german(vat), amount_gross: german(gross) });
     expect(importTotalsMatch({ ...blankImportFields(), ...amounts })).toBe(true);
   });
 
@@ -40,6 +42,6 @@ describe("incoming invoice VAT calculation", () => {
     const fields = { ...blankImportFields(), amount_net: "200,00", amount_vat: "26", amount_gross: "226", currency: "CHF", supplier_name: "Shop" };
     expect(applyInvoiceVatCalculation(fields, defaultInvoiceVatCalculation())).toBe(fields);
     expect(applyInvoiceVatCalculation(fields, { selection: "custom", customRate: "8.1", base: "amount_net" }))
-      .toEqual({ ...fields, amount_vat: "16.20", amount_gross: "216.20" });
+      .toEqual({ ...fields, amount_vat: "16,20", amount_gross: "216,20" });
   });
 });

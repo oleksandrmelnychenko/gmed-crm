@@ -21,7 +21,8 @@ function scaledVatRate(value: string): bigint | null {
 }
 
 export const validInvoiceVatRate = (value: string) => scaledVatRate(value) !== null;
-const formatCents = (cents: bigint) => `${cents / 100n}.${String(cents % 100n).padStart(2, "0")}`;
+// Shown as staff type money ("119,00", owner 2026-11-11); importMoneyCents reads it back.
+const formatCents = (cents: bigint) => `${cents / 100n},${String(cents % 100n).padStart(2, "0")}`;
 const roundDivide = (value: bigint, divisor: bigint) => (value + divisor / 2n) / divisor;
 
 export function calculateInvoiceAmounts(value: string, rateValue: string, base: InvoiceAmountBase): InvoiceAmounts | null {
