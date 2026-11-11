@@ -262,6 +262,19 @@ test.describe("patients data-table", () => {
 
     await firstRow.hover();
 
+    // The cell colour fades in over 150 ms, so the value read right after the
+    // pointer arrives is still the resting one: wait until the fade has begun
+    // and is over, then compare the colour the user ends up seeing.
+    await expect
+      .poll(() =>
+        patientCell.evaluate((element) => getComputedStyle(element).backgroundColor),
+      )
+      .not.toBe(beforeHover);
+    await expect
+      .poll(() =>
+        patientCell.evaluate((element) => element.getAnimations().length),
+      )
+      .toBe(0);
     const afterHover = await patientCell.evaluate((element) =>
       getComputedStyle(element).backgroundColor,
     );
