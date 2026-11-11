@@ -237,13 +237,24 @@ async fn identify_invoice_payer(pool: &PgPool, invoice_id: &str) {
             r#"INSERT INTO documents (
                    id, patient_id, order_id, auto_name, original_filename, art, category,
                    status, visibility, is_medical, mime_type, generated_template_id,
-                   signed_at, version_root_document_id, version_number, uploaded_by
+                   signed_at, version_root_document_id, version_number, uploaded_by,
+                   created_at
                )
                SELECT doc_id, i.patient_id, i.order_id, $2, $2 || '.pdf', $2, 'finance',
                       'active', 'internal', false, 'application/pdf', $3,
                       CASE WHEN $4 THEN now() END, doc_id, 1,
-                      (SELECT id FROM users ORDER BY created_at LIMIT 1)
-               FROM invoices i, (SELECT gen_random_uuid() AS doc_id) fresh
+                      (SELECT id FROM users ORDER BY created_at LIMIT 1),
+                      -- Filed after the payer was set, also when the database
+                      -- clock steps back between two statements (WSL/CI): the
+                      -- release compares the papers' age with the payer's.
+                      GREATEST(
+                          now(),
+                          COALESCE(GREATEST(i.payer_updated_at, o.payer_updated_at), now())
+                              + interval '1 millisecond'
+                      )
+               FROM invoices i
+               LEFT JOIN orders o ON o.id = i.order_id
+               CROSS JOIN (SELECT gen_random_uuid() AS doc_id) fresh
                WHERE i.id = $1::uuid"#,
         )
         .bind(invoice_id)
