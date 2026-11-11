@@ -129,10 +129,91 @@ impl CommercialRounding for Decimal {
     }
 }
 
+/// A non-negative euro amount as people type it: `500`, `500,00`, `1.234,56`,
+/// `1234.5`, optionally followed by `€` or `EUR`. Signs, letters and anything
+/// else give `None` (the framework contract printed "abc" or a lost minus
+/// sign as its budget threshold, QA 2026-11-11 V-13).
+pub fn parse_non_negative_amount(raw: &str) -> Option<Decimal> {
+    let mut value = raw.trim();
+    for suffix in ["€", "EUR", "eur", "Eur"] {
+        if let Some(rest) = value.strip_suffix(suffix) {
+            value = rest.trim_end();
+            break;
+        }
+    }
+    if value.is_empty()
+        || !value
+            .chars()
+            .all(|ch| ch.is_ascii_digit() || ch == ',' || ch == '.')
+    {
+        return None;
+    }
+    let (integer, fraction) = match value.matches(',').count() {
+        0 => match value.rsplit_once('.') {
+            // One dot with one or two digits after it is the decimal point.
+            Some((head, tail)) if !head.contains('.') && (1..=2).contains(&tail.len()) => {
+                (head, tail)
+            }
+            _ => (value, ""),
+        },
+        1 => value.split_once(',')?,
+        _ => return None,
+    };
+    if fraction.len() > 2 || !fraction.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    // "500," has a decimal comma without cents.
+    if value.contains(',') && fraction.is_empty() {
+        return None;
+    }
+    // Dots left in the integer part group thousands: "1.234.567".
+    let grouped = integer.contains('.');
+    let mut groups = integer.split('.');
+    let first = groups.next()?;
+    if first.is_empty() || (grouped && first.len() > 3) {
+        return None;
+    }
+    let mut digits = first.to_string();
+    for group in groups {
+        if group.len() != 3 {
+            return None;
+        }
+        digits.push_str(group);
+    }
+    let text = if fraction.is_empty() {
+        digits
+    } else {
+        format!("{digits}.{fraction}")
+    };
+    text.parse::<Decimal>().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::str::FromStr;
+
+    #[test]
+    fn non_negative_amounts_are_read_as_typed() {
+        for (raw, expected) in [
+            ("500", "500"),
+            ("500,00", "500.00"),
+            ("500,5", "500.5"),
+            ("1.234,56", "1234.56"),
+            ("1.234", "1234"),
+            ("1234.5", "1234.5"),
+            ("0", "0"),
+            (" 750 € ", "750"),
+            ("750 EUR", "750"),
+        ] {
+            assert_eq!(parse_non_negative_amount(raw), Some(dec(expected)), "{raw}");
+        }
+        for raw in [
+            "", "abc", "-500", "+500", "500,", "5,000,00", "12.34.5", "1,234.56", "50 0", "500€x",
+        ] {
+            assert_eq!(parse_non_negative_amount(raw), None, "{raw}");
+        }
+    }
 
     fn dec(value: &str) -> Decimal {
         Decimal::from_str(value).expect("decimal literal")

@@ -25,6 +25,19 @@ export function validMoneyInput(value: string) {
 }
 
 /**
+ * The framework contract's budget threshold (§ 2), as the server takes it
+ * (`money::parse_non_negative_amount`): empty, or an amount of at least 0 —
+ * «500», «500,00», «1.500,00», «1500.5», optionally with «€». «abc» and «-500»
+ * were saved and printed in the contract (QA 2026-11-11 V-13).
+ */
+export function validCostThresholdInput(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  const amount = trimmed.replace(/\s*(?:€|eur)$/iu, "");
+  return /^(?:\d+|\d{1,3}(?:\.\d{3})+)(?:,\d{1,2})?$/u.test(amount) || /^\d+\.\d{1,2}$/u.test(amount);
+}
+
+/**
  * A typed amount in the API's "87.40" form, null when empty or refused by
  * {@link validMoneyInput}: «87,40» was sent as typed and came back 422 while
  * the summary beside it showed 87,40 € (QA 2026-11-01, V1).

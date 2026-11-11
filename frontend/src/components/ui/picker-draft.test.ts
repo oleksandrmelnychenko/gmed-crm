@@ -6,6 +6,7 @@ import {
   applyExternalValue,
   applyPickerBlur,
   applyPickerChange,
+  applyPickerCommit,
   parsePastedDate,
   pickerDraftFromValue,
   type PickerDraft,
@@ -153,6 +154,81 @@ describe("picker draft", () => {
 
     expect(step.emit).toBe("09:45");
     expect(applyExternalValue(state, "09:45", true, timeParse, "HH:mm").emit).toBeNull();
+  });
+});
+
+describe("typed dates reach the form when the field is left (QA 2026-11-11 V-01)", () => {
+  /** Keys typed into a focused field: nothing is handed over on the way. */
+  function typeKeys(start: PickerDraft, steps: Array<{ value: Dayjs | null; error?: string | null }>) {
+    let state = start;
+    for (const step of steps) {
+      const next = applyPickerChange(state, step.value, step.error ?? null, FORMAT, true);
+      expect(next.emit).toBeNull();
+      state = next.state;
+    }
+    return state;
+  }
+
+  it("does not store the complete dates passed on the way to a refused one", () => {
+    // Staff wizard: 15.06.2031 typed over 01.01.1990 passed 15.01.1990 and 15.06.1990.
+    const typing = typeKeys(pickerDraftFromValue("1990-01-01", parse, FORMAT), [
+      { value: typed("15.01.1990") },
+      { value: typed("15.06.1990") },
+      { value: typed("15.06.0002"), error: "invalidDate" },
+      { value: typed("15.06.2031"), error: "maxDate" },
+    ]);
+    const left = applyPickerBlur(typing, parse, FORMAT);
+
+    expect(left.emit).toBeNull();
+    expect(left.state.lastValue).toBe("1990-01-01");
+    expect(left.state.pending).toBeUndefined();
+    expect(left.state.draft?.format("DD.MM.YYYY")).toBe("15.06.2031");
+  });
+
+  it("does not store 03.06.1990 on the way to the impossible 31.02.1990", () => {
+    const typing = typeKeys(pickerDraftFromValue("1990-06-15", parse, FORMAT), [
+      { value: typed("03.06.1990") },
+      { value: typed("31.06.1990"), error: "invalidDate" },
+      { value: typed("31.02.1990"), error: "invalidDate" },
+    ]);
+
+    expect(applyPickerBlur(typing, parse, FORMAT).emit).toBeNull();
+  });
+
+  it("hands over the finished date once, when the field is left", () => {
+    const typing = typeKeys(pickerDraftFromValue("1990-01-01", parse, FORMAT), [
+      { value: typed("15.01.1990") },
+      { value: typed("15.06.1990") },
+      { value: typed("15.06.1985") },
+    ]);
+    const left = applyPickerBlur(typing, parse, FORMAT);
+
+    expect(left.emit).toBe("1985-06-15");
+    expect(left.state).toMatchObject({ committable: "1985-06-15", lastValue: "1985-06-15" });
+    expect(left.state.pending).toBeUndefined();
+  });
+
+  it("empties the stored date at once when the person emptied the field", () => {
+    const step = applyPickerChange(pickerDraftFromValue("1990-01-01", parse, FORMAT), null, null, FORMAT, true);
+
+    expect(step.emit).toBe("");
+    expect(step.state.pending).toBeUndefined();
+  });
+
+  it("keeps what is being typed when an autosave answer arrives meanwhile", () => {
+    const typing = typeKeys(pickerDraftFromValue("1990-01-01", parse, FORMAT), [{ value: typed("15.01.1990") }]);
+    const echoed = applyExternalValue(typing, "1990-01-02", true, parse, FORMAT);
+
+    expect(echoed.emit).toBeNull();
+    expect(echoed.state.draft).toBe(typing.draft);
+    expect(echoed.state.pending).toBe(true);
+  });
+
+  it("Enter finishes the typed date like leaving the field", () => {
+    const typing = typeKeys(pickerDraftFromValue("", parse, FORMAT), [{ value: typed("01.02.1985") }]);
+
+    expect(applyPickerCommit(typing, parse, FORMAT).emit).toBe("1985-02-01");
+    expect(applyPickerCommit(pickerDraftFromValue("1985-02-01", parse, FORMAT), parse, FORMAT).emit).toBeNull();
   });
 });
 

@@ -20,6 +20,12 @@ export type PickerDraft = {
   committable: string | null
   /** The last form value this field handed over or received. */
   lastValue: string
+  /**
+   * The person changed the field while typing in it and the form has not got the change yet: it
+   * is handed over when the field is left (or Enter / a calendar choice accepts it). Absent when
+   * nothing waits.
+   */
+  pending?: true
 }
 
 export type PickerDraftStep = {
@@ -54,13 +60,25 @@ export function pickerDraftFromValue(
  * disallowed dates stay visible (MUI marks them as errors); the form gets a
  * value only once the date is complete and allowed, or when the field was
  * emptied.
+ *
+ * `typing`: the change comes from keys typed into the field. Then nothing is
+ * handed over yet: on the way from 01.01.1990 to 15.06.2031 the field passes
+ * 15.01.1990 and 15.06.1990, both complete dates, and an autosave stored the
+ * date nobody meant while the final one was refused (QA 2026-11-11 V-01). The
+ * typed value waits (`pending`) until the field is left.
  */
 export function applyPickerChange(
   state: PickerDraft,
   nextDate: Dayjs | null,
   validationError: unknown,
   format: string,
+  typing = false,
 ): PickerDraftStep {
+  // An emptied field (every segment deleted) passes no in-between date: it counts at once.
+  if (typing && nextDate !== null) {
+    const committable = validationError || !nextDate.isValid() ? null : formatPickerValue(nextDate, format)
+    return { state: { draft: nextDate, committable, lastValue: state.lastValue, pending: true }, emit: null }
+  }
   if (nextDate === null) {
     return {
       state: { draft: null, committable: "", lastValue: "" },
@@ -96,6 +114,10 @@ export function applyExternalValue(
     // The same date in another spelling (a timestamp from the server).
     return { state: { ...state, lastValue: value }, emit: null }
   }
+  if (focused && state.pending) {
+    // What is being typed stays and is handed over when the field is left.
+    return { state: { ...state, lastValue: value }, emit: null }
+  }
   if (focused) {
     if (state.committable) {
       return { state: { ...state, lastValue: state.committable }, emit: state.committable }
@@ -119,6 +141,7 @@ export function applyPickerBlur(
   parse: (value: string) => Dayjs | null,
   format: string,
 ): PickerDraftStep {
+  if (state.pending) return applyPickerCommit(state, parse, format)
   const normalized = normalizedValue(state.lastValue, parse, format)
   if (state.committable === null || state.committable === normalized) {
     return { state, emit: null }
@@ -133,6 +156,25 @@ export function applyPickerBlur(
     state: { ...state, lastValue: state.committable },
     emit: state.committable,
   }
+}
+
+/**
+ * The typed value is finished (the field was left, Enter pressed, a calendar day chosen): a
+ * complete allowed date or an emptied field reaches the form; an unfinished, impossible or
+ * disallowed one never does, and the form keeps its last value (the field keeps showing what was
+ * typed, with its refusal).
+ */
+export function applyPickerCommit(
+  state: PickerDraft,
+  parse: (value: string) => Dayjs | null,
+  format: string,
+): PickerDraftStep {
+  if (!state.pending) return { state, emit: null }
+  const settled: PickerDraft = { draft: state.draft, committable: state.committable, lastValue: state.lastValue }
+  if (state.committable === null || state.committable === normalizedValue(state.lastValue, parse, format)) {
+    return { state: settled, emit: null }
+  }
+  return { state: { ...settled, lastValue: state.committable }, emit: state.committable }
 }
 
 /** A calendar date read from pasted text. */

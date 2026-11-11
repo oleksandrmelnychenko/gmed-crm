@@ -712,6 +712,7 @@ export interface PatientsPortalTranslations {
   patient_form_zip_invalid_germany: string;
   patient_form_zip_invalid: string;
   patient_form_minor_needs_guardian: string;
+  patient_form_birth_date_future: string;
   // Patients list footer: "1 Patient", "2 пациента", "5 пациентов".
   patients_list_count_one: string;
   patients_list_count_few: string;
@@ -1704,6 +1705,7 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   patient_form_zip_invalid_germany: "Немецкий индекс — 5 цифр",
   patient_form_zip_invalid: "Только буквы, цифры, пробел и дефис (до 10 знаков)",
   patient_form_minor_needs_guardian: "Для несовершеннолетнего добавьте родителя или опекуна с телефоном или e-mail",
+  patient_form_birth_date_future: "Дата рождения не может быть в будущем",
   patients_list_count_one: "{count} пациент",
   patients_list_count_few: "{count} пациента",
   patients_list_count_many: "{count} пациентов",
@@ -2686,6 +2688,7 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   patient_form_zip_invalid_germany: "Deutsche PLZ: 5 Ziffern",
   patient_form_zip_invalid: "Nur Buchstaben, Ziffern, Leerzeichen und Bindestrich (bis 10 Zeichen)",
   patient_form_minor_needs_guardian: "Für Minderjährige einen Elternteil oder Vormund mit Telefonnummer oder E-Mail hinzufügen",
+  patient_form_birth_date_future: "Das Geburtsdatum darf nicht in der Zukunft liegen",
   patients_list_count_one: "{count} Patient",
   patients_list_count_few: "{count} Patienten",
   patients_list_count_many: "{count} Patienten",

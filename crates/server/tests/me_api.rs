@@ -1337,8 +1337,8 @@ async fn patient_can_request_additional_service_and_assigned_staff_get_notificat
             "taxonomy_node_id": hotel_taxonomy_id,
             "title": "Airport hotel stay",
             "vendor_name": "Motel One",
-            "starts_at": "2026-04-18T12:00:00Z",
-            "ends_at": "2026-04-20T10:00:00Z",
+            "starts_at": "2099-04-18T12:00:00Z",
+            "ends_at": "2099-04-20T10:00:00Z",
             "service_notes": "Need late check-in close to the clinic"
         })),
     )
@@ -1439,7 +1439,7 @@ async fn patient_can_cancel_own_pending_additional_service_request() {
         Some(json!({
             "service_kind": "transfer",
             "title": "Airport pickup",
-            "starts_at": "2026-04-22T09:00:00Z",
+            "starts_at": "2099-04-22T09:00:00Z",
             "service_notes": "One large suitcase"
         })),
     )
@@ -1496,8 +1496,8 @@ async fn patient_sees_staff_processing_updates_for_portal_service_and_loses_canc
             "service_kind": "hotel",
             "title": "Clinic hotel coordination",
             "vendor_name": "Airport Hilton",
-            "starts_at": "2026-04-24T12:00:00Z",
-            "ends_at": "2026-04-26T10:00:00Z",
+            "starts_at": "2099-04-24T12:00:00Z",
+            "ends_at": "2099-04-26T10:00:00Z",
             "service_notes": "Please confirm a quiet room close to the clinic."
         })),
     )
@@ -1848,7 +1848,7 @@ async fn portal_service_notifications_and_staff_queue_stay_assignment_scoped() {
         Some(json!({
             "service_kind": "transfer",
             "title": "Airport pickup coordination",
-            "starts_at": "2026-04-28T08:30:00Z",
+            "starts_at": "2099-04-28T08:30:00Z",
             "service_notes": "One passenger with two bags."
         })),
     )

@@ -6449,6 +6449,22 @@ async fn update_lead(
             "wizard_state must be a JSON object",
         );
     }
+    // The framework contract prints this threshold (§ 2): an amount of at least 0 or nothing
+    // ("abc" and "-500" were stored and printed, QA 2026-11-11 V-13).
+    if let Some(threshold) = body
+        .wizard_state
+        .as_ref()
+        .and_then(|state| state.get("cost_threshold"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        && crate::money::parse_non_negative_amount(threshold).is_none()
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "cost_threshold must be a non-negative amount",
+        );
+    }
     let citizenships = match body
         .citizenships
         .as_deref()

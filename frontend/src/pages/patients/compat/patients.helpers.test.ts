@@ -98,6 +98,8 @@ describe("computeAge", () => {
     expect(computeAge(null, now)).toBeNull();
     expect(computeAge("", now)).toBeNull();
     expect(computeAge("not-a-date", now)).toBeNull();
+    // A future birth date has no age (and makes no minor).
+    expect(computeAge("2099-01-01", now)).toBeNull();
   });
   it("turns a year older at Berlin midnight", () => {
     // 27 Sep 23:30 in Berlin (28 Sep in Kyiv), then 28 Sep 00:30 in Berlin (27 Sep in UTC).

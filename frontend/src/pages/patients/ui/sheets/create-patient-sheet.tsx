@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Banner } from "@/components/ui-shell";
 import { normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
 import { emailDomainWarningText } from "@/components/email-domain-warning";
+import { appDateKey } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 
 import { createPatient } from "../../data/patient-mutations";
@@ -61,6 +62,8 @@ function newPatientValidationMessages(
     zipGermany: dictionary.patient_form_zip_invalid_germany,
     zipInvalid: dictionary.patient_form_zip_invalid,
     minorNeedsGuardian: dictionary.patient_form_minor_needs_guardian,
+    futureBirthDate: dictionary.patient_form_birth_date_future,
+    today: appDateKey(),
   };
 }
 

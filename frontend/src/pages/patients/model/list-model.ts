@@ -624,7 +624,8 @@ export function computeAge(birthDate: string | null | undefined, now: Date = new
   let age = today.year - dob.year;
   const m = today.month - dob.month;
   if (m < 0 || (m === 0 && today.day < dob.day)) age -= 1;
-  return age;
+  // A birth date in the future has no age: it made a "minor" nobody can be (QA 2026-11-11 V-15).
+  return age < 0 ? null : age;
 }
 
 export function patientDisplayName(patient: Pick<PatientSummary, "first_name" | "last_name" | "title">): string {

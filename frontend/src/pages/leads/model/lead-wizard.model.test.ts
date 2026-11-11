@@ -50,7 +50,21 @@ import {
   type WizardDraft,
   type WizardOrderLine,
 } from "./lead-wizard.model";
-import { insuranceAnswerFromStored } from "./lead-wizard.model";
+import { insuranceAnswerFromStored, validCostThresholdInput } from "./lead-wizard.model";
+
+describe("validCostThresholdInput (QA 2026-11-11 V-13)", () => {
+  it("takes empty and amounts of at least 0 as people type them", () => {
+    for (const value of ["", " ", "0", "500", "500,00", "500,5", "1.500,00", "1.500", "1500.5", "750 €", "750 EUR"]) {
+      expect(validCostThresholdInput(value), value).toBe(true);
+    }
+  });
+
+  it("refuses letters, signs and broken amounts", () => {
+    for (const value of ["abc", "-500", "+500", "500,", "5,000,00", "12.34.5", "1,234.56", "50 0"]) {
+      expect(validCostThresholdInput(value), value).toBe(false);
+    }
+  });
+});
 
 function lead(overrides: Partial<LeadDetail> = {}): LeadDetail {
   return {

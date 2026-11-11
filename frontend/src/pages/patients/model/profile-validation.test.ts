@@ -21,6 +21,8 @@ const messages = {
   required: "Обязательное поле",
   invalidEmail: "Введите корректный адрес электронной почты",
   invalidPhone: "Введите корректный номер телефона",
+  futureBirthDate: "Дата рождения не может быть в будущем",
+  today: "2026-11-11",
 };
 
 const person = { firstName: "Anna", lastName: "Muster", birthDate: "1990-05-01", gender: "female" };
@@ -153,6 +155,16 @@ describe("validateNewPatientForm", () => {
     ...zipMessages,
     minorNeedsGuardian: "Elternteil oder Vormund mit Telefon",
   };
+
+  it("refuses a birth date in the future with its own message (QA 2026-11-11 V-15)", () => {
+    const errors = validateNewPatientForm(
+      { ...blankPatientForm(), ...person, birthDate: "2030-01-01" },
+      false,
+      newPatientMessages,
+    );
+    expect(errors).toEqual({ [newPatientFieldKey.birthDate]: messages.futureBirthDate });
+    expect(validatePatientProfileForm({ ...person, birthDate: "2026-11-11" }, [], [], false, messages)).toEqual({});
+  });
 
   it("does not accept the blank form: the sex has no default", () => {
     const errors = validateNewPatientForm(blankPatientForm(), false, newPatientMessages);

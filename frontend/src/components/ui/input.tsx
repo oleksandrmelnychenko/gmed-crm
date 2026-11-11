@@ -18,6 +18,7 @@ import {
   applyExternalValue,
   applyPickerBlur,
   applyPickerChange,
+  applyPickerCommit,
   formatPickerValue,
   parsePastedDate,
   pickerDraftFromValue,
@@ -32,6 +33,8 @@ const DATETIME_LOCAL_FORMAT = "DD.MM.YYYY HH:mm"
 const DATETIME_LOCAL_VALUE_FORMAT = "YYYY-MM-DDTHH:mm"
 const TIME_FORMAT = "HH:mm"
 const TIME_PICKER_REFERENCE_DATE = "2000-01-01T00:00:00"
+/** A pause this long in the last segment finishes a typed value (see `schedulePauseCommit`). */
+const PICKER_PAUSE_COMMIT_MS = 800
 
 function hasClassToken(className: string | undefined, token: string) {
   if (!className) {
@@ -242,6 +245,9 @@ function Input({
   )
   const pickerDraftRef = React.useRef(pickerDraft)
   const pickerFocusedRef = React.useRef(false)
+  /** A key was pressed in the field since it got the focus: its changes are typing. */
+  const pickerKeyTypedRef = React.useRef(false)
+  const pickerPauseTimerRef = React.useRef<number | null>(null)
   const onChangeRef = React.useRef(onChange)
 
   React.useEffect(() => {
@@ -277,7 +283,7 @@ function Input({
     )
   }, [applyPickerStep, isPicker, pickerFormat, pickerValue, type])
 
-  const handlePickerChange = (nextDate: Dayjs | null, context: { validationError: unknown }) => {
+  const handlePickerChange = (nextDate: Dayjs | null, context: { validationError: unknown; source?: string }) => {
     onPickerValidation?.(
       nextDate === null
         ? null
@@ -287,7 +293,50 @@ function Input({
             ? "invalidDate"
             : null,
     )
-    applyPickerStep(applyPickerChange(pickerDraftRef.current, nextDate, context.validationError, pickerFormat))
+    // Keys typed into the field reach the form when the field is left, not at every complete
+    // date on the way (QA 2026-11-11 V-01); a choice in the calendar or time list, a value set
+    // by the browser (autofill) and a whole paste count at once.
+    const typing = pickerFocusedRef.current && pickerKeyTypedRef.current && context.source !== "view"
+    applyPickerStep(applyPickerChange(pickerDraftRef.current, nextDate, context.validationError, pickerFormat, typing))
+    if (typing) schedulePauseCommit()
+  }
+
+  const commitPending = () => {
+    if (pickerPauseTimerRef.current !== null) {
+      window.clearTimeout(pickerPauseTimerRef.current)
+      pickerPauseTimerRef.current = null
+    }
+    if (!pickerDraftRef.current.pending) return
+    applyPickerStep(applyPickerCommit(pickerDraftRef.current, (raw) => parsePickerValue(type, raw), pickerFormat))
+  }
+
+  // A pause in the last segment (the year, the minutes) with a complete allowed value finishes
+  // the field as well: forms that store by themselves after a pause keep doing so. On the way
+  // through the day and month no pause counts, and the year passes only refused values
+  // (0002, 0019, 0199 lie before the earliest allowed date), so no in-between date is stored.
+  const schedulePauseCommit = () => {
+    if (pickerPauseTimerRef.current !== null) window.clearTimeout(pickerPauseTimerRef.current)
+    pickerPauseTimerRef.current = window.setTimeout(() => {
+      pickerPauseTimerRef.current = null
+      const sections = pickerAnchorRef.current?.querySelectorAll('[role="spinbutton"]')
+      const last = sections && sections.length > 0 ? sections[sections.length - 1] : null
+      if (!last || last.ownerDocument.activeElement !== last) return
+      if (pickerDraftRef.current.committable === null) return
+      commitPending()
+    }, PICKER_PAUSE_COMMIT_MS)
+  }
+
+  React.useEffect(() => () => {
+    if (pickerPauseTimerRef.current !== null) window.clearTimeout(pickerPauseTimerRef.current)
+  }, [])
+
+  const handlePickerKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    // Enter finishes a typed date as leaving the field does: a form sent with Enter gets it.
+    if (event.key === "Enter") {
+      commitPending()
+      return
+    }
+    if (!["Tab", "Shift", "Control", "Alt", "Meta", "Escape"].includes(event.key)) pickerKeyTypedRef.current = true
   }
 
   const handlePickerFocus = () => {
@@ -299,6 +348,11 @@ function Input({
     const next = event.relatedTarget
     if (next instanceof Node && event.currentTarget.contains(next)) return
     pickerFocusedRef.current = false
+    pickerKeyTypedRef.current = false
+    if (pickerPauseTimerRef.current !== null) {
+      window.clearTimeout(pickerPauseTimerRef.current)
+      pickerPauseTimerRef.current = null
+    }
     applyPickerStep(applyPickerBlur(pickerDraftRef.current, (raw) => parsePickerValue(type, raw), pickerFormat))
   }
 
@@ -318,6 +372,7 @@ function Input({
     const outOfRange =
       Boolean(minDate && next.isBefore(minDate, "day")) || Boolean(maxDate && next.isAfter(maxDate, "day"))
     applyPickerStep(
+      // A whole pasted date is finished at once: no in-between dates pass on the way.
       applyPickerChange(pickerDraftRef.current, next, outOfRange ? "outOfRange" : null, pickerFormat),
     )
   }
@@ -440,7 +495,7 @@ function Input({
         {...(pickerLang ? { dateAdapter: AppAdapterDayjs, adapterLocale: PICKER_ADAPTER_LOCALE[pickerLang] } : {})}
         localeText={PICKER_LOCALE_TEXT[pickerLang ?? lang]}
       >
-        <span ref={pickerAnchorRef} data-picker-anchor="" className="contents" onPasteCapture={handlePickerPaste} onClick={handlePickerAnchorClick}>
+        <span ref={pickerAnchorRef} data-picker-anchor="" className="contents" onPasteCapture={handlePickerPaste} onKeyDownCapture={handlePickerKeyDown} onClick={handlePickerAnchorClick}>
           {picker}
         </span>
       </LocalizationProvider>

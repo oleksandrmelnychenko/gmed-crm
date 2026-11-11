@@ -33,7 +33,7 @@ import {
   type StatusTone,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { berlinLocalInputToIso } from "@/lib/app-time-zone";
+import { appDateKey, berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { uiText, useLang, type Lang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import {
@@ -415,6 +415,11 @@ export function PatientServicesPage() {
     event.preventDefault();
     // Said in the portal's language before sending; the server refuses the
     // same with a code (global QA 2026-11-10: "ends_at must be later …").
+    // A start on a day that has passed was taken and planned (QA 2026-11-11 V-17); today counts.
+    if (form.startsAt && form.startsAt.slice(0, 10) < appDateKey()) {
+      dispatchPageState({ requestError: uiText("api_portal_service_start_in_past", lang), notice: "" });
+      return;
+    }
     if (form.startsAt && form.endsAt && form.endsAt <= form.startsAt) {
       dispatchPageState({ requestError: uiText("api_portal_service_period_inverted", lang), notice: "" });
       return;

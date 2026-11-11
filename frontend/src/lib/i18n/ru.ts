@@ -124,6 +124,7 @@ export const ru = {
   users_create_title: "Создать нового пользователя",
   users_name: "Имя",
   users_name_placeholder: "Макс Мюллер",
+  users_name_required: "Укажите имя: одни пробелы не подходят.",
   users_email: "Электронная почта",
   users_email_placeholder: "max@gmed.de",
   users_password: "Пароль",

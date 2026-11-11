@@ -537,6 +537,7 @@ import {
   prepaymentDueAtPatch,
   repeatIntakePatientId,
   repeatIntakePatientNumber,
+  validCostThresholdInput,
   validMoneyInput,
   wizardMoneyForApi,
   type LeadWizardEntryPoint,
@@ -1446,7 +1447,13 @@ function autosavePayload(
       program_date_to: draft.programDateTo,
       framework_contract_id: draft.frameworkContractId || null,
       contract_valid_from: draft.contractValidFrom,
-      cost_threshold: draft.costThreshold,
+      // A threshold the field refuses is not sent: the stored one stays (the server refuses
+      // the whole save for it, QA 2026-11-11 V-13); an older unreadable one is dropped.
+      cost_threshold: validCostThresholdInput(draft.costThreshold)
+        ? draft.costThreshold
+        : typeof previousWizardState.cost_threshold === "string" && validCostThresholdInput(previousWizardState.cost_threshold)
+          ? previousWizardState.cost_threshold
+          : "",
       // `citizenships` is the one source; the legacy key of older leads is
       // dropped (undefined is left out of the JSON body).
       registration_country: undefined,
@@ -4429,6 +4436,13 @@ export function LeadWizard({
     failed: Boolean(workTypesError),
   });
   const costEstimateHint = costEstimateWorkTypeHint(costEstimateStatus, tx, COST_ESTIMATE_WORK_TYPES_STEP);
+  // § 2 of the framework contract prints the threshold; it is an amount of at least 0 or nothing.
+  const costThresholdError = draft && !validCostThresholdInput(draft.costThreshold)
+    ? tx(
+        "Укажите сумму в евро не меньше 0, например 500 или 1.500,00 — без букв и знака минус",
+        "Geben Sie einen Betrag in Euro ab 0 an, z. B. 500 oder 1.500,00 — ohne Buchstaben und Minuszeichen",
+      )
+    : undefined;
   const selectedSpecializationLabelById = useMemo(
     () => new Map(
       selectedSpecializationItems.map((specialization) => [
@@ -7145,7 +7159,11 @@ export function LeadWizard({
       ? tx("Дата рождения не может быть в будущем", "Das Geburtsdatum darf nicht in der Zukunft liegen")
       : birthDateEntryError === "minDate"
         ? tx("Дата рождения не может быть раньше 01.01.1900", "Das Geburtsdatum darf nicht vor dem 01.01.1900 liegen")
-        : tx("Введите дату полностью: ДД.ММ.ГГГГ", "Datum vollständig eingeben: TT.MM.JJJJ");
+        // 31.02.1990 is complete but does not exist: the same words as the cabinet (QA 2026-11-11 V-03).
+        : tx(
+            "Такой даты нет, или дата введена не полностью. Проверьте день, месяц и год (ДД.ММ.ГГГГ).",
+            "Dieses Datum gibt es nicht oder es ist unvollständig. Bitte prüfen Sie Tag, Monat und Jahr (TT.MM.JJJJ).",
+          );
   const birthDateError = birthDateEntryText ?? visibleMasterError("birthDate");
 
   const ensureMasterDataReady = () => {
@@ -8150,6 +8168,13 @@ ${serviceCommentLines.join("\n")}`
       setCommercialDocumentErrors((current) => ({ ...current, cost_estimate: costEstimateHint }));
       return;
     }
+    // The framework contract prints the threshold: never one the field refuses (QA 2026-11-11 V-13).
+    if (templateId === "framework_contract" && costThresholdError) {
+      setError("");
+      setCommercialDocumentErrors((current) => ({ ...current, framework_contract: costThresholdError }));
+      document.getElementById(COST_THRESHOLD_ID)?.focus();
+      return;
+    }
     const normalizedPrepaymentAmount = prepaymentAmount.trim();
     const invalidRequiredPrepayment = prepayment && (
       !normalizedPrepaymentAmount
@@ -8243,7 +8268,7 @@ ${serviceCommentLines.join("\n")}`
           : "patient",
         status: "active",
         bindings: {
-          cost_threshold: draft.costThreshold.trim() || undefined,
+          cost_threshold: (validCostThresholdInput(draft.costThreshold) && draft.costThreshold.trim()) || undefined,
           party_city: draft.city.trim() || undefined,
           party_sign_place: draft.city.trim() || undefined,
           specialties: draft.specialties.map((value) => specialtyDocumentLabel(value)).join(", "),
@@ -11736,12 +11761,17 @@ ${serviceCommentLines.join("\n")}`
                       "Граница согласования превышения бюджета",
                       "Mehrkosten-Freigabegrenze",
                     )}
+                    htmlFor={COST_THRESHOLD_ID}
+                    error={costThresholdError}
+                    errorId={`${COST_THRESHOLD_ID}-error`}
                   >
                     <div className="relative">
                       <Input
                         id={COST_THRESHOLD_ID}
                         name="cost_threshold"
                         inputMode="decimal"
+                        aria-invalid={Boolean(costThresholdError)}
+                        aria-describedby={costThresholdError ? `${COST_THRESHOLD_ID}-error` : undefined}
                         className={cn(inputClass, "pr-12 font-mono tabular-nums")}
                         placeholder="500,00"
                         value={draft.costThreshold}

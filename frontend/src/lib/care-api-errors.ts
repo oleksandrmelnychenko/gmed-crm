@@ -14,6 +14,7 @@ export const CARE_API_ERROR_KEYS: Record<string, string> = {
   feedback_visit_not_held: "api_feedback_visit_not_held",
   // Patient's own service requests (concierge_services.rs)
   portal_service_period_inverted: "api_portal_service_period_inverted",
+  portal_service_start_in_past: "api_portal_service_start_in_past",
   // Patient's document upload (documents.rs `upload_my_document`)
   portal_upload_no_file: "api_portal_upload_no_file",
   portal_upload_type_not_allowed: "api_portal_upload_type_not_allowed",

@@ -526,7 +526,8 @@ fn validate_create(req: &CreateUserRequest) -> Result<(), &'static str> {
     if !crate::email_address::is_valid_email(&req.email) {
         return Err("Invalid email");
     }
-    if req.name.is_empty() || req.name.len() > 200 {
+    // A name of only spaces names nobody (QA 2026-11-11 V-16).
+    if req.name.trim().is_empty() || req.name.len() > 200 {
         return Err("Name must be 1-200 characters");
     }
     if let Some(password) = req.password.as_deref() {
@@ -859,6 +860,15 @@ async fn update_user(
         && !crate::email_address::is_valid_email(email)
     {
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid email"));
+    }
+    // A name of only spaces names nobody (QA 2026-11-11 V-16).
+    if let Some(ref name) = body.name
+        && (name.trim().is_empty() || name.len() > 200)
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Name must be 1-200 characters",
+        ));
     }
 
     let mut tx = state.db.begin().await.map_err(|e| {

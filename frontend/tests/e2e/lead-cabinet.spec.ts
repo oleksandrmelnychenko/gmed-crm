@@ -2870,6 +2870,31 @@ test.describe("Weiter holds a step the same way on every press", () => {
     await expect(page.getByTestId("lead-request-save-state")).toHaveText("Nicht gespeichert");
   });
 
+  // Validators QA 2026-11-11 V-01: on the way to 31.02.1990 the field passed 03.05.1988, a
+  // complete date, and the autosave stored it; after a reload it stood there as valid.
+  test("an impossible date typed over the stored one leaves the stored date, also after a reload", async ({ page }) => {
+    const { calls } = await setup(page, "lead", { prepare: filled() });
+    await page.goto("/");
+    const date = page.getByRole("group", { name: /Geburtsdatum/ });
+    await expect(date.locator("input")).toHaveValue("01.05.1988");
+    await date.getByRole("spinbutton").first().click();
+    await page.keyboard.type("31021990", { delay: 80 });
+    await page.locator("#lead-request-city").click();
+    await expect(page.locator("#lead-request-date_of_birth-error")).toContainText("gibt es nicht");
+    await expect(page.getByTestId("lead-request-save-state")).toHaveText("Nicht gespeichert");
+    // Nothing on the way was sent: no date of birth but the stored one.
+    expect(calls.personalData.filter((patch) => "date_of_birth" in patch && patch.date_of_birth !== "1988-05-01")).toEqual([]);
+    await page.reload();
+    await expect(page.getByRole("group", { name: /Geburtsdatum/ }).locator("input")).toHaveValue("01.05.1988");
+    // A finished, valid date is sent once: no date passed on the way (15.05.1988, 15.06.1988).
+    await date.getByRole("spinbutton").first().click();
+    await page.keyboard.type("15061990", { delay: 80 });
+    await page.locator("#lead-request-city").click();
+    await expect.poll(() => calls.personalData
+      .filter((patch) => "date_of_birth" in patch && patch.date_of_birth !== "1988-05-01")
+      .map((patch) => patch.date_of_birth)).toEqual(["1990-06-15"]);
+  });
+
   test("a wish date in the past holds every press of Weiter until it is put right or emptied (release QA 2026-11-11)", async ({ page }) => {
     await setup(page, "lead", {
       prepare: (request) => {
@@ -2980,6 +3005,8 @@ test.describe("Weiter holds a step the same way on every press", () => {
     // The date put right: the select is still empty and holds every press, the cursor in it.
     await date.getByRole("spinbutton").first().click();
     await page.keyboard.type("01051988", { delay: 80 });
+    // The typed date is taken when the field is left (validators QA 2026-11-11 V-01).
+    await page.locator("#lead-request-phone").focus();
     await expect(page.getByTestId("lead-request-save-blocked")).toHaveCount(0);
     const sex = page.getByRole("combobox", { name: "Geschlecht laut Ausweis" });
     for (let press = 1; press <= 2; press += 1) {

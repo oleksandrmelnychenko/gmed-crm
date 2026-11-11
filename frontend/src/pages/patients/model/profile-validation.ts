@@ -14,7 +14,16 @@ export type PatientProfileValidationMessages = {
   invalidPhone: string;
   /** The message for an address whose domain is already known to receive no mail (no check without it). */
   noMailEmail?: (email: string) => string;
+  /** A birth date after today (QA 2026-11-11 V-15); `today` is the Berlin date "YYYY-MM-DD". */
+  futureBirthDate: string;
+  today: string;
 };
+
+/** Whether a birth date "YYYY-MM-DD" lies after `today`; a future date is no minor. */
+export function isFutureBirthDate(birthDate: string, today: string): boolean {
+  const value = birthDate.trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && value > today;
+}
 
 function noMailError(email: string, messages: PatientProfileValidationMessages): string | undefined {
   return messages.noMailEmail && isKnownNoMailEmail(email) ? messages.noMailEmail(email) : undefined;
@@ -50,6 +59,7 @@ export function validatePatientProfileForm(
   if (!form.firstName.trim()) errors[patientProfileFieldKey.firstName] = messages.required;
   if (!form.lastName.trim()) errors[patientProfileFieldKey.lastName] = messages.required;
   if (!form.birthDate.trim()) errors[patientProfileFieldKey.birthDate] = messages.required;
+  else if (isFutureBirthDate(form.birthDate, messages.today)) errors[patientProfileFieldKey.birthDate] = messages.futureBirthDate;
   if (!form.gender.trim()) errors[patientProfileFieldKey.gender] = messages.required;
 
   for (const contact of contacts) {

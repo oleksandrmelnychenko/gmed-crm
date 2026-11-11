@@ -47,6 +47,7 @@ import {
   inputClass as formInputClassName,
   textareaClass as formTextareaClassName,
 } from "@/components/ui-shell";
+import { appDateKey } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
 import { updatePatient } from "../../data/patient-mutations";
@@ -275,6 +276,8 @@ function patientProfileFieldErrors(
       invalidEmail: dictionary.patient_profile_editor_invalid_email,
       invalidPhone: dictionary.patient_profile_editor_invalid_phone,
       noMailEmail: (email) => emailDomainWarningText(email, lang),
+      futureBirthDate: dictionary.patient_form_birth_date_future,
+      today: appDateKey(),
     },
   );
 }

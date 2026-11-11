@@ -17156,6 +17156,22 @@ async fn generate_document(
     if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return resp;
     }
+    // § 2 of the framework contract prints the threshold: "abc" was printed as typed and
+    // "-500" as 500,00 € (QA 2026-11-11 V-13). Checked before anything is numbered.
+    if body
+        .bindings
+        .as_ref()
+        .and_then(|bindings| bindings.cost_threshold.as_deref())
+        .map(str::trim)
+        .is_some_and(|value| {
+            !value.is_empty() && crate::money::parse_non_negative_amount(value).is_none()
+        })
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "cost_threshold must be a non-negative amount",
+        );
+    }
 
     if let Some(replace_document_id) = body.replace_document_id
         && let Err(response) =
@@ -31120,10 +31136,12 @@ fn parse_single_eur_amount(value: &str) -> Option<f64> {
 /// one every additional cost does — no blank "______ der Gesamtsumme" is
 /// printed (QA 2026-10-25).
 fn framework_contract_additional_costs_clause(cost_threshold: Option<&str>) -> String {
+    // Only a readable amount of at least 0 is printed; an older unreadable value ("abc",
+    // "-500") leaves the stricter wording without a threshold (QA 2026-11-11 V-13).
     let threshold = cost_threshold
         .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(fmt_money_de);
+        .and_then(crate::money::parse_non_negative_amount)
+        .map(format_eur_decimal);
     let condition = match threshold {
         Some(threshold) => format!(
             "Zusätzliche Kosten, die im Kostenvoranschlag nicht aufgeführt waren, und {threshold} der Gesamtsumme übersteigen,"
@@ -46299,7 +46317,13 @@ mod tests {
             with.contains("und 500,00 € der Gesamtsumme übersteigen,"),
             "{with}"
         );
-        for empty in [None, Some(""), Some("   ")] {
+        let grouped = super::framework_contract_additional_costs_clause(Some("1.500,00 €"));
+        assert!(
+            grouped.contains("und 1.500,00 € der Gesamtsumme"),
+            "{grouped}"
+        );
+        // QA 2026-11-11 V-13: unreadable or negative values are never printed.
+        for empty in [None, Some(""), Some("   "), Some("abc"), Some("-500")] {
             let without = super::framework_contract_additional_costs_clause(empty);
             assert!(!without.contains("der Gesamtsumme"), "{without}");
             assert!(!without.contains("____"), "{without}");

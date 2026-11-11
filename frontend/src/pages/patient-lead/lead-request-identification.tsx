@@ -175,7 +175,9 @@ export function useIdentificationForm({
       if (value === undefined || value !== identificationValue(field, draft)) return undefined;
       if (refused.codes[field] === "id_document_expired") return text.idDocumentExpired;
       if (refused.codes[field] === "health_consent_required") return text.healthConsentRequired;
-      return text.invalidField;
+      // Say which rule the number broke, as the payer link does (QA 2026-11-11 V-06).
+      const code = refused.codes[field];
+      return (code ? text.idDocumentRules[code] : undefined) ?? text.invalidField;
     },
   };
 }

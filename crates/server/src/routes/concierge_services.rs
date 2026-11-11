@@ -624,6 +624,19 @@ async fn create_my_concierge_service(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
 
+    // A wish for a day that has passed was taken and planned (QA 2026-11-11 V-17); today counts.
+    if let Some(starts_at) = starts_at
+        && crate::app_time::date_of(starts_at) < crate::app_time::today()
+    {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(serde_json::json!({
+                "error": "portal_service_start_in_past",
+                "message": "starts_at must not be in the past"
+            })),
+        )
+            .into_response();
+    }
     if let (Some(starts_at), Some(ends_at)) = (starts_at.as_ref(), ends_at.as_ref())
         && ends_at <= starts_at
     {

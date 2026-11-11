@@ -1648,6 +1648,10 @@ fn validate_create(req: &CreatePatientRequest) -> Result<(), &'static str> {
     }
     let parsed_birth_date = chrono::NaiveDate::parse_from_str(birth_date, "%Y-%m-%d")
         .map_err(|_| "Invalid birth_date format (YYYY-MM-DD)")?;
+    // A future birth date made a "minor" nobody can be (QA 2026-11-11 V-15).
+    if parsed_birth_date > crate::app_time::today() {
+        return Err("birth_date cannot be in the future");
+    }
     match req.gender.as_str() {
         "male" => {}
         "female" => {}
@@ -3683,6 +3687,12 @@ async fn update_patient(
                 return err(StatusCode::UNPROCESSABLE_ENTITY, "Birth date required");
             }
             match chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d") {
+                Ok(value) if value > crate::app_time::today() => {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "birth_date cannot be in the future",
+                    );
+                }
                 Ok(value) => value,
                 Err(_) => {
                     return err(

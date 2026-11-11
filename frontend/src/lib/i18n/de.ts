@@ -125,6 +125,7 @@ export const de = {
   users_create_title: "Neuen Benutzer anlegen",
   users_name: "Name",
   users_name_placeholder: "Max Mustermann",
+  users_name_required: "Bitte den Namen angeben: nur Leerzeichen reichen nicht.",
   users_email: "E-Mail",
   users_email_placeholder: "max@gmed.de",
   users_password: "Passwort",

@@ -90,6 +90,8 @@ export type LeadRequestText = {
   saved: string;
   notSaved: string;
   invalidField: string;
+  /** What the server code of a refused document number means (the payer link says the same). */
+  idDocumentRules: Record<string, string>;
   /** An e-mail address that is not name@domain.tld. */
   invalidEmail: string;
   /** A phone number with fewer than six digits or other characters than + ( ) - / and spaces. */
@@ -1224,6 +1226,11 @@ const de: LeadRequestText = {
   saved: "Gespeichert",
   notSaved: "Nicht gespeichert",
   invalidField: "Bitte prüfen Sie diese Angabe.",
+  idDocumentRules: {
+    id_document_number_invalid: "Nur lateinische Buchstaben A–Z, Ziffern, Leerzeichen, „-“ und „<“.",
+    id_document_number_too_short: "Die Nummer ist zu kurz: mindestens 5 Buchstaben oder Ziffern.",
+    id_document_number_too_long: "Die Nummer ist zu lang: höchstens 30 Zeichen.",
+  },
   invalidEmail: "Bitte geben Sie eine gültige E-Mail-Adresse ein, z. B. name@example.de.",
   invalidPhone: "Bitte geben Sie eine gültige Telefonnummer ein: mindestens 6 Ziffern, erlaubt sind nur +, Leerzeichen, ( ) - /.",
   invalidGermanZip: "Eine deutsche Postleitzahl hat fünf Ziffern.",
@@ -1903,6 +1910,11 @@ const ru: LeadRequestText = {
   saved: "Сохранено",
   notSaved: "Не сохранено",
   invalidField: "Пожалуйста, проверьте это поле.",
+  idDocumentRules: {
+    id_document_number_invalid: "Только латинские буквы A–Z, цифры, пробел, «-» и «<».",
+    id_document_number_too_short: "Номер слишком короткий: минимум 5 букв или цифр.",
+    id_document_number_too_long: "Номер слишком длинный: максимум 30 знаков.",
+  },
   invalidEmail: "Введите корректный адрес электронной почты, например name@example.de.",
   invalidPhone: "Введите корректный номер телефона: не менее 6 цифр, допустимы только +, пробелы, ( ) - /.",
   invalidGermanZip: "Почтовый индекс в Германии состоит из пяти цифр.",
@@ -2575,6 +2587,11 @@ const uk: LeadRequestText = {
   saved: "Збережено",
   notSaved: "Не збережено",
   invalidField: "Будь ласка, перевірте це поле.",
+  idDocumentRules: {
+    id_document_number_invalid: "Лише латинські літери A–Z, цифри, пробіл, «-» і «<».",
+    id_document_number_too_short: "Номер закороткий: щонайменше 5 літер або цифр.",
+    id_document_number_too_long: "Номер задовгий: не більше 30 символів.",
+  },
   invalidEmail: "Введіть коректну адресу електронної пошти, наприклад name@example.de.",
   invalidPhone: "Введіть коректний номер телефону: щонайменше 6 цифр, допустимі лише +, пробіли, ( ) - /.",
   invalidGermanZip: "Поштовий індекс у Німеччині складається з п’яти цифр.",
@@ -3247,6 +3264,11 @@ const en: LeadRequestText = {
   saved: "Saved",
   notSaved: "Not saved",
   invalidField: "Please check this entry.",
+  idDocumentRules: {
+    id_document_number_invalid: "Only Latin letters A–Z, digits, spaces, “-” and “<”.",
+    id_document_number_too_short: "The number is too short: at least 5 letters or digits.",
+    id_document_number_too_long: "The number is too long: at most 30 characters.",
+  },
   invalidEmail: "Please enter a valid e-mail address, e.g. name@example.com.",
   invalidPhone: "Please enter a valid phone number: at least 6 digits; only +, spaces, ( ) - / are allowed.",
   invalidGermanZip: "A German postal code has five digits.",

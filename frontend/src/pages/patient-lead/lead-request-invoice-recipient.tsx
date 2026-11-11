@@ -332,6 +332,8 @@ export function InvoiceRecipientSection({
   };
   const errorFor = (field: keyof RecipientDraft) => {
     if (refused[field] === undefined || refused[field] !== recipientValue(field, draft)) return undefined;
+    // The phone rule is said in words, as at the lead's own phone (QA 2026-11-11 V-06).
+    if (field === "phone") return text.invalidPhone;
     if (field !== "email") return text.invalidField;
     // "The domain … accepts no mail" when the server (or the known list) says so (QA 2026-10-24, B-3).
     return refusedCodes.email === EMAIL_DOMAIN_NO_MAIL || isKnownNoMailEmail(draft.email)

@@ -112,6 +112,7 @@ export interface Translations
   users_create_title: string;
   users_name: string;
   users_name_placeholder: string;
+  users_name_required: string;
   users_email: string;
   users_email_placeholder: string;
   users_password: string;

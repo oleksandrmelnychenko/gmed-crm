@@ -734,6 +734,11 @@ function useAdminUsersPageContent() {
 
   const onSubmitCreate = async (ev: FormEvent) => {
     ev.preventDefault();
+    // The browser's `required` lets a name of only spaces through (QA 2026-11-11 V-16).
+    if (!newName.trim()) {
+      setCreateError(t.users_name_required);
+      return;
+    }
     if (!isValidEmailAddress(newEmail)) {
       setCreateError(t.login_error_email_invalid);
       return;
@@ -759,7 +764,7 @@ function useAdminUsersPageContent() {
     try {
       const created = await createAdminUser<User>({
         email: newEmail,
-        name: newName,
+        name: newName.trim(),
         role: newRole,
         ...(manualPassword ? { password: newPassword } : {}),
       });
