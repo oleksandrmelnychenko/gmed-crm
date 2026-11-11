@@ -238,6 +238,28 @@ function displayValue(value: unknown, fallback = "-") {
   return fallback;
 }
 
+/**
+ * State of an order line in words: the staff sheet printed the stored code
+ * («бухгалтерия approved», release QA D R-08). Same words as on the order.
+ */
+function billingLineStatusLabel(value: unknown, lang: string): string {
+  const de = lang === "de";
+  switch (value) {
+    case "planned":
+      return de ? "Geplant" : "Запланировано";
+    case "delivered":
+      return de ? "Erbracht" : "Оказано";
+    case "approved":
+      return de ? "Freigegeben" : "Утверждено";
+    case "invoiced":
+      return de ? "Abgerechnet" : "Выставлен счёт";
+    case "cancelled":
+      return de ? "Storniert" : "Отменено";
+    default:
+      return displayValue(value);
+  }
+}
+
 function displayNumber(value: unknown, suffix = "") {
   // "1.25" from the server reads "1,25" in both interface languages.
   const rawValue = displayValue(value, "0");
@@ -2586,7 +2608,7 @@ export function InterpretersPage() {
                             {displayValue(item.patient_code)}
                             {/* Nothing to say about billing yet: no «бухгалтерия -». */}
                             {item.billing_status
-                              ? ` · ${profileCopy.billing} ${displayValue(item.billing_status)}`
+                              ? ` · ${profileCopy.billing}: ${billingLineStatusLabel(item.billing_status, lang).toLowerCase()}`
                               : null}
                           </span>
                         </div>
@@ -2600,7 +2622,7 @@ export function InterpretersPage() {
                         <div>
                           <span className="font-medium">
                             {displayValue(item.order_number)} ·{" "}
-                            {displayValue(item.status)}
+                            {billingLineStatusLabel(item.status, lang)}
                           </span>
                           <span className="mt-1 block text-muted-foreground">
                             {displayValue(item.description)} ·{" "}

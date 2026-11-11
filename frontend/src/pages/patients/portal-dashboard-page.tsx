@@ -344,7 +344,9 @@ function usePatientDashboardPageContent() {
     for (const item of nextActions) {
       counts.set(item.kind, (counts.get(item.kind) ?? 0) + 1);
     }
-    return Array.from(counts.entries()).slice(0, 3);
+    // Every kind gets its counter: a fourth kind (payment) was dropped
+    // while its action stood in the list (release QA B S3-5).
+    return Array.from(counts.entries());
   }, [nextActions]);
   // What the patient uploads apart from the consents GMED sends for signing.
   const requiredDocuments = useMemo(

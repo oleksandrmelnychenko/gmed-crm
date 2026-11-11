@@ -248,7 +248,7 @@ export function ServiceMixTable({
   loading,
   tr,
 }: {
-  rows: Array<{ service_type: string; item_count: number; gross_total: string }>;
+  rows: Array<{ service_type: string; item_count: number; gross_total: string | null }>;
   loading: boolean;
   tr: DashboardTranslations;
 }) {
@@ -278,7 +278,7 @@ export function ServiceMixTable({
               {row.item_count}
             </div>
             <div className="w-[120px] shrink-0 text-right text-[12px] font-medium tabular-nums text-foreground">
-              {formatMoneyAmount(row.gross_total, "EUR")}
+              {row.gross_total == null ? "—" : formatMoneyAmount(row.gross_total, "EUR")}
             </div>
           </div>
         );
@@ -292,7 +292,7 @@ export function OrdersValuedBars({
   loading,
   emptyLabel,
 }: {
-  data: Array<{ phase: string; count: number; value_eur: string }>;
+  data: Array<{ phase: string; count: number; value_eur: string | null }>;
   loading: boolean;
   emptyLabel: string;
 }) {
@@ -300,13 +300,15 @@ export function OrdersValuedBars({
   if (loading) return <div style={{ height: 220 }}><ChartSkeleton /></div>;
   if (data.length === 0) return <div style={{ height: 220 }}><EmptyChart label={emptyLabel} /></div>;
 
-  const max = Math.max(1, ...data.map((item) => Number(item.value_eur) || 0));
+  // A role without the finance right gets no amounts: the bars follow the counts.
+  const byCount = data.every((item) => item.value_eur == null);
+  const max = Math.max(1, ...data.map((item) => (byCount ? item.count : Number(item.value_eur) || 0)));
 
   return (
     <div className="space-y-2.5">
       {data.map((item) => {
         const value = Number(item.value_eur) || 0;
-        const percent = (value / max) * 100;
+        const percent = ((byCount ? item.count : value) / max) * 100;
         return (
           <div key={item.phase} className="flex items-center gap-3">
             <div className="w-[100px] shrink-0 text-[13px] first-letter:uppercase text-foreground">
@@ -327,7 +329,7 @@ export function OrdersValuedBars({
               {item.count} {translateCatalog(lang).dash_order_count_suffix}
             </div>
             <div className="w-[110px] shrink-0 text-right text-[12.5px] font-medium tabular-nums text-foreground">
-              {formatMoneyAmount(value, "EUR")}
+              {item.value_eur == null ? "—" : formatMoneyAmount(value, "EUR")}
             </div>
           </div>
         );

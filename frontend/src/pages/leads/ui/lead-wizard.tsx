@@ -4039,6 +4039,8 @@ export function LeadWizard({
   const [signedTermsAsk, setSignedTermsAsk] = useState<{ text: string; resolve: (yes: boolean) => void } | null>(null);
   // One conversion at a time: `busy` is free between its steps.
   const convertInFlightRef = useRef(false);
+  /** The lead whose first order the sanctions gate refused: not asked again on a reload. */
+  const orderBootstrapRefusedRef = useRef<string | null>(null);
   const [documentPreviewError, setDocumentPreviewError] = useState("");
   // The person whose document data a refused signature names: the banner
   // leads straight to that person's document form (DEV 2026-10-22).
@@ -4549,6 +4551,10 @@ export function LeadWizard({
             ||
             existingOrders.length > 0
             || !["new", "in_progress", "qualified"].includes(orderLead.qualification_status)
+            // A confirmed sanctions match refuses every order (409): the banner
+            // says so, the wizard does not ask again (release QA E F-6).
+            || (orderLead.readiness?.blocking_reasons ?? []).includes(SANCTIONS_CONFIRMED_REASON)
+            || orderBootstrapRefusedRef.current === leadId
           ) {
             return { bootstrapError: null, orders: existingOrders };
           }
@@ -4560,7 +4566,10 @@ export function LeadWizard({
             };
           } catch (bootstrapError) {
             // A sanctions or country block has its own banner.
-            if (isSanctionsGateError(bootstrapError)) return { bootstrapError: null, orders: existingOrders };
+            if (isSanctionsGateError(bootstrapError)) {
+              orderBootstrapRefusedRef.current = leadId;
+              return { bootstrapError: null, orders: existingOrders };
+            }
             return { bootstrapError, orders: existingOrders };
           }
         });
@@ -8855,9 +8864,15 @@ ${serviceCommentLines.join("\n")}`
   // signed the order resets that signature (manual DEV run 2026-10-30), so the
   // release list names it before anything is signed.
   const periodIssues = orderIssues.filter((issue) => issue.key.startsWith("program-date"));
-  const conversionReady = leadConversionRunnable(lead?.readiness, lead?.qualification_status)
+  // Step 1 is checked by «Создать пациента» first (`finishIntake`): an open
+  // required field there must not let the footer say "ready" (QA C S3-2).
+  const masterDataComplete = Object.keys(masterErrors).length === 0
+    && !(step1Portal.mode === "patient" && Object.keys(strictMasterErrors).length > 0);
+  // The button stays usable without it: a press leads to the open field.
+  const conversionRunnable = leadConversionRunnable(lead?.readiness, lead?.qualification_status)
     && quoteAndPrepaymentReady
     && periodIssues.length === 0;
+  const conversionReady = conversionRunnable && masterDataComplete;
   // The order document carries the period: with no date at all it is not made either.
   const orderDocumentPeriodIssues = periodIssues.length > 0 || !draft || draft.programDateFrom || draft.programDateTo
     ? periodIssues
@@ -12767,7 +12782,7 @@ ${serviceCommentLines.join("\n")}`
                     {tx("Открыть карточку пациента", "Patientenakte öffnen")}
                   </StaffLink>
                 ) : (
-                  <Button type="button" className="h-9" disabled={loading || isBusy || !conversionReady || !conversionConfirmed} onClick={() => void convert()}>
+                  <Button type="button" className="h-9" disabled={loading || isBusy || !conversionRunnable || !conversionConfirmed} onClick={() => void convert()}>
                     {busy === "convert" ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <UserRoundCheck aria-hidden="true" className="size-4" />}
                     {isRepeatIntake ? tx("Завершить обращение", "Anfrage abschließen") : tx("Создать пациента", "Patient anlegen")}
                   </Button>

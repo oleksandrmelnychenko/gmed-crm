@@ -5799,7 +5799,13 @@ async fn dashboard_clinical(
     let cases_by_status = load_cases_by_status(&state, &clause)
         .await
         .unwrap_or_else(|_| json!({}));
-    let service_mix = load_ceo_service_mix(&state).await.unwrap_or_default();
+    let mut service_mix = load_ceo_service_mix(&state).await.unwrap_or_default();
+    // Company turnover is a finance figure: a role without the finance right
+    // (Sales, interpreter team lead) gets the counts and no amount (RBAC
+    // matrix: "роль без фінансового доступу не отримує жодної суми").
+    if !auth.role.can_see_financial_data() {
+        blank_money_field(&mut service_mix, "gross_total");
+    }
     let avg_case_duration_days = load_avg_case_duration(&state, &clause).await.unwrap_or(0.0);
 
     Json(json!({
@@ -5831,9 +5837,13 @@ async fn dashboard_operations(
     let appointments_heatmap = load_appointments_heatmap(&state, &apt_clause)
         .await
         .unwrap_or_default();
-    let orders_by_phase_valued = load_orders_by_phase_valued(&state, &order_clause)
+    let mut orders_by_phase_valued = load_orders_by_phase_valued(&state, &order_clause)
         .await
         .unwrap_or_default();
+    // Same rule as the service mix: order value only with the finance right.
+    if !auth.role.can_see_financial_data() {
+        blank_money_field(&mut orders_by_phase_valued, "value_eur");
+    }
     let top_providers = load_top_providers(&state, &apt_clause)
         .await
         .unwrap_or_default();
@@ -5846,6 +5856,15 @@ async fn dashboard_operations(
         "top_providers": top_providers,
     }))
     .into_response()
+}
+
+/// Replaces one money field of every row by `null`; the row and its counts stay.
+fn blank_money_field(rows: &mut [Value], field: &str) {
+    for row in rows.iter_mut() {
+        if let Some(object) = row.as_object_mut() {
+            object.insert(field.to_string(), Value::Null);
+        }
+    }
 }
 
 /* ── Demographics loaders ── */

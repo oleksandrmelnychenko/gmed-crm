@@ -883,6 +883,9 @@ const PORTAL_CONCIERGE_KIND_LABEL_KEYS = {
 const PORTAL_CONCIERGE_SOURCE_LABEL_KEYS = {
   appointment_bootstrap: "portal_concierge_source_appointment_bootstrap",
   patient_portal: "portal_concierge_source_patient_portal",
+  // A service created in the staff workspace is stored as `staff`
+  // (release QA B S3-2: it showed «Неизвестное значение»).
+  staff: "portal_concierge_source_staff",
   staff_capture: "portal_concierge_source_staff",
   staff_workspace: "portal_concierge_source_staff",
 } satisfies Partial<Record<string, TranslationKey>>;

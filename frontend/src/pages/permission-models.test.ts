@@ -295,7 +295,8 @@ describe("appointments model", () => {
       const submit = has("appointments.report.submit");
       expect(appointmentPermissions(actor)).toEqual({
         canViewPage: view,
-        canCreate: edit,
+        // The team lead edits visits but never creates one (release QA D R-04).
+        canCreate: edit && actorRole !== "teamlead_interpreter",
         canEditSchedule: edit,
         canDelete: has("appointments.delete"),
         canManageStatus: status,

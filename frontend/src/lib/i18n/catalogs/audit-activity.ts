@@ -14,6 +14,15 @@ type Pair = readonly [ru: string, de: string];
 const ACTIONS: Record<string, Pair> = {
   // Sign-in, sessions, accounts
   login_totp_requested: ["Запрошен код второго фактора", "Zwei-Faktor-Code angefordert"],
+  // Release QA E F-3: two codes added after the catalog.
+  totp_disable_failed: [
+    "Не удалось отключить двухфакторный код",
+    "Zwei-Faktor-Code konnte nicht entfernt werden",
+  ],
+  lead_healthcare_consent_granted: [
+    "Согласие на обработку медицинских данных отмечено",
+    "Einwilligung in die Verarbeitung von Gesundheitsdaten erfasst",
+  ],
   refresh_token_theft: ["Обнаружена кража сессии", "Sitzungsdiebstahl erkannt"],
   sessions_expired: ["Сессии истекли", "Sitzungen abgelaufen"],
   change_own_password_rejected: ["Смена пароля отклонена", "Passwortänderung abgelehnt"],

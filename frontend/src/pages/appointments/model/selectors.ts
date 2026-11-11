@@ -66,7 +66,10 @@ export function appointmentPermissions(actor?: Actor): AppointmentPermissions {
   const assistant = role === "ceo_assistant";
   return {
     canViewPage: canView,
-    canCreate: canEdit,
+    // The interpreter team lead only assigns and replaces interpreters: the
+    // server refuses a visit created by this role and gives it no patient
+    // list to choose from (release QA D R-04).
+    canCreate: canEdit && role !== "teamlead_interpreter",
     canEditSchedule: canEdit,
     canDelete: can("appointments.delete"),
     canManageStatus: coordinates,

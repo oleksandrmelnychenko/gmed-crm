@@ -43,6 +43,9 @@ export function AppointmentCalendarQuickActionsMenu({
 }: AppointmentCalendarQuickActionsMenuProps) {
   const { appointmentText } = useAppointmentLabels();
   const completionTooEarly = isAppointmentCompletionTooEarly(item.date);
+  // A cancelled or completed visit is closed: confirming or completing it is
+  // refused by the server, so the menu does not offer it (release QA C S3-6).
+  const closed = item.status === "cancelled" || item.status === "completed";
   // A scope other than "single" exists only for a series.
   const cancelScope: AppointmentRecurringActionScope = item.recurrence_frequency
     ? activeScope
@@ -102,7 +105,7 @@ export function AppointmentCalendarQuickActionsMenu({
         >
           <span>{dictionary.appointments_open_detail}</span>
         </button>
-        {item.status !== "confirmed" ? (
+        {!closed && item.status !== "confirmed" ? (
           <button
             type="button"
             role="menuitem"
@@ -116,7 +119,7 @@ export function AppointmentCalendarQuickActionsMenu({
             ) : null}
           </button>
         ) : null}
-        <button
+        {closed ? null : <button
           type="button"
           role="menuitem"
           className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-foreground transition hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-60"
@@ -132,7 +135,7 @@ export function AppointmentCalendarQuickActionsMenu({
           {actionBusy === statusActionKey(item.id, "completed", activeScope) ? (
             <LoaderCircle className="size-4 animate-spin" />
           ) : null}
-        </button>
+        </button>}
         {/* A single appointment can be cancelled too (it stays, as
             "cancelled"); the page asks before it does. */}
         {item.recurrence_frequency ||

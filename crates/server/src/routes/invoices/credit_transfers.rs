@@ -210,7 +210,12 @@ pub(crate) async fn load_credit_transfer_targets(
                           SELECT invoice_recipient_identity(source.recipient_snapshot)
                           FROM invoices source
                           WHERE source.id = $2
-                      ) AS same_recipient
+                      ) AS same_recipient,
+                  invoice.payer_role AS payer_role,
+                  (SELECT ({source_recipient}) ->> 'name'
+                   FROM invoices source WHERE source.id = $2) AS source_recipient_name,
+                  (SELECT source.payer_role
+                   FROM invoices source WHERE source.id = $2) AS source_payer_role
            FROM invoices invoice
            LEFT JOIN orders ON orders.id = invoice.order_id
            WHERE invoice.patient_id = $1
@@ -221,6 +226,7 @@ pub(crate) async fn load_credit_transfer_targets(
                  - invoice.paid_amount - invoice.prepayment_applied_amount > 0
            ORDER BY invoice.issued_at, invoice.id"#,
         recipient = recipient_value("invoice"),
+        source_recipient = recipient_value("source"),
     ))
     .bind(patient_id)
     .bind(invoice_id)
@@ -239,14 +245,35 @@ pub(crate) async fn load_credit_transfer_targets(
                 row.try_get("prepayment_applied_amount")
                     .unwrap_or(Decimal::ZERO),
             );
+            let recipient_name = row
+                .try_get::<Option<String>, _>("recipient_name")
+                .unwrap_or_default();
+            let source_recipient_name = row
+                .try_get::<Option<String>, _>("source_recipient_name")
+                .unwrap_or_default();
+            let source_payer_role = row
+                .try_get::<Option<String>, _>("source_payer_role")
+                .unwrap_or_default();
+            let payer_role = row
+                .try_get::<Option<String>, _>("payer_role")
+                .unwrap_or_default();
+            // The same person at another address is the same recipient, as at
+            // the release of a final invoice (QA D R-02).
+            let same_recipient = row.try_get::<bool, _>("same_recipient").unwrap_or(false)
+                || super::payer::advance_names_same_person(
+                    source_recipient_name.as_deref(),
+                    source_payer_role.as_deref(),
+                    recipient_name.as_deref().unwrap_or_default(),
+                    payer_role.as_deref(),
+                );
             json!({
                 "invoice_id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
                 "invoice_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
                 "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
                 "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
                 "balance_due": decimal_to_string(balance),
-                "recipient_name": row.try_get::<Option<String>, _>("recipient_name").unwrap_or_default(),
-                "same_recipient": row.try_get::<bool, _>("same_recipient").unwrap_or(false),
+                "recipient_name": recipient_name,
+                "same_recipient": same_recipient,
             })
         })
         .collect())
@@ -420,7 +447,9 @@ pub(crate) async fn create_credit_transfer(
                   IS NOT DISTINCT FROM invoice_recipient_identity(target.recipient_snapshot)
                   AS same_recipient,
                   ({source}) ->> 'name' AS source_recipient_name,
-                  ({target}) ->> 'name' AS target_recipient_name
+                  ({target}) ->> 'name' AS target_recipient_name,
+                  source.payer_role AS source_payer_role,
+                  target.payer_role AS target_payer_role
            FROM invoices source, invoices target
            WHERE source.id = $1 AND target.id = $2"#,
         source = recipient_value("source"),
@@ -437,9 +466,30 @@ pub(crate) async fn create_credit_transfer(
             return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
         }
     };
+    // The patient and the patient's own name at another invoice address are
+    // one recipient, as at the release of a final invoice (QA D R-02).
     let same_recipient = recipients
         .try_get::<bool, _>("same_recipient")
-        .unwrap_or(false);
+        .unwrap_or(false)
+        || super::payer::advance_names_same_person(
+            recipients
+                .try_get::<Option<String>, _>("source_recipient_name")
+                .unwrap_or_default()
+                .as_deref(),
+            recipients
+                .try_get::<Option<String>, _>("source_payer_role")
+                .unwrap_or_default()
+                .as_deref(),
+            recipients
+                .try_get::<Option<String>, _>("target_recipient_name")
+                .unwrap_or_default()
+                .as_deref()
+                .unwrap_or_default(),
+            recipients
+                .try_get::<Option<String>, _>("target_payer_role")
+                .unwrap_or_default()
+                .as_deref(),
+        );
     if !same_recipient && !body.confirm_recipient_mismatch {
         // Both recipients and the amount, so the confirmation names what
         // billing moves between two debtors (QA D3-04).

@@ -744,7 +744,9 @@ export function SanctionsPage() {
             variant="ghost"
             data-workspace-tab
             aria-current={entry === tab ? "page" : undefined}
-            className="h-9 min-w-0 flex-1 rounded-lg px-3 text-xs"
+            // A tab is never narrower than its label (release QA E F-7: the
+            // German «Risikobewertung (3)» ran over its cell on a phone).
+            className="h-9 flex-1 shrink-0 rounded-lg px-3 text-xs"
             onClick={() => setParams(entry === "open" ? {} : { tab: entry }, { replace: true })}
           >
             {icons[entry]}

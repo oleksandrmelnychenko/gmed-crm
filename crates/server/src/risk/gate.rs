@@ -227,6 +227,7 @@ pub async fn holds(
     lead_id: Uuid,
     route: RiskRoute,
     actor: Option<Uuid>,
+    may_start: bool,
 ) -> Result<bool, sqlx::Error> {
     // A converted lead is frozen: new triggers from its old data (a passport that
     // expired since) would void a release nobody can renew (QA 2026-10-30).
@@ -237,7 +238,10 @@ pub async fn holds(
             .await?
             .unwrap_or(false);
     let mut tx = state.db.begin().await?;
-    let assessment = if converted {
+    // A read-only caller starts nothing: its write is refused by the handler
+    // anyway, and the log would name it as the one who started the
+    // assessment (release QA E F-5).
+    let assessment = if converted || !may_start {
         store::load(&mut tx, lead_id).await?
     } else {
         store::ensure_started(&mut tx, lead_id, Cause::Gate, actor).await?
@@ -317,10 +321,16 @@ pub async fn middleware(State(state): State<AppState>, request: Request, next: N
         .extensions()
         .get::<AuthUser>()
         .map(|auth| auth.user_id);
+    // The CEO assistant reads everything and changes nothing (owner
+    // 2026-10-11): its calls never start an assessment.
+    let may_start = !request
+        .extensions()
+        .get::<AuthUser>()
+        .is_some_and(|auth| auth.role == gmed_domain::role::Role::CeoAssistant);
     let outcome = async {
         let mut held = Vec::new();
         for lead_id in scope_of(&state, route, &body).await? {
-            if holds(&state, lead_id, route, actor).await? {
+            if holds(&state, lead_id, route, actor, may_start).await? {
                 held.push(lead_id);
             }
         }

@@ -22,6 +22,7 @@ import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
+import { GuardedDateInput } from "@/pages/invoices/ui/guarded-date-input";
 import { amountInputText, amountInputValue, normalizeAmountInput } from "./amount-input";
 import { localizeCompanyFinanceError } from "./errors";
 import { useFinanceAutoRefresh } from "./use-finance-auto-refresh";
@@ -182,6 +183,10 @@ export function ProviderSettlementDialog({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentDirty, setPaymentDirty] = useState(false);
+  // The date field shows a date it did not hand to the form (a future day):
+  // nothing is booked until it is corrected (release QA D R-01).
+  const [paymentDateRefused, setPaymentDateRefused] = useState(false);
+  const [reversalDateRefused, setReversalDateRefused] = useState(false);
   const [reversalDirty, setReversalDirty] = useState(false);
   const [correctionDirty, setCorrectionDirty] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
@@ -285,7 +290,7 @@ export function ProviderSettlementDialog({
 
   async function handlePayment(event: FormEvent) {
     event.preventDefault();
-    if (!liability) return;
+    if (!liability || paymentDateRefused) return;
     setPaymentBusy(true);
     setPaymentError(null);
     try {
@@ -337,7 +342,7 @@ export function ProviderSettlementDialog({
 
   async function handleReversal(event: FormEvent) {
     event.preventDefault();
-    if (!liability || !reversal) return;
+    if (!liability || !reversal || reversalDateRefused) return;
     setReversalBusy(true);
     setReversalError(null);
     try {
@@ -432,7 +437,7 @@ export function ProviderSettlementDialog({
                       </span>
                     ) : null}
                   </label>
-                  <label className={paymentFieldClassName}><span>{text.date}</span><Input className={paymentInputClassName} required type="date" max={todayIso()} value={paymentForm.paidOn} onChange={(event) => setPaymentForm((current) => ({ ...current, paidOn: event.target.value }))} /></label>
+                  <label className={paymentFieldClassName}><span>{text.date}</span><GuardedDateInput className={paymentInputClassName} required max={todayIso()} value={paymentForm.paidOn} onRefusedChange={setPaymentDateRefused} onChange={(event) => setPaymentForm((current) => ({ ...current, paidOn: event.target.value }))} /></label>
                   <label className={paymentFieldClassName}>
                     <span>{text.method}</span>
                     <select className={cn(shellSelectClassName, paymentInputClassName, "w-full text-sm")} value={paymentForm.method} onChange={(event) => setPaymentForm((current) => ({ ...current, method: event.target.value }))}>
@@ -447,7 +452,7 @@ export function ProviderSettlementDialog({
                 <label className={paymentFieldClassName}><span>{text.note}</span><Input className={paymentInputClassName} maxLength={1000} value={paymentForm.note} onChange={(event) => setPaymentForm((current) => ({ ...current, note: event.target.value }))} /></label>
                 </div>
                 <div className="flex justify-stretch border-t border-border/60 bg-muted/20 px-3.5 py-3 sm:justify-end">
-                  <Button type="submit" size="sm" className="h-9 w-full rounded-md sm:h-8 sm:w-auto" disabled={loading || paymentBusy || Boolean(loadError) || !activeAccounts.some((account) => account.id === paymentForm.accountId) || !(paymentAmount > 0) || paymentAmount > remaining}>
+                  <Button type="submit" size="sm" className="h-9 w-full rounded-md sm:h-8 sm:w-auto" disabled={loading || paymentBusy || paymentDateRefused || Boolean(loadError) || !activeAccounts.some((account) => account.id === paymentForm.accountId) || !(paymentAmount > 0) || paymentAmount > remaining}>
                     {paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{text.record}
                   </Button>
                 </div>
@@ -527,11 +532,11 @@ export function ProviderSettlementDialog({
                 <div className="space-y-2.5 p-3">
                 {reversalError ? <ShellBanner tone="error">{reversalError}</ShellBanner> : null}
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <label className={paymentFieldClassName}><span>{text.date}</span><Input className={paymentInputClassName} required type="date" min={reversal.paid_on} max={todayIso()} value={reversalForm.paidOn} onChange={(event) => setReversalForm((current) => ({ ...current, paidOn: event.target.value }))} /></label>
+                  <label className={paymentFieldClassName}><span>{text.date}</span><GuardedDateInput className={paymentInputClassName} required min={reversal.paid_on} max={todayIso()} value={reversalForm.paidOn} onRefusedChange={setReversalDateRefused} onChange={(event) => setReversalForm((current) => ({ ...current, paidOn: event.target.value }))} /></label>
                   <label className={paymentFieldClassName}><span>{text.reversalReason}</span><Input className={paymentInputClassName} required maxLength={1000} value={reversalForm.note} onChange={(event) => setReversalForm((current) => ({ ...current, note: event.target.value }))} /></label>
                 </div>
                 </div>
-                <div className="flex flex-col gap-2 border-t border-border/60 bg-muted/20 px-3.5 py-3 sm:flex-row sm:flex-wrap sm:justify-end"><Button type="button" variant="outline" size="sm" className="h-9 rounded-md sm:h-8" onClick={() => { setReversal(null); setReversalDirty(false); }}>{text.cancel}</Button><Button type="submit" variant="destructive" size="sm" className="h-9 rounded-md sm:h-8" disabled={reversalBusy || !reversalForm.note.trim()}>{reversalBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{text.confirmReversal}</Button></div>
+                <div className="flex flex-col gap-2 border-t border-border/60 bg-muted/20 px-3.5 py-3 sm:flex-row sm:flex-wrap sm:justify-end"><Button type="button" variant="outline" size="sm" className="h-9 rounded-md sm:h-8" onClick={() => { setReversal(null); setReversalDirty(false); }}>{text.cancel}</Button><Button type="submit" variant="destructive" size="sm" className="h-9 rounded-md sm:h-8" disabled={reversalBusy || reversalDateRefused || !reversalForm.note.trim()}>{reversalBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{text.confirmReversal}</Button></div>
               </form>
               </SettlementSection>
             ) : null}

@@ -42,6 +42,7 @@ describe("appointment role contracts", () => {
     expect(appointmentPermissions("concierge").canDelete).toBe(false);
     expect(appointmentPermissions("teamlead_interpreter")).toEqual(
       expect.objectContaining({
+        canCreate: false,
         canEditSchedule: true,
         canAssignInterpreter: true,
         canApproveReport: true,

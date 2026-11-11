@@ -1060,10 +1060,19 @@ export function representativeCardPlace(missing: unknown, tx: Tx): string {
   if (keys.length > 0 && keys.every((key) => key.startsWith("patient_"))) {
     return tx("шаг «Данные клиента»", "Schritt „Personendaten“");
   }
-  return tx(
+  // The representatives' PEP and sanctions answers live in the client's
+  // questionnaire, not in the parent's card (release QA C S3-1).
+  const answers = tx(
+    "шаг «Документы», блок «Законные представители» — кнопка «Изменить» (форма «Анкета клиента»)",
+    "Schritt „Unterlagen“, Block „Gesetzliche Vertreter“ – Schaltfläche „Bearbeiten“ (Formular des Kunden)",
+  );
+  const isAnswer = (key: string) => /_(pep_[a-z_]+|sanctions_links?(_[a-z_]+)?)$/.test(key);
+  if (keys.length > 0 && keys.every(isAnswer)) return answers;
+  const card = tx(
     "шаг «Данные клиента», блок «Родитель или законный представитель» — кнопка ✎ у родителя, раздел «Адрес и данные для анкеты GwG»",
     "Schritt „Personendaten“, Block „Elternteil oder gesetzlicher Vertreter“ – Stift beim Elternteil, Abschnitt „Anschrift und Angaben für den GwG-Bogen“",
   );
+  return keys.some(isAnswer) ? `${card}; ${tx("ответы о PEP и санкциях", "Angaben zu PEP und Sanktionen")}: ${answers}` : card;
 }
 
 /** 409 `risk_review_required` of the gated staff actions (qualify, convert, signatures …). */

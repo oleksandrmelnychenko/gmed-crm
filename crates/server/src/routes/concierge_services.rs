@@ -4531,6 +4531,9 @@ async fn create_concierge_service(
 
             match load_service_row(&state, service_id).await {
                 Ok(Some(service)) => {
+                    // Created by staff (never a request of the patient): the
+                    // patient hears of it like of a later change (QA B S3-3).
+                    notify_patient_of_new_service(&state, &service, auth.user_id).await;
                     (
                         StatusCode::CREATED,
                         Json(build_service_json_for_actor(&service, &auth)),
@@ -5460,6 +5463,118 @@ async fn notify_patient_of_service_change(
         "previous_starts_at": starts_before.map(|value| value.to_rfc3339()),
         "previous_ends_at": ends_before.map(|value| value.to_rfc3339()),
     });
+    deliver_patient_service_notice(
+        state,
+        service_id,
+        patient_id,
+        kind,
+        &notice_title,
+        &notice_body,
+        params,
+        actor_id,
+    )
+    .await;
+}
+
+/// Title and text of the patient notification about a service staff added:
+/// `(title, body)` in every language of the stored patient notices.
+fn patient_service_added_texts(
+    title: &str,
+    starts_at: Option<&str>,
+) -> (PatientNoticeTexts, PatientNoticeTexts) {
+    let [when_de, when_ru, when_uk, when_en] = match starts_at {
+        Some(value) => [
+            value.to_string(),
+            value.to_string(),
+            value.to_string(),
+            value.to_string(),
+        ],
+        None => [
+            "Zeit wird noch abgestimmt".to_string(),
+            "время уточняется".to_string(),
+            "час уточнюється".to_string(),
+            "time to be confirmed".to_string(),
+        ],
+    };
+    (
+        PatientNoticeTexts::new(
+            "Neuer Service geplant",
+            "Добавлен новый сервис",
+            "Додано новий сервіс",
+            "New service added",
+        ),
+        PatientNoticeTexts::new(
+            format!("{title}: {when_de}"),
+            format!("{title}: {when_ru}"),
+            format!("{title}: {when_uk}"),
+            format!("{title}: {when_en}"),
+        ),
+    )
+}
+
+/// Tells the patient that staff added a service (release QA B S3-3: the
+/// time and status changes notified, the creation did not). A service the
+/// patient requested in the portal stays silent (the patient made it), and
+/// the visibility condition is the one of the change notice.
+async fn notify_patient_of_new_service(
+    state: &AppState,
+    service: &sqlx::postgres::PgRow,
+    actor_id: Uuid,
+) {
+    type Instant = Option<chrono::DateTime<chrono::Utc>>;
+    let source = service
+        .try_get::<String, _>("request_source")
+        .unwrap_or_default();
+    if source == "patient_portal" {
+        return;
+    }
+    let (Ok(service_id), Ok(patient_id)) = (
+        service.try_get::<Uuid, _>("id"),
+        service.try_get::<Uuid, _>("patient_id"),
+    ) else {
+        return;
+    };
+    let title = service.try_get::<String, _>("title").unwrap_or_default();
+    let starts_at = service
+        .try_get::<Instant, _>("starts_at")
+        .unwrap_or_default();
+    let ends_at = service.try_get::<Instant, _>("ends_at").unwrap_or_default();
+    let status = service.try_get::<String, _>("status").unwrap_or_default();
+    let starts_text = patient_service_time(starts_at);
+    let (notice_title, notice_body) = patient_service_added_texts(&title, starts_text.as_deref());
+    let params = serde_json::json!({
+        "service_title": title,
+        "status": status,
+        "starts_at": starts_at.map(|value| value.to_rfc3339()),
+        "ends_at": ends_at.map(|value| value.to_rfc3339()),
+    });
+    deliver_patient_service_notice(
+        state,
+        service_id,
+        patient_id,
+        "patient_service_added",
+        &notice_title,
+        &notice_body,
+        params,
+        actor_id,
+    )
+    .await;
+}
+
+/// Writes one patient notification about a service for every portal login of
+/// the patient (never the acting user) while the portal shows the service,
+/// and announces it in real time. A failure is logged and changes nothing.
+#[allow(clippy::too_many_arguments)]
+async fn deliver_patient_service_notice(
+    state: &AppState,
+    service_id: Uuid,
+    patient_id: Uuid,
+    kind: &str,
+    notice_title: &PatientNoticeTexts,
+    notice_body: &PatientNoticeTexts,
+    params: serde_json::Value,
+    actor_id: Uuid,
+) {
     let insert_sql = format!(
         r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
            SELECT DISTINCT u.id, $2::text,

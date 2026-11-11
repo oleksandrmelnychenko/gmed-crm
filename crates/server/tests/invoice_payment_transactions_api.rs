@@ -1332,6 +1332,100 @@ async fn credit_transfer_to_another_recipient_names_both_recipients() {
     assert_eq!(after["summary"]["total_due"], "83.05");
 }
 
+/// Release QA D R-02: an invoice to the patient and one to the patient's own
+/// name at another invoice address are one recipient. The target list does
+/// not call it another recipient and the move needs no confirmation.
+#[tokio::test]
+async fn credit_transfer_to_the_same_person_at_another_address_asks_nothing() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("transfer-same-person");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let source = seed_invoice(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("{tag}-a"),
+        "interim",
+        100,
+        false,
+    )
+    .await;
+    let patient_name: String = sqlx::query_scalar(
+        "SELECT gmed_person_display_name(title, first_name, last_name) FROM patients WHERE id = $1",
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let target: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status,
+                due_date, total_net, total_vat, total_gross, paid_amount,
+                line_items, notes, portal_visible, hide_amounts_from_patient,
+                created_by, recipient_snapshot
+           ) VALUES (
+                $1, $2, $3, 'final', 'sent', CURRENT_DATE + 14,
+                95, 18.05, 113.05, 0,
+                '[{"description":"Flughafentransfer","quantity":"1","unit_price":"95","vat_rate":"19","is_cost_passthrough":false,"line_net":"95","line_vat":"18.05","line_gross":"113.05"}]',
+                'Payment journal test', true, false, $4,
+                jsonb_build_object('kind', 'payer', 'name', $5::text)
+           ) RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INV-{tag}-b"))
+    .bind(admin_id)
+    .bind(&patient_name)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let billing = auth_header_for(billing_id, "billing");
+    let today = gmed_server::app_time::today().to_string();
+    let (status, overpaid) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{source}/payments"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": "130",
+            "payment_method": "bank_transfer",
+            "received_on": today,
+            "accept_overpayment": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{overpaid:?}");
+    let listed = overpaid["invoice"]["credit_transfer_targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["invoice_id"] == target.to_string())
+        .unwrap();
+    assert_eq!(listed["same_recipient"], true, "{listed}");
+
+    let (status, moved) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{source}/credit-transfers"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "target_invoice_id": target,
+            "amount_gross": "30",
+            "transferred_on": today,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{moved:?}");
+}
+
 /// Paid advances settle the final invoice as soon as it is released (oldest
 /// first, up to its balance), and an advance paid later still reaches a
 /// released final invoice. Every "to pay" figure is net of advances: before,

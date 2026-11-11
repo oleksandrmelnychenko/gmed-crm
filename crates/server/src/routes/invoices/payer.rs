@@ -1114,8 +1114,9 @@ struct MismatchedAdvance {
 /// Whether an advance and the final invoice name the same person although
 /// their recipient records differ: the same name on both, and neither of
 /// them a Kostenübernehmer (a third party stays another recipient even under
-/// an equal name).
-fn advance_names_same_person(
+/// an equal name). The credit transfer between two invoices compares its two
+/// recipients with the same rule (release QA D R-02).
+pub(super) fn advance_names_same_person(
     advance_name: Option<&str>,
     advance_role: Option<&str>,
     recipient_name: &str,

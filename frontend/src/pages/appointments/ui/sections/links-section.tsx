@@ -43,12 +43,16 @@ function AppointmentLinksSection({
       title={t.compliance_col_linked_records}
     >
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        <LinkedRecordTile
-          icon={UserRound}
-          title={patientLabel}
-          description={descriptions.patient}
-          onClick={() => onOpenPreview("patient", patientLabel)}
-        />
+        {/* The team lead sees team visits of patients it is not assigned to:
+            their card would answer "раздел не открыт" (release QA D R-07). */}
+        {detail.can_open_patient !== false ? (
+          <LinkedRecordTile
+            icon={UserRound}
+            title={patientLabel}
+            description={descriptions.patient}
+            onClick={() => onOpenPreview("patient", patientLabel)}
+          />
+        ) : null}
         {detail.order_id && canOpenOrder ? (
           <LinkedRecordTile
             icon={ClipboardList}

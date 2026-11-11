@@ -3857,3 +3857,67 @@ async fn interpreter_scorecards_count_pending_reports_instead_of_reading_fully_a
         "a pending report must keep the rate below 100: {team}"
     );
 }
+
+/// Release QA E F-1: the dashboard statistics carry company euro totals.
+/// Roles without the finance right (Sales, interpreter team lead) keep the
+/// rows and counts and get no amount; a finance role still gets them.
+#[tokio::test]
+async fn dashboard_statistics_hide_amounts_from_roles_without_finance_right() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("dash-no-money");
+    let manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let sales_id = seed_user(&pool, &format!("{tag}-sales"), "sales").await;
+    let teamlead_id = seed_user(&pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let patient_id = seed_patient(&pool, admin_id, &tag, "DE").await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag, "active").await;
+    seed_order_service(&pool, order_id, provider_id, None, &tag, 500).await;
+    sqlx::query("UPDATE orders SET total_estimated = 595 WHERE id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    for (user_id, role, sees_money) in [
+        (manager_id, "patient_manager", true),
+        (sales_id, "sales", false),
+        (teamlead_id, "teamlead_interpreter", false),
+    ] {
+        let auth = auth_header_for(user_id, role);
+
+        let (status, clinical) = json_request(
+            &app,
+            "GET",
+            "/api/v1/stats/dashboard/clinical?period=all",
+            &auth,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{role}: {clinical}");
+        let mix = clinical["service_mix"].as_array().unwrap();
+        assert!(!mix.is_empty(), "{role}: {clinical}");
+        for row in mix {
+            assert!(row["item_count"].as_i64().unwrap_or_default() >= 1);
+            assert_eq!(row["gross_total"].is_null(), !sees_money, "{role}: {row}");
+        }
+
+        let (status, operations) = json_request(
+            &app,
+            "GET",
+            "/api/v1/stats/dashboard/operations?period=all",
+            &auth,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{role}: {operations}");
+        let phases = operations["orders_by_phase_valued"].as_array().unwrap();
+        assert!(!phases.is_empty(), "{role}: {operations}");
+        for row in phases {
+            assert!(row["count"].as_i64().unwrap_or_default() >= 1);
+            assert_eq!(row["value_eur"].is_null(), !sees_money, "{role}: {row}");
+        }
+    }
+}

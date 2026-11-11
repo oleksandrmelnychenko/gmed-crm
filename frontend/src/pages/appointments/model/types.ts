@@ -146,6 +146,12 @@ export type AppointmentListItem = {
    * 2026-11-10). Absent in older payloads: `can_edit` decides.
    */
   can_assign_interpreter?: boolean;
+  /**
+   * Whether the patient card will open for the caller. The interpreter team
+   * lead sees the team's visits without being assigned to their patients, so
+   * no link to the card is offered there. Absent in older payloads: offered.
+   */
+  can_open_patient?: boolean;
 };
 
 export type AppointmentRequestStatus =

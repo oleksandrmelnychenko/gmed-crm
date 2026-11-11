@@ -16,7 +16,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { hasPortalSubscription, isPortalSubscriptionPaused } from "@/lib/portal-subscription";
 import { usePortalPatientId } from "@/lib/portal-patient-context";
-import { clearApiCache } from "@/lib/api";
+import { apiFetch, clearApiCache } from "@/lib/api";
 import { useNavState } from "@/lib/nav-state";
 import { canAccessStaffRoute, isLeadPortalUser, staffHrefIfAllowed } from "@/lib/staff-route-access";
 import { useLeadCabinetLang } from "@/pages/patient-lead/lead-cabinet-language";
@@ -24,6 +24,7 @@ import { leadShellText } from "@/pages/patient-lead/lead-shell-text";
 import { useNewLeadCounter } from "@/lib/use-nav-counters";
 import { cn } from "@/lib/utils";
 import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
+import { formatCount, type PluralWords } from "@/lib/i18n/plural";
 import { formatAppDateTime, isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import {
   useDebouncedRealtimeSubscription,
@@ -64,6 +65,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+
+/** «1 новый лид», «2 новых лида», «5 новых лидов» (release QA E F-2). */
+const NEW_LEAD_WORDS: PluralWords = {
+  ru: ["новый лид", "новых лида", "новых лидов"],
+  de: ["neuer Lead", "neue Leads"],
+};
 
 const TOPBAR_REALTIME_EVENTS = [
   "notification.created",
@@ -159,7 +166,7 @@ function RealtimeConnectionIndicator({
 }
 
 export function Topbar() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const { lang, setLang, t } = useLang();
@@ -209,8 +216,8 @@ export function Topbar() {
       };
   const leadShortcutTitle = newLeads > 0
     ? lang === "de"
-      ? `${newLeads} neue Leads. Lead auswählen`
-      : `${newLeads} новых лидов. Выбрать лида`
+      ? `${formatCount("de", newLeads, NEW_LEAD_WORDS)}. Lead auswählen`
+      : `${formatCount("ru", newLeads, NEW_LEAD_WORDS)}. Выбрать лида`
     : t.leads_title;
   const onlineUsersWithSelf =
     !isPatientPortal && user
@@ -352,7 +359,22 @@ export function Topbar() {
   }, 150);
 
   const toggleLang = () => {
-    setLang(lang === "de" ? "ru" : "de");
+    const next = lang === "de" ? "ru" : "de";
+    setLang(next);
+    // A language saved on the profile wins at the next sign-in or reload, so
+    // the switch saves it there too, as the account page does (release QA B
+    // S3-1). Without a saved language the local choice already persists.
+    if (user?.preferred_language && user.preferred_language !== next) {
+      void apiFetch("/me/profile", {
+        method: "PUT",
+        body: JSON.stringify({ preferred_language: next }),
+      })
+        .then(() => {
+          clearApiCache();
+          return refreshUser();
+        })
+        .catch(() => undefined);
+    }
   };
 
   return (

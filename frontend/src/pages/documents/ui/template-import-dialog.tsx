@@ -64,6 +64,7 @@ const FILE_INPUT_ID = "template-import-file";
 /** What each `{{field}}` stands for; keys mirror the server catalog. */
 const VARIABLE_LABELS: Record<string, { de: string; ru: string }> = {
   patient_id: { de: "Patientennummer", ru: "Номер пациента" },
+  lead_number: { de: "Anfragenummer (Lead)", ru: "Номер обращения (лид)" },
   patient_name: { de: "Vor- und Nachname", ru: "Имя и фамилия" },
   patient_first_name: { de: "Vorname", ru: "Имя" },
   patient_last_name: { de: "Nachname", ru: "Фамилия" },
@@ -133,6 +134,9 @@ function texts(lang: Lang) {
     empty: ru ? "Шаблонов пока нет." : "Noch keine Vorlagen.",
     loadFailed: ru ? "Не удалось загрузить шаблоны." : "Vorlagen konnten nicht geladen werden.",
     retry: ru ? "Повторить" : "Erneut laden",
+    damagedFile: ru
+      ? "Файл повреждён или это не настоящий файл Word. Сохраните документ в Word заново как .docx и загрузите его ещё раз."
+      : "Die Datei ist beschädigt oder keine echte Word-Datei. Speichern Sie das Dokument in Word erneut als .docx und laden Sie es noch einmal hoch.",
     importFailed: ru ? "Не удалось загрузить файл." : "Die Datei konnte nicht hochgeladen werden.",
     saveFailed: ru ? "Не удалось сохранить шаблон." : "Die Vorlage konnte nicht gespeichert werden.",
     disableFailed: ru ? "Не удалось отключить шаблон." : "Die Vorlage konnte nicht deaktiviert werden.",
@@ -151,7 +155,14 @@ function texts(lang: Lang) {
   };
 }
 
-function errorMessage(error: unknown, fallback: string) {
+/** The server's file check refuses content that is not what its name says
+ * (a damaged .docx): it answers in English, the dialog says it in words. */
+const FILE_CONTENT_MISMATCH = "Uploaded file content does not match the declared MIME type or filename extension";
+
+function errorMessage(error: unknown, fallback: string, damagedFile?: string) {
+  if (damagedFile && error instanceof Error && error.message.includes(FILE_CONTENT_MISMATCH)) {
+    return damagedFile;
+  }
   if (isLocalizedApiError(error)) return error.message;
   if (error instanceof ApiRequestError && (error.body?.message?.trim() || !error.status)) {
     return error.message.trim() || fallback;
@@ -284,7 +295,7 @@ export function TemplateImportDialog({
     try {
       await action();
     } catch (nextError) {
-      setError(errorMessage(nextError, failure));
+      setError(errorMessage(nextError, failure, texts(lang).damagedFile));
     } finally {
       setBusy("");
     }

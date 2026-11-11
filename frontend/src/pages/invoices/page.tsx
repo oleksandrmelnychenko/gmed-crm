@@ -1723,7 +1723,8 @@ function useStaffInvoicesPageContent() {
       required: true,
       pinned: "left",
       width: 160,
-      render: (row) => <span className="text-foreground">{row.period}</span>,
+      // "2026-10" reads "10.2026", like every other date of the app (QA D R-12).
+      render: (row) => <span className="text-foreground">{row.period.replace(/^(\d{4})-(\d{2})$/, "$2.$1")}</span>,
     },
     {
       id: "income_gross",

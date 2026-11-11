@@ -63,6 +63,8 @@ const ENTITY_TYPE: &str = "agency_document_template";
 /// the preview. The frontend names them from its own catalog by key.
 const VARIABLES: &[(&str, &str)] = &[
     ("patient_id", "P-0001"),
+    // A lead has no patient number yet: its own number has its own field.
+    ("lead_number", "LEAD-1A2B3C4D"),
     ("patient_name", "Max Mustermann"),
     ("patient_first_name", "Max"),
     ("patient_last_name", "Mustermann"),
@@ -806,11 +808,12 @@ pub(crate) async fn render_for_generation(
     })?;
 
     // A lead answers under the same field names as a patient (owner request
-    // 2026-11-11): its request number stands for the patient number, as in
-    // the other documents generated for a lead.
+    // 2026-11-11). Its request number is no patient number: it fills
+    // `{{lead_number}}` and leaves `{{patient_id}}` empty (release QA C S3-4).
     let patient = match subject {
         TemplateSubject::Patient(patient_id) => sqlx::query(
-            r#"SELECT patient_id, title, first_name, last_name, birth_date,
+            r#"SELECT patient_id, NULL::text AS lead_number,
+                      title, first_name, last_name, birth_date,
                       address_street, address_zip, address_city, address_country,
                       email, phone_primary
                FROM patients
@@ -822,7 +825,8 @@ pub(crate) async fn render_for_generation(
         .map_err(|error| db_error("load agency template patient", error))?
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "Patient not found"))?,
         TemplateSubject::Lead(lead_id) => sqlx::query(
-            r#"SELECT 'LEAD-' || upper(left(replace(id::text, '-', ''), 8)) AS patient_id,
+            r#"SELECT NULL::text AS patient_id,
+                      'LEAD-' || upper(left(replace(id::text, '-', ''), 8)) AS lead_number,
                       NULL::text AS title, first_name, last_name,
                       date_of_birth AS birth_date,
                       street_address AS address_street, zip_code AS address_zip,
@@ -844,6 +848,7 @@ pub(crate) async fn render_for_generation(
 
     let mut values = BTreeMap::<&str, String>::new();
     values.insert("patient_id", text_column(&patient, "patient_id"));
+    values.insert("lead_number", text_column(&patient, "lead_number"));
     values.insert("patient_name", patient_name.clone());
     values.insert("patient_first_name", first_name);
     values.insert("patient_last_name", last_name);
@@ -872,7 +877,21 @@ pub(crate) async fn render_for_generation(
                 .await
                 .map_err(|error| db_error("load agency template order", error))?
         }
-        None => None,
+        // A document made on the lead card names no order: the lead's own
+        // order (the newest one that is not cancelled) is its order.
+        None => match subject {
+            TemplateSubject::Lead(lead_id) => sqlx::query_scalar::<_, String>(
+                r#"SELECT order_number FROM orders
+                   WHERE source_lead_id = $1 AND status <> 'cancelled'
+                   ORDER BY created_at DESC
+                   LIMIT 1"#,
+            )
+            .bind(lead_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|error| db_error("load agency template lead order", error))?,
+            TemplateSubject::Patient(_) => None,
+        },
     };
     values.insert("order_number", order_number.unwrap_or_default());
 

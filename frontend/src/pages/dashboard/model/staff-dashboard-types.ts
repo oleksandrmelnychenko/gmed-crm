@@ -73,7 +73,7 @@ export type ClinicalPayload = {
   period: string;
   top_case_reasons: Array<{ reason: string; count: number }>;
   cases_by_status: Record<string, number>;
-  service_mix: Array<{ service_type: string; item_count: number; gross_total: string }>;
+  service_mix: Array<{ service_type: string; item_count: number; gross_total: string | null }>;
   avg_case_duration_days: number;
 };
 
@@ -81,7 +81,7 @@ export type OperationsPayload = {
   period: string;
   appointments_by_status: Record<string, number>;
   appointments_heatmap: Array<{ dow: number; hour: number; count: number }>;
-  orders_by_phase_valued: Array<{ phase: string; count: number; value_eur: string }>;
+  orders_by_phase_valued: Array<{ phase: string; count: number; value_eur: string | null }>;
   top_providers: Array<{
     id: string;
     name: string;

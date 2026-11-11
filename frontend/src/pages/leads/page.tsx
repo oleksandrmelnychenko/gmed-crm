@@ -2399,6 +2399,8 @@ function useLeadsPageContent() {
                         status={
                           leadWorkflow.leadQualified
                             ? t.lead_workflow_done
+                            : detail.readiness.qualification_ready && !permissions.canEdit
+                              ? t.read_only_scope_title
                             : detail.readiness.qualification_ready
                               ? t.lead_workflow_available
                               : t.lead_workflow_blocked
@@ -2439,6 +2441,8 @@ function useLeadsPageContent() {
                         status={
                           leadWorkflow.leadConverted
                             ? t.lead_workflow_done
+                            : detail.readiness.conversion_ready && !permissions.canConvert
+                              ? t.read_only_scope_title
                             : detail.readiness.conversion_ready
                               ? t.lead_workflow_available
                               : t.lead_workflow_blocked
@@ -2479,12 +2483,16 @@ function useLeadsPageContent() {
                             ? t.lead_workflow_done
                             : leadWorkflow.leadConverted
                               ? t.lead_workflow_locked
-                              : t.lead_workflow_available
+                              // A read-only role (CEO assistant) cannot close
+                              // the lead: no «Можно выполнить» (QA E F-9).
+                              : !permissions.canEdit
+                                ? t.read_only_scope_title
+                                : t.lead_workflow_available
                         }
                         tone={
                           leadWorkflow.failedResolved
                             ? "success"
-                            : leadWorkflow.leadConverted
+                            : leadWorkflow.leadConverted || !permissions.canEdit
                               ? "muted"
                               : "warning"
                         }

@@ -5403,7 +5403,19 @@ async fn get_appointment(
                 false
             };
 
-            Json(build_appointment_detail_json(
+            // The team context shows visits of patients the caller cannot
+            // open (no assignment): the client offers the patient card only
+            // when the patient routes will admit the caller (QA D R-07).
+            let can_open_patient = if auth.can(Capability::PatientsView) {
+                match super::patients::has_patient_access(&state, &auth, patient_id).await {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                }
+            } else {
+                false
+            };
+
+            let mut detail = build_appointment_detail_json(
                 &auth,
                 &a,
                 appointment_id,
@@ -5412,8 +5424,9 @@ async fn get_appointment(
                 recurring_scope_preview,
                 recurring_lineage_history,
                 can_edit,
-            ))
-            .into_response()
+            );
+            detail["can_open_patient"] = serde_json::json!(can_open_patient);
+            Json(detail).into_response()
         }
         Ok(None) => err(StatusCode::NOT_FOUND, "Appointment not found"),
         Err(e) => {

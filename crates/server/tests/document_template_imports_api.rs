@@ -647,7 +647,7 @@ async fn imported_template_is_generated_for_a_lead() {
         &[("label", "Anschreiben"), ("language", "de")],
         "anschreiben.txt",
         "text/plain",
-        "Guten Tag {{patient_name}}, geboren am {{birth_date}}, aus {{patient_city}} ({{patient_id}})."
+        "Guten Tag {{patient_name}}, geboren am {{birth_date}}, aus {{patient_city}} ({{lead_number}}/{{patient_id}})."
             .as_bytes(),
     )
     .await;
@@ -686,7 +686,8 @@ async fn imported_template_is_generated_for_a_lead() {
     let lead_number = format!("LEAD-{}", lead_id.simple().to_string()[..8].to_uppercase());
     assert_eq!(
         manual_text,
-        format!("Guten Tag Lead {tag} Beispiel, geboren am 24.12.1985, aus Wien ({lead_number}).")
+        // The request number has its own field; a lead has no patient number.
+        format!("Guten Tag Lead {tag} Beispiel, geboren am 24.12.1985, aus Wien ({lead_number}/).")
     );
 
     // Typing a free document for a lead is still refused, also when the

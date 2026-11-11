@@ -450,6 +450,15 @@ describe("the contract gate names the missing parent details (staff report 2026-
     expect(representativeCardPlace(["patient_id_valid_until"], ru)).toBe("шаг «Данные клиента»");
   });
 
+  it("sends the parents' PEP and sanctions answers to the client's questionnaire (release QA C S3-1)", () => {
+    const only = representativeCardPlace(["rep1_pep_self", "rep1_sanctions_links"], ru);
+    expect(only).toContain("«Анкета клиента»");
+    expect(only).not.toContain("«Адрес и данные для анкеты GwG»");
+    const mixed = representativeCardPlace(["rep1_street", "rep1_pep_related"], ru);
+    expect(mixed).toContain("«Адрес и данные для анкеты GwG»");
+    expect(mixed).toContain("«Анкета клиента»");
+  });
+
   it("names only the person of a per-person document (DEV 2026-10-19)", () => {
     const error = new ApiRequestError("x", {
       status: 422,
