@@ -17752,6 +17752,13 @@ async fn generate_document(
                 AND ($5::text IS NULL OR d.generated_bindings->>'_contracting_party_fingerprint'=$5)
                 AND d.generated_bindings->>'_order_payer_fingerprint' IS NOT DISTINCT FROM $6::text
                 AND document_terms_current(d.id) IS NOT FALSE
+                -- A Kostenvoranschlag prints its quote's number: one made for
+                -- an earlier quote is not handed out again (release QA 2026-11-11).
+                AND ($3 <> 'order_cost_estimate'
+                     OR d.generated_bindings->>'_quote_number' IS NOT DISTINCT FROM
+                        (SELECT q.quote_number FROM quotes q
+                         WHERE q.order_id=$1 AND q.status<>'superseded'
+                         ORDER BY q.created_at DESC, q.id DESC LIMIT 1))
                 AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id)
              ORDER BY created_at DESC,id DESC LIMIT 1")
             .bind(order_id).bind(context).bind(template.id).bind(language).bind(contracting_fingerprint.as_deref())
@@ -18628,7 +18635,6 @@ async fn generate_document(
             } else {
                 None
             };
-
             let conditions = contract_row
                 .try_get::<Option<Value>, _>("conditions")
                 .unwrap_or_default()
@@ -19094,6 +19100,13 @@ async fn generate_document(
             let order_sequence = bindings
                 .order_sequence
                 .unwrap_or(order_metadata.order_sequence);
+            // The Kostenvoranschlag prints the number of the quote it was made
+            // for; the signature on it accepts only that quote (release QA
+            // 2026-11-11). Kept with the document's bindings.
+            if is_order_cost_estimate && let Some(number) = &quote_number {
+                generated_bindings_snapshot.get_or_insert_with(|| json!({}))["_quote_number"] =
+                    json!(number);
+            }
             let quote_annex_reference = quote_number.as_ref().map(|number| {
                 format!(
                     "Anlage 1 zum {order_sequence}. Einzelauftrag: Kostenvoranschlag Nr.: {number} (separates Dokument)"

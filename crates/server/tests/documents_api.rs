@@ -11872,6 +11872,8 @@ fn bindings_without_generation_metadata(bindings: &Value) -> Value {
         object.remove("_signature_anchors");
         // Render metadata is validated independently; business bindings stay exact.
         object.remove("_contracting_party_fingerprint");
+        // The quote an estimate was made for (release QA 2026-11-11).
+        object.remove("_quote_number");
     }
     bindings
 }

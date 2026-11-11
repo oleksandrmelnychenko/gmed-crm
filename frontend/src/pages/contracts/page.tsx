@@ -504,6 +504,10 @@ function useContractsPageContent() {
         lang === "de"
           ? "Der Vertrag ist unterschrieben und es laufen Aufträge darunter; er kann nicht auf Entwurf oder Versendet zurückgesetzt werden."
           : "Договор подписан и по нему идут заказы; вернуть его в черновик или «отправлен» нельзя.",
+      quoteAcceptedBySignature:
+        lang === "de"
+          ? "„Angenommen“ setzt das System selbst, sobald der Kunde den Kostenvoranschlag unterschrieben hat: elektronisch oder auf Papier – dann den Scan des unterschriebenen Exemplars am Dokument hochladen („Auf Papier unterschrieben“)."
+          : "Статус «Принято» система ставит сама, когда клиент подписал смету: электронно или на бумаге — тогда загрузите скан подписанного экземпляра у документа сметы («Подписано на бумаге»).",
       quoteExpired: (validUntil: string) =>
         lang === "de"
           ? `Das Angebot ist abgelaufen (gültig bis ${validUntil}). Es kann nicht mehr angenommen werden; erstellen Sie ein neues Angebot.`
@@ -3243,6 +3247,11 @@ function useContractsPageContent() {
                         <ShellBanner tone="warning">
                           {text.quoteExpired(formatDate(quoteDetail.valid_until, locale, t.common_not_set))}
                         </ShellBanner>
+                      ) : null}
+                      {!quoteSuperseded && quoteDetail.status !== "accepted" ? (
+                        <p className="text-xs leading-5 text-muted-foreground" data-testid="quote-accepted-by-signature-hint">
+                          {text.quoteAcceptedBySignature}
+                        </p>
                       ) : null}
                       <div className="grid gap-4 sm:grid-cols-3">
                         <Field label={t.users_status}>

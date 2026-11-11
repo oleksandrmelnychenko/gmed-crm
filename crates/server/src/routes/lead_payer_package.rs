@@ -367,6 +367,26 @@ async fn client_cost_estimate_current(
         .await
 }
 
+/// The generated estimate behind the client's current one: the document a
+/// signed version replaced, else the document itself.
+async fn client_cost_estimate_source(
+    conn: &mut PgConnection,
+    estimate: Option<Uuid>,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    let Some(estimate) = estimate else {
+        return Ok(None);
+    };
+    sqlx::query_scalar(
+        r#"SELECT CASE WHEN d.ursprung IN ('paper_signature', 'electronic_signature')
+                       THEN COALESCE(d.replaces_document_id, d.id)
+                       ELSE d.id END
+           FROM documents d WHERE d.id = $1"#,
+    )
+    .bind(estimate)
+    .fetch_optional(&mut *conn)
+    .await
+}
+
 /// The newest document of a slot template in the lead's scope (the lead or
 /// its orders): replaced by the next version when it is unsigned and not out
 /// for signature.
@@ -531,6 +551,10 @@ struct Facts {
     /// `Some(false)`: the client's estimate was made before the last change
     /// of the order's terms or prepayment and has to be created again.
     client_estimate_current: Option<bool>,
+    /// The generated estimate the current one is the signed version of (the
+    /// scan of the paper signature, the electronically signed result); the
+    /// current one itself when it is the generated PDF.
+    client_estimate_source: Option<Uuid>,
     fingerprint: Option<String>,
     package: Option<PackageRow>,
     request: Option<RequestFacts>,
@@ -569,6 +593,7 @@ async fn load_facts(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Fac
         });
     let client_estimate = client_cost_estimate(conn, payer.order_id).await?;
     let client_estimate_current = client_cost_estimate_current(conn, client_estimate).await?;
+    let client_estimate_source = client_cost_estimate_source(conn, client_estimate).await?;
     let package = load_package(conn, lead_id).await?;
     let request = load_request(conn, package.as_ref().and_then(|p| p.request_id)).await?;
     let documents = match &package {
@@ -584,6 +609,7 @@ async fn load_facts(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Fac
         consent_required,
         client_estimate,
         client_estimate_current,
+        client_estimate_source,
         fingerprint,
         package,
         request,
@@ -766,7 +792,12 @@ impl Facts {
         if self.signer() != Some(SignerFacts::recorded(package)) {
             reasons.push("signer_changed");
         }
-        if self.client_estimate != package.cost_estimate_document_id {
+        // The client's signature on the estimate (a scan, a signed result) is
+        // a version of the same estimate: its lines and amounts are the ones
+        // the payer's copy was made from (release QA 2026-11-11).
+        if self.client_estimate != package.cost_estimate_document_id
+            && self.client_estimate_source != package.cost_estimate_document_id
+        {
             reasons.push("cost_estimate_changed");
         }
         if self.client_estimate_current == Some(false) {

@@ -1076,23 +1076,40 @@ pub(crate) async fn close_open_order_quotes_for_cancelled_order_tx(
     Ok(closed)
 }
 
+/// The number of the quote the estimate `d` (alias of a `documents` row)
+/// was generated for (`_quote_number` of its bindings; a signed version — the
+/// scan of a paper signature, an electronically signed result — carries the
+/// one of the PDF it replaced). `NULL` for an estimate made before the number
+/// was kept.
+const ESTIMATE_QUOTE_NUMBER: &str = r#"COALESCE(
+    d.generated_bindings->>'_quote_number',
+    (SELECT original.generated_bindings->>'_quote_number' FROM documents original
+     WHERE original.id = d.replaces_document_id))"#;
+
+/// Whether an estimate made for `printed` may accept the quote `number`.
+fn estimate_names_quote(printed: Option<&str>, number: &str) -> bool {
+    printed.is_none_or(|printed| printed == number)
+}
+
 /// The newest order_cost_estimate document of an order as the quote sees it:
-/// whether it is signed and whether its terms are still the order's
-/// (`document_terms_current`). `None` without such a document.
+/// whether it is signed, whether its terms are still the order's
+/// (`document_terms_current`) and the quote number it was made for. `None`
+/// without such a document.
 async fn newest_estimate_document_tx(
     tx: &mut Transaction<'_, Postgres>,
     order_id: Uuid,
-) -> Result<Option<(bool, Option<bool>)>, sqlx::Error> {
-    sqlx::query_as::<_, (bool, Option<bool>)>(
-        r#"SELECT d.signed_at IS NOT NULL, document_terms_current(d.id)
+) -> Result<Option<(bool, Option<bool>, Option<String>)>, sqlx::Error> {
+    sqlx::query_as::<_, (bool, Option<bool>, Option<String>)>(&format!(
+        r#"SELECT d.signed_at IS NOT NULL, document_terms_current(d.id),
+                  {ESTIMATE_QUOTE_NUMBER}
            FROM documents d
            WHERE d.order_id = $1
              AND d.generated_template_id = 'order_cost_estimate'
              AND d.status = 'active'
              AND d.file_deleted_at IS NULL
            ORDER BY d.created_at DESC, d.id DESC
-           LIMIT 1"#,
-    )
+           LIMIT 1"#
+    ))
     .bind(order_id)
     .fetch_optional(&mut **tx)
     .await
@@ -1107,18 +1124,22 @@ struct QuoteToAccept {
     previous_status: String,
 }
 
-/// `Ok(Ok(Some(_)))`: the order's current quote is open and matches the
-/// order; `Ok(Ok(None))`: nothing to accept (no quote, or accepted already);
-/// `Ok(Err(code))`: the quote cannot be accepted as it stands — the checks of
-/// the status route (`quote_outdated`), and a quote that is closed or past
-/// its validity (`quote_expired`, `quote_rejected`).
+/// `Ok(Ok(Some(_)))`: the order's current quote is open, matches the order
+/// and is the one the estimate `document_id` was generated for;
+/// `Ok(Ok(None))`: nothing to accept (no quote, or accepted already);
+/// `Ok(Err(code))`: the signature cannot accept the quote as things stand —
+/// the checks of the status route (`quote_outdated`), a quote that is closed
+/// or past its validity (`quote_expired`, `quote_rejected`), and a document
+/// that states other terms than the order or was made for an earlier quote
+/// (`estimate_document_outdated`).
 async fn quote_of_signed_estimate_tx(
     tx: &mut Transaction<'_, Postgres>,
     order_id: Uuid,
+    document_id: Uuid,
 ) -> Result<Result<Option<QuoteToAccept>, &'static str>, sqlx::Error> {
     lock_open_order_quotes_tx(tx, order_id).await?;
     let Some(quote) = sqlx::query(
-        r#"SELECT q.id, q.status, q.total_gross, q.line_items, q.valid_until,
+        r#"SELECT q.id, q.status, q.total_gross, q.line_items, q.valid_until, q.quote_number,
                   COALESCE(order_service_total_gross(o.id), o.total_estimated) AS total_estimated
            FROM quotes q
            JOIN orders o ON o.id = q.order_id
@@ -1157,6 +1178,24 @@ async fn quote_of_signed_estimate_tx(
     {
         return Ok(Err("quote_outdated"));
     }
+    // A version made before the order's services, period or prepayment terms
+    // changed confirms terms the order no longer has; one made for another
+    // quote prints another estimate number (release QA 2026-11-11: a new
+    // quote was accepted on the signature given for the one it replaced).
+    let (current, printed): (Option<bool>, Option<String>) = sqlx::query_as(&format!(
+        "SELECT document_terms_current(d.id), {ESTIMATE_QUOTE_NUMBER} FROM documents d WHERE d.id = $1"
+    ))
+    .bind(document_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if current == Some(false)
+        || !estimate_names_quote(
+            printed.as_deref(),
+            &quote.try_get::<String, _>("quote_number")?,
+        )
+    {
+        return Ok(Err("estimate_document_outdated"));
+    }
     Ok(Ok(Some(QuoteToAccept {
         id: quote.try_get("id")?,
         previous_status,
@@ -1170,8 +1209,11 @@ async fn quote_of_signed_estimate_tx(
 pub(crate) async fn signed_estimate_quote_blocker_tx(
     tx: &mut Transaction<'_, Postgres>,
     order_id: Uuid,
+    document_id: Uuid,
 ) -> Result<Option<&'static str>, sqlx::Error> {
-    Ok(quote_of_signed_estimate_tx(tx, order_id).await?.err())
+    Ok(quote_of_signed_estimate_tx(tx, order_id, document_id)
+        .await?
+        .err())
 }
 
 /// The client signed the Kostenvoranschlag `document_id` of the order: the
@@ -1186,21 +1228,11 @@ pub(crate) async fn accept_quote_of_signed_estimate_tx(
     source: &str,
     actor: Option<Uuid>,
 ) -> Result<Result<Option<Uuid>, &'static str>, sqlx::Error> {
-    let quote = match quote_of_signed_estimate_tx(tx, order_id).await? {
+    let quote = match quote_of_signed_estimate_tx(tx, order_id, document_id).await? {
         Ok(Some(quote)) => quote,
         Ok(None) => return Ok(Ok(None)),
         Err(code) => return Ok(Err(code)),
     };
-    // A signature finished on a version made before the order's services,
-    // period or prepayment terms changed confirms terms the order no longer
-    // has (the rule of the paper signature and of the status route).
-    let current: Option<bool> = sqlx::query_scalar("SELECT document_terms_current($1)")
-        .bind(document_id)
-        .fetch_one(&mut **tx)
-        .await?;
-    if current == Some(false) {
-        return Ok(Err("estimate_document_outdated"));
-    }
     let row = sqlx::query(
         r#"UPDATE quotes SET status = 'accepted' WHERE id = $1
            RETURNING quote_number, total_net, total_vat, total_gross, valid_until,
@@ -4638,6 +4670,45 @@ async fn create_quote(
         }
     }
 
+    // The estimate the client accepted by signature still says what the order
+    // holds: a new, unaccepted quote must not close it (release QA
+    // 2026-11-11: «Новое предложение» replaced the estimate signed by scan).
+    // The accepted quote is returned instead; to replace it on purpose, staff
+    // reject it first. Changed services make a new quote as before.
+    match sqlx::query(
+        r#"SELECT to_jsonb(q) AS quote, q.status, q.line_items
+           FROM quotes q
+           WHERE q.order_id = $1 AND q.status <> 'superseded'
+           ORDER BY q.created_at DESC, q.id DESC
+           LIMIT 1"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(current))
+            if current
+                .try_get::<String, _>("status")
+                .is_ok_and(|status| status == "accepted")
+                && current
+                    .try_get::<Value, _>("line_items")
+                    .is_ok_and(|stored| quote_lines_match_persisted(&stored, &line_items)) =>
+        {
+            return match current.try_get::<Value, _>("quote") {
+                Ok(value) => Json(value).into_response(),
+                Err(error) => {
+                    tracing::error!(%error, %order_id, "read accepted quote");
+                    err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare quote")
+                }
+            };
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::error!(%error, %order_id, "find accepted quote");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare quote");
+        }
+    }
+
     let totals = compute_quote_totals(&line_items);
     // Cash belongs to the quote whose invoices received it (read from the
     // journals by `quote_recorded_cash_paid`); a new quote has none yet. The
@@ -5144,7 +5215,7 @@ async fn update_quote_status(
     let quote_context = match sqlx::query(
         r#"SELECT q.order_id, q.status, q.total_gross, q.paid_amount, q.line_items,
                   COALESCE(order_service_total_gross(o.id), o.total_estimated) AS total_estimated,
-                  q.valid_until,
+                  q.valid_until, q.quote_number,
                   o.status AS order_status,
                   EXISTS (
                       SELECT 1 FROM quotes other
@@ -5283,7 +5354,7 @@ async fn update_quote_status(
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
             }
         };
-        if matches!(newest_estimate, Some((_, Some(false)))) {
+        if matches!(newest_estimate, Some((_, Some(false), _))) {
             return coded_err(
                 StatusCode::CONFLICT,
                 "estimate_document_outdated",
@@ -5295,7 +5366,14 @@ async fn update_quote_status(
         // a click alone. The signature accepts the quote by itself
         // (`accept_quote_of_signed_estimate_tx`); this route stays for a
         // quote made anew for a signed, still current estimate.
-        if !matches!(newest_estimate, Some((true, _))) {
+        // The signed document must be the one generated for this quote: a
+        // quote made after it carries another number and is signed anew
+        // (release QA 2026-11-11).
+        let quote_number = quote_context
+            .try_get::<String, _>("quote_number")
+            .unwrap_or_default();
+        if !matches!(&newest_estimate, Some((true, _, printed)) if estimate_names_quote(printed.as_deref(), &quote_number))
+        {
             return coded_err(
                 StatusCode::CONFLICT,
                 "estimate_signature_required",

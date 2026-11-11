@@ -1367,8 +1367,19 @@ async fn a_change_makes_the_package_outdated_and_it_is_prepared_again() {
     };
 
     let first = prepare(&app, lead_id).await;
+    // The client signs the estimate on paper: the scan is the same estimate,
+    // the payer's documents stay as prepared (release QA 2026-11-11).
+    let (status, signed) = sign_on_paper(&app, document_uuid(&ready.estimate)).await;
+    assert_eq!(status, StatusCode::OK, "{signed}");
+    let unchanged = package(&app, lead_id).await;
+    assert_eq!(
+        unchanged["package"]["outdated_reasons"],
+        json!([]),
+        "{unchanged}"
+    );
+    assert_eq!(unchanged["package"]["id"], first["package"]["id"]);
     // A new version of the client's estimate.
-    client_estimate(&app, lead_id, ready.order_id, Some(&ready.estimate)).await;
+    client_estimate(&app, lead_id, ready.order_id, Some(&signed["document_id"])).await;
     let second = assert_outdated("cost_estimate_changed").await;
     assert_ne!(first["package"]["id"], second["package"]["id"]);
     // The earlier documents got new versions; the earlier row is superseded.

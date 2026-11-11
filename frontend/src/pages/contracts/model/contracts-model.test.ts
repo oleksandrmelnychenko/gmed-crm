@@ -239,7 +239,15 @@ describe("status audit decisions 2026-09-28", () => {
       "rejected",
       "expired",
     ]);
-    expect(selectableQuoteStatuses("sent", "2026-09-28", "2026-09-28")).toContain("accepted");
+    expect(selectableQuoteStatuses("sent", "2026-09-28", "2026-09-28")).toContain("rejected");
+  });
+
+  it("never offers «accepted» by hand: the signed estimate sets it", () => {
+    expect(selectableQuoteStatuses("draft", null, "2026-09-28")).not.toContain("accepted");
+    expect(selectableQuoteStatuses("sent", "2026-09-28", "2026-09-28")).not.toContain("accepted");
+    expect(selectableQuoteStatuses("rejected", null, "2026-09-28")).not.toContain("accepted");
+    // An accepted quote still shows its own status.
+    expect(selectableQuoteStatuses("accepted", null, "2026-09-28")).toContain("accepted");
   });
 });
 

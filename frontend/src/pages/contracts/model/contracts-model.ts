@@ -107,18 +107,24 @@ export function quoteValidityPassed(validUntil: string | null | undefined, today
  * Statuses staff may choose for a quote: an expired quote, or one whose
  * validity date has passed, is no offer any more and cannot be accepted or
  * reopened; a new quote is created instead.
+ *
+ * «Принято» is never chosen by hand (owner decision 2026-11-11): a quote is
+ * accepted by the client's signature on the estimate document — electronic,
+ * or on paper with the scan — and the server sets the status itself. An
+ * accepted quote keeps showing its status.
  */
 export function selectableQuoteStatuses(
   current: string,
   validUntil: string | null | undefined,
   todayKey: string,
 ): QuoteStatus[] {
+  const byHand = QUOTE_STATUSES.filter((status) => status !== "accepted" || status === current);
   if (current === "expired" || quoteValidityPassed(validUntil, todayKey)) {
-    return QUOTE_STATUSES.filter(
+    return byHand.filter(
       (status) => status === current || status === "rejected" || status === "expired",
     );
   }
-  return QUOTE_STATUSES;
+  return byHand;
 }
 
 /** Every status a quote row can carry (filters and labels). */

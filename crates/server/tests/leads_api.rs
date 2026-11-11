@@ -7689,7 +7689,43 @@ async fn repeat_order_document_changes_require_current_documents_before_confirma
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
     assert_eq!(refused["error"], "estimate_signature_required", "{refused}");
     // … and the scan of the signed copy accepts it, with a version and an
-    // audit row that name the signed document.
+    // audit row that name the signed document. The estimate signed is the
+    // one generated for this quote (it prints the quote's number).
+    let (s, b) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        Some(
+            json!({"template_id":"order_cost_estimate","lead_id":lead,"order_id":order,
+            "language":"de","status":"active","replace_document_id":estimate_document}),
+        ),
+    )
+    .await;
+    assert!(s.is_success(), "{b}");
+    let estimate_document = b["id"].as_str().unwrap().to_string();
+    let printed: Option<String> = sqlx::query_scalar(
+        "SELECT generated_bindings->>'_quote_number' FROM documents WHERE id = $1::uuid",
+    )
+    .bind(&estimate_document)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let current_number: String = sqlx::query_scalar(
+        "SELECT quote_number FROM quotes WHERE order_id = $1 AND status <> 'superseded'
+         ORDER BY created_at DESC, id DESC LIMIT 1",
+    )
+    .bind(order)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        printed.as_deref(),
+        Some(current_number.as_str()),
+        "quote {}: {}",
+        first.1["quote_number"],
+        b
+    );
     let (s, b) = support::paper_signature(&app, &pm, &estimate_document).await;
     assert_eq!(s, StatusCode::OK, "{b}");
     let signed_estimate = Uuid::parse_str(b["document_id"].as_str().unwrap()).unwrap();

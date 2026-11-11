@@ -356,7 +356,7 @@ async fn store_signed_version(
         // or is closed, would stay unconfirmed under a signed document:
         // staff recalculate the estimate first.
         if let Some(code) =
-            crate::routes::contracts::signed_estimate_quote_blocker_tx(&mut tx, order_id)
+            crate::routes::contracts::signed_estimate_quote_blocker_tx(&mut tx, order_id, id)
                 .await
                 .map_err(db_error)?
         {

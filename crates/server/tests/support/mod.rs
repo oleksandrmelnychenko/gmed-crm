@@ -275,13 +275,18 @@ pub async fn seed_signed_order_estimate(pool: &PgPool, order_id: Uuid) -> Uuid {
         r#"INSERT INTO documents (
                 id, version_root_document_id, patient_id, lead_id, order_id, auto_name,
                 art, category, status, visibility, is_medical, uploaded_by,
-                generated_template_id, signed_at
+                generated_template_id, signed_at, generated_bindings
            )
            SELECT $1, $1, o.patient_id,
                   CASE WHEN o.patient_id IS NULL THEN o.source_lead_id END,
                   o.id, 'Kostenvoranschlag (signed)', 'cost_estimate', 'finance', 'active',
                   'internal', false, (SELECT id FROM users ORDER BY created_at LIMIT 1),
-                  'order_cost_estimate', now()
+                  'order_cost_estimate', now(),
+                  -- Made for the order's current quote, as generation records it.
+                  jsonb_build_object('_quote_number',
+                      (SELECT q.quote_number FROM quotes q
+                       WHERE q.order_id = o.id AND q.status <> 'superseded'
+                       ORDER BY q.created_at DESC, q.id DESC LIMIT 1))
            FROM orders o WHERE o.id = $2"#,
     )
     .bind(document_id)

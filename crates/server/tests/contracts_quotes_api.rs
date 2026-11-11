@@ -1375,6 +1375,137 @@ async fn quote_is_not_accepted_while_the_estimate_document_is_outdated() {
     assert_eq!(accepted["status"], "accepted");
 }
 
+/// Release QA 2026-11-11 (F1): on a patient's order «Новое предложение»
+/// closed the estimate the client had signed by scan, and the new quote was
+/// accepted by a click on the strength of that older signature. A signed
+/// estimate that still matches the order is not replaced, and a quote is
+/// accepted only on the signed document generated for it.
+#[tokio::test]
+async fn a_new_quote_neither_replaces_a_signed_estimate_nor_rides_on_its_signature() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("quote-signed-kept");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm_bearer,
+        Some(json!({ "patient_id": patient_id, "needs_description": "Signed estimate" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let order_id = body["id"].as_str().unwrap().to_string();
+    let order_uuid = Uuid::parse_str(&order_id).unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(json!({
+            "description": "Single service",
+            "quantity": 1.0,
+            "unit_price": 100.0,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    let new_quote = |notes: &'static str| {
+        let app = app.clone();
+        let pm_bearer = pm_bearer.clone();
+        let path = format!("/api/v1/orders/{order_id}/quotes");
+        async move {
+            let (status, body) = json_request(
+                &app,
+                "POST",
+                &path,
+                &pm_bearer,
+                Some(json!({ "notes": notes })),
+            )
+            .await;
+            assert!(status.is_success(), "{body}");
+            body["id"].as_str().unwrap().to_string()
+        }
+    };
+    let set_status = |quote_id: String, status: &'static str| {
+        let app = app.clone();
+        let pm_bearer = pm_bearer.clone();
+        async move {
+            json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/quotes/{quote_id}/status"),
+                &pm_bearer,
+                Some(json!({ "status": status })),
+            )
+            .await
+        }
+    };
+    let status_of = |quote_id: String| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, String>("SELECT status FROM quotes WHERE id = $1::uuid")
+                .bind(quote_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+
+    // The client signs the estimate of the first quote.
+    let first = new_quote("first").await;
+    support::seed_signed_order_estimate(&pool, order_uuid).await;
+    let (status, body) = set_status(first.clone(), "accepted").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // «Новое предложение» for the unchanged order: the signed estimate stays.
+    let again = new_quote("second").await;
+    assert_eq!(again, first);
+    assert_eq!(status_of(first.clone()).await, "accepted");
+    let open: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM quotes WHERE order_id = $1 AND status <> 'superseded'",
+    )
+    .bind(order_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(open, 1);
+
+    // Replaced on purpose: staff reject it, then make a new quote. The new
+    // one is not accepted on the signature given for the rejected one …
+    let (status, body) = set_status(first.clone(), "rejected").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let second = new_quote("third").await;
+    assert_ne!(second, first);
+    for requested in ["sent", "accepted"] {
+        let (status, body) = set_status(second.clone(), requested).await;
+        if requested == "accepted" {
+            assert_eq!(status, StatusCode::CONFLICT, "{body}");
+            assert_eq!(body["error"], "estimate_signature_required", "{body}");
+        } else {
+            assert_eq!(status, StatusCode::OK, "{body}");
+        }
+    }
+    assert_eq!(status_of(second.clone()).await, "sent");
+    assert_eq!(status_of(first.clone()).await, "rejected");
+
+    // … only on the estimate signed for it.
+    support::seed_signed_order_estimate(&pool, order_uuid).await;
+    let (status, body) = set_status(second.clone(), "accepted").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
 #[tokio::test]
 async fn quote_commercial_invariants_use_persisted_order_lines() {
     let Some((app, pool, admin_id, _)) = test_context().await else {

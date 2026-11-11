@@ -64,8 +64,8 @@ export function PaperSignatureSection({ lang, electronicFormExcluded, disabled =
                 `Für dieses Dokument ist die elektronische Form ausgeschlossen (${electronicFormExcluded}). Laden Sie den Scan des handschriftlich unterschriebenen Exemplars hoch.`,
               )
             : tx(
-                "Если документ подписан от руки, загрузите его скан. Скан станет подписанной версией документа, а договор, заказ или согласие будут отмечены как подписанные.",
-                "Wurde das Dokument handschriftlich unterschrieben, laden Sie den Scan hoch. Der Scan wird zur unterschriebenen Fassung des Dokuments; Vertrag, Auftrag oder Einwilligung gelten damit als unterschrieben.",
+                "Если документ подписан от руки, загрузите его скан. Скан станет подписанной версией документа, а договор, заказ, смета или согласие будут отмечены как подписанные.",
+                "Wurde das Dokument handschriftlich unterschrieben, laden Sie den Scan hoch. Der Scan wird zur unterschriebenen Fassung des Dokuments; Vertrag, Auftrag, Kostenvoranschlag oder Einwilligung gelten damit als unterschrieben.",
               )}
           </p>
         </div>
