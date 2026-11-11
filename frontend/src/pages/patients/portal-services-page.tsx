@@ -36,7 +36,6 @@ import { clearApiCache } from "@/lib/api";
 import { berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { uiText, useLang, type Lang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
-import { localizeTaskNote } from "@/lib/task-labels";
 import {
   cancelPortalService,
   createPortalServiceRequest,
@@ -51,6 +50,7 @@ import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { ProviderTaxonomyCascadeSelect } from "@/pages/providers/ui/provider-taxonomy-cascade-select";
 import { cn } from "@/lib/utils";
 import { portalServiceContext } from "./model/portal-service-context";
+import { portalServiceNotes } from "./model/portal-service-notes";
 
 type ServiceRequestFormState = {
   serviceKind: string;
@@ -317,7 +317,6 @@ export function PatientServicesPage() {
   const {
     conciergeServiceKindLabel,
     conciergeServiceSourceLabel,
-    formatPortalCurrency,
     portalStatusLabel,
   } = usePortalLabels();
   const { lang, t } = useLang();
@@ -435,7 +434,8 @@ export function PatientServicesPage() {
         starts_at: toIsoDateTime(form.startsAt),
         ends_at: toIsoDateTime(form.endsAt),
         cost_estimate: form.costEstimate ? Number(form.costEstimate) : undefined,
-        service_notes: form.serviceNotes || undefined,
+        // Stored as the patient's own note; staff never overwrite it.
+        patient_note: form.serviceNotes || undefined,
       });
       setRequestOpen(false);
       dispatchPageState((current) => ({
@@ -560,16 +560,18 @@ export function PatientServicesPage() {
                     </div>}
                     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                       {item.vendor_name && <InfoRow label={t.services_vendor} value={item.vendor_name} />}
-                      {item.cost_estimate != null && <InfoRow label={t.services_estimate} value={formatPortalCurrency(item.cost_estimate)} />}
                       {item.booking_reference && <InfoRow label={t.services_booking_reference} value={item.booking_reference} />}
                       <InfoRow label={t.services_created_at} value={<PortalDateChip timestamp={item.created_at} />} />
                     </div>
 
-                    {item.service_notes ? (
-                      <div className={cn("rounded-lg px-3 py-2 text-sm leading-6 text-foreground", tokens.surface.mutedCard)}>
-                        {localizeTaskNote(item.service_notes, lang)}
+                    {portalServiceNotes(item).map((note) => (
+                      <div key={note.kind} className={cn("rounded-lg px-3 py-2 text-sm leading-6 text-foreground", tokens.surface.mutedCard)}>
+                        <p className="text-xs font-medium text-muted-foreground">
+                          {note.kind === "own" ? t.services_own_note : t.services_care_team_note}
+                        </p>
+                        <p className="whitespace-pre-wrap">{note.text}</p>
                       </div>
-                    ) : null}
+                    ))}
 
                     {item.can_cancel ? (
                       <div className="flex justify-end">

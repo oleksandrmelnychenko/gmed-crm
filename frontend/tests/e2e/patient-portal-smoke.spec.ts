@@ -105,12 +105,11 @@ async function installPatientPortalMocks(page: Page, patients?: Array<{ id: stri
       status: "booked",
       booking_reference: "TR-001",
       vendor_name: "Transfer Vendor",
-      vendor_contact: null,
       starts_at: "2026-04-20T06:00:00Z",
       ends_at: "2026-04-20T07:00:00Z",
-      cost_estimate: "150.00",
       currency: "EUR",
-      service_notes: null,
+      patient_note: null,
+      patient_visible_note: null,
       request_source: "patient_portal",
       completed_at: null,
       created_at: "2026-04-01T09:00:00Z",
@@ -299,7 +298,7 @@ async function installPatientPortalMocks(page: Page, patients?: Array<{ id: stri
         starts_at?: string;
         ends_at?: string;
         cost_estimate?: number;
-        service_notes?: string;
+        patient_note?: string;
       };
       const createdService = {
         id: `00000000-0000-0000-0000-0000000092${10 + nextServiceRequestIndex}`,
@@ -313,13 +312,11 @@ async function installPatientPortalMocks(page: Page, patients?: Array<{ id: stri
         status: "pending",
         booking_reference: null,
         vendor_name: payload.vendor_name ?? null,
-        vendor_contact: payload.vendor_contact ?? null,
         starts_at: payload.starts_at ?? null,
         ends_at: payload.ends_at ?? null,
-        cost_estimate:
-          payload.cost_estimate !== undefined ? String(payload.cost_estimate.toFixed(2)) : null,
         currency: "EUR",
-        service_notes: payload.service_notes ?? null,
+        patient_note: payload.patient_note ?? null,
+        patient_visible_note: null,
         request_source: "patient_portal",
         completed_at: null,
         created_at: `2026-04-1${nextServiceRequestIndex}T14:00:00Z`,

@@ -1656,6 +1656,8 @@ export interface Translations
   services_vendor: string;
   services_estimate: string;
   services_booking_reference: string;
+  services_own_note: string;
+  services_care_team_note: string;
   services_created_at: string;
   services_cancel_request: string;
   services_request_title: string;

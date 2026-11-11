@@ -124,7 +124,10 @@ struct CreateConciergeServiceRequest {
     quantity: Option<f64>,
     unit_price: Option<f64>,
     currency: Option<String>,
+    /// Internal staff note; never sent to the patient (S2-1, 2026-11-11).
     service_notes: Option<String>,
+    /// The only staff text the patient portal shows.
+    patient_visible_note: Option<String>,
     billing_notes: Option<String>,
 }
 
@@ -180,6 +183,7 @@ struct UpdateConciergeServiceRequest {
     unit_price: Option<f64>,
     currency: Option<String>,
     service_notes: NullablePatchValue,
+    patient_visible_note: NullablePatchValue,
     billing_notes: NullablePatchValue,
 }
 
@@ -236,7 +240,10 @@ struct CreateMyConciergeServiceRequest {
     ends_at: Option<String>,
     cost_estimate: Option<f64>,
     currency: Option<String>,
-    service_notes: Option<String>,
+    /// The patient's own note; stored apart from every staff note so staff
+    /// never overwrite it (`service_notes` is the name older clients send).
+    #[serde(alias = "service_notes")]
+    patient_note: Option<String>,
 }
 
 struct NonMedicalAppointmentContext {
@@ -536,7 +543,8 @@ async fn list_my_concierge_services(
         r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.provider_service_id, cs.assigned_concierge_id,
                   cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
                   cs.vendor_contact, cs.service_address, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
-                  cs.quantity, cs.unit_price, cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes,
+                  cs.quantity, cs.unit_price, cs.currency, cs.billing_status,
+                  cs.patient_request_note, cs.patient_visible_note,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at, cs.request_source,
                   p.patient_id AS patient_code, p.first_name, p.last_name,
                   pr.name AS provider_name,
@@ -640,7 +648,7 @@ async fn create_my_concierge_service(
     };
     let normalized_vendor_name = normalize_optional_text(body.vendor_name.as_deref());
     let normalized_vendor_contact = normalize_optional_text(body.vendor_contact.as_deref());
-    let normalized_notes = normalize_optional_text(body.service_notes.as_deref());
+    let normalized_notes = normalize_optional_text(body.patient_note.as_deref());
     if let Some(taxonomy_node_id) = body.taxonomy_node_id
         && let Err(resp) = validate_non_medical_taxonomy_node(&state, taxonomy_node_id).await
     {
@@ -652,7 +660,7 @@ async fn create_my_concierge_service(
                 patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind, taxonomy_node_id,
                 title, status, booking_reference, vendor_name, vendor_contact,
                 starts_at, ends_at, cost_estimate, actual_cost, currency,
-                billing_status, service_notes, billing_notes, request_source, created_by
+                billing_status, patient_request_note, billing_notes, request_source, created_by
            ) VALUES (
                 $1, NULL, NULL, $2, $3, $4,
                 $5, 'planned', NULL, $6, $7,
@@ -932,6 +940,7 @@ async fn list_concierge_services(
                   OR de_normalize(concat_ws(' ',
                        cs.title, cs.booking_reference, cs.vendor_name, cs.vendor_contact,
                        cs.service_notes, cs.billing_notes,
+                       cs.patient_request_note, cs.patient_visible_note,
                        pr.name, sc.service_name,
                        ptn.code, ptn.name_de, ptn.name_ru,
                        a.title, u.name,
@@ -4464,12 +4473,14 @@ async fn create_concierge_service(
                 patient_id, appointment_id, provider_id, provider_service_id, assigned_concierge_id, service_kind, taxonomy_node_id,
                 title, status, booking_reference, vendor_name, vendor_contact,
                 starts_at, ends_at, cost_estimate, actual_cost, quantity, unit_price, currency,
-                billing_status, service_notes, billing_notes, request_source, created_by
+                billing_status, service_notes, billing_notes, request_source, created_by,
+                patient_visible_note
            ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7,
                 $8, 'planned', $9, $10, $11,
                 $12, $13, $14, $15, $16, $17, $18,
-                'draft', $19, $20, 'staff', $21
+                'draft', $19, $20, 'staff', $21,
+                $22
            ) RETURNING id"#,
     )
     .bind(body.patient_id)
@@ -4493,6 +4504,9 @@ async fn create_concierge_service(
     .bind(body.service_notes)
     .bind(body.billing_notes)
     .bind(auth.user_id)
+    .bind(normalize_optional_text(
+        body.patient_visible_note.as_deref(),
+    ))
     .fetch_one(&state.db)
     .await
     {
@@ -4823,6 +4837,25 @@ async fn update_concierge_service(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    // The note for the patient is the only staff text the portal shows. The
+    // patient's own request note is not part of the patch at all: no staff
+    // save changes it (S2-1, owner decision 2026-11-11).
+    let existing_patient_visible_note = existing
+        .try_get::<Option<String>, _>("patient_visible_note")
+        .unwrap_or_default();
+    let patient_visible_note = match parse_optional_text_patch(
+        visible_patch(
+            &body.patient_visible_note,
+            redaction.hides_notes(),
+            &unchanged,
+        ),
+        existing_patient_visible_note.clone(),
+        "patient_visible_note",
+    ) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let patient_visible_note_changed = patient_visible_note != existing_patient_visible_note;
     let billing_notes = match parse_optional_text_patch(
         &body.billing_notes,
         existing
@@ -5186,7 +5219,8 @@ async fn update_concierge_service(
                taxonomy_node_id = COALESCE($19, taxonomy_node_id),
                provider_service_id = COALESCE($20, provider_service_id),
                quantity = COALESCE($21, quantity),
-               unit_price = COALESCE($22, unit_price)
+               unit_price = COALESCE($22, unit_price),
+               patient_visible_note = $23
            WHERE id = $1"#,
     )
     .bind(service_id)
@@ -5211,6 +5245,7 @@ async fn update_concierge_service(
     .bind(body.provider_service_id)
     .bind(quantity)
     .bind(unit_price)
+    .bind(patient_visible_note)
     .execute(&mut *tx)
     .await
     {
@@ -5247,6 +5282,7 @@ async fn update_concierge_service(
             }),
             "assigned_concierge_id": audit_assigned_concierge_id,
             "task_id": task_change.as_ref().map(|change| change.0),
+            "patient_visible_note_changed": patient_visible_note_changed,
         }),
     ));
     if let Some((task_id, assigned_to, previous_status, next_status)) = task_change.as_ref() {
@@ -5652,6 +5688,7 @@ const SERVICE_ROW_SELECT: &str = r#"SELECT cs.id, cs.patient_id, cs.appointment_
                   cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
                   cs.vendor_contact, cs.service_address, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
                   cs.quantity, cs.unit_price, cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes, cs.request_source,
+                  cs.patient_request_note, cs.patient_visible_note,
                   cs.key_status, cs.key_responsible_user_id, cs.key_status_at,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at,
                   cs.booking_decision_required_at,
@@ -5822,7 +5859,7 @@ pub(crate) async fn ensure_task_for_service(
                billed_at, key_status, key_responsible_user_id, key_status_at,
                created_at, updated_at
            )
-           SELECT title, service_notes,
+           SELECT title, COALESCE(service_notes, patient_request_note),
                   -- No concierge on the service: the patient's coordinating
                   -- concierge (else manager, else CEO) works it, not whoever
                   -- happened to book it (QA C2-15).
@@ -6574,6 +6611,7 @@ fn validate_update_fields_for_role(
             || body.quantity.is_some()
             || body.unit_price.is_some()
             || body.service_notes.is_present()
+            || body.patient_visible_note.is_present()
             || body.currency.is_some()
         {
             return Err(err(
@@ -6742,6 +6780,7 @@ fn parse_optional_text_patch(
             "vendor_contact" => Err("vendor_contact must be text or null"),
             "service_address" => Err("service_address must be text or null"),
             "service_notes" => Err("service_notes must be text or null"),
+            "patient_visible_note" => Err("patient_visible_note must be text or null"),
             "billing_notes" => Err("billing_notes must be text or null"),
             _ => Err("field must be text or null"),
         },
@@ -6950,6 +6989,12 @@ fn can_patient_cancel_service(row: &sqlx::postgres::PgRow) -> bool {
             .is_none()
 }
 
+/// The service as the patient sees it (S2-1, owner decision 2026-11-11):
+/// the patient's own request note, the note staff wrote for the patient, and
+/// what is meant for the patient — booking reference, vendor, address, time.
+/// The internal staff note, the billing note, the vendor's contact and every
+/// amount of the internal calculation (estimate, quantity, unit price) stay
+/// with staff.
 fn build_portal_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
     serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
@@ -6969,15 +7014,12 @@ fn build_portal_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
         "booking_reference": row.try_get::<Option<String>, _>("booking_reference").unwrap_or_default(),
         "vendor_name": row.try_get::<Option<String>, _>("vendor_name").unwrap_or_default(),
-        "vendor_contact": row.try_get::<Option<String>, _>("vendor_contact").unwrap_or_default(),
         "service_address": row.try_get::<Option<String>, _>("service_address").unwrap_or_default(),
         "starts_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("starts_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "ends_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("ends_at").unwrap_or_default().map(|value| value.to_rfc3339()),
-        "cost_estimate": row.try_get::<Option<rust_decimal::Decimal>, _>("cost_estimate").unwrap_or_default().map(|value| value.round_cents().to_string()),
-        "quantity": row.try_get::<rust_decimal::Decimal, _>("quantity").map(|value| value.round_commercial(2).normalize().to_string()).unwrap_or_else(|_| "1".to_string()),
-        "unit_price": row.try_get::<Option<rust_decimal::Decimal>, _>("unit_price").unwrap_or_default().map(|value| value.round_cents().to_string()),
         "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
-        "service_notes": row.try_get::<Option<String>, _>("service_notes").unwrap_or_default(),
+        "patient_note": row.try_get::<Option<String>, _>("patient_request_note").unwrap_or_default(),
+        "patient_visible_note": row.try_get::<Option<String>, _>("patient_visible_note").unwrap_or_default(),
         "request_source": row.try_get::<String, _>("request_source").unwrap_or_else(|_| "staff".to_string()),
         "completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
@@ -7031,7 +7073,12 @@ fn build_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "key_responsible_user_id": row.try_get::<Option<Uuid>, _>("key_responsible_user_id").unwrap_or_default(),
         "key_responsible_user_name": row.try_get::<Option<String>, _>("key_responsible_user_name").unwrap_or_default(),
         "key_status_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("key_status_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        // Internal staff note; never sent to the patient.
         "service_notes": row.try_get::<Option<String>, _>("service_notes").unwrap_or_default(),
+        // The patient's own request text, read-only for staff.
+        "patient_note": row.try_get::<Option<String>, _>("patient_request_note").unwrap_or_default(),
+        // The only staff text the patient portal shows.
+        "patient_visible_note": row.try_get::<Option<String>, _>("patient_visible_note").unwrap_or_default(),
         "billing_notes": row.try_get::<Option<String>, _>("billing_notes").unwrap_or_default(),
         "request_source": row.try_get::<String, _>("request_source").unwrap_or_else(|_| "staff".to_string()),
         "completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
@@ -7113,7 +7160,12 @@ fn build_service_json_for_role(row: &sqlx::postgres::PgRow, role: Role) -> serde
             serde_json::Value::String("Service request".to_string()),
         );
         service.insert("appointment_title".to_string(), serde_json::Value::Null);
-        service.insert("service_notes".to_string(), serde_json::Value::Null);
+    }
+
+    if redaction.hides_notes() {
+        for field in ["service_notes", "patient_note", "patient_visible_note"] {
+            service.insert(field.to_string(), serde_json::Value::Null);
+        }
     }
 
     if redaction.medical_provider {
@@ -7121,7 +7173,6 @@ fn build_service_json_for_role(row: &sqlx::postgres::PgRow, role: Role) -> serde
             "title".to_string(),
             serde_json::Value::String("Service request".to_string()),
         );
-        service.insert("service_notes".to_string(), serde_json::Value::Null);
         for field in [
             "provider_id",
             "provider_name",

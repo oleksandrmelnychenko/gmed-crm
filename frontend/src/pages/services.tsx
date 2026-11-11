@@ -152,7 +152,12 @@ type StaffConciergeService = {
   unit_price: string | null;
   currency: string;
   billing_status: string;
+  /** Internal staff note; never sent to the patient. */
   service_notes: string | null;
+  /** The patient's own request text; read-only for staff. */
+  patient_note?: string | null;
+  /** The only staff text the patient portal shows. */
+  patient_visible_note?: string | null;
   billing_notes: string | null;
   request_source: string;
   completed_at: string | null;
@@ -211,6 +216,7 @@ type CreateServiceFormState = {
   quantity: string;
   currency: string;
   serviceNotes: string;
+  patientVisibleNote: string;
   billingNotes: string;
 };
 
@@ -239,6 +245,7 @@ type ConciergeServiceUpdatePayload = Partial<{
   unit_price: number | null;
   currency: string;
   service_notes: string | null;
+  patient_visible_note: string | null;
   billing_notes: string | null;
 }>;
 
@@ -325,6 +332,7 @@ function blankCreateServiceForm(defaultConciergeId = ""): CreateServiceFormState
     quantity: "1",
     currency: "EUR",
     serviceNotes: "",
+    patientVisibleNote: "",
     billingNotes: "",
   };
 }
@@ -349,10 +357,25 @@ function buildEditServiceForm(service: StaffConciergeService, lang: Lang): EditS
     currency: service.currency || "EUR",
     // System notes ("Automatisch aus nichtmedizinischem Termin erstellt") in the UI language.
     serviceNotes: localizeTaskNote(service.service_notes, lang),
+    patientVisibleNote: service.patient_visible_note ?? "",
     billingNotes: service.billing_notes ?? "",
     status: service.status,
     billingStatus: service.billing_status,
   };
+}
+
+/** Says next to a field label whether the patient sees it on the portal (release QA S2-1). */
+function PatientVisibilityMark({ visible, label }: { visible: boolean; label: string }) {
+  return (
+    <span
+      className={cn(
+        "ml-1.5 font-normal",
+        visible ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground/80",
+      )}
+    >
+      · {label}
+    </span>
+  );
 }
 
 function patientOptionLabel(patient: PatientOption) {
@@ -1547,6 +1570,7 @@ function useStaffServicesPageContent() {
           unit_price: selectedProviderServiceUnitPrice,
           currency,
           service_notes: createForm.serviceNotes.trim() || null,
+          patient_visible_note: createForm.patientVisibleNote.trim() || null,
           billing_notes: createForm.billingNotes.trim() || null,
         }),
       });
@@ -1621,6 +1645,7 @@ function useStaffServicesPageContent() {
       ends_at: editForm.endsAt ? toRfc3339(editForm.endsAt) : null,
       actual_cost: actualCost,
       service_notes: editForm.serviceNotes.trim() || null,
+      patient_visible_note: editForm.patientVisibleNote.trim() || null,
     };
     const updatePayload: ConciergeServiceUpdatePayload =
       canEditProtectedServiceFields
@@ -2262,6 +2287,7 @@ function useStaffServicesPageContent() {
                       <label className="space-y-1.5 text-sm">
                         <span className="text-xs font-medium text-muted-foreground">
                           {t.staff_services_form_booking_reference}
+                          <PatientVisibilityMark visible label={t.staff_services_visible_to_patient} />
                         </span>
                         <Input
                           value={editForm.bookingReference}
@@ -2278,6 +2304,7 @@ function useStaffServicesPageContent() {
                       <label className="space-y-1.5 text-sm">
                         <span className="text-xs font-medium text-muted-foreground">
                           {t.staff_services_form_vendor}
+                          <PatientVisibilityMark visible label={t.staff_services_visible_to_patient} />
                         </span>
                         <Input
                           value={editForm.vendorName}
@@ -2292,6 +2319,7 @@ function useStaffServicesPageContent() {
                       <label className="space-y-1.5 text-sm md:col-span-2">
                         <span className="text-xs font-medium text-muted-foreground">
                           {t.staff_services_form_vendor_contact}
+                          <PatientVisibilityMark visible={false} label={t.staff_services_hidden_from_patient} />
                         </span>
                         <Input
                           value={editForm.vendorContact}
@@ -2305,9 +2333,21 @@ function useStaffServicesPageContent() {
                           className={formInputClassName}
                         />
                       </label>
+                      {selectedService.patient_note ? (
+                        <div className="space-y-1.5 text-sm md:col-span-2">
+                          <span className="text-xs font-medium text-muted-foreground">
+                            {t.staff_services_form_patient_request_note}
+                          </span>
+                          <p className="whitespace-pre-wrap rounded-md border bg-muted/40 px-3 py-2">
+                            {selectedService.patient_note}
+                          </p>
+                          <p className="text-xs text-muted-foreground">{t.staff_services_patient_request_note_hint}</p>
+                        </div>
+                      ) : null}
                       <label className="space-y-1.5 text-sm">
                         <span className="text-xs font-medium text-muted-foreground">
                           {t.staff_services_form_service_notes}
+                          <PatientVisibilityMark visible={false} label={t.staff_services_hidden_from_patient} />
                         </span>
                         <textarea
                           value={editForm.serviceNotes}
@@ -2315,6 +2355,24 @@ function useStaffServicesPageContent() {
                             setEditForm((current) =>
                               current
                                 ? { ...current, serviceNotes: event.target.value }
+                                : current,
+                            )
+                          }
+                          className={formTextareaClassName}
+                          rows={4}
+                        />
+                      </label>
+                      <label className="space-y-1.5 text-sm">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {t.staff_services_form_patient_visible_note}
+                          <PatientVisibilityMark visible label={t.staff_services_visible_to_patient} />
+                        </span>
+                        <textarea
+                          value={editForm.patientVisibleNote}
+                          onChange={(event) =>
+                            setEditForm((current) =>
+                              current
+                                ? { ...current, patientVisibleNote: event.target.value }
                                 : current,
                             )
                           }
@@ -2424,10 +2482,12 @@ function useStaffServicesPageContent() {
 
                   <Section icon={NotebookPen} title={t.staff_services_create_section_vendor_notes}>
                     <div className="grid gap-1">
-                      <ServiceDetailField label={t.staff_services_form_booking_reference} value={selectedService.booking_reference} />
-                      <ServiceDetailField label={t.staff_services_form_vendor} value={selectedService.vendor_name} />
+                      <ServiceDetailField label={`${t.staff_services_form_booking_reference} · ${t.staff_services_visible_to_patient}`} value={selectedService.booking_reference} />
+                      <ServiceDetailField label={`${t.staff_services_form_vendor} · ${t.staff_services_visible_to_patient}`} value={selectedService.vendor_name} />
                       <ServiceDetailField label={t.staff_services_form_vendor_contact} value={selectedService.vendor_contact} />
-                      <ServiceDetailField label={t.staff_services_form_service_notes} value={localizeTaskNote(selectedService.service_notes, lang) || null} multiline />
+                      <ServiceDetailField label={t.staff_services_form_patient_request_note} value={selectedService.patient_note ?? null} multiline />
+                      <ServiceDetailField label={`${t.staff_services_form_service_notes} · ${t.staff_services_hidden_from_patient}`} value={localizeTaskNote(selectedService.service_notes, lang) || null} multiline />
+                      <ServiceDetailField label={`${t.staff_services_form_patient_visible_note} · ${t.staff_services_visible_to_patient}`} value={selectedService.patient_visible_note ?? null} multiline />
                       <ServiceDetailField label={t.staff_services_form_billing_notes} value={selectedService.billing_notes} multiline />
                     </div>
                   </Section>
@@ -2763,6 +2823,7 @@ function useStaffServicesPageContent() {
                     <label className="space-y-1.5 text-sm">
                       <span className="text-xs font-medium text-muted-foreground">
                         {t.staff_services_form_booking_reference}
+                        <PatientVisibilityMark visible label={t.staff_services_visible_to_patient} />
                       </span>
                       <Input
                         value={createForm.bookingReference}
@@ -2778,6 +2839,7 @@ function useStaffServicesPageContent() {
                     <label className="space-y-1.5 text-sm">
                       <span className="text-xs font-medium text-muted-foreground">
                         {t.staff_services_form_vendor}
+                        <PatientVisibilityMark visible label={t.staff_services_visible_to_patient} />
                       </span>
                       <Input
                         value={createForm.vendorName}
@@ -2792,6 +2854,7 @@ function useStaffServicesPageContent() {
                   <label className="block space-y-1.5 text-sm">
                     <span className="text-xs font-medium text-muted-foreground">
                       {t.staff_services_form_vendor_contact}
+                      <PatientVisibilityMark visible={false} label={t.staff_services_hidden_from_patient} />
                     </span>
                     <Input
                       value={createForm.vendorContact}
@@ -2806,11 +2869,27 @@ function useStaffServicesPageContent() {
                     <label className="block space-y-1.5 text-sm">
                       <span className="text-xs font-medium text-muted-foreground">
                         {t.staff_services_form_service_notes}
+                        <PatientVisibilityMark visible={false} label={t.staff_services_hidden_from_patient} />
                       </span>
                       <textarea
                         value={createForm.serviceNotes}
                         onChange={(event) =>
                           setCreateForm((current) => ({ ...current, serviceNotes: event.target.value }))
+                        }
+                        className={formTextareaClassName}
+                        rows={4}
+                      />
+                    </label>
+
+                    <label className="block space-y-1.5 text-sm">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t.staff_services_form_patient_visible_note}
+                        <PatientVisibilityMark visible label={t.staff_services_visible_to_patient} />
+                      </span>
+                      <textarea
+                        value={createForm.patientVisibleNote}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, patientVisibleNote: event.target.value }))
                         }
                         className={formTextareaClassName}
                         rows={4}

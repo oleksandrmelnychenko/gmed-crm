@@ -1804,6 +1804,8 @@ export const ru = {
   services_vendor: "Поставщик",
   services_estimate: "Оценка",
   services_booking_reference: "Референс бронирования",
+  services_own_note: "Ваша заметка",
+  services_care_team_note: "Заметка команды GMED",
   services_created_at: "Создано",
   services_cancel_request: "Отменить запрос",
   services_request_title: "Запросить сервис",

@@ -1572,13 +1572,23 @@ async fn patient_sees_staff_processing_updates_for_portal_service_and_loses_canc
         &format!("/api/v1/concierge-services/{service_id}/update"),
         &concierge_bearer,
         Some(json!({
-            "service_notes": "Booked by concierge and confirmed with the patient."
+            "service_notes": "INTERNAL: partner overcharges, negotiate.",
+            "patient_visible_note": "Booked by concierge and confirmed with the patient.",
+            "patient_note": "Staff must not be able to replace this."
         })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(updated["status"], "booked");
     assert_eq!(updated["booking_reference"], "HTL-7788");
+    assert_eq!(
+        updated["service_notes"],
+        "INTERNAL: partner overcharges, negotiate."
+    );
+    assert_eq!(
+        updated["patient_note"],
+        "Please confirm a quiet room close to the clinic."
+    );
 
     let (status, portal_history) = json_request(
         &app,
@@ -1595,8 +1605,16 @@ async fn patient_sees_staff_processing_updates_for_portal_service_and_loses_canc
     assert_eq!(portal_items[0]["status"], "booked");
     assert_eq!(portal_items[0]["booking_reference"], "HTL-7788");
     assert_eq!(
-        portal_items[0]["service_notes"],
+        portal_items[0]["patient_visible_note"],
         "Booked by concierge and confirmed with the patient."
+    );
+    assert_eq!(
+        portal_items[0]["patient_note"],
+        "Please confirm a quiet room close to the clinic."
+    );
+    assert!(
+        !portal_history.to_string().contains("INTERNAL"),
+        "the internal staff note must never reach the portal: {portal_history}"
     );
     assert_eq!(portal_items[0]["can_cancel"], false);
     assert_eq!(
@@ -1617,6 +1635,159 @@ async fn patient_sees_staff_processing_updates_for_portal_service_and_loses_canc
         cancel_body["message"],
         "Service request is already being processed and can no longer be cancelled"
     );
+}
+
+/// Release QA S2-1 (owner decision 2026-11-11): staff keep an internal note,
+/// write a separate note for the patient, and never change the patient's
+/// own request note; the portal API carries none of the internal text and
+/// no amount of the internal calculation.
+#[tokio::test]
+async fn portal_service_api_never_carries_internal_staff_text() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("me-concierge-note-split");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+    let pm_bearer = auth_header_for(patient_manager_id, "patient_manager");
+
+    // A staff-created service with every kind of staff text.
+    let (status, staff_created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/concierge-services",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "service_kind": "transfer",
+            "title": "Airport transfer",
+            "booking_reference": "BOOK-SPLIT-1",
+            "vendor_name": "Synthetic Taxi GmbH",
+            "vendor_contact": "INTERNAL-CONTACT dispatcher line",
+            "cost_estimate": 987.65,
+            "service_notes": "INTERNAL-NOTE vendor overcharges, negotiate",
+            "billing_notes": "INTERNAL-BILLING pass through at cost",
+            "patient_visible_note": "Your driver waits at exit B."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{staff_created}");
+    assert_eq!(
+        staff_created["service_notes"],
+        "INTERNAL-NOTE vendor overcharges, negotiate"
+    );
+    assert_eq!(
+        staff_created["patient_visible_note"],
+        "Your driver waits at exit B."
+    );
+
+    // A patient request whose own note staff then try to overwrite.
+    let (status, requested) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/concierge-services",
+        &patient_bearer,
+        Some(json!({
+            "service_kind": "hotel",
+            "title": "Hotel near the clinic",
+            "patient_note": "Ground floor room, please."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{requested}");
+    assert_eq!(requested["patient_note"], "Ground floor room, please.");
+    let request_id = requested["id"].as_str().expect("request id").to_string();
+
+    let (status, staff_view) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/concierge-services/{request_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{staff_view}");
+    assert_eq!(staff_view["patient_note"], "Ground floor room, please.");
+    assert!(staff_view["service_notes"].is_null());
+
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/concierge-services/{request_id}/update"),
+        &pm_bearer,
+        Some(json!({
+            "service_notes": "INTERNAL-NOTE second request",
+            "patient_note": "INTERNAL-OVERWRITE attempt",
+            "cost_estimate": 123.45
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["service_notes"], "INTERNAL-NOTE second request");
+    assert_eq!(saved["patient_note"], "Ground floor room, please.");
+    let stored_patient_note: Option<String> =
+        sqlx::query_scalar("SELECT patient_request_note FROM concierge_services WHERE id = $1")
+            .bind(Uuid::parse_str(&request_id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        stored_patient_note.as_deref(),
+        Some("Ground floor room, please.")
+    );
+
+    let (status, portal) = json_request(
+        &app,
+        "GET",
+        "/api/v1/me/concierge-services",
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{portal}");
+    let serialized = portal.to_string();
+    for hidden in ["INTERNAL", "987.65", "123.45"] {
+        assert!(
+            !serialized.contains(hidden),
+            "{hidden} must not reach the portal: {portal}"
+        );
+    }
+    let items = portal.as_array().expect("portal services");
+    assert_eq!(items.len(), 2);
+    for item in items {
+        for key in [
+            "service_notes",
+            "billing_notes",
+            "vendor_contact",
+            "cost_estimate",
+            "actual_cost",
+            "unit_price",
+            "quantity",
+        ] {
+            assert!(item.get(key).is_none(), "portal item carries {key}: {item}");
+        }
+    }
+    let transfer = items
+        .iter()
+        .find(|item| item["title"] == "Airport transfer")
+        .expect("staff-created service");
+    assert_eq!(
+        transfer["patient_visible_note"],
+        "Your driver waits at exit B."
+    );
+    assert_eq!(transfer["booking_reference"], "BOOK-SPLIT-1");
+    assert_eq!(transfer["vendor_name"], "Synthetic Taxi GmbH");
+    let hotel = items
+        .iter()
+        .find(|item| item["title"] == "Hotel near the clinic")
+        .expect("patient request");
+    assert_eq!(hotel["patient_note"], "Ground floor room, please.");
+    assert!(hotel["patient_visible_note"].is_null());
 }
 
 #[tokio::test]

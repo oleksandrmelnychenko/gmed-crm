@@ -583,20 +583,23 @@ test.describe("patient portal live workflows", () => {
         title: string;
         status: string;
         vendor_name: string | null;
-        vendor_contact: string | null;
-        cost_estimate: string | number | null;
-        service_notes: string | null;
+        vendor_contact?: string | null;
+        cost_estimate?: string | number | null;
+        service_notes?: string | null;
+        patient_note: string | null;
         request_source: string | null;
       }>;
       const created = items.find((item) => item.title === "Hotel near clinic");
       expect(created).toBeDefined();
       expect(created!.status).toBe("cancelled");
       expect(created!.vendor_name).toBe("River Hotel");
-      expect(created!.vendor_contact).toBe("booking@river.example");
-      expect(created!.service_notes).toBe(
+      expect(created!.patient_note).toBe(
         "Need a quiet room close to the clinic for two nights.",
       );
-      expect(String(created!.cost_estimate)).toContain("240");
+      // Release QA S2-1: the portal API carries no internal staff fields.
+      expect(created!.vendor_contact).toBeUndefined();
+      expect(created!.cost_estimate).toBeUndefined();
+      expect(created!.service_notes).toBeUndefined();
       expect(created!.request_source).toBe("patient_portal");
     }).toPass({ timeout: 15_000 });
   });

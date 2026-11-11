@@ -576,12 +576,14 @@ export type PortalConciergeServiceItem = {
   status: string;
   booking_reference: string | null;
   vendor_name: string | null;
-  vendor_contact: string | null;
+  service_address?: string | null;
   starts_at: string | null;
   ends_at: string | null;
-  cost_estimate: string | null;
   currency: string;
-  service_notes: string | null;
+  /** The patient's own note from the request. */
+  patient_note: string | null;
+  /** The note staff wrote for the patient; the internal staff note never reaches the portal. */
+  patient_visible_note: string | null;
   request_source: string;
   completed_at: string | null;
   created_at: string;
