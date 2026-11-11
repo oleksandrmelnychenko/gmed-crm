@@ -54,6 +54,7 @@ export const portalQaUiDe = {
   "chat_connection_own_hint": "Ihre Verbindung zum Chat: Neue Nachrichten kommen sofort an. Das ist nicht der Status Ihres Gesprächspartners.",
   // Paused subscription (owner decision 2026-11-10)
   "portal_paused_appointments_note": "Ihr Abonnement ist pausiert: Bereits vereinbarte Termine sehen Sie hier weiterhin, neue Anfragen und Änderungen sind bis zur Fortsetzung nicht möglich. Bei Fragen schreiben Sie Ihrem Manager im Chat.",
+  "portal_paused_services_note": "Ihr Abonnement ist pausiert: Ihre Serviceanfragen sehen Sie hier weiterhin, und eine offene Anfrage können Sie stornieren. Neue Anfragen sind bis zur Fortsetzung nicht möglich. Bei Fragen schreiben Sie Ihrem Manager im Chat.",
   "portal_paused_subscriptions_note": "Ihr Abonnement ist pausiert. Neue Termin- und Serviceanfragen sind bis zur Fortsetzung geschlossen; vereinbarte Termine, Dokumente, Rechnungen und der Chat mit Ihrem Manager bleiben verfügbar.",
   // Account
   "account_profile_error_name_required": "Bitte geben Sie Ihren Namen an.",
@@ -99,6 +100,7 @@ export const portalQaUiRu = {
   "portal_privacy_data_copy_hint": "Копия данных не прикладывается к запросу: скачайте её кнопкой «Экспортировать мои данные» (она есть и на главной странице портала).",
   "chat_connection_own_hint": "Ваше соединение с чатом: новые сообщения приходят сразу. Это не статус собеседника.",
   "portal_paused_appointments_note": "Ваша подписка приостановлена: уже согласованные визиты по-прежнему видны здесь, новые запросы и изменения недоступны до возобновления. С вопросами напишите менеджеру в чате.",
+  "portal_paused_services_note": "Ваша подписка приостановлена: ваши запросы на сервисы по-прежнему видны здесь, открытый запрос можно отменить. Новые запросы недоступны до возобновления. С вопросами напишите менеджеру в чате.",
   "portal_paused_subscriptions_note": "Ваша подписка приостановлена. Новые запросы на визиты и сервисы закрыты до возобновления; согласованные визиты, документы, счета и чат с менеджером остаются доступными.",
   "account_profile_error_name_required": "Укажите имя.",
 } as const satisfies Record<keyof typeof portalQaUiDe, string>;

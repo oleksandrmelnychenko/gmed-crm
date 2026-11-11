@@ -155,8 +155,10 @@ fn basic_path(path: &str) -> bool {
 
 /// What a patient with a paused subscription still reaches besides the basic
 /// paths: the visits already booked and the own requests (read only), the
-/// subscriptions page, the chat with the team and the notifications. Creating
-/// or withdrawing a request, services and recommendations stay closed.
+/// own concierge service requests (read, and cancelling an open one: owner
+/// decision 2026-11-12), the subscriptions page, the chat with the team and
+/// the notifications. Creating a request or a service, withdrawing an
+/// appointment request and recommendations stay closed.
 fn paused_path(method: &Method, path: &str) -> bool {
     let path = path.strip_prefix("/api/v1").unwrap_or(path);
     let read = method == Method::GET || method == Method::HEAD;
@@ -164,12 +166,21 @@ fn paused_path(method: &Method, path: &str) -> bool {
         && [
             "/me/appointments",
             "/me/appointment-requests",
+            "/me/concierge-services",
             "/me/followup-milestones",
             "/me/subscriptions",
         ]
         .contains(&path))
+        || (method == Method::POST && concierge_service_cancel_path(path))
         || within(path, "/messages")
         || within(path, "/notifications")
+}
+
+/// `/me/concierge-services/{service_id}/cancel`, with exactly one id segment.
+fn concierge_service_cancel_path(path: &str) -> bool {
+    path.strip_prefix("/me/concierge-services/")
+        .and_then(|tail| tail.strip_suffix("/cancel"))
+        .is_some_and(|id| !id.is_empty() && !id.contains('/'))
 }
 
 pub async fn middleware(State(state): State<AppState>, req: Request, next: Next) -> Response {
@@ -239,12 +250,21 @@ mod tests {
         // Writing to the chat and marking a notice read stay possible.
         assert!(paused_path(&Method::POST, "/messages/a/upload"));
         assert!(paused_path(&Method::POST, "/notifications/a/read"));
+        // The own concierge requests stay readable and an open one can be
+        // cancelled (owner decision 2026-11-12); a new one stays refused.
+        assert!(paused_path(&Method::GET, "/me/concierge-services"));
+        assert!(paused_path(
+            &Method::POST,
+            "/api/v1/me/concierge-services/a/cancel"
+        ));
         for (method, path) in [
             (Method::POST, "/me/appointment-requests"),
             (Method::POST, "/me/appointment-requests/a/withdraw"),
             (Method::GET, "/me/recommendations"),
-            (Method::GET, "/me/concierge-services"),
             (Method::POST, "/me/concierge-services"),
+            (Method::POST, "/me/concierge-services//cancel"),
+            (Method::POST, "/me/concierge-services/a/b/cancel"),
+            (Method::GET, "/me/concierge-services/a/cancel"),
             (Method::GET, "/me/next-actions"),
             (Method::GET, "/messagesX"),
         ] {

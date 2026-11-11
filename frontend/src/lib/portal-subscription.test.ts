@@ -30,10 +30,10 @@ describe("paused subscription (owner decision 2026-11-10)", () => {
   it("keeps agreed visits, the subscriptions page, the chat and notifications open", () => {
     const open = listPatientPortalNavItems()
       .filter((item) => isBasicPortalRoute(item.to) || isPausedPortalRoute(item.to)).map((item) => item.to);
-    for (const path of ["/appointments", "/subscriptions", "/chat", "/notifications", "/documents", "/invoices"]) {
+    for (const path of ["/appointments", "/services", "/subscriptions", "/chat", "/notifications", "/documents", "/invoices"]) {
       expect(open, path).toContain(path);
     }
-    for (const path of ["/", "/services", "/recommendations", "/feedback"]) {
+    for (const path of ["/", "/recommendations", "/feedback", "/services-extra"]) {
       expect(isBasicPortalRoute(path) || isPausedPortalRoute(path), path).toBe(false);
     }
   });

@@ -37,6 +37,42 @@ async fn request(
     (status, serde_json::from_slice(&body).unwrap_or(json!(null)))
 }
 
+async fn post(
+    app: &axum::Router,
+    token: &str,
+    path: &str,
+    patient: Uuid,
+    body: Value,
+) -> (StatusCode, Value) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1{path}"))
+                .header("Authorization", token)
+                .header("X-Patient-Id", patient.to_string())
+                .header("Content-Type", "application/json")
+                .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
+    (status, serde_json::from_slice(&body).unwrap_or(json!(null)))
+}
+
+fn concierge_request(title: &str) -> Value {
+    json!({
+        "service_kind": "transfer",
+        "title": title,
+        "starts_at": "2099-04-22T09:00:00Z"
+    })
+}
+
 fn bearer(user: Uuid, role: &str) -> String {
     format!(
         "Bearer {}",
@@ -271,6 +307,20 @@ async fn a_paused_subscription_keeps_agreed_visits_and_the_chat_open() {
     assign(pool, patient_id, user_id, ctx.admin_id, "manual").await;
     let token = bearer(user_id, "patient");
     let (assigned, _order) = subscription(pool, patient_id, ctx.admin_id).await;
+    // Two concierge requests made while the subscription was active.
+    let mut requested = Vec::new();
+    for title in ["Synthetic airport pickup", "Synthetic hotel transfer"] {
+        let (status, body) = post(
+            &ctx.app,
+            &token,
+            "/me/concierge-services",
+            patient_id,
+            concierge_request(title),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        requested.push(body["id"].as_str().expect("service id").to_string());
+    }
     sqlx::query("UPDATE patient_service_packages SET status='paused' WHERE id=$1")
         .bind(assigned)
         .execute(pool)
@@ -295,11 +345,52 @@ async fn a_paused_subscription_keeps_agreed_visits_and_the_chat_open() {
         let (status, body) = request(&ctx.app, &token, path, Some(patient_id)).await;
         assert_eq!(status, StatusCode::OK, "{path}: {body}");
     }
-    for path in ["/me/recommendations", "/me/concierge-services"] {
-        let (status, body) = request(&ctx.app, &token, path, Some(patient_id)).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
-        assert_eq!(body["error"], "subscription_required");
+    let (status, body) = request(&ctx.app, &token, "/me/recommendations", Some(patient_id)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"], "subscription_required");
+
+    // Owner decision 2026-11-12: the own concierge requests stay readable
+    // and an open one can be cancelled; a new one is refused.
+    let (status, body) =
+        request(&ctx.app, &token, "/me/concierge-services", Some(patient_id)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let listed: Vec<&str> = body
+        .as_array()
+        .expect("service list")
+        .iter()
+        .filter_map(|service| service["id"].as_str())
+        .collect();
+    for id in &requested {
+        assert!(listed.contains(&id.as_str()), "{id} missing in {body}");
     }
+    let (status, body) = post(
+        &ctx.app,
+        &token,
+        &format!("/me/concierge-services/{}/cancel", requested[0]),
+        patient_id,
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["status"], "cancelled", "{body}");
+    let (status, body) = post(
+        &ctx.app,
+        &token,
+        "/me/concierge-services",
+        patient_id,
+        concierge_request("Synthetic new request during the pause"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"], "subscription_required");
+    let open_requests: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM concierge_services WHERE patient_id=$1 AND status <> 'cancelled'",
+    )
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(open_requests, 1);
 
     // A new appointment request is a new action: refused.
     let response = ctx
@@ -336,7 +427,11 @@ async fn a_paused_subscription_keeps_agreed_visits_and_the_chat_open() {
         .execute(pool)
         .await
         .unwrap();
-    for path in ["/me/appointments", "/messages/conversations"] {
+    for path in [
+        "/me/appointments",
+        "/me/concierge-services",
+        "/messages/conversations",
+    ] {
         let (status, body) = request(&ctx.app, &token, path, Some(patient_id)).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
     }

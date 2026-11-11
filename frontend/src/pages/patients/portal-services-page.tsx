@@ -34,6 +34,9 @@ import {
   type StatusTone,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { usePortalPatientId } from "@/lib/portal-patient-context";
+import { isPortalSubscriptionPaused } from "@/lib/portal-subscription";
 import { appDateKey, berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { uiText, useLang, type Lang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
@@ -320,6 +323,10 @@ export function PatientServicesPage() {
     portalStatusLabel,
   } = usePortalLabels();
   const { lang, t } = useLang();
+  const { user } = useAuth();
+  // Paused subscription (owner decision 2026-11-12): the own requests stay
+  // readable and an open one can be cancelled; no new request.
+  const subscriptionPaused = isPortalSubscriptionPaused(user ?? null, usePortalPatientId(user?.id));
   const [pageState, dispatchPageState] = useReducer(
     patientServicesReducer,
     undefined,
@@ -368,15 +375,17 @@ export function PatientServicesPage() {
       dispatchPageState({ refreshing: !initialLoad });
 
       try {
+        // The catalogue serves only the request form, which a pause closes
+        // (and the server refuses the catalogue then).
         const [rows, taxonomy] = await Promise.all([
           fetchPortalServices(),
-          fetchProviderTaxonomy("non_medical"),
+          subscriptionPaused ? Promise.resolve(null) : fetchProviderTaxonomy("non_medical"),
         ]);
         if (cancelled) return;
         startTransition(() => {
           dispatchPageState({
             services: rows,
-            taxonomyLeaves: taxonomy.nodes.filter((node) => node.is_active),
+            taxonomyLeaves: taxonomy ? taxonomy.nodes.filter((node) => node.is_active) : [],
             error: "",
             loading: false,
             refreshing: false,
@@ -396,7 +405,7 @@ export function PatientServicesPage() {
     return () => {
       cancelled = true;
     };
-  }, [version, t.services_failed_load]);
+  }, [version, subscriptionPaused, t.services_failed_load]);
 
   const openItems = useMemo(
     () => services.filter((item) => !["completed", "cancelled"].includes(item.status)),
@@ -491,7 +500,7 @@ export function PatientServicesPage() {
   return (
     <div className="w-full min-w-0 max-w-none space-y-3">
       <PageHeader
-        pageAction={<Button onClick={() => setRequestOpen(true)}><Plus className="size-4" />{t.services_request_title}</Button>}
+        pageAction={subscriptionPaused ? undefined : <Button onClick={() => setRequestOpen(true)}><Plus className="size-4" />{t.services_request_title}</Button>}
         title={t.services_title}
         description={t.services_description}
         actions={
@@ -508,6 +517,12 @@ export function PatientServicesPage() {
 
       {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
+
+      {subscriptionPaused ? (
+        <Banner tone="warning" withIcon>
+          <span data-testid="portal-services-paused">{uiText("portal_paused_services_note", lang)}</span>
+        </Banner>
+      ) : null}
 
       <PortalSummary items={[
         { label: t.services_open_requests, value: openItems.length, visible: openItems.length > 0 },
@@ -603,7 +618,7 @@ export function PatientServicesPage() {
           </Section>
         </section>
 
-        <Dialog open={requestOpen} onOpenChange={(open) => {
+        <Dialog open={requestOpen && !subscriptionPaused} onOpenChange={(open) => {
           if (requestBusy) return;
           setRequestOpen(open);
           if (!open) dispatchPageState({ form: blankServiceRequestForm(), requestError: "" });
