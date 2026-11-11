@@ -10058,6 +10058,142 @@ async fn revoking_patient_portal_release_hides_document_from_me_workspace() {
     assert_eq!(body["message"], "Document not found");
 }
 
+/// Owner 2026-11-11 (QA F4): a new version of a document released to the
+/// patient is released at once, with one «document released» notice; a
+/// document never released, or whose release staff revoked, is not.
+#[tokio::test]
+async fn a_new_version_of_a_released_document_is_released_automatically() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-portal-version");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+
+    let generate = |appointment_id: Uuid, replace: Option<String>| {
+        let app = app.clone();
+        let admin_bearer = admin_bearer.clone();
+        async move {
+            let mut body = json!({
+                "template_id": "treatment_plan",
+                "patient_id": patient_id,
+                "appointment_id": appointment_id,
+                "language": "de"
+            });
+            if let Some(replace) = replace {
+                body["replace_document_id"] = json!(replace);
+            }
+            let (status, body) = json_request(
+                &app,
+                "POST",
+                "/api/v1/documents/generate",
+                &admin_bearer,
+                Some(body),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            body["id"].as_str().unwrap().to_string()
+        }
+    };
+    let release = |document_id: String| {
+        let app = app.clone();
+        let admin_bearer = admin_bearer.clone();
+        async move {
+            let (status, body) = json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/documents/{document_id}/portal-release"),
+                &admin_bearer,
+                Some(json!({ "channel": "patient_portal", "requires_confirmation": false })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+        }
+    };
+    let portal_ids = || {
+        let app = app.clone();
+        let patient_bearer = patient_bearer.clone();
+        async move {
+            let (status, body) =
+                json_request(&app, "GET", "/api/v1/me/documents", &patient_bearer, None).await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            body.as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|item| item["id"].as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        }
+    };
+    let notices = |document_id: String| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM user_notifications WHERE user_id = $1 AND kind = 'document_release' AND entity_id = $2::uuid",
+            )
+            .bind(patient_user_id)
+            .bind(document_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+
+    // Released v1 → regenerated v2 is in the portal without a staff release.
+    let released_visit = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("{tag}-a"),
+    )
+    .await;
+    let v1 = generate(released_visit, None).await;
+    release(v1.clone()).await;
+    let v2 = generate(released_visit, Some(v1.clone())).await;
+    let visible = portal_ids().await;
+    assert!(visible.contains(&v2), "{visible:?}");
+    assert!(!visible.contains(&v1), "{visible:?}");
+    assert_eq!(notices(v2.clone()).await, 1);
+
+    // A release staff revoked is not followed by the next version.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{v2}/portal-release/revoke"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let v3 = generate(released_visit, Some(v2.clone())).await;
+    assert!(!portal_ids().await.contains(&v3));
+    assert_eq!(notices(v3).await, 0);
+
+    // A document never released: its new version stays hidden.
+    let hidden_visit = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("{tag}-b"),
+    )
+    .await;
+    let u1 = generate(hidden_visit, None).await;
+    let u2 = generate(hidden_visit, Some(u1.clone())).await;
+    let visible = portal_ids().await;
+    assert!(
+        !visible.contains(&u1) && !visible.contains(&u2),
+        "{visible:?}"
+    );
+    assert_eq!(notices(u2).await, 0);
+}
+
 /// QA 2026-10-31: a withdrawn document does not come back. Staff withdraw it
 /// while one parent's assignment has ended; that parent's share ends too, the
 /// visibility goes back, and a login linked later does not get it either.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ESTIMATE_OUTDATED_REASON,
   isOrderReadinessGateApplicable,
   isOverageDeclineBlockingReason,
   isPatientInvoiceBlockingReason,
@@ -107,6 +108,13 @@ describe("resolveOrderBlockingReason", () => {
 
   it("returns null for unknown values so the localized generic fallback is used", () => {
     expect(resolveOrderBlockingReason("Unexpected future blocker")).toBeNull();
+  });
+});
+
+describe("outdated estimate blocker (owner 2026-11-11)", () => {
+  it("is translated and opens the services", () => {
+    expect(resolveOrderBlockingReason(ESTIMATE_OUTDATED_REASON)).toEqual({ key: "orders_blocking_estimate_outdated" });
+    expect(orderBlockingReasonSection(ESTIMATE_OUTDATED_REASON)).toBe("services");
   });
 });
 

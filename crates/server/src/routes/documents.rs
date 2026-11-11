@@ -16164,6 +16164,10 @@ pub(crate) async fn persist_document_file(
             ));
     }
 
+    // A new version of a document already released to the patient follows the
+    // release (owner 2026-11-11).
+    release_new_version_like_predecessor(state, document_id, input).await;
+
     // A collected lead document advances compliance 'pending' -> 'documents_sent'
     // (see docs/lead-status-strategy-ua.md). Non-fatal; signing the DSGVO form
     // later advances it to 'signed'. Medical files of the client are not
@@ -16185,6 +16189,185 @@ pub(crate) async fn persist_document_file(
     }
 
     Ok((document_id, file_size, original_filename, storage_key))
+}
+
+/// The templates of which an order (or, for the framework contract, a
+/// patient) holds one current document: a newly generated one is the next
+/// version of the earlier one even when it was not made as its replacement.
+const ONE_PER_ORDER_TEMPLATES: [&str; 3] =
+    ["single_order", "order_cost_estimate", "framework_contract"];
+
+/// The earlier version of `document_id` that is released to the patient
+/// right now (an open portal share), if any: the document it replaces, else —
+/// for a one-per-order template — the newest earlier document of the same
+/// template, order and patient. A release staff revoked is no release: such a
+/// version is not followed.
+async fn released_predecessor(
+    state: &AppState,
+    document_id: Uuid,
+    input: &NewStoredDocument<'_>,
+) -> Result<Option<(Uuid, bool)>, sqlx::Error> {
+    let released = |id: Uuid| async move {
+        sqlx::query_scalar::<_, bool>(
+            r#"SELECT EXISTS (
+                   SELECT 1 FROM documents d
+                   JOIN document_shares ds ON ds.document_id = d.id
+                   WHERE d.id = $1
+                     AND d.visibility = 'patient_visible'
+                     AND ds.channel = 'patient_portal'
+                     AND ds.revoked_at IS NULL)"#,
+        )
+        .bind(id)
+        .fetch_one(&state.db)
+        .await
+    };
+    if let Some(replaced) = input.replaces_document_id {
+        return Ok(released(replaced).await?.then_some((replaced, true)));
+    }
+    let (Some(template), Some(patient_id)) = (input.generated_template_id, input.patient_id) else {
+        return Ok(None);
+    };
+    if !ONE_PER_ORDER_TEMPLATES.contains(&template) {
+        return Ok(None);
+    }
+    let earlier: Option<Uuid> = sqlx::query_scalar(
+        r#"SELECT d.id FROM documents d
+           WHERE d.id <> $1
+             AND d.generated_template_id = $2
+             AND d.patient_id = $3
+             AND d.order_id IS NOT DISTINCT FROM $4
+             AND d.status <> 'archived'
+             AND d.visibility = 'patient_visible'
+             AND EXISTS (SELECT 1 FROM document_shares ds
+                         WHERE ds.document_id = d.id
+                           AND ds.channel = 'patient_portal'
+                           AND ds.revoked_at IS NULL)
+           ORDER BY d.created_at DESC, d.id DESC
+           LIMIT 1"#,
+    )
+    .bind(document_id)
+    .bind(template)
+    .bind(patient_id)
+    .bind(input.order_id)
+    .fetch_optional(&state.db)
+    .await?;
+    Ok(earlier.map(|id| (id, false)))
+}
+
+/// A new version of a document the patient already has in the portal is
+/// released to the same logins at once (owner 2026-11-11, QA F4: the new
+/// signed Einzelauftrag and the new KV stayed hidden). A version that
+/// replaces the earlier one takes its release over (the portal shows the
+/// current version only); a new document of a one-per-order template is
+/// released beside the earlier one, which the portal then marks as no
+/// longer current. A document never released, or whose release staff
+/// revoked, stays as it is. Each login gets the «document released» notice
+/// once. Best effort: a failure is logged and leaves the release to staff.
+async fn release_new_version_like_predecessor(
+    state: &AppState,
+    document_id: Uuid,
+    input: &NewStoredDocument<'_>,
+) {
+    let Some(patient_id) = input.patient_id else {
+        return;
+    };
+    let predecessor = match released_predecessor(state, document_id, input).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::error!(%error, %document_id, "find the released earlier version");
+            return;
+        }
+    };
+    let (earlier, replaces) = predecessor;
+    let recipients: Result<Vec<Uuid>, sqlx::Error> = if replaces {
+        match move_portal_release_to_version(&state.db, earlier, document_id).await {
+            Ok(_) => {
+                sqlx::query_scalar(
+                    r#"SELECT DISTINCT shared_with_user_id FROM document_shares
+                   WHERE document_id = $1 AND channel = 'patient_portal'
+                     AND revoked_at IS NULL AND shared_with_user_id IS NOT NULL"#,
+                )
+                .bind(document_id)
+                .fetch_all(&state.db)
+                .await
+            }
+            Err(error) => Err(error),
+        }
+    } else {
+        sqlx::query_scalar(
+            r#"WITH released AS (
+                   UPDATE documents SET visibility = 'patient_visible' WHERE id = $2
+               )
+               INSERT INTO document_shares (
+                   document_id, shared_with_user_id, shared_by, channel, requires_confirmation
+               )
+               SELECT DISTINCT ON (ds.shared_with_user_id)
+                      $2, ds.shared_with_user_id, ds.shared_by, 'patient_portal',
+                      ds.requires_confirmation
+               FROM document_shares ds
+               WHERE ds.document_id = $1
+                 AND ds.channel = 'patient_portal'
+                 AND ds.revoked_at IS NULL
+                 AND ds.shared_with_user_id IS NOT NULL
+               ORDER BY ds.shared_with_user_id, ds.shared_at DESC
+               RETURNING shared_with_user_id"#,
+        )
+        .bind(earlier)
+        .bind(document_id)
+        .fetch_all(&state.db)
+        .await
+    };
+    let recipients = match recipients {
+        Ok(recipients) => recipients,
+        Err(error) => {
+            tracing::error!(%error, %document_id, %earlier, "release the new version to the portal");
+            return;
+        }
+    };
+    let auto_name = input.auto_name.trim();
+    for recipient_id in &recipients {
+        if let Ok(notification_id) = sqlx::query_scalar::<_, Uuid>(
+            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+               VALUES ($1, 'document_release', $2, $3, 'document', $4, $5)
+               RETURNING id"#,
+        )
+        .bind(recipient_id)
+        .bind(format!("New document released: {auto_name}"))
+        .bind("A new document is available in your patient portal.")
+        .bind(document_id)
+        .bind(json!({ "document_name": auto_name }))
+        .fetch_one(&state.db)
+        .await
+        {
+            crate::realtime::publish_notification_event(
+                state,
+                *recipient_id,
+                "notification.created",
+                Some(notification_id),
+                json!({
+                    "entity_type": "document",
+                    "entity_id": document_id,
+                }),
+            )
+            .await;
+        }
+    }
+    if recipients.is_empty() {
+        return;
+    }
+    state.audit_sender.try_send(audit::domain_event(
+        "release_document_version_to_patient_portal",
+        Some(input.uploaded_by),
+        "document",
+        Some(document_id),
+        json!({
+            "patient_id": patient_id,
+            "previous_version_id": earlier,
+            "replaces_previous": replaces,
+            "recipient_count": recipients.len(),
+        }),
+    ));
 }
 
 /// Store only the private upload blob. Callers that need the

@@ -1786,6 +1786,11 @@ async fn load_order_transition_gate(
             if !process_gates.execution_ready {
                 reasons.extend(process_gates.blocking_reasons.clone());
             }
+            // Execution starts on the estimate the client signed for the
+            // order as it stands (owner 2026-11-11).
+            if load_estimate_outdated(state, order_id).await?.is_some() {
+                reasons.push(ESTIMATE_OUTDATED_REASON.to_string());
+            }
             let planning = load_order_planning_readiness(state, order_id).await?;
             if !planning.planning_ready {
                 reasons.extend(planning.blocking_reasons);
@@ -1885,17 +1890,116 @@ async fn load_order_lifecycle(
 }
 
 fn lifecycle_gate_err(phase: &str, reasons: &[String]) -> axum::response::Response {
-    (
-        StatusCode::UNPROCESSABLE_ENTITY,
-        Json(serde_json::json!({
-            "error": StatusCode::UNPROCESSABLE_ENTITY
-                .canonical_reason()
-                .unwrap_or("error"),
-            "message": format!("Order cannot move to {phase} yet"),
-            "blocking_reasons": reasons,
-        })),
+    let mut body = serde_json::json!({
+        "error": StatusCode::UNPROCESSABLE_ENTITY
+            .canonical_reason()
+            .unwrap_or("error"),
+        "message": format!("Order cannot move to {phase} yet"),
+        "blocking_reasons": reasons,
+    });
+    // The outdated estimate has its own code (owner 2026-11-11): a new
+    // estimate must be made and signed.
+    if reasons
+        .iter()
+        .any(|reason| reason == ESTIMATE_OUTDATED_REASON)
+    {
+        body["code"] = serde_json::json!(ESTIMATE_OUTDATED_CODE);
+    }
+    (StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response()
+}
+
+/// The blocking reason of an outdated signed estimate (owner 2026-11-11).
+pub(crate) const ESTIMATE_OUTDATED_REASON: &str =
+    "The signed cost estimate no longer matches the order; a new estimate must be signed";
+const ESTIMATE_OUTDATED_CODE: &str = "estimate_outdated";
+
+/// The stale-estimate rule on the order (owner 2026-10-25; QA 2026-11-11,
+/// F3): the order's current quote is accepted, but the money it states is no
+/// longer the order's, or the terms its newest estimate document states
+/// changed since it was made. Money means the lines' quantities, unit prices
+/// and VAT rates (so the sum and the VAT): a renamed service or a note leaves
+/// the estimate current (owner 2026-11-11). Every quoted line must still be
+/// a line of the order, and every open (not invoiced, not cancelled) line of
+/// the order must be quoted. The terms are the prepayment and the
+/// contracting party (`prepayment_terms_changed_at`,
+/// `contracting_party_changed_at`). `None` while the estimate is current.
+async fn load_estimate_outdated(
+    state: &AppState,
+    order_id: Uuid,
+) -> Result<Option<serde_json::Value>, axum::response::Response> {
+    sqlx::query_scalar::<_, serde_json::Value>(
+        r#"WITH current_quote AS (
+               SELECT q.id, q.quote_number, q.status, q.total_gross, q.line_items
+               FROM quotes q
+               WHERE q.order_id = $1 AND q.status <> 'superseded'
+               ORDER BY q.created_at DESC, q.id DESC
+               LIMIT 1
+           ), quoted AS (
+               SELECT ROUND(CASE WHEN line.value ->> 'quantity' ~ '^-?[0-9]+(\.[0-9]+)?$'
+                                 THEN (line.value ->> 'quantity')::numeric END, 4) AS quantity,
+                      ROUND(CASE WHEN line.value ->> 'unit_price' ~ '^-?[0-9]+(\.[0-9]+)?$'
+                                 THEN (line.value ->> 'unit_price')::numeric END, 2) AS unit_price,
+                      ROUND(CASE WHEN line.value ->> 'vat_rate' ~ '^-?[0-9]+(\.[0-9]+)?$'
+                                 THEN (line.value ->> 'vat_rate')::numeric END, 2) AS vat_rate
+               FROM current_quote q
+               CROSS JOIN LATERAL jsonb_array_elements(
+                   CASE WHEN jsonb_typeof(q.line_items) = 'array' THEN q.line_items
+                        ELSE '[]'::jsonb END) AS line(value)
+           ), order_lines AS (
+               SELECT ROUND(s.quantity::numeric, 4) AS quantity,
+                      ROUND(s.unit_price_snapshot::numeric, 2) AS unit_price,
+                      ROUND(s.vat_rate_snapshot::numeric, 2) AS vat_rate,
+                      s.status
+               FROM order_leistungen s
+               WHERE s.order_id = $1 AND s.status <> 'cancelled'
+           ), estimate AS (
+               SELECT COALESCE(
+                          (SELECT original.created_at FROM documents original
+                           WHERE original.id = d.replaces_document_id
+                             AND d.ursprung IN ('paper_signature', 'electronic_signature')),
+                          d.created_at) AS generated_at
+               FROM documents d
+               WHERE d.order_id = $1
+                 AND d.generated_template_id = 'order_cost_estimate'
+                 AND d.status = 'active'
+                 AND d.file_deleted_at IS NULL
+               ORDER BY d.created_at DESC, d.id DESC
+               LIMIT 1
+           )
+           SELECT jsonb_build_object(
+                      'quote_id', q.id,
+                      'quote_number', q.quote_number,
+                      'quote_total_gross', q.total_gross::text,
+                      'order_total_gross', COALESCE(order_service_total_gross(o.id), o.total_estimated)::text)
+           FROM current_quote q
+           JOIN orders o ON o.id = $1
+           WHERE q.status = 'accepted'
+             AND (
+                 EXISTS (
+                     SELECT quantity, unit_price, vat_rate FROM quoted
+                     EXCEPT ALL
+                     SELECT quantity, unit_price, vat_rate FROM order_lines)
+                 OR EXISTS (
+                     SELECT quantity, unit_price, vat_rate FROM order_lines
+                     WHERE status <> 'invoiced'
+                     EXCEPT ALL
+                     SELECT quantity, unit_price, vat_rate FROM quoted)
+                 OR EXISTS (
+                     SELECT 1 FROM estimate e
+                     WHERE GREATEST(o.prepayment_terms_changed_at, o.contracting_party_changed_at)
+                           > e.generated_at)
+             )"#,
     )
-        .into_response()
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, %order_id, "load outdated estimate");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load order process gates",
+        )
+    })
 }
 
 fn normalize_optional_text(value: Option<String>) -> Option<String> {
@@ -2080,48 +2184,11 @@ async fn load_order_process_readiness(
         tracing::error!(%error,"load order payment tracking");
         err(StatusCode::INTERNAL_SERVER_ERROR,"Failed to load payment tracking")
     })?.unwrap_or(serde_json::Value::Null);
-    // The stale-estimate rule (owner 2026-10-25) on the order: the accepted
-    // quote no longer states the order's sum, or the newest estimate document
-    // no longer states its terms. The order says so and asks for a new,
-    // signed estimate (QA 2026-11-11, F3: KV stayed «Принято» with the old
-    // sum and nothing said it was outdated). Not a gate: the new estimate is
-    // made and signed while the order goes on.
-    let estimate_outdated: serde_json::Value = sqlx::query_scalar(
-        r#"SELECT jsonb_build_object(
-                      'quote_id', q.id,
-                      'quote_number', q.quote_number,
-                      'quote_total_gross', q.total_gross::text,
-                      'order_total_gross', COALESCE(order_service_total_gross(o.id), o.total_estimated)::text)
-           FROM quotes q
-           JOIN orders o ON o.id = q.order_id
-           WHERE q.order_id = $1
-             AND q.status = 'accepted'
-             AND NOT EXISTS (
-                 SELECT 1 FROM quotes newer
-                 WHERE newer.order_id = q.order_id AND newer.status <> 'superseded'
-                   AND (newer.created_at, newer.id) > (q.created_at, q.id))
-             AND (COALESCE(ABS(q.total_gross - COALESCE(order_service_total_gross(o.id), o.total_estimated)) > 0.01, false)
-                  OR (SELECT document_terms_current(d.id)
-                      FROM documents d
-                      WHERE d.order_id = q.order_id
-                        AND d.generated_template_id = 'order_cost_estimate'
-                        AND d.status = 'active'
-                        AND d.file_deleted_at IS NULL
-                      ORDER BY d.created_at DESC, d.id DESC
-                      LIMIT 1) IS FALSE)
-           LIMIT 1"#,
-    )
-    .bind(order_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|error| {
-        tracing::error!(%error, %order_id, "load outdated estimate");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to load order process gates",
-        )
-    })?
-    .unwrap_or(serde_json::Value::Null);
+    // The stale-estimate rule on the order (QA 2026-11-11, F3): shown in the
+    // workspace; it blocks the start of execution (`load_order_transition_gate`).
+    let estimate_outdated = load_estimate_outdated(state, order_id)
+        .await?
+        .unwrap_or(serde_json::Value::Null);
     let execution_ready = blocking_reasons.is_empty();
 
     Ok(OrderProcessReadiness {

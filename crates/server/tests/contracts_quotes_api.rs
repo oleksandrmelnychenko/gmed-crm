@@ -1506,6 +1506,164 @@ async fn a_new_quote_neither_replaces_a_signed_estimate_nor_rides_on_its_signatu
     assert_eq!(status, StatusCode::OK, "{body}");
 }
 
+/// Owner 2026-11-11 (QA F3): an outdated signed estimate blocks the start of
+/// execution until a new estimate is signed; a renamed service at the same
+/// price leaves it current.
+#[tokio::test]
+async fn an_outdated_signed_estimate_blocks_execution_until_a_new_one_is_signed() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("estimate-outdated-gate");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm_bearer,
+        Some(json!({ "patient_id": patient_id, "needs_description": "Estimate gate" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let order_id = body["id"].as_str().unwrap().to_string();
+    let order_uuid = Uuid::parse_str(&order_id).unwrap();
+    let add_service = |description: &'static str, price: f64| {
+        let app = app.clone();
+        let pm_bearer = pm_bearer.clone();
+        let path = format!("/api/v1/orders/{order_id}/leistungen");
+        async move {
+            let (status, body) = json_request(
+                &app,
+                "POST",
+                &path,
+                &pm_bearer,
+                Some(json!({
+                    "description": description,
+                    "quantity": 1.0,
+                    "unit_price": price,
+                    "provider_id": provider_id,
+                    "doctor_id": doctor_id
+                })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CREATED, "{body}");
+            body["id"].as_str().unwrap().to_string()
+        }
+    };
+    let first_service = add_service("Gate service", 100.0).await;
+
+    let new_quote = || {
+        let app = app.clone();
+        let pm_bearer = pm_bearer.clone();
+        let path = format!("/api/v1/orders/{order_id}/quotes");
+        async move {
+            let (status, body) =
+                json_request(&app, "POST", &path, &pm_bearer, Some(json!({}))).await;
+            assert!(status.is_success(), "{body}");
+            body["id"].as_str().unwrap().to_string()
+        }
+    };
+    let set_status = |quote_id: String, status: &'static str| {
+        let app = app.clone();
+        let pm_bearer = pm_bearer.clone();
+        async move {
+            json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/quotes/{quote_id}/status"),
+                &pm_bearer,
+                Some(json!({ "status": status })),
+            )
+            .await
+        }
+    };
+    let outdated = || {
+        let app = app.clone();
+        let pm_bearer = pm_bearer.clone();
+        let path = format!("/api/v1/orders/{order_id}");
+        async move {
+            let (status, body) = json_request(&app, "GET", &path, &pm_bearer, None).await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            body["process_gates"]["estimate_outdated"].clone()
+        }
+    };
+    let start_execution = || {
+        let app = app.clone();
+        let pm_bearer = pm_bearer.clone();
+        let path = format!("/api/v1/orders/{order_id}/phase");
+        async move {
+            json_request(
+                &app,
+                "POST",
+                &path,
+                &pm_bearer,
+                Some(json!({ "phase": "execution" })),
+            )
+            .await
+        }
+    };
+    let names_estimate = |body: &Value| {
+        body["blocking_reasons"].as_array().is_some_and(|reasons| {
+            reasons.iter().any(|reason| {
+                reason
+                    .as_str()
+                    .is_some_and(|text| text.contains("signed cost estimate"))
+            })
+        })
+    };
+
+    let first = new_quote().await;
+    support::seed_signed_order_estimate(&pool, order_uuid).await;
+    let (status, body) = set_status(first.clone(), "accepted").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    sqlx::query("UPDATE orders SET phase = 'intake' WHERE id = $1")
+        .bind(order_uuid)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(outdated().await.is_null());
+
+    // A renamed service at the same price: the estimate stays current.
+    sqlx::query(
+        "UPDATE order_leistungen SET description = 'Gate service (renamed)' WHERE id = $1::uuid",
+    )
+    .bind(&first_service)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(outdated().await.is_null());
+    let (_, body) = start_execution().await;
+    assert!(!names_estimate(&body), "{body}");
+    assert_ne!(body["code"], "estimate_outdated", "{body}");
+
+    // A new service changes the money: the start of execution is refused.
+    add_service("Second gate service", 50.0).await;
+    let stale = outdated().await;
+    assert_eq!(stale["quote_id"], json!(first), "{stale}");
+    let (status, body) = start_execution().await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "estimate_outdated", "{body}");
+    assert!(names_estimate(&body), "{body}");
+
+    // A new quote with its signed estimate clears it.
+    let second = new_quote().await;
+    assert_ne!(second, first);
+    support::seed_signed_order_estimate(&pool, order_uuid).await;
+    let (status, body) = set_status(second, "accepted").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(outdated().await.is_null());
+    let (_, body) = start_execution().await;
+    assert!(!names_estimate(&body), "{body}");
+    assert_ne!(body["code"], "estimate_outdated", "{body}");
+}
+
 #[tokio::test]
 async fn quote_commercial_invariants_use_persisted_order_lines() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
