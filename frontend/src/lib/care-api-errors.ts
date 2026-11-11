@@ -28,4 +28,6 @@ export const CARE_API_ERROR_KEYS: Record<string, string> = {
   reminder_no_appointment_access: "api_reminder_no_appointment_access",
   // The client's signature of the single order needs its signed document (orders.rs).
   order_signature_evidence_required: "api_orders_signature_evidence_required",
+  // GMED's signature waits for the signed KÜE of the order (owner decision 2026-11-12).
+  order_agency_signature_waits_for_cost_coverage: "api_orders_agency_signature_waits_for_cost_coverage",
 };

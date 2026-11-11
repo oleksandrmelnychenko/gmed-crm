@@ -13,6 +13,7 @@ export const careUiDe = {
   "api_reminder_interpreter_not_booked": "Dolmetscher können nur an Termine erinnert werden, für die sie gebucht sind.",
   "api_reminder_no_appointment_access": "Die gewählte Person hat keinen Zugriff auf diesen Termin oder den Patienten.",
   "api_orders_signature_evidence_required": "Die Unterschrift des Kunden unter dem Einzelauftrag zählt nur mit unterschriebenem Dokument: Laden Sie den Scan des unterschriebenen Exemplars hoch („Auf Papier unterschrieben“) oder lassen Sie ihn elektronisch unterschreiben.",
+  "api_orders_agency_signature_waits_for_cost_coverage": "GMED bestätigt den Einzelauftrag erst, wenn die unterschriebene Kostenübernahmeerklärung dieses Auftrags vorliegt. Die GMED-Unterschrift wird mit der unterschriebenen Kostenübernahmeerklärung gesetzt.",
   // Patient card → curators (QA C-14)
   "patients_curator_not_selected": "Nicht ausgewählt",
   // Appointment workspace: the tab with the interpreter report (QA C-17)
@@ -50,6 +51,7 @@ export const careUiRu = {
   "api_reminder_interpreter_not_booked": "Переводчику можно напомнить только о приёме, на который он назначен.",
   "api_reminder_no_appointment_access": "У выбранного сотрудника нет доступа к этому приёму или пациенту.",
   "api_orders_signature_evidence_required": "Подпись клиента под заказом фиксируется только подписанным документом: загрузите скан подписанного экземпляра («Подписано на бумаге») или подпишите его электронно.",
+  "api_orders_agency_signature_waits_for_cost_coverage": "GMED подтверждает заказ (Einzelauftrag) только после подписанного заявления о принятии расходов (Kostenübernahmeerklärung) этого заказа. Подпись GMED ставится вместе с подписанным заявлением.",
   "patients_curator_not_selected": "Не выбран",
   "appointments_workspace_tab_clinical_report": "Клиника и отчёт",
   "appointments_workspace_tab_interpreter_report": "Отчёт переводчика",

@@ -20,6 +20,10 @@ fn database(_: sqlx::Error) -> &'static str {
 
 const REVIEW_PREFIX: &str = "Prüfung erforderlich – ";
 
+/// Key of the signature effects (audit context) that records GMED's
+/// signature on an Einzelauftrag waiting for the order's KÜE.
+const AGENCY_WAITS_FOR_COST_COVERAGE: &str = "order_agency_signature_waits_for_cost_coverage";
+
 /// Visibility of a bundle: patient-visible only if every covered document is;
 /// otherwise internal. Medical if any document is medical.
 async fn bundle_classification(
@@ -400,6 +404,21 @@ pub(super) async fn apply_business_effects(
         && let Some(order_id) = order_id
         && (client_signed || agency_signed)
     {
+        // Owner decision 2026-11-12 (QA L11): the KÜE says GMED confirms the
+        // Einzelauftrag only once the signed Kostenübernahmeerklärung is
+        // there. While a KÜE of the order is unsigned, GMED's signature waits;
+        // the KÜE's signature sets it (see the branch below).
+        let agency_waits = agency_signed
+            && sqlx::query_scalar::<_, bool>(super::ORDER_COST_COVERAGE_PENDING_SQL)
+                .bind(order_id)
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(database)?;
+        let agency_signed = agency_signed && !agency_waits;
+        if agency_waits {
+            effects["order_id"] = json!(order_id);
+            effects[AGENCY_WAITS_FOR_COST_COVERAGE] = json!(true);
+        }
         // QA C3-01: a signature counts for the order only on a document made
         // after the last staff change of its terms (services, period); an
         // older version shows terms the order no longer has. The signed
@@ -464,6 +483,49 @@ pub(super) async fn apply_business_effects(
             if !order.get::<bool, _>("document_current") {
                 effects["order_document_outdated"] = json!(true);
             }
+        }
+    }
+    // The signed KÜE releases GMED's signature on the Einzelauftrag that
+    // waited for it (owner decision 2026-11-12): only when a signed current
+    // Einzelauftrag recorded the wait and the order's terms did not change
+    // since.
+    if (template == Some("cost_coverage_declaration")
+        || (template.is_none() && art == "cost_coverage_declaration"))
+        && let Some(order_id) = order_id
+    {
+        let released = sqlx::query_scalar::<_, Uuid>(
+            r#"UPDATE orders
+               SET signed_agency = true,
+                   signed_agency_at = COALESCE(signed_agency_at, $2),
+                   signed_at = COALESCE(signed_at, $2),
+                   updated_at = now()
+               WHERE id = $1
+                 AND NOT signed_agency
+                 AND signed_patient
+                 AND EXISTS (
+                     SELECT 1 FROM audit_log waited
+                     WHERE waited.entity_type = 'document'
+                       AND waited.action IN ('document_paper_signature_recorded',
+                                             'document_signature_effects_applied')
+                       AND waited.context ->> 'order_id' = $1::uuid::text
+                       AND waited.context ->> $3 = 'true'
+                       AND waited.created_at >= COALESCE(
+                               GREATEST(orders.client_terms_changed_at,
+                                        orders.payer_terms_changed_at),
+                               '-infinity'::timestamptz)
+                 )
+               RETURNING id"#,
+        )
+        .bind(order_id)
+        .bind(signed_at)
+        .bind(AGENCY_WAITS_FOR_COST_COVERAGE)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(database)?;
+        if released.is_some() {
+            effects["order_id"] = json!(order_id);
+            effects["order_signed_agency"] = json!(true);
+            effects["order_agency_signature_after_cost_coverage"] = json!(true);
         }
     }
     // Owner decision 2026-11-11: the client's signature on the

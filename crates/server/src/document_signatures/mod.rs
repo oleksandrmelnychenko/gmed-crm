@@ -46,6 +46,27 @@ use crate::{
 };
 use provider::{Level, MAX_PDF, Signer, VerifiedRequest, sha256};
 
+/// `$1` = order: a Kostenübernahmeerklärung belongs to the order and none of
+/// its versions is signed yet. GMED's signature on the Einzelauftrag waits
+/// for it then (owner decision 2026-11-12; the KÜE says GMED confirms only
+/// afterwards).
+pub(crate) const ORDER_COST_COVERAGE_PENDING_SQL: &str = r#"SELECT EXISTS (
+           SELECT 1 FROM documents d
+           WHERE d.order_id = $1
+             AND (d.generated_template_id = 'cost_coverage_declaration'
+                  OR d.art = 'cost_coverage_declaration')
+             AND d.status <> 'archived'
+             AND d.file_deleted_at IS NULL
+       ) AND NOT EXISTS (
+           SELECT 1 FROM documents d
+           WHERE d.order_id = $1
+             AND (d.generated_template_id = 'cost_coverage_declaration'
+                  OR d.art = 'cost_coverage_declaration')
+             AND d.signed_at IS NOT NULL
+             AND d.status <> 'archived'
+             AND d.file_deleted_at IS NULL
+       )"#;
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .merge(connection::router())

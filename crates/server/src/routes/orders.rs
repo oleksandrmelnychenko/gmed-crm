@@ -5739,7 +5739,7 @@ async fn update_order_commercial_basis(
     let order = match sqlx::query(
         r#"SELECT patient_id, source_lead_id, date_from, date_to,
                   total_estimated, order_service_total_gross(id) AS service_total,
-                  prepayment_amount, signed_patient,
+                  prepayment_amount, signed_patient, signed_agency,
                   intake_state = 'draft' AND EXISTS (
                       SELECT 1 FROM leads l WHERE l.id = orders.source_lead_id
                       AND l.repeat_patient_id = orders.patient_id AND l.converted_patient_id IS NULL
@@ -5837,6 +5837,33 @@ async fn update_order_commercial_basis(
         .await
     {
         return response;
+    }
+    // Owner decision 2026-11-12 (QA L11): GMED's signature waits for the
+    // signed KÜE of the order, for every order (the KÜE says so).
+    if body.signed_agency == Some(true) && !order.get::<bool, _>("signed_agency") {
+        match sqlx::query_scalar::<_, bool>(
+            crate::document_signatures::ORDER_COST_COVERAGE_PENDING_SQL,
+        )
+        .bind(order_id)
+        .fetch_one(&state.db)
+        .await
+        {
+            Ok(false) => {}
+            Ok(true) => {
+                return coded_err(
+                    StatusCode::CONFLICT,
+                    "order_agency_signature_waits_for_cost_coverage",
+                    "GMED confirms the order only after the signed cost coverage declaration (Kostenübernahmeerklärung) is there",
+                );
+            }
+            Err(error) => {
+                tracing::error!(%error, %order_id, "check the order's cost coverage declaration");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to verify the cost coverage declaration",
+                );
+            }
+        }
     }
 
     let total_estimated = match body.total_estimated.as_deref() {

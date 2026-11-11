@@ -123,6 +123,36 @@ async fn seed_order_document(pool: &PgPool, patient_id: Uuid, order_id: Uuid, by
     document_id
 }
 
+/// A Kostenübernahmeerklärung GMED generated for the order, not signed yet.
+async fn seed_cost_coverage_document(
+    pool: &PgPool,
+    patient_id: Uuid,
+    order_id: Uuid,
+    by: Uuid,
+) -> Uuid {
+    let document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+               id, patient_id, order_id, auto_name, original_filename, art, category, status,
+               visibility, is_medical, mime_type, generated_template_id, ursprung,
+               version_root_document_id, version_number, uploaded_by
+           ) VALUES (
+               $1, $2, $3, 'Kostenübernahmeerklärung', 'kostenuebernahme.pdf',
+               'cost_coverage_declaration', 'finance_cost_coverage', 'draft', 'internal', false,
+               'application/pdf', 'cost_coverage_declaration',
+               'template:cost_coverage_declaration', $1, 1, $4
+           )"#,
+    )
+    .bind(document_id)
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(by)
+    .execute(pool)
+    .await
+    .unwrap();
+    document_id
+}
+
 async fn order_signatures(pool: &PgPool, order_id: Uuid) -> (bool, bool) {
     sqlx::query_as("SELECT signed_patient, signed_agency FROM orders WHERE id = $1")
         .bind(order_id)
@@ -304,6 +334,63 @@ async fn changing_the_services_of_a_signed_order_needs_a_confirmed_signature_res
     assert_eq!(status, StatusCode::OK, "{order}");
     assert_eq!(order["client_signature"]["signed_total"], "452.2");
     assert_eq!(order["client_signature"]["changes_await_signature"], false);
+}
+
+/// Owner decision 2026-11-12 (QA L11): the KÜE says GMED confirms the
+/// Einzelauftrag only once the signed Kostenübernahmeerklärung is there. The
+/// paper scan of the Einzelauftrag records the client's signature; GMED's
+/// waits (also by hand) until the KÜE of the order is signed.
+#[tokio::test]
+async fn gmed_signs_the_single_order_only_after_the_cost_coverage_declaration() {
+    let Some((app, pool, admin_id, ceo)) = test_context().await else {
+        return;
+    };
+    let patient_id = seed_patient(&pool, admin_id).await;
+    let order_id = create_order_with_interpreter_hours(&app, &ceo, patient_id).await;
+    let coverage = seed_cost_coverage_document(&pool, patient_id, order_id, admin_id).await;
+    let single_order = seed_order_document(&pool, patient_id, order_id, admin_id).await;
+
+    let (status, signed) = sign_on_paper(&app, single_order, &ceo).await;
+    assert_eq!(status, StatusCode::OK, "{signed}");
+    assert_eq!(order_signatures(&pool, order_id).await, (true, false));
+
+    // Not by hand either while the KÜE is unsigned.
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/commercial-basis"),
+        &ceo,
+        Some(json!({ "signed_agency": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(
+        refused["error"],
+        "order_agency_signature_waits_for_cost_coverage"
+    );
+    assert_eq!(order_signatures(&pool, order_id).await, (true, false));
+
+    // The signed KÜE releases GMED's signature.
+    let (status, signed) = sign_on_paper(&app, coverage, &ceo).await;
+    assert_eq!(status, StatusCode::OK, "{signed}");
+    assert_eq!(order_signatures(&pool, order_id).await, (true, true));
+    let released: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action = 'document_paper_signature_recorded'
+           AND context ->> 'order_id' = $1::text
+           AND context ->> 'order_agency_signature_after_cost_coverage' = 'true'",
+    )
+    .bind(order_id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(released, 1);
+
+    // Without a KÜE in the order nothing waits.
+    let other_order = create_order_with_interpreter_hours(&app, &ceo, patient_id).await;
+    let document = seed_order_document(&pool, patient_id, other_order, admin_id).await;
+    let (status, signed) = sign_on_paper(&app, document, &ceo).await;
+    assert_eq!(status, StatusCode::OK, "{signed}");
+    assert_eq!(order_signatures(&pool, other_order).await, (true, true));
 }
 
 #[tokio::test]
