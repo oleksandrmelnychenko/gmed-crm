@@ -576,7 +576,21 @@ async fn list_my_documents(
                   d.is_medical, d.mime_type, d.file_size, d.klinik, d.ursprung,
                   d.created_at, d.updated_at,
                   ds.id AS share_id, ds.channel, ds.requires_confirmation, ds.confirmed,
-                  ds.confirmed_at, ds.shared_at
+                  ds.confirmed_at, ds.shared_at,
+                  -- An estimate the order no longer matches is not presented
+                  -- as current (QA 2026-11-11, F4): its terms changed since,
+                  -- or the quote it was made for was replaced or closed.
+                  COALESCE(d.generated_template_id = 'order_cost_estimate' AND (
+                      document_terms_current(d.id) IS FALSE
+                      OR EXISTS (
+                          SELECT 1 FROM quotes q
+                          WHERE q.order_id = d.order_id
+                            AND q.status IN ('superseded', 'rejected', 'expired')
+                            AND q.quote_number = COALESCE(
+                                d.generated_bindings->>'_quote_number',
+                                (SELECT original.generated_bindings->>'_quote_number'
+                                 FROM documents original
+                                 WHERE original.id = d.replaces_document_id)))), false) AS outdated
            FROM documents d
            JOIN LATERAL (
                 SELECT id, channel, requires_confirmation, confirmed, confirmed_at, shared_at
@@ -624,6 +638,7 @@ async fn list_my_documents(
                         "shared_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("shared_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                         "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                        "outdated": row.try_get::<bool, _>("outdated").unwrap_or(false),
                     })
                 })
                 .collect::<Vec<_>>(),

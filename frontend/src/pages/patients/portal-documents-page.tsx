@@ -685,7 +685,12 @@ function usePatientDocumentsPageContent() {
                             <StatusBadge className={documentTone(item)}>
                               {item.confirmed ? t.portal_documents_confirmed : item.requires_confirmation ? t.portal_documents_needs_confirmation : t.portal_documents_released}
                             </StatusBadge>
-                            <StatusBadge status={item.status}>{portalStatusLabel(item.status)}</StatusBadge>
+                            {item.outdated ? (
+                              // QA 2026-11-11, F4: an estimate the order no longer matches read «Aktiv».
+                              <StatusBadge tone="neutral">{t.portal_documents_outdated}</StatusBadge>
+                            ) : (
+                              <StatusBadge status={item.status}>{portalStatusLabel(item.status)}</StatusBadge>
+                            )}
                             <PortalDateChip title={t.portal_documents_released_at} timestamp={item.shared_at} />
                             <span className="text-xs text-muted-foreground">{formatPortalFileSize(item.file_size)}</span>
                           </div>

@@ -169,6 +169,8 @@ export function blankCreateOrderForm(): CreateOrderFormState {
   return {
     patientId: "",
     needsDescription: "",
+    date_from: "",
+    date_to: "",
     prepayment: blankOrderPrepaymentTerms(),
   };
 }

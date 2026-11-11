@@ -7,6 +7,7 @@ import {
   normalizeOrderCancellationSummary,
   orderCancellationBalance,
   orderCancellationErrorMessage,
+  orderCancellationOverInvoiced,
   orderCancellationReasonLabel,
 } from "./order-cancellation";
 
@@ -78,6 +79,24 @@ describe("orderCancellationBalance", () => {
     });
     expect(orderCancellationBalance({ balance_gross: 0.004 })).toEqual({ kind: "settled", amount: 0 });
     expect(orderCancellationBalance(null)).toEqual({ kind: "settled", amount: 0 });
+  });
+});
+
+describe("orderCancellationOverInvoiced (QA 2026-11-11, F7)", () => {
+  const base = { accrued_gross: 0, invoiced_gross: 0, advance_invoiced_gross: 0, to_credit_gross: 0 };
+
+  it("names an invoice for services never rendered", () => {
+    expect(orderCancellationOverInvoiced({ ...base, invoiced_gross: 1771.2, to_credit_gross: 1771.2 })).toBe(1771.2);
+  });
+
+  it("names an advance beyond the rendered amount while no other invoice exists", () => {
+    expect(orderCancellationOverInvoiced({ ...base, advance_invoiced_gross: 300 })).toBe(300);
+    expect(orderCancellationOverInvoiced({ ...base, advance_invoiced_gross: 300, accrued_gross: 663.05 })).toBe(0);
+    expect(orderCancellationOverInvoiced({ ...base, advance_invoiced_gross: 300, accrued_gross: 663.05, invoiced_gross: 663.05 })).toBe(0);
+  });
+
+  it("is 0 without a settlement", () => {
+    expect(orderCancellationOverInvoiced(null)).toBe(0);
   });
 });
 

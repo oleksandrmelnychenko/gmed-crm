@@ -24,6 +24,8 @@ export type OrderCancellationSettlement = {
   uninvoiced_gross: number;
   /** Package overage nobody decided yet: outside the figures above. */
   pending_overage_gross: number;
+  /** Released invoices billing services never delivered, not credited yet. */
+  to_credit_gross: number;
   lines: Array<{ description: string; status: string; gross: number }>;
 };
 
@@ -71,6 +73,7 @@ export function normalizeOrderCancellationSettlement(
     balance_gross: amount(source.balance_gross),
     uninvoiced_gross: amount(source.uninvoiced_gross),
     pending_overage_gross: amount(source.pending_overage_gross),
+    to_credit_gross: amount(source.to_credit_gross),
     lines: list(source.lines).map((entry) => {
       const line = record(entry);
       return {
@@ -136,6 +139,31 @@ export function orderCancellationReasonLabel(reason: string, lang: string): stri
 export function isValidOrderCancelReason(reason: string) {
   const length = Array.from(reason.trim()).length;
   return length >= ORDER_CANCEL_REASON_MIN && length <= ORDER_CANCEL_REASON_MAX;
+}
+
+/**
+ * What the order's invoices (advance invoices included, credit notes taken
+ * off) bill beyond what was rendered: Billing has to cancel it with a Storno
+ * or credit note; invoices are never cancelled automatically. 0 when nothing
+ * is over-invoiced (QA 2026-11-11, F7: «Расчёты закрыты» was shown while an
+ * invoice for services never rendered stayed open).
+ */
+export function orderCancellationOverInvoiced(
+  settlement: Pick<
+    OrderCancellationSettlement,
+    "accrued_gross" | "invoiced_gross" | "advance_invoiced_gross" | "to_credit_gross"
+  > | null,
+): number {
+  if (!settlement) return 0;
+  // The server's `to_credit`: released invoices billing services never
+  // delivered. An advance invoice has no service lines: while no other
+  // invoice was released, what it bills beyond the rendered amount has to be
+  // credited too (a final invoice settles the advance otherwise).
+  const advanceBeyondRendered = settlement.invoiced_gross < 0.01
+    ? Math.max(0, settlement.advance_invoiced_gross - settlement.accrued_gross)
+    : 0;
+  const over = roundCents(settlement.to_credit_gross + advanceBeyondRendered);
+  return over >= 0.01 ? over : 0;
 }
 
 export type OrderCancellationBalance =

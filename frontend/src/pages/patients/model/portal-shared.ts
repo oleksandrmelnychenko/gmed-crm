@@ -37,6 +37,11 @@ export type PortalDocumentItem = {
   shared_at: string;
   created_at: string;
   updated_at: string;
+  /**
+   * An estimate the order no longer matches (its quote was replaced, or the
+   * order's terms changed since): shown as no longer current, not as active.
+   */
+  outdated?: boolean;
 };
 
 export type PortalUploadedDocumentItem = {

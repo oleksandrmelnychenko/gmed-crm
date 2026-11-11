@@ -2080,6 +2080,48 @@ async fn load_order_process_readiness(
         tracing::error!(%error,"load order payment tracking");
         err(StatusCode::INTERNAL_SERVER_ERROR,"Failed to load payment tracking")
     })?.unwrap_or(serde_json::Value::Null);
+    // The stale-estimate rule (owner 2026-10-25) on the order: the accepted
+    // quote no longer states the order's sum, or the newest estimate document
+    // no longer states its terms. The order says so and asks for a new,
+    // signed estimate (QA 2026-11-11, F3: KV stayed «Принято» with the old
+    // sum and nothing said it was outdated). Not a gate: the new estimate is
+    // made and signed while the order goes on.
+    let estimate_outdated: serde_json::Value = sqlx::query_scalar(
+        r#"SELECT jsonb_build_object(
+                      'quote_id', q.id,
+                      'quote_number', q.quote_number,
+                      'quote_total_gross', q.total_gross::text,
+                      'order_total_gross', COALESCE(order_service_total_gross(o.id), o.total_estimated)::text)
+           FROM quotes q
+           JOIN orders o ON o.id = q.order_id
+           WHERE q.order_id = $1
+             AND q.status = 'accepted'
+             AND NOT EXISTS (
+                 SELECT 1 FROM quotes newer
+                 WHERE newer.order_id = q.order_id AND newer.status <> 'superseded'
+                   AND (newer.created_at, newer.id) > (q.created_at, q.id))
+             AND (COALESCE(ABS(q.total_gross - COALESCE(order_service_total_gross(o.id), o.total_estimated)) > 0.01, false)
+                  OR (SELECT document_terms_current(d.id)
+                      FROM documents d
+                      WHERE d.order_id = q.order_id
+                        AND d.generated_template_id = 'order_cost_estimate'
+                        AND d.status = 'active'
+                        AND d.file_deleted_at IS NULL
+                      ORDER BY d.created_at DESC, d.id DESC
+                      LIMIT 1) IS FALSE)
+           LIMIT 1"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, %order_id, "load outdated estimate");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load order process gates",
+        )
+    })?
+    .unwrap_or(serde_json::Value::Null);
     let execution_ready = blocking_reasons.is_empty();
 
     Ok(OrderProcessReadiness {
@@ -2104,6 +2146,7 @@ async fn load_order_process_readiness(
             "advance_invoice_count": advance_invoice_count,
             "paid_advance_invoice_count": paid_advance_invoice_count,
             "blocking_reasons": blocking_reasons,
+            "estimate_outdated": estimate_outdated,
         }),
     })
 }

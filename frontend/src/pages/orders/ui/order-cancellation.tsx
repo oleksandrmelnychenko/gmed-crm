@@ -23,6 +23,7 @@ import {
   isValidOrderCancelReason,
   orderCancellationBalance,
   orderCancellationErrorMessage,
+  orderCancellationOverInvoiced,
   orderCancellationReasonLabel,
   type OrderCancellationSettlement,
   type OrderCancellationSummary,
@@ -49,6 +50,7 @@ export function OrderCancellationBasis({
   const tx = bilingual(lang);
   const money = (value: number) => formatMoneyAmount(value, settlement.currency);
   const balance = orderCancellationBalance(settlement);
+  const overInvoiced = orderCancellationOverInvoiced(settlement);
   const rows: Array<[string, number]> = [
     [tx("Оказано и подлежит оплате", "Erbracht und abzurechnen"), settlement.accrued_gross],
     [tx("Выставлено счетами", "In Rechnung gestellt"), settlement.invoiced_gross],
@@ -80,11 +82,24 @@ export function OrderCancellationBasis({
                 `Пациенту к возврату: ${money(balance.amount)}.`,
                 `Rückerstattung an den Patienten: ${money(balance.amount)}.`,
               )
-            : tx(
-                "Расчёты закрыты: оказанное оплачено полностью.",
-                "Ausgeglichen: Die erbrachten Leistungen sind vollständig bezahlt.",
-              )}
+            : overInvoiced > 0
+              ? tx(
+                  "Оказанное оплачено, но расчёт не закрыт: есть счета за неоказанные услуги.",
+                  "Die erbrachten Leistungen sind bezahlt, die Abrechnung ist aber offen: Es gibt Rechnungen für nicht erbrachte Leistungen.",
+                )
+              : tx(
+                  "Расчёты закрыты: оказанное оплачено полностью.",
+                  "Ausgeglichen: Die erbrachten Leistungen sind vollständig bezahlt.",
+                )}
       </p>
+      {overInvoiced > 0 ? (
+        <p className="font-medium text-amber-800 dark:text-amber-300" data-testid="order-cancellation-to-credit">
+          {tx(
+            `Бухгалтерии: счета заказа на ${money(overInvoiced)} выставлены за неоказанные услуги — нужен сторно-счёт или кредит-нота. Счета не отменяются автоматически.`,
+            `Für die Buchhaltung: Rechnungen des Auftrags über ${money(overInvoiced)} betreffen nicht erbrachte Leistungen – Storno oder Gutschrift erforderlich. Rechnungen werden nicht automatisch storniert.`,
+          )}
+        </p>
+      ) : null}
       {settlement.pending_overage_gross > 0 ? (
         <p className="text-muted-foreground" data-testid="order-cancellation-pending-overage">
           {tx(

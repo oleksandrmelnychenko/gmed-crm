@@ -187,6 +187,7 @@ import {
   orderPrepaymentErrorMessage,
   orderPrepaymentPayload,
 } from "./model/order-prepayment";
+import { OrderPeriodCard, orderPeriodError } from "./ui/order-period-card";
 import { OrderPrepaymentCard } from "./ui/order-prepayment-card";
 import { OrderPrepaymentFields } from "./ui/order-prepayment-fields";
 import {
@@ -2773,6 +2774,14 @@ function useOrdersPageContent() {
       setCreateError(orderPrepaymentErrorMessage(prepaymentError, lang));
       return;
     }
+    // The programme period, as an order from a lead has it (QA 2026-11-11, F6);
+    // it can also be set later in the order workspace.
+    const periodGiven = Boolean(createForm.date_from || createForm.date_to);
+    const periodError = periodGiven ? orderPeriodError(createForm, lang) : null;
+    if (periodError) {
+      setCreateError(periodError);
+      return;
+    }
 
     setCreateSaving(true);
     setCreateError(null);
@@ -2783,6 +2792,7 @@ function useOrdersPageContent() {
         // Without a choice the server attaches the latest signed contract.
         contract_id: createContractId,
         needs_description: optString(createForm.needsDescription),
+        ...(periodGiven ? { date_from: createForm.date_from, date_to: createForm.date_to } : {}),
         ...orderPrepaymentPayload(createForm.prepayment),
       });
 
@@ -4320,6 +4330,24 @@ function useOrdersPageContent() {
                         {phaseError}
                       </div>
                     ) : null}
+                    {orderDetail.status === "active" && orderDetail.process_gates?.estimate_outdated ? (
+                      // The stale-estimate rule (QA 2026-11-11, F3): the signed
+                      // estimate states another sum or other terms than the order.
+                      <div className="mt-3">
+                        <Banner tone="warning" withIcon>
+                          <span data-testid="order-estimate-outdated">
+                            {lang === "de"
+                              ? `Der angenommene Kostenvoranschlag ${orderDetail.process_gates.estimate_outdated.quote_number} (${formatMoney(orderDetail.process_gates.estimate_outdated.quote_total_gross)}) entspricht nicht mehr dem Auftrag${orderDetail.process_gates.estimate_outdated.order_total_gross ? ` (jetzt ${formatMoney(orderDetail.process_gates.estimate_outdated.order_total_gross)})` : ""}. Bitte ein neues Angebot erstellen und den neuen Kostenvoranschlag unterschreiben lassen.`
+                              : `Принятая смета ${orderDetail.process_gates.estimate_outdated.quote_number} (${formatMoney(orderDetail.process_gates.estimate_outdated.quote_total_gross)}) устарела: она не совпадает с заказом${orderDetail.process_gates.estimate_outdated.order_total_gross ? ` (сейчас ${formatMoney(orderDetail.process_gates.estimate_outdated.order_total_gross)})` : ""}. Создайте новое предложение и получите подпись новой сметы.`}{" "}
+                            {detailContractsHref ? (
+                              <StaffLink to={detailContractsHref} className="font-medium underline">
+                                {lang === "de" ? "Zu den Angeboten" : "К предложениям"}
+                              </StaffLink>
+                            ) : null}
+                          </span>
+                        </Banner>
+                      </div>
+                    ) : null}
                   </div>
                 </section>
                 <div ref={orderSectionAnchorRef} className="absolute h-0 scroll-mt-2" />
@@ -4508,6 +4536,13 @@ function useOrdersPageContent() {
                     {orderDetail.patient_id ? (
                       <OrderSubscriptionCard orderId={orderDetail.id} orderStatus={orderDetail.status} lang={lang} />
                     ) : null}
+
+                    <OrderPeriodCard
+                      order={orderDetail}
+                      canEdit={permissions.canManagePhase && !orderStepsLocked}
+                      lang={lang}
+                      onSaved={triggerReload}
+                    />
 
                     <OrderPrepaymentCard
                       order={orderDetail}
@@ -9103,6 +9138,32 @@ function useOrdersPageContent() {
                     />
                   </OrderSheetSection>
                 ) : null}
+
+                <OrderSheetSection icon={CalendarRange} title={lang === "de" ? "Programmzeitraum" : "Период программы"}>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label={lang === "de" ? "Beginn" : "Начало"}>
+                      <Input
+                        type="date"
+                        data-testid="order-create-date-from"
+                        value={createForm.date_from}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, date_from: event.target.value }))
+                        }
+                      />
+                    </Field>
+                    <Field label={lang === "de" ? "Ende" : "Окончание"}>
+                      <Input
+                        type="date"
+                        data-testid="order-create-date-to"
+                        value={createForm.date_to}
+                        min={createForm.date_from || undefined}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, date_to: event.target.value }))
+                        }
+                      />
+                    </Field>
+                  </div>
+                </OrderSheetSection>
 
                 <OrderSheetSection icon={NotebookText} title={l("orders_zusatzlich")}>
                   <Field label={t.orders_intake_note}>

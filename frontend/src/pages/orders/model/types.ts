@@ -422,6 +422,17 @@ export type OrderProcessGates = {
   advance_invoice_count: number;
   paid_advance_invoice_count: number;
   blocking_reasons: string[];
+  /**
+   * The accepted quote no longer states the order's sum, or its newest
+   * estimate document no longer states the order's terms (stale-estimate
+   * rule): a new estimate has to be made and signed. Null otherwise.
+   */
+  estimate_outdated?: {
+    quote_id: string;
+    quote_number: string;
+    quote_total_gross: string;
+    order_total_gross: string | null;
+  } | null;
 };
 
 type OrderDebtManagement = {
@@ -874,6 +885,9 @@ export type OrdersFilters = {
 export type CreateOrderFormState = {
   patientId: string;
   needsDescription: string;
+  /** The programme period ("YYYY-MM-DD"), "" while not given. */
+  date_from: string;
+  date_to: string;
   prepayment: OrderPrepaymentTerms;
 };
 
