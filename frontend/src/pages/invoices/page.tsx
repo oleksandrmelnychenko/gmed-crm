@@ -1084,6 +1084,7 @@ function useStaffInvoicesPageContent() {
   );
   const paymentForm = paymentDraft.draft;
   const [paymentBusy, setPaymentBusy] = useState(false);
+  const paymentInFlight = useRef(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   // The payment or refund date field shows a date it did not take (a future
   // day): nothing is recorded until it is corrected (QA 2026-11-10, D-05).
@@ -2083,6 +2084,10 @@ function useStaffInvoicesPageContent() {
 
   async function handleRecordPayment() {
     if (!detail || paymentDateRefused || !(parseMoneyInput(paymentForm.amountGross) > 0)) return;
+    // A second click before the busy state re-renders the button does nothing;
+    // the server also replays a repeated request id instead of booking twice.
+    if (paymentInFlight.current) return;
+    paymentInFlight.current = true;
     setPaymentBusy(true);
     setPaymentError(null);
     try {
@@ -2098,15 +2103,16 @@ function useStaffInvoicesPageContent() {
         accept_overpayment: overpaymentAcceptedFor === paymentForm.amountGross
           && paymentOverpayment(paymentForm.amountGross, detail.balance_due) > 0,
       });
-      // Recorded values are no longer unsaved; the reload prefills the new balance.
-      resetPaymentForm((current) => ({
-        ...current,
-        requestId: crypto.randomUUID(),
-      }));
+      // The booked payment leaves an empty form (amount, today, bank transfer,
+      // no overpayment confirmation), so a second click cannot book it again
+      // (QA 2026-11-11, N2). The reload prefills a remaining balance.
+      resetPaymentForm(newPaymentDraft(undefined));
+      setOverpaymentAcceptedFor(null);
       setReloadToken((current) => current + 1);
     } catch (error) {
       setPaymentError(localizeInvoiceError(error, lang, t.common_error));
     } finally {
+      paymentInFlight.current = false;
       setPaymentBusy(false);
     }
   }

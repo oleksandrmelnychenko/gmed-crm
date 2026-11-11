@@ -89,6 +89,26 @@ describe("patient notices about visits, services and money (owner decision 2026-
       .toBe("Service storniert");
   });
 
+  it("words a service staff added as new, not as a status change (QA N1)", () => {
+    const added = notice("patient_service_added", "concierge_service", {
+      service_title: "Flughafentransfer",
+      status: "scheduled",
+    });
+    expect(patientEventNotificationCopy(added, "de")?.title).toBe("Neuer Service geplant");
+    expect(patientEventNotificationCopy(added, "de")?.body).toContain("Zeit wird noch abgestimmt");
+    const ru = patientEventNotificationCopy(
+      notice("patient_service_added", "concierge_service", {
+        service_title: "Трансфер",
+        status: "scheduled",
+        starts_at: "2026-11-15T14:30:00Z",
+      }),
+      "ru",
+    );
+    expect(ru?.title).toBe("Добавлен новый сервис");
+    expect(ru?.body).toContain("15.11.2026 15:30");
+    expect(ru?.body).not.toContain("время уточняется");
+  });
+
   it("words a registered payment, a new invoice and a correction", () => {
     const payment = notice("invoice_payment_registered", "invoice", { invoice_number: "INV-1", amount: "400.00", currency: "EUR" });
     const copy = patientEventNotificationCopy(payment, "de");

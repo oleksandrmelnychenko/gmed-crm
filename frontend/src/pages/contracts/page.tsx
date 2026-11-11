@@ -696,6 +696,9 @@ function useContractsPageContent() {
   } = contractsWorkspaceState;
   const [terminateContractTarget, setTerminateContractTarget] = useState<ContractItem | null>(null);
   const [quoteDeleteConfirmOpen, setQuoteDeleteConfirmOpen] = useState(false);
+  // «Новое предложение» returned the accepted, signed quote that still matches
+  // the order instead of a new one: its sheet says why (QA 2026-11-11, N3).
+  const [acceptedQuoteKeptId, setAcceptedQuoteKeptId] = useState("");
   const [quoteDeleteBusy, setQuoteDeleteBusy] = useState(false);
   // An internal note typed in the quote sheet but not saved yet.
   const [quoteInternalNoteDirty, setQuoteInternalNoteDirty] = useState(false);
@@ -1878,6 +1881,8 @@ function useContractsPageContent() {
       setCreateQuoteOpen(false);
       setCreateQuoteForm(blankQuoteForm(quoteFilters.orderId));
       setQuotesReloadToken((current) => current + 1);
+      // A new quote starts as a draft; an accepted one is the kept estimate.
+      setAcceptedQuoteKeptId(result.status === "accepted" ? result.id : "");
       openQuote(result.id);
     } catch (error) {
       setCreateQuoteError(error instanceof Error ? error.message : t.common_error);
@@ -3145,6 +3150,7 @@ function useContractsPageContent() {
             setSelectedQuoteId("");
             setQuoteDetail(null);
             setQuoteDetailError(null);
+            setAcceptedQuoteKeptId("");
             syncQuery({ quote: null }, { replace: false });
           }
         }}
@@ -3156,6 +3162,11 @@ function useContractsPageContent() {
             description={text.quoteSheetDescription}
           >
             <div className="space-y-4 rounded-xl">
+              {acceptedQuoteKeptId && acceptedQuoteKeptId === selectedQuoteId ? (
+                <ShellBanner tone="warning" data-testid="quote-accepted-kept-notice">
+                  {t.revenue_contracts_new_quote_accepted_kept}
+                </ShellBanner>
+              ) : null}
               {quoteDetailLoading ? (
                 <LoadingState label={t.common_loading} />
               ) : quoteDetailError ? (

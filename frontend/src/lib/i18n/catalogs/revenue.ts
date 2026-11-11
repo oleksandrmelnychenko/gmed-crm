@@ -167,6 +167,7 @@ export interface RevenueTranslations {
   revenue_contracts_refresh: string;
   revenue_contracts_new_contract: string;
   revenue_contracts_new_quote: string;
+  revenue_contracts_new_quote_accepted_kept: string;
   revenue_contracts_tab_contracts: string;
   revenue_contracts_tab_quotes: string;
   revenue_contracts_stats_signed_sent: string;
@@ -1082,6 +1083,8 @@ export const revenueRu: RevenueTranslations = {
   revenue_contracts_refresh: "Обновить",
   revenue_contracts_new_contract: "Новый договор",
   revenue_contracts_new_quote: "Новое предложение",
+  revenue_contracts_new_quote_accepted_kept:
+    "Подписанная смета с теми же услугами уже действует — открыта она. Чтобы заменить её, сначала отклоните её.",
   revenue_contracts_tab_contracts: "Рамочные договоры",
   revenue_contracts_tab_quotes: "Предложения",
   revenue_contracts_stats_signed_sent: "подписано / отправлено",
@@ -1516,6 +1519,8 @@ export const revenueDe: RevenueTranslations = {
   revenue_contracts_refresh: "Aktualisieren",
   revenue_contracts_new_contract: "Neuer Vertrag",
   revenue_contracts_new_quote: "Neues Angebot",
+  revenue_contracts_new_quote_accepted_kept:
+    "Ein unterschriebener Kostenvoranschlag mit denselben Leistungen gilt bereits — er wurde geöffnet. Um ihn zu ersetzen, lehnen Sie ihn zuerst ab.",
   revenue_contracts_tab_contracts: "Rahmenverträge",
   revenue_contracts_tab_quotes: "Angebote",
   revenue_contracts_stats_signed_sent: "unterzeichnet / versendet",

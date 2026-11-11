@@ -134,21 +134,28 @@ function serviceCopy(item: PatientEventNotice, lang: Lang): PatientEventCopy {
   const current = when(fact(item, "new_starts_at", "starts_at"));
   const previous = when(fact(item, "old_starts_at", "previous_starts_at"));
   const moved = Boolean(previous && current && previous !== current);
+  // A service staff added (`patient_service_added`, concierge_services.rs)
+  // carries its first status too; it is news, not a status change (QA N1).
+  const added = hasWord(kind, /creat|(^|_)add(ed)?($|_)|(^|_)new($|_)/);
 
   let heading: Texts;
   if (hasWord(kind, /cancel|storn/) || status === "cancelled") {
     heading = { ru: "Сервис отменён", de: "Service storniert" };
+  } else if (added) {
+    heading = { ru: "Добавлен новый сервис", de: "Neuer Service geplant" };
   } else if (moved || hasWord(kind, /mov|resched|time|date/)) {
     heading = { ru: "Время сервиса изменено", de: "Zeit Ihres Services geändert" };
   } else if (hasWord(kind, /status/) || status) {
     heading = { ru: "Статус сервиса изменён", de: "Status Ihres Services geändert" };
-  } else if (hasWord(kind, /creat|add|new|book/)) {
+  } else if (hasWord(kind, /book/)) {
     heading = { ru: "Новый сервис", de: "Neuer Service" };
   } else {
     heading = { ru: "Сервис обновлён", de: "Service aktualisiert" };
   }
 
-  const timing = moved ? `${previous} → ${current}` : current;
+  const timing = moved
+    ? `${previous} → ${current}`
+    : current || (added ? pick({ ru: "время уточняется", de: "Zeit wird noch abgestimmt" }, lang) : "");
   const facts = [title, status ? serviceStatusLabel(status, tr) : null, timing].filter(Boolean).join(" · ");
   return { title: pick(heading, lang), body: facts || item.body };
 }

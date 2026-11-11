@@ -130,6 +130,10 @@ export function CreditBalancePanel({
       setPendingMismatch(null);
       setRequestId(crypto.randomUUID());
       setNote("");
+      // The reload derives the amount for the new credit; nothing of the
+      // booked move stays in the form (QA 2026-11-11, N2).
+      setAmountGross("");
+      setTransferredOn(appDateKey());
       onChanged();
     } catch (cause) {
       setPendingMismatch(null);
