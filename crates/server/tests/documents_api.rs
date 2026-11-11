@@ -10174,14 +10174,16 @@ async fn a_new_version_of_a_released_document_is_released_automatically() {
     assert!(!portal_ids().await.contains(&v3));
     assert_eq!(notices(v3).await, 0);
 
-    // A document never released: its new version stays hidden.
-    let hidden_visit = seed_appointment(
+    // A document never released: its new version stays hidden. A second
+    // visit of the same patient needs another day (no overlapping visits).
+    let hidden_visit = seed_appointment_on(
         &pool,
         patient_id,
         provider_id,
         doctor_id,
         admin_id,
         &format!("{tag}-b"),
+        "2026-04-16",
     )
     .await;
     let u1 = generate(hidden_visit, None).await;
