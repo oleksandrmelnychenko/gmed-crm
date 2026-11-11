@@ -21,6 +21,7 @@ import {
   recipientKey,
   recipientExpected,
   recipientPatch,
+  recipientPayerOpenKeys,
   withOwnParent,
   withRecipientAnswer,
   withRecipientRelationship,
@@ -269,5 +270,18 @@ describe("recipientExpected", () => {
     const shown = { ...draftFromRecipient(null), recipient: "self", representative_id: "parent-mother" };
     expect(recipientExpected(shown)).toEqual({ invoice_recipient: "self", representative_id: "parent-mother" });
     expect(recipientExpected(draftFromRecipient(null))).toEqual({ invoice_recipient: null, representative_id: null });
+  });
+
+  it("asks an organisation that receives and pays for its legal form and contact person (release QA 2026-11-11)", () => {
+    const paying = { ...draftFromRecipient(null), recipient: "third_party", is_payer: "yes", type: "organisation", organisation_name: "Beispiel GmbH" };
+    expect(flowOf(paying)).toEqual({ recipient: "third_party", isPayer: "yes" });
+    expect(recipientPayerOpenKeys(paying)).toEqual(["recipient_legal_form", "recipient_contact_name"]);
+    expect(recipientPayerOpenKeys({ ...paying, legal_form: " GmbH " })).toEqual(["recipient_contact_name"]);
+    expect(recipientPayerOpenKeys({ ...paying, legal_form: "GmbH", contact_name: "Ben Muster" })).toEqual([]);
+    // Without the star the two are optional: an organisation that only receives the invoice, a person, nobody.
+    expect(recipientPayerOpenKeys({ ...paying, is_payer: "no" })).toEqual([]);
+    expect(recipientPayerOpenKeys({ ...paying, type: "person" })).toEqual([]);
+    expect(recipientPayerOpenKeys({ ...paying, recipient: "self" })).toEqual([]);
+    expect(recipientPayerOpenKeys(draftFromRecipient(null))).toEqual([]);
   });
 });

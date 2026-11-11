@@ -30,7 +30,7 @@ import { inputClass, selectClass } from "@/components/record-workspace/primitive
 import { ReadOnlyScope } from "@/components/read-only-scope";
 import { appDateKey } from "@/lib/app-time-zone";
 import { useCabinetStaffMode } from "./lead-request-staff-mode";
-import { useDateRefusal } from "./lead-request-date-refusal";
+import { DateRefusal } from "./lead-request-date-refusal";
 
 import {
   HEALTH_CONSENT,
@@ -466,8 +466,6 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
   const identification = useIdentificationForm({ request, text, enqueue, onChange, onSaveState: parts.on("identification") });
   const withIdentification = request.identification !== undefined;
   const { draft, set, errorFor, fieldProps } = personal;
-  // A date of birth the field did not take (31.02., in the future) says so, not "required".
-  const birthDate = useDateRefusal(lang, draft.date_of_birth, { min: "1900-01-01", max: appDateKey() });
   // The step's list follows the badge: the consent only while the request was never sent (QA 2026-10-24).
   const consentMissing = inquiryConsentMissing(request) ? [{ label: text.sectionConsent, field: "inquiry_consent" }] : [];
 
@@ -613,6 +611,8 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
             />
             {nameCorrection("middle_name")}
           </FormField>
+          {/* A date of birth the field did not take (31.02., in the future) says so, not "required". */}
+          <DateRefusal lang={lang} value={draft.date_of_birth} limits={{ min: "1900-01-01", max: appDateKey() }}>{(birthDate) => (
           <FormField field="date_of_birth" text={text} error={birthDate.message ?? errorFor("date_of_birth")} required>
             {birthDate.wrap(<Input
               key={`date_of_birth-${lang}`}
@@ -637,6 +637,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
               </p>
             ) : null}
           </FormField>
+          )}</DateRefusal>
           <FormField field="legal_sex" text={text} error={errorFor("legal_sex")} required>
             <NativeComboboxSelect
               {...fieldProps("legal_sex")}

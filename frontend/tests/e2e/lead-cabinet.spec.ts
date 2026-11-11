@@ -2774,6 +2774,88 @@ test.describe("Weiter holds a step the same way on every press", () => {
     await expect(current(page)).toHaveAttribute("data-current-step", "identity");
   });
 
+  test("a name in other than Latin letters holds every press and gets the cursor (release QA 2026-11-11)", async ({ page }) => {
+    const { request } = await setup(page, "lead", { prepare: filled() });
+    // Like the server: the name is stored as typed, and "the name in Latin letters" is missing.
+    await page.route("**/api/v1/me/lead-requests/lead-1/personal-data", async (route) => {
+      const patch = route.request().postDataJSON() as Record<string, unknown>;
+      Object.assign(request.personal_data, patch);
+      const latin = [request.personal_data.first_name, request.personal_data.last_name].every((name) => /^[\p{Script=Latin}\s'.-]*$/u.test(String(name ?? "")));
+      request.progress.missing_for_submit = latin ? [] : ["name_latin"];
+      await route.fulfill({ json: request });
+    });
+    await page.goto("/");
+    const firstName = page.locator("#lead-request-first_name");
+    await firstName.fill("Эрика");
+    await expect(page.getByTestId("lead-request-save-state")).toHaveText("Gespeichert");
+    for (let press = 1; press <= 3; press += 1) {
+      await page.locator("#lead-request-phone").focus();
+      await next(page);
+      await expect(current(page)).toHaveAttribute("data-current-step", "person");
+      await expect(list(page).getByRole("listitem")).toHaveCount(1);
+      await expect(list(page)).toContainText("lateinischen Buchstaben");
+      await expect(firstName).toBeFocused();
+      await expect(firstName).toBeInViewport();
+    }
+    // The last name alone in other letters: the cursor goes there.
+    await firstName.fill("Erika");
+    await page.locator("#lead-request-last_name").fill("Тест");
+    await expect.poll(() => request.personal_data.last_name).toBe("Тест");
+    await next(page);
+    await expect(current(page)).toHaveAttribute("data-current-step", "person");
+    await expect(page.locator("#lead-request-last_name")).toBeFocused();
+    await page.locator("#lead-request-last_name").fill("Test");
+    await expect.poll(() => request.progress.missing_for_submit).toEqual([]);
+    await next(page);
+    await expect(current(page)).toHaveAttribute("data-current-step", "identity");
+  });
+
+  test("the first step does not say 'saved' next to a date of birth it refused (release QA 2026-11-11)", async ({ page }) => {
+    await setup(page, "lead", { prepare: filled() });
+    await page.goto("/");
+    await page.locator("#lead-request-city").fill("Hamburg");
+    await expect(page.getByTestId("lead-request-save-state")).toHaveText("Gespeichert");
+    const date = page.getByRole("group", { name: /Geburtsdatum/ });
+    await date.getByRole("spinbutton").first().click();
+    await page.keyboard.type("01012090", { delay: 80 });
+    await next(page);
+    await expect(page.locator("#lead-request-date_of_birth-error")).toContainText("Zukunft");
+    await expect(page.getByTestId("lead-request-save-state")).toHaveText("Nicht gespeichert");
+  });
+
+  test("a wish date in the past holds every press of Weiter until it is put right or emptied (release QA 2026-11-11)", async ({ page }) => {
+    await setup(page, "lead", {
+      prepare: (request) => {
+        filled()(request);
+        Object.assign(request, { service_preferences: { services: [], service_comments: {}, program_date_from: "", notes: "" } });
+      },
+    });
+    await page.goto("/?lead=lead-1&step=services");
+    await expect(current(page)).toHaveAttribute("data-current-step", "services");
+    const date = page.getByRole("group", { name: /^Datum/ });
+    await date.getByRole("spinbutton").first().click();
+    await page.keyboard.type("01012025", { delay: 80 });
+    for (let press = 1; press <= 3; press += 1) {
+      await page.locator("#lead-request-service-notes").focus();
+      await next(page);
+      await expect(current(page)).toHaveAttribute("data-current-step", "services");
+      await expect(page.locator("#lead-request-service-program_date_from-error")).toContainText("Vergangenheit");
+      await expect(page.getByTestId("lead-request-save-blocked")).toBeVisible();
+      await expect(date.getByRole("spinbutton").first()).toBeFocused();
+      await expect(date).toBeInViewport();
+    }
+    // A tab does not drop the date either.
+    await step(page, "send");
+    await expect(current(page)).toHaveAttribute("data-current-step", "services");
+    // Emptied — the date is optional — the step is left.
+    await date.getByRole("spinbutton").first().click();
+    await page.keyboard.press("Control+A");
+    await page.keyboard.press("Backspace");
+    await expect(page.locator("#lead-request-service-program_date_from-error")).toHaveCount(0);
+    await next(page);
+    await expect(current(page)).toHaveAttribute("data-current-step", "send");
+  });
+
   test("a request that is sent is never held by Weiter (QA 2026-11-10, A-1)", async ({ page }) => {
     await setup(page, "lead", {
       prepare: (request) => {
@@ -2863,6 +2945,15 @@ test.describe("Weiter holds a step the same way on every press", () => {
       const acts = page.getByRole("combobox", { name: ACTS });
       await expect(page.locator("#lead-request-first_name")).toBeVisible();
       await expect(acts).not.toBeInViewport();
+      // On a phone the bar with "Weiter" ends at the bottom edge: no strip of the form beneath it
+      // (release QA 2026-11-11; a wide screen keeps the page's own bottom margin).
+      if (name === "phone") {
+        const bar = await current(page).getByRole("button", { name: "Weiter" }).evaluate((button) => {
+          const sticky = button.closest(".sticky") as HTMLElement;
+          return Math.round(sticky.getBoundingClientRect().bottom);
+        });
+        expect(bar).toBe(size.height);
+      }
       await next(page);
       await expect(current(page)).toHaveAttribute("data-current-step", "person");
       await expect(acts).toBeFocused();

@@ -890,6 +890,99 @@ for (const status of [422, 503]) {
   });
 }
 
+// Release QA 2026-11-11: fields without an id of their own (the country lists, the owners' choice)
+// let the second press of "Weiter" pass and got neither scroll nor cursor.
+test.describe("payer hard stop: every required field of a step holds every press", () => {
+  const form = (page: Page) => page.getByTestId("payer-link-form");
+  const person = (answers: Record<string, unknown> = {}, route: Partial<Route8> = {}) => ({
+    acknowledged: true,
+    answers: { ...completeAnswers("person"), ...answers },
+    route: { ...completeRoute(), ...route },
+    identityDocuments: [document("doc-id", "pass.pdf")],
+  });
+
+  test("the country of birth", async ({ page }) => {
+    await setup(page, person({ birth_country: null }));
+    await signIn(page);
+    await expect(form(page)).toHaveAttribute("data-step", "details");
+    const country = page.getByTestId("payer-link-step-details").getByRole("combobox", { name: "Geburtsland" });
+    for (let press = 1; press <= 3; press += 1) {
+      await page.getByTestId("payer-link-step-title").click();
+      await next(page);
+      await expect(form(page)).toHaveAttribute("data-step", "details");
+      await expect(page.getByTestId("payer-link-step-missing").getByRole("listitem")).toHaveText(["Geburtsland"]);
+      await expect(country).toBeFocused();
+      await expect(country).toBeInViewport();
+    }
+    await choose(page, country, "Österreich");
+    await next(page);
+    await expect(form(page)).not.toHaveAttribute("data-step", "details");
+  });
+
+  test("the country of the account", async ({ page }) => {
+    await setup(page, person({}, { account_country: null }));
+    await signIn(page);
+    await expect(form(page)).toHaveAttribute("data-step", "payment");
+    const country = page.getByTestId("payer-link-form").getByRole("combobox", { name: "Land des Kontos" });
+    for (let press = 1; press <= 3; press += 1) {
+      await page.getByTestId("payer-link-step-title").click();
+      await next(page);
+      await expect(form(page)).toHaveAttribute("data-step", "payment");
+      await expect(page.getByTestId("payer-link-step-missing")).toContainText("Land des Kontos");
+      await expect(country).toBeFocused();
+      await expect(country).toBeInViewport();
+    }
+    await choose(page, country, "Deutschland");
+    await next(page);
+    await expect(form(page)).toHaveAttribute("data-step", "declarations");
+  });
+
+  test("the beneficial owners: neither a person nor 'nobody'", async ({ page }) => {
+    await setup(page, {
+      payerType: "company",
+      acknowledged: true,
+      answers: { ...completeAnswers("company"), beneficial_owners_none: null },
+      route: completeRoute(),
+      identityDocuments: [document("doc-id", "ausweis.pdf")],
+    });
+    await signIn(page);
+    await expect(form(page)).toHaveAttribute("data-step", "owners");
+    const none = page.locator("#payer-link-beneficial_owners_none");
+    for (let press = 1; press <= 3; press += 1) {
+      await page.getByTestId("payer-link-step-title").click();
+      await next(page);
+      await expect(form(page)).toHaveAttribute("data-step", "owners");
+      await expect(page.getByTestId("payer-link-step-missing")).toBeVisible();
+      await expect(none).toBeFocused();
+      await expect(none).toBeInViewport();
+    }
+    await none.check();
+    await next(page);
+    await expect(form(page)).toHaveAttribute("data-step", "funds");
+  });
+
+  test("a required answer that was emptied is not left behind with the old value", async ({ page }) => {
+    const { q } = await setup(page, person());
+    await signIn(page);
+    await page.getByTestId("payer-link-summary-details").getByRole("button").click();
+    await expect(form(page)).toHaveAttribute("data-step", "details");
+    const firstName = page.getByTestId("payer-link-step-details").getByRole("textbox", { name: "Vorname" });
+    await firstName.fill("");
+    for (let press = 1; press <= 3; press += 1) {
+      await page.getByTestId("payer-link-step-title").click();
+      await next(page);
+      await expect(form(page)).toHaveAttribute("data-step", "details");
+      // Named by the list (the server knows the answer is gone) or by the notice (it was not sent).
+      await expect(page.getByTestId("payer-link-notice").or(page.getByTestId("payer-link-step-missing")).first()).toContainText("Vorname");
+      await expect(firstName).toBeFocused();
+    }
+    await firstName.fill("Viktoria");
+    await expect.poll(() => q.answers.first_name).toBe("Viktoria");
+    await next(page);
+    await expect(form(page)).toHaveAttribute("data-step", "identity");
+  });
+});
+
 test("payer recheck: a refused send keeps the answer saved just before it", async ({ page }) => {
   let releaseWrite = () => {};
   const writeHeld = new Promise<void>((resolve) => { releaseWrite = resolve; });

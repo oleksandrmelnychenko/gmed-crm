@@ -18,6 +18,7 @@ import {
   isOrganisation,
   missingByStep,
   ownersBlocker,
+  PAYER_FIELDS,
   payerSteps,
   refusedField,
   industryRequired,
@@ -530,6 +531,11 @@ function DraftForm({
     if (submitting) return;
     if (next !== "privacy" && !consented) {
       setNotice(text.privacyFirst);
+      // The notice stands at the top, the box to tick at the end of the page: the press leads there.
+      void afterRender(() => {
+        const box = document.querySelector<HTMLElement>('[data-testid="payer-link-privacy-ack"]');
+        if (box) revealCabinetTarget({ element: box, field: true });
+      });
       return;
     }
     setNotice(null);
@@ -639,11 +645,23 @@ function DraftForm({
       const open = missingByStep(questionnaireRef.current.missing_for_submit ?? [], payerType, steps).find((group) => group.step === step)?.keys ?? [];
       // Like the lead cabinet (owner 2026-11-11): "next" does not leave a step while a required
       // answer of it is missing — every press shows the list, leads to the first field and stays.
-      // A key the step shows no field for holds nobody here; the summary still lists it.
-      const holding = softNext ? [] : open.filter((key) => payerFieldTarget(key) !== null);
-      if (consented && holding.length > 0) {
+      // Every key of the step holds, also one whose field has no id of its own (a country list,
+      // the owners' choice: release QA 2026-11-11 — they let the second press pass, unfocused).
+      if (consented && !softNext && open.length > 0) {
         setMissingShownSteps((current) => new Set(current).add(step));
-        void afterRender(() => holding.some((key) => revealPayerField(key)));
+        void afterRender(() => {
+          if (!open.some((key) => revealPayerField(key))) topRef.current?.scrollIntoView({ block: "start" });
+        });
+        return;
+      }
+      // A required field of the step that was emptied is not sent, so the server keeps the old
+      // answer and lists nothing: going on would bring the old value back unseen. It holds as well.
+      const emptied = softNext ? [] : PAYER_FIELDS.filter(
+        (field) => field !== "beneficial_owners" && required(field) && fieldValue(field, form.draft) === "" && payerFieldTarget(field) !== null,
+      );
+      if (consented && emptied.length > 0) {
+        setNotice(`${text.missingTitle} ${emptied.map((field) => missingLabel(text, field, payerType)).join(", ")}`);
+        void afterRender(() => emptied.some((key) => revealPayerField(key)));
         return;
       }
       // Staff who copy the payer's signed paper form keep the rule of 2026-10-09: the first press
@@ -811,8 +829,12 @@ function revealOwnerProblem(blocker: OwnersBlocker, owners: readonly OwnerDraft[
 
 /** Leads to the field of a missing key: scrolled into view, the cursor in it. False when the step does not show it. */
 function payerFieldTarget(key: string): HTMLElement | null {
-  const id = UPLOAD_IDS[key] ?? `payer-link-${key}`;
-  return document.getElementById(id) ?? document.getElementById(`${id}-label`);
+  // The owners are answered by a person or by "nobody holds more than 25 %": the box stands first.
+  const id = UPLOAD_IDS[key] ?? `payer-link-${key === "beneficial_owners" ? "beneficial_owners_none" : key}`;
+  // A country list has no id of its own: its label names the field, the box around both holds the list.
+  const labelled = Array.from(document.querySelectorAll("label")).find((label) => label.htmlFor === id);
+  // A group's label (an upload, a set of boxes): the group around it.
+  return document.getElementById(id) ?? document.getElementById(`${id}-label`)?.parentElement ?? labelled?.parentElement ?? null;
 }
 
 /** Scrolls that element into view and puts the cursor into it. False when the step does not show it. */
@@ -821,8 +843,8 @@ function revealPayerField(key: string): boolean {
   if (!target) return false;
   // An upload's input is hidden: its button gets the focus; a group's label its first choice;
   // a date field its day (`revealCabinetTarget` knows them).
-  const own = target.matches("input, select, textarea, button, [tabindex]") && !(target instanceof HTMLInputElement && target.type === "file");
-  revealCabinetTarget({ element: own ? target : target.parentElement ?? target, field: true });
+  const hiddenInput = target instanceof HTMLInputElement && target.type === "file";
+  revealCabinetTarget({ element: hiddenInput ? target.parentElement ?? target : target, field: true });
   return true;
 }
 

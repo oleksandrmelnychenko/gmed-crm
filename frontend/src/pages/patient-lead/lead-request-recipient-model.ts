@@ -361,6 +361,22 @@ export function recipientPayerReady(recipient: RecipientDraft): boolean {
   return named && Boolean(recipient.country && recipient.street.trim() && recipient.zip.trim() && recipient.city.trim() && recipient.email.trim());
 }
 
+/**
+ * What an organisation that receives the invoice and pays still has to state before it can stand
+ * as the payer (`recipientPayerReady`): its legal form and its contact person. The form marks both
+ * as required then, but the server asks them only of a payer that is already stored — so nothing
+ * was listed and "Next" passed with both empty (release QA 2026-11-11). The step lists and holds
+ * them itself. Empty for every other recipient.
+ */
+export function recipientPayerOpenKeys(recipient: RecipientDraft): RecipientSubmitField[] {
+  const flow = flowOf(recipient);
+  if (flow.recipient !== "third_party" || flow.isPayer !== "yes" || recipient.type !== "organisation") return [];
+  const keys: RecipientSubmitField[] = [];
+  if (!recipient.legal_form.trim()) keys.push("recipient_legal_form");
+  if (!recipient.contact_name.trim()) keys.push("recipient_contact_name");
+  return keys;
+}
+
 /** Keys of step 3's recipient in `progress.missing_for_submit`. */
 export type RecipientSubmitField =
   | "invoice_recipient"

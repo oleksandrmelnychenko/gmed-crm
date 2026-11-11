@@ -820,6 +820,39 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await expect(summary).toContainText("Der Arbeitgeber erhält die Rechnung.");
   });
 
+  test("an organisation that receives and pays: the starred legal form and contact person hold Weiter (release QA 2026-11-11)", async ({ page }) => {
+    await setup(page);
+    await page.goto("/");
+    await step(page, "billing");
+    const stepBox = page.getByTestId("lead-request-step-billing");
+    const party = page.getByTestId("lead-request-recipient-party");
+    await checkLabelledRadio(stepBox.getByRole("radio", { name: "Eine andere Person oder Organisation" }));
+    await expect(stepBox.getByRole("checkbox", { name: IS_PAYER })).toBeChecked();
+    await party.getByRole("combobox", { name: "Rechnungsempfänger ist" }).click();
+    await page.getByRole("option", { name: "Eine Organisation", exact: true }).click();
+    await party.getByRole("textbox", { name: "Name der Organisation" }).fill("Beispiel GmbH");
+    const legalForm = party.getByRole("textbox", { name: "Rechtsform" });
+    const contact = party.getByRole("textbox", { name: "Ansprechperson" });
+    const missing = stepBox.getByTestId("lead-request-step-missing");
+    // Both carry the star while the organisation pays; the server lists neither: the step does.
+    for (let press = 1; press <= 3; press += 1) {
+      await page.getByRole("button", { name: "Weiter", exact: true }).click();
+      await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "billing");
+      await expect(missing).toContainText("Rechtsform");
+      await expect(missing).toContainText("Ansprechperson");
+    }
+    await expect(page.locator("#lead-request-recipient_legal_form-error")).toHaveText("Pflichtfeld");
+    // Each of the two leads to its field, and goes from the list once it is filled.
+    await missing.getByRole("button", { name: /Rechtsform/ }).click();
+    await expect(legalForm).toBeFocused();
+    await legalForm.fill("GmbH");
+    await contact.fill("Ben Muster");
+    await page.getByRole("button", { name: "Weiter", exact: true }).click();
+    await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "billing");
+    await expect(missing).not.toContainText("Rechtsform");
+    await expect(missing).not.toContainText("Ansprechperson");
+  });
+
   test("a person who receives and pays the invoice is the payer: citizenships and the consents follow", async ({ page }) => {
     const { calls } = await setup(page);
     await page.goto("/");

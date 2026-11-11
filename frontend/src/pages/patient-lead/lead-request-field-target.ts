@@ -103,6 +103,15 @@ function directFieldElement(scope: ParentNode, key: string): HTMLElement | null 
   );
 }
 
+/** A name is written in Latin letters (accents included), spaces, hyphens, apostrophes and dots. */
+const LATIN_NAME = /^[\p{Script=Latin}\s'’.-]*$/u;
+
+/** The first of the name fields `<prefix>first_name / last_name / middle_name` that holds other letters; else the first name. */
+function nonLatinNameInput(scope: ParentNode, prefix: string): HTMLElement | null {
+  const inputs = ["first_name", "last_name", "middle_name"].map((field) => byId(scope, `${prefix}${field}`));
+  return inputs.find((input) => input instanceof HTMLInputElement && !LATIN_NAME.test(input.value)) ?? inputs[0] ?? null;
+}
+
 /** The element that answers one form key, searched by the ids and labels the cabinet gives its fields. */
 export function fieldElement(scope: ParentNode, key: string): HTMLElement | null {
   // Block R: a representative's answer, else the person's box.
@@ -116,6 +125,8 @@ export function fieldElement(scope: ParentNode, key: string): HTMLElement | null
   if (key === "inquiry_consent") return byTestId(scope, "lead-request-inquiry-consent");
   if (key === "id_document_upload" || key.startsWith("id_")) return byTestId(scope, "lead-request-identity-upload");
   if (key === "request_reason") return byTestId(scope, "lead-request-reason");
+  // The proof of the source of funds (extra step): its upload, not only its block.
+  if (key === "funds_proof_upload") return byTestId(scope, "lead-request-funds-proof");
   const representative = representativeSubmitPart(key);
   if (representative) {
     // An upload of a person: its own button (a parent's identity copy is on step "Document").
@@ -126,11 +137,20 @@ export function fieldElement(scope: ParentNode, key: string): HTMLElement | null
           ? byTestId(scope, `lead-request-${representative.slot}-authority-upload`)
           : null;
     if (upload) return upload;
-    return (
-      byTestId(scope, `lead-request-representative-${representative.slot}`) ??
-      byId(scope, SECTION_ANCHORS.representatives)
-    );
+    const box = byTestId(scope, `lead-request-representative-${representative.slot}`);
+    // The person's name in Latin letters: the name field that is not (else the first name).
+    if (representative.part === "name_latin") {
+      const name = nonLatinNameInput(scope, `lead-request-${representative.slot}_`);
+      if (name) return name;
+    }
+    // A question about the person (public office, sanctions): its own list, else the block of
+    // the questions — never the person's box, whose first control is "remove" (release QA 2026-11-11).
+    const question = box?.querySelector<HTMLElement>(`[id^="representative-"][id$="-${representative.part}"]`)
+      ?? box?.querySelector<HTMLElement>('[data-testid^="lead-request-representative-pep-"], [data-testid^="lead-request-representative-questions-"]');
+    return question ?? box ?? byId(scope, SECTION_ANCHORS.representatives);
   }
+  // "The name in Latin letters, as in the passport": the name field that holds other letters.
+  if (key === "name_latin") return nonLatinNameInput(scope, "lead-request-");
   if (key === "has_insurance" || key.startsWith("insurance_")) return byTestId(scope, "lead-request-insurance");
   if (isRecipientField(key)) return byTestId(scope, "lead-request-invoice-recipient");
   // The recipient who pays answers the payer's e-mail, phone or residence in the recipient's

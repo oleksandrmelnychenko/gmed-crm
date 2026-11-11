@@ -326,7 +326,10 @@
 
 /* Fill the actual workspace height so short steps end at the same bottom edge
    as long steps, without a viewport estimate or extra space after the footer. */
-#main-content:has(.patient-request-wizard) {
+/* `:is(…, html)`: one class more than `.patient-portal-theme #main-content { padding: 16px }`,
+   which is loaded later and otherwise put the bottom padding back — the step's sticky bar then
+   stood above the bottom edge with the form showing beneath it (release QA 2026-11-11). */
+:is(.patient-portal-theme, html) #main-content:has(.patient-request-wizard) {
   display: flex;
   flex-direction: column;
   padding-bottom: 0;

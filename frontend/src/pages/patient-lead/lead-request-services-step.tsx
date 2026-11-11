@@ -14,6 +14,7 @@ import type { SaveState } from "./lead-request-model";
 import { CabinetSection, LabeledField, errorMessage, runDraftSave, useAutosave } from "./lead-request-parts";
 import { useServerDraftSync } from "./lead-request-server-sync";
 import { StepFrame, type StepProps } from "./lead-request-step-forms";
+import { DateRefusal } from "./lead-request-date-refusal";
 import { servicesText } from "./lead-request-services-text";
 import { asLeadCabinetLang } from "./lead-request-text";
 import { useCabinetStaffMode } from "./lead-request-staff-mode";
@@ -158,11 +159,16 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
       <CabinetSection icon={CalendarRange} title={wording.period} accessory={<span className="font-mono text-xs text-muted-foreground">{wording.optional}</span>}>
         <LabeledField id="lead-request-service-program_date_from" label={wording.from} className={cn(fieldStyle, "max-w-sm")}>
           {/* A wished start lies ahead: no date in the past (owner 2026-10-29); staff may enter one (QA 2026-10-31). */}
+          {/* A date the field does not take holds the step like every other date of the cabinet: it was
+              dropped without a word when the step was left (release QA 2026-11-11). Cleared, it holds nothing. */}
+          <DateRefusal lang={lang} value={draft.program_date_from} limits={staffMode ? {} : { min: appDateKey() }}>{(refusal) => refusal.wrap(
           <Input key={`program_date_from-${lang}`} id="lead-request-service-program_date_from" type="date" className={inputClass}
             pickerLang={asLeadCabinetLang(lang) ?? undefined}
-            min={staffMode ? undefined : appDateKey()} value={draft.program_date_from} onPickerValidation={setPickerRefused}
+            min={staffMode ? undefined : appDateKey()} value={draft.program_date_from}
+            onPickerValidation={(reason) => { setPickerRefused(reason); refusal.onPickerValidation(reason); }}
             aria-invalid={pastStart || undefined} aria-describedby={pastStart ? "lead-request-service-program_date_from-error" : undefined}
-            onChange={(event) => setDraft((current) => ({ ...current, program_date_from: event.target.value }))} />
+            onChange={(event) => setDraft((current) => ({ ...current, program_date_from: event.target.value }))} />,
+          )}</DateRefusal>
           {pastStart ? <p id="lead-request-service-program_date_from-error" role="alert" className="text-xs text-destructive">{pastDateMessage(lang)}</p> : null}
         </LabeledField>
       </CabinetSection>

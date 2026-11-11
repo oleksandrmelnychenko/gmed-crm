@@ -91,6 +91,26 @@ export function dateRangeMessage(lang: string, value: string, limits: DateLimits
  * `Input` (it notices when the field is left). While such a date is on screen the step is not left: what is
  * shown would silently not be saved.
  */
+/**
+ * `useDateRefusal` for a date field of a component that renders its step's frame itself: the
+ * hook then runs inside the frame, where it can tell the step that an entry is refused (called
+ * above the frame, the first step kept saying "saved" next to the refused date of birth —
+ * release QA 2026-11-11).
+ */
+export function DateRefusal({
+  lang,
+  value,
+  limits,
+  children,
+}: {
+  lang: string;
+  value: string;
+  limits?: DateLimits;
+  children: (refusal: ReturnType<typeof useDateRefusal>) => ReactNode;
+}) {
+  return <>{children(useDateRefusal(lang, value, limits))}</>;
+}
+
 export function useDateRefusal(lang: string, value: string, limits: DateLimits = {}) {
   const [reason, setReason] = useState<string | null>(null);
   const [left, setLeft] = useState(false);

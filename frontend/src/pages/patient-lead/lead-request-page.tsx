@@ -58,6 +58,7 @@ import {
   type RequestPatch,
   type RequestQueue,
 } from "./lead-request-parts";
+import { draftFromRecipient, recipientPayerOpenKeys } from "./lead-request-recipient-model";
 import { findCabinetTarget, firstCabinetTarget, firstProblemIn, revealCabinetTarget, type CabinetTarget } from "./lead-request-field-target";
 import { SendStep } from "./lead-request-send-step";
 import {
@@ -668,7 +669,7 @@ function LeadRequestView({
   const steps = visibleSteps(request);
   // "Ergänzende Angaben" exists only while the server opened blocks.
   const step: StepId = steps.includes(chosenStep) ? chosenStep : "send";
-  const missing = missingByStep(request);
+  const missing = cabinetMissing(request);
   const position = steps.indexOf(step);
   const topRef = useRef<HTMLElement | null>(null);
   const languageSwitch = useContext(CabinetLanguageContext);
@@ -762,7 +763,7 @@ function LeadRequestView({
   heldKeys.current = (current, id) => {
     if (!nextIsStrict({ staff: staffMode, submitted: Boolean(current.submitted_at) })) return [];
     const root = stepRef.current ?? document;
-    return nextHoldKeys(current, id).filter((key) => findCabinetTarget({ field: key }, root) !== null);
+    return nextHoldKeys(current, id, cabinetMissing(current)).filter((key) => findCabinetTarget({ field: key }, root) !== null);
   };
   const go = useCallback((next: StepId, validateCurrent = false, target?: CabinetTarget) => {
     if (validateCurrent) setNextPressed(true);
@@ -786,7 +787,7 @@ function LeadRequestView({
         // field for keep the rule of 2026-10-09: the first press shows the list and stays, the
         // next goes on — unless something is missing that the list of that press did not name.
         // A step of a sent request is read-only and shows no list: nothing holds it at all.
-        const keys = stepReadOnly(latestRequest.current, step) ? [] : stepMissingKeys(latestRequest.current, step);
+        const keys = stepReadOnly(latestRequest.current, step) ? [] : stepMissingKeys(latestRequest.current, step, cabinetMissing(latestRequest.current));
         if (nextHeldByMissing(keys, warned.current?.step === step ? warned.current.keys : null)) {
           warned.current = { step, keys: new Set(keys) };
           showMissingOf(step);
@@ -998,6 +999,19 @@ function LeadRequestView({
     </RequestPatchContext.Provider>
     </ServerConflictContext.Provider>
   );
+}
+
+/**
+ * What every step of the cabinet still misses: the server's lists (`missingByStep`), and in step 3
+ * the two fields the form itself requires of an organisation that receives the invoice and pays
+ * (`recipientPayerOpenKeys`) while the request is not sent. The summary and the send follow the
+ * server alone.
+ */
+function cabinetMissing(request: LeadRequest): Record<StepId, string[]> {
+  const missing = missingByStep(request);
+  if (request.submitted_at) return missing;
+  const own = recipientPayerOpenKeys(draftFromRecipient(request.billing)).filter((key) => !missing.billing.includes(key));
+  return own.length > 0 ? { ...missing, billing: [...missing.billing, ...own] } : missing;
 }
 
 /**
