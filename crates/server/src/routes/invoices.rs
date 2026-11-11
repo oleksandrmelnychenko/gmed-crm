@@ -342,10 +342,8 @@ struct ApplyInvoicePrepaymentRequest {
     request_id: Uuid,
     advance_invoice_id: Uuid,
     amount_gross: MoneyInput,
-    /// Credits the advance of one recipient (debtor) against the invoice of
-    /// another; only with billing's explicit confirmation for this pair.
-    #[serde(default)]
-    confirm_recipient_mismatch: bool,
+    // `confirm_recipient_mismatch` is gone: another person's advance is never
+    // credited by hand (owner decision 2026-11-12); serde ignores the field.
 }
 
 #[derive(Deserialize)]
@@ -5005,6 +5003,9 @@ async fn load_invoice_detail(
                           0
                       ) AS available_amount,
                       advance.recipient_snapshot ->> 'name' AS recipient_name,
+                      advance.payer_role AS advance_payer_role,
+                      target.recipient_snapshot ->> 'name' AS target_recipient_name,
+                      target.payer_role AS target_payer_role,
                       (invoice_recipient_identity(advance.recipient_snapshot)
                           IS NOT DISTINCT FROM invoice_recipient_identity(target.recipient_snapshot)
                        OR COALESCE(
@@ -5039,6 +5040,34 @@ async fn load_invoice_detail(
             )
         })?
         .into_iter()
+        // Only the same recipient person's advances are offered (owner
+        // decision 2026-11-12; the patient's own name at another address
+        // counts as the same person).
+        .filter(|advance| {
+            advance
+                .try_get::<Option<bool>, _>("same_recipient")
+                .unwrap_or_default()
+                .unwrap_or(false)
+                || payer::advance_names_same_person(
+                    advance
+                        .try_get::<Option<String>, _>("recipient_name")
+                        .unwrap_or_default()
+                        .as_deref(),
+                    advance
+                        .try_get::<Option<String>, _>("advance_payer_role")
+                        .unwrap_or_default()
+                        .as_deref(),
+                    advance
+                        .try_get::<Option<String>, _>("target_recipient_name")
+                        .unwrap_or_default()
+                        .as_deref()
+                        .unwrap_or_default(),
+                    advance
+                        .try_get::<Option<String>, _>("target_payer_role")
+                        .unwrap_or_default()
+                        .as_deref(),
+                )
+        })
         .map(|advance| {
             serde_json::json!({
                 "invoice_id": advance.try_get::<Uuid, _>("id").unwrap_or_default(),
@@ -5049,7 +5078,7 @@ async fn load_invoice_detail(
                 "allocated_amount": decimal_to_string(advance.try_get::<Decimal, _>("allocated_amount").unwrap_or(Decimal::ZERO)),
                 "available_amount": decimal_to_string(advance.try_get::<Decimal, _>("available_amount").unwrap_or(Decimal::ZERO)),
                 "recipient_name": advance.try_get::<Option<String>, _>("recipient_name").unwrap_or_default(),
-                "same_recipient": advance.try_get::<Option<bool>, _>("same_recipient").unwrap_or_default().unwrap_or(false),
+                "same_recipient": true,
             })
         })
         .collect::<Vec<_>>()
@@ -8593,18 +8622,27 @@ async fn apply_invoice_prepayment(
         };
     }
 
-    // Money belongs to whoever paid it (§ 14 Abs. 5 Satz 2 UStG): the advance
-    // of another recipient (debtor) is credited only with billing's explicit
-    // confirmation for this pair, or when billing confirmed exactly this
-    // advance at the release of the target invoice (QA D-57).
-    let recipient_mismatch = match sqlx::query_scalar::<_, bool>(
+    // Money belongs to whoever paid it (§ 14 Abs. 5 Satz 2 UStG): an advance
+    // is credited only against an invoice of the same patient and the same
+    // invoice recipient person (the patient's own name at another address
+    // counts as the same person, `advance_names_same_person`). Owner decision
+    // 2026-11-12: no confirmation overrides it any more, as for credit
+    // transfers. An advance billing confirmed at the release of exactly this
+    // target invoice (QA D-57, the release rule) stays creditable.
+    let recipients = match sqlx::query(
         r#"SELECT invoice_recipient_identity(advance.recipient_snapshot)
-                      IS DISTINCT FROM invoice_recipient_identity(target.recipient_snapshot)
-                  AND NOT COALESCE(
+                      IS NOT DISTINCT FROM invoice_recipient_identity(target.recipient_snapshot)
+                  OR COALESCE(
                       target.recipient_snapshot -> 'confirmations'
                           -> 'advance_recipient_mismatch' -> 'advance_invoice_numbers',
                       '[]'::jsonb
-                  ) ? COALESCE(advance.invoice_number, '')
+                  ) ? COALESCE(advance.invoice_number, '') AS same_recipient,
+                  advance.recipient_snapshot ->> 'name' AS advance_recipient_name,
+                  advance.payer_role AS advance_payer_role,
+                  advance.invoice_number AS advance_invoice_number,
+                  target.recipient_snapshot ->> 'name' AS target_recipient_name,
+                  target.payer_role AS target_payer_role,
+                  target.invoice_number AS target_invoice_number
            FROM invoices advance, invoices target
            WHERE advance.id = $1 AND target.id = $2"#,
     )
@@ -8622,12 +8660,43 @@ async fn apply_invoice_prepayment(
             );
         }
     };
-    if recipient_mismatch && !body.confirm_recipient_mismatch {
+    let advance_recipient_name = recipients
+        .try_get::<Option<String>, _>("advance_recipient_name")
+        .unwrap_or_default();
+    let target_recipient_name = recipients
+        .try_get::<Option<String>, _>("target_recipient_name")
+        .unwrap_or_default();
+    let same_person = recipients
+        .try_get::<Option<bool>, _>("same_recipient")
+        .unwrap_or_default()
+        .unwrap_or(false)
+        || payer::advance_names_same_person(
+            advance_recipient_name.as_deref(),
+            recipients
+                .try_get::<Option<String>, _>("advance_payer_role")
+                .unwrap_or_default()
+                .as_deref(),
+            target_recipient_name.as_deref().unwrap_or_default(),
+            recipients
+                .try_get::<Option<String>, _>("target_payer_role")
+                .unwrap_or_default()
+                .as_deref(),
+        );
+    if !same_person {
         return coded_err(
-            StatusCode::CONFLICT,
-            "prepayment_recipient_mismatch",
-            "The advance invoice is addressed to another recipient; confirm to credit its money against this invoice",
-            serde_json::json!({ "confirm_field": "confirm_recipient_mismatch" }),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "prepayment_other_person",
+            "An advance can only be credited against an invoice of the same patient and the same invoice recipient",
+            serde_json::json!({
+                "advance_invoice_number": recipients
+                    .try_get::<Option<String>, _>("advance_invoice_number")
+                    .unwrap_or_default(),
+                "advance_recipient_name": advance_recipient_name,
+                "target_invoice_number": recipients
+                    .try_get::<Option<String>, _>("target_invoice_number")
+                    .unwrap_or_default(),
+                "target_recipient_name": target_recipient_name,
+            }),
         );
     }
 
@@ -8708,7 +8777,6 @@ async fn apply_invoice_prepayment(
             "advance_invoice_id": body.advance_invoice_id,
             "amount_gross": decimal_to_string(amount_gross),
             "patient_id": patient_id,
-            "recipient_mismatch_confirmed": recipient_mismatch,
         }),
     )
     .await

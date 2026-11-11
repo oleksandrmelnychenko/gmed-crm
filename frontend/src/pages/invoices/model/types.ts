@@ -87,8 +87,9 @@ export type InvoicePrepaymentOption = {
   /** Recipient (debtor) of the advance invoice. */
   recipient_name?: string | null;
   /**
-   * Billed to the same recipient as this invoice (or confirmed by number at
-   * its release); otherwise crediting it needs a confirmation for the pair.
+   * Billed to the same recipient person as this invoice (or confirmed by
+   * number at its release). Since 2026-11-12 the server offers only these;
+   * another person's advance is never credited.
    */
   same_recipient?: boolean;
 };

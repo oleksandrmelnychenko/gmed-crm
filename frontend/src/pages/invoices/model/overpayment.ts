@@ -69,6 +69,15 @@ export function creditTransferTargetLabel(
   return `${base} · ${lang === "de" ? "Empfänger" : "получатель"}: ${recipient}${other}`;
 }
 
+/**
+ * The paid advances that may be credited against an invoice: the same
+ * recipient person's only (owner decision 2026-11-12, as for credit
+ * transfers); the server refuses others with `prepayment_other_person`.
+ */
+export function creditablePrepayments<T extends { same_recipient?: boolean }>(advances: readonly T[] | undefined): T[] {
+  return (advances ?? []).filter((advance) => advance.same_recipient !== false);
+}
+
 /** Receipts moved from another invoice's credit, not money from outside. */
 export const CREDIT_TRANSFER_METHOD = "credit_transfer";
 

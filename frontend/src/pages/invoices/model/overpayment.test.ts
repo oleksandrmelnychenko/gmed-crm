@@ -8,8 +8,19 @@ import {
   creditTransferProblem,
   creditTransferTargetLabel,
   creditTransferTargets,
+  creditablePrepayments,
   paymentOverpayment,
 } from "./overpayment";
+
+describe("advances of another recipient (owner decision 2026-11-12)", () => {
+  it("offers only the same recipient person's advances", () => {
+    const own = { invoice_id: "a", same_recipient: true };
+    const legacy = { invoice_id: "b" };
+    const other = { invoice_id: "c", same_recipient: false };
+    expect(creditablePrepayments([own, legacy, other]).map((item) => item.invoice_id)).toEqual(["a", "b"]);
+    expect(creditablePrepayments(undefined)).toEqual([]);
+  });
+});
 
 // Owner decision 2026-11-12 (QA L12): credit never moves to another person.
 describe("credit transfer to another recipient", () => {

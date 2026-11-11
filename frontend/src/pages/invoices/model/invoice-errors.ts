@@ -386,9 +386,10 @@ const CODES: Record<string, Pair> = {
     "Guthaben gehört dem, der es gezahlt hat: Es kann nur auf eine Rechnung desselben Patienten und desselben Rechnungsempfängers umgebucht werden, auch aus einem stornierten Auftrag. Für eine andere Person das Guthaben erstatten.",
     "Переплата принадлежит тому, кто её внёс: её можно перенести только на счёт того же пациента и того же получателя счёта, в том числе из отменённого заказа. Другому лицу переплату нужно вернуть (возврат).",
   ],
-  prepayment_recipient_mismatch: [
-    "Die Anzahlungsrechnung ist an einen anderen Rechnungsempfänger adressiert. Das Geld eines Zahlers nur nach Bestätigung auf die Rechnung eines anderen anrechnen.",
-    "Авансовый счёт выставлен другому получателю. Зачесть деньги одного плательщика в счёт другого можно только после подтверждения.",
+  // Owner decision 2026-11-12: no confirmation any more, as for credit transfers.
+  prepayment_other_person: [
+    "Die Anzahlung gehört dem, der sie gezahlt hat: Sie wird nur auf eine Rechnung desselben Patienten und desselben Rechnungsempfängers angerechnet. Für eine andere Person die Anzahlung erstatten.",
+    "Аванс принадлежит тому, кто его внёс: его можно зачесть только в счёт того же пациента и того же получателя счёта. Другому лицу аванс нужно вернуть (возврат).",
   ],
   services_not_delivered: [
     "Die Rechnung enthält noch nicht erbrachte Leistungen. Auf der Rechnung steht dann „Leistung noch nicht erbracht (Abrechnung vor Leistungserbringung)“.",

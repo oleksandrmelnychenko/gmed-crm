@@ -209,13 +209,13 @@ describe("localizeInvoiceError", () => {
     expect(
       localizeInvoiceError({ body: { error: "credit_note_below_applied_advance" } }, "ru", "x"),
     ).toContain("зачтён в финальный счёт");
+    // Owner decision 2026-11-12: another person's advance is refused, no confirmation.
     expect(
-      localizeInvoiceError(
-        { body: { error: "prepayment_recipient_mismatch", confirm_field: "confirm_recipient_mismatch" } },
-        "ru",
-        "x",
-      ),
-    ).toContain("другому получателю");
+      localizeInvoiceError({ body: { error: "prepayment_other_person" } }, "ru", "x"),
+    ).toContain("того же получателя счёта");
+    expect(
+      localizeInvoiceError({ body: { error: "prepayment_other_person" } }, "de", "x"),
+    ).toContain("desselben Rechnungsempfängers");
     expect(localizeInvoiceError(new Error("Refund exceeds the refundable cash credit"), "ru", "x")).toBe(
       "Сумма возврата больше доступной к возврату переплаты.",
     );

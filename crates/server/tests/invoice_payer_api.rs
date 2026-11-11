@@ -1914,28 +1914,42 @@ async fn confirmed_advance_mismatch_covers_only_the_named_advances() {
         company_detail["prepayment_applied_amount"], "0",
         "{company_detail}"
     );
+    // Owner decision 2026-11-12: another person's advance is not offered and
+    // is refused by hand, also with the old confirmation flag.
     let offered = company_detail["available_prepayments"].as_array().unwrap();
-    let mia_offer = offered
-        .iter()
-        .find(|advance| advance["invoice_id"] == mia_advance_id)
-        .unwrap();
-    assert_eq!(mia_offer["same_recipient"], false);
-    // By hand only with a confirmation for this pair.
-    let (status, refused) = json_request(
-        &fx.app,
-        "POST",
-        &format!("/api/v1/invoices/{company_final_id}/prepayment-allocations"),
-        &fx.billing,
-        Some(json!({
-            "request_id": Uuid::new_v4(),
-            "advance_invoice_id": mia_advance_id,
-            "amount_gross": "10",
-        })),
+    assert!(
+        offered
+            .iter()
+            .all(|advance| advance["invoice_id"] != mia_advance_id),
+        "{company_detail}"
+    );
+    for confirm in [false, true] {
+        let (status, refused) = json_request(
+            &fx.app,
+            "POST",
+            &format!("/api/v1/invoices/{company_final_id}/prepayment-allocations"),
+            &fx.billing,
+            Some(json!({
+                "request_id": Uuid::new_v4(),
+                "advance_invoice_id": mia_advance_id,
+                "amount_gross": "10",
+                "confirm_recipient_mismatch": confirm,
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+        assert_eq!(refused["error"], "prepayment_other_person");
+        assert_eq!(refused["target_recipient_name"], "Beispiel GmbH");
+        assert_eq!(refused["advance_recipient_name"], "Mia Muster");
+    }
+    let allocated: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM invoice_prepayment_allocations WHERE advance_invoice_id = $1",
     )
-    .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
-    assert_eq!(refused["error"], "prepayment_recipient_mismatch");
-    assert_eq!(refused["confirm_field"], "confirm_recipient_mismatch");
+    .bind(Uuid::parse_str(&mia_advance_id).unwrap())
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(allocated, 0);
 
     // Mia's own final invoice deducts her 50 and closes the unpaid 69.
     let mia_final = create_draft(&fx.app, &fx.billing, &second_quote, "final").await;

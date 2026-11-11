@@ -109,7 +109,7 @@ import {
   effectiveCreditNoteSelection,
   previewCreditNote,
 } from "./model/credit-note";
-import { CREDIT_TRANSFER_METHOD, paymentOverpayment } from "./model/overpayment";
+import { CREDIT_TRANSFER_METHOD, creditablePrepayments, paymentOverpayment } from "./model/overpayment";
 import { CreditBalancePanel } from "./ui/credit-balance-panel";
 import { CreateInvoiceDialog } from "./ui/create-invoice-dialog";
 import { InvoiceLineComment } from "./ui/invoice-line-comment";
@@ -1105,7 +1105,6 @@ function useStaffInvoicesPageContent() {
   const [prepaymentRequestId, setPrepaymentRequestId] = useState(() => crypto.randomUUID());
   const [prepaymentBusy, setPrepaymentBusy] = useState(false);
   const [prepaymentError, setPrepaymentError] = useState<string | null>(null);
-  const [prepaymentConfirmMismatch, setPrepaymentConfirmMismatch] = useState(false);
   const [advanceRestBusy, setAdvanceRestBusy] = useState(false);
   const [advanceRestError, setAdvanceRestError] = useState<string | null>(null);
   // What the page prefilled for the prepayment; only a change away from it is user input.
@@ -1240,7 +1239,7 @@ function useStaffInvoicesPageContent() {
   }, [createOpen, createBusy, selectedInvoiceId]);
 
   useEffect(() => {
-    const firstAvailable = detail?.available_prepayments?.[0];
+    const firstAvailable = creditablePrepayments(detail?.available_prepayments)[0];
     const prefilled: InvoicePrepaymentDraft = {
       invoiceId: firstAvailable?.invoice_id ?? "",
       amount: firstAvailable
@@ -1255,7 +1254,6 @@ function useStaffInvoicesPageContent() {
     setPrepaymentBaseline(prefilled);
     setPrepaymentRequestId(crypto.randomUUID());
     setPrepaymentError(null);
-    setPrepaymentConfirmMismatch(false);
     setAdvanceRestError(null);
   }, [detail?.id, detail?.available_prepayments]);
 
@@ -2078,13 +2076,9 @@ function useStaffInvoicesPageContent() {
 
   async function handleApplyPrepayment() {
     if (!detail || !prepaymentInvoiceId || !(parseMoneyInput(prepaymentAmount) > 0)) return;
-    const advance = detail.available_prepayments?.find(
-      (item) => item.invoice_id === prepaymentInvoiceId,
-    );
-    // Money of one debtor on another debtor's invoice only with this
-    // confirmation for the pair (QA D-57).
-    const otherRecipient = advance?.same_recipient === false;
-    if (otherRecipient && !prepaymentConfirmMismatch) return;
+    // Another person's advance is never credited (owner decision
+    // 2026-11-12): only the offered advances of the same recipient person.
+    if (!creditablePrepayments(detail.available_prepayments).some((item) => item.invoice_id === prepaymentInvoiceId)) return;
     setPrepaymentBusy(true);
     setPrepaymentError(null);
     try {
@@ -2092,11 +2086,9 @@ function useStaffInvoicesPageContent() {
         request_id: prepaymentRequestId,
         advance_invoice_id: prepaymentInvoiceId,
         amount_gross: parseMoneyInput(prepaymentAmount),
-        confirm_recipient_mismatch: otherRecipient && prepaymentConfirmMismatch,
       });
       setDetail(updated);
       setPrepaymentRequestId(crypto.randomUUID());
-      setPrepaymentConfirmMismatch(false);
       setReloadToken((current) => current + 1);
     } catch (error) {
       setPrepaymentError(localizeInvoiceError(error, lang, t.common_error));
@@ -4043,7 +4035,7 @@ function useStaffInvoicesPageContent() {
                 </SectionCard>
 
                 {detail.invoice_type !== "advance" &&
-                ((detail.available_prepayments?.length ?? 0) > 0 ||
+                (creditablePrepayments(detail.available_prepayments).length > 0 ||
                   (detail.prepayment_allocations?.length ?? 0) > 0) ? (
                   <SectionCard icon={Banknote} title={text.prepayment}>
                     <div className="space-y-4">
@@ -4083,18 +4075,17 @@ function useStaffInvoicesPageContent() {
                           ))}
                         </div>
                       ) : null}
-                      {(detail.available_prepayments?.length ?? 0) > 0 && access.canManage ? (
+                      {creditablePrepayments(detail.available_prepayments).length > 0 && access.canManage ? (
                         <div className="grid gap-3 sm:grid-cols-[1fr_10rem_auto] sm:items-end">
                           <Field label={text.availableAdvance}>
                             <NativeComboboxSelect
                               value={prepaymentInvoiceId}
                               onChange={(event) => {
                                 const invoiceId = event.target.value;
-                                const advance = detail.available_prepayments?.find(
+                                const advance = creditablePrepayments(detail.available_prepayments).find(
                                   (item) => item.invoice_id === invoiceId,
                                 );
                                 setPrepaymentInvoiceId(invoiceId);
-                                setPrepaymentConfirmMismatch(false);
                                 setPrepaymentAmount(
                                   advance
                                     ? cappedPrepaymentAmount(
@@ -4106,12 +4097,9 @@ function useStaffInvoicesPageContent() {
                               }}
                               className={selectClassName}
                             >
-                              {detail.available_prepayments?.map((advance) => (
+                              {creditablePrepayments(detail.available_prepayments).map((advance) => (
                                 <option key={advance.invoice_id} value={advance.invoice_id}>
                                   {advance.invoice_number} · {formatMoney(advance.available_amount, detail?.currency)}
-                                  {advance.same_recipient === false && advance.recipient_name
-                                    ? ` · ${advance.recipient_name}`
-                                    : ""}
                                 </option>
                               ))}
                             </NativeComboboxSelect>
@@ -4128,11 +4116,7 @@ function useStaffInvoicesPageContent() {
                             disabled={
                               prepaymentBusy ||
                               !prepaymentInvoiceId ||
-                              !(parseMoneyInput(prepaymentAmount) > 0) ||
-                              (detail.available_prepayments?.find(
-                                (item) => item.invoice_id === prepaymentInvoiceId,
-                              )?.same_recipient === false &&
-                                !prepaymentConfirmMismatch)
+                              !(parseMoneyInput(prepaymentAmount) > 0)
                             }
                             onClick={() => void handleApplyPrepayment()}
                           >
@@ -4141,23 +4125,6 @@ function useStaffInvoicesPageContent() {
                             ) : null}
                             {text.applyPrepayment}
                           </Button>
-                          {detail.available_prepayments?.find(
-                            (item) => item.invoice_id === prepaymentInvoiceId,
-                          )?.same_recipient === false ? (
-                            <label className="flex items-start gap-2 text-xs text-amber-800 sm:col-span-3">
-                              <input
-                                type="checkbox"
-                                className="mt-0.5"
-                                checked={prepaymentConfirmMismatch}
-                                onChange={(event) => setPrepaymentConfirmMismatch(event.target.checked)}
-                              />
-                              <span>
-                                {lang === "de"
-                                  ? "Die Anzahlung ist an einen anderen Rechnungsempfänger adressiert. Ich bestätige, das Geld dieses Zahlers auf diese Rechnung anzurechnen."
-                                  : "Аванс выставлен другому получателю счёта. Подтверждаю зачёт денег этого плательщика в этот счёт."}
-                              </span>
-                            </label>
-                          ) : null}
                         </div>
                       ) : null}
                       {prepaymentError ? (
