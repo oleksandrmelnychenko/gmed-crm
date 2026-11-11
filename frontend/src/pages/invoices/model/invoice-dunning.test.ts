@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   automaticDunningNote,
   dunningBlockReason,
+  dunningCreditNotice,
   dunningDeadlineHint,
   dunningDeadlineRunning,
   dunningErrorKey,
@@ -19,6 +20,14 @@ describe("invoice dunning preflight", () => {
   it("says before submit that a covered invoice takes no reminder", () => {
     expect(dunningBlockReason({ ...sent, reminder_amount: "0" }, today)).toBe("invoices_workspace_dunning_covered");
     expect(dunningBlockReason({ ...sent, reminder_amount: "10" }, today)).toBeNull();
+  });
+  it("names a credit on another invoice without netting it (owner decision 2026-11-12)", () => {
+    expect(dunningCreditNotice("30.00", "30,00 €", "de")).toContain("Guthaben 30,00 € verfügbar – die Buchhaltung verrechnet es");
+    expect(dunningCreditNotice("30.00", "30,00 €", "ru")).toContain("кредит 30,00 €");
+    expect(dunningCreditNotice("0", "0,00 €", "de")).toBeNull();
+    expect(dunningCreditNotice(undefined, "", "de")).toBeNull();
+    // The reminder still demands the invoice's own amount.
+    expect(dunningBlockReason({ ...sent, reminder_amount: "2963.10" }, today)).toBeNull();
   });
   it("blocks drafts even if their due date has passed", () => {
     expect(dunningBlockReason({ ...sent, status: "draft" }, today)).toBe("invoices_workspace_dunning_not_sent");

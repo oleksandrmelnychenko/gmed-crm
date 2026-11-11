@@ -418,8 +418,10 @@ export type InvoiceItem = {
   advance_credit_available?: unknown;
   /** Balance due net of `advance_credit_available`. */
   amount_to_pay?: unknown;
-  /** Net of paid advances and of credit balances on the debtor's other invoices: what a reminder may demand. */
+  /** The own open amount net of an unapplied paid advance of the order: what a reminder demands (credit on other invoices is not netted, 2026-11-12). */
   reminder_amount?: unknown;
+  /** Credit balances on the recipient's other invoices: named next to a reminder, applied only by a credit transfer. */
+  recipient_credit_available?: unknown;
   credit_balance?: unknown;
   refundable_cash_amount?: unknown;
   credit_transfers?: InvoiceCreditTransfer[];

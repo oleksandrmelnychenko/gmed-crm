@@ -79,6 +79,20 @@ export function dunningOverrideCopy(lang: string) {
       };
 }
 
+/**
+ * Credit on the recipient's other invoices next to a reminder (owner decision
+ * 2026-11-12): the reminder demands the invoice's own open amount, the credit
+ * is only named and applied by Billing with «Guthaben verrechnen». `null`
+ * without credit. `amountLabel` is the formatted money.
+ */
+export function dunningCreditNotice(credit: unknown, amountLabel: string, lang: string): string | null {
+  const value = Number(credit);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return lang === "de"
+    ? `Guthaben ${amountLabel} verfügbar – die Buchhaltung verrechnet es mit «Guthaben verrechnen». Die Mahnung fordert den offenen Betrag dieser Rechnung ohne das Guthaben.`
+    : `Доступен кредит ${amountLabel} – бухгалтерия зачитывает его через «Guthaben verrechnen». Напоминание требует открытую сумму этого счёта без учёта кредита.`;
+}
+
 // Keep the preflight in sync with create_dunning_event. The server uses Berlin dates.
 export function dunningBlockReason(
   invoice: Pick<InvoiceItem, "status" | "balance_due" | "due_date" | "dunning_block" | "reminder_amount"> | null,
@@ -93,7 +107,8 @@ export function dunningBlockReason(
     return "invoices_workspace_dunning_ineligible";
   }
   if (invoice.status === "draft") return "invoices_workspace_dunning_not_sent";
-  // Money GMED already holds is not demanded: said before submit (R4-4).
+  // A paid advance of the order not applied yet is not demanded: said before
+  // submit (R4-4). Credit on other invoices is not netted (2026-11-12).
   if (invoice.reminder_amount != null && Number(invoice.reminder_amount) <= 0) {
     return "invoices_workspace_dunning_covered";
   }

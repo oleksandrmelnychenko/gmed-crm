@@ -118,6 +118,7 @@ import { invoiceCreationErrorMessage } from "./model/billing-release";
 import {
   automaticDunningNote,
   dunningBlockReason,
+  dunningCreditNotice,
   dunningDeadlineHint,
   dunningDeadlineRunning,
   dunningErrorKey,
@@ -4976,6 +4977,13 @@ function useStaffInvoicesPageContent() {
                   </div>
                 </div>
               </div>
+              {detail && dunningCreditNotice(detail.recipient_credit_available, formatMoney(detail.recipient_credit_available, detail.currency), lang) ? (
+                <ShellBanner tone="warning">
+                  <span data-testid="dunning-credit-available">
+                    {dunningCreditNotice(detail.recipient_credit_available, formatMoney(detail.recipient_credit_available, detail.currency), lang)}
+                  </span>
+                </ShellBanner>
+              ) : null}
               {dunningDeadline ? (
                 <ShellBanner tone="warning">
                   {dunningDeadlineHint(dunningDeadline, lang, canOverrideDunningDeadline)}

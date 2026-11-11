@@ -1074,8 +1074,10 @@ async fn load_patient_account_statement(
     let mut credit_balance = Decimal::ZERO;
     let mut invoice_due = Decimal::ZERO;
     let mut hidden_amount_count = 0_u64;
-    // Open balances are netted against paid advances not applied yet and
-    // credit balances, like the order card and the invoice list.
+    // Open balances are netted against paid advances of the same order not
+    // applied yet, like the order card and the invoice list. Credit balances
+    // are only summed as available (`credit_balance`): Billing applies them
+    // with a credit transfer (owner decision 2026-11-12).
     let mut open_invoices = Vec::new();
     let mut open_item_indexes = Vec::new();
 
@@ -1173,7 +1175,6 @@ async fn load_patient_account_statement(
                     is_advance: invoice_type == "advance",
                     due,
                     advance_available,
-                    credit_balance: invoice_credit,
                     issued_at: row
                         .try_get::<chrono::DateTime<Utc>, _>("issued_at")
                         .unwrap_or_else(|_| Utc::now()),
@@ -1227,10 +1228,6 @@ async fn load_patient_account_statement(
             item.insert(
                 "advance_credit".to_string(),
                 serde_json::json!(decimal_to_string(net.advance_credit)),
-            );
-            item.insert(
-                "credit_applied".to_string(),
-                serde_json::json!(decimal_to_string(net.credit_applied)),
             );
             item.insert(
                 "amount_due".to_string(),
@@ -1610,8 +1607,9 @@ async fn load_patient_account_statement(
             .and_then(Value::as_str)
             .cmp(&left.get("entry_date").and_then(Value::as_str))
     });
-    // Still to pay: open invoices net of unapplied advances and credit
-    // balances, plus external receivables not yet on a patient invoice.
+    // Still to pay: open invoices net of unapplied advances of their order
+    // (not of credit balances), plus external receivables not yet on a
+    // patient invoice.
     let total_due = amount_to_pay + external_receivable;
     let settlement =
         load_patient_settlement_ledger(state, patient_id, query, portal_scope, &currency, from, to)

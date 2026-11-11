@@ -744,11 +744,13 @@ async fn overdue_invoice_stays_overdue_after_a_partial_payment() {
     assert_eq!(settled["invoice"]["status"], "paid");
 }
 
-/// QA 2026-11-01 (R4-1, R4-4): an overdue invoice a credit balance covers
-/// keeps its status but asks for nothing: the overdue list drops it and the
-/// detail says what a reminder may demand.
+/// Owner decision 2026-11-12 (replaces QA 2026-11-01 R4-1/R4-4, which netted
+/// the credit): a credit balance on another invoice is not taken off an
+/// overdue invoice. The invoice stays in the overdue list, a reminder demands
+/// its own open amount, and the detail names the credit as available for
+/// Billing's explicit transfer.
 #[tokio::test]
-async fn an_overdue_invoice_covered_by_a_credit_leaves_the_overdue_filter() {
+async fn an_overdue_invoice_keeps_its_own_open_amount_next_to_a_credit_on_another_invoice() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
@@ -793,7 +795,7 @@ async fn an_overdue_invoice_covered_by_a_credit_leaves_the_overdue_filter() {
     )
     .await;
     let billing = auth_header_for(billing_id, "billing");
-    // 80 beyond the 100: the older overdue invoice is covered, 40 of the next stay.
+    // 80 beyond the 100: a credit of 80, not netted into either overdue invoice.
     let (status, payment) = json_request(
         &app,
         "POST",
@@ -819,19 +821,40 @@ async fn an_overdue_invoice_covered_by_a_credit_leaves_the_overdue_filter() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{list:?}");
-    let ids = list["items"]
+    let mut ids = list["items"]
         .as_array()
         .unwrap()
         .iter()
         .map(|item| item["id"].as_str().unwrap().to_string())
         .collect::<Vec<_>>();
-    assert_eq!(ids, vec![open.to_string()], "{list:?}");
-    assert_eq!(list["total"], 1);
+    ids.sort();
+    let mut expected = vec![covered.to_string(), open.to_string()];
+    expected.sort();
+    assert_eq!(ids, expected, "{list:?}");
+    assert_eq!(list["total"], 2);
 
     let detail = invoice_detail(&app, &billing, covered).await;
     assert_eq!(detail["status"], "overdue");
     assert_eq!(detail["balance_due"], "50");
-    assert_eq!(detail["reminder_amount"], "0");
+    assert_eq!(detail["reminder_amount"], "50");
+    assert_eq!(detail["recipient_credit_available"], "80");
+    let detail = invoice_detail(&app, &billing, open).await;
+    assert_eq!(detail["reminder_amount"], "70");
+    assert_eq!(detail["recipient_credit_available"], "80");
+
+    // The statement asks for each invoice's own open amount and names the
+    // credit separately.
+    let (status, statement) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/account-statement"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{statement:?}");
+    assert_eq!(statement["summary"]["amount_to_pay"], "120");
+    assert_eq!(statement["summary"]["credit_balance"], "80");
 }
 
 async fn category_totals(pool: &PgPool, invoice_id: Uuid) -> Vec<(String, Decimal)> {
@@ -1306,7 +1329,8 @@ async fn credit_transfer_to_another_recipient_names_both_recipients() {
         .find(|item| item["id"] == target.to_string())
         .unwrap();
     assert_eq!(target_item["amount_due"], "113.05");
-    assert_eq!(target_item["credit_applied"], "0");
+    // Credit is never netted (owner decision 2026-11-12): no such figure.
+    assert!(target_item.get("credit_applied").is_none(), "{target_item}");
     assert_eq!(before["summary"]["total_due"], "113.05");
 
     let mut confirmed = request;

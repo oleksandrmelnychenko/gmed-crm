@@ -62,8 +62,12 @@ pub(super) struct DunningLetterContext {
     pub invoice_due_date: Option<NaiveDate>,
     pub currency: String,
     pub total_gross: Decimal,
-    /// Open amount when the letter was sent (snapshot of the event).
+    /// Open amount when the letter was sent (snapshot of the event): the
+    /// invoice's own open amount, credit on other invoices not netted.
     pub balance_due: Decimal,
+    /// Credit balances on the recipient's other invoices: named in the
+    /// letter, applied only by Billing (owner decision 2026-11-12).
+    pub available_credit: Decimal,
     pub patient_name: String,
     pub patient_pid: String,
     pub language: String,
@@ -81,6 +85,19 @@ pub(super) async fn load_dunning_letter_context(
         r#"SELECT dunning.level, dunning.sent_at, dunning.payment_due_date, dunning.balance_due,
                   i.invoice_number, i.issued_at, i.due_date, i.currency, i.total_gross,
                   p.patient_id AS patient_pid, p.title, p.first_name, p.last_name, p.languages,
+                  COALESCE((
+                      SELECT SUM(GREATEST(
+                          other.paid_amount + other.prepayment_applied_amount
+                              - (other.total_gross - other.credited_amount),
+                          0))
+                      FROM invoices other
+                      WHERE other.patient_id = i.patient_id
+                        AND other.currency = i.currency
+                        AND other.id <> i.id
+                        AND other.status NOT IN ('draft', 'cancelled')
+                        AND COALESCE(invoice_recipient_identity(other.recipient_snapshot), '')
+                            = COALESCE(invoice_recipient_identity(i.recipient_snapshot), '')
+                  ), 0) AS available_credit,
                   {recipient_columns},
                   (SELECT jsonb_object_agg(key, value #>> '{{}}') FROM system_settings
                     WHERE key LIKE 'agency\_%') AS agency
@@ -162,6 +179,9 @@ pub(super) async fn load_dunning_letter_context(
             .unwrap_or(Decimal::ZERO),
         balance_due: row
             .try_get::<Decimal, _>("balance_due")
+            .unwrap_or(Decimal::ZERO),
+        available_credit: row
+            .try_get::<Decimal, _>("available_credit")
             .unwrap_or(Decimal::ZERO),
         patient_name,
         patient_pid: row.try_get::<String, _>("patient_pid").unwrap_or_default(),
@@ -310,6 +330,26 @@ pub(super) fn dunning_letter_body(
     vec![opening, already_paid.to_string()]
 }
 
+/// The sentence naming a credit on the recipient's other invoices: the
+/// letter demands the invoice's own open amount, the credit is applied only
+/// when Billing moves it (owner decision 2026-11-12).
+pub(super) fn dunning_letter_credit_note(language: &str, credit: &str) -> String {
+    match language {
+        "uk" => format!(
+            "На інших ваших рахунках є переплата {credit}. Вона не зараховується автоматично: бухгалтерія зарахує її в цей рахунок на ваше прохання. Сума до сплати вище вказана без цієї переплати."
+        ),
+        "ru" => format!(
+            "На других ваших счетах есть переплата {credit}. Она не засчитывается автоматически: бухгалтерия зачтёт её в этот счёт по вашей просьбе. Сумма к оплате выше указана без этой переплаты."
+        ),
+        "en" => format!(
+            "A credit of {credit} is available on your other invoices. It is not applied automatically: our accounts team applies it to this invoice on request. The amount outstanding above does not include it."
+        ),
+        _ => format!(
+            "Guthaben {credit} verfügbar – die Buchhaltung verrechnet es auf Ihren Wunsch mit dieser Rechnung. Der offene Betrag oben ist ohne dieses Guthaben angegeben."
+        ),
+    }
+}
+
 /// File name of a stored letter, e.g. `1-MAHNUNG-INV-20260927-0042.pdf`.
 pub(super) fn dunning_letter_filename(level: &str, invoice_number: &str) -> String {
     let prefix = match level {
@@ -410,12 +450,19 @@ pub(super) fn build_dunning_letter_pdf(
         0.0,
         2.0,
     );
-    for paragraph in dunning_letter_body(
+    let mut paragraphs = dunning_letter_body(
         language,
         &context.level,
         &context.invoice_number,
         context.payment_due_date,
-    ) {
+    );
+    if context.available_credit > Decimal::ZERO {
+        paragraphs.push(dunning_letter_credit_note(
+            language,
+            &money(context.available_credit),
+        ));
+    }
+    for paragraph in paragraphs {
         layout.text_block(
             &paragraph,
             10.5,
@@ -657,6 +704,7 @@ mod tests {
             currency: "EUR".to_string(),
             total_gross: Decimal::new(119000, 2),
             balance_due: Decimal::new(69000, 2),
+            available_credit: Decimal::ZERO,
             patient_name: "Anna Muster".to_string(),
             patient_pid: "PT-1".to_string(),
             language: language.to_string(),
@@ -716,6 +764,30 @@ mod tests {
         let russian = text(&context("second", "ru"));
         assert!(russian.contains("Первое требование об оплате"));
         assert!(russian.contains("Новый срок оплаты"));
+    }
+
+    /// Owner decision 2026-11-12: a credit on another invoice is not taken
+    /// off the demanded amount; the letter only names it.
+    #[test]
+    fn a_credit_on_another_invoice_is_named_but_not_netted() {
+        let plain = text(&context("first", "de"));
+        assert!(!plain.contains("Guthaben"), "{plain}");
+
+        let mut letter = context("first", "de");
+        letter.available_credit = Decimal::new(3000, 2);
+        let reminder = text(&letter);
+        assert!(
+            reminder.contains("Guthaben 30,00 € verfügbar"),
+            "{reminder}"
+        );
+        assert!(reminder.contains("Buchhaltung verrechnet"), "{reminder}");
+        // The demanded amount stays the invoice's own open amount.
+        assert!(reminder.contains("690,00 €"), "{reminder}");
+        assert!(!reminder.contains("660,00 €"), "{reminder}");
+
+        letter.language = "ru".to_string();
+        let russian = text(&letter);
+        assert!(russian.contains("переплата 30,00 €"), "{russian}");
     }
 
     #[test]

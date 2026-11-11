@@ -404,8 +404,6 @@ pub(crate) struct OpenInvoice {
     pub due: Decimal,
     /// Paid advance cash of an advance invoice not applied to any invoice yet.
     pub advance_available: Decimal,
-    /// Cash beyond what the invoice asks for.
-    pub credit_balance: Decimal,
     /// Oldest first: issue time, then id.
     pub issued_at: chrono::DateTime<chrono::Utc>,
     pub id: Uuid,
@@ -413,22 +411,20 @@ pub(crate) struct OpenInvoice {
 
 /// What an invoice still asks for once the patient's money already held is
 /// counted: `advance_credit` from unapplied paid advances of the same order,
-/// then `credit_applied` from the same recipient's credit balances,
-/// invoices, `to_pay` what remains.
+/// `to_pay` what remains.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct NetDue {
     pub advance_credit: Decimal,
-    pub credit_applied: Decimal,
     pub to_pay: Decimal,
 }
 
-/// Nets open invoice balances against money the patient already paid: paid
-/// advances not yet applied settle the same order's settlement invoices of
-/// the same recipient (oldest first, as the automatic application would),
-/// credit balances settle the same recipient's open invoices across orders
-/// (oldest first). A different recipient requires an explicit credit transfer.
-/// One rule for the
-/// order card, the invoice list, the account statement and the portal.
+/// Nets open invoice balances against paid advances not yet applied: they
+/// settle the same order's settlement invoices of the same recipient (oldest
+/// first, as the automatic application would). A credit balance (an
+/// overpayment, also of another order) is never netted here: it is only
+/// named as available and applied by Billing's explicit credit transfer
+/// (owner decision 2026-11-12). One rule for the order card, the invoice
+/// list, the account statement, reminders and the portal.
 pub(crate) fn net_open_balances(invoices: &[OpenInvoice]) -> Vec<NetDue> {
     let mut order = (0..invoices.len()).collect::<Vec<_>>();
     order.sort_by(|left, right| {
@@ -447,11 +443,6 @@ pub(crate) fn net_open_balances(invoices: &[OpenInvoice]) -> Vec<NetDue> {
             *advance_pools.entry(key).or_default() += invoice.advance_available.max(Decimal::ZERO);
         }
     }
-    let mut credit_pools = std::collections::BTreeMap::<Option<String>, Decimal>::new();
-    for invoice in invoices {
-        *credit_pools.entry(invoice.recipient.clone()).or_default() +=
-            invoice.credit_balance.max(Decimal::ZERO);
-    }
     for index in &order {
         let invoice = &invoices[*index];
         let mut left = invoice.due.max(Decimal::ZERO);
@@ -465,23 +456,17 @@ pub(crate) fn net_open_balances(invoices: &[OpenInvoice]) -> Vec<NetDue> {
         }
         result[*index].to_pay = left;
     }
-    for index in &order {
-        let pool = credit_pools
-            .entry(invoices[*index].recipient.clone())
-            .or_default();
-        let take = (*pool).min(result[*index].to_pay);
-        *pool -= take;
-        result[*index].credit_applied = take;
-        result[*index].to_pay -= take;
-    }
     result
 }
 
-/// What an issued invoice still asks for once the money GMED holds for its
-/// debtor is counted ([`net_open_balances`] over the patient's issued invoices
-/// of its currency): the "to pay" of the account statement and the portal, and
-/// therefore what a payment reminder may demand (QA 2026-10-31). `None` for a
-/// draft or cancelled invoice.
+/// What an issued invoice still asks for: its own open amount, less a paid
+/// advance of the same order and recipient not applied yet
+/// ([`net_open_balances`] over the patient's issued invoices of its
+/// currency). The "to pay" of the account statement and the portal, and
+/// therefore what a payment reminder demands (QA 2026-10-31). A credit
+/// balance on another invoice is not counted (owner decision 2026-11-12):
+/// see [`recipient_credit_available`]. `None` for a draft or cancelled
+/// invoice.
 pub(crate) async fn invoice_amount_to_pay(
     pool: &sqlx::PgPool,
     invoice_id: Uuid,
@@ -542,7 +527,6 @@ pub(crate) async fn invoice_amounts_to_pay(
                 } else {
                     Decimal::ZERO
                 },
-                credit_balance: (paid + applied - total).max(Decimal::ZERO),
                 issued_at: row.try_get("issued_at")?,
                 id: row.try_get("id")?,
             });
@@ -558,6 +542,35 @@ pub(crate) async fn invoice_amounts_to_pay(
     Ok(amounts)
 }
 
+/// SQL of the credit balances (cash beyond what each invoice asks for) on the
+/// other issued invoices of `$1`'s patient, currency and invoice recipient:
+/// money Billing may move to `$1` with a credit transfer. Named on reminders
+/// and in the invoice detail, never netted (owner decision 2026-11-12).
+pub(crate) const RECIPIENT_CREDIT_AVAILABLE_SQL: &str = r#"SELECT COALESCE(SUM(GREATEST(
+           other.paid_amount + other.prepayment_applied_amount
+               - (other.total_gross - other.credited_amount),
+           0)), 0)
+       FROM invoices target
+       JOIN invoices other
+         ON other.patient_id = target.patient_id
+        AND other.currency = target.currency
+        AND other.id <> target.id
+        AND other.status NOT IN ('draft', 'cancelled')
+        AND COALESCE(invoice_recipient_identity(other.recipient_snapshot), '')
+            = COALESCE(invoice_recipient_identity(target.recipient_snapshot), '')
+       WHERE target.id = $1"#;
+
+/// See [`RECIPIENT_CREDIT_AVAILABLE_SQL`].
+pub(crate) async fn recipient_credit_available(
+    pool: &sqlx::PgPool,
+    invoice_id: Uuid,
+) -> Result<Decimal, sqlx::Error> {
+    sqlx::query_scalar::<_, Decimal>(RECIPIENT_CREDIT_AVAILABLE_SQL)
+        .bind(invoice_id)
+        .fetch_one(pool)
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -571,7 +584,6 @@ mod tests {
         is_advance: bool,
         due: i64,
         advance_available: i64,
-        credit_balance: i64,
         day: i64,
     ) -> OpenInvoice {
         OpenInvoice {
@@ -580,21 +592,25 @@ mod tests {
             is_advance,
             due: dec(due),
             advance_available: dec(advance_available),
-            credit_balance: dec(credit_balance),
             issued_at: chrono::DateTime::<chrono::Utc>::from_timestamp(day * 86_400, 0).unwrap(),
             id: Uuid::from_u128(day as u128),
         }
     }
 
+    /// Owner decision 2026-11-12: an unapplied advance still nets its own
+    /// order, but an overpayment (here 50 on order 2) is no longer taken off
+    /// another invoice: each invoice asks for its own open amount until
+    /// Billing moves the credit explicitly. Before, the 300 read as 250.
     #[test]
-    fn unapplied_advances_net_their_own_order_and_credit_nets_same_recipient_across_orders() {
+    fn unapplied_advances_net_their_own_order_and_credit_is_never_netted() {
         let invoices = [
             // Paid advance of 700 on order 1, final invoice of 1152.20 still open.
-            open(Some(1), true, 0, 700, 0, 1),
-            open(Some(1), false, 1152, 0, 0, 3),
-            // Order 2: an open interim invoice, and an overpaid invoice of 50.
-            open(Some(2), false, 300, 0, 0, 2),
-            open(Some(2), false, 0, 0, 50, 4),
+            open(Some(1), true, 0, 700, 1),
+            open(Some(1), false, 1152, 0, 3),
+            // Order 2: an open interim invoice; an overpaid invoice of the same
+            // order asks for nothing (its 50 credit is not netted).
+            open(Some(2), false, 300, 0, 2),
+            open(Some(2), false, 0, 0, 4),
         ];
         let net = net_open_balances(&invoices);
         assert_eq!(net[1].advance_credit, dec(700));
@@ -603,39 +619,21 @@ mod tests {
             dec(0),
             "advances stay within their order"
         );
-        assert_eq!(
-            net[2].credit_applied,
-            dec(50),
-            "oldest open invoice takes the credit"
-        );
-        assert_eq!(net[2].to_pay, dec(250));
+        assert_eq!(net[2].to_pay, dec(300), "its own open amount");
         assert_eq!(net[1].to_pay, dec(452));
         assert_eq!(
             net.iter().map(|item| item.to_pay).sum::<Decimal>(),
-            dec(702)
+            dec(752)
         );
-    }
-
-    #[test]
-    fn untransferred_credit_never_nets_another_recipients_invoice() {
-        let credit = open(Some(1), false, 0, 0, 50, 1);
-        let mut company = open(Some(2), false, 100, 0, 0, 2);
-        company.recipient = Some("company".to_string());
-        let patient = open(Some(3), false, 80, 0, 0, 3);
-        let net = net_open_balances(&[credit, company, patient]);
-        assert_eq!(net[1].credit_applied, dec(0));
-        assert_eq!(net[1].to_pay, dec(100));
-        assert_eq!(net[2].credit_applied, dec(50));
-        assert_eq!(net[2].to_pay, dec(30));
     }
 
     #[test]
     fn an_unapplied_advance_never_nets_the_invoice_of_another_recipient() {
-        let mut mia_advance = open(Some(1), true, 69, 50, 0, 1);
+        let mut mia_advance = open(Some(1), true, 69, 50, 1);
         mia_advance.recipient = Some("name:mia muster".to_string());
-        let mut company_final = open(Some(1), false, 785, 0, 0, 2);
+        let mut company_final = open(Some(1), false, 785, 0, 2);
         company_final.recipient = Some("name:beispiel gmbh".to_string());
-        let mut mia_final = open(Some(1), false, 119, 0, 0, 3);
+        let mut mia_final = open(Some(1), false, 119, 0, 3);
         mia_final.recipient = Some("name:mia muster".to_string());
         let net = net_open_balances(&[mia_advance, company_final, mia_final]);
         assert_eq!(net[1].advance_credit, dec(0), "QA D-57");

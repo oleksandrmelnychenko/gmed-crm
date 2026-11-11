@@ -1046,6 +1046,7 @@ fn redact_patient_invoice_payload(invoice: &mut Value) {
             "advance_credit_available",
             "amount_to_pay",
             "reminder_amount",
+            "recipient_credit_available",
             "credit_balance",
             "refundable_cash_amount",
         ] {
@@ -2106,8 +2107,10 @@ pub async fn run_auto_dunning_scheduler_once(
             continue;
         }
         // A reminder demands what the statement and the portal show as to
-        // pay: a paid advance not credited yet or a credit balance of this
-        // debtor is money GMED already holds (QA 2026-10-31).
+        // pay: the invoice's own open amount, less a paid advance of its
+        // order not credited yet (QA 2026-10-31). A credit balance on
+        // another invoice is only named in the letter; Billing applies it
+        // explicitly (owner decision 2026-11-12).
         let balance_due =
             advance_application::invoice_amount_to_pay(&state.db, candidate.invoice_id)
                 .await?
@@ -5204,8 +5207,11 @@ async fn load_invoice_detail(
     } else {
         Decimal::ZERO
     };
-    // What a reminder may demand: also net of credit balances on the debtor's
-    // other invoices. The dialog says so before submit (QA 2026-11-01, R4-4).
+    // What a reminder may demand: the own open amount, less an unapplied paid
+    // advance of the order. The dialog says so before submit (QA 2026-11-01,
+    // R4-4). Credit on the recipient's other invoices is not netted; it is
+    // named as available for Billing's credit transfer (owner decision
+    // 2026-11-12).
     let reminder_amount = advance_application::invoice_amount_to_pay(&state.db, invoice_id)
         .await
         .map_err(|e| {
@@ -5213,6 +5219,16 @@ async fn load_invoice_detail(
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
         })?
         .unwrap_or(balance_due);
+    let recipient_credit_available = if balance_due > Decimal::ZERO {
+        advance_application::recipient_credit_available(&state.db, invoice_id)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "load recipient credit available");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+            })?
+    } else {
+        Decimal::ZERO
+    };
     let credit_transfers_history = credit_transfers::load_invoice_credit_transfers(
         state, invoice_id,
     )
@@ -5337,7 +5353,7 @@ async fn load_invoice_detail(
     })
     .collect::<Vec<_>>();
 
-    Ok(Some(serde_json::json!({
+    let mut detail = serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
         "quote_id": row.try_get::<Option<Uuid>, _>("quote_id").unwrap_or_default(),
         "quote_number": row.try_get::<Option<String>, _>("quote_number").unwrap_or_default(),
@@ -5431,7 +5447,13 @@ async fn load_invoice_detail(
         "internal_note": row.try_get::<Option<String>, _>("internal_note").unwrap_or_default(),
         "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
         "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
-    })))
+    });
+    // Credit on the recipient's other invoices: named, not netted (owner
+    // decision 2026-11-12). Set here to keep the long json! object above
+    // within the macro recursion limit.
+    detail["recipient_credit_available"] =
+        serde_json::json!(decimal_to_string(recipient_credit_available));
+    Ok(Some(detail))
 }
 
 async fn load_invoice_pdf_context(
