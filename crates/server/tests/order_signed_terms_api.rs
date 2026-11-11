@@ -385,9 +385,12 @@ async fn gmed_signs_the_single_order_only_after_the_cost_coverage_declaration() 
     .unwrap();
     assert_eq!(released, 1);
 
-    // Without a KÜE in the order nothing waits.
-    let other_order = create_order_with_interpreter_hours(&app, &ceo, patient_id).await;
-    let document = seed_order_document(&pool, patient_id, other_order, admin_id).await;
+    // Without a KÜE in the order nothing waits. A fresh patient's first
+    // order, as in the other tests: a further order of the same patient
+    // needs the complete paperwork of a repeat order.
+    let other_patient = seed_patient(&pool, admin_id).await;
+    let other_order = create_order_with_interpreter_hours(&app, &ceo, other_patient).await;
+    let document = seed_order_document(&pool, other_patient, other_order, admin_id).await;
     let (status, signed) = sign_on_paper(&app, document, &ceo).await;
     assert_eq!(status, StatusCode::OK, "{signed}");
     assert_eq!(order_signatures(&pool, other_order).await, (true, true));
