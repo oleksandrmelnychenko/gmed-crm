@@ -1155,7 +1155,7 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
           {/* The details exist only for an insured person. */}
           {draft.has_insurance === "yes" ? (
             <>
-              <FormField field="insurance_type" text={text} error={errorFor("insurance_type")}>
+              <FormField field="insurance_type" text={text} error={errorFor("insurance_type")} required>
                 <NativeComboboxSelect
                   {...fieldProps("insurance_type")}
                   className={selectClass}
@@ -1170,7 +1170,7 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
                   ))}
                 </NativeComboboxSelect>
               </FormField>
-              <FormField field="insurance_provider" text={text} error={errorFor("insurance_provider")}>
+              <FormField field="insurance_provider" text={text} error={errorFor("insurance_provider")} required={draft.insurance_type !== "self_pay"}>
                 <Input
                   {...fieldProps("insurance_provider")}
                   className={inputClass}
@@ -1179,7 +1179,7 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
                   onChange={(event) => set("insurance_provider", event.target.value)}
                 />
               </FormField>
-              <FormField field="insurance_number" text={text} error={errorFor("insurance_number")}>
+              <FormField field="insurance_number" text={text} error={errorFor("insurance_number")} required={draft.insurance_type !== "self_pay"}>
                 <Input
                   {...fieldProps("insurance_number")}
                   className={inputClass}

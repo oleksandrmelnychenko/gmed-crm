@@ -1470,6 +1470,17 @@ pub(crate) fn missing(recipient: &Recipient) -> Vec<&'static str> {
                 if blank(&recipient.organisation_name) {
                     missing.push("recipient_organisation_name");
                 }
+                // An organisation that also pays stands as the payer: its legal
+                // form and contact person are needed (owner 2026-11-11; before,
+                // only a payer already stored asked them).
+                if recipient.is_payer == Some(true) {
+                    if blank(&recipient.legal_form) {
+                        missing.push("recipient_legal_form");
+                    }
+                    if blank(&recipient.contact_name) {
+                        missing.push("recipient_contact_name");
+                    }
+                }
             }
             Some(_) => {
                 if blank(&recipient.first_name) {
@@ -2085,18 +2096,40 @@ mod tests {
                 "recipient_payment_reason",
             ]
         );
-        // A third party who pays: the payer's keys count.
+        // A third party who pays: the payer's keys count, and an organisation
+        // that pays names its legal form and contact person (owner 2026-11-11).
         third.is_payer = Some(true);
         assert_eq!(
             missing(&third),
             [
                 "recipient_organisation_name",
+                "recipient_legal_form",
+                "recipient_contact_name",
                 "recipient_street",
                 "recipient_zip",
                 "recipient_city",
                 "recipient_country"
             ]
         );
+        third.legal_form = Some("GmbH".into());
+        third.contact_name = Some("  ".into());
+        assert_eq!(
+            missing(&third),
+            [
+                "recipient_organisation_name",
+                "recipient_contact_name",
+                "recipient_street",
+                "recipient_zip",
+                "recipient_city",
+                "recipient_country"
+            ]
+        );
+        // Only the payer is asked them: the organisation that only receives the invoice is not.
+        third.contact_name = None;
+        third.legal_form = None;
+        third.is_payer = Some(false);
+        assert!(!missing(&third).contains(&"recipient_legal_form"));
+        assert!(!missing(&third).contains(&"recipient_contact_name"));
     }
 
     fn parent(

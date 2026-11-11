@@ -4458,6 +4458,12 @@ async fn step_three_asks_the_invoice_recipient_first_and_derives_section_seven()
         !missing_for_step_three(&body).contains(&"invoice_recipient_is_payer"),
         "{body}"
     );
+    // Its legal form and contact person were given: neither is missing (owner 2026-11-11).
+    assert!(
+        !missing_for_step_three(&body).contains(&"recipient_legal_form")
+            && !missing_for_step_three(&body).contains(&"recipient_contact_name"),
+        "{body}"
+    );
     assert!(
         !missing_for_step_three(&body).contains(&"payer_kind"),
         "{body}"

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { LeadRequest, LeadRequestIdentification, LeadRequestPayer } from "./lead-request-api";
 import {
+  insuranceDetailsMissing,
   uploadLimitReached,
   identityDocumentsInStep,
   canSubmit,
@@ -1048,5 +1049,22 @@ describe("a refused identity copy (QA 2026-10-25, G F-G4)", () => {
     expect(identityDocumentsInStep({ follow_up: followUp([]) }, [old])).toEqual({ current: [old], refused: [] });
     expect(identityDocumentsInStep({ follow_up: followUp(undefined) }, [old])).toEqual({ current: [old], refused: [] });
     expect(identityDocumentsInStep({ follow_up: undefined }, [old])).toEqual({ current: [old], refused: [] });
+  });
+});
+
+describe("the insurance of an insured person (owner 2026-11-11)", () => {
+  it("asks type, company and policy number with 'yes', nothing otherwise", () => {
+    // No answer, or "no": nothing.
+    expect(insuranceDetailsMissing({ has_insurance: null })).toEqual([]);
+    expect(insuranceDetailsMissing({ has_insurance: "" })).toEqual([]);
+    expect(insuranceDetailsMissing({ has_insurance: false, insurance_type: null })).toEqual([]);
+    expect(insuranceDetailsMissing({ has_insurance: "no" })).toEqual([]);
+    // "Yes", stored (true) or in the form ("yes").
+    expect(insuranceDetailsMissing({ has_insurance: true })).toEqual(["insurance_type", "insurance_provider", "insurance_number"]);
+    expect(insuranceDetailsMissing({ has_insurance: "yes", insurance_type: "private", insurance_provider: "  " }))
+      .toEqual(["insurance_provider", "insurance_number"]);
+    expect(insuranceDetailsMissing({ has_insurance: true, insurance_type: "public", insurance_provider: "AOK", insurance_number: "A1" })).toEqual([]);
+    // Self-payment names no company or policy, as the staff wizard and the server.
+    expect(insuranceDetailsMissing({ has_insurance: true, insurance_type: "self_pay" })).toEqual([]);
   });
 });

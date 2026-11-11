@@ -1122,6 +1122,30 @@ pub(crate) struct PersonalData {
     insurance_covers_germany: Option<String>,
 }
 
+/// What an insured person (`has_insurance = true`) still has to name: the
+/// type of insurance, and for any type but self-payment the company and the
+/// policy number (owner 2026-11-11; the staff wizard's rule, F-W7).
+pub(crate) fn insurance_details_missing(
+    insurance_type: Option<&str>,
+    provider_given: bool,
+    number_given: bool,
+) -> Vec<&'static str> {
+    let mut missing = Vec::new();
+    if insurance_type.is_none() {
+        missing.push("insurance_type");
+    }
+    if insurance_type == Some("self_pay") {
+        return missing;
+    }
+    if !provider_given {
+        missing.push("insurance_provider");
+    }
+    if !number_given {
+        missing.push("insurance_number");
+    }
+    missing
+}
+
 fn non_empty(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_string())
@@ -1212,6 +1236,16 @@ impl PersonalData {
         .any(name_needs_latin_spelling)
         {
             missing.push("name_latin");
+        }
+        // "Insured: yes" names the insurance (owner 2026-11-11), as the staff
+        // wizard does: its type, and — unless it is self-payment — the company
+        // and the policy number. "No" or no answer asks nothing.
+        if self.has_insurance == Some(true) {
+            missing.extend(insurance_details_missing(
+                self.value("insurance_type").as_deref(),
+                self.value("insurance_provider").is_some(),
+                self.value("insurance_number").is_some(),
+            ));
         }
         missing
     }
@@ -9414,6 +9448,47 @@ mod tests {
         assert_eq!(data.filled_count(), 4);
         assert_eq!(PROGRESS_FIELDS.len(), 12);
         assert!(!data.missing_for_submit().contains(&"has_insurance"));
+    }
+
+    #[test]
+    fn an_insured_person_names_the_insurance() {
+        let insurance_keys = |data: &PersonalData| {
+            data.missing_for_submit()
+                .into_iter()
+                .filter(|key| key.starts_with("insurance_"))
+                .collect::<Vec<_>>()
+        };
+        let mut data = anna();
+        // No answer, or "no": nothing about an insurance is asked.
+        assert!(insurance_keys(&data).is_empty());
+        data.has_insurance = Some(false);
+        assert!(insurance_keys(&data).is_empty());
+        // "Yes" (owner 2026-11-11): the type, the company and the policy number.
+        data.has_insurance = Some(true);
+        assert_eq!(
+            insurance_keys(&data),
+            ["insurance_type", "insurance_provider", "insurance_number"]
+        );
+        data.insurance_type = Some("private".into());
+        data.insurance_provider = Some("  ".into());
+        assert_eq!(
+            insurance_keys(&data),
+            ["insurance_provider", "insurance_number"]
+        );
+        data.insurance_provider = Some("Beispiel Versicherung".into());
+        data.insurance_number = Some("A123".into());
+        assert!(insurance_keys(&data).is_empty());
+        // Self-payment names no company or policy, as in the staff wizard.
+        data.insurance_type = Some("self_pay".into());
+        data.insurance_provider = None;
+        data.insurance_number = None;
+        assert!(insurance_keys(&data).is_empty());
+        // Whether it covers Germany stays optional.
+        assert!(
+            !data
+                .missing_for_submit()
+                .contains(&"insurance_covers_germany")
+        );
     }
 
     #[test]

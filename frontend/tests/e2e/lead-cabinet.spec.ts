@@ -2856,6 +2856,39 @@ test.describe("Weiter holds a step the same way on every press", () => {
     await expect(current(page)).toHaveAttribute("data-current-step", "send");
   });
 
+  test("insured 'yes' needs type, company and policy number: every press holds (owner 2026-11-11)", async ({ page }) => {
+    await setup(page, "lead", {
+      prepare: (request) => {
+        filled()(request);
+        request.personal_data.has_insurance = true;
+      },
+    });
+    await page.goto("/?lead=lead-1&step=billing");
+    const insurance = page.getByTestId("lead-request-insurance");
+    const type = insurance.getByRole("combobox", { name: /Versicherungsart/ });
+    const billingList = page.getByTestId("lead-request-step-billing").getByTestId("lead-request-step-missing");
+    await expect(type).toBeVisible();
+    for (let press = 1; press <= 3; press += 1) {
+      await page.locator("#lead-request-step-billing, [data-testid='lead-request-step-billing']").first().getByRole("button", { name: "Zurück" }).focus();
+      await next(page);
+      await expect(current(page)).toHaveAttribute("data-current-step", "billing");
+      await expect(billingList).toContainText("Versicherungsart");
+      await expect(billingList).toContainText("Versicherer");
+      await expect(billingList).toContainText("Versicherungsnummer");
+      await expect(type).toBeFocused();
+      await expect(type).toBeInViewport();
+    }
+    // Starred, as the staff wizard asks them.
+    await expect(insurance.locator('label[for="lead-request-insurance_provider"]')).toContainText("*");
+    await choose(page, type, "Privat");
+    await page.locator("#lead-request-insurance_provider").fill("Beispiel Versicherung");
+    await page.locator("#lead-request-insurance_number").fill("A-123");
+    await next(page);
+    await expect(current(page)).toHaveAttribute("data-current-step", "billing");
+    await expect(billingList).not.toContainText("Versicherungsart");
+    await expect(billingList).not.toContainText("Versicherungsnummer");
+  });
+
   test("a request that is sent is never held by Weiter (QA 2026-11-10, A-1)", async ({ page }) => {
     await setup(page, "lead", {
       prepare: (request) => {

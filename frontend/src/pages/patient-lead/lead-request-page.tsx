@@ -59,6 +59,7 @@ import {
   type RequestQueue,
 } from "./lead-request-parts";
 import { draftFromRecipient, recipientPayerOpenKeys } from "./lead-request-recipient-model";
+import { insuranceDetailsMissing } from "./lead-request-model";
 import { findCabinetTarget, firstCabinetTarget, firstProblemIn, revealCabinetTarget, type CabinetTarget } from "./lead-request-field-target";
 import { SendStep } from "./lead-request-send-step";
 import {
@@ -1003,15 +1004,17 @@ function LeadRequestView({
 
 /**
  * What every step of the cabinet still misses: the server's lists (`missingByStep`), and in step 3
- * the two fields the form itself requires of an organisation that receives the invoice and pays
- * (`recipientPayerOpenKeys`) while the request is not sent. The summary and the send follow the
- * server alone.
+ * the insurance details of an insured person and the two fields of an organisation that receives
+ * the invoice and pays, while the request is not sent — the server lists them too since
+ * 2026-11-11; an older one does not. The summary and the send follow the server.
  */
 function cabinetMissing(request: LeadRequest): Record<StepId, string[]> {
   const missing = missingByStep(request);
   if (request.submitted_at) return missing;
+  // The insurance first, as in the form; an older server does not list its details yet.
+  const insurance = insuranceDetailsMissing(request.personal_data).filter((key) => !missing.billing.includes(key));
   const own = recipientPayerOpenKeys(draftFromRecipient(request.billing)).filter((key) => !missing.billing.includes(key));
-  return own.length > 0 ? { ...missing, billing: [...missing.billing, ...own] } : missing;
+  return insurance.length + own.length > 0 ? { ...missing, billing: [...insurance, ...missing.billing, ...own] } : missing;
 }
 
 /**

@@ -150,6 +150,27 @@ export function rejectedValue(field: string, draft: PersonalDraft): RejectedValu
 }
 
 /**
+ * What an insured person still has to name (owner 2026-11-11, the server's
+ * `insurance_details_missing` and the staff wizard's rule): with "yes" the type of insurance and,
+ * unless it is self-payment, the company and the policy number. "No" or no answer asks nothing.
+ */
+export function insuranceDetailsMissing(data: {
+  has_insurance: string | boolean | null | undefined;
+  insurance_type?: string | null;
+  insurance_provider?: string | null;
+  insurance_number?: string | null;
+}): ("insurance_type" | "insurance_provider" | "insurance_number")[] {
+  if (data.has_insurance !== true && data.has_insurance !== "yes") return [];
+  const type = (data.insurance_type ?? "").trim();
+  const missing: ("insurance_type" | "insurance_provider" | "insurance_number")[] = [];
+  if (!type) missing.push("insurance_type");
+  if (type === "self_pay") return missing;
+  if (!(data.insurance_provider ?? "").trim()) missing.push("insurance_provider");
+  if (!(data.insurance_number ?? "").trim()) missing.push("insurance_number");
+  return missing;
+}
+
+/**
  * An address in Germany with a postal code that is not five digits (QA 2026-11-10, finding 10:
  * "ABCDE!!" was taken). Other countries keep their own formats; an empty code is "missing", not this.
  */
