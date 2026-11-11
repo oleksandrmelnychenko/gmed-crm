@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  portalStatementAvailableCredit,
   portalStatementOpenAmount,
-  statementCreditWords,
+  portalStatementSettled,
   type PortalAccountStatementItem,
 } from "./portal-shared";
 
@@ -43,35 +44,21 @@ describe("portal statement open amount", () => {
     });
   });
 
-  // QA 2026-11-10, D-03: 30,00 € overpaid on the advance invoice was taken
-  // off the final invoice in this block only: 1.006,53 € here, 1.036,53 € in
-  // the invoice list, the sheet and for Billing.
-  it("keeps the invoice's own open amount and names the credit beside it", () => {
+  // QA 2026-11-11 L4: the 30,00 € credit of another order was shown as
+  // «nach Abzug von Guthaben 30,00 €: 270,00 € zu zahlen» before Billing
+  // applied it. The row keeps the invoice's own open amount and says nothing
+  // about credit that is not applied.
+  it("never takes credit off an invoice before Billing applies it", () => {
     expect(
       portalStatementOpenAmount(
         row({
-          amount_due: "1006.53",
-          invoice_balance_due: "1036.53",
+          amount_due: "270.00",
+          invoice_balance_due: "300.00",
           credit_applied: "30.00",
           advance_credit: "0",
         }),
       ),
-    ).toEqual({
-      kind: "due",
-      amount: "1036.53",
-      afterCredit: { advance: 0, overpayment: 30, toPay: "1006.53" },
-    });
-    expect(statementCreditWords(0, 30, "ru")).toBe("переплаты");
-    expect(statementCreditWords(100, 0, "de")).toBe("Vorauszahlung");
-    expect(statementCreditWords(100, 30, "ru")).toBe("предоплаты и переплаты");
-  });
-
-  it("names no credit when nothing is set against the row", () => {
-    expect(
-      portalStatementOpenAmount(
-        row({ amount_due: "400", invoice_balance_due: "400", credit_applied: "0", advance_credit: "0" }),
-      ),
-    ).toEqual({ kind: "due", amount: "400" });
+    ).toEqual({ kind: "due", amount: "300.00" });
   });
 
   it("an unpaid advance covered by an overpayment still shows what it asks for", () => {
@@ -85,10 +72,45 @@ describe("portal statement open amount", () => {
           prepayment_available: "0",
         }),
       ),
-    ).toEqual({
-      kind: "due",
-      amount: "100",
-      afterCredit: { advance: 0, overpayment: 100, toPay: "0" },
-    });
+    ).toEqual({ kind: "due", amount: "100" });
+  });
+});
+
+describe("portal statement booked to an invoice (QA 2026-11-11 L4)", () => {
+  it("never shows more paid than the invoice asks for; the rest is overpayment", () => {
+    // INV-0018: 1.461,70 €, advance 500 € applied, 1.000 € paid, 8,30 € refunded.
+    expect(
+      portalStatementSettled(
+        row({
+          amount_gross: "1461.70",
+          adjusted_amount_gross: "1461.70",
+          cash_paid: "991.70",
+          prepayment_applied: "500.00",
+        }),
+      ),
+    ).toEqual({ settled: 1461.7, overpayment: 30 });
+  });
+
+  it("a partly paid invoice has no overpayment", () => {
+    expect(
+      portalStatementSettled(row({ amount_gross: "300", cash_paid: "100", prepayment_applied: "0" })),
+    ).toEqual({ settled: 100, overpayment: 0 });
+  });
+
+  it("counts credit notes in what the invoice asks for", () => {
+    expect(
+      portalStatementSettled(
+        row({ amount_gross: "500", credited_amount: "100", cash_paid: "450" }),
+      ),
+    ).toEqual({ settled: 400, overpayment: 50 });
+  });
+
+  it("names unapplied credit once, as available", () => {
+    expect(
+      portalStatementAvailableCredit({ available_prepayment: "0", credit_balance: "30.00" }),
+    ).toEqual({ advance: 0, overpayment: 30 });
+    expect(
+      portalStatementAvailableCredit({ available_prepayment: "-1", credit_balance: undefined }),
+    ).toEqual({ advance: 0, overpayment: 0 });
   });
 });

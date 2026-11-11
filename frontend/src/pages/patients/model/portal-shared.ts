@@ -245,11 +245,18 @@ export type PortalAccountStatementItem = {
     | "credited";
   amounts_visible: boolean;
   amount_gross?: string | null;
+  /** Credit notes on this invoice. */
+  credited_amount?: string | null;
+  /** The invoice total after its credit notes: what the invoice asks for at most. */
+  adjusted_amount_gross?: string | null;
   cash_paid?: string | null;
   prepayment_applied?: string | null;
   prepayment_allocated?: string | null;
   prepayment_available?: string | null;
-  /** Open amount net of the credit below: what is left to transfer. */
+  /**
+   * Open amount net of credit Billing has not applied yet (server netting).
+   * Not shown in the portal: there the invoice's own open amount counts.
+   */
   amount_due?: string | null;
   /** What the document itself still asks for — the open amount Billing and the invoice list show. */
   invoice_balance_due?: string | null;
@@ -268,35 +275,65 @@ export type PortalAccountStatementItem = {
  *
  * One invoice has one open amount (QA 2026-11-10, D-03): the row shows the
  * document's own open amount, the same figure as the invoice list, the
- * invoice sheet and Billing. Credit that is not applied yet — a paid advance,
- * an overpayment on another invoice — is named beside it (`afterCredit`)
- * instead of being silently taken off.
+ * invoice sheet and Billing.
+ *
+ * Credit that Billing has not applied yet — a paid advance, an overpayment on
+ * another invoice — is never shown as already taken off an invoice (QA
+ * 2026-11-11 L4: «nach Abzug von Guthaben 30,00 €: 270,00 € zu zahlen» before
+ * Billing moved the credit; paying 270 € would have left the invoice short).
+ * The statement shows such credit once, as available credit.
  */
 export function portalStatementOpenAmount(item: PortalAccountStatementItem): {
   kind: "due" | "available";
   amount: string;
-  afterCredit?: { advance: number; overpayment: number; toPay: string };
 } {
-  const toPay = item.amount_due ?? "0";
-  const open = item.invoice_balance_due ?? toPay;
+  const open = item.invoice_balance_due ?? item.amount_due ?? "0";
   if (item.kind === "prepayment" && !(Number(open) > 0)) {
     return { kind: "available", amount: item.prepayment_available ?? "0" };
-  }
-  const advance = Number(item.advance_credit ?? 0);
-  const overpayment = Number(item.credit_applied ?? 0);
-  if (advance + overpayment > 0 && Number(open) - Number(toPay) > 0.004) {
-    return { kind: "due", amount: open, afterCredit: { advance, overpayment, toPay } };
   }
   return { kind: "due", amount: open };
 }
 
-/** The words for credit set against an open amount: an advance, an overpayment, or both. */
-export function statementCreditWords(advance: number, overpayment: number, lang: string) {
-  if (advance > 0 && overpayment > 0) {
-    return lang === "de" ? "Vorauszahlung und Guthaben" : "предоплаты и переплаты";
+const CENT = 0.004;
+
+function roundedAmount(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * What was booked to an invoice ("Bezahlt / verrechnet": cash plus applied
+ * advance) never exceeds what the invoice asks for; the part above it is an
+ * overpayment, shown as credit (QA 2026-11-11 L4: 1.491,70 € "paid" on a
+ * 1.461,70 € invoice).
+ */
+export function portalStatementSettled(item: PortalAccountStatementItem): {
+  settled: number;
+  overpayment: number;
+} {
+  const booked = Number(item.cash_paid ?? 0) + Number(item.prepayment_applied ?? 0);
+  const payable = item.adjusted_amount_gross != null
+    ? Number(item.adjusted_amount_gross)
+    : Number(item.amount_gross ?? 0) - Number(item.credited_amount ?? 0);
+  if (!(payable >= 0) || !Number.isFinite(booked)) {
+    return { settled: roundedAmount(booked || 0), overpayment: 0 };
   }
-  if (advance > 0) return lang === "de" ? "Vorauszahlung" : "предоплаты";
-  return lang === "de" ? "Guthaben" : "переплаты";
+  const overpayment = booked - payable > CENT ? booked - payable : 0;
+  return { settled: roundedAmount(booked - overpayment), overpayment: roundedAmount(overpayment) };
+}
+
+/**
+ * The money GMED holds for the patient and has not applied yet: unused paid
+ * advances and overpayments. One figure, named as available, never netted
+ * into the open total (QA 2026-11-11 L4: three different open totals).
+ */
+export function portalStatementAvailableCredit(summary: Pick<PortalAccountStatement["summary"], "available_prepayment" | "credit_balance">): {
+  advance: number;
+  overpayment: number;
+} {
+  return {
+    advance: roundedAmount(Math.max(0, Number(summary.available_prepayment ?? 0))),
+    overpayment: roundedAmount(Math.max(0, Number(summary.credit_balance ?? 0))),
+  };
 }
 
 export type PortalAccountMovement = {
