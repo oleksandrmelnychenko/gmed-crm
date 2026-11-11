@@ -27,7 +27,7 @@ describe("incoming invoice VAT calculation", () => {
       expect(validInvoiceVatRate(rate)).toBe(false);
       expect(calculateInvoiceAmounts("100", rate, "amount_net")).toBeNull();
     }
-    for (const value of ["", "12,", "-5", "0.001", "1.000,00"]) {
+    for (const value of ["", "12,", "-5", "0.001", "1,000.00", "12,345"]) {
       expect(calculateInvoiceAmounts(value, "19", "amount_net")).toBeNull();
     }
     expect(calculateInvoiceAmounts("999999999999.99", "19", "amount_net")).toBeNull();

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Banner as ShellBanner } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
+import { parseMoneyInput } from "@/lib/money";
 
 import { cancelUnassignedProviderInvoice, updateUnassignedProviderInvoice } from "./data";
 import type { CompanyProviderLiability } from "./types";
@@ -48,11 +49,10 @@ const copy = {
   },
 } as const;
 
+// German money format like every money field (owner 2026-11-11).
 function parseAmount(value: string) {
-  const normalized = value.trim().replace(/\s/g, "").replace(",", ".");
-  if (!normalized) return null;
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : Number.NaN;
+  if (!value.trim()) return null;
+  return parseMoneyInput(value);
 }
 
 type Props = {

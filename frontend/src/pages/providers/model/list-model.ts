@@ -1,4 +1,5 @@
 import { isValidEmailAddress } from "@/lib/contact-validation";
+import { moneyInputText, parseMoneyInput } from "@/lib/money";
 import { isKnownNoMailEmail } from "@/lib/email-domain-check";
 import type {
   DoctorFormState,
@@ -1629,10 +1630,11 @@ export function serviceToForm(service: ServiceItem): ServiceFormState {
     description: service.description ?? "",
     taxonomyNodeId: service.taxonomy_node_id ?? service.taxonomy_node?.id ?? "",
     taxonomyAttributes: stringifyJsonRecord(service.taxonomy_attributes),
-    price: service.price,
+    // Prices as staff type them: "1.234,56" (owner 2026-11-11, German money format).
+    price: moneyInputText(service.price),
     priceType: service.price_type || "fixed",
-    priceFrom: service.price_from ?? service.price ?? "",
-    priceTo: service.price_to ?? service.price ?? "",
+    priceFrom: moneyInputText(service.price_from ?? service.price),
+    priceTo: moneyInputText(service.price_to ?? service.price),
     priceNote: service.price_note ?? "",
     currency: service.currency || "EUR",
     validFrom: service.valid_from || appDateKey(),
@@ -1767,11 +1769,17 @@ export function toDoctorPayload(form: DoctorFormState) {
   };
 }
 
+/** A typed price ("1.234,56", "1234,56", "1234.56"); 0 when it cannot be read. */
+function typedMoney(value: string): number {
+  const amount = parseMoneyInput(value);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
 export function toServicePayload(form: ServiceFormState) {
   const priceType = form.priceType || "fixed";
-  const fixedPrice = Number.parseFloat(form.price || form.priceFrom || "0");
-  const priceFrom = Number.parseFloat(form.priceFrom || form.price || "0");
-  const priceTo = Number.parseFloat(form.priceTo || form.priceFrom || form.price || "0");
+  const fixedPrice = typedMoney(form.price || form.priceFrom || "0");
+  const priceFrom = typedMoney(form.priceFrom || form.price || "0");
+  const priceTo = typedMoney(form.priceTo || form.priceFrom || form.price || "0");
   return {
     service_name: form.serviceName.trim(),
     description: toOptional(form.description),

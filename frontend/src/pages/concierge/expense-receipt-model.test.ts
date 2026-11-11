@@ -39,7 +39,10 @@ describe("Concierge expense receipt model", () => {
   it("uses exact minor units and calculates VAT from a percentage", () => {
     expect(moneyStringToMinorUnits("12,30")).toBe(1_230);
     expect(moneyStringToMinorUnits("0.07")).toBe(7);
-    expect(moneyStringToMinorUnits("12.345")).toBeNull();
+    // German thousands dots (owner 2026-11-11): "12.345" is 12.345,00 €; three decimals are refused.
+    expect(moneyStringToMinorUnits("12.345")).toBe(1_234_500);
+    expect(moneyStringToMinorUnits("1.234,56")).toBe(123_456);
+    expect(moneyStringToMinorUnits("12,345")).toBeNull();
     expect(calculateConciergeExpenseGross("100.00", "19.00")).toBe("119.00");
     expect(calculateConciergeExpenseVat("12.30", "7.5")).toBe("0.92");
     expect(calculateConciergeExpenseGross("12.30", "7.5")).toBe("13.22");

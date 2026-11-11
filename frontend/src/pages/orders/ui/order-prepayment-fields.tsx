@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Field, checkboxClass } from "@/components/ui-shell";
 import { appDateKeyOf } from "@/lib/app-time-zone";
 
@@ -9,7 +10,6 @@ import type { OrderPrepaymentTerms } from "../model/order-prepayment";
 /** Required prepayment of an order: flag, amount in EUR and due date. */
 export function OrderPrepaymentFields({
   value,
-  maxAmount,
   lang,
   hint,
   onChange,
@@ -37,12 +37,9 @@ export function OrderPrepaymentFields({
       {value.prepayment_required ? (
         <div className="grid gap-3 sm:max-w-2xl sm:grid-cols-2">
           <Field label={amountLabel}>
-            <Input
+            <MoneyInput
               aria-label={amountLabel}
-              type="number"
-              min="0"
-              max={maxAmount}
-              step="0.01"
+              allowZero
               value={value.prepayment_amount}
               onChange={(event) => onChange({ prepayment_amount: event.target.value })}
             />

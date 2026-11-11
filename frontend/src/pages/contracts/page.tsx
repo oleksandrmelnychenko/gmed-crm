@@ -72,6 +72,8 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
+import { parseMoneyInput } from "@/lib/money";
 import { Banner as ShellBanner } from "@/components/record-workspace/recipes";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
@@ -1902,7 +1904,7 @@ function useContractsPageContent() {
         description_items: serviceDescriptionItems(agencyServiceForm.descriptionItems, agencyServiceForm.description)
           .map((item) => ({ ...item, text: item.text.trim() })).filter((item) => item.text),
         unit_label: toOptional(agencyServiceForm.unitLabel),
-        unit_price: Number(agencyServiceForm.unitPrice),
+        unit_price: parseMoneyInput(agencyServiceForm.unitPrice),
         currency: toOptional(agencyServiceForm.currency),
         vat_rate: toOptional(agencyServiceForm.vatRate)
           ? Number(agencyServiceForm.vatRate)
@@ -2640,11 +2642,9 @@ function useContractsPageContent() {
                   <h2 className={tokens.text.sectionTitle}><SectionHeading icon={Tags}>{text.pricing}</SectionHeading></h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={text.unitPrice}>
-                      <Input
+                      <MoneyInput
                         required
-                        type="number"
-                        step="0.01"
-                        min="0"
+                        allowZero
                         className={shellInputClassName}
                         value={agencyServiceForm.unitPrice}
                         onChange={(event) =>

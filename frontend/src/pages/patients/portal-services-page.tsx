@@ -17,6 +17,7 @@ import { AdminDialogScaffold } from "@/components/admin-dialog-scaffold";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import {
   Banner,
   CountBadge,
@@ -49,7 +50,7 @@ import { fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { ProviderTaxonomyCascadeSelect } from "@/pages/providers/ui/provider-taxonomy-cascade-select";
 import { cn } from "@/lib/utils";
-import { formatMoneyLabel } from "@/lib/money";
+import { formatMoneyLabel, parseMoneyInput } from "@/lib/money";
 import { portalServiceContext } from "./model/portal-service-context";
 import { portalServiceNotes } from "./model/portal-service-notes";
 
@@ -284,14 +285,12 @@ function PatientServicesRequestSection({
         </div>
 
         <Field label={t.services_form_budget} htmlFor="portal-service-budget" className="max-w-xs">
-          <Input
+          <MoneyInput
             id="portal-service-budget"
-            type="number"
-            min="0"
-            step="0.01"
+            allowZero
             value={form.costEstimate}
             onChange={(event) => onFormChange((current) => ({ ...current, costEstimate: event.target.value }))}
-            placeholder="250.00"
+            placeholder="250,00"
             className={inputClass}
           />
         </Field>
@@ -440,7 +439,7 @@ export function PatientServicesPage() {
         starts_at: toIsoDateTime(form.startsAt),
         ends_at: toIsoDateTime(form.endsAt),
         // The patient's own budget: shown back to the patient, never replaced by staff.
-        patient_budget: form.costEstimate ? Number(form.costEstimate) : undefined,
+        patient_budget: form.costEstimate.trim() ? parseMoneyInput(form.costEstimate) : undefined,
         // Stored as the patient's own note; staff never overwrite it.
         patient_note: form.serviceNotes || undefined,
       });

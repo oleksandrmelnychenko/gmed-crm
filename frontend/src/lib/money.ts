@@ -72,6 +72,55 @@ export function parseMoneyInput(value: string): number {
   return normalized === null ? Number.NaN : Number(normalized);
 }
 
+/** Why a typed amount cannot be taken; null when it can (or the field is empty). */
+export type MoneyInputProblem = "unreadable" | "not_positive" | "negative";
+
+/**
+ * Checks a typed amount the way every money field does (owner 2026-11-11:
+ * German money format everywhere): "1.234,56", "1234,56" and "1234.56" are
+ * read, anything else is "unreadable"; zero and negative amounts only where
+ * the field allows them. An empty field is no problem here (`required` is).
+ */
+export function moneyInputProblem(
+  value: string,
+  options: { allowZero?: boolean; allowNegative?: boolean } = {},
+): MoneyInputProblem | null {
+  if (value.trim() === "") return null;
+  const amount = parseMoneyInput(value);
+  if (Number.isNaN(amount)) return "unreadable";
+  if (amount < 0 && !options.allowNegative) return options.allowZero ? "negative" : "not_positive";
+  if (amount === 0 && !options.allowZero) return "not_positive";
+  return null;
+}
+
+const MONEY_INPUT_MESSAGES: Record<"ru" | "de", Record<MoneyInputProblem, string>> = {
+  ru: {
+    unreadable: "Введите сумму числом, например 119,00 или 1.234,56.",
+    not_positive: "Введите сумму больше нуля, например 119,00.",
+    negative: "Сумма не может быть отрицательной.",
+  },
+  de: {
+    unreadable: "Bitte den Betrag als Zahl eingeben, z. B. 119,00 oder 1.234,56.",
+    not_positive: "Bitte einen Betrag größer als null eingeben, z. B. 119,00.",
+    negative: "Der Betrag darf nicht negativ sein.",
+  },
+};
+
+/** The message of a money field problem in the UI language. */
+export function moneyInputMessage(problem: MoneyInputProblem, lang: string): string {
+  return MONEY_INPUT_MESSAGES[lang === "de" ? "de" : "ru"][problem];
+}
+
+/**
+ * A typed amount for the API ("1.234,56" → "1234.56"), or null when the field
+ * is empty or cannot be read. The value sent stays the same number as before
+ * the German input; only the typing changed.
+ */
+export function moneyInputPayload(value: string): string | null {
+  if (value.trim() === "") return null;
+  return normalizeMoneyInput(value);
+}
+
 export type MoneyLineAmounts = { net: number; vat: number; gross: number };
 
 /**

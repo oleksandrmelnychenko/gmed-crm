@@ -6,11 +6,12 @@ import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { useEffect } from "react";
 
 import { formatAppDate } from "@/lib/app-time-zone";
-import { formatMoneyAmount, parseMoneyInput } from "@/lib/money";
+import { formatMoneyAmount, moneyInputText, parseMoneyInput } from "@/lib/money";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import {
   Banner,
   CountBadge,
@@ -788,7 +789,7 @@ function WizardBasicsSection({
         ? service.description.trim()
         : current.description,
       unit_price: selectedPrice
-        ? String(selectedPrice.unit_price ?? "")
+        ? moneyInputText(selectedPrice.unit_price)
         : current.unit_price,
       currency: selectedPrice?.currency || current.currency,
       vat_rate: selectedPrice
@@ -803,7 +804,7 @@ function WizardBasicsSection({
     setForm((current) => ({
       ...current,
       agency_service_price_version_id: selectedPrice.id,
-      unit_price: String(selectedPrice.unit_price ?? ""),
+      unit_price: moneyInputText(selectedPrice.unit_price),
       currency: selectedPrice.currency,
       vat_rate: String(selectedPrice.vat_rate ?? "0"),
     }));
@@ -944,7 +945,8 @@ function WizardCostSection({
           />
         </Field>
         <Field label={t.orders_service_group_unit_price}>
-          <Input
+          <MoneyInput
+            allowZero
             value={form.unit_price}
             readOnly={Boolean(form.agency_service_id)}
             disabled={Boolean(form.agency_service_id)}

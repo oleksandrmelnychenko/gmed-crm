@@ -53,6 +53,8 @@ import {
 } from "@/components/admin-page-patterns";
 import { FilePicker } from "@/components/ui/file-picker";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
+import { moneyInputText, parseMoneyInput } from "@/lib/money";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
@@ -824,7 +826,7 @@ function profileToForm(profile: InterpreterProfile): InterpreterProfileForm {
     gdprTrainingAt:
       text(profile.gdprTrainingAt) || text(compliance.gdprTrainingAt),
     workPermitValidUntil: text(profile.workPermitValidUntil),
-    hourlyRate: text(profile.hourlyRate) || text(finance.hourlyRate),
+    hourlyRate: moneyInputText(text(profile.hourlyRate) || text(finance.hourlyRate)),
     salaryClass: text(profile.salaryClass) || text(finance.salaryClass),
     bankDetails: text(profile.bankDetails) || text(finance.bankDetails),
     taxNumber: text(profile.taxNumber) || text(finance.taxNumber),
@@ -875,7 +877,7 @@ function formToProfile(form: InterpreterProfileForm) {
     },
     workPermitValidUntil: form.workPermitValidUntil,
     finance: {
-      hourlyRate: form.hourlyRate ? Number(form.hourlyRate) : null,
+      hourlyRate: form.hourlyRate.trim() ? parseMoneyInput(form.hourlyRate) : null,
       salaryClass: form.salaryClass,
       bankDetails: form.bankDetails,
       taxNumber: form.taxNumber,
@@ -2385,8 +2387,8 @@ export function InterpretersPage() {
               <Section icon={Wallet} title={profileCopy.financeAccess}>
                 <div className="grid gap-3 md:grid-cols-3">
                   <Field label={profileCopy.hourlyRate}>
-                    <Input
-                      type="number"
+                    <MoneyInput
+                      allowZero
                       className={inputClass}
                       value={form.hourlyRate}
                       onChange={(event) =>

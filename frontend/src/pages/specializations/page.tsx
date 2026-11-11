@@ -32,6 +32,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { toast } from "@/components/ui/toast";
@@ -43,7 +44,7 @@ import {
   isChecklistTemplate,
 } from "@/pages/patients/data/specialization-checklist";
 import { SpecializationChecklistForm } from "@/pages/patients/ui/sections/specialization-checklist-form";
-import { formatMoneyRange } from "@/lib/money";
+import { formatMoneyRange, moneyInputText, parseMoneyInput } from "@/lib/money";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import {
   createSpecialization,
@@ -1094,8 +1095,8 @@ function workTypeDraft(
     nameRu: item?.name_ru ?? "",
     nameEn: item?.name_en ?? "",
     nameEs: item?.name_es ?? "",
-    minPriceEur: item ? String(item.min_price_eur) : "",
-    maxPriceEur: item ? String(item.max_price_eur) : "",
+    minPriceEur: item ? moneyInputText(item.min_price_eur) : "",
+    maxPriceEur: item ? moneyInputText(item.max_price_eur) : "",
     durationHours: String(item?.duration_hours ?? 1),
     sortOrder: String(item?.sort_order ?? 1000),
     isActive: item?.is_active ?? true,
@@ -1232,8 +1233,8 @@ function WorkTypeSheet({
     event.preventDefault();
     if (busy || (item && !dirty)) return;
     setError("");
-    const minPrice = Number(draft.minPriceEur);
-    const maxPrice = Number(draft.maxPriceEur);
+    const minPrice = parseMoneyInput(draft.minPriceEur);
+    const maxPrice = parseMoneyInput(draft.maxPriceEur);
 
     if (
       !draft.nameDe.trim() ||
@@ -1505,10 +1506,8 @@ function WorkTypeSheet({
                 />
               </FormField>
               <FormField label={tx("Минимум, EUR", "Minimum, EUR")} required>
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
+                <MoneyInput
+                  allowZero
                   value={draft.minPriceEur}
                   onChange={(event) =>
                     setDraft((current) => ({
@@ -1521,10 +1520,8 @@ function WorkTypeSheet({
                 />
               </FormField>
               <FormField label={tx("Максимум, EUR", "Maximum, EUR")} required>
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
+                <MoneyInput
+                  allowZero
                   value={draft.maxPriceEur}
                   onChange={(event) =>
                     setDraft((current) => ({

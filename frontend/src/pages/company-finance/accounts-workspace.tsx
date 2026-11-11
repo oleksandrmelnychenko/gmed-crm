@@ -47,7 +47,7 @@ import {
   deleteCompanyFinancialAccount,
   updateCompanyFinancialAccount,
 } from "./data";
-import { normalizeAmountInput } from "./amount-input";
+import { amountInputText, normalizeAmountInput } from "./amount-input";
 import { companyFinanceErrorCode, localizeCompanyFinanceError } from "./errors";
 import type {
   CompanyFinancialAccount,
@@ -245,7 +245,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
     name: "",
     accountType: "bank",
     iban: "",
-    openingBalance: "0.00",
+    openingBalance: "0,00",
     openingBalanceOn: todayIso(),
     isDefault: false,
   });
@@ -277,7 +277,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
     name: "",
     accountType: "bank",
     iban: "",
-    openingBalance: "0.00",
+    openingBalance: "0,00",
     openingBalanceOn: todayIso(),
     isActive: true,
   });
@@ -368,7 +368,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
         name: "",
         accountType: "bank",
         iban: "",
-        openingBalance: "0.00",
+        openingBalance: "0,00",
         openingBalanceOn: todayIso(),
         isDefault: false,
       });
@@ -386,7 +386,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
       name: account.name,
       accountType: account.account_type,
       iban: account.iban ?? "",
-      openingBalance: account.opening_balance,
+      openingBalance: amountInputText(account.opening_balance),
       openingBalanceOn: account.opening_balance_on,
       isActive: account.is_active,
     });

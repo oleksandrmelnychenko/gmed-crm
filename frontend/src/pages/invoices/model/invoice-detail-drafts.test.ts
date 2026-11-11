@@ -30,7 +30,7 @@ function pristine(balanceDue: unknown = "2963.10"): InvoiceDetailDraftState {
 describe("newPaymentDraft", () => {
   it("proposes the open balance received today", () => {
     expect(newPaymentDraft("2963.1", today)).toMatchObject({
-      amountGross: "2963.10",
+      amountGross: "2963,10",
       paymentMethod: "bank_transfer",
       receivedOn: today,
     });
@@ -100,7 +100,7 @@ describe("invoiceDetailHasUnsavedInput", () => {
   it("is clean again once an edit is reverted or saved as the new baseline", () => {
     const state = pristine();
     const typed = { ...state.payment.draft, amountGross: "1000" };
-    expect(draftChanged({ draft: { ...typed, amountGross: "2963.10" }, baseline: state.payment.baseline })).toBe(false);
+    expect(draftChanged({ draft: { ...typed, amountGross: "2963,10" }, baseline: state.payment.baseline })).toBe(false);
     expect(draftChanged({ draft: typed, baseline: typed })).toBe(false);
   });
 });

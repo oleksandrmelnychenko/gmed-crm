@@ -106,7 +106,8 @@ import type {
   AgencyServicePriceVersion,
 } from "@/pages/contracts/model/types";
 import { cn } from "@/lib/utils";
-import { formatMoneyAmount, moneyLineAmounts } from "@/lib/money";
+import { formatMoneyAmount, moneyInputText, moneyLineAmounts, parseMoneyInput } from "@/lib/money";
+import { MoneyInput } from "@/components/ui/money-input";
 
 /** A catalogue date as DD.MM.YYYY (owner rule), e.g. a price version period. */
 function catalogDate(value: string | null | undefined) {
@@ -512,7 +513,7 @@ function packageItemToForm(
     serviceKey: item.service_key ?? "",
     includedQuantity: item.included_quantity,
     unitLabel: item.unit_label || defaultUnitLabel,
-    overageUnitPriceNet: item.overage_unit_price_net ?? "",
+    overageUnitPriceNet: moneyInputText(item.overage_unit_price_net),
     taxProfileId: item.tax_profile_id ?? "",
     requiresPatientApproval: item.requires_patient_approval,
   };
@@ -528,7 +529,7 @@ function packageToForm(
     name: item.name,
     description: item.description ?? "",
     currency: item.currency || "EUR",
-    basePriceNet: item.base_price_net,
+    basePriceNet: moneyInputText(item.base_price_net),
     taxProfileId: item.tax_profile_id ?? "",
     isActive: item.is_active,
     validFrom: item.valid_from ?? "",
@@ -659,6 +660,19 @@ function decimalInputIsValid(value: string) {
   return Number.isFinite(Number(value.replace(",", ".")));
 }
 
+// Prices are typed in the German money format like every money field
+// (owner 2026-11-11): "1.234,56", "1234,56" or "1234.56". Rates and
+// quantities stay plain decimals (above).
+function moneyPayload(value: string, fallback = 0) {
+  if (!value.trim()) return fallback;
+  const parsed = parseMoneyInput(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function moneyInputIsValid(value: string) {
+  return !value.trim() || Number.isFinite(parseMoneyInput(value));
+}
+
 type AgencyServiceValidationMessages = {
   required: string;
   unitPrice: string;
@@ -677,8 +691,8 @@ export function validateAgencyServiceForm(
   }
   if (
     !form.unitPrice.trim() ||
-    !decimalInputIsValid(form.unitPrice) ||
-    decimalPayload(form.unitPrice) < 0
+    !moneyInputIsValid(form.unitPrice) ||
+    moneyPayload(form.unitPrice) < 0
   ) {
     return messages.unitPrice;
   }
@@ -1902,7 +1916,7 @@ function useFinanceCatalogPageContent() {
                             kind: "service-package",
                             parentId: servicePackage.id,
                             title: servicePackage.name,
-                            netPrice: servicePackage.base_price_net,
+                            netPrice: moneyInputText(servicePackage.base_price_net),
                             currency: servicePackage.currency || "EUR",
                             taxProfileId: activeTaxProfileId(taxProfiles, servicePackage.tax_profile_id),
                             validFrom: todayInputDate(),
@@ -2220,7 +2234,7 @@ function useFinanceCatalogPageContent() {
       name: version
         ? priceVersionDisplayName(version) || `${service.service_name} · ${catalogDate(version.valid_from)}`
         : "",
-      netPrice: valueToInput(version?.unit_price ?? service.unit_price),
+      netPrice: moneyInputText(version?.unit_price ?? service.unit_price),
       currency: version?.currency ?? service.currency ?? "EUR",
       vatRate: valueToInput(version?.vat_rate ?? service.vat_rate) || "19",
       validFrom: version?.valid_from ?? todayInputDate(),
@@ -2245,7 +2259,7 @@ function useFinanceCatalogPageContent() {
       name: version
         ? priceVersionDisplayName(version) || `${servicePackage.name} · ${catalogDate(version.valid_from)}`
         : "",
-      netPrice: version?.base_price_net ?? servicePackage.base_price_net,
+      netPrice: moneyInputText(version?.base_price_net ?? servicePackage.base_price_net),
       currency: version?.currency ?? servicePackage.currency ?? "EUR",
       taxProfileId: version ? version.tax_profile_id ?? "" : activeTaxProfileId(taxProfiles, servicePackage.tax_profile_id),
       validFrom: version?.valid_from ?? todayInputDate(),
@@ -2272,7 +2286,7 @@ function useFinanceCatalogPageContent() {
       }));
       return;
     }
-    if (!decimalInputIsValid(priceVersionForm.netPrice) || decimalPayload(priceVersionForm.netPrice) < 0) {
+    if (!moneyInputIsValid(priceVersionForm.netPrice) || moneyPayload(priceVersionForm.netPrice) < 0) {
       setPriceVersionForm((current) => ({
         ...current,
         error: t.finance_catalog_error_base_price_numeric,
@@ -2311,7 +2325,7 @@ function useFinanceCatalogPageContent() {
         priceVersionForm.kind === "agency-service"
           ? {
               name: priceVersionForm.name.trim(),
-              unit_price: decimalPayload(priceVersionForm.netPrice),
+              unit_price: moneyPayload(priceVersionForm.netPrice),
               currency: priceVersionForm.currency.trim() || "EUR",
               vat_rate: decimalPayload(priceVersionForm.vatRate, 19),
               valid_from: priceVersionForm.validFrom,
@@ -2319,7 +2333,7 @@ function useFinanceCatalogPageContent() {
             }
           : {
               name: priceVersionForm.name.trim(),
-              base_price_net: decimalPayload(priceVersionForm.netPrice),
+              base_price_net: moneyPayload(priceVersionForm.netPrice),
               currency: priceVersionForm.currency.trim() || "EUR",
               tax_profile_id: priceVersionForm.taxProfileId || null,
               valid_from: priceVersionForm.validFrom,
@@ -2473,7 +2487,7 @@ function useFinanceCatalogPageContent() {
       setPackageError(t.finance_catalog_error_package_item_description);
       return;
     }
-    if (!decimalInputIsValid(packageForm.basePriceNet)) {
+    if (!moneyInputIsValid(packageForm.basePriceNet)) {
       setPackageError(t.finance_catalog_error_base_price_numeric);
       return;
     }
@@ -2483,8 +2497,8 @@ function useFinanceCatalogPageContent() {
           !decimalInputIsValid(item.includedQuantity) ||
           (item.pricingMode === "manual" &&
             (!item.overageUnitPriceNet.trim() ||
-              !decimalInputIsValid(item.overageUnitPriceNet) ||
-              Number(item.overageUnitPriceNet.replace(",", ".")) < 0)),
+              !moneyInputIsValid(item.overageUnitPriceNet) ||
+              moneyPayload(item.overageUnitPriceNet) < 0)),
       )
     ) {
       setPackageError(t.finance_catalog_error_item_numbers);
@@ -2514,7 +2528,7 @@ function useFinanceCatalogPageContent() {
         name: packageForm.name.trim(),
         description: packageForm.description.trim() || null,
         currency: packageForm.currency.trim() || "EUR",
-        base_price_net: decimalPayload(packageForm.basePriceNet),
+        base_price_net: moneyPayload(packageForm.basePriceNet),
         tax_profile_id: packageForm.taxProfileId || null,
         is_active: packageForm.isActive,
         valid_from: packageForm.validFrom || null,
@@ -2534,7 +2548,7 @@ function useFinanceCatalogPageContent() {
           unit_label: item.unitLabel.trim() || t.finance_catalog_unit_default,
           overage_unit_price_net:
             item.pricingMode === "manual" && item.overageUnitPriceNet.trim()
-            ? decimalPayload(item.overageUnitPriceNet)
+            ? moneyPayload(item.overageUnitPriceNet)
             : null,
           tax_profile_id: item.taxProfileId || null,
           requires_patient_approval: item.requiresPatientApproval,
@@ -2587,7 +2601,7 @@ function useFinanceCatalogPageContent() {
             description_items: serviceDescriptionItems(agencyServiceForm.descriptionItems, agencyServiceForm.description)
               .map((item) => ({ ...item, text: item.text.trim() })).filter((item) => item.text),
             unit_label: toOptional(agencyServiceForm.unitLabel),
-            unit_price: decimalPayload(agencyServiceForm.unitPrice),
+            unit_price: moneyPayload(agencyServiceForm.unitPrice),
             currency: toOptional(agencyServiceForm.currency),
             vat_rate: agencyServiceForm.vatRate.trim()
               ? decimalPayload(agencyServiceForm.vatRate)
@@ -3002,9 +3016,9 @@ function useFinanceCatalogPageContent() {
                       }
                       htmlFor="catalog-price-version-net"
                     >
-                      <Input
+                      <MoneyInput
                         id="catalog-price-version-net"
-                        inputMode="decimal"
+                        allowZero
                         required
                         value={priceVersionForm.netPrice}
                         onChange={(event) =>
@@ -3706,11 +3720,9 @@ function useFinanceCatalogPageContent() {
                   ) : (
                     <div className="grid gap-3 sm:grid-cols-2">
                       <Field label={t.revenue_agency_service_unit_price}>
-                        <Input
+                        <MoneyInput
                           required
-                          type="number"
-                          min="0"
-                          step="0.01"
+                          allowZero
                           value={agencyServiceForm.unitPrice}
                           onChange={(event) =>
                             setAgencyServiceForm((current) => ({
@@ -4013,8 +4025,9 @@ function useFinanceCatalogPageContent() {
                   ) : (
                     <div className="grid gap-3 sm:grid-cols-2">
                       <Field label={t.finance_catalog_base_net_price} htmlFor="package-base-price">
-                        <Input
+                        <MoneyInput
                           id="package-base-price"
+                          allowZero
                           value={packageForm.basePriceNet}
                           onChange={(event) =>
                             setPackageForm((current) => ({
@@ -4320,7 +4333,8 @@ function useFinanceCatalogPageContent() {
                           ) : null}
                           {item.pricingMode === "manual" ? (
                             <Field label={t.finance_catalog_overage_net_price}>
-                              <Input
+                              <MoneyInput
+                                allowZero
                                 value={item.overageUnitPriceNet}
                                 onChange={(event) =>
                                   updatePackageItem(index, {

@@ -1,4 +1,4 @@
-import { parseMoneyInput, roundCents, toCents } from "@/lib/money";
+import { moneyInputText, parseMoneyInput, roundCents, toCents } from "@/lib/money";
 
 /** The prepayment terms of an order, named like the API and the order wizard draft. */
 export type OrderPrepaymentTerms = {
@@ -54,7 +54,8 @@ export function orderPrepaymentTerms(order: {
 }): OrderPrepaymentTerms {
   return {
     prepayment_required: Boolean(order.prepayment_required),
-    prepayment_amount: order.prepayment_amount == null ? "" : String(order.prepayment_amount),
+    // As staff type it: "1.500,00" form (owner 2026-11-11, German money format).
+    prepayment_amount: order.prepayment_amount == null ? "" : moneyInputText(order.prepayment_amount),
     prepayment_due_at: order.prepayment_due_at ?? null,
   };
 }

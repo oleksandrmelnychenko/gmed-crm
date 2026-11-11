@@ -82,8 +82,8 @@ describe("overpayments", () => {
 
 describe("credit transfers", () => {
   it("proposes the credit up to the target balance", () => {
-    expect(creditTransferDefaultAmount("700", "452.2")).toBe("452.20");
-    expect(creditTransferDefaultAmount("100", "452.2")).toBe("100.00");
+    expect(creditTransferDefaultAmount("700", "452.2")).toBe("452,20");
+    expect(creditTransferDefaultAmount("100", "452.2")).toBe("100,00");
     expect(creditTransferDefaultAmount("100", undefined)).toBe("");
   });
 

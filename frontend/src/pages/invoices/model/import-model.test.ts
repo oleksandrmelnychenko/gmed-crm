@@ -21,8 +21,10 @@ describe("reviewed invoice amounts", () => {
     expect(importMoneyCents("0.1")).toBe(10);
     expect(importTotalsMatch({ ...blankImportFields(), amount_net: "0.1", amount_vat: "0.2", amount_gross: "0.3" })).toBe(true);
   });
-  it("does not guess missing tax, thousands grouping, signs or excess precision", () => {
-    for (const value of ["", "1.234", "1,234.56", "-1", "NaN", "1e3", "9999999999999999"]) {
+  it("reads German thousands, refuses English grouping, signs and excess precision", () => {
+    expect(importMoneyCents("1.234")).toBe(123400);
+    expect(importMoneyCents("1.234,56")).toBe(123456);
+    for (const value of ["", "1,234.56", "-1", "NaN", "1e3", "9999999999999999", "12,345"]) {
       expect(importMoneyCents(value)).toBeNull();
     }
     const fields = { ...blankImportFields(), amount_net: "100", amount_gross: "100" };

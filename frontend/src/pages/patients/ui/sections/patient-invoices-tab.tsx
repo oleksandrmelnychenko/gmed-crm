@@ -47,6 +47,8 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
+import { moneyInputPayload, parseMoneyInput } from "@/lib/money";
 import { TabsContent } from "@/components/ui/tabs";
 import {
   Banner,
@@ -1022,7 +1024,7 @@ function usePatientInvoicesTabContent({
     event.preventDefault();
     if (
       !patientId ||
-      Number(balanceAdjustmentForm.amount.replace(",", ".")) <= 0 ||
+      !(parseMoneyInput(balanceAdjustmentForm.amount) > 0) ||
       !balanceAdjustmentForm.reason.trim()
     ) {
       return;
@@ -1036,7 +1038,7 @@ function usePatientInvoicesTabContent({
           request_id: balanceAdjustmentForm.requestId,
           direction: balanceAdjustmentForm.direction,
           category: balanceAdjustmentForm.category,
-          amount: balanceAdjustmentForm.amount.replace(",", "."),
+          amount: moneyInputPayload(balanceAdjustmentForm.amount),
           currency: balanceAdjustmentForm.currency,
           effective_on: balanceAdjustmentForm.effectiveOn,
           order_id: balanceAdjustmentForm.orderId || null,
@@ -2761,7 +2763,7 @@ function usePatientInvoicesTabContent({
               className="h-8 rounded-lg"
               disabled={
                 balanceAdjustmentBusy ||
-                Number(balanceAdjustmentForm.amount.replace(",", ".")) <= 0 ||
+                !(parseMoneyInput(balanceAdjustmentForm.amount) > 0) ||
                 !balanceAdjustmentForm.reason.trim()
               }
             >
@@ -2824,11 +2826,8 @@ function usePatientInvoicesTabContent({
               </NativeComboboxSelect>
             </Field>
             <Field label={lang === "de" ? "Betrag" : "Сумма"} htmlFor="balance-adjustment-amount">
-              <Input
+              <MoneyInput
                 id="balance-adjustment-amount"
-                type="number"
-                min="0.01"
-                step="0.01"
                 value={balanceAdjustmentForm.amount}
                 onChange={(event) =>
                   setBalanceAdjustmentForm((current) => ({ ...current, amount: event.target.value }))

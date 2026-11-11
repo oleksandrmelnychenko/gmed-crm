@@ -13,10 +13,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Banner, StatusBadge, inputClass, selectClass, tokens } from "@/components/ui-shell";
 import { appDateKey } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
-import { formatMoneyAmount, normalizeMoneyInput, toCents } from "@/lib/money";
+import { formatMoneyAmount, moneyInputProblem, normalizeMoneyInput, toCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 import { createCreditTransfer, reverseCreditTransfer } from "../data/invoice-api";
@@ -207,10 +208,7 @@ export function CreditBalancePanel({
               </NativeComboboxSelect>
             </Field>
             <Field label={t.finance_credit_transfer_amount}>
-              <Input
-                type="number"
-                min="0.01"
-                step="0.01"
+              <MoneyInput
                 value={amountGross}
                 onChange={(event) => setAmountGross(event.target.value)}
                 className={inputClass}
@@ -230,7 +228,10 @@ export function CreditBalancePanel({
             </Field>
             <div className="flex flex-wrap items-center justify-between gap-3 sm:col-span-2 lg:col-span-3">
               <span className="text-sm text-rose-700" aria-live="polite">
-                {problem && amountGross ? t[PROBLEM_KEYS[problem]] : null}
+                {/* The field names an unreadable or zero amount itself. */}
+                {problem && amountGross && !(problem === "invalid_amount" && moneyInputProblem(amountGross))
+                  ? t[PROBLEM_KEYS[problem]]
+                  : null}
               </span>
               <Button type="button" disabled={busy || problem !== null || !transferredOn || dateRefused} onClick={() => void submit()}>
                 {busy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}

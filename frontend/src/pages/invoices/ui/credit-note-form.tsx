@@ -4,10 +4,11 @@ import { ListOrdered, LoaderCircle, Percent } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { inputClass, selectClass, tokens } from "@/components/ui-shell";
 import { appDateKey } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
-import { formatMoneyAmount, toCents } from "@/lib/money";
+import { formatMoneyAmount, moneyInputText, toCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 import {
@@ -174,11 +175,7 @@ export function CreditNoteForm({
 
       {selection.mode === "amount" ? (
         <Field label={t.finance_credit_note_amount}>
-          <Input
-            type="number"
-            min="0.01"
-            step="0.01"
-            max={limit ?? undefined}
+          <MoneyInput
             value={draft.selection.amountGross}
             onChange={(event) =>
               onChange((current) => ({
@@ -235,13 +232,10 @@ export function CreditNoteForm({
                   </span>
                 </label>
                 {lineDraft.selected ? (
-                  <Input
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    max={creditable}
+                  <div className="min-w-0 space-y-1">
+                  <MoneyInput
                     aria-label={t.finance_credit_note_line_amount}
-                    placeholder={creditable.toFixed(2)}
+                    placeholder={moneyInputText(creditable)}
                     title={t.finance_credit_note_line_amount_hint}
                     value={lineDraft.amount}
                     onChange={(event) =>
@@ -258,6 +252,7 @@ export function CreditNoteForm({
                     }
                     className={inputClass}
                   />
+                  </div>
                 ) : null}
               </div>
             );
@@ -286,10 +281,7 @@ export function CreditNoteForm({
             </NativeComboboxSelect>
           </Field>
           <Field label={t.finance_credit_note_amount}>
-            <Input
-              type="number"
-              min="0.01"
-              step="0.01"
+            <MoneyInput
               value={draft.selection.amountGross}
               onChange={(event) =>
                 onChange((current) => ({

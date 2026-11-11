@@ -87,12 +87,15 @@ describe("parseAmendmentDelta", () => {
     expect(parseAmendmentDelta("150")).toBe("150");
     expect(parseAmendmentDelta(" 150,5 ")).toBe("150.5");
     expect(parseAmendmentDelta("0.01")).toBe("0.01");
+    // German thousands dots (owner 2026-11-11).
+    expect(parseAmendmentDelta("1.234,56")).toBe("1234.56");
+    expect(parseAmendmentDelta("1.500")).toBe("1500");
   });
 
   it("rejects reductions, zero, too many decimals and garbage", () => {
     expect(parseAmendmentDelta("-50")).toBeNull();
     expect(parseAmendmentDelta("0")).toBeNull();
-    expect(parseAmendmentDelta("10.005")).toBeNull();
+    expect(parseAmendmentDelta("10,005")).toBeNull();
     expect(parseAmendmentDelta("abc")).toBeNull();
     expect(parseAmendmentDelta("")).toBeNull();
   });

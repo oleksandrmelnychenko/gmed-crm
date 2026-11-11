@@ -79,7 +79,7 @@ import {
 } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { roundCents } from "@/lib/money";
+import { moneyInputText, parseMoneyInput, roundCents } from "@/lib/money";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
 import { servicesPermissions } from "@/pages/services.model";
@@ -374,8 +374,8 @@ function buildEditServiceForm(service: StaffConciergeService, lang: Lang): EditS
     vendorContact: service.vendor_contact ?? "",
     startsAt: toDateTimeLocalInput(service.starts_at),
     endsAt: toDateTimeLocalInput(service.ends_at),
-    costEstimate: service.cost_estimate ?? "",
-    actualCost: service.actual_cost ?? "",
+    costEstimate: moneyInputText(service.cost_estimate),
+    actualCost: moneyInputText(service.actual_cost),
     quantity: service.quantity || "1",
     currency: service.currency || "EUR",
     // System notes ("Automatisch aus nichtmedizinischem Termin erstellt") in the UI language.
@@ -406,11 +406,10 @@ function patientOptionLabel(patient: PatientOption) {
   return name ? `${patient.patient_id} | ${name}` : patient.patient_id;
 }
 
+// Typed in the German money format like every money field (owner 2026-11-11).
 function optionalMoney(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const parsed = Number(trimmed.replace(",", "."));
-  return Number.isFinite(parsed) ? parsed : Number.NaN;
+  if (!value.trim()) return null;
+  return parseMoneyInput(value);
 }
 
 function integerInputValue(value: string) {
@@ -422,7 +421,7 @@ function integerInputValue(value: string) {
 
 function formatMoneyInput(value: number) {
   if (!Number.isFinite(value)) return "";
-  return value.toFixed(2).replace(/\.00$/, "");
+  return moneyInputText(value);
 }
 
 function providerServiceUnitPrice(service: ServiceItem | null | undefined) {

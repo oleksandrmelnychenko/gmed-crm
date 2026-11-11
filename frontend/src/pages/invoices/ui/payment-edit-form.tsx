@@ -4,11 +4,12 @@ import { LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { inputClass, selectClass, tokens } from "@/components/ui-shell";
 import { hasFormChanges } from "@/lib/form-changes";
 import { appDateKey } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
-import { formatMoneyAmount } from "@/lib/money";
+import { formatMoneyAmount, moneyInputText } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 import {
@@ -64,7 +65,7 @@ export function PaymentEditForm({
   const { t } = useLang();
   const [initialForm] = useState<PaymentCorrectionForm>(() => ({
     requestId: crypto.randomUUID(),
-    amountGross: String(payment.amount_gross ?? ""),
+    amountGross: moneyInputText(payment.amount_gross),
     paymentMethod: payment.payment_method,
     paymentReference: payment.payment_reference ?? "",
     receivedOn: payment.received_on,
@@ -91,10 +92,7 @@ export function PaymentEditForm({
       </p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Field label={de ? "Eingang brutto" : "Сумма брутто"}>
-          <Input
-            type="number"
-            min="0.01"
-            step="0.01"
+          <MoneyInput
             value={form.amountGross}
             onChange={(event) => set({ amountGross: event.target.value })}
             className={inputClass}

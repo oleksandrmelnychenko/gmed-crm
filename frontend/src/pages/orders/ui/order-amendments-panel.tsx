@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { useLang } from "@/lib/i18n";
+import { normalizeMoneyInput } from "@/lib/money";
 
 import {
   billOrderAmendment,
@@ -59,7 +60,8 @@ export function formatAmendmentDelta(amount: string, currency: string): string {
  * amendment: the service line is changed or cancelled, or the invoice credited.
  */
 export function parseAmendmentDelta(value: string): string | null {
-  const normalized = value.trim().replace(/\s/g, "").replace(",", ".");
+  // German money format like every money field (owner 2026-11-11): "1.234,56".
+  const normalized = normalizeMoneyInput(value) ?? "";
   if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
   const amount = Number(normalized);
   return Number.isFinite(amount) && amount > 0 ? normalized : null;

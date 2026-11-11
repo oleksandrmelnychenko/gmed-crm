@@ -4,6 +4,9 @@ import {
   formatMoneyLabel,
   formatMoneyRange,
   formatRecognizedMoney,
+  moneyInputMessage,
+  moneyInputPayload,
+  moneyInputProblem,
   moneyInputText,
   moneyLineAmounts,
   normalizeMoneyInput,
@@ -12,6 +15,48 @@ import {
   sameCents,
   toCents,
 } from "./money";
+
+// Owner 2026-11-11: German money format in every money field.
+describe("money fields: German format everywhere", () => {
+  it("reads German thousands dots with comma decimals", () => {
+    expect(parseMoneyInput("1.234,56")).toBe(1234.56);
+    expect(parseMoneyInput("12.345.678,90")).toBe(12345678.9);
+    expect(parseMoneyInput("1.500")).toBe(1500);
+    expect(moneyInputPayload("1.234,56")).toBe("1234.56");
+  });
+
+  it("reads comma decimals without thousands dots", () => {
+    expect(parseMoneyInput("1234,56")).toBe(1234.56);
+    expect(parseMoneyInput("119,5")).toBe(119.5);
+    expect(moneyInputPayload(" 1 234,50 ")).toBe("1234.50");
+  });
+
+  it("reads plain dot decimals as the old number fields sent them", () => {
+    expect(parseMoneyInput("1234.56")).toBe(1234.56);
+    expect(parseMoneyInput("0.01")).toBe(0.01);
+    expect(moneyInputPayload("119.00")).toBe("119.00");
+  });
+
+  it("names an unreadable amount instead of calling it zero", () => {
+    for (const value of ["abc", "1,500", "1.234.5", "12,345", "1e3", "1400,009999999,99", "1,234.56"]) {
+      expect(moneyInputProblem(value)).toBe("unreadable");
+      expect(moneyInputPayload(value)).toBeNull();
+    }
+    expect(moneyInputMessage("unreadable", "ru")).toBe("Введите сумму числом, например 119,00 или 1.234,56.");
+    expect(moneyInputMessage("unreadable", "de")).toBe("Bitte den Betrag als Zahl eingeben, z. B. 119,00 oder 1.234,56.");
+  });
+
+  it("refuses zero and negative amounts where the field does not allow them", () => {
+    expect(moneyInputProblem("")).toBeNull();
+    expect(moneyInputProblem("0")).toBe("not_positive");
+    expect(moneyInputProblem("0,00", { allowZero: true })).toBeNull();
+    expect(moneyInputProblem("-5")).toBe("not_positive");
+    expect(moneyInputProblem("-5", { allowZero: true })).toBe("negative");
+    expect(moneyInputProblem("-1.500,50", { allowNegative: true })).toBeNull();
+    expect(moneyInputProblem("119,00")).toBeNull();
+    expect(moneyInputMessage("not_positive", "ru")).toBe("Введите сумму больше нуля, например 119,00.");
+  });
+});
 
 describe("typed money amounts (QA 2026-10-31)", () => {
   it("reads German amounts and the plain API form", () => {

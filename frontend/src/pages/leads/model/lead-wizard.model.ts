@@ -506,10 +506,16 @@ function numberOrNull(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+// Prices are typed in the German money format like every money field (owner 2026-11-11).
+function moneyOrNull(value: string): number | null {
+  const normalized = normalizeMoneyInput(value);
+  return normalized === null ? null : Number(normalized);
+}
+
 /** A line is billable once its description and monetary fields are valid. */
 export function orderLineIsValid(line: WizardOrderLine): boolean {
   const quantity = numberOrNull(line.quantity);
-  const unitPrice = numberOrNull(line.unitPrice);
+  const unitPrice = moneyOrNull(line.unitPrice);
   const vatRate = numberOrNull(line.vatRate);
   return (
     line.description.trim().length > 0 &&
@@ -527,7 +533,7 @@ export function orderLineIsBlank(line: WizardOrderLine): boolean {
   return (
     line.description.trim().length === 0 &&
     numberOrNull(line.quantity) === 1 &&
-    numberOrNull(line.unitPrice) === 0 &&
+    moneyOrNull(line.unitPrice) === 0 &&
     numberOrNull(line.vatRate) === 19
   );
 }
@@ -552,7 +558,7 @@ export function costEstimate(lines: WizardOrderLine[]): CostEstimate {
     if (!orderLineIsValid(line)) continue;
     const amounts = moneyLineAmounts(
       numberOrNull(line.quantity) ?? 0,
-      numberOrNull(line.unitPrice) ?? 0,
+      moneyOrNull(line.unitPrice) ?? 0,
       numberOrNull(line.vatRate) ?? 0,
     );
     net += amounts.net;
@@ -576,7 +582,7 @@ export function orderLinePayload(
     ...(patientId ? { patient_id: patientId } : {}),
     description: line.description.trim(),
     quantity: numberOrNull(line.quantity) ?? 0,
-    unit_price: numberOrNull(line.unitPrice) ?? 0,
+    unit_price: moneyOrNull(line.unitPrice) ?? 0,
     vat_rate: numberOrNull(line.vatRate) ?? 0,
     ...(clientReference ? { client_reference: clientReference } : {}),
   };
@@ -586,7 +592,7 @@ export function orderLineFingerprint(line: WizardOrderLine): string {
   return [
     line.description.trim().toLowerCase(),
     numberOrNull(line.quantity) ?? 0,
-    numberOrNull(line.unitPrice) ?? 0,
+    moneyOrNull(line.unitPrice) ?? 0,
     numberOrNull(line.vatRate) ?? 0,
   ].join("|");
 }

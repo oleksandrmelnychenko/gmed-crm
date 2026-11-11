@@ -21,7 +21,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { appDateKey, formatAppDateTime } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
-import { formatMoneyAmount } from "@/lib/money";
+import { formatMoneyAmount, normalizeMoneyInput } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 import {
@@ -367,9 +367,9 @@ export function ConciergeExpenseReceiptDialog({
         orderLeistungId: null,
         vendor: vendor.trim(),
         expenseDate,
-        amountNet: amountNet.replace(",", "."),
+        amountNet: normalizeMoneyInput(amountNet) ?? amountNet,
         amountVat,
-        amountGross,
+        amountGross: normalizeMoneyInput(amountGross) ?? amountGross,
         currency,
         paidBy,
         serviceDelivered,
@@ -567,14 +567,14 @@ export function ConciergeExpenseReceiptDialog({
                       </ConciergeField>
                       <ConciergeField label={labels.expenseDate}><Input type="date" value={expenseDate} max={todayInputValue()} required onChange={(event) => setExpenseDate(event.target.value)} /></ConciergeField>
                       <ConciergeField label={labels.currency}><Input readOnly value={currency} /></ConciergeField>
-                      <ConciergeField label={labels.net}><Input inputMode="decimal" placeholder="0.00" value={amountNet} required onChange={(event) => { setAmountSource("net"); setNetInput(event.target.value); }} /></ConciergeField>
+                      <ConciergeField label={labels.net}><Input inputMode="decimal" placeholder="0,00" value={amountNet} required onChange={(event) => { setAmountSource("net"); setNetInput(event.target.value); }} /></ConciergeField>
                       <ConciergeField label={labels.vat}>
                         <div className="relative">
                           <Input className="pr-8" inputMode="decimal" placeholder="19" value={vatRate} required onChange={(event) => setVatRate(event.target.value)} />
                           <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted-foreground">%</span>
                         </div>
                       </ConciergeField>
-                      <ConciergeField label={labels.gross} className="sm:col-span-2"><Input inputMode="decimal" value={amountGross} placeholder="0.00" required onChange={(event) => { setAmountSource("gross"); setGrossInput(event.target.value); }} /></ConciergeField>
+                      <ConciergeField label={labels.gross} className="sm:col-span-2"><Input inputMode="decimal" value={amountGross} placeholder="0,00" required onChange={(event) => { setAmountSource("gross"); setGrossInput(event.target.value); }} /></ConciergeField>
                       <ConciergeField label={labels.paidBy} className="sm:col-span-2">
                         <select className={selectClass} value={paidBy} onChange={(event) => setPaidBy(event.target.value as ConciergeExpensePaidBy)}>
                           <option value="patient">{labels.paidPatient}</option>

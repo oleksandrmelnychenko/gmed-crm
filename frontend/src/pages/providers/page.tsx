@@ -79,6 +79,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { EmailDomainWarning, emailDomainWarningText } from "@/components/email-domain-warning";
 import { LanguageMultiSelect, languageLabel } from "@/components/ui/language-multi-select";
 import { StatusActionPill } from "@/components/status-action-pill";
@@ -9872,10 +9873,8 @@ function ServiceFormFields({
           </Field>
           {priceType === "fixed" ? (
             <Field label={t.providers_service_price} required>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
+              <MoneyInput
+                allowZero
                 value={form.price}
                 onChange={(event) => {
                   onChange("price", event.target.value);
@@ -9890,10 +9889,8 @@ function ServiceFormFields({
           {priceType === "range" ? (
             <>
               <Field label={l("providers_price_from")} required>
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
+                <MoneyInput
+                  allowZero
                   value={form.priceFrom}
                   onChange={(event) => onChange("priceFrom", event.target.value)}
                   className={shellInputClassName}
@@ -9901,10 +9898,8 @@ function ServiceFormFields({
                 />
               </Field>
               <Field label={l("providers_price_to")} required>
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
+                <MoneyInput
+                  allowZero
                   value={form.priceTo}
                   onChange={(event) => onChange("priceTo", event.target.value)}
                   className={shellInputClassName}

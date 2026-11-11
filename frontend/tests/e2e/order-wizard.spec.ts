@@ -253,7 +253,7 @@ for (const lang of ["ru", "de"] as const) {
     await quantity.fill("2");
     await expect(totals).toBeVisible();
     await dialog.getByRole("checkbox", { name: tx("Предоплата предусмотрена", "Vorauszahlung vorgesehen") }).check();
-    await dialog.getByRole("spinbutton", { name: tx("Сумма предоплаты, EUR", "Vorauszahlung, EUR") }).fill("100");
+    await dialog.getByRole("textbox", { name: tx("Сумма предоплаты, EUR", "Vorauszahlung, EUR") }).fill("100");
     await expect.poll(() => state.workspace.data.prepayment_amount).toBe("100");
     await page.screenshot({ path: `../artifacts/design-qa/order-wizard-${lang}-services-desktop.png` });
     await page.setViewportSize({ width: 390, height: 844 });

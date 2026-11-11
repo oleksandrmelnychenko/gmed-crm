@@ -1,6 +1,7 @@
 import { SectionHeading } from "@/components/ui/section-heading";
 import { hasFormChanges } from "@/lib/form-changes";
-import { parseMoneyInput } from "@/lib/money";
+import { moneyInputText, parseMoneyInput } from "@/lib/money";
+import { MoneyInput } from "@/components/ui/money-input";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
@@ -415,7 +416,8 @@ function cappedPrepaymentAmount(available: unknown, balanceDue: unknown) {
   const availableAmount = Number(available ?? 0);
   const balanceAmount = Number(balanceDue ?? 0);
   if (!Number.isFinite(availableAmount) || !Number.isFinite(balanceAmount)) return "";
-  return Math.max(0, Math.min(availableAmount, balanceAmount)).toFixed(2);
+  // Prefilled the way staff type it ("1.234,56" form, owner 2026-11-11).
+  return moneyInputText(Math.max(0, Math.min(availableAmount, balanceAmount)));
 }
 
 async function downloadInvoicePdf(
@@ -3330,10 +3332,7 @@ function useStaffInvoicesPageContent() {
                     !["draft", "cancelled"].includes(detail.status) ? (
                       <div className="grid gap-3 rounded-lg border border-border/70 bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-3">
                         <Field label={text.paymentAmount}>
-                          <Input
-                            type="number"
-                            min="0.01"
-                            step="0.01"
+                          <MoneyInput
                             value={paymentForm.amountGross}
                             onChange={(event) =>
                               setPaymentForm((current) => ({
@@ -3806,11 +3805,7 @@ function useStaffInvoicesPageContent() {
                     Number(detail.refundable_cash_amount ?? 0) > 0 ? (
                       <div className="grid gap-3 rounded-lg border border-border/70 bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-3">
                         <Field label={text.refundAmount}>
-                          <Input
-                            type="number"
-                            min="0.01"
-                            step="0.01"
-                            max={String(detail.refundable_cash_amount ?? "")}
+                          <MoneyInput
                             value={refundForm.amountGross}
                             onChange={(event) =>
                               setRefundForm((current) => ({
@@ -4121,16 +4116,7 @@ function useStaffInvoicesPageContent() {
                             </NativeComboboxSelect>
                           </Field>
                           <Field label={text.amountToApply}>
-                            <Input
-                              type="number"
-                              min="0.01"
-                              step="0.01"
-                              max={cappedPrepaymentAmount(
-                                detail.available_prepayments?.find(
-                                  (item) => item.invoice_id === prepaymentInvoiceId,
-                                )?.available_amount,
-                                detail.balance_due,
-                              )}
+                            <MoneyInput
                               value={prepaymentAmount}
                               onChange={(event) => setPrepaymentAmount(event.target.value)}
                               className={shellInputClassName}

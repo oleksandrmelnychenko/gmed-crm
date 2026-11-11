@@ -1,4 +1,4 @@
-import { parseMoneyInput, roundCents, toCents } from "@/lib/money";
+import { moneyInputText, parseMoneyInput, roundCents, toCents } from "@/lib/money";
 
 /**
  * Overpayments and credit transfers. A receipt above the open balance is
@@ -122,7 +122,7 @@ export function paymentOverpayment(receipt: unknown, balanceDue: unknown): numbe
 /** Proposed transfer: the credit, at most what the target still asks for. */
 export function creditTransferDefaultAmount(credit: unknown, targetBalance: unknown): string {
   const available = Math.min(amount(credit), amount(targetBalance));
-  return Number.isFinite(available) && available > 0 ? roundCents(available).toFixed(2) : "";
+  return Number.isFinite(available) && available > 0 ? moneyInputText(roundCents(available)) : "";
 }
 
 export type CreditTransferProblem = "invalid_amount" | "exceeds_credit" | "exceeds_target" | "no_target";

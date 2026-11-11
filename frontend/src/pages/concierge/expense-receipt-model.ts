@@ -1,3 +1,5 @@
+import { normalizeMoneyInput } from "@/lib/money";
+
 export const CONCIERGE_EXPENSE_MAX_FILE_SIZE = 25 * 1024 * 1024;
 
 export type ConciergeExpensePaidBy = "patient" | "agency" | "unpaid";
@@ -143,7 +145,8 @@ export function validateConciergeExpenseReceiptFile(
 }
 
 export function moneyStringToMinorUnits(value: string): number | null {
-  const normalized = value.trim().replace(",", ".");
+  // Typed as "1.234,56", "1234,56" or "1234.56" (owner 2026-11-11, German money format).
+  const normalized = normalizeMoneyInput(value) ?? "";
   if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
   const [whole, fraction = ""] = normalized.split(".");
   const cents = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));

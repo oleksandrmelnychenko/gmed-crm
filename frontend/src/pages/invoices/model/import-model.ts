@@ -1,3 +1,5 @@
+import { normalizeMoneyInput } from "@/lib/money";
+
 export type InvoiceImportFields = {
   supplier_name: string;
   external_invoice_number: string;
@@ -80,9 +82,11 @@ export function importFieldsFromPreview(preview: InvoiceImportPreview): InvoiceI
   ])) as InvoiceImportFields;
 }
 
-// Form amounts accept a decimal comma/dot, without guessing thousands groups.
+// Form amounts are typed in the German money format like every money field
+// (owner 2026-11-11): "1.234,56", "1234,56" or "1234.56"; English grouping,
+// signs and more than two decimals are refused.
 export function importMoneyCents(value: string): number | null {
-  const normalized = value.trim().replace(",", ".");
+  const normalized = normalizeMoneyInput(value) ?? "";
   if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
   const [whole, fraction = ""] = normalized.split(".");
   const cents = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));

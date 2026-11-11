@@ -2,6 +2,7 @@ import { useCallback, useState, type SetStateAction } from "react";
 
 import { appDateKey } from "@/lib/app-time-zone";
 import { hasFormChanges } from "@/lib/form-changes";
+import { moneyInputText } from "@/lib/money";
 
 import { emptyCreditNoteSelection, type CreditNoteSelectionDraft } from "./credit-note";
 import type { InvoiceCreditableLine } from "./types";
@@ -57,7 +58,8 @@ export function newPaymentDraft(balanceDue: unknown, today = isoToday()): Invoic
   const balance = Number(balanceDue ?? 0);
   return {
     requestId: crypto.randomUUID(),
-    amountGross: Number.isFinite(balance) && balance > 0 ? balance.toFixed(2) : "",
+    // Prefilled as staff type it: "2963,10" (owner 2026-11-11, German money format).
+    amountGross: Number.isFinite(balance) && balance > 0 ? moneyInputText(balance) : "",
     paymentMethod: "bank_transfer",
     paymentReference: "",
     receivedOn: today,
