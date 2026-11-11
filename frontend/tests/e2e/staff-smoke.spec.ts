@@ -2018,7 +2018,7 @@ test.describe("staff smoke flows", () => {
     await page.getByRole("table").getByText("MRI report").click();
     const sheet = page.getByRole("main");
     await expect(
-      sheet.getByRole("heading", { name: "MRI report" }),
+      page.getByRole("heading", { name: "MRI report", level: 1, exact: true }),
     ).toBeVisible();
 
     await sheet.getByRole("button", { name: /Freigabe erstellen/i }).click();
@@ -2063,7 +2063,7 @@ test.describe("staff smoke flows", () => {
     await page.getByRole("table").getByText("MRI report").click();
     const sheet = page.getByRole("main");
     await expect(
-      sheet.getByRole("heading", { name: "MRI report" }),
+      page.getByRole("heading", { name: "MRI report", level: 1, exact: true }),
     ).toBeVisible();
 
     await sheet.getByRole("button", { name: /Datei/i }).click();
@@ -2093,7 +2093,7 @@ test.describe("staff smoke flows", () => {
     await page.getByRole("table").getByText("MRI report").click();
     const sheet = page.getByRole("main");
     await expect(
-      sheet.getByRole("heading", { name: "MRI report" }),
+      page.getByRole("heading", { name: "MRI report", level: 1, exact: true }),
     ).toBeVisible();
     await expect(
       sheet.getByRole("heading", { name: /bersetzungsanfragen/i }),
@@ -2185,7 +2185,7 @@ test.describe("staff smoke flows", () => {
     await page.reload();
     const reloadedSheet = page.getByRole("main");
     await expect(
-      reloadedSheet.getByRole("heading", { name: "MRI report" }),
+      page.getByRole("heading", { name: "MRI report", level: 1, exact: true }),
     ).toBeVisible();
     await reloadedSheet
       .getByText(/Zugewiesen: Uliana Mu|Assigned: Uliana Mu/i)
@@ -4173,7 +4173,7 @@ test.describe("lead onboarding wizard", () => {
       .getByRole("tab", { name: /Unterlagen/i })
       .click();
 
-    await expect(wizard.getByText("passport-alfred.pdf", { exact: true })).toBeVisible();
+    await expect(wizard.getByRole("button", { name: "passport-alfred.pdf", exact: true })).toBeVisible();
     await expect(wizard.getByText("2 MB", { exact: true })).toBeVisible();
     // An unconfirmed identity document offers its confirmation action instead of a status label.
     await expect(wizard.getByRole("button", { name: "Dokument bestätigen", exact: true })).toBeVisible();
@@ -4377,7 +4377,8 @@ test.describe("responsive staff workspace", () => {
       .toBeLessThanOrEqual(viewport.clientWidth);
 
     await page.goto("/appointments");
-    await expect(page.getByRole("button", { name: "Patienten heute", exact: true })).toBeVisible();
+    // The quick scope of the compact agenda is named "Heute" since the shared admin patterns (87a60b3f).
+    await expect(page.getByRole("button", { name: "Heute", exact: true })).toBeVisible();
     await expect(page.locator(".appointments-calendar-shell")).toHaveCount(0);
   });
 
