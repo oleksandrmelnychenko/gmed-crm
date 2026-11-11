@@ -45,6 +45,7 @@ const COPY = {
     unread: "Ungelesen",
     refresh: "Aktualisieren",
     markAll: "Alle als gelesen markieren",
+    markAllShort: "Alle gelesen",
     all: "Alle",
     onlyUnread: "Ungelesen",
     onlyRead: "Gelesen",
@@ -63,6 +64,7 @@ const COPY = {
     unread: "Непрочитанные",
     refresh: "Обновить",
     markAll: "Отметить все прочитанными",
+    markAllShort: "Все прочитаны",
     all: "Все",
     onlyUnread: "Непрочитанные",
     onlyRead: "Прочитанные",
@@ -232,9 +234,13 @@ export function PatientNotificationsPage() {
               className={tokens.control.primaryButton}
               disabled={unreadCount === 0 || busyId === "all"}
               onClick={() => void markAllRead()}
+              // A phone shows the short label; the full one stays the button's name (QA 2026-11-10, A-9).
+              aria-label={copy.markAll}
+              title={copy.markAll}
             >
               {busyId === "all" ? <LoaderCircle className="size-4 animate-spin" /> : <CheckCheck className="size-4" />}
-              {copy.markAll}
+              <span className="sm:hidden">{copy.markAllShort}</span>
+              <span className="hidden sm:inline">{copy.markAll}</span>
             </Button>
           </>
         }

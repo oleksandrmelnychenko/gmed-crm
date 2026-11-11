@@ -90,7 +90,8 @@ export function PageHeader({ title, actions, pageAction }: PageHeaderProps) {
         )}
       >
         <div className={cn("min-w-0", pageAction && "flex w-full flex-wrap items-center justify-between gap-2", !portal && topbarSlot && "lg:hidden")}>
-          <InPageTitle className="min-w-0 truncate text-lg font-semibold tracking-tight text-foreground">{title}</InPageTitle>
+          {/* A cut title (a long name in the greeting) can still be read in full (QA 2026-11-10, A-13). */}
+          <InPageTitle className="min-w-0 truncate text-lg font-semibold tracking-tight text-foreground" title={typeof title === "string" ? title : undefined}>{title}</InPageTitle>
           {pageAction}
         </div>
         {actions && !(portal && topbarTitleShown && topbarSlot && actionsInTopbar) ? (

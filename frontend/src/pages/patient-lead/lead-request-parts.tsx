@@ -216,7 +216,16 @@ export function useRequestQueue(): RequestQueue {
   return useState(createRequestQueue)[0];
 }
 
-export type AutosaveFlush = { save: () => Promise<boolean>; version: () => string | undefined };
+export type AutosaveFlush = {
+  save: () => Promise<boolean>;
+  version: () => string | undefined;
+  /**
+   * True when the last `save` held the step without sending anything (a consent box still
+   * empty, marked at its field): the step stays, but no save failed, so the page shows no
+   * "could not be saved" notice (QA 2026-11-10, A-2).
+   */
+  held?: () => boolean;
+};
 export const AutosaveFlushContext = createContext<Set<AutosaveFlush> | null>(null);
 
 /**

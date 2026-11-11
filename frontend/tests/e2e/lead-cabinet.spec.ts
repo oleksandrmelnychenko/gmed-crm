@@ -1092,8 +1092,10 @@ test.describe("lead cabinet", () => {
 
     await page.getByRole("button", { name: "Weiter" }).click();
     await expect(missing).toHaveCount(0);
-    // Complete, but not confirmed: nothing can be sent yet.
-    await expect(send).toBeDisabled();
+    // Complete, but not confirmed: pressing «send» leads to the box and sends nothing.
+    await send.click();
+    await expect(page.getByTestId("lead-request-declaration").getByRole("checkbox")).toBeFocused();
+    expect(calls.submits).toBe(0);
     await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
     await expect(send).toBeEnabled();
     await send.click();
@@ -2161,11 +2163,21 @@ test.describe("lead cabinet", () => {
     );
     // No reporting duty is mentioned any more (owner 2026-10-22).
     await expect(declaration).not.toContainText("Meldepflicht");
-    await expect(send).toBeDisabled();
-    await declaration.getByRole("checkbox").check();
+    // «Send» without the confirmation does what «Next» does (QA 2026-11-10, A-3): the reason
+    // stands at the button, a press leads to the box with the cursor in it and sends nothing.
+    const reason = page.getByTestId("lead-request-submit-reason");
     await expect(send).toBeEnabled();
+    await expect(reason).toHaveText("Bitte bestätigen Sie Ihre Angaben, bevor Sie die Anfrage senden.");
+    await send.click();
+    await expect(declaration.getByRole("checkbox")).toBeFocused();
+    await expect(declaration.getByRole("checkbox")).toBeInViewport();
+    await expect(declaration.getByRole("checkbox")).toHaveAttribute("aria-invalid", "true");
+    await expect(reason).toHaveAttribute("role", "alert");
+    expect(calls.submitBodies).toEqual([]);
+    await declaration.getByRole("checkbox").check();
+    await expect(reason).toHaveCount(0);
     await declaration.getByRole("checkbox").uncheck();
-    await expect(send).toBeDisabled();
+    await expect(reason).toBeVisible();
     expect(calls.submitBodies).toEqual([]);
 
     await declaration.getByRole("checkbox").check();
@@ -2175,6 +2187,25 @@ test.describe("lead cabinet", () => {
     await expect(declaration).toContainText("Bestätigt am 03.10.2026");
     // What was received stays readable.
     await expect(person).toContainText("Anna");
+  });
+
+  test("on a phone «send» without the confirmation shows the box below the header", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    const { calls } = await setup(page, "lead", { prepare: completeRequest });
+    await page.goto("/");
+    await step(page, "send");
+    const send = page.getByTestId("lead-request-submit");
+    const box = page.getByTestId("lead-request-declaration").getByRole("checkbox");
+    await expect(page.getByTestId("lead-request-submit-reason")).toBeVisible();
+    await send.click();
+    await expect(box).toBeFocused();
+    await expect(box).toBeInViewport();
+    // Not behind the sticky header or the sticky bar.
+    await expect.poll(() => box.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) === element;
+    })).toBe(true);
+    expect(calls.submitBodies).toEqual([]);
   });
 
   test("a parent reads the questions about the child, not about 'you'", async ({ page }) => {

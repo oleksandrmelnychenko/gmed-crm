@@ -193,7 +193,7 @@ function ProfileSection() {
         {saved ? <SuccessBanner>{l("account_profile_saved")}</SuccessBanner> : null}
         <div className={`grid gap-3 rounded-lg border border-border bg-muted/30 p-3${portalUser ? "" : " sm:grid-cols-2"}`}>
           <Field label={l("account_profile_email")} htmlFor="account-email">
-            <Input id="account-email" value={profile?.email ?? ""} readOnly className="h-9 rounded-lg border-border bg-muted/40 px-3 text-foreground" />
+            <Input id="account-email" value={profile?.email ?? ""} readOnly title={profile?.email || undefined} className="h-9 text-ellipsis rounded-lg border-border bg-muted/40 px-3 text-foreground" />
           </Field>
           {/* A raw role code means nothing to a lead, parent or patient. */}
           {portalUser ? null : (
@@ -220,8 +220,10 @@ function ProfileSection() {
               maxLength={40}
               inputMode="tel"
               autoComplete="tel"
-              placeholder="+49 30 1234567"
-              className="h-9 rounded-lg bg-field"
+              // A neutral hint, lighter than a value: a full sample number read as a stored one
+              // (QA 2026-11-10, A-4).
+              placeholder="+49 …"
+              className="h-9 rounded-lg bg-field placeholder:text-muted-foreground/60"
               onChange={(event) => setPhone(event.target.value)}
             />
           </Field>

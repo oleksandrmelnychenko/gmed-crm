@@ -1812,7 +1812,7 @@ export const ru = {
   services_cancel_request: "Отменить запрос",
   services_request_title: "Запросить сервис",
   services_request_description:
-    "Отправьте запрос на консьерж-сервис прямо из портала. Назначенная команда рассмотрит его и оформит на своей стороне.",
+    "Опишите здесь, какой сервис вам нужен. Ваша команда GMED рассмотрит запрос, займётся бронированием и свяжется с вами.",
   services_form_service_type: "Тип сервиса",
   services_category: "Категория сервиса",
   services_all_categories: "Все категории сервиса",

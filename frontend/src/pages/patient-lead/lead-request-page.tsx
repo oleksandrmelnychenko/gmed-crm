@@ -190,7 +190,8 @@ export function LeadRequestPage({
       for (;;) {
         const versions = new Map(Array.from(flushers, (flush) => [flush, flush.version()] as const));
         const refusedBefore = sentRefusals.current;
-        const results = await Promise.all(Array.from(versions.keys(), (flush) => flush.save()));
+        const saving = Array.from(versions.keys());
+        const results = await Promise.all(saving.map((flush) => flush.save()));
         if (!results.every(Boolean)) {
           // The request is with GMED: what was typed cannot be saved any more, and trying again
           // would never work. The step is left; the page says that the change was not saved.
@@ -199,8 +200,15 @@ export function LeadRequestPage({
             action();
             break;
           }
-          setSaveBlocked(true);
-          setBlockedCount((count) => count + 1);
+          // A part that only held the step (nothing sent, the missing entry marked at its field)
+          // is no failed save: the step stays without the notice (QA 2026-11-10, A-2).
+          const onlyHeld = saving.every((flush, index) => results[index] || flush.held?.() === true);
+          if (onlyHeld) {
+            setSaveBlocked(false);
+          } else {
+            setSaveBlocked(true);
+            setBlockedCount((count) => count + 1);
+          }
           onBlocked?.();
           break;
         }

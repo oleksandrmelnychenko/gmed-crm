@@ -288,7 +288,8 @@ export function DocumentList({
           <li key={document.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
             <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1">
-              <span className="block truncate">{document.file_name ?? "—"}</span>
+              {/* A long file name wraps, as in the lead's cabinet: it stays readable on a phone (QA 2026-11-10, A-8). */}
+              <span className="block [overflow-wrap:anywhere]" title={document.file_name ?? undefined}>{document.file_name ?? "—"}</span>
               <span className="block text-xs text-muted-foreground">
                 {formatAppDateTime(document.uploaded_at)}
                 {document.reviewed ? ` · ${text.documentReviewed}` : ""}

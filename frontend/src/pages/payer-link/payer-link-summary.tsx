@@ -8,6 +8,7 @@ import { countryLabel } from "@/components/ui/country-select";
 import { checkboxClass } from "@/components/record-workspace/primitives/design-tokens";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
+import { revealCabinetTarget } from "@/pages/patient-lead/lead-request-field-target";
 import { LEAD_CABINET_LANGS } from "@/pages/patient-lead/lead-request-text";
 
 import type { PayerDocument, PayerQuestionnaire, PayerSignaturePackage, PayerType } from "./payer-link-api";
@@ -345,20 +346,27 @@ export function SummaryStep({
   onSubmit: () => void;
 }) {
   const [confirmed, setConfirmed] = useState(false);
+  // «Send» pressed without the confirmation: the box is shown and marked, as «Next» shows a
+  // missing field (QA 2026-11-10, A-3: a disabled button said nothing on a long page).
+  const [confirmAsked, setConfirmAsked] = useState(false);
+  const confirmRef = useRef<HTMLLabelElement | null>(null);
   const missing = (questionnaire.missing_for_submit ?? []).length > 0;
   const blockedReason = uploading ? text.uploading : missing ? text.submitNeedsMissing : !confirmed ? text.submitNeedsConfirm : null;
+  // Only the confirmation holds the sending: the button stays pressable and leads to the box.
+  const onlyConfirmMissing = !uploading && !missing && !confirmed;
   return (
     <div className="space-y-5" data-testid="payer-link-step-summary">
       <MissingList questionnaire={questionnaire} steps={steps} text={text} onGoTo={onGoTo} />
       <AnswersSummary questionnaire={questionnaire} steps={steps} text={text} lang={lang} onEdit={onGoTo} />
       <div className="space-y-3 rounded-lg border border-border bg-muted/10 px-3 py-3">
-        <label className="flex items-start gap-3 text-sm">
+        <label ref={confirmRef} className="flex items-start gap-3 text-sm">
           <input
             type="checkbox"
             aria-label={text.confirmLabel}
             className={cn(checkboxClass, "mt-0.5")}
             checked={confirmed}
             disabled={submitting}
+            aria-invalid={onlyConfirmMissing && confirmAsked ? true : undefined}
             onChange={(event) => setConfirmed(event.target.checked)}
             data-testid="payer-link-confirm"
           />
@@ -367,16 +375,27 @@ export function SummaryStep({
         <Button
           type="button"
           className="h-10 w-full gap-2 sm:w-auto"
-          disabled={submitting || blockedReason !== null}
+          disabled={submitting || (blockedReason !== null && !onlyConfirmMissing)}
           aria-describedby={blockedReason ? "payer-link-submit-hint" : undefined}
-          onClick={onSubmit}
+          onClick={() => {
+            if (onlyConfirmMissing) {
+              setConfirmAsked(true);
+              if (confirmRef.current) revealCabinetTarget({ element: confirmRef.current, field: true });
+              return;
+            }
+            onSubmit();
+          }}
           data-testid="payer-link-submit"
         >
           {submitting ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : null}
           {submitting ? text.submitting : text.submit}
         </Button>
         {blockedReason ? (
-          <p id="payer-link-submit-hint" className="text-xs text-muted-foreground">
+          <p
+            id="payer-link-submit-hint"
+            role={onlyConfirmMissing && confirmAsked ? "alert" : undefined}
+            className={cn("text-xs text-muted-foreground", onlyConfirmMissing && confirmAsked && "font-medium text-amber-700 dark:text-amber-300")}
+          >
             {blockedReason}
           </p>
         ) : null}

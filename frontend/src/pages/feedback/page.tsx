@@ -6,6 +6,7 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useState,
   type Dispatch,
   type FormEvent,
   type ReactNode,
@@ -80,6 +81,7 @@ import {
 } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
+import { revealCabinetTarget } from "@/pages/patient-lead/lead-request-field-target";
 import {
   formatPortalDate,
   usePortalLabels,
@@ -103,6 +105,7 @@ import {
   canReviewStaffFeedback,
   canViewStaffFeedback,
   feedbackScoresPayload,
+  feedbackScoreValue,
   formatFeedbackCount,
   formatFeedbackDecimal,
   formatFeedbackPercent,
@@ -121,6 +124,8 @@ import type {
 } from "./model/types";
 
 const selectClassName = shellSelectClassName;
+/** The two required scales of the patient's survey, as «send» finds them. */
+const FEEDBACK_SCALE_IDS = { overall: "feedback-scale-overall", nps: "feedback-scale-nps" } as const;
 const textareaClassName = shellTextareaClass;
 const FEEDBACK_DEFAULT_FROZEN_COLUMNS = ["patient"];
 const FEEDBACK_DEFAULT_HIDDEN_COLUMNS = [
@@ -579,6 +584,8 @@ function PatientRatingScale({
   notChosenLabel,
   requiredLabel,
   prominent = false,
+  id,
+  missing = false,
 }: {
   label: string;
   value: string;
@@ -588,11 +595,19 @@ function PatientRatingScale({
   /** Set for a scale the survey cannot be sent without. */
   requiredLabel?: string;
   prominent?: boolean;
+  /** The id «send» leads to when the scale is still missing. */
+  id?: string;
+  /** «Send» was pressed while this required scale was still empty. */
+  missing?: boolean;
 }) {
   const isNpsScale = options.length > 5;
 
   return (
     <div
+      id={id}
+      role="group"
+      aria-label={label}
+      data-cabinet-invalid={missing ? "true" : undefined}
       className="portal-rating-scale min-w-0 py-2"
     >
       <div className="mb-2 flex items-center justify-between gap-3">
@@ -605,10 +620,10 @@ function PatientRatingScale({
         <span
           className={cn(
             "text-sm tabular-nums",
-            value ? "font-semibold text-foreground" : "text-muted-foreground",
+            value ? "font-semibold text-foreground" : missing ? "font-medium text-destructive" : "text-muted-foreground",
           )}
         >
-          {value || notChosenLabel}
+          {value || (missing && requiredLabel ? requiredLabel : notChosenLabel)}
         </span>
       </div>
       <div
@@ -647,12 +662,15 @@ function PatientScoreGrid({
   form,
   setForm,
   withInterpreter,
+  requiredAsked = false,
 }: {
   t: Translations;
   form: FeedbackFormState;
   setForm: SetFeedbackForm;
   /** False for a visit without an interpreter: there is nobody to rate. */
   withInterpreter: boolean;
+  /** «Send» was pressed without a required scale: the empty ones are marked. */
+  requiredAsked?: boolean;
 }) {
   const notChosen = t.uiText.feedback_score_not_chosen;
   const requiredLabel = t.uiText.feedback_required_scale;
@@ -675,6 +693,8 @@ function PatientScoreGrid({
       <div className="grid gap-x-5 gap-y-2 rounded-xl border border-border/70 bg-card p-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.8fr)]">
         <PatientRatingScale
           prominent
+          id={FEEDBACK_SCALE_IDS.overall}
+          missing={requiredAsked && feedbackScoreValue(form.overallScore) === null}
           label={t.feedback_overall}
           value={form.overallScore}
           options={scoreOptions}
@@ -686,6 +706,8 @@ function PatientScoreGrid({
         />
         <PatientRatingScale
           prominent
+          id={FEEDBACK_SCALE_IDS.nps}
+          missing={requiredAsked && feedbackScoreValue(form.npsScore) === null}
           label={`${t.uiText.feedback_nps_label} 0–10`}
           value={form.npsScore}
           options={npsOptions}
@@ -930,6 +952,8 @@ type PatientFeedbackContentProps = {
   submitDisabled: boolean;
   /** The chosen visit had an interpreter (always true for a general feedback). */
   withInterpreter: boolean;
+  /** «Send» was pressed without a required rating: the missing ones are marked and named. */
+  requiredAsked: boolean;
   t: ReturnType<typeof useLang>["t"];
   setActiveFeedbackId: Dispatch<SetStateAction<string>>;
   setForm: SetFeedbackForm;
@@ -951,6 +975,7 @@ function PatientFeedbackContent({
   submitting,
   submitDisabled,
   withInterpreter,
+  requiredAsked,
   t,
   setActiveFeedbackId,
   setForm,
@@ -958,6 +983,7 @@ function PatientFeedbackContent({
   onSubmit,
 }: PatientFeedbackContentProps) {
   const { formatPortalAverage, portalNotSetLabel } = usePortalLabels();
+  const requiredMissing = requiredAsked && missingRequiredFeedbackScore(form) !== null;
   const { appointmentOptionLabel } = useLanguageHelpers();
   return (
     <div className="portal-feedback w-full min-w-0 space-y-3 [&_label]:font-sans [&_label]:text-sm">
@@ -1015,16 +1041,30 @@ function PatientFeedbackContent({
               <p className="mt-1.5 text-xs text-muted-foreground">{t.uiText.feedback_rateable_visits_hint}</p>
             </div>
 
-            <PatientScoreGrid t={t} form={form} setForm={setForm} withInterpreter={withInterpreter} />
+            <PatientScoreGrid t={t} form={form} setForm={setForm} withInterpreter={withInterpreter} requiredAsked={requiredAsked} />
 
             <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3">
               <FeedbackFormNotes t={t} form={form} setForm={setForm} />
             </section>
 
-            <Button type="submit" className="h-9 w-full rounded-lg sm:w-auto" disabled={submitting || submitDisabled}>
-              {submitting ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
-              {t.feedback_submit_button}
-            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Button
+                type="submit"
+                className="h-9 w-full shrink-0 rounded-lg sm:w-auto"
+                disabled={submitting || submitDisabled}
+                aria-describedby={requiredMissing ? "feedback-required-missing" : undefined}
+              >
+                {submitting ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
+                {t.feedback_submit_button}
+              </Button>
+              {/* The ratings still missing, named at the button (QA 2026-11-10, A-1): the message at the
+                  top of the form was out of sight. */}
+              {requiredMissing ? (
+                <p id="feedback-required-missing" role="alert" className="text-sm text-destructive" data-testid="feedback-required-missing">
+                  {t.uiText.feedback_required_scores_missing}
+                </p>
+              ) : null}
+            </div>
           </form>
         </PortalSection>
 
@@ -1052,7 +1092,7 @@ function PatientFeedbackContent({
                           </StatusBadge>
                           <PortalDateChip timestamp={item.submitted_at} />
                         </div>
-                        <p className="mt-2 truncate text-sm font-medium text-foreground">
+                        <p className="mt-2 truncate text-sm font-medium text-foreground" title={item.appointment_title || t.feedback_general_feedback}>
                           {item.appointment_title || t.feedback_general_feedback}
                         </p>
                         <p className="mt-1 text-xs text-muted-foreground">
@@ -1117,6 +1157,7 @@ function PatientFeedbackWorkspace() {
     activeFeedbackId,
   } = patientState;
   const submitInFlight = useRef(false);
+  const [requiredAsked, setRequiredAsked] = useState(false);
 
   const setForm = useMemo<SetFeedbackForm>(
     () => (nextValue) => {
@@ -1295,11 +1336,17 @@ function PatientFeedbackWorkspace() {
     // The blank form is valid: an untouched one after a success, or a second
     // click before the next render, would send the feedback twice (QA 2026-11-01).
     if (submitInFlight.current || form === sentForm) return;
-    // Nothing is pre-set, so the two mandatory scales are asked for by name.
-    if (missingRequiredFeedbackScore(form)) {
-      dispatchPatientState({ error: t.uiText.feedback_required_scores_missing, notice: "" });
+    // Nothing is pre-set, so the two mandatory scales are asked for by name: next to the button,
+    // and the page goes to the first one missing with the cursor on it (QA 2026-11-10, A-1).
+    const missingScale = missingRequiredFeedbackScore(form);
+    if (missingScale) {
+      setRequiredAsked(true);
+      dispatchPatientState({ error: "", notice: "" });
+      const scale = document.getElementById(FEEDBACK_SCALE_IDS[missingScale]);
+      if (scale) revealCabinetTarget({ element: scale, field: true });
       return;
     }
+    setRequiredAsked(false);
     submitInFlight.current = true;
     dispatchPatientState({
       submitting: true,
@@ -1364,6 +1411,7 @@ function PatientFeedbackWorkspace() {
       onSubmit={handleSubmit}
       submitDisabled={form === sentForm}
       withInterpreter={withInterpreter}
+      requiredAsked={requiredAsked}
     />
   );
 }

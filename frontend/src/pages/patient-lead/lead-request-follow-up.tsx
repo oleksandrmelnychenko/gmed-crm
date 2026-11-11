@@ -385,15 +385,17 @@ export function FollowUpStep({
       <StepFooter
         status={<SaveIndicator state={combinedSaveState(Object.values(states))} text={text} />}
       >
-        <Button type="button" variant="outline" className="h-9" onClick={onBack}>
+        <Button type="button" variant="outline" className={cn("h-9", !beforeSubmit && "flex-1 sm:flex-none")} onClick={onBack}>
           <ArrowLeft aria-hidden="true" className="size-3.5" />
           {text.back}
         </Button>
-        <div className="flex flex-wrap gap-2">
+        {/* With the follow-up's own send there are three buttons: on a phone «Back» and «Next»
+            share the first row and «send» takes the second (QA 2026-11-10, A-6: a ragged bar). */}
+        <div className={cn("flex flex-wrap gap-2", !beforeSubmit && "contents sm:flex")}>
           <Button
             type="button"
             variant="default"
-            className="h-9"
+            className={cn("h-9", !beforeSubmit && "flex-1 sm:flex-none")}
             // The page saves the entry still in its autosave delay first and judges the fresh
             // response (like the base steps): the first press with something missing shows it.
             onClick={onNext}
@@ -403,7 +405,7 @@ export function FollowUpStep({
           </Button>
           {!beforeSubmit ? <Button
             type="button"
-            className="h-9 gap-2"
+            className="h-9 w-full gap-2 sm:w-auto"
             disabled={sending || answered || !inquiryConsent || Object.values(states).some((state) => state === "saving")}
             onClick={() => void send()}
             data-testid="lead-request-follow-up-submit"

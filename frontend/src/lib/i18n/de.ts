@@ -1822,7 +1822,7 @@ export const de = {
   services_cancel_request: "Anfrage stornieren",
   services_request_title: "Service anfragen",
   services_request_description:
-    "Senden Sie einen Concierge-Bedarf direkt aus dem Portal. Das zuständige Team prüft die Anfrage und bucht operativ.",
+    "Beschreiben Sie hier, welchen Service Sie wünschen. Ihr GMED-Team prüft die Anfrage, kümmert sich um die Buchung und meldet sich bei Ihnen.",
   services_form_service_type: "Servicetyp",
   services_category: "Service-Kategorie",
   services_all_categories: "Alle Service-Kategorien",

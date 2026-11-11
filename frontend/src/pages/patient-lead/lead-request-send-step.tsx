@@ -1,5 +1,5 @@
 import { SectionHeading } from "@/components/ui/section-heading";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -44,7 +44,7 @@ import { actsAsGuardian } from "./lead-request-access";
 import { followUpAnswered, followUpBeforeSubmit, followUpMissingAll, followUpShown, missingOfRefusal } from "./lead-request-follow-up-model";
 import { canSubmit, consentGiven, type SubmitField } from "./lead-request-model";
 import { CabinetSection as Section, MissingItemLink, RequiredMark, SentLockHint, StepFooter, errorBody, errorMessage, type RequestQueue, type Step } from "./lead-request-parts";
-import { missingListKeys, recipientIsPayer, type CabinetTarget } from "./lead-request-field-target";
+import { missingListKeys, recipientIsPayer, revealCabinetTarget, type CabinetTarget } from "./lead-request-field-target";
 import { hasBaseFormInput, missingByStep, visibleSteps, type StepId } from "./lead-request-steps";
 import { requestSummary, type SummaryGroup, type SummaryRow } from "./lead-request-summary";
 import { extraWorkSubject, followUpFieldLabel, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
@@ -74,6 +74,10 @@ export function SendStep({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  // «Send» pressed without the confirmation: the box is shown and marked, the reason stands at the
+  // button (QA 2026-11-10, A-3: a disabled button at the end of a long page said nothing).
+  const [declarationAsked, setDeclarationAsked] = useState(false);
+  const declarationRef = useRef<HTMLDivElement | null>(null);
   // Staff say how the client confirmed the details before they send for the client.
   const [sendHow, setSendHow] = useState<StaffConsentChannel | "">("");
   const [sendNote, setSendNote] = useState("");
@@ -111,6 +115,8 @@ export function SendStep({
   // A server that knows the GwG statements wants them confirmed with every sending.
   const needsDeclaration = request.identification !== undefined;
   const declaredAt = request.identification?.declared_correct_at ?? null;
+  // Everything else is there, only the confirmation is not: the one reason «send» does not send.
+  const declarationMissing = sendable && ready && needsDeclaration && !confirmed;
 
   // «Abschließen und abmelden»: the usual sign-out; the login page thanks once.
   async function finish() {
@@ -124,7 +130,12 @@ export function SendStep({
   }
 
   async function send(recorded?: StaffConsentRecord) {
-    if (needsDeclaration && !confirmed) return;
+    if (needsDeclaration && !confirmed) {
+      // Like «Next» on a step: to the box that holds the sending, with the cursor in it.
+      setDeclarationAsked(true);
+      if (declarationRef.current) revealCabinetTarget({ element: declarationRef.current, field: true });
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -282,7 +293,7 @@ export function SendStep({
       </Section>
       {needsDeclaration && (sendable || declaredAt) ? (
         <Section icon={FileSignature} title={text.declarationTitle}>
-          <div className="rounded-lg border border-border bg-muted/10 px-3 py-2" data-testid="lead-request-declaration">
+          <div ref={declarationRef} className="rounded-lg border border-border bg-muted/10 px-3 py-2" data-testid="lead-request-declaration">
             <label className="flex items-start gap-3 text-sm">
               {/* Sent and unchanged: the confirmation given with that sending is shown, not asked again. */}
               <input
@@ -292,6 +303,8 @@ export function SendStep({
                 checked={sendable ? confirmed : true}
                 disabled={!sendable || busy}
                 required
+                aria-invalid={declarationMissing && declarationAsked ? true : undefined}
+                aria-describedby={declarationMissing ? "lead-request-declaration-reason" : undefined}
                 onChange={(event) => setConfirmed(event.target.checked)}
               />
               <span className="space-y-1">
@@ -345,7 +358,18 @@ export function SendStep({
         </Section>
       ) : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
-      <StepFooter>
+      <StepFooter
+        status={declarationMissing ? (
+          <span
+            id="lead-request-declaration-reason"
+            role={declarationAsked ? "alert" : undefined}
+            className={cn("text-left", declarationAsked && "font-medium text-amber-700 dark:text-amber-300")}
+            data-testid="lead-request-submit-reason"
+          >
+            {text.declarationRequired}
+          </span>
+        ) : undefined}
+      >
         {request.submitted_at ? (
           // Sent already: documents can still be added; the form itself is read-only.
           <Button type="button" className="h-9 gap-1.5" onClick={() => onEdit("documents")} data-testid="lead-request-go-add-documents">
@@ -370,7 +394,9 @@ export function SendStep({
           <Button
             type="button"
             className="h-9 gap-2"
-            disabled={!ready || busy || (needsDeclaration && !confirmed) || !sendHow}
+            // Without the confirmation the button stays pressable and leads to the box (QA 2026-11-10, A-3).
+            disabled={!ready || busy || !sendHow}
+            aria-describedby={declarationMissing ? "lead-request-declaration-reason" : undefined}
             onClick={() => { if (sendHow) void send({ how: sendHow, note: sendNote }); }}
             data-testid="lead-request-submit-record-save"
           >
@@ -381,8 +407,10 @@ export function SendStep({
           <Button
             type="button"
             className="h-9 gap-2"
-            // Without the confirmation nothing is sent: the button stays off until the box is ticked.
-            disabled={!ready || busy || (needsDeclaration && !confirmed)}
+            // Without the confirmation nothing is sent: pressed, the button leads to the box and names
+            // the reason next to it, as «Next» does on a step (QA 2026-11-10, A-3).
+            disabled={!ready || busy}
+            aria-describedby={declarationMissing ? "lead-request-declaration-reason" : undefined}
             onClick={() => void send()}
             data-testid="lead-request-submit"
           >

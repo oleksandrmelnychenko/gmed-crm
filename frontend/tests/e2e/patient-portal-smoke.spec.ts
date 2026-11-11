@@ -1307,9 +1307,16 @@ test.describe("patient portal smoke flows", () => {
         name: /Feedback senden|Отправить отзыв|Submit feedback/i,
       })
       .click();
-    await expect(page.getByText(/Bitte wählen Sie die Gesamtbewertung und die NPS-Bewertung/)).toBeVisible();
+    // Named at the button, and the page goes to the first missing scale (QA 2026-11-10, A-1).
+    await expect(form.getByTestId("feedback-required-missing")).toHaveText(/Bitte wählen Sie die Gesamtbewertung und die NPS-Bewertung/);
+    await expect(form.getByRole("button", { name: "Gesamt: 1", exact: true })).toBeFocused();
+    await expect(form.getByRole("button", { name: "Gesamt: 1", exact: true })).toBeInViewport();
     expect(feedbackPosts).toHaveLength(0);
     await form.getByRole("button", { name: "Gesamt: 4", exact: true }).click();
+    // Only the NPS scale is left: «send» goes there.
+    await form.getByRole("button", { name: /Feedback senden|Отправить отзыв|Submit feedback/i }).click();
+    await expect(form.getByRole("button", { name: "NPS 0–10: 0", exact: true })).toBeFocused();
+    expect(feedbackPosts).toHaveLength(0);
     await form.getByRole("button", { name: "NPS 0–10: 9", exact: true }).click();
     // A chosen optional score can be taken back by pressing it again.
     const doctorScore = form.getByRole("button", { name: "Ärzte: 5", exact: true });
@@ -1359,6 +1366,22 @@ test.describe("patient portal smoke flows", () => {
     await expect(feedbackCard).toBeVisible();
     await expect(feedbackCard.getByText("Clinic follow-up")).toBeVisible();
     await expect(feedbackCard.getByText(/Eingereicht|Submitted/i)).toBeVisible();
+  });
+
+  test("on a phone the survey's send leads to the missing rating", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto("/feedback");
+    const form = page.locator("form").first();
+    const send = form.getByRole("button", { name: /Feedback senden|Отправить отзыв|Submit feedback/i });
+    await send.scrollIntoViewIfNeeded();
+    await send.click();
+    // The message stands at the button, which stays on screen, and the first missing scale gets the cursor.
+    await expect(form.getByTestId("feedback-required-missing")).toBeVisible();
+    const first = form.getByRole("button", { name: "Gesamt: 1", exact: true });
+    await expect(first).toBeFocused();
+    await expect(first).toBeInViewport();
+    await expect(form.getByRole("group", { name: "Gesamt", exact: true })).toContainText("Pflichtangabe");
+    expect(await page.evaluate(() => document.activeElement?.tagName)).toBe("BUTTON");
   });
 
   test("patient portal stays within a mobile viewport", async ({ page }, testInfo) => {

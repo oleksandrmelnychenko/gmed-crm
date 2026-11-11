@@ -130,6 +130,36 @@ test("a failed save keeps the step and draft; retrying a step tab saves before n
   expect(calls).toHaveLength(2);
 });
 
+test("on a phone Next without the consent tick leads to the box itself, with no save-failure notice", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  const { calls } = await setup(page);
+  await page.getByTestId("disclosure-yes").check();
+  await page.getByTestId("trusted-person-add").click();
+  const row = page.getByTestId("trusted-person-editor").last();
+  await row.getByLabel("Last name, first name").fill("Eva Friend");
+  await row.getByRole("combobox").first().click();
+  await page.getByRole("option", { name: "Friend / acquaintance", exact: true }).click();
+  await fillCaller(row);
+  await toggleScope(page, ["medical"], row);
+  const consent = page.getByTestId("disclosure-consent");
+  await expect(consent).not.toBeChecked();
+  // The cursor was last in a field of the person.
+  await row.getByTestId("trusted-person-phone").focus();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "disclosure");
+  await expect(consent).toBeFocused();
+  await expect(consent).toHaveAttribute("aria-invalid", "true");
+  await expect(consent).toBeInViewport();
+  // Not hidden behind the sticky header or the sticky bar.
+  await expect.poll(() => consent.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) === element;
+  })).toBe(true);
+  // Nothing was sent, so nothing failed to save.
+  await expect(page.getByTestId("lead-request-save-blocked")).toHaveCount(0);
+  expect(calls).toHaveLength(0);
+});
+
 test("an incomplete choice is not discarded when another step is selected", async ({ page }) => {
   const { calls } = await setup(page);
   await page.getByTestId("disclosure-yes").check();

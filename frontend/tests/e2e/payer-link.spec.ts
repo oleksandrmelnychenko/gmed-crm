@@ -777,6 +777,29 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 720 
     await expect(stepTitle(page)).toBeInViewport();
     expect(calls.others).toEqual([]);
   });
+
+  test(`payer send: «Absenden» without the confirmation shows the box at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport.width === 390 ? { width: 375, height: 667 } : viewport);
+    const { calls } = await setup(page, {
+      acknowledged: true,
+      answers: completeAnswers("person"),
+      route: completeRoute(),
+      identityDocuments: [document("doc-id", "pass.pdf")],
+    });
+    await signIn(page);
+    await expect(page.getByTestId("payer-link-form")).toHaveAttribute("data-step", "summary");
+    const submit = page.getByTestId("payer-link-submit");
+    const confirm = page.getByTestId("payer-link-confirm");
+    await expect(submit).toBeEnabled();
+    await submit.click();
+    await expect(confirm).toBeFocused();
+    await expect(confirm).toBeInViewport();
+    await expect(page.locator("#payer-link-submit-hint")).toHaveAttribute("role", "alert");
+    await expect(page.locator("#payer-link-submit-hint")).toBeInViewport();
+    expect(calls.payer.filter((call) => call.path.endsWith("/submit"))).toEqual([]);
+    await confirm.check();
+    await expect(page.locator("#payer-link-submit-hint")).toHaveCount(0);
+  });
 }
 
 test("payer recheck: a queued edit keeps the server's corrected untouched answers", async ({ page }) => {
@@ -1481,7 +1504,12 @@ test.describe("payer link", () => {
     await expect(summary).toContainText("Musterbank");
     await expect(summary).toContainText("E-Mail, Telefon");
     const submit = page.getByTestId("payer-link-submit");
-    await expect(submit).toBeDisabled();
+    // Without the confirmation «Absenden» leads to the box and sends nothing (QA 2026-11-10, A-3).
+    await submit.click();
+    await expect(page.getByTestId("payer-link-confirm")).toBeFocused();
+    await expect(page.getByTestId("payer-link-confirm")).toHaveAttribute("aria-invalid", "true");
+    await expect(page.locator("#payer-link-submit-hint")).toHaveText("Bitte bestätigen Sie, dass Ihre Angaben vollständig und richtig sind.");
+    expect(calls.payer.filter((call) => call.path.endsWith("/submit"))).toEqual([]);
     await page.getByTestId("payer-link-confirm").check();
     await submit.click();
 

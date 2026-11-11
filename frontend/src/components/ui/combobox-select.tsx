@@ -346,6 +346,8 @@ function ComboboxSelect({
           data-overlay-interaction-root=""
           sideOffset={4}
           align="start"
+          // Kept clear of the screen's edges: on a small phone the flipped popup started above it (QA 2026-11-10, A-5).
+          collisionPadding={8}
           className="isolate z-[150]"
         >
           <ComboboxPrimitive.Popup
@@ -360,7 +362,8 @@ function ComboboxSelect({
                 className="h-7 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--control-placeholder,var(--muted-foreground))]"
               />
             </div>
-            <ComboboxPrimitive.List className="max-h-[min(18rem,var(--available-height))] overflow-y-auto p-1">
+            {/* The available height is the whole popup's: the search row above the list takes its share. */}
+            <ComboboxPrimitive.List className="max-h-[min(18rem,calc(var(--available-height)-3rem))] overflow-y-auto p-1">
               {(itemValue: string) => {
                 const option = optionsByValue.get(String(itemValue))
 

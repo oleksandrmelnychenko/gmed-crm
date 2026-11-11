@@ -142,7 +142,7 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
       const checked = checkedScopeCodes(person.scopeCodes);
       return <div key={index} className="overflow-hidden rounded-xl border border-border/70 bg-card" data-testid="trusted-person-editor">
       <div className="flex items-center justify-between gap-3 border-b border-border/60 bg-muted/30 px-3 py-2">
-        <span className="flex min-w-0 items-center gap-2 text-xs font-medium"><span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-border/70 bg-card font-mono text-[11px] text-muted-foreground">{String(index + 1).padStart(2, "0")}</span><span className="truncate">{person.name || fields.name}</span></span>
+        <span className="flex min-w-0 items-center gap-2 text-xs font-medium"><span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-border/70 bg-card font-mono text-[11px] text-muted-foreground">{String(index + 1).padStart(2, "0")}</span><span className="truncate" title={person.name || undefined}>{person.name || fields.name}</span></span>
         <Button type="button" variant="ghost" size="sm" className="size-7 shrink-0 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" disabled={disabled} aria-label={text.removeRecipient} title={text.removeRecipient} onClick={() => removeAt(index)}><Trash2 aria-hidden="true" className="size-3.5" /></Button>
       </div>
       <div className="grid gap-x-3 gap-y-2.5 p-3 sm:grid-cols-2">

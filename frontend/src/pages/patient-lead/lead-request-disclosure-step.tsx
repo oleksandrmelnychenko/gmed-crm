@@ -48,6 +48,8 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const saving = useRef<Promise<boolean> | null>(null);
+  // The last save only held the step (a missing entry, nothing sent).
+  const held = useRef(false);
   const flushers = useContext(AutosaveFlushContext);
   const ownMinor = choiceOnlyByGuardian(request);
   const changed = disclosureChanged(draft, request, viewerId);
@@ -82,6 +84,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   const latest = useRef<{ save: (recorded?: StaffConsentRecord | null) => Promise<boolean>; draft: DisclosureDraft }>({ save: () => Promise.resolve(true), draft });
 
   const save = useCallback(async (recorded: StaffConsentRecord | null = null): Promise<boolean> => {
+    held.current = false;
     if (saving.current) {
       // Typed during the save: saved right after it, never dropped.
       const ok = await saving.current;
@@ -101,9 +104,11 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     }
     const problemNow = disclosureProblem(current);
     if (problemNow) {
-      // The step stays: every missing entry is marked at its field.
+      // The step stays: every missing entry is marked at its field. Nothing was sent, so no
+      // save failed (the page shows no "could not be saved" notice, QA 2026-11-10, A-2).
       setAttempted(true);
       setError(problemMessage(problemNow));
+      held.current = true;
       return false;
     }
     // Staff save only with how the client gave the decision (server: 422 `consent_recorded_how_required`).
@@ -169,7 +174,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   // in the shared queue. A failed/incomplete draft stays visible for correction.
   latest.current = { save, draft };
   useEffect(() => {
-    const flush = { save: () => latest.current.save(), version: () => JSON.stringify(latest.current.draft) };
+    const flush = { save: () => latest.current.save(), version: () => JSON.stringify(latest.current.draft), held: () => held.current };
     flushers?.add(flush);
     return () => { flushers?.delete(flush); };
   }, [flushers]);
@@ -276,7 +281,10 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
       </CabinetSection>
       <CabinetSection icon={ShieldCheck} title={text.consentHeading}>
         <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/60 bg-muted/25 p-3.5 text-sm leading-6">
-          <input type="checkbox" aria-label={disclosureConsentText(lang, companyName, disclosureSubject(request))} className={`${checkboxClass} mt-1 shrink-0`} checked={draft.consentGiven} disabled={busy} data-testid="disclosure-consent" onChange={(event) => { setConsentReset(false); update({ consentGiven: event.currentTarget.checked }); }} />
+          <input type="checkbox" aria-label={disclosureConsentText(lang, companyName, disclosureSubject(request))} className={`${checkboxClass} mt-1 shrink-0`} checked={draft.consentGiven} disabled={busy} data-testid="disclosure-consent"
+            // Marked once a step change was held for it: «Next» then leads to the box itself, not
+            // to the message under the long text (QA 2026-11-10, A-2).
+            aria-invalid={attempted && problem === "consent" ? true : undefined} onChange={(event) => { setConsentReset(false); update({ consentGiven: event.currentTarget.checked }); }} />
           <span>{disclosureConsentText(lang, companyName, disclosureSubject(request))}</span>
         </label>
         {/* The consent staff recorded says when it was given, as the single consents do (owner 2026-10-30). */}

@@ -502,8 +502,9 @@ function UserCard({
         {userInitials(name)}
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[13px] font-semibold text-foreground leading-tight">{name}</p>
-        {hideRole ? null : <p className="truncate text-[10px] font-semibold text-muted-foreground mt-0.5">{roleText}</p>}
+        {/* A long name is cut: the tooltip reads it in full (QA 2026-11-10, A-13). */}
+        <p className="truncate text-[13px] font-semibold text-foreground leading-tight" title={name}>{name}</p>
+        {hideRole ? null : <p className="truncate text-[10px] font-semibold text-muted-foreground mt-0.5" title={roleText}>{roleText}</p>}
       </div>
     </div>
   );
