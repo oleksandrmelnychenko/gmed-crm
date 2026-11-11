@@ -1126,12 +1126,22 @@ async fn subject_leads_where(
     order_id: Option<Uuid>,
     open_only: bool,
 ) -> Result<Vec<Uuid>, sqlx::Error> {
+    // Only the request the document belongs to: the document's own lead, the
+    // order's own intake, or the patient's original (non-repeat) lead. A
+    // repeat intake («Повторное обращение») of the same patient is another
+    // request: its unfinished draft blocked every contract document of all
+    // the patient's orders (QA 2026-11-11, F1). An archived or failed lead
+    // never blocks anything but its own documents.
     sqlx::query_scalar(
         r#"SELECT l.id FROM leads l WHERE l.qualification_status <> 'deleted'
             AND (NOT $4 OR l.converted_patient_id IS NULL) AND (
-            l.id=$1 OR l.prospect_patient_id=$2 OR l.converted_patient_id=$2 OR l.repeat_patient_id=$2
-            OR EXISTS (SELECT 1 FROM orders o WHERE o.id=$3 AND (o.source_lead_id=l.id
-                OR o.patient_id=l.prospect_patient_id OR o.patient_id=l.converted_patient_id OR o.patient_id=l.repeat_patient_id))
+            l.id=$1
+            OR (l.qualification_status NOT IN ('archived','not_qualified') AND (
+                EXISTS (SELECT 1 FROM orders o WHERE o.id=$3 AND o.source_lead_id=l.id)
+                OR (l.repeat_patient_id IS NULL AND (
+                    l.prospect_patient_id=$2 OR l.converted_patient_id=$2
+                    OR EXISTS (SELECT 1 FROM orders o WHERE o.id=$3
+                        AND (o.patient_id=l.prospect_patient_id OR o.patient_id=l.converted_patient_id))))))
         ) ORDER BY l.id FOR UPDATE"#,
     )
     .bind(lead_id)

@@ -2781,6 +2781,85 @@ async fn a_converted_lead_no_longer_holds_the_patients_documents() {
     assert_ne!(body["code"], "representative_details_incomplete", "{body}");
 }
 
+/// QA 2026-11-11 (F1): an unfinished or archived repeat intake of a child is
+/// another request; its missing parent data never hold the documents of the
+/// patient's existing orders. The draft itself stays gated.
+#[tokio::test]
+async fn a_childs_unfinished_or_archived_repeat_intake_does_not_hold_other_documents() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let mother = || {
+        json!([{ "id": Uuid::new_v4(), "name": "Anna Muster", "relation": "mother",
+                 "email": address("anna.repeat") }])
+    };
+    let original = minor_lead(&app, mother()).await;
+    let open_draft = minor_lead(&app, mother()).await;
+    let archived_draft = minor_lead(&app, mother()).await;
+    // The open draft's own documents need its data.
+    assert!(!contract_gate_missing(&app, open_draft).await.is_empty());
+
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
+           VALUES ($1, 'Mia', 'Muster', '2017-01-01', 'diverse', $2) RETURNING id"#,
+    )
+    .bind(format!(
+        "P-REP-{}",
+        &Uuid::new_v4().simple().to_string()[..8]
+    ))
+    .bind(app.suite.admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE leads SET converted_patient_id = $2, prospect_patient_id = $2 WHERE id = $1",
+    )
+    .bind(original)
+    .bind(patient_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by, source_lead_id)
+           VALUES ($1, $2, 'execution', 'active', $3, $4)"#,
+    )
+    .bind(format!(
+        "ORD-REP-{}",
+        &Uuid::new_v4().simple().to_string()[..8]
+    ))
+    .bind(patient_id)
+    .bind(app.suite.admin_id)
+    .bind(original)
+    .execute(pool)
+    .await
+    .unwrap();
+    for draft in [open_draft, archived_draft] {
+        sqlx::query(
+            "UPDATE leads SET repeat_patient_id = $2, prospect_patient_id = $2 WHERE id = $1",
+        )
+        .bind(draft)
+        .bind(patient_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query("UPDATE leads SET qualification_status = 'archived' WHERE id = $1")
+        .bind(archived_draft)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let (status, body) = json_request(
+        &app.suite.app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &bearer(app.suite.admin_id, "ceo"),
+        Some(json!({ "patient_id": patient_id, "status": "draft" })),
+    )
+    .await;
+    assert_ne!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_ne!(body["code"], "representative_details_incomplete", "{body}");
+}
+
 /// What the contract gate (creating a framework contract) still misses of
 /// the lead's representatives.
 async fn contract_gate_missing(app: &TestApp, lead_id: Uuid) -> Vec<String> {
