@@ -1,11 +1,47 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  portalInvoiceIsThirdParty,
+  portalOwnOpenBalances,
   portalStatementAvailableCredit,
   portalStatementOpenAmount,
   portalStatementSettled,
+  portalStatementSplit,
   type PortalAccountStatementItem,
 } from "./portal-shared";
+
+// Owner decision 2026-11-12 (QA L18/F15): Lukas pays Carla's INV-0020 as a
+// third party; it is not Carla's own debt in the portal.
+describe("third-party invoices in the patient's portal balance", () => {
+  const own = { currency: "EUR", status: "sent", balance_due: "633.05", third_party_payer: false };
+  const lukas = { currency: "EUR", status: "sent", balance_due: "663.05", third_party_payer: true };
+
+  it("leaves a third party's invoice out of the own open total", () => {
+    expect(portalInvoiceIsThirdParty(lukas)).toBe(true);
+    expect(portalInvoiceIsThirdParty({})).toBe(false);
+    expect(portalOwnOpenBalances([own, lukas]).get("EUR")).toBe(633.05);
+    expect(portalOwnOpenBalances([lukas]).get("EUR")).toBeUndefined();
+    expect(portalOwnOpenBalances([{ ...own, status: "cancelled" }, { ...own, balance_due: "10" }]).get("EUR")).toBe(10);
+    expect(
+      portalOwnOpenBalances([{ ...own, portal_visibility: { visible_to_patient: true, amounts_visible_to_patient: false, line_items_visible_to_patient: true, pdf_visible_to_patient: true, redaction_reason: null } }]).size,
+    ).toBe(0);
+  });
+
+  it("lists a third party's invoice and its credit notes on their own, by payer", () => {
+    const split = portalStatementSplit([
+      row({ id: "inv-19", document_number: "INV-0019", invoice_balance_due: "633.05" }),
+      row({ id: "inv-20", document_number: "INV-0020", paid_by: "third_party", recipient_name: "Lukas Pfannkuchen", invoice_balance_due: "663.05" }),
+      row({ id: "cn-1", kind: "credit_note", invoice_id: "inv-20", payment_state: "invoice_adjustment", amount_gross: "-10" }),
+      row({ id: "cn-2", kind: "credit_note", invoice_id: "inv-19", payment_state: "invoice_adjustment", amount_gross: "-5" }),
+    ]);
+    expect(split.own.map((item) => item.id)).toEqual(["inv-19", "cn-2"]);
+    expect(split.thirdParty).toHaveLength(1);
+    expect(split.thirdParty[0].payer).toBe("Lukas Pfannkuchen");
+    expect(split.thirdParty[0].items.map((item) => item.id)).toEqual(["inv-20", "cn-1"]);
+    expect(split.thirdParty[0].due).toBe(663.05);
+    expect(portalStatementSplit([row({ id: "a" })]).thirdParty).toEqual([]);
+  });
+});
 
 function row(patch: Partial<PortalAccountStatementItem>): PortalAccountStatementItem {
   return {

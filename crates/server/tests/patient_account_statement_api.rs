@@ -741,3 +741,102 @@ async fn invoiced_total_counts_an_advance_settled_by_its_final_invoice_once() {
         assert_eq!(statement["summary"]["amount_to_pay"], "400", "{path}");
     }
 }
+
+/// Owner decision 2026-11-12 (QA L18/F15): an invoice a third party
+/// (Kostenübernehmer) receives and pays is not the patient's own debt in the
+/// portal: listed as paid by that payer, kept out of the patient's totals and
+/// summed on its own. The staff statement keeps it in the totals.
+#[tokio::test]
+async fn a_third_party_invoice_stays_out_of_the_patients_portal_balance() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = format!("third-party-{}", Uuid::new_v4().simple());
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    assign(&pool, patient_id, patient_user_id, admin_id).await;
+    assign(&pool, patient_id, manager_id, admin_id).await;
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by)
+           VALUES ($1, $2, 'execution', 'active', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    seed_invoice(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("OWN-{tag}"),
+        "final",
+        100,
+        0,
+        false,
+    )
+    .await;
+    let third_party: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status,
+                due_date, total_net, total_vat, total_gross, paid_amount,
+                line_items, portal_visible, hide_amounts_from_patient, created_by,
+                payer_contact_name, payer_role, recipient_snapshot, released_at
+           ) VALUES (
+                $1, $2, $3, 'final', 'sent', CURRENT_DATE + 14,
+                250, 0, 250, 0, '[]', true, false, $4,
+                'Lukas Beispiel', 'cost_bearer',
+                '{"kind":"contact","is_payer":true,"name":"Lukas Beispiel"}'::jsonb, now()
+           ) RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("PAYER-{tag}"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let patient = auth_header_for(patient_user_id, "patient");
+
+    let (status, portal) = request_json(&app, "/api/v1/me/account-statement", &patient).await;
+    assert_eq!(status, StatusCode::OK, "{portal:?}");
+    assert_eq!(portal["summary"]["invoiced_gross"], "100", "{portal}");
+    assert_eq!(portal["summary"]["invoice_due"], "100", "{portal}");
+    assert_eq!(portal["summary"]["amount_to_pay"], "100", "{portal}");
+    assert_eq!(portal["summary"]["third_party_invoiced_gross"], "250");
+    assert_eq!(portal["summary"]["third_party_due"], "250");
+    let listed = portal["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == third_party.to_string())
+        .expect("the third party's invoice is listed");
+    assert_eq!(listed["paid_by"], "third_party");
+    assert_eq!(listed["recipient_name"], "Lukas Beispiel");
+
+    let (status, staff) = request_json(
+        &app,
+        &format!("/api/v1/patients/{patient_id}/account-statement"),
+        &auth_header_for(manager_id, "patient_manager"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{staff:?}");
+    assert_eq!(staff["summary"]["invoiced_gross"], "350", "{staff}");
+    assert_eq!(staff["summary"]["invoice_due"], "350", "{staff}");
+    assert!(staff["summary"]["third_party_due"].is_null());
+
+    let (status, invoices) = request_json(&app, "/api/v1/me/invoices", &patient).await;
+    assert_eq!(status, StatusCode::OK, "{invoices:?}");
+    let listed = invoices
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == third_party.to_string())
+        .expect("the released third-party invoice is listed");
+    assert_eq!(listed["third_party_payer"], true);
+    assert_eq!(listed["third_party_payer_name"], "Lukas Beispiel");
+}

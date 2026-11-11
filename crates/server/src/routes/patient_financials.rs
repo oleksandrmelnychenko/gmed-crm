@@ -1014,7 +1014,15 @@ async fn load_patient_account_statement(
                         AND (allocation.released_at IS NULL OR (allocation.released_at AT TIME ZONE 'Europe/Berlin')::date > $3)
                   ), 0) AS allocated_from_advance,
                   rcpt.value ->> 'name' AS recipient_name,
-                  invoice_recipient_identity(rcpt.value) AS recipient_identity
+                  invoice_recipient_identity(rcpt.value) AS recipient_identity,
+                  -- A third party (Kostenübernehmer) receives and pays the
+                  -- invoice: its own payer's role, else the order's.
+                  COALESCE((rcpt.value ->> 'is_payer')::boolean, false)
+                  AND (CASE WHEN invoice.payer_patient_id IS NOT NULL
+                                 OR invoice.payer_patient_relation_id IS NOT NULL
+                                 OR NULLIF(btrim(invoice.payer_contact_name), '') IS NOT NULL
+                            THEN invoice.payer_role ELSE orders.payer_role END)
+                      IS NOT DISTINCT FROM 'cost_bearer' AS third_party_payer
            FROM invoices invoice
            LEFT JOIN orders ON orders.id = invoice.order_id
            CROSS JOIN LATERAL (SELECT {INVOICE_RECIPIENT_VALUE} AS value) rcpt
@@ -1080,8 +1088,15 @@ async fn load_patient_account_statement(
     // with a credit transfer (owner decision 2026-11-12).
     let mut open_invoices = Vec::new();
     let mut open_item_indexes = Vec::new();
+    // Owner decision 2026-11-12: in the portal a third party's invoice is not
+    // the patient's own debt. It is listed (`paid_by: third_party`) but kept
+    // out of the totals above and summed on its own. Staff totals unchanged.
+    let mut third_party_invoiced = Decimal::ZERO;
+    let mut third_party_due = Decimal::ZERO;
 
     for row in invoice_rows {
+        let separate_third_party =
+            portal_scope && row.try_get::<bool, _>("third_party_payer").unwrap_or(false);
         let invoice_type = row.try_get::<String, _>("invoice_type").unwrap_or_default();
         let mut status = row.try_get::<String, _>("status").unwrap_or_default();
         let total_gross = row
@@ -1146,7 +1161,12 @@ async fn load_patient_account_statement(
         } else {
             (paid + applied - (total_gross - credited)).max(Decimal::ZERO)
         };
-        if amounts_visible {
+        if amounts_visible && separate_third_party {
+            if status != "draft" {
+                third_party_invoiced += (total_gross - credited).max(Decimal::ZERO);
+                third_party_due += due;
+            }
+        } else if amounts_visible {
             // An advance invoice asks for money on account; the final invoice
             // that settles it bills the services. Like the account statement
             // (whose debits leave advance invoices out), "invoiced" counts
@@ -1196,7 +1216,7 @@ async fn load_patient_account_statement(
             "display_status": display_status,
             "status": status,
             "payment_state": payment_state,
-            "paid_by": "patient",
+            "paid_by": if separate_third_party { "third_party" } else { "patient" },
             "recipient_name": row.try_get::<Option<String>, _>("recipient_name").unwrap_or_default(),
             "recipient_identity": row.try_get::<Option<String>, _>("recipient_identity").unwrap_or_default(),
             "amounts_visible": amounts_visible,
@@ -1628,7 +1648,7 @@ async fn load_patient_account_statement(
         "settled"
     };
 
-    Ok(serde_json::json!({
+    let mut statement = serde_json::json!({
         "patient_id": patient_id,
         "currency": currency,
         "available_currencies": available_currencies,
@@ -1668,7 +1688,21 @@ async fn load_patient_account_statement(
         },
         "movements": settlement.movements,
         "items": items,
-    }))
+    });
+    // Invoices a third party pays, outside the patient's own totals (portal
+    // only; owner decision 2026-11-12). Set here to keep the object above
+    // within the json! recursion limit.
+    statement["summary"]["third_party_invoiced_gross"] = if portal_scope {
+        serde_json::json!(decimal_to_string(third_party_invoiced))
+    } else {
+        Value::Null
+    };
+    statement["summary"]["third_party_due"] = if portal_scope {
+        serde_json::json!(decimal_to_string(third_party_due))
+    } else {
+        Value::Null
+    };
+    Ok(statement)
 }
 
 async fn get_patient_account_statement(

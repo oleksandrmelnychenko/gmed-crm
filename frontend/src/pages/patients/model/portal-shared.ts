@@ -155,6 +155,10 @@ export type PortalInvoiceItem = {
   last_payment_proof_at?: string | null;
   line_items?: PortalInvoiceLineItem[];
   portal_visibility?: InvoicePortalVisibility;
+  /** A third party (Kostenübernehmer) receives and pays the invoice: not the patient's own debt. */
+  third_party_payer?: boolean;
+  /** Name of that third party, as on the invoice. */
+  third_party_payer_name?: string | null;
 };
 
 export type PortalInvoicePaymentTransaction = {
@@ -231,6 +235,12 @@ export type PortalDunningLetterResponse = {
 export type PortalAccountStatementItem = {
   id: string;
   kind: "invoice" | "prepayment" | "credit_note" | "credit_note_reversal";
+  /** Who pays the invoice: `third_party` for a Kostenübernehmer (kept out of the patient's totals). */
+  paid_by?: "patient" | "third_party";
+  /** Recipient of the invoice as printed. */
+  recipient_name?: string | null;
+  /** For a credit note row: the invoice it corrects. */
+  invoice_id?: string | null;
   entry_date: string;
   order_number?: string | null;
   document_number?: string | null;
@@ -262,7 +272,7 @@ export type PortalAccountStatementItem = {
   invoice_balance_due?: string | null;
   /** Paid advance not applied yet that is set against this row. */
   advance_credit?: string | null;
-  /** Overpayment on other invoices that is set against this row. */
+  /** No longer sent: credit on other invoices is never netted (owner decision 2026-11-12). */
   credit_applied?: string | null;
   due_date?: string | null;
 };
@@ -326,6 +336,61 @@ export function portalStatementSettled(item: PortalAccountStatementItem): {
  * advances and overpayments. One figure, named as available, never netted
  * into the open total (QA 2026-11-11 L4: three different open totals).
  */
+/**
+ * Owner decision 2026-11-12: an invoice a third party (Kostenübernehmer) pays
+ * is not the patient's own debt. The portal lists it on its own, «bezahlt von
+ * …», and leaves it out of the patient's open total; staff totals keep it.
+ */
+export function portalInvoiceIsThirdParty(invoice: Pick<PortalInvoiceItem, "third_party_payer">): boolean {
+  return invoice.third_party_payer === true;
+}
+
+/** The patient's own open balance per currency: visible, not cancelled, not paid by a third party. */
+export function portalOwnOpenBalances(
+  invoices: readonly Pick<PortalInvoiceItem, "currency" | "status" | "balance_due" | "third_party_payer" | "portal_visibility">[],
+): Map<string, number> {
+  const totals = new Map<string, number>();
+  for (const invoice of invoices) {
+    if (invoice.portal_visibility?.amounts_visible_to_patient === false) continue;
+    if (invoice.status === "cancelled" || portalInvoiceIsThirdParty(invoice)) continue;
+    const currency = invoice.currency ?? "EUR";
+    totals.set(currency, roundedAmount((totals.get(currency) ?? 0) + Number(invoice.balance_due ?? 0)));
+  }
+  return totals;
+}
+
+/**
+ * The statement rows of the patient's own invoices, and those a third party
+ * pays (with their credit notes), grouped by that payer.
+ */
+export function portalStatementSplit(items: readonly PortalAccountStatementItem[]): {
+  own: PortalAccountStatementItem[];
+  thirdParty: { payer: string; items: PortalAccountStatementItem[]; due: number }[];
+} {
+  const thirdPartyInvoices = new Map<string, string>();
+  for (const item of items) {
+    if (item.paid_by === "third_party") thirdPartyInvoices.set(item.id, item.recipient_name?.trim() ?? "");
+  }
+  const own: PortalAccountStatementItem[] = [];
+  const groups = new Map<string, { payer: string; items: PortalAccountStatementItem[]; due: number }>();
+  for (const item of items) {
+    const payer = item.paid_by === "third_party"
+      ? thirdPartyInvoices.get(item.id)
+      : item.invoice_id ? thirdPartyInvoices.get(item.invoice_id) : undefined;
+    if (payer === undefined) {
+      own.push(item);
+      continue;
+    }
+    const group = groups.get(payer) ?? { payer, items: [], due: 0 };
+    group.items.push(item);
+    if (item.paid_by === "third_party" && item.amounts_visible) {
+      group.due = roundedAmount(group.due + Math.max(0, Number(portalStatementOpenAmount(item).amount) || 0));
+    }
+    groups.set(payer, group);
+  }
+  return { own, thirdParty: [...groups.values()] };
+}
+
 export function portalStatementAvailableCredit(summary: Pick<PortalAccountStatement["summary"], "available_prepayment" | "credit_balance">): {
   advance: number;
   overpayment: number;
@@ -377,8 +442,11 @@ export type PortalAccountStatement = {
     /** Cash beyond what invoices ask for (overpayments, credit notes after payment). */
     credit_balance?: string;
     invoice_due: string;
-    /** Open invoices net of unapplied paid advances and credit balances. */
+    /** Open invoices net of unapplied paid advances of their order (credit is never netted, 2026-11-12). */
     amount_to_pay?: string;
+    /** Invoices a third party pays: kept out of the totals above (2026-11-12). */
+    third_party_invoiced_gross?: string | null;
+    third_party_due?: string | null;
     external_receivable: null;
     total_due: string | null;
     reconciliation_required: boolean;

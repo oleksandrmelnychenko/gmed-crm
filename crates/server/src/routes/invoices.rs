@@ -6350,6 +6350,15 @@ async fn list_my_invoices(
                   EXISTS (
                     SELECT 1 FROM invoice_storno_documents storno WHERE storno.invoice_id = i.id
                   ) AS has_storno_document,
+                  -- A third party (Kostenübernehmer) receives and pays it:
+                  -- not the patient's own debt (owner decision 2026-11-12).
+                  COALESCE((i.recipient_snapshot ->> 'is_payer')::boolean, false)
+                  AND (CASE WHEN i.payer_patient_id IS NOT NULL
+                                 OR i.payer_patient_relation_id IS NOT NULL
+                                 OR NULLIF(btrim(i.payer_contact_name), '') IS NOT NULL
+                            THEN i.payer_role ELSE o.payer_role END)
+                      IS NOT DISTINCT FROM 'cost_bearer' AS third_party_payer,
+                  i.recipient_snapshot ->> 'name' AS third_party_payer_name,
                   COALESCE((
                     SELECT count(*)::bigint
                     FROM documents d
@@ -6446,6 +6455,13 @@ async fn list_my_invoices(
                         "last_payment_proof_at": row.try_get::<Option<DateTime<Utc>>, _>("last_payment_proof_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                         "portal_visibility": row_invoice_portal_visibility(&row),
                     });
+                    let third_party = row.try_get::<bool, _>("third_party_payer").unwrap_or(false);
+                    invoice["third_party_payer"] = serde_json::json!(third_party);
+                    invoice["third_party_payer_name"] = if third_party {
+                        serde_json::json!(row.try_get::<Option<String>, _>("third_party_payer_name").unwrap_or_default())
+                    } else {
+                        Value::Null
+                    };
                     redact_patient_invoice_payload(&mut invoice);
                     invoice
                 })

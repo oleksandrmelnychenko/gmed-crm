@@ -56,9 +56,12 @@ import {
   downloadPortalInvoicePdf,
   downloadPortalDunningLetter,
   openPortalInvoicePdf,
+  portalInvoiceIsThirdParty,
+  portalOwnOpenBalances,
   portalStatementAvailableCredit,
   portalStatementOpenAmount,
   portalStatementSettled,
+  portalStatementSplit,
   usePortalLabels,
 } from "@/pages/patients/model/portal-shared";
 import type {
@@ -373,16 +376,17 @@ function usePatientInvoicesPageContent() {
     };
   }, [selectedInvoiceId, t.portal_invoices_failed_to_load_invoice_detail, version]);
 
+  // The patient's own open total: an invoice a third party pays is not the
+  // patient's debt (owner decision 2026-11-12).
   const totalBalance = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const invoice of invoices) {
-      if (!invoiceAmountsVisible(invoice) || invoice.status === "cancelled") continue;
-      const currency = invoice.currency ?? "EUR";
-      totals.set(currency, (totals.get(currency) ?? 0) + Number(invoice.balance_due ?? 0));
-    }
+    const totals = portalOwnOpenBalances(invoices);
     return [...totals].sort(([a], [b]) => a.localeCompare(b))
       .map(([currency, amount]) => formatPortalCurrency(amount, currency)).join(" · ") || formatPortalCurrency(0);
   }, [invoices]);
+  const statementSplit = useMemo(
+    () => portalStatementSplit(accountStatement?.items ?? []),
+    [accountStatement],
+  );
   const hiddenAmountCount = useMemo(
     () => invoices.filter((item) => !invoiceAmountsVisible(item)).length,
     [invoices],
@@ -460,6 +464,12 @@ function usePatientInvoicesPageContent() {
       ? `Guthaben ${formatPortalCurrency(availableCreditTotal, accountStatement?.currency)} verfügbar – die Buchhaltung verrechnet es mit einer Rechnung`
       : `Доступно ${formatPortalCurrency(availableCreditTotal, accountStatement?.currency)} переплаты/предоплаты – бухгалтерия зачтёт её в счёт`
     : undefined;
+  const thirdPartyPaidByText = (payer: string | null | undefined) => {
+    const name = payer?.trim() || (lang === "de" ? "einem Dritten" : "третье лицо");
+    return lang === "de"
+      ? `Bezahlt von ${name} – nicht in Ihrem offenen Saldo`
+      : `Оплачивает ${name} – не входит в ваш открытый баланс`;
+  };
   const overpaymentText = (amount: number) =>
     lang === "de"
       ? `Überzahlung ${formatPortalCurrency(amount, accountStatement?.currency)} als Guthaben`
@@ -520,7 +530,7 @@ function usePatientInvoicesPageContent() {
                   ))}
                 </select>
               ) : null}
-              <CountBadge>{accountStatement.items.length}</CountBadge>
+              <CountBadge>{statementSplit.own.length}</CountBadge>
             </div>
           }
         >
@@ -607,7 +617,7 @@ function usePatientInvoicesPageContent() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
-                {accountStatement.items.map((item) => {
+                {statementSplit.own.map((item) => {
                   const isCreditAdjustment = item.kind === "credit_note" || item.kind === "credit_note_reversal";
                   const kindLabel = isCreditAdjustment
                     ? item.kind === "credit_note"
@@ -652,7 +662,7 @@ function usePatientInvoicesPageContent() {
             </table>
           </div>
           <div className="mt-4 space-y-2 md:hidden">
-            {accountStatement.items.map((item) => {
+            {statementSplit.own.map((item) => {
               const isCreditAdjustment = item.kind === "credit_note" || item.kind === "credit_note_reversal";
               const openAmount = portalStatementOpenAmount(item);
               const settled = portalStatementSettled(item);
@@ -707,6 +717,49 @@ function usePatientInvoicesPageContent() {
               );
             })}
           </div>
+          {statementSplit.thirdParty.length > 0 ? (
+            <div className="mt-4 space-y-2" data-testid="portal-statement-third-party">
+              <div className={tokens.text.eyebrow}>
+                {lang === "de" ? "Von Dritten bezahlte Rechnungen (nicht in Ihrem Saldo)" : "Счета, которые оплачивает третье лицо (не входят в ваш баланс)"}
+              </div>
+              {statementSplit.thirdParty.map((group) => (
+                <ListItem key={`third-party:${group.payer}`} className="space-y-2">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="text-sm font-semibold text-foreground">
+                      {lang === "de" ? "Bezahlt von" : "Оплачивает"} {group.payer || (lang === "de" ? "einem Dritten" : "третье лицо")}
+                    </div>
+                    <div className="text-right text-xs text-muted-foreground">
+                      {lang === "de" ? "Offen beim Zahler" : "Открыто у плательщика"}{" "}
+                      <span className="font-mono font-semibold tabular-nums text-foreground">{formatPortalCurrency(group.due, accountStatement.currency)}</span>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    {group.items.map((item) => {
+                      const isCreditAdjustment = item.kind === "credit_note" || item.kind === "credit_note_reversal";
+                      return (
+                        <div key={`third-party:${item.kind}:${item.id}`} className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                          <span>
+                            {item.document_number || item.description}
+                            {item.order_number ? ` · ${item.order_number}` : ""}
+                            {" · "}
+                            <PortalDateChip timestamp={item.entry_date} />
+                          </span>
+                          <span className="font-mono tabular-nums">
+                            {item.amounts_visible && item.amount_gross != null
+                              ? formatPortalCurrency(item.amount_gross, accountStatement.currency)
+                              : t.portal_invoices_hidden}
+                            {!isCreditAdjustment && item.amounts_visible
+                              ? ` · ${lang === "de" ? "offen" : "открыто"} ${formatPortalCurrency(portalStatementOpenAmount(item).amount, accountStatement.currency)}`
+                              : ""}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </ListItem>
+              ))}
+            </div>
+          ) : null}
         </Section>
       ) : null}
 
@@ -759,6 +812,9 @@ function usePatientInvoicesPageContent() {
                           {invoice.invoice_number}
                         </button>
                         <div className="mt-0.5 text-xs text-muted-foreground">{invoice.order_number}</div>
+                        {portalInvoiceIsThirdParty(invoice) ? (
+                          <div className="mt-0.5 text-xs text-muted-foreground" data-testid="portal-invoice-third-party">{thirdPartyPaidByText(invoice.third_party_payer_name)}</div>
+                        ) : null}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-muted-foreground"><PortalDateChip timestamp={invoice.issued_at} /></td>
                       <td className="px-4 py-3"><StatusBadge status={invoice.display_status ?? invoice.status}>{portalStatusLabel(invoice.display_status ?? invoice.status)}</StatusBadge></td>
@@ -796,6 +852,9 @@ function usePatientInvoicesPageContent() {
                       <p className="mt-1 text-sm text-muted-foreground">
                         {t.portal_invoices_issued} <PortalDateChip timestamp={invoice.issued_at} />
                       </p>
+                      {portalInvoiceIsThirdParty(invoice) ? (
+                        <p className="mt-1 text-xs text-muted-foreground">{thirdPartyPaidByText(invoice.third_party_payer_name)}</p>
+                      ) : null}
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <StatusBadge status={invoice.display_status ?? invoice.status}>
