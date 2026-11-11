@@ -4879,6 +4879,12 @@ test.describe("responsive staff workspace", () => {
     await expect(
       wizard.getByText("Kostenvoranschlag wartet auf die Unterschrift des Kunden", { exact: true }),
     ).toBeVisible();
+    // Owner decision 2026-11-11: no one-click acceptance. Without the estimate
+    // document the step asks for it first, then for the client's signature.
+    await expect(wizard.getByRole("button", { name: "Kostenvoranschlag annehmen", exact: true })).toHaveCount(0);
+    await expect(wizard.getByTestId("lead-wizard-estimate-signature-hint")).toContainText(
+      "Erstellen Sie zuerst den Kostenvoranschlag zum Einzelauftrag",
+    );
   });
 });
 

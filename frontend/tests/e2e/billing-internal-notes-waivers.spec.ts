@@ -22,7 +22,12 @@ type Waiver = {
 async function prepare(page: Page, role = "billing") {
   const errors: string[] = [];
   const writes: { path: string; body: unknown }[] = [];
-  const state = { waivers: [] as Waiver[], refuseWaiver: false, quoteNote: "Angebot erst nach Rückruf senden." as string | null };
+  const state = {
+    waivers: [] as Waiver[],
+    refuseWaiver: false,
+    quoteNote: "Angebot erst nach Rückruf senden." as string | null,
+    quoteStatus: "accepted",
+  };
   page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript(() => {
     localStorage.setItem("gmed_access_token", "billing-tail-test");
@@ -60,7 +65,7 @@ async function prepare(page: Page, role = "billing") {
   const quote = () => ({
     id: quoteId, order_id: "order-1", order_number: "A-TEST-1", contract_id: null, patient_id: patientId,
     patient_name: "Mia Muster", patient_pid: "P-TEST-0301", quote_number: "KV-TEST-1", currency: "EUR",
-    status: "accepted", total_net: "100", total_vat: "19", total_gross: "119", valid_until: null,
+    status: state.quoteStatus, total_net: "100", total_vat: "19", total_gross: "119", valid_until: null,
     paid_amount: "0", paid_at: null, notes: "Bitte vor Behandlungsbeginn überweisen.",
     internal_note: state.quoteNote, version_count: 1, current_version_number: 1, superseded_quotes: [],
     created_at: "2026-10-01T10:00:00Z", updated_at: "2026-10-01T10:00:00Z", line_items: [],
@@ -187,5 +192,34 @@ test("the quote's internal note is saved on its own and guards the sheet while u
   await page.keyboard.press("Escape");
   await expect(page.getByRole("alertdialog")).toHaveCount(0);
   await expect(editor).toHaveCount(0);
+  expect(api.errors).toEqual([]);
+});
+
+// Owner decision 2026-11-11, release QA F1: a quote is accepted by the
+// client's signature on the estimate, which sets the status on the server —
+// never by choosing «Принято» in the quote sheet.
+test("the quote sheet does not offer «Принято» by hand and points to the signature", async ({ page }) => {
+  const api = await prepare(page, "ceo");
+  api.state.quoteStatus = "sent";
+  await page.goto(`/contracts?quote=${quoteId}`);
+  const hint = page.getByTestId("quote-accepted-by-signature-hint");
+  await expect(hint).toBeVisible();
+  await expect(hint).toContainText("Статус «Принято» система ставит сама");
+  const status = page.getByRole("combobox", { name: "Статус", exact: true }).first();
+  await expect(status).toContainText("Отправлено");
+  await status.click();
+  await expect(page.getByRole("option", { name: "Черновик", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Принято", exact: true })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  expect(api.writes.filter((write) => write.path.endsWith("/status"))).toEqual([]);
+  expect(api.errors).toEqual([]);
+});
+
+test("an accepted quote keeps showing its status and no signature hint", async ({ page }) => {
+  const api = await prepare(page, "ceo");
+  await page.goto(`/contracts?quote=${quoteId}`);
+  await expect(page.getByTestId("quote-internal-note")).toBeVisible();
+  await expect(page.getByTestId("quote-accepted-by-signature-hint")).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "Статус", exact: true }).first()).toContainText("Принято");
   expect(api.errors).toEqual([]);
 });

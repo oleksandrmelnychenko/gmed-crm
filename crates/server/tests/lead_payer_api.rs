@@ -1455,7 +1455,7 @@ async fn a_staff_save_keeps_the_leads_invoice_recipient_and_payment_route() {
     );
 
     let audit_is_metadata_only: bool = sqlx::query_scalar(
-        "SELECT old_value IS NULL AND new_value IS NULL AND context ? 'changed_fields' FROM audit_log WHERE action = 'update_lead_payer_declaration' AND entity_id = $1 ORDER BY created_at DESC LIMIT 1",
+        "SELECT old_value IS NULL AND new_value IS NULL AND context ? 'changed_fields' FROM audit_log WHERE action = 'update_lead_payer_declaration' AND entity_id = $1 ORDER BY id DESC LIMIT 1",
     ).bind(lead_id).fetch_one(pool).await.unwrap();
     assert!(
         audit_is_metadata_only,
@@ -1599,7 +1599,7 @@ async fn the_self_payers_source_of_funds_from_the_cabinet_counts_and_survives_st
     let audited: Value = sqlx::query_scalar(
         r#"SELECT context FROM audit_log
            WHERE action = 'update_lead_payer_declaration' AND entity_id = $1
-           ORDER BY created_at DESC LIMIT 1"#,
+           ORDER BY id DESC LIMIT 1"#,
     )
     .bind(lead_id)
     .fetch_one(pool)
@@ -1874,7 +1874,7 @@ async fn a_staff_save_keeps_the_payer_informed_by_the_payers_link() {
     let context: Value = sqlx::query_scalar(
         r#"SELECT context FROM audit_log
            WHERE action = 'update_lead_payer_declaration' AND entity_id = $1
-           ORDER BY created_at DESC, id DESC LIMIT 1"#,
+           ORDER BY id DESC LIMIT 1"#,
     )
     .bind(lead_id)
     .fetch_one(pool)
@@ -2021,7 +2021,7 @@ async fn full_order_payer(pool: &PgPool, order_id: Uuid) -> Value {
 async fn order_payer_audit(pool: &PgPool, order_id: Uuid) -> Vec<Value> {
     sqlx::query_scalar(
         "SELECT context FROM audit_log WHERE action = 'set_order_payer' AND entity_id = $1
-         ORDER BY created_at, id",
+         ORDER BY id",
     )
     .bind(order_id)
     .fetch_all(pool)
@@ -3104,7 +3104,7 @@ async fn staff_enter_and_correct_a_third_party_payers_payment_route() {
         r#"SELECT jsonb_build_object('context', context, 'old', old_value, 'new', new_value)
            FROM audit_log
            WHERE action = 'lead_payer_payment_route_updated_by_staff' AND entity_id = $1
-           ORDER BY created_at, id"#,
+           ORDER BY id"#,
     )
     .bind(lead_id)
     .fetch_all(pool)

@@ -7688,6 +7688,33 @@ async fn repeat_order_document_changes_require_current_documents_before_confirma
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
     assert_eq!(refused["error"], "estimate_signature_required", "{refused}");
+    // The estimate generated before this quote prints the number of the one it
+    // replaced: its scan accepts nothing and is refused before it is stored
+    // (release QA 2026-11-11, F1).
+    let older_printed: Option<String> = sqlx::query_scalar(
+        "SELECT generated_bindings->>'_quote_number' FROM documents WHERE id = $1::uuid",
+    )
+    .bind(&estimate_document)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_ne!(older_printed.as_deref(), first.1["quote_number"].as_str());
+    let (s, b) = support::paper_signature(&app, &pm, &estimate_document).await;
+    assert_eq!(s, StatusCode::CONFLICT, "{b}");
+    assert_eq!(b["error"], "estimate_document_outdated", "{b}");
+    let still_open: String = sqlx::query_scalar("SELECT status FROM quotes WHERE id = $1::uuid")
+        .bind(quote_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_ne!(still_open, "accepted");
+    let scans: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM documents WHERE replaces_document_id = $1::uuid")
+            .bind(&estimate_document)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(scans, 0, "a refused scan is not stored");
     // … and the scan of the signed copy accepts it, with a version and an
     // audit row that name the signed document. The estimate signed is the
     // one generated for this quote (it prints the quote's number).
@@ -7743,7 +7770,7 @@ async fn repeat_order_document_changes_require_current_documents_before_confirma
     assert_eq!(change_reason.as_deref(), Some("estimate_signed"));
     let audit_context: Value = sqlx::query_scalar(
         "SELECT context FROM audit_log WHERE entity_type = 'quote' AND entity_id = $1
-           AND action = 'update_quote_status' ORDER BY created_at DESC LIMIT 1",
+           AND action = 'update_quote_status' ORDER BY id DESC LIMIT 1",
     )
     .bind(quote_uuid)
     .fetch_one(pool)
