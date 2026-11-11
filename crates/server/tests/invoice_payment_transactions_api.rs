@@ -1219,11 +1219,12 @@ async fn overpayment_becomes_patient_credit_that_can_be_moved_to_another_invoice
     );
 }
 
-/// QA D3-04: moving credit to another recipient's invoice names both
-/// recipients and the amount (target list and the 409 to confirm), so billing
-/// never confirms a move between two debtors blind.
+/// Owner decision 2026-11-12 (QA L12, replaces the D3-04 confirmation):
+/// credit never moves to another recipient's invoice. The target list leaves
+/// it out and the route refuses it with a 422 naming both recipients, also
+/// with the old confirmation and when the order is cancelled.
 #[tokio::test]
-async fn credit_transfer_to_another_recipient_names_both_recipients() {
+async fn credit_transfer_to_another_recipient_is_refused() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
@@ -1359,27 +1360,15 @@ async fn credit_transfer_to_another_recipient_names_both_recipients() {
     assert!(target_item.get("credit_applied").is_none(), "{target_item}");
     assert_eq!(before["summary"]["total_due"], "113.05");
 
-    let mut confirmed = request;
-    confirmed["confirm_recipient_mismatch"] = json!(true);
-    let (status, moved) = json_request(
-        &app,
-        "POST",
-        &format!("/api/v1/invoices/{source}/credit-transfers"),
-        &billing,
-        Some(confirmed),
+    // Nothing moved: the credit stays with whoever paid it.
+    let moved: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM invoice_credit_transfers WHERE source_invoice_id = $1",
     )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{moved:?}");
-    let (status, after) = json_request(&app, "GET", &statement_path, &billing, None).await;
-    assert_eq!(status, StatusCode::OK, "{after}");
-    let target_item = after["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|item| item["id"] == target.to_string())
-        .unwrap();
-    assert_eq!(target_item["amount_due"], "83.05");
-    assert_eq!(after["summary"]["total_due"], "83.05");
+    .bind(source)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(moved, 0);
 }
 
 /// Release QA D R-02: an invoice to the patient and one to the patient's own
