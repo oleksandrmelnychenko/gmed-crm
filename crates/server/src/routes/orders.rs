@@ -2439,12 +2439,36 @@ async fn load_order_planning_readiness(
     let medical_confirmed: i64 = appointment_counts
         .try_get("medical_confirmed")
         .unwrap_or_default();
+    // A concierge service linked to the order directly (Services page or the
+    // order's blocker) is a non-medical booking like a non-medical
+    // appointment; a confirmed one clears the gate (QA 2026-11-11 L1). A
+    // service with an appointment is counted through that appointment.
+    let (linked_services_total, linked_services_confirmed): (i64, i64) = sqlx::query_as(
+        r#"SELECT
+                COUNT(*) FILTER (WHERE status <> 'cancelled'),
+                COUNT(*) FILTER (WHERE status IN ('confirmed', 'in_service', 'completed'))
+           FROM concierge_services
+           WHERE order_id = $1
+             AND appointment_id IS NULL"#,
+    )
+    .bind(order_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, order_id = %order_id, "load order linked concierge services");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load order planning state",
+        )
+    })?;
     let non_medical_total: i64 = appointment_counts
-        .try_get("non_medical_total")
-        .unwrap_or_default();
+        .try_get::<i64, _>("non_medical_total")
+        .unwrap_or_default()
+        + linked_services_total;
     let non_medical_confirmed: i64 = appointment_counts
-        .try_get("non_medical_confirmed")
-        .unwrap_or_default();
+        .try_get::<i64, _>("non_medical_confirmed")
+        .unwrap_or_default()
+        + linked_services_confirmed;
     let interpreter_assigned: i64 = appointment_counts
         .try_get("interpreter_assigned")
         .unwrap_or_default();
@@ -2696,8 +2720,8 @@ async fn load_order_execution_readiness(
     let concierge_completed: i64 = sqlx::query_scalar(
         r#"SELECT COUNT(*)
            FROM concierge_services cs
-           JOIN appointments a ON a.id = cs.appointment_id
-           WHERE a.order_id = $1
+           LEFT JOIN appointments a ON a.id = cs.appointment_id
+           WHERE (a.order_id = $1 OR (cs.appointment_id IS NULL AND cs.order_id = $1))
              AND cs.status = 'completed'"#,
     )
     .bind(order_id)
@@ -3202,12 +3226,15 @@ async fn load_order_followup_readiness_scoped(
         || (package_end_required && package_end_status != "not_required");
     let followup_activity_ready = !followup_activity_required || followup_activity_present;
 
+    // German calendar arithmetic (QA 2026-11-11 L6): 182 UTC days put the
+    // 6-month date one day and, across the DST change, one hour late; the
+    // patient saw it in the portal too.
     let recommended_followup_1w_at =
-        closure_anchor_at.map(|value| value + chrono::Duration::days(7));
+        closure_anchor_at.map(|value| crate::app_time::add_local_days(value, 7));
     let recommended_followup_1m_at =
-        closure_anchor_at.map(|value| value + chrono::Duration::days(30));
+        closure_anchor_at.map(|value| crate::app_time::add_local_days(value, 30));
     let recommended_followup_6m_at =
-        closure_anchor_at.map(|value| value + chrono::Duration::days(182));
+        closure_anchor_at.map(|value| crate::app_time::add_local_months(value, 6));
     let recommended_package_end_followup_at = effective_package_end_date
         .and_then(|value| value.checked_sub_signed(chrono::Duration::days(30)));
 

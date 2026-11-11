@@ -4342,7 +4342,7 @@ async fn load_forecast_followup(state: &AppState) -> Result<Value, sqlx::Error> 
                 )::bigint AS followup_1m_due_next_30d,
                 COUNT(*) FILTER (
                     WHERE followup_6m_status NOT IN ('completed', 'not_required')
-                      AND closure_anchor_at + interval '182 day' BETWEEN now() AND now() + interval '30 day'
+                      AND closure_anchor_at + interval '6 months' BETWEEN now() AND now() + interval '30 day'
                 )::bigint AS followup_6m_due_next_30d,
                 COUNT(*) FILTER (
                     WHERE package_end_status NOT IN ('completed', 'not_required')

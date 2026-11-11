@@ -954,6 +954,130 @@ async fn planning_preparation_blocks_execution_until_plan_slots_and_handoffs_are
     assert_eq!(status, StatusCode::OK);
 }
 
+/// QA 2026-11-11 L1: a concierge service booked on the Services page is
+/// linked to the order and its confirmed booking clears the «non-medical
+/// services» blocker; no non-medical appointment is needed for it.
+#[tokio::test]
+async fn a_linked_concierge_service_counts_for_the_non_medical_gate() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("order-linked-concierge");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let patient_id = create_patient(&app, &pm_bearer, &tag).await;
+    let order_id = create_order(&app, &pm_bearer, patient_id).await;
+
+    let (status, planning) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/planning-preparation"),
+        &pm_bearer,
+        Some(json!({ "non_medical_required": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{planning}");
+    assert_eq!(planning["non_medical_bookings_ready"], false);
+
+    // Created on the Services page with the order.
+    let (status, service) = json_request(
+        &app,
+        "POST",
+        "/api/v1/concierge-services",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "order_id": order_id,
+            "title": format!("Chauffeur Hotel → Klinik {tag}"),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{service}");
+    assert_eq!(service["order_id"], order_id.to_string());
+    assert_eq!(service["order_linked_directly"], true);
+    assert_eq!(service["service_kind"], "chauffeur");
+    let service_id = Uuid::parse_str(service["id"].as_str().unwrap()).unwrap();
+
+    let (_, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(detail["planning_preparation"]["non_medical_total"], 1);
+    assert_eq!(detail["planning_preparation"]["non_medical_confirmed"], 0);
+    assert_eq!(
+        detail["planning_preparation"]["non_medical_bookings_ready"],
+        false
+    );
+
+    // The link can be removed and set again.
+    let link_path = format!("/api/v1/concierge-services/{service_id}/order");
+    let (status, unlinked) = json_request(
+        &app,
+        "POST",
+        &link_path,
+        &pm_bearer,
+        Some(json!({ "order_id": null })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unlinked}");
+    assert!(unlinked["order_id"].is_null());
+    let (status, relinked) = json_request(
+        &app,
+        "POST",
+        &link_path,
+        &pm_bearer,
+        Some(json!({ "order_id": order_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{relinked}");
+
+    // Another patient's order is refused.
+    let other_patient = create_patient(&app, &pm_bearer, &format!("{tag}-other")).await;
+    let other_order = create_order(&app, &pm_bearer, other_patient).await;
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        &link_path,
+        &pm_bearer,
+        Some(json!({ "order_id": other_order })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "concierge_service_order_other_patient");
+
+    // A confirmed booking linked to the order clears the gate.
+    sqlx::query(
+        r#"INSERT INTO concierge_services (patient_id, order_id, service_kind, title, status, created_by)
+           VALUES ($1, $2, 'chauffeur', $3, 'confirmed', $4)"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(format!("Confirmed ride {tag}"))
+    .bind(pm_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (_, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(detail["planning_preparation"]["non_medical_total"], 2);
+    assert_eq!(detail["planning_preparation"]["non_medical_confirmed"], 1);
+    assert_eq!(
+        detail["planning_preparation"]["non_medical_bookings_ready"],
+        true
+    );
+}
+
 #[tokio::test]
 async fn existing_customer_recheck_reports_missing_data_without_a_debt_hold() {
     let Some((app, pool, admin_id)) = test_context().await else {

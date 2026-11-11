@@ -3561,6 +3561,7 @@ fn is_allowed_appointment_status_transition(current: &str, target: &str) -> bool
 }
 
 const APPOINTMENT_COMPLETION_BEFORE_DATE_CODE: &str = "appointment_completion_before_date";
+const APPOINTMENT_COMPLETION_OPEN_CHECKLIST_CODE: &str = "appointment_completion_open_checklist";
 const APPOINTMENT_REPORT_BEFORE_DATE_CODE: &str = "appointment_report_before_date";
 const APPOINTMENT_REPORTED_FUTURE_DATE_CODE: &str = "appointment_reported_future_date";
 const APPOINTMENT_REPORT_STATUS_NOT_OPEN_CODE: &str = "appointment_report_status_not_open";
@@ -7512,15 +7513,19 @@ async fn update_status(
             );
         }
 
-        let blocked = match sqlx::query(
-            r#"SELECT appointment_id
+        // The open items are named in the answer, so the quick action can say
+        // what is still to tick instead of a bare "could not change the
+        // status" (QA 2026-11-11 L2).
+        let open_items = match sqlx::query_as::<_, (Uuid, String)>(
+            r#"SELECT appointment_id, item_text
                FROM appointment_checklists
                WHERE appointment_id = ANY($1)
                  AND NOT is_completed
-               LIMIT 1"#,
+               ORDER BY appointment_id, sort_order, created_at, id
+               LIMIT 20"#,
         )
         .bind(&target_ids)
-        .fetch_optional(&mut *tx)
+        .fetch_all(&mut *tx)
         .await
         {
             Ok(value) => value,
@@ -7530,10 +7535,23 @@ async fn update_status(
             }
         };
 
-        if blocked.is_some() {
-            return err(
+        if !open_items.is_empty() {
+            let items = open_items
+                .iter()
+                .map(|(appointment_id, item_text)| {
+                    serde_json::json!({
+                        "appointment_id": appointment_id,
+                        "item_text": item_text,
+                    })
+                })
+                .collect::<Vec<_>>();
+            return err_with_details(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "At least one targeted appointment has open checklist items and cannot be completed",
+                serde_json::json!({
+                    "code": APPOINTMENT_COMPLETION_OPEN_CHECKLIST_CODE,
+                    "open_checklist_items": items,
+                }),
             );
         }
     }

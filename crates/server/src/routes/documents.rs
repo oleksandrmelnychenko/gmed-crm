@@ -17830,6 +17830,15 @@ async fn generate_document(
             "Order context is required for this document",
         );
     }
+    // A patient's Kostenübernahmeerklärung names the Einzelauftrag it covers:
+    // without an order it was saved blank («1. Einzelauftrag vom ____»,
+    // QA 2026-11-11 L9). A lead's declaration keeps its lead context.
+    if template.id == "cost_coverage_declaration" && order_id.is_none() && lead_id.is_none() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Order context is required for this document",
+        );
+    }
 
     // Resolve the VKS lines before an existing version is reused or a document
     // number is allocated, so an estimate without medical services is never issued.

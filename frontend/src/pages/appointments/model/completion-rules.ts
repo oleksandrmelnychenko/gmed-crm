@@ -4,6 +4,9 @@ import { currentDateInput } from "@/pages/appointments/model/date-time";
 export const APPOINTMENT_COMPLETION_BEFORE_DATE_CODE =
   "appointment_completion_before_date";
 
+/** Error code the server returns when a visit with open checklist items is completed; it lists them. */
+export const APPOINTMENT_COMPLETION_OPEN_CHECKLIST_CODE = "appointment_completion_open_checklist";
+
 /** Error code the server returns when a report is submitted or approved too early. */
 export const APPOINTMENT_REPORT_BEFORE_DATE_CODE = "appointment_report_before_date";
 

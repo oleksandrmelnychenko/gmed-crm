@@ -202,8 +202,11 @@ impl KvPaymentTerms {
     fn due_suffix(&self) -> String {
         self.prepayment_due_at
             .map(|due| {
+                // A payment deadline is a day (QA 2026-11-11 L6): the order
+                // form stores the chosen date at noon UTC, which printed as
+                // "18.11.2026, 13:00 Uhr". The Berlin date alone is the term.
                 let local = crate::app_time::local(due);
-                format!(" bis zum {}", local.format("%d.%m.%Y, %H:%M Uhr"))
+                format!(" bis zum {}", local.format("%d.%m.%Y"))
             })
             .unwrap_or_default()
     }
@@ -312,7 +315,7 @@ mod tests {
         };
         assert_eq!(
             kv_payment_lead_in(&terms),
-            "Vor Behandlungs-/Auftragsbeginn ist die vereinbarte Vorauszahlung in Höhe von 300,00 € bis zum 15.10.2026, 12:00 Uhr zu überweisen an:"
+            "Vor Behandlungs-/Auftragsbeginn ist die vereinbarte Vorauszahlung in Höhe von 300,00 € bis zum 15.10.2026 zu überweisen an:"
         );
         assert_eq!(
             kv_remainder_note(&terms),

@@ -1,7 +1,9 @@
 import { ApiRequestError } from "@/lib/api";
+import { localizeTaskTitle } from "@/lib/task-labels";
 import {
   APPOINTMENT_CANCEL_BILLED_REPORT_CODE,
   APPOINTMENT_COMPLETION_BEFORE_DATE_CODE,
+  APPOINTMENT_COMPLETION_OPEN_CHECKLIST_CODE,
   APPOINTMENT_REPORT_BEFORE_DATE_CODE,
   APPOINTMENT_REPORT_STATUS_NOT_OPEN_CODE,
   APPOINTMENT_REPORTED_FUTURE_DATE_CODE,
@@ -9,7 +11,7 @@ import {
   INTERPRETER_REPORT_SELF_REVIEW_CODE,
 } from "@/pages/appointments/model/completion-rules";
 import { appointmentText } from "@/pages/appointments/model/labels";
-import { useLanguageBound } from "@/lib/i18n";
+import { getLang, useLanguageBound } from "@/lib/i18n";
 
 const LOCALIZED_TRANSPORT_CODES = new Set(["aborted", "network", "timeout"]);
 
@@ -59,6 +61,27 @@ export function billedReportCancelMessage(body: Record<string, unknown>) {
   );
 }
 
+/**
+ * Completing a visit whose checklist is not done: the answer names the open
+ * items in the UI language, instead of "could not change the status"
+ * (QA 2026-11-11 L2).
+ */
+export function openChecklistCompletionMessage(body: Record<string, unknown>) {
+  const raw = Array.isArray(body.open_checklist_items) ? body.open_checklist_items : [];
+  const names = raw
+    .map((item) =>
+      item && typeof item === "object" ? bodyText(item as Record<string, unknown>, "item_text").trim() : "",
+    )
+    .filter(Boolean)
+    .map((text) => localizeTaskTitle(text, getLang()));
+  const unique = [...new Set(names)];
+  const shown = unique.slice(0, 5).map((name) => `«${name}»`);
+  if (unique.length > shown.length) shown.push(`+${unique.length - shown.length}`);
+  return appointmentText("appointments_status_completion_open_checklist", {
+    items: shown.join(", ") || "—",
+  });
+}
+
 export function appointmentActionErrorMessage(
   error: unknown,
   localizedFallback: string,
@@ -74,6 +97,9 @@ export function appointmentActionErrorMessage(
     const bodyCode = error.body?.code;
     if (bodyCode === APPOINTMENT_CANCEL_BILLED_REPORT_CODE && error.body) {
       return billedReportCancelMessage(error.body as Record<string, unknown>);
+    }
+    if (bodyCode === APPOINTMENT_COMPLETION_OPEN_CHECKLIST_CODE && error.body) {
+      return openChecklistCompletionMessage(error.body as Record<string, unknown>);
     }
     const bodyCodeKey =
       typeof bodyCode === "string"

@@ -39,9 +39,57 @@ pub fn from_local(local: NaiveDateTime) -> DateTime<Utc> {
     unreachable!("Europe/Berlin must have a valid local instant within three hours")
 }
 
+/// The instant `days` German calendar days after `instant`, at the same
+/// German wall-clock time: across a daylight-saving change a plain UTC
+/// addition lands an hour off.
+pub fn add_local_days(instant: DateTime<Utc>, days: u64) -> DateTime<Utc> {
+    let wall = local(instant).naive_local();
+    from_local(
+        wall.checked_add_days(chrono::Days::new(days))
+            .unwrap_or(wall),
+    )
+}
+
+/// The instant `months` German calendar months after `instant`, at the same
+/// German wall-clock time (the last day of a shorter month when the day does
+/// not exist). "6 months" after 11.11.2026 20:49 is 11.05.2027 20:49, not
+/// 182 UTC days later (QA 2026-11-11 L6: 12.05.2027 21:49).
+pub fn add_local_months(instant: DateTime<Utc>, months: u32) -> DateTime<Utc> {
+    let wall = local(instant).naive_local();
+    from_local(
+        wall.checked_add_months(chrono::Months::new(months))
+            .unwrap_or(wall),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn follow_up_dates_keep_the_german_day_and_time() {
+        // 11.11.2026 20:49 Berlin (winter time, UTC+1).
+        let anchor = Utc.with_ymd_and_hms(2026, 11, 11, 19, 49, 0).unwrap();
+        // 11.05.2027 20:49 Berlin (summer time, UTC+2).
+        assert_eq!(
+            add_local_months(anchor, 6),
+            Utc.with_ymd_and_hms(2027, 5, 11, 18, 49, 0).unwrap()
+        );
+        assert_eq!(
+            add_local_months(anchor, 1),
+            Utc.with_ymd_and_hms(2026, 12, 11, 19, 49, 0).unwrap()
+        );
+        assert_eq!(
+            add_local_days(anchor, 7),
+            Utc.with_ymd_and_hms(2026, 11, 18, 19, 49, 0).unwrap()
+        );
+        // 31.08. + 6 months is the last day of February.
+        let end_of_month = Utc.with_ymd_and_hms(2026, 8, 31, 8, 0, 0).unwrap();
+        assert_eq!(
+            date_of(add_local_months(end_of_month, 6)),
+            NaiveDate::from_ymd_opt(2027, 2, 28).unwrap()
+        );
+    }
 
     #[test]
     fn instants_after_german_midnight_belong_to_the_next_day() {

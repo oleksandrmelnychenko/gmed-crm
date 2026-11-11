@@ -38,6 +38,9 @@ const ORDER_CONTEXT_REQUIRED_TEMPLATE_IDS = new Set([
   "order_cost_estimate",
   // The payer's copy of the order's cost estimate (phase 3b).
   "payer_cost_estimate",
+  // The Kostenübernahmeerklärung covers one Einzelauftrag; without an order
+  // it was saved blank (QA 2026-11-11 L9).
+  "cost_coverage_declaration",
 ]);
 
 const ORDER_CONTEXT_SUPPORTED_TEMPLATE_IDS = new Set([

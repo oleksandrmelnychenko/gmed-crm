@@ -127,6 +127,11 @@ type StaffConciergeService = {
   patient_pid: string;
   appointment_id: string | null;
   appointment_title: string | null;
+  /** The order the service counts for: linked directly or through its appointment (QA 2026-11-11 L1). */
+  order_id?: string | null;
+  order_number?: string | null;
+  /** True when the order is linked on the service itself, not through an appointment. */
+  order_linked_directly?: boolean;
   provider_id: string | null;
   provider_name: string | null;
   provider_service_id: string | null;
@@ -200,8 +205,22 @@ type StaffOption = {
   role: string;
 };
 
+/** An order a concierge service can be linked to (QA 2026-11-11 L1). */
+type ServiceOrderOption = {
+  id: string;
+  order_number: string;
+  status?: string | null;
+};
+
+/** Only an open order takes a new service; the server refuses others. */
+function openServiceOrders(rows: ServiceOrderOption[]) {
+  return rows.filter((row) => !row.status || row.status === "active" || row.status === "paused");
+}
+
 type CreateServiceFormState = {
   patientId: string;
+  /** An open order of the patient the service belongs to; "" for none. */
+  orderId: string;
   providerId: string;
   providerServiceId: string;
   taxonomyNodeId: string;
@@ -318,6 +337,7 @@ const SERVICE_SOURCE_LABEL_KEYS = {
 function blankCreateServiceForm(defaultConciergeId = ""): CreateServiceFormState {
   return {
     patientId: "",
+    orderId: "",
     providerId: "",
     providerServiceId: "",
     taxonomyNodeId: "",
@@ -342,6 +362,7 @@ function blankCreateServiceForm(defaultConciergeId = ""): CreateServiceFormState
 function buildEditServiceForm(service: StaffConciergeService, lang: Lang): EditServiceFormState {
   return {
     patientId: service.patient_id,
+    orderId: service.order_linked_directly ? service.order_id ?? "" : "",
     providerId: service.provider_id ?? "",
     providerServiceId: service.provider_service_id ?? "",
     taxonomyNodeId: service.taxonomy_node_id ?? "",
@@ -1130,6 +1151,35 @@ function useStaffServicesPageContent() {
   const [editProviderServices, setEditProviderServices] = useState<ServiceItem[]>([]);
   const [editProviderServicesLoading, setEditProviderServicesLoading] = useState(false);
   const [editProviderServicesError, setEditProviderServicesError] = useState("");
+  // The open orders of the patient in the create or edit form: a service
+  // linked to one counts for its «non-medical services» gate (QA 2026-11-11 L1).
+  const orderPatientId = createOpen ? createForm.patientId : editMode ? editForm?.patientId ?? "" : "";
+  const [patientOrders, setPatientOrders] = useState<ServiceOrderOption[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!orderPatientId) {
+      setPatientOrders([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+    apiFetch<ServiceOrderOption[]>(`/orders?patient_id=${encodeURIComponent(orderPatientId)}`)
+      .then((rows) => {
+        if (!cancelled) setPatientOrders(openServiceOrders(rows));
+      })
+      .catch(() => {
+        if (!cancelled) setPatientOrders([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [orderPatientId]);
+  const orderFieldLabel = lang === "de" ? "Auftrag" : "Заказ";
+  const orderFieldHint =
+    lang === "de"
+      ? "Eine bestätigte Buchung erfüllt die Anforderung „Nichtmedizinische Leistungen“ dieses Auftrags."
+      : "Подтверждённое бронирование закрывает требование «Немедицинские услуги» этого заказа.";
+  const noOrderLabel = lang === "de" ? "Ohne Auftrag" : "Без заказа";
 
   const { canCreateService, canEditService, canEditProtectedServiceFields } =
     servicesPermissions(user);
@@ -1555,6 +1605,7 @@ function useStaffServicesPageContent() {
         method: "POST",
         body: JSON.stringify({
           patient_id: createForm.patientId,
+          order_id: createForm.orderId || null,
           provider_id: createForm.providerId || null,
           provider_service_id: createForm.providerServiceId || null,
           taxonomy_node_id: createForm.taxonomyNodeId || null,
@@ -1670,13 +1721,25 @@ function useStaffServicesPageContent() {
 
     setEditBusy(true);
     try {
-      const updated = await apiFetch<StaffConciergeService>(
+      let updated = await apiFetch<StaffConciergeService>(
         `/concierge-services/${selectedService.id}/update`,
         {
           method: "POST",
           body: JSON.stringify(updatePayload),
         },
       );
+      // The order link has its own call; a service with an appointment
+      // belongs to the appointment's order (QA 2026-11-11 L1).
+      const currentOrderId = selectedService.order_linked_directly ? selectedService.order_id ?? "" : "";
+      if (!selectedService.appointment_id && editForm.orderId !== currentOrderId) {
+        updated = await apiFetch<StaffConciergeService>(
+          `/concierge-services/${selectedService.id}/order`,
+          {
+            method: "POST",
+            body: JSON.stringify({ order_id: editForm.orderId || null }),
+          },
+        );
+      }
       clearApiCache("/concierge-services");
       dispatchStaffServicesState({ type: "update-success", updated });
     } catch (err) {
@@ -1997,6 +2060,37 @@ function useStaffServicesPageContent() {
                           />
                         </label>
                       ) : null}
+                      <label className="space-y-1.5 text-sm md:col-span-2">
+                        <span className="text-xs font-medium text-muted-foreground">{orderFieldLabel}</span>
+                        {selectedService.appointment_id ? (
+                          // A service with an appointment belongs to the appointment's order.
+                          <span className="block text-sm text-foreground">
+                            {selectedService.order_number ?? noOrderLabel}
+                          </span>
+                        ) : (
+                          <>
+                            <NativeComboboxSelect
+                              value={editForm.orderId}
+                              onChange={(event) =>
+                                setEditForm((current) =>
+                                  current ? { ...current, orderId: event.target.value } : current,
+                                )
+                              }
+                              className={formSelectClassName}
+                              aria-label={orderFieldLabel}
+                              missingValueLabel={selectedService.order_number ?? undefined}
+                            >
+                              <option value="">{noOrderLabel}</option>
+                              {patientOrders.map((order) => (
+                                <option key={order.id} value={order.id}>
+                                  {order.order_number}
+                                </option>
+                              ))}
+                            </NativeComboboxSelect>
+                            <span className="block text-xs text-muted-foreground">{orderFieldHint}</span>
+                          </>
+                        )}
+                      </label>
                     </div>
                   </Section>
 
@@ -2480,6 +2574,7 @@ function useStaffServicesPageContent() {
                     <div className="grid gap-1">
                       <ServiceDetailField label={t.staff_services_form_provider} value={selectedService.provider_name} />
                       <ServiceDetailField label={t.staff_services_form_concierge} value={selectedService.assigned_concierge_name} />
+                      <ServiceDetailField label={orderFieldLabel} value={selectedService.order_number} />
                     </div>
                   </Section>
 
@@ -2555,7 +2650,7 @@ function useStaffServicesPageContent() {
                         required
                         value={createForm.patientId}
                         onChange={(event) =>
-                          setCreateForm((current) => ({ ...current, patientId: event.target.value }))
+                          setCreateForm((current) => ({ ...current, patientId: event.target.value, orderId: "" }))
                         }
                         className={formSelectClassName}
                       >
@@ -2566,6 +2661,27 @@ function useStaffServicesPageContent() {
                           </option>
                         ))}
                       </NativeComboboxSelect>
+                    </label>
+
+                    <label className="space-y-1.5 text-sm">
+                      <span className="text-xs font-medium text-muted-foreground">{orderFieldLabel}</span>
+                      <NativeComboboxSelect
+                        value={createForm.orderId}
+                        disabled={!createForm.patientId}
+                        onChange={(event) =>
+                          setCreateForm((current) => ({ ...current, orderId: event.target.value }))
+                        }
+                        className={formSelectClassName}
+                        aria-label={orderFieldLabel}
+                      >
+                        <option value="">{noOrderLabel}</option>
+                        {patientOrders.map((order) => (
+                          <option key={order.id} value={order.id}>
+                            {order.order_number}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                      <span className="block text-xs text-muted-foreground">{orderFieldHint}</span>
                     </label>
 
                     <label className="space-y-1.5 text-sm">

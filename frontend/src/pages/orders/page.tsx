@@ -112,6 +112,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache, type ApiRequestError } from "@/lib/api";
+import { localizeTaskTitle } from "@/lib/task-labels";
 import { appDateKey, berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { hasFormChanges } from "@/lib/form-changes";
 import { paymentStatusLabel } from "@/lib/payment-status";
@@ -244,6 +245,7 @@ import {
   updateOrderFollowupFlow,
   updateOrderPhase,
   updateOrderStatus,
+  fetchOrderOpenTaskTitles,
   updateOrderPlanningPreparation,
   updateOrderProcessGates,
   updateOrderLeistungPlannedCost,
@@ -1238,6 +1240,8 @@ function useOrdersPageContent() {
   const [plannedCostSaving, setPlannedCostSaving] = useState(false);
   const [plannedCostError, setPlannedCostError] = useState<string | null>(null);
   const [cancelOrderOpen, setCancelOrderOpen] = useState(false);
+  const [completeOrderAsk, setCompleteOrderAsk] = useState(false);
+  const [completeOrderOpenTasks, setCompleteOrderOpenTasks] = useState<string[]>([]);
   const [cancelLeistungTarget, setCancelLeistungTarget] =
     useState<CancelLeistungTarget | null>(null);
   const [agencyServices, setAgencyServices] = useState<AgencyServiceItem[]>([]);
@@ -2831,12 +2835,24 @@ function useOrdersPageContent() {
     }
   }
 
-  async function handleOrderStatusChange(status: OrderStatus) {
+  async function handleOrderStatusChange(status: OrderStatus, confirmed = false) {
     if (!orderDetail || status === orderDetail.status || statusSaving || phaseSaving) return;
     // Cancelling needs a reason and shows what is cancelled and what stays
     // for final billing; the dialog sends it.
     if (status === "cancelled") {
       setCancelOrderOpen(true);
+      return;
+    }
+    // Completing closes the order for good: asked first (QA 2026-11-11 L8).
+    if (status === "completed" && !confirmed) {
+      setCompleteOrderAsk(true);
+      setCompleteOrderOpenTasks([]);
+      // Completing does not close the order's tasks (they belong to their
+      // assignees); the confirmation names those still open (QA L7).
+      const orderId = orderDetail.id;
+      void fetchOrderOpenTaskTitles(orderId)
+        .then((titles) => setCompleteOrderOpenTasks(titles.map((title) => localizeTaskTitle(title, lang))))
+        .catch(() => setCompleteOrderOpenTasks([]));
       return;
     }
 
@@ -5131,7 +5147,7 @@ function useOrdersPageContent() {
                           <OrderSummaryLine
                             label={lang === "de" ? "Vorauszahlung" : "Предоплата"}
                             className="md:col-span-2"
-                            value={`${paymentStatusLabel(orderDetail.process_gates.payment_tracking.status, lang)} · ${formatMoney(prepaymentGateAmount(orderDetail.process_gates.payment_tracking), orderDetail.process_gates.payment_tracking.currency)}${orderDetail.process_gates.payment_tracking.due_at ? ` · ${lang === "de" ? "zahlbar bis" : "срок оплаты"} ${formatDateTimeLabel(orderDetail.process_gates.payment_tracking.due_at)}` : ""}`}
+                            value={`${paymentStatusLabel(orderDetail.process_gates.payment_tracking.status, lang)} · ${formatMoney(prepaymentGateAmount(orderDetail.process_gates.payment_tracking), orderDetail.process_gates.payment_tracking.currency)}${orderDetail.process_gates.payment_tracking.due_at ? ` · ${lang === "de" ? "zahlbar bis" : "срок оплаты"} ${formatDateLabel(orderDetail.process_gates.payment_tracking.due_at)}` : ""}`}
                           />
                         ) : null}
                         <OrderSummaryLine
@@ -9681,6 +9697,35 @@ function useOrdersPageContent() {
           signedTermsAsk?.resolve(false);
           setSignedTermsAsk(null);
         }}
+      />
+      <LeadConfirmDialog
+        open={completeOrderAsk}
+        testId="order-complete-dialog"
+        title={lang === "de" ? "Auftrag abschließen?" : "Завершить заказ?"}
+        description={
+          <>
+            <span className="block">
+              {lang === "de"
+                ? `Der Auftrag ${orderDetail?.order_number ?? ""} wird als abgeschlossen markiert.`
+                : `Заказ ${orderDetail?.order_number ?? ""} будет отмечен как завершённый.`}
+            </span>
+            {completeOrderOpenTasks.length > 0 ? (
+              <span className="mt-2 block" data-testid="order-complete-open-tasks">
+                {lang === "de"
+                  ? `Diese Aufgaben bleiben offen und müssen von ihren Verantwortlichen erledigt werden: ${completeOrderOpenTasks.join(", ")}.`
+                  : `Эти задачи останутся открытыми, их закрывают ответственные: ${completeOrderOpenTasks.join(", ")}.`}
+              </span>
+            ) : null}
+          </>
+        }
+        confirmLabel={lang === "de" ? "Abschließen" : "Завершить"}
+        cancelLabel={lang === "de" ? "Abbrechen" : "Отмена"}
+        busy={statusSaving === "completed"}
+        onConfirm={() => {
+          setCompleteOrderAsk(false);
+          void handleOrderStatusChange("completed", true);
+        }}
+        onCancel={() => setCompleteOrderAsk(false)}
       />
     </div>
   );

@@ -9180,6 +9180,16 @@ async fn appointment_completion_is_blocked_when_checklist_items_remain_open() {
             .unwrap_or_default()
             .contains("open checklist")
     );
+    // The refusal names the open items (QA 2026-11-11 L2).
+    assert_eq!(body["code"], "appointment_completion_open_checklist");
+    assert_eq!(
+        body["open_checklist_items"][0]["item_text"],
+        "Send discharge summary to patient"
+    );
+    assert_eq!(
+        body["open_checklist_items"][0]["appointment_id"],
+        appointment_id.to_string()
+    );
 }
 
 fn berlin_today() -> chrono::NaiveDate {

@@ -52,6 +52,10 @@ pub fn router() -> Router<AppState> {
             post(keep_concierge_service_booking),
         )
         .route(
+            "/concierge-services/{service_id}/order",
+            post(link_concierge_service_order),
+        )
+        .route(
             "/concierge-services/{service_id}/billing-reversal-options",
             get(concierge_service_billing_reversal_options),
         )
@@ -108,6 +112,11 @@ struct ListConciergeServicesQuery {
 struct CreateConciergeServiceRequest {
     patient_id: Uuid,
     appointment_id: Option<Uuid>,
+    /// An open order of the same patient the service belongs to (QA
+    /// 2026-11-11 L1). Not with `appointment_id`: then the appointment's
+    /// order counts.
+    #[serde(default)]
+    order_id: Option<Uuid>,
     provider_id: Option<Uuid>,
     provider_service_id: Option<Uuid>,
     assigned_concierge_id: Option<Uuid>,
@@ -525,6 +534,19 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         Json(serde_json::json!({
             "error": status.canonical_reason().unwrap_or("error"),
             "message": message
+        })),
+    )
+        .into_response()
+}
+
+/// [`err`] with a machine-readable `code` the UI turns into its own words.
+fn err_with_code(status: StatusCode, message: &str, code: &str) -> axum::response::Response {
+    (
+        status,
+        Json(serde_json::json!({
+            "error": status.canonical_reason().unwrap_or("error"),
+            "message": message,
+            "code": code
         })),
     )
         .into_response()
@@ -1718,6 +1740,125 @@ async fn keep_concierge_service_booking(
         Ok(Some(row)) => Json(build_service_json_for_actor(&row, &auth)).into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "Concierge service not found"),
         Err(response) => response,
+    }
+}
+
+#[derive(Deserialize)]
+struct LinkConciergeServiceOrderRequest {
+    /// The open order of the service's patient; `null` removes the link.
+    order_id: Option<Uuid>,
+}
+
+/// Links a concierge service to an order of its patient, or removes the link
+/// (QA 2026-11-11 L1): a booking made on the Services page then counts for the
+/// order's «non-medical services» planning and execution gates. A service
+/// with a non-medical appointment belongs to the appointment's order.
+async fn link_concierge_service_order(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(service_id): Path<Uuid>,
+    Json(body): Json<LinkConciergeServiceOrderRequest>,
+) -> axum::response::Response {
+    if let Err(response) =
+        auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge])
+    {
+        return response;
+    }
+    let service = match load_service_row(&state, service_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(response) => return response,
+    };
+    if let Err(response) = ensure_operational_service_access(&state, &auth, &service).await {
+        return response;
+    }
+    let patient_id: Uuid = match service.try_get("patient_id") {
+        Ok(value) => value,
+        Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
+    };
+    let appointment_id = service
+        .try_get::<Option<Uuid>, _>("appointment_id")
+        .unwrap_or_default();
+    if appointment_id.is_some() {
+        return err_with_code(
+            StatusCode::CONFLICT,
+            "This service belongs to its appointment's order",
+            "concierge_service_order_from_appointment",
+        );
+    }
+    let previous_order_id = service
+        .try_get::<Option<Uuid>, _>("direct_order_id")
+        .unwrap_or_default();
+    if let Some(order_id) = body.order_id
+        && let Err(response) = validate_service_order(&state, patient_id, order_id).await
+    {
+        return response;
+    }
+    if let Err(error) =
+        sqlx::query("UPDATE concierge_services SET order_id = $2, updated_at = now() WHERE id = $1")
+            .bind(service_id)
+            .bind(body.order_id)
+            .execute(&state.db)
+            .await
+    {
+        tracing::error!(error = %error, service_id = %service_id, "link concierge service to order");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    state.audit_sender.try_send(audit::domain_event(
+        "link_concierge_service_order",
+        Some(auth.user_id),
+        "concierge_service",
+        Some(service_id),
+        serde_json::json!({
+            "order_id": body.order_id,
+            "previous_order_id": previous_order_id,
+        }),
+    ));
+    crate::realtime::publish_concierge_service_event(
+        &state,
+        Some(auth.user_id),
+        "concierge_service.updated",
+        service_id,
+        serde_json::json!({ "order_id": body.order_id }),
+    )
+    .await;
+    match load_service_row(&state, service_id).await {
+        Ok(Some(row)) => Json(build_service_json_for_actor(&row, &auth)).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(response) => response,
+    }
+}
+
+/// An order a concierge service may be linked to: one of the same patient
+/// that is still open.
+async fn validate_service_order(
+    state: &AppState,
+    patient_id: Uuid,
+    order_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let status: Option<String> = sqlx::query_scalar(
+        "SELECT status FROM orders WHERE id = $1 AND patient_id = $2",
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, order_id = %order_id, "validate concierge service order");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })?;
+    match status.as_deref() {
+        Some("active") | Some("paused") => Ok(()),
+        Some(_) => Err(err_with_code(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "order_id must reference an open order of the patient",
+            "concierge_service_order_closed",
+        )),
+        None => Err(err_with_code(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "order_id must reference an order of the same patient",
+            "concierge_service_order_other_patient",
+        )),
     }
 }
 
@@ -4347,6 +4488,18 @@ async fn create_concierge_service(
         return resp;
     }
 
+    if let Some(order_id) = body.order_id {
+        if body.appointment_id.is_some() {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "order_id cannot be combined with appointment_id: the appointment's order counts",
+            );
+        }
+        if let Err(resp) = validate_service_order(&state, body.patient_id, order_id).await {
+            return resp;
+        }
+    }
+
     let provider_service_pricing = match body.provider_service_id {
         Some(provider_service_id) => {
             match load_provider_service_pricing(&state, provider_service_id).await {
@@ -4502,13 +4655,13 @@ async fn create_concierge_service(
                 title, status, booking_reference, vendor_name, vendor_contact,
                 starts_at, ends_at, cost_estimate, actual_cost, quantity, unit_price, currency,
                 billing_status, service_notes, billing_notes, request_source, created_by,
-                patient_visible_note
+                patient_visible_note, order_id
            ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7,
                 $8, 'planned', $9, $10, $11,
                 $12, $13, $14, $15, $16, $17, $18,
                 'draft', $19, $20, 'staff', $21,
-                $22
+                $22, $23
            ) RETURNING id"#,
     )
     .bind(body.patient_id)
@@ -4535,6 +4688,7 @@ async fn create_concierge_service(
     .bind(normalize_optional_text(
         body.patient_visible_note.as_deref(),
     ))
+    .bind(body.order_id)
     .fetch_one(&state.db)
     .await
     {
@@ -4550,6 +4704,7 @@ async fn create_concierge_service(
                 Some(service_id),
                 serde_json::json!({
                     "appointment_id": body.appointment_id,
+                    "order_id": body.order_id,
                     "patient_id": body.patient_id,
                     "provider_id": provider_id,
                     "provider_service_id": body.provider_service_id,
@@ -5730,6 +5885,10 @@ const SERVICE_ROW_SELECT: &str = r#"SELECT cs.id, cs.patient_id, cs.appointment_
                   ku.name AS key_responsible_user_name,
                   a.title AS appointment_title, a.appointment_type AS linked_appointment_type,
                   a.status AS linked_appointment_status,
+                  cs.order_id AS direct_order_id,
+                  COALESCE(cs.order_id, a.order_id) AS linked_order_id,
+                  (SELECT linked_order.order_number FROM orders linked_order
+                    WHERE linked_order.id = COALESCE(cs.order_id, a.order_id)) AS linked_order_number,
                   (cs.provider_id IS NULL OR pr.provider_type = 'non_medical')
                   AND (cs.appointment_id IS NULL OR a.appointment_type = 'non_medical')
                       AS task_eligible,
@@ -6977,9 +7136,11 @@ fn derive_service_kind(taxonomy_code: Option<&str>, category: Option<&str>, titl
     let air_ticket = has_word(&["ticket", "tickets"])
         && has_word(&["air", "plane", "airline", "airlines", "boarding"]);
 
-    if normalized.contains("hotel") {
-        "hotel".to_string()
-    } else if has_word(&["vip"]) && normalized.contains("terminal") {
+    // A ride names the place it starts or ends at ("Chauffeur Hotel →
+    // Helios"): the ride words win over the hotel, which is only the kind
+    // when nothing else is named (QA 2026-11-11 L1: a chauffeur ride was
+    // stored as «Hotel»).
+    if has_word(&["vip"]) && normalized.contains("terminal") {
         "vip_terminal".to_string()
     } else if normalized.contains("flight") || air_ticket {
         "flight".to_string()
@@ -6987,6 +7148,8 @@ fn derive_service_kind(taxonomy_code: Option<&str>, category: Option<&str>, titl
         "chauffeur".to_string()
     } else if normalized.contains("transfer") || normalized.contains("airport") {
         "transfer".to_string()
+    } else if normalized.contains("hotel") {
+        "hotel".to_string()
     } else if normalized.contains("translation") {
         "translation_support".to_string()
     } else {
@@ -7073,6 +7236,11 @@ fn build_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "patient_pid": row.try_get::<String, _>("patient_code").unwrap_or_default(),
         "appointment_id": row.try_get::<Option<Uuid>, _>("appointment_id").unwrap_or_default(),
         "appointment_title": row.try_get::<Option<String>, _>("appointment_title").unwrap_or_default(),
+        // The order the service counts for: linked directly, or through its
+        // non-medical appointment (QA 2026-11-11 L1).
+        "order_id": row.try_get::<Option<Uuid>, _>("linked_order_id").unwrap_or_default(),
+        "order_number": row.try_get::<Option<String>, _>("linked_order_number").unwrap_or_default(),
+        "order_linked_directly": row.try_get::<Option<Uuid>, _>("direct_order_id").unwrap_or_default().is_some(),
         "task_eligible": row.try_get::<bool, _>("task_eligible").unwrap_or(false),
         "linked_task_id": row.try_get::<Option<Uuid>, _>("linked_task_id").unwrap_or_default(),
         "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
@@ -7383,6 +7551,20 @@ mod service_kind_tests {
             "flight"
         );
         assert_eq!(derive_service_kind(None, None, "Flight home"), "flight");
+    }
+
+    #[test]
+    fn a_ride_from_the_hotel_is_not_a_hotel() {
+        assert_eq!(
+            derive_service_kind(None, None, "QA-LC Chauffeur Hotel → Helios (Concierge)"),
+            "chauffeur"
+        );
+        assert_eq!(
+            derive_service_kind(None, None, "Hotel transfer to the clinic"),
+            "transfer"
+        );
+        assert_eq!(derive_service_kind(None, None, "Hotel Adlon"), "hotel");
+        assert_eq!(derive_service_kind(None, None, "Begleitung"), "other");
     }
 
     #[test]

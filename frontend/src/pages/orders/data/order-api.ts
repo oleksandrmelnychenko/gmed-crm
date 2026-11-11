@@ -275,6 +275,22 @@ export function updateOrderPhase(orderId: string, phase: string) {
   return postJson<void>(`/orders/${orderId}/phase`, { phase });
 }
 
+const CLOSED_TASK_STATUSES = new Set(["completed", "cancelled"]);
+
+/**
+ * The titles of the order's tasks that are still open: completing the order
+ * does not close them, so the confirmation names them (QA 2026-11-11 L7).
+ */
+export async function fetchOrderOpenTaskTitles(orderId: string): Promise<string[]> {
+  const rows = await apiFetch<{ title?: string | null; status?: string | null }[]>(
+    `/tasks?order_id=${encodeURIComponent(orderId)}`,
+  );
+  return rows
+    .filter((row) => !CLOSED_TASK_STATUSES.has(row.status ?? ""))
+    .map((row) => row.title?.trim() ?? "")
+    .filter(Boolean);
+}
+
 export function updateOrderStatus(orderId: string, status: string, note?: string) {
   return postJson<void>(`/orders/${orderId}/status`, { status, note });
 }

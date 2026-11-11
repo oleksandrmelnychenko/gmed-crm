@@ -71,6 +71,8 @@ describe("commercial document context", () => {
   it("requires an order only for order-bound commercial templates", () => {
     expect(documentTemplateRequiresOrder("single_order")).toBe(true);
     expect(documentTemplateRequiresOrder("order_cost_estimate")).toBe(true);
+    // QA 2026-11-11 L9: a KÜE without an order was saved blank.
+    expect(documentTemplateRequiresOrder("cost_coverage_declaration")).toBe(true);
     expect(documentTemplateRequiresOrder("cost_estimate")).toBe(false);
     expect(documentTemplateRequiresOrder("privacy_consents")).toBe(false);
   });

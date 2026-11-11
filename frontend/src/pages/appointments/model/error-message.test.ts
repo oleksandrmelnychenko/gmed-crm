@@ -62,6 +62,31 @@ describe("appointmentActionErrorMessage", () => {
     );
   });
 
+  // QA 2026-11-11 L2: «Завершить» only said «Не удалось изменить статус.».
+  it("names the open checklist items when a completion is refused", () => {
+    const error = new ApiRequestError(
+      "At least one targeted appointment has open checklist items and cannot be completed",
+      {
+        status: 422,
+        body: {
+          code: "appointment_completion_open_checklist",
+          open_checklist_items: [
+            { appointment_id: "a-1", item_text: "Hotel bestätigen" },
+            { appointment_id: "a-1", item_text: "Quittungen sammeln" },
+            { appointment_id: "a-1", item_text: "Hotel bestätigen" },
+          ],
+        },
+      },
+    );
+
+    const message = appointmentActionErrorMessage(error, "Fallback");
+
+    expect(message).not.toBe("Fallback");
+    expect(message).toContain("«Hotel bestätigen», «Quittungen sammeln»");
+    expect(message.match(/Hotel bestätigen/g)).toHaveLength(1);
+    expect(message).not.toContain("{items}");
+  });
+
   it("localizes the server rejection of a report submitted or approved before the date", () => {
     const error = new ApiRequestError(
       "Interpreter reports cannot be approved before the appointment date",
