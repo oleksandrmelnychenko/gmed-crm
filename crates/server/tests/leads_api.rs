@@ -6819,6 +6819,51 @@ async fn seed_repeat_patient(app: &TestApp, assigned: bool) -> Uuid {
     }
     patient
 }
+
+/// Owner rule (2026-10-25): consents are never copied or pre-set for a
+/// repeat request. A patient whose card records a signed DSGVO consent still
+/// gets a repeat intake without any consent, also when the create body
+/// carries consent flags; staff tick them for this request (QA 2026-11-11 L3).
+#[tokio::test]
+async fn repeat_intake_starts_without_consents_even_for_a_consented_patient() {
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let patient = seed_repeat_patient(&app, true).await;
+    sqlx::query(
+        "UPDATE patients SET legal_status = jsonb_build_object('dsgvo_signed', true) WHERE id = $1",
+    )
+    .bind(patient)
+    .execute(&app.suite.pool)
+    .await
+    .unwrap();
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Repeat",
+            "last_name": "Regression",
+            "repeat_patient_id": patient,
+            "creation_key": Uuid::new_v4(),
+            "consent_privacy_practices": true,
+            "consent_healthcare": true
+        })),
+    )
+    .await;
+    assert!(status.is_success(), "{created}");
+    let lead = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    let (privacy, healthcare): (bool, bool) = sqlx::query_as(
+        "SELECT consent_privacy_practices, consent_healthcare FROM leads WHERE id = $1",
+    )
+    .bind(lead)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert!(!privacy, "the request consent is not taken over");
+    assert!(!healthcare, "the health-data consent is not taken over");
+}
+
 #[tokio::test]
 async fn repeat_intake_creation_is_atomic_replayable_visible_and_archivable() {
     let Some(app) = test_app().await else { return };

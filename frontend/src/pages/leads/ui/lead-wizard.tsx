@@ -2222,12 +2222,11 @@ function patientLegalSex(value: string | null | undefined) {
   return "";
 }
 
-function draftFromExistingPatient(patient: PatientDetail): Draft {
+export function draftFromExistingPatient(patient: PatientDetail): Draft {
   const draft = blankDraft();
   const insuranceProvider = patient.insurance_provider?.trim() ?? "";
   const insuranceNumber = patient.insurance_number?.trim() ?? "";
   const insuranceType = patient.insurance_type?.trim() ?? "";
-  const legal = asRecord(patient.legal_status);
 
   return {
     ...draft,
@@ -2260,7 +2259,10 @@ function draftFromExistingPatient(patient: PatientDetail): Draft {
     // The patient file keeps the coverage only in the intake of the first
     // request; a repeat request showed "Не указано" (live QA 2026-10-24).
     insuranceCoversGermany: patientInsuranceCoversGermany(patient.intake_profile),
-    privacyConsent: legal?.dsgvo_signed === true,
+    // Consents are never taken over from the card (owner rule 2026-10-25):
+    // the box starts unticked and nothing is stored until staff tick it for
+    // this request (QA 2026-11-11 L3).
+    privacyConsent: false,
     insuranceType,
     insuranceProvider: insuranceType === "self_pay" ? "" : insuranceProvider,
     insuranceNumber: insuranceType === "self_pay" ? "" : insuranceNumber,
