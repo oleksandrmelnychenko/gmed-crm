@@ -201,6 +201,8 @@ export interface AdminSystemTranslations {
   chat_attachment_type_blocked: string;
   chat_attachment_name_invalid: string;
   chat_attachments_limit: string;
+  chat_attachments_not_added: string;
+  chat_peer_unavailable: string;
   chat_attachments_uploading: string;
   chat_attachments_drop: string;
   chat_attachment_preview: string;
@@ -673,6 +675,8 @@ export const adminSystemRu: AdminSystemTranslations = {
   chat_attachment_too_large: "Файл превышает допустимый размер 20 МБ.",
   chat_attachment_name_invalid: "Сократите имя файла до 255 байт и уберите недопустимые символы.",
   chat_attachments_limit: "Можно прикрепить до 10 файлов за раз, не более 20 МБ каждый.",
+  chat_attachments_not_added: "Не добавлены (не более 10 файлов за раз): {names}",
+  chat_peer_unavailable: "С этим человеком нельзя начать чат: переписка с ним вам недоступна или его учётная запись неактивна.",
   chat_attachments_uploading: "Отправка файла {index} из {total}: {name}",
   chat_attachments_drop: "Отпустите файлы, чтобы прикрепить к сообщению",
   chat_attachment_preview: "Просмотреть",
@@ -1162,6 +1166,8 @@ export const adminSystemDe: AdminSystemTranslations = {
   chat_attachment_too_large: "Die Datei überschreitet die zulässigen 20 MB.",
   chat_attachment_name_invalid: "Kürzen Sie den Dateinamen auf 255 Bytes und entfernen Sie ungültige Zeichen.",
   chat_attachments_limit: "Bis zu 10 Dateien gleichzeitig, jeweils maximal 20 MB.",
+  chat_attachments_not_added: "Nicht angehängt (höchstens 10 Dateien gleichzeitig): {names}",
+  chat_peer_unavailable: "Mit dieser Person können Sie keinen Chat beginnen: Der Austausch ist für Sie nicht freigegeben oder ihr Konto ist inaktiv.",
   chat_attachments_uploading: "Datei {index} von {total} wird gesendet: {name}",
   chat_attachments_drop: "Dateien loslassen, um sie anzuhängen",
   chat_attachment_preview: "Vorschau",

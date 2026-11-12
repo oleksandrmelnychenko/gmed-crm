@@ -44,6 +44,7 @@ import {
   convertMessageFromE2E,
   downloadMessageAttachmentBytes,
   deletePeerMessage,
+  fetchAllowedPeer,
   fetchAllowedPeers,
   fetchConversations,
   fetchLatestPeerMessage,
@@ -63,6 +64,7 @@ import {
   mergeChatMessages,
   reconcileChatMessages,
   sortChatMessages,
+  splitChatTextLinks,
   roleDisplay,
   timeAgo,
   truncate,
@@ -301,6 +303,17 @@ function useChatPageContent() {
   }>());
   const [attachmentUpload, setAttachmentUpload] = useState<{ peerId: string; fileId: string; index: number; total: number; name: string } | null>(null);
   const [draggingFiles, setDraggingFiles] = useState(false);
+  // A deep link (`/chat?peer=`, from handoff buttons also `&name=&role=`)
+  // opens a person even without a conversation: the server names the peer
+  // only if the user may chat with them; the address's name and role are a
+  // first display only (QA 2026-11-12 system-A S2-1).
+  const routePeerHintRef = useRef<{ peer: string; name: string; role: string } | null>(null);
+  const routePeerRequestsRef = useRef(new Set<string>());
+  const [routePeers, setRoutePeers] = useState<Record<string, UserItem | "refused" | "failed">>({});
+  // Until the first answer of the peer list, "nobody found" would be a false claim.
+  const [usersLoaded, setUsersLoaded] = useState(false);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const [phoneWorkspaceHeight, setPhoneWorkspaceHeight] = useState<number | null>(null);
   const sendLockRef = useRef(false);
   const afterRescueRef = useRef<(job: E2ERescueJob) => void>(() => undefined);
   // Hands old end-to-end history that this browser can still open back to the
@@ -335,6 +348,39 @@ function useChatPageContent() {
     composer.style.height = "auto";
     composer.style.height = `${Math.min(composer.scrollHeight, 112)}px`;
   }, [input]);
+
+  // On a phone the notices and the page title above the chat pushed the
+  // composer below the screen: with a conversation open the workspace fills
+  // exactly the rest of the visible page, so the input stays at the bottom
+  // (QA 2026-11-12 system-A S3-5).
+  useLayoutEffect(() => {
+    const node = workspaceRef.current;
+    const main = node?.closest("main");
+    if (!node || !main || typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(max-width: 767px)");
+    const fit = () => {
+      if (!media.matches || !activePeer) {
+        setPhoneWorkspaceHeight(null);
+        return;
+      }
+      const offset = node.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop;
+      const paddingBottom = Number.parseFloat(getComputedStyle(main).paddingBottom) || 0;
+      setPhoneWorkspaceHeight(Math.max(320, Math.floor(main.clientHeight - offset - paddingBottom)));
+    };
+    fit();
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(fit) : null;
+    if (observer) {
+      observer.observe(main);
+      for (const child of Array.from(main.children)) observer.observe(child);
+    }
+    window.addEventListener("resize", fit);
+    media.addEventListener?.("change", fit);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", fit);
+      media.removeEventListener?.("change", fit);
+    };
+  }, [activePeer]);
 
   useEffect(() => {
     if (!messages.some((message) => message.expires_at)) return;
@@ -645,24 +691,50 @@ function useChatPageContent() {
       ignoredRoutePeerRef.current = null;
       return;
     }
+    // Old links and handoff buttons still name the peer in the address; the
+    // name is kept in memory as a first display and removed from the URL
+    // below (QA E-22).
+    const hintName = searchParams.get("name")?.trim() ?? "";
+    const hintRole = searchParams.get("role")?.trim() ?? "";
+    if (hintName || hintRole) {
+      routePeerHintRef.current = { peer, name: hintName.slice(0, 200), role: hintRole.slice(0, 64) };
+    }
     if (ignoredRoutePeerRef.current === peer) return;
 
     const fromConversation = conversations.find((item) => item.user_id === peer);
     const fromUserList = allUsers.find((item) => item.id === peer);
-    // The URL carries only the peer id: names and roles stay out of browser
-    // history and proxy logs (QA E-22).
+    const lookup = routePeers[peer];
+    const fromServer = typeof lookup === "object" ? lookup : undefined;
+    if (lookup === "refused" && !fromConversation && !fromUserList) {
+      // The server does not offer this person: no conversation opens and the
+      // list shows why.
+      if (activePeer === peer) clearActiveConversation();
+      return;
+    }
+    const hint = routePeerHintRef.current?.peer === peer ? routePeerHintRef.current : null;
+    const current = activePeer === peer ? { name: activeName, role: activeRole } : null;
     const name =
       fromConversation?.name ||
       fromUserList?.name ||
-      activeName;
+      fromServer?.name ||
+      current?.name ||
+      hint?.name ||
+      "";
     const role =
       fromConversation?.role ||
       fromUserList?.role ||
-      activeRole;
+      fromServer?.role ||
+      current?.role ||
+      hint?.role ||
+      "";
 
     if (activePeer !== peer && name) {
       if (activePeer) draftRef.current.set(activePeer, { input, pendingFiles, messageTimerSeconds });
       openPeerFromRoute(peer, name, role);
+    } else if (activePeer === peer && name && (name !== activeName || role !== activeRole)) {
+      // The server's name replaces the first display from the address.
+      setActiveName(name);
+      setActiveRole(role);
     }
 
   }, [
@@ -672,8 +744,31 @@ function useChatPageContent() {
     allUsers,
     conversations,
     openPeerFromRoute,
+    routePeers,
     searchParams,
   ]);
+
+  useEffect(() => {
+    const peer = searchParams.get("peer");
+    if (!peer || !canViewChat || loading || peer === myId) return;
+    if (conversations.some((item) => item.user_id === peer) || allUsers.some((item) => item.id === peer)) return;
+    if (routePeerRequestsRef.current.has(peer)) return;
+    routePeerRequestsRef.current.add(peer);
+    void fetchAllowedPeer(peer)
+      .then((found) => setRoutePeers((current) => ({ ...current, [peer]: found ?? "refused" })))
+      .catch(() => setRoutePeers((current) => ({ ...current, [peer]: "failed" })));
+  }, [allUsers, canViewChat, conversations, loading, myId, searchParams]);
+
+  const routePeerId = searchParams.get("peer");
+  const routePeerLookup = routePeerId ? routePeers[routePeerId] : undefined;
+  const routePeerNotice =
+    routePeerId && routePeerId !== activePeer
+      ? routePeerLookup === "refused" && !conversations.some((item) => item.user_id === routePeerId)
+        ? t.chat_peer_unavailable
+        : routePeerLookup === "failed"
+          ? t.chat_load_failed
+          : null
+      : null;
 
   useEffect(() => {
     const state = location.state as
@@ -879,11 +974,10 @@ function useChatPageContent() {
     );
   };
 
-  const closeConversation = () => {
+  function clearActiveConversation() {
     if (activePeer) draftRef.current.set(activePeer, { input, pendingFiles, messageTimerSeconds });
     setInput("");
     setMessageTimerSeconds(0);
-    ignoredRoutePeerRef.current = activePeerRef.current;
     messageRequestIdRef.current += 1;
     activePeerRef.current = null;
     setActivePeer(null);
@@ -896,6 +990,11 @@ function useChatPageContent() {
     setPendingFiles([]);
     setMessageSearch("");
     setSecureStatus(null);
+  }
+
+  const closeConversation = () => {
+    ignoredRoutePeerRef.current = activePeerRef.current;
+    clearActiveConversation();
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
@@ -925,7 +1024,10 @@ function useChatPageContent() {
     } catch {
       if (requestId === userRequestIdRef.current) setUserError(true);
     } finally {
-      if (requestId === userRequestIdRef.current) dispatchChatState({ usersLoading: false });
+      if (requestId === userRequestIdRef.current) {
+        dispatchChatState({ usersLoading: false });
+        setUsersLoaded(true);
+      }
     }
   }, [canViewChat]);
 
@@ -952,6 +1054,8 @@ function useChatPageContent() {
     if (!activePeer || sendLockRef.current || !files.length) return;
     const additions: PendingChatAttachment[] = [];
     const errors: string[] = [];
+    // Files beyond the limit are named, not dropped silently (QA 2026-11-12 system-A S3-6).
+    const overLimit: string[] = [];
     for (const file of files) {
       const problem = chatAttachmentProblem(file);
       if (problem) {
@@ -959,8 +1063,11 @@ function useChatPageContent() {
         continue;
       }
       if ([...pendingFiles, ...additions].some((entry) => entry.file.name === file.name && entry.file.size === file.size && entry.file.lastModified === file.lastModified)) continue;
-      if (pendingFiles.length + additions.length >= CHAT_ATTACHMENT_MAX_COUNT) { errors.push(t.chat_attachments_limit); break; }
+      if (pendingFiles.length + additions.length >= CHAT_ATTACHMENT_MAX_COUNT) { overLimit.push(file.name); continue; }
       additions.push({ id: crypto.randomUUID(), file });
+    }
+    if (overLimit.length) {
+      errors.push(t.chat_attachments_not_added.replace("{names}", overLimit.join(", ")));
     }
     setPendingFiles((current) => [...current, ...additions]);
     setSecureStatus(errors.length ? errors.join(" ") : null);
@@ -1260,7 +1367,12 @@ function useChatPageContent() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-5.5rem)] min-h-[320px] overflow-hidden rounded-xl border bg-card shadow-sm sm:h-[calc(100dvh-8rem)] sm:rounded-2xl" data-testid="chat-workspace">
+    <div
+      ref={workspaceRef}
+      style={phoneWorkspaceHeight ? { height: phoneWorkspaceHeight } : undefined}
+      className="flex h-[calc(100dvh-5.5rem)] min-h-[320px] overflow-hidden rounded-xl border bg-card shadow-sm sm:h-[calc(100dvh-8rem)] sm:rounded-2xl"
+      data-testid="chat-workspace"
+    >
       {/* ── Left: Conversations ── */}
       <div
         className={cn(
@@ -1318,7 +1430,7 @@ function useChatPageContent() {
               role="listbox"
               aria-label={t.chat_search_users}
             >
-              {usersLoading ? (
+              {usersLoading || (!usersLoaded && !userError) ? (
                 <p role="status" className="py-4 text-center text-xs text-muted-foreground">{t.common_loading}</p>
               ) : userError ? (
                 <div className="flex flex-col items-center gap-2 py-4 text-center">
@@ -1351,6 +1463,12 @@ function useChatPageContent() {
             </div>
           </div>
         )}
+
+        {routePeerNotice ? (
+          <p role="alert" data-testid="chat-route-peer-notice" className="mx-4 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            {routePeerNotice}
+          </p>
+        ) : null}
 
         {/* Conversation list */}
         <div className="flex-1 overflow-y-auto">
@@ -1616,7 +1734,21 @@ function useChatPageContent() {
                               ),
                         )}
                       >
-                        {m.message}
+                        {splitChatTextLinks(m.message ?? "").map((part, partIndex) =>
+                          part.kind === "link" ? (
+                            <a
+                              key={partIndex}
+                              href={part.href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline underline-offset-2 hover:opacity-80"
+                            >
+                              {part.text}
+                            </a>
+                          ) : (
+                            <span key={partIndex}>{part.text}</span>
+                          ),
+                        )}
                       </div>
                     )}
                     <div className="mt-0.5 flex min-h-5 items-center gap-1.5 px-1 text-[10px] text-muted-foreground">

@@ -33,7 +33,13 @@ import {
   type RealtimeConnectionStatus,
 } from "@/lib/realtime";
 import {
+  bannerAnnouncements,
+  fetchActiveAnnouncements,
   fetchNotificationPanelWorkspace,
+  groupNotificationEntries,
+  readSeenAnnouncementIds,
+  unseenAnnouncementCount,
+  writeSeenAnnouncementIds,
   fetchTopbarChatMessages,
   fetchTopbarPresence,
   fetchUnreadNotificationCount,
@@ -46,6 +52,7 @@ import {
   type ActiveSession,
   type ChatMessage,
   type Notification,
+  type NotificationEntry,
   dismissActiveAnnouncement,
   fetchNewLeadQueue,
   isAnnouncementDismissible,
@@ -79,6 +86,8 @@ const TOPBAR_REALTIME_EVENTS = [
   "announcement.created",
   "announcement.updated",
   "announcement.deleted",
+  // Hidden in another tab or the bell panel: the banner and count follow.
+  "announcement.dismissed",
 ] as const;
 
 function initials(name: string) {
@@ -249,6 +258,52 @@ export function Topbar() {
   const [notifOpen, setNotifOpen] = useState(false);
   const [usersOpen, setUsersOpen] = useState(false);
 
+  // Active announcements: an unseen one raises the bell count, a warning or
+  // error one also stays in a banner under the bar (QA 2026-11-12 system-A S3-3).
+  const [announcements, setAnnouncements] = useState<ActiveAnnouncement[]>([]);
+  const [seenAnnouncementIds, setSeenAnnouncementIds] = useState<string[]>([]);
+  const [bannerDismissingId, setBannerDismissingId] = useState<string | null>(null);
+  const userId = user?.id;
+  useEffect(() => {
+    setSeenAnnouncementIds(readSeenAnnouncementIds(userId));
+  }, [userId]);
+  const loadAnnouncements = useCallback(() => {
+    if (notificationsLocked) {
+      setAnnouncements([]);
+      return;
+    }
+    void fetchActiveAnnouncements()
+      .then(setAnnouncements)
+      .catch(() => undefined);
+  }, [notificationsLocked]);
+  useEffect(() => {
+    loadAnnouncements();
+    const timer = window.setInterval(loadAnnouncements, 60_000);
+    return () => window.clearInterval(timer);
+  }, [loadAnnouncements]);
+  // Opening the bell shows every active announcement: they stop counting.
+  useEffect(() => {
+    if (!notifOpen || announcements.length === 0) return;
+    const ids = announcements.map((announcement) => announcement.id);
+    if (unseenAnnouncementCount(announcements, seenAnnouncementIds) === 0) return;
+    setSeenAnnouncementIds(ids);
+    writeSeenAnnouncementIds(userId, ids);
+  }, [announcements, notifOpen, seenAnnouncementIds, userId]);
+  const bellCount = notificationsLocked
+    ? 0
+    : unread + unseenAnnouncementCount(announcements, seenAnnouncementIds);
+  const bannerItems = notificationsLocked ? [] : bannerAnnouncements(announcements);
+  const dismissBannerAnnouncement = (id: string) => {
+    setBannerDismissingId(id);
+    void dismissActiveAnnouncement(id)
+      .then(() => {
+        clearApiCache("/announcements/active");
+        setAnnouncements((current) => current.filter((announcement) => announcement.id !== id));
+      })
+      .catch(() => undefined)
+      .finally(() => setBannerDismissingId(null));
+  };
+
   const openLead = useCallback((leadId: string) => {
     const query = new URLSearchParams({ lead: leadId });
     if (canOpenLeadWizard) query.set("view", "wizard");
@@ -342,6 +397,8 @@ export function Topbar() {
   useDebouncedRealtimeSubscription(TOPBAR_REALTIME_EVENTS, (_event, events) => {
     if (events.some((event) => event.type.startsWith("announcement."))) {
       clearApiCache("/announcements/active");
+      // A new or changed announcement arrives live: bell count and banner.
+      loadAnnouncements();
     }
     if (events.every((event) => event.type.startsWith("announcement."))) return;
     if (notificationsLocked) return;
@@ -607,9 +664,9 @@ export function Topbar() {
             title={t.topbar_notifications}
           >
             <Bell aria-hidden="true" className="size-[17px]" />
-            {unread > 0 && (
+            {bellCount > 0 && (
               <span className="absolute top-0.5 right-0.5 flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-[var(--badge,var(--brand))] text-[10px] font-semibold text-[var(--badge-foreground,#fff)] px-1">
-                {unread}
+                {bellCount > 99 ? "99+" : bellCount}
               </span>
             )}
           </TopbarIconButton>
@@ -677,6 +734,41 @@ export function Topbar() {
           ) : null}
         </div>
       </header>
+
+      {bannerItems.length > 0 ? (
+        <div data-testid="announcement-banner" className="shrink-0 border-b border-border">
+          {bannerItems.map((announcement) => (
+            <div
+              key={announcement.id}
+              role={announcement.variant === "error" ? "alert" : "status"}
+              className={cn(
+                "flex items-start gap-2 px-3 py-2 text-xs sm:px-4",
+                announcement.variant === "error"
+                  ? "bg-red-500/10 text-red-800 dark:text-red-300"
+                  : "bg-amber-500/10 text-amber-800 dark:text-amber-300",
+              )}
+            >
+              <p className="line-clamp-3 min-w-0 flex-1 break-words">
+                <span className="font-semibold">{announcement.title}</span>
+                <span className="mx-1.5" aria-hidden="true">·</span>
+                {announcement.message}
+              </p>
+              {isAnnouncementDismissible(announcement) ? (
+                <button
+                  type="button"
+                  className="flex size-6 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-black/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current disabled:opacity-50 motion-reduce:transition-none"
+                  onClick={() => dismissBannerAnnouncement(announcement.id)}
+                  disabled={bannerDismissingId === announcement.id}
+                  title={t.common_dismiss}
+                  aria-label={`${t.common_dismiss}: ${announcement.title}`}
+                >
+                  <X aria-hidden="true" className="size-3.5" />
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {/* Notification panel */}
         {notifOpen && !notificationsLocked && (
@@ -885,11 +977,9 @@ function NotificationPanel({
       .catch(() => {});
   };
 
-  const handleOpen = (item: Notification) => {
-    if (!item.is_read) {
-      markOne(item.id);
-    }
-    const href = notificationHrefForRole(item, staffRole);
+  const handleOpen = (entry: NotificationEntry) => {
+    for (const id of entry.unreadIds) markOne(id);
+    const href = notificationHrefForRole(entry.item, staffRole);
     if (href) {
       navigate(staffHrefIfAllowed(staffRole, href, staffCapabilities));
       onClose();
@@ -994,13 +1084,14 @@ function NotificationPanel({
               {t.topbar_no_notifications}
             </div>
           ) : (
-            notifs.map((n) => {
+            groupNotificationEntries(notifs).map((entry) => {
+              const n = entry.item;
               const copy = localizedNotificationCopy(n, lang, staffRole);
               return (
                 <button
                 key={n.id}
                 type="button"
-                onClick={() => handleOpen(n)}
+                onClick={() => handleOpen(entry)}
                 className={`flex w-full cursor-pointer gap-3 border-b border-border px-4 py-3 text-left transition-colors last:border-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
                   n.is_read
                     ? "opacity-60"
@@ -1012,8 +1103,15 @@ function NotificationPanel({
                 ) : (
                   <Bell aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                 )}
-                <div className="min-w-0">
-                  <p className="text-sm font-medium truncate">{copy.title}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
+                    <span className="truncate">{copy.title}</span>
+                    {entry.count > 1 ? (
+                      <span className="shrink-0 rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
+                        {entry.count}
+                      </span>
+                    ) : null}
+                  </p>
                   {copy.body && (
                     <p className="text-xs text-muted-foreground truncate">
                       {copy.body}

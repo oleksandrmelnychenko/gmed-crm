@@ -241,6 +241,10 @@ fn publish_message_event(
 #[derive(Deserialize)]
 struct AllowedPeersQuery {
     search: Option<String>,
+    /// One person by id: the chat resolves the name and role of a deep-link
+    /// peer (`/chat?peer=`) before any conversation exists. Only a person the
+    /// caller may chat with comes back; anybody else gives an empty list.
+    id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -739,11 +743,25 @@ async fn list_allowed_peers(
     if let Err(resp) = ensure_chat_workspace_role(&auth) {
         return resp;
     }
-    let search_pattern = format!("%{}%", query.search.unwrap_or_default().trim());
-    let rows = match load_allowed_peer_rows(&state, &auth, &search_pattern).await {
+    let peer_id = match query.id.as_deref().map(str::trim) {
+        Some(raw) if !raw.is_empty() => match Uuid::parse_str(raw) {
+            Ok(id) => Some(id),
+            Err(_) => return Json(Vec::<serde_json::Value>::new()).into_response(),
+        },
+        _ => None,
+    };
+    let search_pattern = if peer_id.is_some() {
+        "%%".to_string()
+    } else {
+        format!("%{}%", query.search.unwrap_or_default().trim())
+    };
+    let mut rows = match load_allowed_peer_rows(&state, &auth, &search_pattern).await {
         Ok(rows) => rows,
         Err(resp) => return resp,
     };
+    if let Some(peer_id) = peer_id {
+        rows.retain(|row| row.try_get::<Uuid, _>("id").ok() == Some(peer_id));
+    }
 
     Json(rows_to_peer_json(rows)).into_response()
 }

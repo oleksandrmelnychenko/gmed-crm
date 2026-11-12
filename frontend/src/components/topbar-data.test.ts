@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  bannerAnnouncements,
+  groupNotificationEntries,
   isAnnouncementDismissible,
+  unseenAnnouncementCount,
   localizedNotificationCopy,
   notificationHrefForRole,
   oldestNewLead,
@@ -371,6 +374,61 @@ describe("notificationHrefForRole", () => {
     const incident = notification("security_incident", "incident-1");
     incident.kind = "security_incident";
     expect(notificationHrefForRole(incident, "it_admin")).toBe("/incidents");
+  });
+
+  it("opens a new patient feedback on the feedback page, not the patient (QA 2026-11-12 system-A S3-4)", () => {
+    const feedback = notification("patient", "patient-1");
+    feedback.kind = "feedback";
+    expect(notificationHrefForRole(feedback, "ceo")).toBe("/feedback");
+    expect(notificationHrefForRole(feedback, "patient_manager")).toBe("/feedback");
+  });
+});
+
+describe("announcements in the bell", () => {
+  const announcement = (id: string, variant: string) => ({ id, title: id, message: id, variant });
+
+  it("keeps warnings and errors in the banner", () => {
+    expect(
+      bannerAnnouncements([
+        announcement("a", "info"),
+        announcement("b", "warning"),
+        announcement("c", "error"),
+        announcement("d", "success"),
+      ]).map((item) => item.id),
+    ).toEqual(["b", "c"]);
+  });
+
+  it("counts the announcements not yet seen in the bell", () => {
+    const active = [announcement("a", "info"), announcement("b", "warning")];
+    expect(unseenAnnouncementCount(active, [])).toBe(2);
+    expect(unseenAnnouncementCount(active, ["a", "old"])).toBe(1);
+    expect(unseenAnnouncementCount(active, ["a", "b"])).toBe(0);
+  });
+});
+
+describe("groupNotificationEntries", () => {
+  const chatNotice = (id: string, peer: string, isRead = false): Notification => ({
+    ...notification("message_peer", peer),
+    id,
+    kind: id.startsWith("file") ? "new_file" : "new_message",
+    is_read: isRead,
+  });
+
+  it("shows one entry per conversation with the number of notices", () => {
+    const entries = groupNotificationEntries([
+      chatNotice("file-3", "peer-a"),
+      notification("order"),
+      chatNotice("msg-2", "peer-a", true),
+      chatNotice("msg-1", "peer-b"),
+      chatNotice("msg-0", "peer-a"),
+    ]);
+    expect(entries.map((entry) => [entry.item.id, entry.count])).toEqual([
+      ["file-3", 3],
+      ["notification-1", 1],
+      ["msg-1", 1],
+    ]);
+    expect(entries[0].unreadIds).toEqual(["file-3", "msg-0"]);
+    expect(entries[0].item.is_read).toBe(false);
   });
 });
 

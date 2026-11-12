@@ -782,6 +782,93 @@ export function isAnnouncementDismissible(
   return announcement.dismissible ?? announcement.variant !== "error";
 }
 
+/**
+ * Announcements that must not be missed: a warning (e.g. maintenance) or an
+ * error stays in a banner under the top bar while it is active, not only in
+ * the bell (QA 2026-11-12 system-A S3-3).
+ */
+export function bannerAnnouncements(announcements: ActiveAnnouncement[]): ActiveAnnouncement[] {
+  return announcements.filter(
+    (announcement) => announcement.variant === "warning" || announcement.variant === "error",
+  );
+}
+
+/** Active announcements the user has not yet seen in the bell. */
+export function unseenAnnouncementCount(
+  announcements: Pick<ActiveAnnouncement, "id">[],
+  seenIds: readonly string[],
+): number {
+  const seen = new Set(seenIds);
+  return announcements.filter((announcement) => !seen.has(announcement.id)).length;
+}
+
+const SEEN_ANNOUNCEMENTS_KEY = "gmed.topbar.seen-announcements";
+
+/**
+ * Which announcements this browser already showed the user in the bell. A
+ * per-viewer convenience only: without storage every active announcement
+ * counts as new until the bell is opened in this page session.
+ */
+export function readSeenAnnouncementIds(userId: string | undefined): string[] {
+  if (!userId) return [];
+  try {
+    const raw = window.localStorage.getItem(`${SEEN_ANNOUNCEMENTS_KEY}.${userId}`);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeSeenAnnouncementIds(userId: string | undefined, ids: readonly string[]) {
+  if (!userId) return;
+  try {
+    window.localStorage.setItem(`${SEEN_ANNOUNCEMENTS_KEY}.${userId}`, JSON.stringify(ids.slice(0, 100)));
+  } catch {
+    // Storage may be blocked; the badge then resets with the page.
+  }
+}
+
+/** One bell entry per chat: the newest notice of a conversation and how many it stands for. */
+export interface NotificationEntry {
+  item: Notification;
+  /** Ids of all notices the entry stands for (unread first, for marking). */
+  ids: string[];
+  unreadIds: string[];
+  count: number;
+}
+
+/**
+ * Groups the chat notices (new message, new file) of one conversation into one
+ * bell entry with a count; every other notice keeps its own entry. The list
+ * arrives newest first, so the first notice of a peer is the representative
+ * and the entry keeps its place (QA 2026-11-12 system-A S3-8).
+ */
+export function groupNotificationEntries(notifications: Notification[]): NotificationEntry[] {
+  const entries: NotificationEntry[] = [];
+  const byPeer = new Map<string, NotificationEntry>();
+  for (const item of notifications) {
+    const peer = item.entity_type === "message_peer" && item.entity_id ? item.entity_id : null;
+    const existing = peer ? byPeer.get(peer) : undefined;
+    if (existing) {
+      existing.ids.push(item.id);
+      if (!item.is_read) existing.unreadIds.push(item.id);
+      existing.count += 1;
+      if (!item.is_read && existing.item.is_read) existing.item = { ...existing.item, is_read: false };
+      continue;
+    }
+    const entry: NotificationEntry = {
+      item,
+      ids: [item.id],
+      unreadIds: item.is_read ? [] : [item.id],
+      count: 1,
+    };
+    entries.push(entry);
+    if (peer) byPeer.set(peer, entry);
+  }
+  return entries;
+}
+
 export interface ChatMessage {
   from_user: string;
   message: string;
@@ -873,6 +960,10 @@ export function notificationHrefForRole(item: Notification, role: string) {
   }
   // A possible EU sanctions list match is reviewed by the CEO.
   if (item.entity_type === "sanctions_hit") return role === "ceo" ? "/sanctions" : null;
+  // A new patient feedback is stored against the patient, but the notice is
+  // about the answer: it opens the feedback list, not the patient preview
+  // (QA 2026-11-12 system-A S3-4).
+  if (item.kind === "feedback") return "/feedback";
   if (!item.entity_id) return null;
   if (item.entity_type === "message_peer") return `/chat?peer=${item.entity_id}`;
   if (item.entity_type === "lead") return `/leads?lead=${item.entity_id}`;
@@ -960,12 +1051,16 @@ export function fetchUserNotifications(options: { forceFresh?: boolean } = {}) {
   });
 }
 
+export function fetchActiveAnnouncements() {
+  return apiFetch<ActiveAnnouncement[]>("/announcements/active", {
+    cacheTtlMs: TOPBAR_STATIC_CACHE_TTL_MS,
+  });
+}
+
 export async function fetchNotificationPanelWorkspace() {
   const [notifications, announcements] = await Promise.all([
     fetchUserNotifications().catch(() => []),
-    apiFetch<ActiveAnnouncement[]>("/announcements/active", {
-      cacheTtlMs: TOPBAR_STATIC_CACHE_TTL_MS,
-    }).catch(() => []),
+    fetchActiveAnnouncements().catch(() => []),
   ]);
   return { notifications, announcements };
 }

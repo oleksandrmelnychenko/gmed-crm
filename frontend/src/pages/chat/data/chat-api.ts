@@ -88,6 +88,20 @@ export function fetchAllowedPeers(searchTerm: string) {
   return apiFetch<UserItem[]>(query);
 }
 
+/**
+ * One person the user may chat with, by id (a `/chat?peer=` deep link before
+ * any conversation exists). `null` when the server does not offer this person:
+ * the user may not chat with them. The result is filtered here too, so an
+ * older server that ignores `id` still answers correctly.
+ */
+export async function fetchAllowedPeer(peerId: string) {
+  const peers = await apiFetch<UserItem[]>(
+    `/messages/allowed-peers?id=${encodeURIComponent(peerId)}`,
+    { cache: "no-store" },
+  );
+  return peers.find((peer) => peer.id === peerId) ?? null;
+}
+
 export async function sendPeerMessage(peerId: string, payload: JsonPayload) {
   const receipt = await apiFetch<unknown>(`/messages/${peerId}`, {
     method: "POST",

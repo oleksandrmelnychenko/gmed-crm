@@ -6,6 +6,7 @@ import {
   isSameChatMessageGroup,
   mergeChatMessages,
   reconcileChatMessages,
+  splitChatTextLinks,
   timeAgo,
 } from "./chat-model";
 import type { Message } from "./types";
@@ -115,5 +116,30 @@ describe("chat message grouping", () => {
     expect(chatMessageDateKey("2026-08-23T10:00:00Z")).toBe("2026-08-23");
     expect(chatMessageDateKey("2026-09-27T21:30:00Z")).toBe("2026-09-27");
     expect(chatMessageDateKey("2026-09-27T22:30:00Z")).toBe("2026-09-28");
+  });
+});
+
+describe("splitChatTextLinks", () => {
+  it("turns http(s) addresses into links and keeps the sentence punctuation outside", () => {
+    expect(splitChatTextLinks("Termin: https://example.org/a?b=1. Danke")).toEqual([
+      { kind: "text", text: "Termin: " },
+      { kind: "link", text: "https://example.org/a?b=1", href: "https://example.org/a?b=1" },
+      { kind: "text", text: ". Danke" },
+    ]);
+    expect(splitChatTextLinks("(see http://example.org/x)")).toEqual([
+      { kind: "text", text: "(see " },
+      { kind: "link", text: "http://example.org/x", href: "http://example.org/x" },
+      { kind: "text", text: ")" },
+    ]);
+    expect(splitChatTextLinks("https://de.wikipedia.org/wiki/A_(B)")[0]).toMatchObject({
+      kind: "link",
+      text: "https://de.wikipedia.org/wiki/A_(B)",
+    });
+  });
+
+  it("leaves other schemes and markup as plain text", () => {
+    for (const text of ["javascript:alert(1)", "<a href=\"x\">x</a>", "ftp://example.org", "mailto:a@b.de"]) {
+      expect(splitChatTextLinks(text)).toEqual([{ kind: "text", text }]);
+    }
   });
 });

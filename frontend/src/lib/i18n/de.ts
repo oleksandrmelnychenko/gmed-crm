@@ -1859,7 +1859,7 @@ export const de = {
   chat_type_message: "Nachricht eingeben...",
   chat_send: "Senden",
   chat_select_conversation: "Wählen Sie eine Unterhaltung aus",
-  chat_you: "Du",
+  chat_you: "Sie",
   chat_online: "Online",
   chat_just_now: "Gerade eben",
   chat_minutes_ago: "Min. her",

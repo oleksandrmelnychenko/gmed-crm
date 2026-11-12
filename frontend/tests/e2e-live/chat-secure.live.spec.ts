@@ -41,7 +41,7 @@ async function reopenConversation(
 
 /**
  * The message bubble with that text. Since the chat stores messages on the
- * server, the conversation list also previews the text ("Du: …"), so a plain
+ * server, the conversation list also previews the text ("Sie: …"), so a plain
  * text lookup would find two elements.
  */
 function messageBubble(page: import("@playwright/test").Page, text: string) {

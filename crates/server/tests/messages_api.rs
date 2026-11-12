@@ -327,6 +327,37 @@ async fn it_admin_chats_only_with_patient_manager_billing_and_ceo() {
     assert!(!ids.contains(&sales.to_string()), "{peers}");
     assert!(!ids.contains(&interpreter.to_string()), "{peers}");
 
+    // The one-person lookup of a chat deep link (`/chat?peer=`) answers only
+    // for a person the caller may chat with (QA 2026-11-12 system-A S2-1).
+    for (peer, allowed) in [(pm, true), (sales, false), (interpreter, false)] {
+        let (status, found) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/messages/allowed-peers?id={peer}"),
+            &it_admin_auth,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{found}");
+        let found = found.as_array().unwrap();
+        if allowed {
+            assert_eq!(found.len(), 1, "{found:?}");
+            assert_eq!(found[0]["id"].as_str(), Some(peer.to_string().as_str()));
+        } else {
+            assert!(found.is_empty(), "{found:?}");
+        }
+    }
+    let (status, found) = json_request(
+        &app,
+        "GET",
+        "/api/v1/messages/allowed-peers?id=not-a-uuid",
+        &it_admin_auth,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found, json!([]));
+
     let (status, body) = json_request(
         &app,
         "POST",
