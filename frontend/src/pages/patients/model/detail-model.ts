@@ -876,3 +876,28 @@ export const PATIENT_DETAIL_LANGUAGE_HELPERS = {
 export function usePatientDetailLabels() {
   return useLanguageBound(PATIENT_DETAIL_LANGUAGE_HELPERS);
 }
+
+/**
+ * Whether the signed-in user may complete a patient checklist item. Mirrors
+ * `complete_patient_workflow_item` (workflow_checklists.rs): the read-only CEO
+ * assistant and roles outside the workflow get a 403, so they see no control
+ * (QA F-C10).
+ */
+export function canCompletePatientChecklistItem(
+  actor: { role: string; id?: string } | null | undefined,
+  item: { owner_user_id?: string | null; owner_role: string },
+) {
+  if (!actor) return false;
+  const workflowRoles = [
+    "ceo",
+    "patient_manager",
+    "billing",
+    "teamlead_interpreter",
+    "interpreter",
+    "concierge",
+  ];
+  if (!workflowRoles.includes(actor.role)) return false;
+  if (actor.role === "ceo" || actor.role === "patient_manager") return true;
+  if (actor.id && item.owner_user_id === actor.id) return true;
+  return actor.role === "concierge" && item.owner_role === "concierge";
+}

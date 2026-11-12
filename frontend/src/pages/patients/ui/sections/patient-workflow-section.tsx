@@ -69,6 +69,8 @@ type PatientWorkflowTabProps = {
   priorityLabel: PriorityLabelFn;
   priorityBadgeClass: PriorityBadgeClassFn;
   onCompleteWorkflowItem: (itemId: string) => void | Promise<void>;
+  /** Whether the user may complete this item; without it every open item offers the control. */
+  canCompleteWorkflowItem?: (item: WorkflowChecklistItem) => boolean;
   onSubmitWorkflowItem: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
   onWorkflowItemTextChange: (value: string) => void;
   onWorkflowOwnerChange: (value: string) => void;
@@ -113,6 +115,7 @@ type WorkflowChecklistRenderProps = {
   priorityLabel: PriorityLabelFn;
   priorityBadgeClass: PriorityBadgeClassFn;
   onCompleteWorkflowItem: (itemId: string) => void | Promise<void>;
+  canCompleteWorkflowItem?: (item: WorkflowChecklistItem) => boolean;
 };
 
 type WorkflowContentProps = WorkflowChecklistRenderProps & {
@@ -311,6 +314,7 @@ function WorkflowContent({
   priorityLabel,
   priorityBadgeClass,
   onCompleteWorkflowItem,
+  canCompleteWorkflowItem,
   onCreateItemClick,
 }: WorkflowContentProps) {
   const { t } = useLang();
@@ -473,7 +477,7 @@ function WorkflowContent({
         ) : undefined
       }
       rowActions={(row) =>
-        !row.item.is_completed ? (
+        !row.item.is_completed && (canCompleteWorkflowItem?.(row.item) ?? true) ? (
           <Button
             type="button"
             variant="ghost"
@@ -511,6 +515,7 @@ export function PatientWorkflowTab({
   priorityLabel,
   priorityBadgeClass,
   onCompleteWorkflowItem,
+  canCompleteWorkflowItem,
   onSubmitWorkflowItem,
   onWorkflowItemTextChange,
   onWorkflowOwnerChange,
@@ -574,6 +579,7 @@ export function PatientWorkflowTab({
           priorityLabel={priorityLabel}
           priorityBadgeClass={priorityBadgeClass}
           onCompleteWorkflowItem={onCompleteWorkflowItem}
+          canCompleteWorkflowItem={canCompleteWorkflowItem}
           onCreateItemClick={() => setCreateOpen(true)}
         />
       )}

@@ -4,13 +4,14 @@ import {
   formatAppDateTime,
   isoToBerlinLocalInput,
 } from "@/lib/app-time-zone";
+import { ApiRequestError, isLocalizedApiError } from "@/lib/api";
 import {
   formatMoneyAmount,
   moneyLineAmounts,
   roundCents,
   type MoneyLineAmounts,
 } from "@/lib/money";
-import { hasCapability, type Actor } from "@/lib/permissions";
+import { hasCapability, type Actor, type CapabilityHolder } from "@/lib/permissions";
 
 import { blankOrderPrepaymentTerms } from "./order-prepayment";
 import { blankPartnerCostAmounts } from "./partner-cost-amounts";
@@ -145,6 +146,42 @@ export function orderPermissions(actor?: Actor): OrdersPermissions {
       hasCapability(actor, "orders.economics") && hasCapability(actor, "invoices.finance"),
     readsOnlyOrderPart: readsOnlyOrderPart(actor),
   };
+}
+
+/**
+ * Whether the signed-in user may press «Завершить» on an order checklist item.
+ * Mirrors `complete_order_workflow_item` (workflow_checklists.rs): the CEO and
+ * the patient manager complete any item, billing only an item assigned to them;
+ * every other role (the read-only CEO assistant, QA F-C10) gets a 403, so the
+ * control is not offered.
+ */
+export function canCompleteOrderChecklistItem(
+  actor: (CapabilityHolder & { id?: string }) | null | undefined,
+  item: { owner_user_id: string | null },
+) {
+  if (!actor) return false;
+  if (actor.role === "ceo" || actor.role === "patient_manager") return true;
+  return (
+    actor.role === "billing" &&
+    Boolean(actor.id) &&
+    item.owner_user_id === actor.id
+  );
+}
+
+/**
+ * The text shown when an order checklist change fails: a translated server
+ * error stays, a refusal for the role reads `forbidden`, anything else the
+ * translated `fallback` — never the raw English server message (QA F-C10).
+ */
+export function workflowChecklistErrorText(
+  error: unknown,
+  texts: { fallback: string; forbidden: string },
+): string {
+  if (isLocalizedApiError(error)) return error.message;
+  if (error instanceof ApiRequestError && (error.status === 401 || error.status === 403)) {
+    return texts.forbidden;
+  }
+  return texts.fallback;
 }
 
 /**

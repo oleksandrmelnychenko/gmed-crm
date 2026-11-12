@@ -161,6 +161,7 @@ export function LeadIdentityDocumentDataForm({
   holder,
   onApplyHolder,
   clientMayType = false,
+  typedByStaffInClientForm = false,
   noScanText,
 }: {
   /** See `IdentityDocumentStatusChip`. */
@@ -193,6 +194,11 @@ export function LeadIdentityDocumentDataForm({
    * says so (`id_data_typed_by_client`).
    */
   clientMayType?: boolean;
+  /**
+   * Staff typed the data in «Заполнить анкету за клиента» (the server's marker
+   * `identification: staff`): they are not the client's (QA F-C5).
+   */
+  typedByStaffInClientForm?: boolean;
 }) {
   const fieldId = useId();
   const savedKey = JSON.stringify(identityDocumentDraft(source, fallbackValidUntil));
@@ -396,7 +402,10 @@ export function LeadIdentityDocumentDataForm({
   const entered = identityDocumentEnteredLine(marks ?? source, tx);
   // The lead may type the data in the cabinet (owner 2026-11-10): until staff
   // saved them here, they are the client's and need a look at the scan.
-  const typedByClient = clientMayType && !entered && Boolean(source?.id_document_number || source?.id_valid_until);
+  const typedInForm = clientMayType && !entered && Boolean(source?.id_document_number || source?.id_valid_until);
+  // Typed by staff in the client's form: named so, never «клиентом» (QA F-C5).
+  const typedByStaff = typedInForm && typedByStaffInClientForm;
+  const typedByClient = typedInForm && !typedByStaffInClientForm;
   const errorId = (field: IdentityDocumentField) => `${fieldId}-${field}-error`;
   const described = (field: IdentityDocumentField) => (fieldError(field) ? errorId(field) : undefined);
 
@@ -544,6 +553,11 @@ export function LeadIdentityDocumentDataForm({
           <StatusChip tone="warning" className="whitespace-normal" data-testid={`${testId}-entered`}>
             <UserRound aria-hidden="true" />
             {entered}
+          </StatusChip>
+        ) : typedByStaff ? (
+          <StatusChip tone="warning" className="whitespace-normal" data-testid={`${testId}-typed-by-staff`}>
+            <UserRound aria-hidden="true" />
+            {tx("Внесено сотрудником в анкете клиента: сверьте со сканом", "Von Mitarbeitenden im Formular des Kunden erfasst: mit dem Scan abgleichen")}
           </StatusChip>
         ) : typedByClient ? (
           <StatusChip tone="warning" className="whitespace-normal" data-testid={`${testId}-typed-by-client`}>
@@ -871,6 +885,7 @@ export function LeadIdentityDocumentData({
         holder={patientHolder}
         onApplyHolder={onApplyPatientHolder}
         clientMayType
+        typedByStaffInClientForm={intake?.marker_kinds?.identification === "staff"}
         testId="lead-id-data"
         save={async (input, options) => {
           const stored = await saveLeadIdentityDocumentData(leadId, input, options);

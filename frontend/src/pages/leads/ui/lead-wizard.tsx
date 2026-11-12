@@ -1333,6 +1333,22 @@ function autosaveSnapshotSignature(snapshot: AutosaveSnapshot) {
 }
 
 /**
+ * A new request nobody has touched yet takes an automatic prefill (the
+ * patient's framework contract, a minor's parents) as its starting state: the
+ * signature that counts as saved from then on, or null when staff already
+ * changed something (QA F-C6: closing an untouched «Повторное обращение»
+ * asked «Закрыть без сохранения?»).
+ */
+function untouchedPrefillSignature(
+  snapshot: AutosaveSnapshot | null,
+  savedSignature: string,
+  nextDraft: (draft: Draft) => Draft,
+) {
+  if (!snapshot || autosaveSnapshotSignature(snapshot) !== savedSignature) return null;
+  return autosaveSnapshotSignature({ ...snapshot, draft: nextDraft(snapshot.draft) });
+}
+
+/**
  * The answers the client's form writes too (insurance, phone, middle name),
  * as the wizard sends them. The wizard sends the whole lead on every save: a
  * value staff entered in the client's form was overwritten by the wizard's
@@ -5219,6 +5235,15 @@ export function LeadWizard({
         if (!active || hydrated.current !== "__new__") return;
         const parents = repeatIntakeParentContacts(relations);
         if (parents.length === 0) return;
+        const snapshot = autosaveSnapshotRef.current;
+        if (snapshot && snapshot.draft.trustedContacts.length === 0) {
+          const baseline = untouchedPrefillSignature(
+            snapshot,
+            lastSavedAutosaveSignatureRef.current,
+            (current) => ({ ...current, trustedContacts: parents }),
+          );
+          if (baseline !== null) lastSavedAutosaveSignatureRef.current = baseline;
+        }
         setDraft((current) => current && current.trustedContacts.length === 0
           ? { ...current, trustedContacts: parents }
           : current);
@@ -5440,8 +5465,16 @@ export function LeadWizard({
       .sort((left, right) => (right.signed_at ?? right.created_at).localeCompare(left.signed_at ?? left.created_at))[0];
     if (!preferred) return;
     autoContractRef.current = true;
+    if (createMode && !leadId) {
+      const baseline = untouchedPrefillSignature(
+        { draft, lines, paidAmount, prepayment, prepaymentAmount, step },
+        lastSavedAutosaveSignatureRef.current,
+        (current) => ({ ...current, frameworkContractId: preferred.id }),
+      );
+      if (baseline !== null) lastSavedAutosaveSignatureRef.current = baseline;
+    }
     setDraft((current) => current ? { ...current, frameworkContractId: preferred.id } : current);
-  }, [contracts.length, draft, isRepeatIntake, patientReview.contracts]);
+  }, [contracts.length, createMode, draft, isRepeatIntake, leadId, lines, paidAmount, patientReview.contracts, prepayment, prepaymentAmount, step]);
   const currentPatientEvidence = useMemo(() => patientReview.documents.filter(item => item.is_latest_version && item.status === "active" && !item.file_deleted_at
     && ["identity", "confidentiality_release", "privacy_information", "privacy_consents"].includes(wizardDocumentKind(item) ?? "")), [patientReview.documents]);
   const estimate = useMemo(() => calculateServiceLineEstimate(lines), [lines]);
@@ -5661,6 +5694,13 @@ export function LeadWizard({
           )
           ? tx("Смета подтверждена, ожидается предоплата", "Kostenvoranschlag angenommen, Vorauszahlung ausstehend")
           : tx("Смета и предоплата актуальны", "Kostenvoranschlag und Vorauszahlung sind aktuell");
+  // A refusal of an earlier attempt does not stand next to a current, confirmed
+  // estimate (QA F-C3: «Не удалось обновить смету» stayed beside «Смета и
+  // предоплата актуальны»).
+  const commercialQuoteSettled = quoteAndPrepaymentReady && !estimateDocumentOutdated;
+  useEffect(() => {
+    if (commercialQuoteSettled) setCommercialQuoteError("");
+  }, [commercialQuoteSettled]);
 
   const commercialDocumentTitle = (templateId: CommercialDocumentKind) => ({
     framework_contract: tx("Рамочный договор", "Rahmenvertrag"),
@@ -7883,10 +7923,19 @@ ${serviceCommentLines.join("\n")}`
             programDateTo: appDateKeyOf(order.date_to),
           });
         }
+        // The positions too: a rejected amount (the estimated outlays) does not
+        // stay in its field as if it were saved (QA F-C3).
+        if (!confirmed) restoreSignedOrderLines();
         return confirmed;
       }),
     );
     return { contractId, orderId, serviceLines: persistedServiceLines };
+  }
+
+  /** The order's stored positions back in the wizard, after «Отмена» on the signature reset. */
+  function restoreSignedOrderLines() {
+    if (!persistedOrderLeistungen || persistedOrderLeistungen.length === 0) return;
+    setLines(withEstimatedOutlaysLast(persistedOrderLeistungen.map(lineFromOrderLeistung)));
   }
 
   async function prepareCommercial() {
@@ -8153,6 +8202,13 @@ ${serviceCommentLines.join("\n")}`
       await reload(false, true);
     } catch (nextError) {
       setValidationContext(null);
+      // «Отмена» on the signature-reset question keeps the signed order: no
+      // failure to show; the positions went back already (QA F-C3).
+      if (nextError instanceof SignedTermsChangeCancelled) {
+        setCommercialQuoteError("");
+        setCommercialSaveFeedback({ tone: "warning", message: nextError.message });
+        return;
+      }
       // 409 `estimate_document_outdated`: the KV PDF is older than the order.
       setCommercialQuoteError(outdatedDocumentSignErrorText(nextError, tx) ?? errorText(nextError, tx));
       if (outdatedDocumentSignErrorText(nextError, tx)) void refreshDocumentsState();
@@ -9259,7 +9315,14 @@ ${serviceCommentLines.join("\n")}`
             const targetLeadId = leadId;
             // A pick made just before Escape (a second specialisation, a
             // checkbox) is saved first, not lost with the close (QA 2026-10-25).
-            const pendingDraft = Boolean(targetLeadId) && !leadConverted && autosaveIsDirty;
+            // The snapshot itself decides too: a pick whose autosave status was not
+            // marked yet (a background reload under way) was lost with the close
+            // (QA F-C2: a citizenship picked right before Escape).
+            const pendingDraft = Boolean(targetLeadId) && !leadConverted && (
+              autosaveIsDirty
+              || (autosaveSnapshot !== null
+                && autosaveSnapshotSignature(autosaveSnapshot) !== lastSavedAutosaveSignatureRef.current)
+            );
             void (async () => {
               if (!(await flushPayerAutosave())) return;
               if (pendingDraft && !(await save(step, false))) return;
@@ -12256,9 +12319,14 @@ ${serviceCommentLines.join("\n")}`
                         <Info aria-hidden="true" />
                         <span>
                         {tx(
-                          "Будет добавлено последней строкой сметы без НДС.",
-                          "Wird als letzte Position des Kostenvoranschlags ohne MwSt. ausgewiesen.",
+                          "Будет добавлено последней строкой сметы без НДС и войдёт в сумму заказа.",
+                          "Wird als letzte Position des Kostenvoranschlags ohne MwSt. ausgewiesen und zählt zur Auftragssumme.",
                         )}
+                        {/* The same as the confirmation before the save says (QA F-C3). */}
+                        {signedPatient ? ` ${tx(
+                          "Заказ уже подписан клиентом: изменение суммы сбросит подпись клиента и подтверждение GMED.",
+                          "Der Kunde hat den Auftrag bereits unterschrieben: Eine Änderung des Betrags setzt die Unterschrift des Kunden und die Bestätigung durch GMED zurück.",
+                        )}` : null}
                         </span>
                       </StatusChip>
                     </div>
@@ -12815,7 +12883,23 @@ ${serviceCommentLines.join("\n")}`
                   : autosaveStatus === "error" ? null : autosaveStatus === "saving" || commercialFlagsBusyCount + commercialFlagsBackgroundCount > 0 ? (
                     <><LoaderCircle aria-hidden="true" className="size-3 animate-spin" />{tx("Сохранение…", "Wird gespeichert…")}</>
                   ) : !leadId ? tx("Обращение создастся при переходе далее", "Der Lead wird beim Weitergehen angelegt")
-                  : orderLinesUnsaved ? <span data-testid="lead-order-lines-unsaved">{tx("Позиции заказа не сохранены", "Auftragspositionen nicht gespeichert")}</span>
+                  : orderLinesUnsaved ? (
+                    // The positions are a draft until the order is saved: the note
+                    // carries the action itself, on every step (QA F-C4: the note
+                    // stood for minutes with nothing to press next to it).
+                    <span data-testid="lead-order-lines-unsaved" className="inline-flex items-center gap-1.5">
+                      {tx("Позиции заказа не сохранены", "Auftragspositionen nicht gespeichert")}
+                      <button
+                        type="button"
+                        data-testid="lead-order-lines-save"
+                        className="font-medium text-primary underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                        disabled={loading || isBusy}
+                        onClick={() => void prepareCommercial()}
+                      >
+                        {tx("Сохранить заказ", "Auftrag speichern")}
+                      </button>
+                    </span>
+                  )
                   : autosaveStatus === "dirty" || prepaymentDeadlineUnsaved ? tx("Есть несохранённые изменения", "Ungespeicherte Änderungen")
                     : autosaveStatus === "saved" ? (
                       <><Check aria-hidden="true" className="size-3 text-emerald-700" />{tx("Данные сохранены", "Daten gespeichert")}</>

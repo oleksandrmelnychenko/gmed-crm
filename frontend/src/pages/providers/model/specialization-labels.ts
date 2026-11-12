@@ -18,6 +18,7 @@ const KNOWN_SPECIALIZATIONS: [string[], KnownSpecializationLabels][] = [
   [["endocrinology", "endokrinologie", "эндокринология"], { de: "Endokrinologie", ru: "Эндокринология" }],
   [["endocrinology_and_diabetology", "endokrinologie_und_diabetologie", "эндокринология_и_диабетология"], { de: "Endokrinologie und Diabetologie", ru: "Эндокринология и диабетология" }],
   [["gastroenterology", "gastroenterologie", "гастроэнтерология"], { de: "Gastroenterologie", ru: "Гастроэнтерология" }],
+  [["general_medicine", "general medicine", "allgemeinmedizin", "общая медицина"], { de: "Allgemeinmedizin", ru: "Общая медицина" }],
   [["gynecology", "gynaecology", "gynäkologie", "gynaekologie", "гинекология"], { de: "Gynäkologie", ru: "Гинекология" }],
   [["hematology", "haematology", "hämatologie", "haematologie", "гематология"], { de: "Hämatologie", ru: "Гематология" }],
   [["internal_medicine", "internal medicine", "innere medizin", "innere_medizin", "внутренняя медицина", "внутренние болезни"], { de: "Innere Medizin", ru: "Внутренние болезни" }],

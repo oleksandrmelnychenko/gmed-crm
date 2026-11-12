@@ -46,7 +46,11 @@ import {
 } from "@/pages/leads/model/leads-model";
 import { isOtherPersonUploadArt } from "@/pages/leads/model/gwg-identification";
 import { idDocumentTypeLabel } from "@/pages/leads/model/lead-gwg-statements";
-import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
+import { fetchSpecializations } from "@/pages/providers/data/provider-api";
+import {
+  specializationLabelForValue,
+  type SpecializationLabelItem,
+} from "@/pages/providers/model/specialization-labels";
 import { LinkedTasksSection, OPEN_PATIENT_TASK_CREATOR_EVENT } from "@/pages/concierge/linked-tasks-section";
 import { identityDocumentLabels } from "../../model/identity-document-labels";
 import { nationalityNameForDisplay } from "../../model/nationalities";
@@ -175,6 +179,29 @@ function useLivePatientRelations(patientId: string): LiveRelationsState {
   return state.patientId === patientId
     ? state
     : { patientId, status: "loading", items: [] };
+}
+
+/**
+ * The specialisation catalogue, read only when the request names any: its
+ * names are what the UI language shows («Allgemeinmedizin» stood in the RU
+ * card although the catalogue has «Общая медицина», QA F-C7). Without access
+ * the built-in names and the stored value stay.
+ */
+function useSpecializationCatalog(needed: boolean) {
+  const [items, setItems] = useState<SpecializationLabelItem[]>([]);
+  useEffect(() => {
+    if (!needed) return;
+    let active = true;
+    void fetchSpecializations()
+      .then((next) => {
+        if (active) setItems(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [needed]);
+  return items;
 }
 
 function intakeDiscoverySourceLabel(value: string | null, t: Translations) {
@@ -717,6 +744,7 @@ function usePatientProfileTabContent({
   const insuranceCoverage = leadOrigin.string("insurance_covers_germany");
   const medicalRecords = leadOrigin.string("has_medical_records");
   const requestedSpecialties = leadOrigin.strings("requested_specialties");
+  const specializationCatalog = useSpecializationCatalog(requestedSpecialties.length > 0);
   const recordsInAcceptedLanguage = leadOrigin.boolean("records_in_accepted_language");
   const canTravel = leadOrigin.boolean("can_travel");
   const hasTravelDocuments = leadOrigin.boolean("has_travel_documents");
@@ -742,7 +770,7 @@ function usePatientProfileTabContent({
   const selectedWorkTypes = leadOrigin.selectedWorkTypes;
   const costEstimateAdditionalLanguage = leadOrigin.string("cost_estimate_additional_language");
   const requestedSpecialtiesValue = requestedSpecialties
-    .map((value) => specializationLabelForValue(value, [], profileLang))
+    .map((value) => specializationLabelForValue(value, specializationCatalog, profileLang))
     .join(", ");
   const intakeSourceValue = [
     intakeSource ? leadSourceLabel(intakeSource, t) : null,

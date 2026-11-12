@@ -180,6 +180,7 @@ import {
 } from "./model/lead-portal-access";
 import { LeadPortalAccessDetail, PortalCredentialsDialog, type PortalCredentials } from "./ui/lead-portal-access";
 import { LeadConfirmDialog } from "./ui/lead-confirm-dialog";
+import { OverlayDirtyBaseline } from "./ui/overlay-dirty-baseline";
 import { LeadUncountedParentsNotice } from "./ui/lead-uncounted-parents-notice";
 import { ServicesInternalNoteField } from "./ui/lead-wizard-visibility";
 import { LeadIdentityDocumentsBlock } from "./ui/lead-identity-documents-block";
@@ -488,6 +489,12 @@ function useLeadsPageContent() {
   // replaces them (after an own save): see the effect on `detail` (QA 2026-11-10, C-F2).
   const loadedLeadFormsRef = useRef<{ leadId: string; gate: LeadGateForm; failed: LoadedFailedLeadFields } | null>(null);
   const takeStoredLeadFormsRef = useRef(false);
+  // Bumped when the forms are filled from the server (another lead, or the load after
+  // an own save): the card counts as unchanged from there (QA F-C1).
+  const [leadFormsBaselineVersion, bumpLeadFormsBaseline] = useReducer(
+    (version: number) => version + 1,
+    0,
+  );
   const [newLeadWizardOpen, setNewLeadWizardOpen] = useState(false);
   // A fresh wizard per "Новый лид": an open lead's wizard state must never carry
   // over into the new person (QA 2026-10-10, the new data overwrote the open lead).
@@ -1289,6 +1296,7 @@ function useLeadsPageContent() {
     loadedLeadFormsRef.current = { leadId: detail.id, gate: storedGate, failed: storedFailed };
     takeStoredLeadFormsRef.current = false;
     if (!refreshed) {
+      bumpLeadFormsBaseline();
       setFailedReasonError("");
       setGateErrors({});
       setGateBirthDateEntryError(null);
@@ -3603,6 +3611,7 @@ function useLeadsPageContent() {
                   ? leadDisplayName(detail, tx)
                   : t.leads_title}
               </DialogTitle>
+              <OverlayDirtyBaseline version={leadFormsBaselineVersion} />
               {detailPaneNode}
             </DialogContent>
           </Dialog>
@@ -3618,6 +3627,7 @@ function useLeadsPageContent() {
               side="right"
               className="w-full max-w-none gap-0 border-l border-border p-0 sm:max-w-3xl xl:max-w-4xl"
             >
+              <OverlayDirtyBaseline version={leadFormsBaselineVersion} />
               {detailPaneNode}
             </SheetContent>
           </Sheet>

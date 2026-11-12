@@ -131,6 +131,12 @@ describe("identity document data entered by staff", () => {
       <LeadIdentityDocumentDataForm source={typed} save={async () => undefined} tx={ru} lang="ru" testId="lead-id-data" today="2026-10-07" clientMayType />,
     );
     expect(own).toContain("Внесено клиентом в кабинете: сверьте со сканом");
+    // Staff typed them in «Заполнить анкету за клиента» (QA F-C5): never «клиентом».
+    const byStaff = withPickers(
+      <LeadIdentityDocumentDataForm source={typed} save={async () => undefined} tx={ru} lang="ru" testId="lead-id-data" today="2026-10-07" clientMayType typedByStaffInClientForm />,
+    );
+    expect(byStaff).toContain("Внесено сотрудником в анкете клиента: сверьте со сканом");
+    expect(byStaff).not.toContain("Внесено клиентом");
     // A representative's data staff entered carry no such mark (QA 2026-11-10, A F-3);
     // one typed in the cabinet is named by the server (`id_data_typed_by_client`).
     const representative = withPickers(

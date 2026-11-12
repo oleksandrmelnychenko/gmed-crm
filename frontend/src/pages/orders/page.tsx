@@ -291,6 +291,8 @@ import {
   orderExecutionToForm,
   orderFollowupToForm,
   orderPermissions,
+  canCompleteOrderChecklistItem,
+  workflowChecklistErrorText,
   orderPlanningToForm,
   orderProcessGatesToForm,
   patientLabel,
@@ -3438,9 +3440,10 @@ function useOrdersPageContent() {
       triggerReload();
     } catch (error) {
       setWorkflowCreateError(
-        error instanceof Error
-          ? error.message
-          : l("orders_error_create_checklist_item"),
+        workflowChecklistErrorText(error, {
+          fallback: l("orders_error_create_checklist_item"),
+          forbidden: l("orders_checklist_action_forbidden"),
+        }),
       );
     } finally {
       setWorkflowBusy(false);
@@ -3471,9 +3474,10 @@ function useOrdersPageContent() {
       triggerReload();
     } catch (error) {
       setDetailError(
-        error instanceof Error
-          ? error.message
-          : l("orders_error_complete_checklist_item"),
+        workflowChecklistErrorText(error, {
+          fallback: l("orders_error_complete_checklist_item"),
+          forbidden: l("orders_checklist_action_forbidden"),
+        }),
       );
     } finally {
       setWorkflowBusy(false);
@@ -6976,23 +6980,28 @@ function useOrdersPageContent() {
                                                   ) : null}
                                                 </div>
                                               </div>
-                                              {!item.is_completed ? (
+                                              {!item.is_completed &&
+                                              (canCompleteOrderChecklistItem(user, item) ||
+                                                permissions.canManagePhase) ? (
                                                 <div className="flex shrink-0 flex-wrap gap-1.5">
-                                                  <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    size="sm"
-                                                    className="h-7 shrink-0 gap-1.5 rounded-lg px-2 text-xs"
-                                                    disabled={workflowBusy}
-                                                    onClick={() =>
-                                                      void handleCompleteWorkflowItem(
-                                                        item.id,
-                                                      )
-                                                    }
-                                                  >
-                                                    <CheckCircle2 className="size-3.5" />
-                                                    {l("orders_abschliessen")}
-                                                  </Button>
+                                                  {/* Only roles the server lets complete the item (QA F-C10). */}
+                                                  {canCompleteOrderChecklistItem(user, item) ? (
+                                                    <Button
+                                                      type="button"
+                                                      variant="outline"
+                                                      size="sm"
+                                                      className="h-7 shrink-0 gap-1.5 rounded-lg px-2 text-xs"
+                                                      disabled={workflowBusy}
+                                                      onClick={() =>
+                                                        void handleCompleteWorkflowItem(
+                                                          item.id,
+                                                        )
+                                                      }
+                                                    >
+                                                      <CheckCircle2 className="size-3.5" />
+                                                      {l("orders_abschliessen")}
+                                                    </Button>
+                                                  ) : null}
                                                   {permissions.canManagePhase ? (
                                                     <Button
                                                       type="button"

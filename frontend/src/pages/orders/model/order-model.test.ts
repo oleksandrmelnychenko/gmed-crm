@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import { ApiRequestError } from "@/lib/api";
+
 import {
   blankLeistungForm,
+  canCompleteOrderChecklistItem,
   externalInvoiceCreateStatuses,
   externalInvoiceStatusTransitions,
   formatDate,
@@ -15,6 +18,7 @@ import {
   sumLeistungGross,
   summarizeLeistungMetrics,
   sumLeistungTotals,
+  workflowChecklistErrorText,
 } from "./order-model";
 import type { Leistung, OrderProcessGates } from "./types";
 
@@ -221,5 +225,36 @@ describe("leistungLineAmounts / sumLeistungGross", () => {
         line("cancelled", "3", "80", "19"),
       ]),
     ).toBe(700);
+  });
+});
+
+describe("canCompleteOrderChecklistItem (QA F-C10)", () => {
+  const item = { owner_user_id: "u-billing" };
+  it("offers «Завершить» to the roles the server lets complete the item", () => {
+    expect(canCompleteOrderChecklistItem({ role: "ceo", id: "x" }, item)).toBe(true);
+    expect(canCompleteOrderChecklistItem({ role: "patient_manager", id: "x" }, item)).toBe(true);
+    expect(canCompleteOrderChecklistItem({ role: "billing", id: "u-billing" }, item)).toBe(true);
+  });
+  it("hides it from the read-only CEO assistant and from billing on others' items", () => {
+    expect(canCompleteOrderChecklistItem({ role: "ceo_assistant", id: "u-billing" }, item)).toBe(false);
+    expect(canCompleteOrderChecklistItem({ role: "billing", id: "other" }, item)).toBe(false);
+    expect(canCompleteOrderChecklistItem(null, item)).toBe(false);
+  });
+});
+
+describe("workflowChecklistErrorText (QA F-C10)", () => {
+  const texts = { fallback: "Не удалось", forbidden: "Для вашей роли это действие недоступно." };
+  it("never shows the raw English server text", () => {
+    const refused = new ApiRequestError("Insufficient permissions", {
+      status: 403,
+      code: "Forbidden",
+      body: { error: "Forbidden", message: "Insufficient permissions" },
+    });
+    expect(workflowChecklistErrorText(refused, texts)).toBe(texts.forbidden);
+    const conflict = new ApiRequestError("reopen it first", {
+      status: 409,
+      body: { error: "Conflict", message: "reopen it first" },
+    });
+    expect(workflowChecklistErrorText(conflict, texts)).toBe(texts.fallback);
   });
 });

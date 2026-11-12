@@ -27,6 +27,8 @@ export const ordersRound3UiDe = {
   "appointments_package_items_count_few": "{count} Paketelemente",
   "appointments_package_items_count_many": "{count} Paketelemente",
   "appointments_package_items_count_other": "{count} Paketelemente",
+  // A checklist change refused for the role (QA F-C10): never the raw server text
+  "orders_checklist_action_forbidden": "Für Ihre Rolle ist diese Aktion nicht freigegeben.",
 } as const satisfies Record<string, string>;
 
 export const ordersRound3UiRu = {
@@ -49,4 +51,5 @@ export const ordersRound3UiRu = {
   "appointments_package_items_count_few": "{count} пункта пакета",
   "appointments_package_items_count_many": "{count} пунктов пакета",
   "appointments_package_items_count_other": "{count} пункта пакета",
+  "orders_checklist_action_forbidden": "Для вашей роли это действие недоступно.",
 } as const satisfies Record<keyof typeof ordersRound3UiDe, string>;

@@ -16,12 +16,14 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Tabs } from "@/components/ui/tabs";
 import type { Translations } from "@/lib/i18n";
 import { ApiRequestError, apiFetch } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { useFinanceAutoRefresh } from "@/pages/company-finance/use-finance-auto-refresh";
 
 import { resolvePatientBalancePresentation, staffCreditSideLabel } from "../../model/account-balance";
 import type { PatientNavigationItem } from "../../model/patient-navigation";
 import {
+  canCompletePatientChecklistItem,
   PATIENT_LABEL_FORMAT_OPTIONS,
   type PatientLabelFormatId,
   type PatientTimelineItem,
@@ -409,6 +411,7 @@ type PatientDetailWorkspaceContentProps = {
 
 function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceContentProps) {
   const { patientLabelFormatLabel } = usePatientDetailLabels();
+  const { user: currentUser } = useAuth();
   const {
     activeTab,
     activeWorkflowAssignees,
@@ -1109,6 +1112,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               priorityLabel={priorityLabel}
               priorityBadgeClass={priorityBadgeClass}
               onCompleteWorkflowItem={onWorkflowCompleteItem}
+              canCompleteWorkflowItem={(item) => canCompletePatientChecklistItem(currentUser, item)}
               onSubmitWorkflowItem={onWorkflowSubmit}
               onWorkflowItemTextChange={onWorkflowItemTextChange}
               onWorkflowOwnerChange={onWorkflowOwnerChange}
