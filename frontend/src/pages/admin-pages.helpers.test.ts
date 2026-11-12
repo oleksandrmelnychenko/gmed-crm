@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   adminLocale,
+  codedAdminErrorText,
   compactNotificationConfig,
+  maskNotificationSecrets,
   matchesNotificationSearch,
+  NOTIFICATION_SECRET_MASK,
+  prettyNotificationConfig,
   normalizeAdminSettingValue,
   shortAdminUserAgent,
   summarizeAdminSettingValue,
@@ -24,6 +28,32 @@ describe("admin pages helpers", () => {
         ignored: true,
       }),
     ).toBe('host: smtp.example.com, port: 587, user: ops');
+  });
+
+  it("never shows a stored credential of a notification channel (screens QA E F3)", () => {
+    const config = {
+      host: "smtp.qa-e.invalid",
+      password: "not-a-real-secret-qa",
+      headers: { Authorization: "Bearer abc", "X-Trace": "1" },
+      api_key: "",
+    };
+    expect(maskNotificationSecrets(config)).toEqual({
+      host: "smtp.qa-e.invalid",
+      password: NOTIFICATION_SECRET_MASK,
+      headers: { Authorization: NOTIFICATION_SECRET_MASK, "X-Trace": "1" },
+      api_key: "",
+    });
+    expect(compactNotificationConfig(config)).not.toContain("not-a-real-secret-qa");
+    expect(prettyNotificationConfig(config)).not.toContain("Bearer abc");
+  });
+
+  it("translates a coded server refusal", () => {
+    const error = Object.assign(new Error("Field key already exists"), {
+      body: { error: "custom_field_key_exists" },
+    });
+    expect(codedAdminErrorText(error, { custom_field_key_exists: "Ключ занят" }, "Ошибка")).toBe("Ключ занят");
+    expect(codedAdminErrorText(new Error("raw"), {}, "Ошибка")).toBe("raw");
+    expect(codedAdminErrorText(null, {}, "Ошибка")).toBe("Ошибка");
   });
 
   it("matches notification search against name, type, and config payload", () => {

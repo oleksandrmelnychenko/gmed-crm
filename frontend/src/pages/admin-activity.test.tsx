@@ -6,6 +6,7 @@ import { ru } from "@/lib/i18n/ru";
 import {
   actionLabel,
   actionTone,
+  activityActionOptions,
   activityLabelMatches,
   activityViewQuery,
   entityDisplay,
@@ -212,5 +213,24 @@ describe("activity log objects and search by label (QA E3-01)", () => {
     expect(activityLabelMatches("login_failure", ru).actions).not.toContain("login_failure");
     expect(activityLabelMatches("Не", ru)).toEqual({ actions: [], entities: [] });
     expect(activityLabelMatches("Заметка", ru).actions.length).toBeLessThanOrEqual(120);
+  });
+});
+
+describe("Action filter options come from the stored codes (screens QA E F2/F11)", () => {
+  it("offers each stored code once and joins codes with the same label", () => {
+    const options = activityActionOptions(
+      ["create_custom_field", "login_failure", "login_failed", "create_custom_field"],
+      ru,
+    );
+    const values = options.map((option) => option.value);
+    expect(values).toContain("create_custom_field");
+    expect(values).toContain("login_failed,login_failure");
+    const labels = options.map((option) => option.label);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it("keeps a selected filter selectable", () => {
+    const options = activityActionOptions([], ru, "create_lead");
+    expect(options).toEqual([{ value: "create_lead", label: actionLabel("create_lead", ru) }]);
   });
 });

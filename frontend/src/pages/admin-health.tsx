@@ -348,16 +348,16 @@ export function aiHealthCopy(lang: "ru" | "de") {
         processing: "In Verarbeitung",
         ready: "Gespeichert",
         failed: "Fehlgeschlagen",
-        stale: "Abgelaufene Leases",
+        stale: "Abgelaufene Verarbeitungssperren",
         ready24h: "Bereit in 24 Std.",
         failed24h: "Fehler in 24 Std.",
-        leaseRecovered24h: "Lease-Recoveries in 24 Std.",
-        leaseExhausted24h: "Lease-Abbrüche in 24 Std.",
+        leaseRecovered24h: "Nach abgelaufener Sperre neu eingeplant (24 Std.)",
+        leaseExhausted24h: "Nach allen Versuchen fehlgeschlagen (24 Std.)",
         oldest: "Ältester wartender Auftrag",
         lastReady: "Letztes Ergebnis",
         lastFailed: "Letzter Fehler",
-        lastLeaseRecovery: "Letzte Lease-Recovery",
-        lastLeaseExhausted: "Letzter Lease-Abbruch",
+        lastLeaseRecovery: "Zuletzt neu eingeplant",
+        lastLeaseExhausted: "Zuletzt nach allen Versuchen fehlgeschlagen",
         model: "Freigegebenes Modell",
         externalCalls: "Externe Aufrufe",
         enabled: "Aktiv",
@@ -369,9 +369,9 @@ export function aiHealthCopy(lang: "ru" | "de") {
         attentionFailed: "KI-Aufträge mit Fehlern in den letzten 24 Stunden",
         attentionStale: "KI-Aufträge mit abgelaufener Verarbeitungssperre",
         attentionLeaseRecovered:
-          "KI-Aufträge nach abgelaufener Lease wieder eingeplant",
+          "KI-Aufträge nach abgelaufener Verarbeitungssperre wieder eingeplant",
         attentionLeaseExhausted:
-          "KI-Aufträge nach Lease-Ablauf endgültig fehlgeschlagen",
+          "KI-Aufträge nach allen Verarbeitungsversuchen endgültig fehlgeschlagen",
         attentionDelayed: "KI-Aufträge warten länger als zwei Minuten",
         attentionBlocked: "Der konfigurierte KI-Anbieter ist blockiert",
         attentionUnavailable:
@@ -398,7 +398,7 @@ export function aiHealthCopy(lang: "ru" | "de") {
         },
       }
     : {
-        section: "AI-контур",
+        section: "AI-обработка",
         provider: "Состояние провайдера",
         reason: "Состояние конфигурации",
         operational: "Операционное состояние",
@@ -410,13 +410,13 @@ export function aiHealthCopy(lang: "ru" | "de") {
         stale: "Просроченные блокировки обработки",
         ready24h: "Готовы за 24 часа",
         failed24h: "Ошибки за 24 часа",
-        leaseRecovered24h: "Восстановлены после lease за 24 часа",
-        leaseExhausted24h: "Исчерпали lease-попытки за 24 часа",
+        leaseRecovered24h: "Снова в очереди после истёкшей блокировки (24 ч)",
+        leaseExhausted24h: "Ошибка после всех попыток (24 ч)",
         oldest: "Самая старая ожидающая задача",
         lastReady: "Последний результат",
         lastFailed: "Последняя ошибка",
-        lastLeaseRecovery: "Последнее восстановление lease",
-        lastLeaseExhausted: "Последнее исчерпание lease",
+        lastLeaseRecovery: "Последний повторный запуск",
+        lastLeaseExhausted: "Последняя ошибка после всех попыток",
         model: "Разрешённая модель",
         externalCalls: "Внешние вызовы",
         enabled: "Включены",
@@ -428,9 +428,9 @@ export function aiHealthCopy(lang: "ru" | "de") {
         attentionFailed: "AI-задачи с ошибками за последние 24 часа",
         attentionStale: "AI-задачи с просроченной блокировкой обработки",
         attentionLeaseRecovered:
-          "AI-задачи повторно поставлены в очередь после истечения lease",
+          "AI-задачи снова поставлены в очередь после истёкшей блокировки обработки",
         attentionLeaseExhausted:
-          "AI-задачи завершились ошибкой после исчерпания lease-попыток",
+          "AI-задачи завершились ошибкой после всех попыток обработки",
         attentionDelayed: "AI-задачи ожидают обработки больше двух минут",
         attentionBlocked: "Настроенный AI-провайдер заблокирован",
         attentionUnavailable: "Не удалось прочитать состояние AI-очереди",
@@ -908,7 +908,7 @@ function AdminHealthMetrics({
         icon={Database}
         label={t.health_db_size}
         value={data.database.size}
-        description={`${data.database.active_connections} ${t.health_connections}`}
+        description={`${t.health_connections}: ${data.database.active_connections}`}
       />
       <HealthMetric
         icon={UsersRound}
@@ -1227,7 +1227,7 @@ export function AdminHealthPage() {
               <HealthMetric
                 label={t.health_db_size}
                 value={data.database.size}
-                description={`${data.database.active_connections} ${t.health_connections}`}
+                description={`${t.health_connections}: ${data.database.active_connections}`}
               />
               <HealthMetric
                 label={t.health_tables}

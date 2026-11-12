@@ -120,6 +120,21 @@ export function describeSettingError(error: unknown, t: Translations): string {
   if (message.startsWith("VAT ID of Germany")) return t.settings_vat_id_invalid_german;
   if (message.startsWith("VAT ID")) return t.settings_vat_id_invalid;
   if (message.startsWith("Tax number")) return t.settings_tax_number_invalid;
+  // The server's English validation texts (screens QA 2026-11-12, E F13).
+  if (message === "Required patient documents must be a valid JSON array") {
+    return t.settings_required_documents_invalid_json;
+  }
+  if (/^(Required patient document|Each required patient document)/.test(message)) {
+    return t.settings_required_documents_invalid_rule;
+  }
+  if (message === "Must be a positive integer") return t.settings_value_positive_integer;
+  if (/cannot exceed|must be between|at least 1|at most \d+ days/.test(message)) {
+    return t.settings_value_out_of_range;
+  }
+  if (message.startsWith("Date must use")) return t.settings_date_invalid;
+  if (message === "Agency email is invalid") return t.settings_agency_email_invalid;
+  if (message.startsWith("Agency website")) return t.settings_agency_website_invalid;
+  if (/cannot be empty$/.test(message)) return t.settings_value_required_or_too_long;
   return message || t.common_error;
 }
 

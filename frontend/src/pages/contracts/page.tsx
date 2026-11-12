@@ -122,6 +122,7 @@ import {
   buildSearchParams,
   canTerminateContractStatus,
   contractActionErrorMessage,
+  contractConditionsText,
   contractToStatusForm,
   contractsPermissions,
   enumLabel,
@@ -132,6 +133,7 @@ import {
   isContractClosed,
   isQuoteSuperseded,
   orderOptionLabel,
+  parseContractConditionsText,
   patientOptionLabel,
   quoteToStatusForm,
   toOptional,
@@ -1200,7 +1202,8 @@ function useContractsPageContent() {
               {formatDate(row.terminated_at, locale, t.common_not_set)}
             </span>
           ) : (
-            <span className="text-muted-foreground">{t.common_not_set}</span>
+            // Not terminated: a dash, not "Не указано" (screens QA E F16).
+            <span className="text-muted-foreground">—</span>
           ),
       },
       {
@@ -1834,11 +1837,7 @@ function useContractsPageContent() {
     setCreateContractBusy(true);
     setCreateContractError(null);
     try {
-      let conditions: Record<string, unknown> | undefined;
-      const rawConditions = createContractForm.conditionsText.trim();
-      if (rawConditions) {
-        conditions = JSON.parse(rawConditions) as Record<string, unknown>;
-      }
+      const conditions = parseContractConditionsText(createContractForm.conditionsText);
       const payload = {
         patient_id: createContractForm.patientId,
         status: createContractForm.status,
@@ -2013,11 +2012,7 @@ function useContractsPageContent() {
     setContractStatusBusy(true);
     setContractStatusError(null);
     try {
-      let conditions: Record<string, unknown> | undefined;
-      const rawConditions = contractStatusForm.conditionsText.trim();
-      if (rawConditions) {
-        conditions = JSON.parse(rawConditions) as Record<string, unknown>;
-      }
+      const conditions = parseContractConditionsText(contractStatusForm.conditionsText);
       await updateContractStatus(selectedContractId, {
         status: contractStatusForm.status,
         signed_at: toOptional(contractStatusForm.signedAt)
@@ -3045,9 +3040,7 @@ function useContractsPageContent() {
                       <div className="space-y-2.5">
                         <h2 className={tokens.text.sectionTitle}><SectionHeading icon={NotebookPen}>{t.contracts_notes}</SectionHeading></h2>
                         <pre className="rounded-xl border border-border bg-background/60 p-4 font-mono text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
-                          {contractDetail.conditions && Object.keys(contractDetail.conditions).length > 0
-                            ? JSON.stringify(contractDetail.conditions, null, 2)
-                            : t.common_not_set}
+                          {contractConditionsText(contractDetail.conditions) || t.common_not_set}
                         </pre>
                       </div>
                     </div>

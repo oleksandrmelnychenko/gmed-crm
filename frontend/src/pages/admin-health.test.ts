@@ -37,11 +37,11 @@ describe("Medication AI health localization", () => {
     const de = aiHealthCopy("de");
 
     expect(aiLeaseAttention(2, 1, ru)).toEqual([
-      "AI-задачи повторно поставлены в очередь после истечения lease: 2",
-      "AI-задачи завершились ошибкой после исчерпания lease-попыток: 1",
+      "AI-задачи снова поставлены в очередь после истёкшей блокировки обработки: 2",
+      "AI-задачи завершились ошибкой после всех попыток обработки: 1",
     ]);
     expect(aiLeaseAttention(1, 0, de)).toEqual([
-      "KI-Aufträge nach abgelaufener Lease wieder eingeplant: 1",
+      "KI-Aufträge nach abgelaufener Verarbeitungssperre wieder eingeplant: 1",
     ]);
     expect(aiLeaseAttention(0, 0, ru)).toEqual([]);
   });

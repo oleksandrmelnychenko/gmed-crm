@@ -6,6 +6,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useState,
 } from "react";
 import {
   Activity,
@@ -54,7 +55,7 @@ import {
   activityContextSummary,
 } from "@/pages/admin-activity-context";
 import { formatAdminDateTime } from "@/pages/admin-pages.helpers";
-import { fetchAdminActivity } from "@/pages/admin/data/admin-api";
+import { fetchAdminActivity, fetchAdminActivityActions } from "@/pages/admin/data/admin-api";
 import {
   Banner,
   EmptyCell,
@@ -531,6 +532,43 @@ export function actionLabel(
   return humanizeAuditCode(action);
 }
 
+export type ActivityActionOption = { value: string; label: string };
+
+/**
+ * The «Действие» filter options from the codes the log really stores
+ * (screens QA 2026-11-12, E F2/F11): the old list offered realtime event
+ * names nothing was stored under, and some labels twice. Codes that read the
+ * same («Неудачная попытка входа» = `login_failure` and `login_failed`) are
+ * one option whose value lists every code; the server filters by all of them.
+ */
+export function activityActionOptions(
+  codes: Iterable<string>,
+  translations: Translations,
+  selected = "",
+): ActivityActionOption[] {
+  const byLabel = new Map<string, Set<string>>();
+  const add = (code: string) => {
+    const trimmed = code.trim();
+    if (!trimmed) return;
+    const label = actionLabel(trimmed, translations);
+    const group = byLabel.get(label) ?? new Set<string>();
+    group.add(trimmed);
+    byLabel.set(label, group);
+  };
+  for (const code of codes) add(code);
+  const options = [...byLabel.entries()].map(([label, group]) => ({
+    label,
+    value: [...group].sort().join(","),
+  }));
+  // A filter chosen earlier stays selectable even when a newer code list
+  // groups it differently.
+  if (selected && !options.some((option) => option.value === selected)) {
+    const first = selected.split(",")[0] ?? selected;
+    options.push({ label: actionLabel(first, translations), value: selected });
+  }
+  return options.sort((left, right) => left.label.localeCompare(right.label));
+}
+
 function ActivityActionBadge({
   action,
   translations,
@@ -950,7 +988,7 @@ function AdminActivityDetailSheet({
 }
 
 type AdminActivityToolbarSectionProps = {
-  actionOptions: string[];
+  actionOptions: ActivityActionOption[];
   anyFilterActive: boolean;
   dateFrom: string;
   dateTo: string;
@@ -1007,9 +1045,9 @@ function AdminActivityToolbarSection({
         className="h-8 w-full rounded-lg bg-field text-[13px]"
       >
         <option value="__all__">{t.providers_all}</option>
-        {actionOptions.map((value) => (
-          <option key={value} value={value}>
-            {actionLabel(value, t)}
+        {actionOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
           </option>
         ))}
       </NativeComboboxSelect>
@@ -1401,14 +1439,30 @@ export function AdminActivityPage() {
     300,
   );
 
-  const actionOptions = useMemo(() => {
-    const values = new Set<string>([
-      ...Object.keys(EXACT_ACTION_LABEL_KEYS),
-      ...ADMIN_ACTIVITY_REALTIME_EVENTS,
-      ...activities.map((item) => item.action),
-    ]);
-    return Array.from(values).sort();
-  }, [activities]);
+  const [storedActions, setStoredActions] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchAdminActivityActions()
+      .then((response) => {
+        if (!cancelled) setStoredActions(response.data ?? []);
+      })
+      .catch(() => {
+        // Without the list the filter offers the actions of the loaded rows.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const actionOptions = useMemo(
+    () =>
+      activityActionOptions(
+        [...storedActions, ...activities.map((item) => item.action)],
+        t,
+        filterAction,
+      ),
+    [activities, filterAction, storedActions, t],
+  );
 
   const selectedActivity =
     selectedIndex !== null ? (activities[selectedIndex] ?? null) : null;

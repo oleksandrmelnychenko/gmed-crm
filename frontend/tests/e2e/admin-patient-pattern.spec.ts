@@ -717,7 +717,7 @@ for (const width of [1440, 390]) {
     await expect(page.getByText("Ops Webhook", { exact: true }).filter({ visible: true })).toBeVisible();
     await page.getByText("Ops Webhook", { exact: true }).filter({ visible: true }).click();
     await assertModal();
-    await expect(page.getByRole("dialog").locator("pre")).toContainText('"secret": "masked"');
+    await expect(page.getByRole("dialog").locator("pre")).toContainText('"secret": "********"');
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Neuer Kanal", exact: true }).click();
     await assertModal();

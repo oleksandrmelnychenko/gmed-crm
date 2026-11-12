@@ -28,6 +28,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/admin/sessions/revoke-all", post(revoke_all_sessions))
         .route("/admin/activity", get(list_activity))
+        .route("/admin/activity/actions", get(list_activity_actions))
         .route("/admin/mfa/pending", get(list_pending_logins))
         .route(
             "/admin/mfa/pending/{pending_id}/approve",
@@ -285,6 +286,21 @@ struct ActivityQuery {
 
 /// Codes from a comma-separated list: trimmed, non-empty, plain code
 /// characters only, at most 300 of them. `None` without any code.
+/// The `action` filter: one stored code or several comma-separated ones.
+/// Unlike [`activity_code_list`] nothing is dropped silently, so an unknown
+/// code finds no rows instead of lifting the filter.
+fn activity_action_filter(raw: Option<&str>) -> Option<Vec<String>> {
+    let codes: Vec<String> = raw
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|code| !code.is_empty())
+        .take(300)
+        .map(str::to_string)
+        .collect();
+    (!codes.is_empty()).then_some(codes)
+}
+
 fn activity_code_list(raw: Option<&str>) -> Option<Vec<String>> {
     let codes: Vec<String> = raw
         .unwrap_or_default()
@@ -454,6 +470,38 @@ pub const ACTIVITY_DATA_CHANGE_FILTER: &str = r#"(
         END
 )"#;
 
+/// The action codes the log really holds, for the «Действие» filter (screens
+/// QA 2026-11-12, E F2: the list offered names nothing was stored under).
+/// A loose index scan over `idx_audit_action`, so the large technical stream
+/// is not read row by row.
+async fn list_activity_actions(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_capability(Capability::AdminActivity) {
+        return e;
+    }
+    let codes: Result<Vec<String>, sqlx::Error> = sqlx::query_scalar(
+        r#"WITH RECURSIVE codes AS (
+               SELECT MIN(action) AS action FROM audit_log
+               UNION ALL
+               SELECT (SELECT MIN(al.action) FROM audit_log al WHERE al.action > codes.action)
+               FROM codes
+               WHERE codes.action IS NOT NULL
+           )
+           SELECT action FROM codes WHERE action IS NOT NULL"#,
+    )
+    .fetch_all(&state.db)
+    .await;
+    match codes {
+        Ok(codes) => Json(serde_json::json!({ "data": codes })).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "list activity actions");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
+    }
+}
+
 async fn list_activity(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -476,10 +524,9 @@ async fn list_activity(
         date_from,
         date_to,
     } = q;
-    let action = action
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
+    // One code, or several comma-separated codes that share one label in
+    // the filter list (screens QA 2026-11-12, E F2/F11).
+    let action = activity_action_filter(action.as_deref());
     let view = match normalize_activity_view(view) {
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
@@ -533,7 +580,7 @@ async fn list_activity(
            LEFT JOIN users u ON u.id = al.user_id
            LEFT JOIN users target ON al.entity_type = 'user' AND target.id = al.entity_id
            WHERE ($1::UUID IS NULL OR al.user_id = $1)
-             AND ($2::TEXT IS NULL OR al.action = $2)
+             AND ($2::TEXT[] IS NULL OR al.action = ANY($2))
              AND ($3::TIMESTAMPTZ IS NULL OR al.created_at >= $3)
              AND ($4::TIMESTAMPTZ IS NULL OR al.created_at < $4)
              AND (
@@ -581,7 +628,7 @@ async fn list_activity(
              AND ($7::TEXT[] IS NULL OR al.action = ANY($7))"#,
     )
     .bind(user_id)
-    .bind(action)
+    .bind(&action)
     .bind(date_from)
     .bind(date_to_exclusive)
     .bind(&view)
@@ -616,7 +663,7 @@ async fn list_activity(
            LEFT JOIN users u ON u.id = al.user_id
            LEFT JOIN users target ON al.entity_type = 'user' AND target.id = al.entity_id
            WHERE ($1::UUID IS NULL OR al.user_id = $1)
-             AND ($2::TEXT IS NULL OR al.action = $2)
+             AND ($2::TEXT[] IS NULL OR al.action = ANY($2))
              AND ($3::TIMESTAMPTZ IS NULL OR al.created_at >= $3)
              AND ($4::TIMESTAMPTZ IS NULL OR al.created_at < $4)
              AND (
@@ -665,7 +712,7 @@ async fn list_activity(
            ORDER BY al.created_at DESC LIMIT $7 OFFSET $8"#,
     )
     .bind(user_id)
-    .bind(action)
+    .bind(&action)
     .bind(date_from)
     .bind(date_to_exclusive)
     .bind(&view)
@@ -1062,8 +1109,33 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 
 #[cfg(test)]
 mod tests {
-    use super::{activity_category_actions, normalize_activity_view, visible_activity_context};
+    use super::{
+        activity_action_filter, activity_category_actions, normalize_activity_view,
+        visible_activity_context,
+    };
     use serde_json::json;
+
+    #[test]
+    fn activity_action_filter_keeps_every_given_code() {
+        assert_eq!(activity_action_filter(None), None);
+        assert_eq!(activity_action_filter(Some(" , ")), None);
+        assert_eq!(
+            activity_action_filter(Some("create_custom_field")),
+            Some(vec!["create_custom_field".to_string()])
+        );
+        assert_eq!(
+            activity_action_filter(Some("login_failure, login_failed")),
+            Some(vec![
+                "login_failure".to_string(),
+                "login_failed".to_string()
+            ])
+        );
+        // An unknown code stays a filter (no rows), it never lifts it.
+        assert_eq!(
+            activity_action_filter(Some("Bad code!")),
+            Some(vec!["Bad code!".to_string()])
+        );
+    }
 
     #[test]
     fn activity_context_is_redacted_outside_technical_entities_without_full_access() {

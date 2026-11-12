@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Banner, Field, selectClass, textareaClass } from "@/components/ui-shell";
 import { berlinLocalInputToIso, formatAppDateTime } from "@/lib/app-time-zone";
-import { useLang } from "@/lib/i18n";
+import { useLang, type Translations } from "@/lib/i18n";
 import {
   fetchSecurityIncidents,
   reportSecurityIncident,
@@ -26,6 +26,20 @@ const RISKS = ["pending", "no_risk", "risk", "high_risk"] as const;
 function dateTime(value: string | null) {
   // Stored as UTC instants; the register reads in German time, DD.MM.YYYY HH:mm.
   return value ? formatAppDateTime(value) || value : "—";
+}
+
+/**
+ * The server refusals of the register in the UI language (screens QA
+ * 2026-11-12, E F14: closing without a reason showed English text).
+ */
+export function incidentErrorText(cause: unknown, t: Translations): string {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  if (message.startsWith("Record the authority notification")) return t.incident_error_authority_required;
+  if (message.startsWith("A high-risk breach needs")) return t.incident_error_subjects_required;
+  if (message.startsWith("Reopening a closed incident")) return t.incident_error_reopen_reason;
+  if (message === "text too long") return t.incident_error_text_too_long;
+  if (message === "Incident not found") return t.incident_error_not_found;
+  return message;
 }
 
 function hoursLeft(deadline: string) {
@@ -76,7 +90,7 @@ export function IncidentRegisterSection({
     try {
       setIncidents(await fetchSecurityIncidents());
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(incidentErrorText(cause, t));
     }
   }, [showsRegister]);
 
@@ -108,7 +122,7 @@ export function IncidentRegisterSection({
       setForm({ title: "", description: "", category: "confidentiality", severity: "medium", affected: "", awareAt: "" });
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(incidentErrorText(cause, t));
     } finally {
       setBusy(false);
     }
@@ -147,7 +161,7 @@ export function IncidentRegisterSection({
       });
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(incidentErrorText(cause, t));
     } finally {
       setBusy(false);
     }

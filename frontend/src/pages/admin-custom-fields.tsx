@@ -31,7 +31,8 @@ import {
   TabLoader,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
+import { formatEnumLabelFromKeys, formatUiText, useLang, type TranslationKey } from "@/lib/i18n";
+import { codedAdminErrorText } from "@/pages/admin-pages.helpers";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,7 @@ import {
   createAdminCustomField,
   deleteAdminCustomField,
   fetchAdminCustomFields,
+  updateAdminCustomField,
 } from "@/pages/admin/data/admin-api";
 
 interface CustomField {
@@ -59,6 +61,27 @@ interface CustomField {
 }
 
 const ENTITY_TYPES = ["lead", "patient", "order", "provider"] as const;
+
+/** The key rule the server checks too (screens QA 2026-11-12, E F9). */
+export const CUSTOM_FIELD_KEY_PATTERN = /^[a-z][a-z0-9_]{0,62}$/;
+
+/** The list options typed as "a, b, c": trimmed, without empty or repeated ones. */
+export function parseCustomFieldOptions(raw: string): string[] {
+  const options: string[] = [];
+  for (const value of raw.split(",")) {
+    const option = value.trim();
+    if (option && !options.includes(option)) options.push(option);
+  }
+  return options;
+}
+
+/** The stored options of a field as the form shows them. */
+export function customFieldOptionsText(options: unknown): string {
+  return Array.isArray(options)
+    ? options.filter((option): option is string => typeof option === "string").join(", ")
+    : "";
+}
+
 const FIELD_TYPES = ["text", "number", "date", "boolean", "select"] as const;
 
 const ENTITY_TYPE_LABEL_KEYS = {
@@ -88,6 +111,8 @@ type AdminCustomFieldsState = {
   filterEntity: string;
   msg: string | null;
   showCreate: boolean;
+  /** The field the form edits; empty for a new field. */
+  editingId: string;
   creating: boolean;
   fEntity: string;
   fKey: string;
@@ -95,6 +120,7 @@ type AdminCustomFieldsState = {
   fType: string;
   fSort: string;
   fOptions: string;
+  fRequired: boolean;
   createError: string | null;
 };
 
@@ -202,6 +228,8 @@ type AdminCustomFieldCreateSheetProps = {
   fOptions: string;
   fSort: string;
   fType: string;
+  fRequired: boolean;
+  editing: boolean;
   showCreate: boolean;
   dirty: boolean;
   t: Record<string, string>;
@@ -212,6 +240,7 @@ type AdminCustomFieldCreateSheetProps = {
   onLabelChange: (value: string) => void;
   onOpenChange: (open: boolean) => void;
   onOptionsChange: (value: string) => void;
+  onRequiredChange: (value: boolean) => void;
   onSortChange: (value: string) => void;
   onTypeChange: (value: string) => void;
 };
@@ -227,6 +256,8 @@ function AdminCustomFieldCreateSheet({
   fOptions,
   fSort,
   fType,
+  fRequired,
+  editing,
   showCreate,
   dirty,
   t,
@@ -237,16 +268,18 @@ function AdminCustomFieldCreateSheet({
   onLabelChange,
   onOpenChange,
   onOptionsChange,
+  onRequiredChange,
   onSortChange,
   onTypeChange,
 }: AdminCustomFieldCreateSheetProps) {
+  const title = editing ? t.cf_edit : t.cf_new;
   return (
     <Sheet open={showCreate} onOpenChange={onOpenChange} dirty={dirty}>
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
         <form onSubmit={onCreate} className="flex min-h-0 flex-1 flex-col">
           <AdminSheetScaffold
             icon={ListPlus}
-            title={t.cf_new}
+            title={title}
             description={t.cf_subtitle}
             footer={(
               <SheetFormFooter
@@ -259,11 +292,11 @@ function AdminCustomFieldCreateSheet({
           >
             {createError ? <Banner tone="error">{createError}</Banner> : null}
             <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3.5">
-              <AdminSectionTitle icon={ListPlus}>{t.cf_new}</AdminSectionTitle>
+              <AdminSectionTitle icon={ListPlus}>{title}</AdminSectionTitle>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_entity_type}</Label>
-                  <NativeComboboxSelect value={fEntity}
+                  <NativeComboboxSelect value={fEntity} disabled={editing}
                     onChange={(event) => onEntityChange(event.target.value ?? ENTITY_TYPES[0] ?? "patient")} className="h-9 w-full rounded-lg bg-field">
                       {ENTITY_TYPES.map((et) => (
                         <option key={et} value={et}>
@@ -276,11 +309,18 @@ function AdminCustomFieldCreateSheet({
                   <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_key} *</Label>
                   <Input
                     required
+                    disabled={editing}
+                    maxLength={63}
+                    autoCapitalize="none"
+                    spellCheck={false}
                     placeholder={t.cf_field_key_placeholder}
                     value={fKey}
                     onChange={(event) => onKeyChange(event.target.value)}
-                    className="h-9 rounded-lg bg-field"
+                    className="h-9 rounded-lg bg-field font-mono"
                   />
+                  <p className="text-[11px] leading-snug text-muted-foreground">
+                    {editing ? t.cf_key_locked_hint : t.cf_key_hint}
+                  </p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -288,6 +328,7 @@ function AdminCustomFieldCreateSheet({
                   <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_label} *</Label>
                   <Input
                     required
+                    maxLength={120}
                     value={fLabel}
                     onChange={(event) => onLabelChange(event.target.value)}
                     className="h-9 rounded-lg bg-field"
@@ -320,11 +361,24 @@ function AdminCustomFieldCreateSheet({
                   <Input
                     placeholder={t.cf_options_placeholder}
                     value={fOptions}
+                    disabled={fType !== "select"}
+                    required={fType === "select"}
                     onChange={(event) => onOptionsChange(event.target.value)}
                     className="h-9 rounded-lg bg-field"
                   />
+                  <p className="text-[11px] leading-snug text-muted-foreground">{t.cf_options_hint}</p>
                 </div>
               </div>
+              <label className="flex items-center gap-2 text-[13px] text-foreground">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-primary"
+                  checked={fRequired}
+                  onChange={(event) => onRequiredChange(event.target.checked)}
+                />
+                {t.cf_required}
+                <span className="text-[11.5px] text-muted-foreground">· {t.cf_required_hint}</span>
+              </label>
             </section>
           </AdminSheetScaffold>
         </form>
@@ -417,6 +471,7 @@ export function AdminCustomFieldsPage() {
       filterEntity: "",
       msg: null,
       showCreate: false,
+      editingId: "",
       creating: false,
       fEntity: "lead",
       fKey: "",
@@ -424,18 +479,21 @@ export function AdminCustomFieldsPage() {
       fType: "text",
       fSort: "0",
       fOptions: "",
+      fRequired: false,
       createError: null,
     }),
   );
   const {
     createError,
     creating,
+    editingId,
     fields,
     filterEntity,
     fEntity,
     fKey,
     fLabel,
     fOptions,
+    fRequired,
     fSort,
     fType,
     loading,
@@ -473,6 +531,10 @@ export function AdminCustomFieldsPage() {
     setCustomFieldsField("fSort", nextValue);
   const setFOptions = (nextValue: SetStateAction<string>) =>
     setCustomFieldsField("fOptions", nextValue);
+  const setEditingId = (nextValue: SetStateAction<string>) =>
+    setCustomFieldsField("editingId", nextValue);
+  const setFRequired = (nextValue: SetStateAction<boolean>) =>
+    setCustomFieldsField("fRequired", nextValue);
   const setCreateError = (nextValue: SetStateAction<string | null>) =>
     setCustomFieldsField("createError", nextValue);
 
@@ -500,40 +562,79 @@ export function AdminCustomFieldsPage() {
     void load();
   });
 
+  const fieldErrorMessages = useMemo(
+    () => ({
+      custom_field_key_invalid: t.cf_error_key_invalid,
+      custom_field_key_exists: t.cf_error_key_exists,
+      custom_field_label_invalid: t.cf_error_label_invalid,
+      custom_field_type_invalid: t.cf_error_type_invalid,
+      custom_field_entity_invalid: t.cf_error_entity_invalid,
+      custom_field_options_required: t.cf_error_options_required,
+      custom_field_options_invalid: t.cf_error_options_invalid,
+      custom_field_not_found: t.cf_error_not_found,
+    }),
+    [t],
+  );
+
   const onCreate = async (ev: FormEvent) => {
     ev.preventDefault();
     setMsg(null);
     setCreateError(null);
+    const fieldKey = fKey.trim();
+    if (!editingId && !CUSTOM_FIELD_KEY_PATTERN.test(fieldKey)) {
+      setCreateError(t.cf_error_key_invalid);
+      return;
+    }
+    const options = fType === "select" ? parseCustomFieldOptions(fOptions) : [];
+    if (fType === "select" && (options.length === 0 || options.length > 100)) {
+      setCreateError(t.cf_error_options_required);
+      return;
+    }
     setCreating(true);
-    const optionValues = fOptions
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean);
-    const opts = optionValues.length > 0 ? optionValues : undefined;
+    const payload = {
+      entity_type: fEntity,
+      field_key: fieldKey,
+      field_label: fLabel.trim(),
+      field_type: fType,
+      options: options.length > 0 ? options : null,
+      is_required: fRequired,
+      sort_order: parseInt(fSort, 10) || 0,
+    };
     try {
-      await createAdminCustomField({
-        entity_type: fEntity,
-        field_key: fKey,
-        field_label: fLabel,
-        field_type: fType,
-        options: opts ?? null,
-        is_required: false,
-        sort_order: parseInt(fSort, 10) || 0,
-      });
+      if (editingId) {
+        await updateAdminCustomField(editingId, payload);
+      } else {
+        await createAdminCustomField(payload);
+      }
       closeCreateSheet();
       void load();
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      setCreateError(message);
-      setMsg(message);
+      setCreateError(codedAdminErrorText(e, fieldErrorMessages, t.common_error));
     } finally {
       setCreating(false);
     }
   };
 
+  const openEdit = useCallback((field: CustomField) => {
+    dispatchCustomFieldsState({
+      createError: null,
+      editingId: field.id,
+      fEntity: field.entity_type,
+      fKey: field.field_key,
+      fLabel: field.field_label,
+      fOptions: customFieldOptionsText(field.options),
+      fRequired: field.is_required,
+      fSort: String(field.sort_order ?? 0),
+      fType: field.field_type,
+      showCreate: true,
+    });
+  }, []);
+
   const closeCreateSheet = useCallback(() => {
     setShowCreate(false);
     setCreateError(null);
+    setEditingId("");
+    setFRequired(false);
     setFEntity("lead");
     setFType("text");
     setFSort("0");
@@ -542,7 +643,14 @@ export function AdminCustomFieldsPage() {
     setFOptions("");
   }, []);
 
-  const createDirty =
+  const editedField = editingId ? fields.find((field) => field.id === editingId) : undefined;
+  const createDirty = editedField
+    ? fLabel !== editedField.field_label ||
+      fType !== editedField.field_type ||
+      fRequired !== editedField.is_required ||
+      fSort !== String(editedField.sort_order ?? 0) ||
+      fOptions !== customFieldOptionsText(editedField.options)
+    : fRequired ||
     fEntity !== "lead" ||
     fType !== "text" ||
     fSort !== "0" ||
@@ -556,10 +664,17 @@ export function AdminCustomFieldsPage() {
     confirmMessage: closeUnsavedConfirmMessage,
   });
 
-  const onDelete = useCallback(async (id: string) => {
-    await deleteAdminCustomField(id);
+  const onDelete = useCallback(async (field: CustomField) => {
+    // A deleted field disappears from the list: ask first (screens QA E F6).
+    if (!window.confirm(formatUiText(t.cf_delete_confirm, { label: field.field_label }))) return;
+    setMsg(null);
+    try {
+      await deleteAdminCustomField(field.id);
+    } catch (e) {
+      setMsg(codedAdminErrorText(e, fieldErrorMessages, t.common_error));
+    }
     void load();
-  }, [load]);
+  }, [fieldErrorMessages, load, t.cf_delete_confirm, t.common_error]);
 
   const activeFields = fields.filter((f) => f.is_active);
   const entityTypeLabel = useCallback(
@@ -625,21 +740,35 @@ export function AdminCustomFieldsPage() {
       id: "actions",
       label: t.users_actions,
       accessor: (field) => field.id,
-      width: 150,
+      width: 200,
       render: (field) => (
-        <Button
-          size="sm"
-          variant="destructive"
-          onClick={(event) => {
-            event.stopPropagation();
-            void onDelete(field.id);
-          }}
-        >
-          {t.common_delete}
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={(event) => {
+              event.stopPropagation();
+              openEdit(field);
+            }}
+          >
+            {t.common_edit}
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={(event) => {
+              event.stopPropagation();
+              void onDelete(field);
+            }}
+          >
+            {t.common_delete}
+          </Button>
+        </div>
       ),
     },
   ], [
+    t.common_edit,
+    openEdit,
     t.cf_entity_type,
     t.cf_field_key,
     t.cf_field_label,
@@ -661,6 +790,8 @@ export function AdminCustomFieldsPage() {
         onRefresh={() => void load()}
       />
 
+      <Banner tone="warning">{t.cf_not_on_forms}</Banner>
+
       {msg ? <Banner tone="error">{msg}</Banner> : null}
 
       <AdminCustomFieldCreateSheet
@@ -668,6 +799,8 @@ export function AdminCustomFieldsPage() {
         entityTypeLabel={entityTypeLabel} fieldTypeLabel={fieldTypeLabel}
         fEntity={fEntity} fKey={fKey} fLabel={fLabel}
         fOptions={fOptions} fSort={fSort} fType={fType} showCreate={showCreate}
+        fRequired={fRequired} editing={Boolean(editingId)}
+        onRequiredChange={setFRequired}
         dirty={createDirty}
         t={t as unknown as Record<string, string>}
         onClose={closeCreateSheet} onCreate={onCreate}

@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   blankContractForm,
   contractActionErrorMessage,
+  contractConditionsText,
   contractToStatusForm,
+  parseContractConditionsText,
   formatDate,
   formatDateTime,
   formatQuantity,
@@ -167,13 +169,13 @@ describe("validateCreateContractForm", () => {
     );
   });
 
-  it("validates JSON conditions locally", () => {
+  it("accepts plain-text notes (screens QA 2026-11-12, E F15)", () => {
     expect(
       validateCreateContractForm(
-        { ...blankContractForm("patient-1"), conditionsText: "{not json" },
+        { ...blankContractForm("patient-1"), conditionsText: "Patient wünscht Termine vormittags" },
         messages,
       ),
-    ).toBe("Conditions must be valid JSON.");
+    ).toBe("");
   });
 
   it("defaults the start to today while keeping the contract open-ended", () => {
@@ -192,11 +194,23 @@ describe("validateCreateContractForm", () => {
 });
 
 describe("validateContractStatusForm", () => {
-  it("validates JSON conditions before update", () => {
-    expect(validateContractStatusForm({ conditionsText: "{not json" }, messages)).toBe(
-      "Conditions must be valid JSON.",
-    );
+  it("never refuses the notes text", () => {
+    expect(validateContractStatusForm({ conditionsText: "{not json" }, messages)).toBe("");
     expect(validateContractStatusForm({ conditionsText: "" }, messages)).toBe("");
+  });
+
+  it("stores plain text as a note and keeps a JSON object as typed", () => {
+    expect(parseContractConditionsText("  Termine vormittags ")).toEqual({ notes: "Termine vormittags" });
+    expect(parseContractConditionsText("{not json")).toEqual({ notes: "{not json" });
+    expect(parseContractConditionsText('{"discount": 5}')).toEqual({ discount: 5 });
+    expect(parseContractConditionsText("   ")).toBeUndefined();
+    expect(contractConditionsText({ notes: "Termine vormittags" })).toBe("Termine vormittags");
+    expect(contractConditionsText({ portal_enabled: true })).toBe('{\n  "portal_enabled": true\n}');
+    expect(contractConditionsText(null)).toBe("");
+    // The form text of stored conditions gives the same conditions back.
+    for (const stored of [{ notes: "x" }, { discount: 5, notes: "y" }]) {
+      expect(parseContractConditionsText(contractConditionsText(stored))).toEqual(stored);
+    }
   });
 });
 

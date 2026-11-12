@@ -362,33 +362,51 @@ export function contractActionErrorMessage(
   return trimmed;
 }
 
+/**
+ * The «Заметки» of a contract as stored in `conditions` (screens QA
+ * 2026-11-12, E F15: plain text was refused as invalid JSON). A JSON object
+ * is kept as typed; any other text is stored as `{ "notes": "<text>" }`.
+ */
+export function parseContractConditionsText(raw: string): Record<string, unknown> | undefined {
+  const text = raw.trim();
+  if (!text) return undefined;
+  if (text.startsWith("{")) {
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Not JSON: plain text.
+    }
+  }
+  return { notes: text };
+}
+
+/** The form text of stored conditions: the plain note, or the JSON of other terms. */
+export function contractConditionsText(conditions: Record<string, unknown> | null | undefined): string {
+  if (!conditions || Object.keys(conditions).length === 0) return "";
+  const keys = Object.keys(conditions);
+  if (keys.length === 1 && typeof conditions.notes === "string") return conditions.notes;
+  return JSON.stringify(conditions, null, 2);
+}
+
 export function validateCreateContractForm(
   form: ContractFormState,
   messages: ContractFormValidationMessages,
 ) {
   if (!form.patientId) return messages.patientRequired;
   if (!parseDateKey(form.validFrom)) return messages.invalidDate;
-  if (form.conditionsText.trim()) {
-    try {
-      JSON.parse(form.conditionsText);
-    } catch {
-      return messages.invalidConditionsJson;
-    }
-  }
   return "";
 }
 
+/** Notes are free text now; nothing in the status form can be refused locally. */
 export function validateContractStatusForm(
   form: Pick<ContractStatusFormState, "conditionsText">,
   messages: ContractFormValidationMessages,
 ) {
-  if (form.conditionsText.trim()) {
-    try {
-      JSON.parse(form.conditionsText);
-    } catch {
-      return messages.invalidConditionsJson;
-    }
-  }
+  void form;
+  void messages;
   return "";
 }
 
@@ -425,7 +443,7 @@ export function contractToStatusForm(contract: ContractItem): ContractStatusForm
   return {
     status: (contract.status as ContractStatus) ?? "draft",
     signedAt: contract.signed_at ? toDateTimeLocal(contract.signed_at) : "",
-    conditionsText: contract.conditions ? JSON.stringify(contract.conditions, null, 2) : "",
+    conditionsText: contractConditionsText(contract.conditions),
   };
 }
 

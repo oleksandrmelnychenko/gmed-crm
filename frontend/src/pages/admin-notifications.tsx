@@ -41,8 +41,9 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Dialog } from "@/components/ui/dialog";
 import { AdminDialogScaffold, AdminFormSection } from "@/components/admin-dialog-scaffold";
 import { StatusChip } from "@/components/ui/status-chip";
-import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
+import { formatEnumLabelFromKeys, formatUiText, useLang, type TranslationKey } from "@/lib/i18n";
 import {
+  codedAdminErrorText,
   compactNotificationConfig,
   matchesNotificationSearch,
   prettyNotificationConfig,
@@ -64,6 +65,7 @@ import {
   deleteAdminNotificationChannel,
   fetchAdminNotificationChannels,
   testAdminNotificationChannel,
+  updateAdminNotificationChannel,
 } from "@/pages/admin/data/admin-api";
 
 interface Channel {
@@ -76,6 +78,7 @@ interface Channel {
 
 type FlashState =
   | { tone: "success"; text: string }
+  | { tone: "warning"; text: string }
   | { tone: "error"; text: string }
   | null;
 
@@ -108,6 +111,8 @@ type AdminNotificationsState = {
   detailOpen: boolean;
   selectedChannelId: string;
   createOpen: boolean;
+  /** The channel the form edits; empty for a new channel. */
+  editingId: string;
   submitting: boolean;
   formError: string;
   formName: string;
@@ -166,6 +171,7 @@ function useAdminNotificationsPageContent() {
       detailOpen: false,
       selectedChannelId: "",
       createOpen: false,
+      editingId: "",
       submitting: false,
       formError: "",
       formName: "",
@@ -178,6 +184,7 @@ function useAdminNotificationsPageContent() {
     channels,
     createOpen,
     detailOpen,
+    editingId,
     error,
     flash,
     formConfig,
@@ -221,6 +228,8 @@ function useAdminNotificationsPageContent() {
     setNotificationsField("selectedChannelId", nextValue);
   const setCreateOpen = (nextValue: SetStateAction<boolean>) =>
     setNotificationsField("createOpen", nextValue);
+  const setEditingId = (nextValue: SetStateAction<string>) =>
+    setNotificationsField("editingId", nextValue);
   const setSubmitting = (nextValue: SetStateAction<boolean>) =>
     setNotificationsField("submitting", nextValue);
   const setFormError = (nextValue: SetStateAction<string>) =>
@@ -293,7 +302,29 @@ function useAdminNotificationsPageContent() {
     setFormType("smtp");
     setFormConfig("");
     setFormError("");
+    setEditingId("");
     setSubmitting(false);
+  }
+
+  const channelErrorMessages = useMemo(
+    () => ({
+      notification_channel_type_invalid: t.notif_error_type_invalid,
+      notification_channel_name_invalid: t.notif_error_name_invalid,
+      notification_channel_config_invalid: t.notif_error_config_invalid,
+      notification_channel_not_found: t.notif_error_not_found,
+    }),
+    [t],
+  );
+
+  /** Opens the form with the channel; its secrets stay masked (E F3). */
+  function openEdit(channel: Channel) {
+    setFormName(channel.name);
+    setFormType(channel.channel_type);
+    setFormConfig(prettyNotificationConfig(channel.config));
+    setFormError("");
+    setEditingId(channel.id);
+    setDetailOpen(false);
+    setCreateOpen(true);
   }
 
   function handleCreateOpenChange(open: boolean) {
@@ -335,25 +366,34 @@ function useAdminNotificationsPageContent() {
 
     setSubmitting(true);
     try {
-      await createAdminNotificationChannel({
+      const editedChannel = editingId
+        ? channels.find((channel) => channel.id === editingId)
+        : undefined;
+      const payload = {
         channel_type: formType,
         name: formName.trim(),
         config,
-        is_active: true,
-      });
+        is_active: editedChannel?.is_active ?? true,
+      };
+      if (editingId) {
+        await updateAdminNotificationChannel(editingId, payload);
+      } else {
+        await createAdminNotificationChannel(payload);
+      }
       handleCreateOpenChange(false);
-      setFlash({ tone: "success", text: t.settings_updated });
+      setFlash({ tone: "success", text: t.notif_saved });
       await load();
     } catch (submitError) {
-      setFormError(
-        submitError instanceof Error ? submitError.message : t.common_error,
-      );
+      setFormError(codedAdminErrorText(submitError, channelErrorMessages, t.common_error));
     } finally {
       setSubmitting(false);
     }
   }
 
   const handleDelete = useCallback(async (id: string) => {
+    const channel = channels.find((item) => item.id === id);
+    // Deleting cannot be undone: ask first (screens QA E F3).
+    if (!window.confirm(formatUiText(t.notif_delete_confirm, { name: channel?.name ?? "" }))) return;
     setFlash(null);
     setActionBusyId(id);
     try {
@@ -362,32 +402,39 @@ function useAdminNotificationsPageContent() {
         setDetailOpen(false);
         setSelectedChannelId("");
       }
+      setFlash({ tone: "success", text: t.notif_deleted });
       await load();
     } catch (deleteError) {
       setFlash({
         tone: "error",
-        text: deleteError instanceof Error ? deleteError.message : t.common_error,
+        text: codedAdminErrorText(deleteError, channelErrorMessages, t.common_error),
       });
     } finally {
       setActionBusyId("");
     }
-  }, [load, selectedChannelId, t.common_error]);
+  }, [channelErrorMessages, channels, load, selectedChannelId, t.common_error, t.notif_delete_confirm, t.notif_deleted]);
 
   const handleTest = useCallback(async (id: string) => {
     setFlash(null);
     setActionBusyId(id);
     try {
       await testAdminNotificationChannel(id);
-      setFlash({ tone: "success", text: t.notif_test_ok });
+      // Nothing is sent: GMED does not deliver through these channels yet,
+      // so the page says so instead of "OK" (screens QA E F3).
+      const channel = channels.find((item) => item.id === id);
+      setFlash({
+        tone: "warning",
+        text: formatUiText(t.notif_test_dry_run, { name: channel?.name ?? "" }),
+      });
     } catch (testError) {
       setFlash({
         tone: "error",
-        text: testError instanceof Error ? testError.message : t.common_error,
+        text: codedAdminErrorText(testError, channelErrorMessages, t.common_error),
       });
     } finally {
       setActionBusyId("");
     }
-  }, [t.common_error, t.notif_test_ok]);
+  }, [channelErrorMessages, channels, t.common_error, t.notif_test_dry_run]);
 
   const columns = useMemo<ColumnDef<Channel>[]>(() => [
     {
@@ -546,9 +593,11 @@ function useAdminNotificationsPageContent() {
           ))}
         </div>
 
+        <Banner tone="warning">{t.notif_not_used_notice}</Banner>
+
         {flash ? (
-          flash.tone === "error" ? (
-            <Banner tone="error">{flash.text}</Banner>
+          flash.tone === "error" || flash.tone === "warning" ? (
+            <Banner tone={flash.tone}>{flash.text}</Banner>
           ) : (
             <SuccessBanner>{flash.text}</SuccessBanner>
           )
@@ -624,12 +673,12 @@ function useAdminNotificationsPageContent() {
             <AdminDialogScaffold
               icon={BellPlus}
               onSubmit={handleCreate}
-              title={t.notif_new}
+              title={editingId ? t.notif_edit : t.notif_new}
               description={t.notif_subtitle}
               footer={(
                 <SheetFormFooter
                   cancelLabel={t.common_cancel}
-                  submitLabel={t.common_create}
+                  submitLabel={editingId ? t.common_save : t.common_create}
                   submitting={submitting}
                   onCancel={() => handleCreateOpenChange(false)}
                 />
@@ -672,6 +721,7 @@ function useAdminNotificationsPageContent() {
                     className={`${textareaClass} font-mono text-xs`}
                   />
                 </Field>
+                <p className="text-[11.5px] text-muted-foreground">{t.notif_secret_hint}</p>
               </AdminFormSection>
             </AdminDialogScaffold>
       </Dialog>
@@ -704,6 +754,15 @@ function useAdminNotificationsPageContent() {
                         <LoaderCircle className="size-4 animate-spin" />
                       ) : null}
                       {t.notif_test}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 rounded-lg"
+                      disabled={actionBusyId === selectedChannel.id}
+                      onClick={() => openEdit(selectedChannel)}
+                    >
+                      {t.common_edit}
                     </Button>
                     <Button
                       type="button"

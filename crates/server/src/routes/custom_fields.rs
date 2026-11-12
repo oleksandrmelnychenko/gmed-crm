@@ -73,6 +73,84 @@ struct UpsertField {
     sort_order: Option<i32>,
 }
 
+const ENTITY_TYPES: &[&str] = &["lead", "patient", "order", "provider"];
+const FIELD_TYPES: &[&str] = &["text", "number", "date", "boolean", "select"];
+const MAX_KEY_LEN: usize = 63;
+const MAX_LABEL_LEN: usize = 120;
+const MAX_OPTIONS: usize = 100;
+const MAX_OPTION_LEN: usize = 200;
+
+/// A refusal with a stable code the page translates (screens QA 2026-11-12,
+/// E F8/F9: English text and a 500 "Failed" for an unknown type).
+type FieldRefusal = (StatusCode, &'static str, &'static str);
+
+/// `[a-z][a-z0-9_]*`, at most 63 characters (E F9: «Bad Key! ä» was saved).
+fn valid_field_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    matches!(chars.next(), Some(first) if first.is_ascii_lowercase())
+        && key.len() <= MAX_KEY_LEN
+        && chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_')
+}
+
+/// The checked definition: trimmed label, known type, and for a list the
+/// trimmed, non-empty, unique options (other types keep no options).
+fn validated_definition(
+    body: &UpsertField,
+) -> Result<(String, &'static str, Option<serde_json::Value>), FieldRefusal> {
+    let label = body.field_label.trim().to_string();
+    if label.is_empty() || label.chars().count() > MAX_LABEL_LEN {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "custom_field_label_invalid",
+            "Field label is required (at most 120 characters)",
+        ));
+    }
+    let requested = body.field_type.as_deref().unwrap_or("text").trim();
+    let Some(field_type) = FIELD_TYPES.iter().copied().find(|ft| *ft == requested) else {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "custom_field_type_invalid",
+            "Unknown field type",
+        ));
+    };
+    if field_type != "select" {
+        return Ok((label, field_type, None));
+    }
+    let mut options: Vec<String> = Vec::new();
+    if let Some(serde_json::Value::Array(items)) = &body.options {
+        for item in items {
+            let Some(text) = item.as_str().map(str::trim) else {
+                return Err((
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "custom_field_options_invalid",
+                    "List options must be texts",
+                ));
+            };
+            if text.is_empty() {
+                continue;
+            }
+            if text.chars().count() > MAX_OPTION_LEN {
+                return Err((
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "custom_field_options_invalid",
+                    "List option is too long",
+                ));
+            }
+            if !options.iter().any(|known| known == text) {
+                options.push(text.to_string());
+            }
+        }
+    }
+    if options.is_empty() || options.len() > MAX_OPTIONS {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "custom_field_options_required",
+            "A list field needs 1 to 100 options",
+        ));
+    }
+    Ok((label, field_type, Some(serde_json::json!(options))))
+}
+
 async fn create_field(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -82,49 +160,109 @@ async fn create_field(
         return e;
     }
 
-    let ft = body.field_type.as_deref().unwrap_or("text");
+    let entity_type = body.entity_type.trim().to_string();
+    if !ENTITY_TYPES.contains(&entity_type.as_str()) {
+        return coded_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "custom_field_entity_invalid",
+            "Unknown entity type",
+        );
+    }
+    let field_key = body.field_key.trim().to_string();
+    if !valid_field_key(&field_key) {
+        return coded_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "custom_field_key_invalid",
+            "Field key: lowercase latin letters, digits and _, starting with a letter",
+        );
+    }
+    let (label, field_type, options) = match validated_definition(&body) {
+        Ok(value) => value,
+        Err((status, code, message)) => return coded_err(status, code, message),
+    };
 
-    match sqlx::query!(
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin create custom field");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    // A deleted field keeps its row (and the values stored under it); its
+    // key is renamed so the key can be used again (E F7). The new field
+    // starts empty, nothing of the old one comes back.
+    if let Err(e) = sqlx::query(
+        "UPDATE custom_fields
+            SET field_key = field_key || '~deleted~' || left(id::text, 8)
+          WHERE entity_type = $1 AND field_key = $2 AND is_active = false",
+    )
+    .bind(&entity_type)
+    .bind(&field_key)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, "free deleted custom field key");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    let inserted = sqlx::query_scalar::<_, Uuid>(
         "INSERT INTO custom_fields (entity_type, field_key, field_label, field_type, options, is_required, sort_order, created_by)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
-        body.entity_type, body.field_key, body.field_label, ft,
-        body.options, body.is_required.unwrap_or(false),
-        body.sort_order.unwrap_or(0), auth.user_id
-    ).fetch_one(&state.db).await {
-        Ok(r) => {
-            state.audit_sender.try_send(audit::domain_event(
-                "create_custom_field",
-                Some(auth.user_id),
-                "custom_field",
-                Some(r.id),
-                serde_json::json!({
-                    "entity_type": body.entity_type,
-                    "field_key": body.field_key,
-                }),
-            ));
-            crate::realtime::publish_admin_event(
-                &state,
-                Some(auth.user_id),
-                "custom_field.created",
-                "custom_field",
-                r.id,
-                serde_json::json!({}),
-            )
-            .await;
-            Json(serde_json::json!({"ok": true, "id": r.id})).into_response()
-        }
+    )
+    .bind(&entity_type)
+    .bind(&field_key)
+    .bind(&label)
+    .bind(field_type)
+    .bind(&options)
+    .bind(body.is_required.unwrap_or(false))
+    .bind(body.sort_order.unwrap_or(0))
+    .bind(auth.user_id)
+    .fetch_one(&mut *tx)
+    .await;
+    let id = match inserted {
+        Ok(id) => id,
         Err(e) => {
-            let msg = e.to_string();
-            if msg.contains("duplicate") || msg.contains("unique") {
-                err(StatusCode::CONFLICT, "Field key already exists for this entity type")
-            } else {
-                tracing::error!(error = %e, "create custom field");
-                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+            if e.as_database_error()
+                .is_some_and(|db| db.is_unique_violation())
+            {
+                return coded_err(
+                    StatusCode::CONFLICT,
+                    "custom_field_key_exists",
+                    "Field key already exists for this entity type",
+                );
             }
+            tracing::error!(error = %e, "create custom field");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
+    };
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "commit create custom field");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "create_custom_field",
+        Some(auth.user_id),
+        "custom_field",
+        Some(id),
+        serde_json::json!({
+            "entity_type": entity_type,
+            "field_key": field_key,
+        }),
+    ));
+    crate::realtime::publish_admin_event(
+        &state,
+        Some(auth.user_id),
+        "custom_field.created",
+        "custom_field",
+        id,
+        serde_json::json!({}),
+    )
+    .await;
+    Json(serde_json::json!({"ok": true, "id": id})).into_response()
 }
 
+/// Label, type, options, «Обязательное» and order of an active field. Entity
+/// and key stay as created; a deleted field is not brought back by an edit.
 async fn update_field(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -135,13 +273,33 @@ async fn update_field(
         return e;
     }
 
-    let ft = body.field_type.as_deref().unwrap_or("text");
+    let (label, field_type, options) = match validated_definition(&body) {
+        Ok(value) => value,
+        Err((status, code, message)) => return coded_err(status, code, message),
+    };
 
-    match sqlx::query!(
-        "UPDATE custom_fields SET field_label=$2, field_type=$3, options=$4, is_required=$5, sort_order=$6, is_active=true WHERE id=$1",
-        id, body.field_label, ft, body.options, body.is_required.unwrap_or(false), body.sort_order.unwrap_or(0)
-    ).execute(&state.db).await {
+    match sqlx::query(
+        "UPDATE custom_fields
+            SET field_label = $2, field_type = $3, options = $4, is_required = $5, sort_order = $6
+          WHERE id = $1 AND is_active = true",
+    )
+    .bind(id)
+    .bind(&label)
+    .bind(field_type)
+    .bind(&options)
+    .bind(body.is_required.unwrap_or(false))
+    .bind(body.sort_order.unwrap_or(0))
+    .execute(&state.db)
+    .await
+    {
         Ok(r) if r.rows_affected() > 0 => {
+            state.audit_sender.try_send(audit::domain_event(
+                "update_custom_field",
+                Some(auth.user_id),
+                "custom_field",
+                Some(id),
+                serde_json::json!({ "field_type": field_type }),
+            ));
             crate::realtime::publish_admin_event(
                 &state,
                 Some(auth.user_id),
@@ -153,8 +311,15 @@ async fn update_field(
             .await;
             Json(serde_json::json!({"ok": true})).into_response()
         }
-        Ok(_) => err(StatusCode::NOT_FOUND, "Field not found"),
-        Err(e) => { tracing::error!(error = %e, "update custom field"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
+        Ok(_) => coded_err(
+            StatusCode::NOT_FOUND,
+            "custom_field_not_found",
+            "Field not found",
+        ),
+        Err(e) => {
+            tracing::error!(error = %e, "update custom field");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
     }
 }
 
@@ -175,7 +340,13 @@ async fn delete_field(
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {}
-        Ok(_) => return err(StatusCode::NOT_FOUND, "Field not found"),
+        Ok(_) => {
+            return coded_err(
+                StatusCode::NOT_FOUND,
+                "custom_field_not_found",
+                "Field not found",
+            );
+        }
         Err(e) => {
             tracing::error!(error = %e, "delete custom field");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
@@ -382,4 +553,81 @@ async fn authorize_values_access(
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(serde_json::json!({"error": status.canonical_reason().unwrap_or("error"), "message": message}))).into_response()
+}
+
+fn coded_err(status: StatusCode, code: &str, message: &str) -> axum::response::Response {
+    (
+        status,
+        Json(serde_json::json!({ "error": code, "message": message })),
+    )
+        .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{UpsertField, valid_field_key, validated_definition};
+    use serde_json::json;
+
+    fn field(field_type: &str, options: Option<serde_json::Value>) -> UpsertField {
+        UpsertField {
+            entity_type: "lead".to_string(),
+            field_key: "preferred_clinic".to_string(),
+            field_label: "  Bevorzugte Klinik ".to_string(),
+            field_type: Some(field_type.to_string()),
+            options,
+            is_required: Some(true),
+            sort_order: Some(1),
+        }
+    }
+
+    #[test]
+    fn field_keys_are_lowercase_latin_with_digits_and_underscores() {
+        assert!(valid_field_key("qa_e_preferred_clinic"));
+        assert!(valid_field_key("clinic2"));
+        for bad in [
+            "",
+            "Bad Key! ä",
+            "2clinic",
+            "_clinic",
+            "clinic-name",
+            "Clinic",
+            "ä",
+        ] {
+            assert!(!valid_field_key(bad), "{bad}");
+        }
+        assert!(!valid_field_key(&"a".repeat(64)));
+    }
+
+    #[test]
+    fn definitions_are_checked_and_trimmed() {
+        let (label, field_type, options) = validated_definition(&field(
+            "select",
+            Some(json!([" Charité ", "Vivantes", "", "Vivantes"])),
+        ))
+        .expect("valid list");
+        assert_eq!(label, "Bevorzugte Klinik");
+        assert_eq!(field_type, "select");
+        assert_eq!(options, Some(json!(["Charité", "Vivantes"])));
+
+        let (_, _, options) =
+            validated_definition(&field("text", Some(json!(["x"])))).expect("valid text");
+        assert_eq!(options, None);
+
+        let refused = |body: UpsertField| validated_definition(&body).err().map(|r| r.1);
+        assert_eq!(
+            refused(field("color", None)),
+            Some("custom_field_type_invalid")
+        );
+        assert_eq!(
+            refused(field("select", None)),
+            Some("custom_field_options_required")
+        );
+        assert_eq!(
+            refused(field("select", Some(json!([1, 2])))),
+            Some("custom_field_options_invalid")
+        );
+        let mut empty_label = field("text", None);
+        empty_label.field_label = "   ".to_string();
+        assert_eq!(refused(empty_label), Some("custom_field_label_invalid"));
+    }
 }

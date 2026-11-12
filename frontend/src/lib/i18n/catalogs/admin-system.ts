@@ -37,6 +37,45 @@ export interface AdminSystemTranslations {
   cf_field_type_date: string;
   cf_field_type_boolean: string;
   cf_field_type_select: string;
+  cf_edit: string;
+  cf_required_hint: string;
+  cf_key_hint: string;
+  cf_key_locked_hint: string;
+  cf_options_hint: string;
+  cf_delete_confirm: string;
+  cf_not_on_forms: string;
+  cf_error_key_invalid: string;
+  cf_error_key_exists: string;
+  cf_error_label_invalid: string;
+  cf_error_type_invalid: string;
+  cf_error_entity_invalid: string;
+  cf_error_options_required: string;
+  cf_error_options_invalid: string;
+  cf_error_not_found: string;
+  notif_edit: string;
+  notif_test_dry_run: string;
+  notif_delete_confirm: string;
+  notif_not_used_notice: string;
+  notif_secret_hint: string;
+  notif_saved: string;
+  notif_deleted: string;
+  notif_error_type_invalid: string;
+  notif_error_name_invalid: string;
+  notif_error_config_invalid: string;
+  notif_error_not_found: string;
+  settings_required_documents_invalid_json: string;
+  settings_required_documents_invalid_rule: string;
+  settings_value_positive_integer: string;
+  settings_value_out_of_range: string;
+  settings_date_invalid: string;
+  settings_agency_email_invalid: string;
+  settings_agency_website_invalid: string;
+  settings_value_required_or_too_long: string;
+  incident_error_authority_required: string;
+  incident_error_subjects_required: string;
+  incident_error_reopen_reason: string;
+  incident_error_text_too_long: string;
+  incident_error_not_found: string;
 
   activity_action_login: string;
   activity_action_create_lead: string;
@@ -458,6 +497,55 @@ export const adminSystemRu: AdminSystemTranslations = {
   cf_field_type_date: "Дата",
   cf_field_type_boolean: "Да/нет",
   cf_field_type_select: "Список",
+  cf_edit: "Изменить поле",
+  cf_required_hint: "Поле нужно заполнить",
+  cf_key_hint: "Латинские строчные буквы, цифры и «_», первая — буква, до 63 символов.",
+  cf_key_locked_hint: "Тип сущности и ключ после создания не меняются.",
+  cf_options_hint: "Только для типа «Список»: варианты через запятую.",
+  cf_delete_confirm:
+    "Удалить поле «{label}»? Оно исчезнет из списка; уже сохранённые значения останутся в базе, но показываться не будут. Ключ можно будет использовать снова.",
+  cf_not_on_forms:
+    "Поля пока не показываются в карточках и формах лидов, пациентов, заказов и провайдеров: подключение к формам ещё не сделано.",
+  cf_error_key_invalid:
+    "Ключ поля: только латинские строчные буквы, цифры и «_», первая — буква, до 63 символов.",
+  cf_error_key_exists: "Поле с таким ключом для этого типа сущности уже есть.",
+  cf_error_label_invalid: "Укажите название поля (до 120 символов).",
+  cf_error_type_invalid: "Неизвестный тип поля.",
+  cf_error_entity_invalid: "Неизвестный тип сущности.",
+  cf_error_options_required: "Для списка укажите от 1 до 100 вариантов через запятую.",
+  cf_error_options_invalid: "Каждый вариант списка — текст до 200 символов.",
+  cf_error_not_found: "Поле не найдено — возможно, его уже удалили. Обновите страницу.",
+  notif_edit: "Изменить канал",
+  notif_test_dry_run:
+    "Проверка без отправки: канал «{name}» сохранён, но GMED пока не отправляет через такие каналы. Ничего не отправлено, подключение к серверу не проверялось.",
+  notif_delete_confirm: "Удалить канал «{name}»? Это нельзя отменить.",
+  notif_not_used_notice:
+    "Каналы пока только хранятся: GMED не отправляет через них уведомления, кнопка «Тест» ничего не отправляет.",
+  notif_secret_hint:
+    "Пароли, токены и ключи показываются как ******** и не возвращаются после сохранения. Оставьте ******** без изменений, чтобы сохранить прежнее значение.",
+  notif_saved: "Канал сохранён.",
+  notif_deleted: "Канал удалён.",
+  notif_error_type_invalid: "Неизвестный тип канала.",
+  notif_error_name_invalid: "Укажите название канала (до 200 символов).",
+  notif_error_config_invalid: "Конфигурация должна быть JSON-объектом.",
+  notif_error_not_found: "Канал не найден — возможно, его уже удалили. Обновите страницу.",
+  settings_required_documents_invalid_json:
+    "Обязательные документы: текст не является корректным JSON. Нужен список правил в квадратных скобках [ … ].",
+  settings_required_documents_invalid_rule:
+    "Обязательные документы: каждое правило — объект с полями key (латиница, цифры, пробел или дефис), label (до 120 символов) и хотя бы одним из art или category (списки строк); signed — true или false.",
+  settings_value_positive_integer: "Введите целое неотрицательное число.",
+  settings_value_out_of_range: "Значение вне допустимого диапазона.",
+  settings_date_invalid: "Введите корректную дату.",
+  settings_agency_email_invalid: "Электронная почта агентства указана неверно.",
+  settings_agency_website_invalid: "Сайт агентства: укажите адрес http:// или https:// длиной до 300 символов.",
+  settings_value_required_or_too_long: "Поле не может быть пустым или слишком длинным.",
+  incident_error_authority_required:
+    "Перед закрытием укажите дату уведомления надзорного органа или причину, по которой уведомление не требуется.",
+  incident_error_subjects_required:
+    "При высоком риске перед закрытием укажите дату уведомления затронутых лиц или причину, по которой их не уведомляют.",
+  incident_error_reopen_reason: "Чтобы снова открыть закрытый инцидент, укажите причину не короче 10 символов.",
+  incident_error_text_too_long: "Текст слишком длинный (не более 8000 символов).",
+  incident_error_not_found: "Инцидент не найден. Обновите страницу.",
 
   activity_action_login: "Вход",
   activity_action_create_lead: "Лид создан",
@@ -898,6 +986,55 @@ export const adminSystemDe: AdminSystemTranslations = {
   cf_field_type_date: "Datum",
   cf_field_type_boolean: "Ja/Nein",
   cf_field_type_select: "Auswahl",
+  cf_edit: "Feld bearbeiten",
+  cf_required_hint: "Feld muss ausgefüllt werden",
+  cf_key_hint: "Kleine lateinische Buchstaben, Ziffern und „_“, zuerst ein Buchstabe, höchstens 63 Zeichen.",
+  cf_key_locked_hint: "Objekttyp und Schlüssel ändern sich nach dem Anlegen nicht.",
+  cf_options_hint: "Nur für den Typ „Auswahl“: Werte durch Kommas getrennt.",
+  cf_delete_confirm:
+    "Feld „{label}“ löschen? Es verschwindet aus der Liste; bereits gespeicherte Werte bleiben in der Datenbank, werden aber nicht mehr angezeigt. Der Schlüssel kann wieder verwendet werden.",
+  cf_not_on_forms:
+    "Die Felder erscheinen noch in keiner Karte und keinem Formular von Leads, Patienten, Aufträgen oder Anbietern: die Anbindung an die Formulare fehlt noch.",
+  cf_error_key_invalid:
+    "Feldschlüssel: nur kleine lateinische Buchstaben, Ziffern und „_“, zuerst ein Buchstabe, höchstens 63 Zeichen.",
+  cf_error_key_exists: "Für diesen Objekttyp gibt es bereits ein Feld mit diesem Schlüssel.",
+  cf_error_label_invalid: "Bitte einen Feldnamen angeben (höchstens 120 Zeichen).",
+  cf_error_type_invalid: "Unbekannter Feldtyp.",
+  cf_error_entity_invalid: "Unbekannter Objekttyp.",
+  cf_error_options_required: "Für eine Auswahl 1 bis 100 Werte durch Kommas getrennt angeben.",
+  cf_error_options_invalid: "Jeder Auswahlwert ist ein Text mit höchstens 200 Zeichen.",
+  cf_error_not_found: "Feld nicht gefunden – vielleicht wurde es schon gelöscht. Bitte die Seite neu laden.",
+  notif_edit: "Kanal bearbeiten",
+  notif_test_dry_run:
+    "Prüfung ohne Versand: Der Kanal „{name}“ ist gespeichert, aber GMED versendet noch nicht über solche Kanäle. Es wurde nichts gesendet und keine Verbindung zum Server geprüft.",
+  notif_delete_confirm: "Kanal „{name}“ löschen? Das kann nicht rückgängig gemacht werden.",
+  notif_not_used_notice:
+    "Die Kanäle werden bisher nur gespeichert: GMED versendet darüber keine Benachrichtigungen, und „Test“ sendet nichts.",
+  notif_secret_hint:
+    "Passwörter, Tokens und Schlüssel werden als ******** angezeigt und nach dem Speichern nicht mehr ausgegeben. Lassen Sie ******** unverändert, um den bisherigen Wert zu behalten.",
+  notif_saved: "Kanal gespeichert.",
+  notif_deleted: "Kanal gelöscht.",
+  notif_error_type_invalid: "Unbekannter Kanaltyp.",
+  notif_error_name_invalid: "Bitte einen Kanalnamen angeben (höchstens 200 Zeichen).",
+  notif_error_config_invalid: "Die Konfiguration muss ein JSON-Objekt sein.",
+  notif_error_not_found: "Kanal nicht gefunden – vielleicht wurde er schon gelöscht. Bitte die Seite neu laden.",
+  settings_required_documents_invalid_json:
+    "Erforderliche Dokumente: Der Text ist kein gültiges JSON. Erwartet wird eine Liste von Regeln in eckigen Klammern [ … ].",
+  settings_required_documents_invalid_rule:
+    "Erforderliche Dokumente: Jede Regel ist ein Objekt mit key (Buchstaben, Ziffern, Leerzeichen oder Bindestrich), label (höchstens 120 Zeichen) und mindestens art oder category (Listen von Texten); signed ist true oder false.",
+  settings_value_positive_integer: "Bitte eine ganze, nicht negative Zahl eingeben.",
+  settings_value_out_of_range: "Der Wert liegt außerhalb des zulässigen Bereichs.",
+  settings_date_invalid: "Bitte ein gültiges Datum eingeben.",
+  settings_agency_email_invalid: "Die E-Mail-Adresse der Agentur ist ungültig.",
+  settings_agency_website_invalid: "Website der Agentur: bitte eine http://- oder https://-Adresse mit höchstens 300 Zeichen angeben.",
+  settings_value_required_or_too_long: "Das Feld darf nicht leer oder zu lang sein.",
+  incident_error_authority_required:
+    "Vor dem Abschluss die Meldung an die Aufsichtsbehörde oder den Grund, warum keine Meldung nötig ist, erfassen.",
+  incident_error_subjects_required:
+    "Bei hohem Risiko vor dem Abschluss die Benachrichtigung der betroffenen Personen oder den Grund für den Verzicht erfassen.",
+  incident_error_reopen_reason: "Zum Wiedereröffnen eines abgeschlossenen Vorfalls einen Grund mit mindestens 10 Zeichen angeben.",
+  incident_error_text_too_long: "Der Text ist zu lang (höchstens 8000 Zeichen).",
+  incident_error_not_found: "Vorfall nicht gefunden. Bitte die Seite neu laden.",
 
   activity_action_login: "Anmeldung",
   activity_action_create_lead: "Lead erstellt",

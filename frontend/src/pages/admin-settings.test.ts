@@ -56,3 +56,18 @@ describe("refused tax registration of the agency (QA 2026-11-10, D-06)", () => {
     expect(ru.settings_tax_number_invalid).toContain("143/123/12345");
   });
 });
+
+describe("refused required-documents rules in the UI language (screens QA 2026-11-12, E F13)", () => {
+  it("replaces the server's English JSON texts", () => {
+    expect(describeSettingError(refused("Required patient documents must be a valid JSON array"), ru)).toBe(
+      ru.settings_required_documents_invalid_json,
+    );
+    expect(
+      describeSettingError(refused("Each required patient document rule must include a label"), de),
+    ).toBe(de.settings_required_documents_invalid_rule);
+    expect(describeSettingError(refused("Max sessions cannot exceed 100"), ru)).toBe(
+      ru.settings_value_out_of_range,
+    );
+    expect(ru.settings_required_documents_invalid_json).toMatch(/[А-Яа-я]/);
+  });
+});

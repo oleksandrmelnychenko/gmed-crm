@@ -440,6 +440,12 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
   }
 
   const money = (value: string | null | undefined) => formatMoney(value, currency, locale);
+  // One minus style in every column: "− 1.500,00 €", as the movement and
+  // advance columns already write it (screens QA 2026-11-12, E F19).
+  const signedMoney = (value: string | null | undefined) => {
+    const amount = parseAmount(value);
+    return amount < 0 ? `− ${formatMoneyAmount(-amount, currency)}` : money(value);
+  };
   const patientRows = useMemo(() => filterPatientPositions(position?.patient_positions ?? [], patientSide, filters.search), [patientSide, position?.patient_positions, filters.search]);
   const providerRows = useMemo(() => filterProviderDocuments(position?.provider_liabilities ?? [], providerFilter, selectedProviderId, filters.search), [position?.provider_liabilities, providerFilter, selectedProviderId, filters.search]);
   const providerPositionRows = useMemo(() => filterProviderPositions(position?.provider_positions ?? [], position?.provider_liabilities ?? [], providerFilter, selectedProviderId, filters.search), [position?.provider_positions, position?.provider_liabilities, providerFilter, selectedProviderId, filters.search]);
@@ -486,7 +492,7 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
     },
     { id: "invoice_due", label: text.invoicesDue, accessor: (row) => parseAmount(row.invoice_due), filterType: "number", sortable: true, width: 145, render: (row) => money(row.invoice_due) },
     { id: "external_receivable", label: text.externalReceivable, accessor: (row) => parseAmount(row.external_receivable), filterType: "number", sortable: true, width: 150, render: (row) => money(row.external_receivable) },
-    { id: "manual_balance", label: text.adjustments, accessor: (row) => parseAmount(row.manual_balance), filterType: "number", sortable: true, width: 140, render: (row) => money(row.manual_balance) },
+    { id: "manual_balance", label: text.adjustments, accessor: (row) => parseAmount(row.manual_balance), filterType: "number", sortable: true, width: 140, render: (row) => signedMoney(row.manual_balance) },
     { id: "prepayment", label: text.advances, accessor: (row) => parseAmount(row.available_prepayment), filterType: "number", sortable: true, width: 140, render: (row) => parseAmount(row.available_prepayment) > 0 ? <span className="text-sky-700 dark:text-sky-400">− {money(row.available_prepayment)}</span> : money("0") },
     // A balance of overpayments only showed as zero in every column (QA 2026-11-01, R4-7).
     { id: "overpayment", label: text.overpayments, accessor: (row) => parseAmount(row.invoice_cash_credit), filterType: "number", sortable: true, width: 140, render: (row) => parseAmount(row.invoice_cash_credit) > 0 ? <span className="text-sky-700 dark:text-sky-400">− {money(row.invoice_cash_credit)}</span> : money("0") },
@@ -499,7 +505,7 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
       width: 150,
       render: (row) => (
         <span className={cn("font-semibold", row.balance_side === "debit" && "text-rose-700 dark:text-rose-400", row.balance_side === "credit" && "text-sky-700 dark:text-sky-400")}>
-          {money(row.calculated_balance)}
+          {signedMoney(row.calculated_balance)}
         </span>
       ),
     },
@@ -531,7 +537,7 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
         </div>
       ),
     },
-  ], [money, text]);
+  ], [money, signedMoney, text]);
 
   const providerPositionColumns = useMemo<ColumnDef<CompanyProviderPosition>[]>(() => [
     {
@@ -767,8 +773,10 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
         </select>
       ),
     },
-    { id: "net", label: text.net, accessor: (row) => parseAmount(row.amount_net), filterType: "number", sortable: true, width: 130, render: (row) => money(row.amount_net) },
-    { id: "vat", label: text.vat, accessor: (row) => parseAmount(row.amount_vat), filterType: "number", sortable: true, width: 120, render: (row) => money(row.amount_vat) },
+    // Net and VAT carry the sign of the movement like the gross (E F19:
+    // a reversal read "84,03 € / 15,97 €" next to "− 100,00 €").
+    { id: "net", label: text.net, accessor: (row) => parseAmount(row.amount_net), filterType: "number", sortable: true, width: 130, render: (row) => `${row.movement === "inflow" ? "+" : "−"} ${money(row.amount_net)}` },
+    { id: "vat", label: text.vat, accessor: (row) => parseAmount(row.amount_vat), filterType: "number", sortable: true, width: 120, render: (row) => `${row.movement === "inflow" ? "+" : "−"} ${money(row.amount_vat)}` },
     { id: "gross", label: text.gross, accessor: (row) => parseAmount(row.amount_gross), filterType: "number", sortable: true, width: 150, render: (row) => <span className={cn("font-semibold", row.movement === "inflow" ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400")}>{row.movement === "inflow" ? "+" : "−"} {money(row.amount_gross)}</span> },
   ], [accounts?.items, assignmentBusyId, lang, locale, money, openExternalInvoice, readOnly, text]);
 

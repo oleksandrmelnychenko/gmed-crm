@@ -49,8 +49,15 @@ const ACTIONS: Record<string, Pair> = {
     "Подписанты по умолчанию сохранены",
     "Standard-Unterzeichner gespeichert",
   ],
+  create_notification_channel: ["Канал уведомлений создан", "Benachrichtigungskanal angelegt"],
+  update_notification_channel: ["Канал уведомлений изменён", "Benachrichtigungskanal geändert"],
   delete_notification_channel: ["Канал уведомлений удалён", "Benachrichtigungskanal gelöscht"],
+  test_notification_channel: [
+    "Проверка канала уведомлений (без отправки)",
+    "Benachrichtigungskanal geprüft (ohne Versand)",
+  ],
   create_custom_field: ["Пользовательское поле создано", "Benutzerdefiniertes Feld angelegt"],
+  update_custom_field: ["Пользовательское поле изменено", "Benutzerdefiniertes Feld geändert"],
   delete_custom_field: ["Пользовательское поле удалено", "Benutzerdefiniertes Feld gelöscht"],
   noop: ["Без изменений", "Keine Änderung"],
 
@@ -803,8 +810,111 @@ const CHANGE_KEYS: Record<string, Pair> = {
   role: ["Роль", "Rolle"],
 };
 
+/**
+ * Record statuses stored in audit contexts (`status`, `previous_status`,
+ * `from`, …) that had no label yet: the log showed «Прежний статус: review»
+ * (screens QA 2026-11-12, E F12). Becomes `activity_status_<code>`.
+ */
+const CONTEXT_STATUSES: Record<string, Pair> = {
+  planned: ["Запланировано", "Geplant"],
+  requested: ["Запрошено", "Angefragt"],
+  delivered: ["Оказано", "Erbracht"],
+  received: ["Получено", "Eingegangen"],
+  review: ["На проверке", "In Prüfung"],
+  in_service: ["Выполняется", "In Durchführung"],
+  paused: ["Приостановлено", "Pausiert"],
+  pending_approval: ["Ожидает одобрения", "Wartet auf Freigabe"],
+  terminated: ["Расторгнут", "Gekündigt"],
+};
+
+/**
+ * Codes stored under one context key, as `activity_context_<key>_<value>`
+ * («Причина: terms_changed · Источник: order_service», DE «Quelle:
+ * invoice_recipient» — screens QA 2026-11-12, E F12). Only the label; the
+ * stored rows stay as they are.
+ */
+const CONTEXT_VALUES: Record<string, Pair> = {
+  category_arbeitsunfaehigkeit: ["Больничный лист", "Arbeitsunfähigkeitsbescheinigung"],
+  category_arbeitsvertrag: ["Трудовой договор", "Arbeitsvertrag"],
+  category_confidentiality: ["Обязательство о конфиденциальности", "Vertraulichkeitserklärung"],
+  category_followup: ["Последующее наблюдение", "Nachsorge"],
+  category_medical_report: ["Медицинское заключение", "Arztbericht"],
+  category_sop: ["Стандартная процедура (SOP)", "Standardarbeitsanweisung (SOP)"],
+  change_not_required: ["Отмечено «не требуется»", "Als nicht erforderlich markiert"],
+  decision_approve: ["Одобрено", "Freigegeben"],
+  decision_need_consultation: ["Нужна консультация", "Rücksprache nötig"],
+  decision_reject: ["Отклонено", "Abgelehnt"],
+  decision_release: ["Разрешено", "Freigegeben"],
+  kind_allergie: ["Аллергия", "Allergie"],
+  kind_cave: ["Предостережение (CAVE)", "CAVE-Hinweis"],
+  kind_follow_up_answered: ["Ответ на уточняющий вопрос", "Rückfrage beantwortet"],
+  kind_identity: ["Удостоверение личности", "Ausweisdokument"],
+  kind_medical: ["Медицинский документ", "Medizinisches Dokument"],
+  kind_payer_funds_proof: ["Подтверждение средств плательщика", "Mittelnachweis des Zahlers"],
+  kind_payer_identity: ["Удостоверение личности плательщика", "Ausweis des Zahlers"],
+  kind_raised: ["Риск повышен", "Risiko erhöht"],
+  kind_relationship_proof: ["Подтверждение родства", "Nachweis der Beziehung"],
+  kind_representative_authority: ["Полномочия представителя", "Vertretungsnachweis"],
+  kind_self_funds_proof: ["Подтверждение собственных средств", "Nachweis eigener Mittel"],
+  kind_status: ["Статус", "Status"],
+  kind_task: ["Задача", "Aufgabe"],
+  kind_trigger_withdrawn: ["Признак риска снят", "Risikomerkmal zurückgenommen"],
+  mode_link: ["По ссылке", "Per Link"],
+  mode_local_evidence_only: ["Только локальные данные", "Nur lokale Belege"],
+  mode_open_sources_only: ["Только открытые источники", "Nur offene Quellen"],
+  mode_patient: ["Пациент", "Patient:in"],
+  outcome_verified: ["Подтверждено", "Bestätigt"],
+  phase_discovery: ["Уточнение потребности", "Bedarfsklärung"],
+  phase_intake: ["Оформление", "Aufnahme"],
+  phase_execution: ["Исполнение", "Durchführung"],
+  phase_closure: ["Закрытие", "Abschluss"],
+  phase_followup: ["Последующее наблюдение", "Nachsorge"],
+  reason_appointment_completed: ["Приём завершён", "Termin abgeschlossen"],
+  reason_guardian_of_converted_minor: [
+    "Опекун несовершеннолетнего после перевода в пациенты",
+    "Sorgeberechtigte Person eines übernommenen Minderjährigen",
+  ],
+  reason_invalid_current_password: ["Неверный текущий пароль", "Aktuelles Passwort falsch"],
+  reason_lead_archived: ["Лид в архиве", "Lead archiviert"],
+  reason_no_active_booking: ["Нет активного бронирования", "Keine aktive Buchung"],
+  reason_not_our_lead: ["Не наш лид", "Kein Lead für uns"],
+  reason_order_cancelled: ["Заказ отменён", "Auftrag storniert"],
+  reason_password_reset: ["Пароль сброшен", "Passwort zurückgesetzt"],
+  reason_payer_changed: ["Сменился плательщик", "Zahler geändert"],
+  reason_service_status_changed: ["Изменился статус услуги", "Status der Leistung geändert"],
+  reason_staff_revoked: ["Отозвано сотрудником", "Von Mitarbeitenden entzogen"],
+  reason_task_status_changed: ["Изменился статус задачи", "Status der Aufgabe geändert"],
+  reason_terms_changed: ["Изменились условия", "Bedingungen geändert"],
+  reason_totp_auto_locked: [
+    "Второй фактор заблокирован автоматически",
+    "Zweiter Faktor automatisch gesperrt",
+  ],
+  reason_totp_reset: ["Второй фактор сброшен", "Zweiter Faktor zurückgesetzt"],
+  reason_user_logout_all: ["Выход на всех устройствах", "Abmeldung auf allen Geräten"],
+  request_type_access: ["Доступ к данным (ст. 15)", "Auskunft (Art. 15)"],
+  request_type_rectification: ["Исправление данных (ст. 16)", "Berichtigung (Art. 16)"],
+  role_authorised_representative: ["Уполномоченный представитель", "Bevollmächtigte Vertretung"],
+  role_legal_guardian: ["Опекун", "Vormund"],
+  severity_high: ["Высокая", "Hoch"],
+  severity_medium: ["Средняя", "Mittel"],
+  severity_low: ["Низкая", "Niedrig"],
+  source_earlier_request: ["Предыдущая заявка", "Frühere Anfrage"],
+  source_interpreter_booking: ["Бронирование переводчика", "Dolmetscherbuchung"],
+  source_invoice_recipient: ["Получатель счёта", "Rechnungsempfänger"],
+  source_order_service: ["Услуга заказа", "Leistung des Auftrags"],
+  source_paper_signature: ["Подпись на бумаге", "Unterschrift auf Papier"],
+  source_patient_request: ["Запрос пациента", "Anfrage der Patientin / des Patienten"],
+  source_staff_access_api: ["Управление доступами", "Zugriffsverwaltung"],
+};
+
 function catalog(index: 0 | 1): Record<string, string> {
   const text: Record<string, string> = {};
+  for (const [code, labels] of Object.entries(CONTEXT_STATUSES)) {
+    text[`activity_status_${code}`] = labels[index];
+  }
+  for (const [code, labels] of Object.entries(CONTEXT_VALUES)) {
+    text[`activity_context_${code}`] = labels[index];
+  }
   for (const [code, labels] of Object.entries(ACTIONS)) {
     text[`activity_action_${code}`] = labels[index];
   }

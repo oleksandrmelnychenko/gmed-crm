@@ -11,15 +11,55 @@ export function formatAdminDateTime(value: string | Date, _lang: Lang) {
   return formatAppDateTime(value) || String(value);
 }
 
+/** What a stored credential reads as; the server keeps the value when it comes back. */
+export const NOTIFICATION_SECRET_MASK = "********";
+
+const NOTIFICATION_SECRET_KEY = /pass|secret|token|api_?key|auth|bearer|credential|private_key|signing_key/i;
+
+/**
+ * The config with every credential masked (screens QA 2026-11-12, E F3: the
+ * SMTP password was printed in the table and the detail). The server masks
+ * already; this keeps a page from showing one an older server still sends.
+ */
+export function maskNotificationSecrets(cfg: unknown): unknown {
+  if (Array.isArray(cfg)) return cfg.map(maskNotificationSecrets);
+  if (!cfg || typeof cfg !== "object") return cfg;
+  return Object.fromEntries(
+    Object.entries(cfg as Record<string, unknown>).map(([key, value]) => [
+      key,
+      NOTIFICATION_SECRET_KEY.test(key) && value !== null && value !== undefined && value !== ""
+        ? NOTIFICATION_SECRET_MASK
+        : maskNotificationSecrets(value),
+    ]),
+  );
+}
+
 export function compactNotificationConfig(cfg: Record<string, unknown>): string {
-  return Object.entries(cfg)
+  const masked = maskNotificationSecrets(cfg) as Record<string, unknown>;
+  return Object.entries(masked)
     .slice(0, 3)
     .map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`)
     .join(", ");
 }
 
 export function prettyNotificationConfig(cfg: Record<string, unknown>): string {
-  return JSON.stringify(cfg, null, 2);
+  return JSON.stringify(maskNotificationSecrets(cfg), null, 2);
+}
+
+/**
+ * The translated text of a refusal the server marks with a code
+ * (`{"error": "<code>"}`); otherwise the server message or the fallback.
+ */
+export function codedAdminErrorText(
+  error: unknown,
+  messages: Partial<Record<string, string>>,
+  fallback: string,
+): string {
+  const body = (error as { body?: { error?: unknown } } | null)?.body;
+  const code = typeof body?.error === "string" ? body.error : "";
+  const known = code ? messages[code] : undefined;
+  if (known) return known;
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 export function matchesNotificationSearch(

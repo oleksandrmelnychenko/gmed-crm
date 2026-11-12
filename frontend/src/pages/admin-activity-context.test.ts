@@ -162,3 +162,16 @@ describe("activity log values in words (QA E3-01)", () => {
     expect(activityContextSummary({ source: "some_new_source" }, ru)).toBe("Источник: some_new_source");
   });
 });
+
+describe("activity log: stored codes in words (screens QA 2026-11-12, E F12)", () => {
+  it("names reasons, sources, statuses and kinds in Russian and German", () => {
+    expect(activityContextSummary({ reason: "terms_changed", source: "order_service" }, ru)).toBe(
+      "Причина: Изменились условия · Источник: Услуга заказа",
+    );
+    expect(activityContextSummary({ previous_status: "review" }, ru)).toBe("Прежний статус: На проверке");
+    expect(activityContextSummary({ kind: "task", status: "review" }, ru)).toBe(
+      "Вид: Задача · Статус: На проверке",
+    );
+    expect(activityContextSummary({ source: "invoice_recipient" }, de)).toBe("Quelle: Rechnungsempfänger");
+  });
+});

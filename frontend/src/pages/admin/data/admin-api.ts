@@ -143,6 +143,10 @@ export function createAdminCustomField(payload: JsonPayload) {
   return postJson("/admin/custom-fields", payload);
 }
 
+export function updateAdminCustomField(id: string, payload: JsonPayload) {
+  return postJson(`/admin/custom-fields/${id}/update`, payload);
+}
+
 export function deleteAdminCustomField(id: string) {
   return postJson(`/admin/custom-fields/${id}/delete`);
 }
@@ -171,12 +175,18 @@ export function createAdminNotificationChannel(payload: JsonPayload) {
   return postJson("/admin/notifications", payload);
 }
 
+export function updateAdminNotificationChannel(id: string, payload: JsonPayload) {
+  return postJson(`/admin/notifications/${id}/update`, payload);
+}
+
 export function deleteAdminNotificationChannel(id: string) {
   return postJson(`/admin/notifications/${id}/delete`);
 }
 
+export type NotificationChannelTestResult = { ok?: boolean; dry_run?: boolean; sent?: boolean };
+
 export function testAdminNotificationChannel(id: string) {
-  return postJson(`/admin/notifications/${id}/test`);
+  return postJson<NotificationChannelTestResult>(`/admin/notifications/${id}/test`);
 }
 
 export type AdminActivityQuery = {
@@ -234,6 +244,13 @@ export function fetchAdminActivity<TActivity>(
   if (input.category) query.set("category", input.category);
   return apiFetch<AdminActivityResponse<TActivity>>(`/admin/activity?${query.toString()}`, {
     cacheTtlMs: ADMIN_FAST_CACHE_TTL_MS,
+  });
+}
+
+/** The action codes the audit log really holds (filter «Действие»). */
+export function fetchAdminActivityActions() {
+  return apiFetch<{ data: string[] }>("/admin/activity/actions", {
+    cacheTtlMs: ADMIN_LOOKUPS_CACHE_TTL_MS,
   });
 }
 
