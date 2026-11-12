@@ -3099,8 +3099,9 @@ async fn create_appointment(
     if auth.role == Role::Concierge
         && !matches!(body.appointment_type.as_str(), "non_medical" | "internal")
     {
-        return err(
+        return coded_err(
             StatusCode::FORBIDDEN,
+            CONCIERGE_APPOINTMENT_TYPE_FORBIDDEN_CODE,
             "Concierge can only create non-medical or internal appointments",
         );
     }
@@ -3562,6 +3563,9 @@ fn is_allowed_appointment_status_transition(current: &str, target: &str) -> bool
 
 const APPOINTMENT_COMPLETION_BEFORE_DATE_CODE: &str = "appointment_completion_before_date";
 const APPOINTMENT_COMPLETION_OPEN_CHECKLIST_CODE: &str = "appointment_completion_open_checklist";
+/// A concierge may only create or move non-medical and internal appointments;
+/// the UI shows the refusal translated.
+const CONCIERGE_APPOINTMENT_TYPE_FORBIDDEN_CODE: &str = "concierge_appointment_type_forbidden";
 const APPOINTMENT_REPORT_BEFORE_DATE_CODE: &str = "appointment_report_before_date";
 const APPOINTMENT_REPORTED_FUTURE_DATE_CODE: &str = "appointment_reported_future_date";
 const APPOINTMENT_REPORT_STATUS_NOT_OPEN_CODE: &str = "appointment_report_status_not_open";
@@ -6071,8 +6075,9 @@ async fn update_appointment(
     if auth.role == Role::Concierge
         && !matches!(appointment_type.as_str(), "non_medical" | "internal")
     {
-        return err(
+        return coded_err(
             StatusCode::FORBIDDEN,
+            CONCIERGE_APPOINTMENT_TYPE_FORBIDDEN_CODE,
             "Concierge can only reschedule non-medical or internal appointments",
         );
     }

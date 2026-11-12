@@ -313,12 +313,14 @@ export function SpecializationsPage() {
           ].some((value) => value.toLocaleLowerCase().includes(normalizedSearch)),
         )
       : specializations;
-    // Equal display orders go by the name the reader sees, not by the
-    // German slug (QA 2026-11-12 A-13).
+    // The catalogue reads alphabetically by the name the reader sees: the
+    // seeded display orders follow the German names, so in Russian the list
+    // looked unsorted (QA 2026-11-12 A-13, system-D F7). The display order
+    // only breaks ties of equal names.
     return matching.toSorted(
       (left, right) =>
-        left.sort_order - right.sort_order ||
-        specializationName(left, lang).localeCompare(specializationName(right, lang), lang),
+        specializationName(left, lang).localeCompare(specializationName(right, lang), lang) ||
+        left.sort_order - right.sort_order,
     );
   }, [lang, search, specializations]);
 

@@ -37,6 +37,19 @@ const LOCALIZED_BODY_CODE_KEYS = new Map<string, string>([
   ],
 ]);
 
+/**
+ * Refusals the server sends as `{ error: <code> }` (coded_err): the code reaches
+ * the client as `ApiRequestError.code`.
+ */
+export const CONCIERGE_APPOINTMENT_TYPE_FORBIDDEN_CODE =
+  "concierge_appointment_type_forbidden";
+const LOCALIZED_ERROR_CODE_KEYS = new Map<string, string>([
+  [
+    CONCIERGE_APPOINTMENT_TYPE_FORBIDDEN_CODE,
+    "appointments_concierge_type_forbidden",
+  ],
+]);
+
 function bodyText(body: Record<string, unknown>, key: string): string {
   const value = body[key];
   return typeof value === "string" || typeof value === "number" ? String(value) : "";
@@ -107,6 +120,12 @@ export function appointmentActionErrorMessage(
         : undefined;
     if (bodyCodeKey) {
       return appointmentText(bodyCodeKey);
+    }
+    const errorCodeKey = error.code
+      ? LOCALIZED_ERROR_CODE_KEYS.get(error.code)
+      : undefined;
+    if (errorCodeKey) {
+      return appointmentText(errorCodeKey);
     }
     return localizedFallback;
   }

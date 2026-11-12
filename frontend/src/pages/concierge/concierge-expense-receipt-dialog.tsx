@@ -52,7 +52,7 @@ const copy = {
   de: {
     title: "Ausgabe und Beleg erfassen",
     context: "Kunde",
-    patient: "Kunde",
+    patient: "Name und PID",
     receipt: "Beleg",
     camera: "Foto aufnehmen",
     chooseFile: "Foto oder PDF wählen",
@@ -108,7 +108,7 @@ const copy = {
   ru: {
     title: "Расход и подтверждение",
     context: "Клиент",
-    patient: "Клиент",
+    patient: "Имя и PID",
     receipt: "Подтверждение расхода",
     camera: "Сфотографировать",
     chooseFile: "Выбрать фото или PDF",

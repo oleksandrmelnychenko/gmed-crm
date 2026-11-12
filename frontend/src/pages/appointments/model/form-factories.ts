@@ -1,4 +1,4 @@
-import { FOLLOW_UP_PRESETS } from "./constants";
+import { FOLLOW_UP_PRESETS, appointmentTypeOptionsForRole } from "./constants";
 import { currentDateInput, shiftLocalDateTime } from "./date-time";
 import { activePatientAssigneeIds, canRemindAboutAppointment } from "./staff-roles";
 import type {
@@ -70,8 +70,10 @@ export function blankAppointmentFormForCurrentUser(
   currentUserId?: string,
   currentUserRole?: string,
 ): AppointmentFormState {
+  const blank = blankAppointmentForm();
   return {
-    ...blankAppointmentForm(),
+    ...blank,
+    appointmentType: appointmentTypeOptionsForRole(currentUserRole)[0] ?? blank.appointmentType,
     ownerUserId: defaultAppointmentOwnerUserId(currentUserId, currentUserRole),
   };
 }

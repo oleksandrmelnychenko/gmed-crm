@@ -1515,6 +1515,12 @@ export const de = {
     "Es sind Dokumente aus mehreren Aufträgen oder Terminen ausgewählt. Öffne das gewünschte Dokument einzeln oder verknüpfe den Provider zuerst in allen passenden Kontexten.",
   documents_share_provider_medical_required:
     "Medizinische Dokumente dürfen nur an medizinische Provider gesendet werden.",
+  documents_share_user_medical_not_released:
+    "Dolmetscher erhalten ein medizinisches Dokument erst, wenn es intern freigegeben ist. Ändere zuerst die Sichtbarkeit des Dokuments.",
+  documents_share_user_role_not_allowed:
+    "Diese Rolle hat keinen Zugriff auf diese Datenkategorie. Wähle eine andere Person.",
+  documents_share_no_allowed_users:
+    "Für diese Datenkategorie gibt es keine Mitarbeitenden, an die das Dokument freigegeben werden kann.",
   documents_share_provider_specialty_mismatch:
     "Die Spezialisierung des ausgewählten Providers passt nicht zum medizinischen Kontext des Dokuments. Wähle einen Provider mit passender Spezialisierung oder aktualisiere Spezialisierung bzw. Terminkontext.",
   documents_share_external_release_required:

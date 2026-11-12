@@ -86,8 +86,41 @@ export function packageItemLine(
   return quantity ? `${name} — ${quantity}` : name;
 }
 
-export function activePackages(packages: ConciergeServicePackage[]) {
-  return packages
+export type ConciergePackageRow = ConciergeServicePackage & {
+  /** The name, with the package key when several active packages share it. */
+  label: string;
+  /** The description, empty when it only repeats the name. */
+  shownDescription: string;
+};
+
+/**
+ * Active packages, alphabetically. Packages with the same name are told apart
+ * by their key, as the tariff picker does (fix 29); a description that only
+ * repeats the name is not printed twice (QA 2026-11-12 system-D F8: 20 ×
+ * «Synthetic Portal Subscription»). The concierge sees no price to tell them
+ * apart by.
+ */
+export function activePackages(packages: ConciergeServicePackage[]): ConciergePackageRow[] {
+  const active = packages
     .filter((entry) => entry.is_active !== false)
-    .sort((left, right) => left.name.localeCompare(right.name));
+    .sort(
+      (left, right) =>
+        left.name.localeCompare(right.name) || left.package_key.localeCompare(right.package_key),
+    );
+  const nameCounts = new Map<string, number>();
+  for (const entry of active) {
+    const key = entry.name.trim().toLocaleLowerCase();
+    nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1);
+  }
+  return active.map((entry) => {
+    const name = entry.name.trim();
+    const description = entry.description?.trim() ?? "";
+    const repeated = (nameCounts.get(name.toLocaleLowerCase()) ?? 0) > 1;
+    return {
+      ...entry,
+      label: repeated && entry.package_key ? `${name} · ${entry.package_key}` : name,
+      shownDescription:
+        description.toLocaleLowerCase() === name.toLocaleLowerCase() ? "" : description,
+    };
+  });
 }

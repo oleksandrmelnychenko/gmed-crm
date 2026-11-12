@@ -125,6 +125,7 @@ const copy = {
     cancel: "Abbrechen",
     loading: "Wird geladen…",
     confirmedHint: "Für eine bestätigte Buchung ist eine Buchungsnummer, Kontaktperson oder Notiz erforderlich.",
+    missingPrefix: "Zum Speichern fehlt:",
     loadFailed: "Der Service konnte nicht geladen werden.",
     errors: {
       notBookable: "Nur geplante oder angefragte Services können gebucht werden.",
@@ -181,6 +182,7 @@ const copy = {
     cancel: "Отмена",
     loading: "Загрузка…",
     confirmedHint: "Для подтверждённой брони укажите номер брони, контактное лицо или примечание.",
+    missingPrefix: "Чтобы сохранить, заполните:",
     loadFailed: "Не удалось загрузить сервис.",
     errors: {
       notBookable: "Бронировать можно только запланированный сервис или сервис с запрошенной бронью.",
@@ -228,9 +230,39 @@ export function conciergeBookingErrorMessage(error: unknown, lang: Lang): string
   return errors.failed;
 }
 
+/**
+ * What keeps «Сохранить бронь» disabled, named in the UI language
+ * (QA 2026-11-12 system-D F3): the partner, the start and — without a partner
+ * address — the service address. The details of a confirmed booking have
+ * their own hint. Empty when nothing required is missing.
+ */
+export function conciergeBookingMissingHint(
+  fields: { providerId: string; startsAt: string; address: string },
+  lang: Lang,
+): string {
+  const labels = copy[lang];
+  const missing = [
+    fields.providerId ? "" : labels.provider,
+    fields.startsAt ? "" : labels.startsAt,
+    fields.address.trim() ? "" : labels.address,
+  ].filter(Boolean);
+  return missing.length ? `${labels.missingPrefix} ${missing.join(", ")}` : "";
+}
+
 /** Label of the action: book a planned service, confirm a requested booking. */
 export function conciergeBookingActionLabel(status: string, lang: Lang): string {
   return status === "booked" ? copy[lang].confirm : copy[lang].book;
+}
+
+function RequiredLabel({ text }: { text: string }) {
+  return (
+    <>
+      {text}
+      <span aria-hidden className="ml-1 text-destructive">
+        *
+      </span>
+    </>
+  );
 }
 
 const selectClass =
@@ -354,6 +386,9 @@ export function ConciergeProviderBookingDialog<TService extends BookableConcierg
   const directionsUrl = googleMapsDirectionsUrl(effectiveAddress);
   const confirmedDetailsMissing =
     bookingState === "confirmed" && !bookingReference.trim() && !contactPerson.trim() && !note.trim();
+  const missingHint = service
+    ? conciergeBookingMissingHint({ providerId, startsAt, address: effectiveAddress }, lang)
+    : "";
   const canSubmit =
     Boolean(service && providerId && requestId && startsAt && effectiveAddress) &&
     !confirmedDetailsMissing &&
@@ -483,13 +518,16 @@ export function ConciergeProviderBookingDialog<TService extends BookableConcierg
 
                 <ConciergeDialogSection title={labels.details} icon={ClipboardList}>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <ConciergeField label={labels.startsAt}>
+                    <ConciergeField label={<RequiredLabel text={labels.startsAt} />}>
                       <Input type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} required />
                     </ConciergeField>
                     <ConciergeField label={labels.endsAt}>
                       <Input type="datetime-local" value={endsAt} min={startsAt || undefined} onChange={(event) => setEndsAt(event.target.value)} />
                     </ConciergeField>
-                    <ConciergeField label={labels.address} className="sm:col-span-2">
+                    <ConciergeField
+                      label={providerAddress ? labels.address : <RequiredLabel text={labels.address} />}
+                      className="sm:col-span-2"
+                    >
                       <Input
                         value={serviceAddress}
                         onChange={(event) => setServiceAddress(event.target.value)}
@@ -533,6 +571,15 @@ export function ConciergeProviderBookingDialog<TService extends BookableConcierg
                     <p className="mt-3 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
                       <AlertCircle className="mt-0.5 size-4 shrink-0" />
                       {labels.confirmedHint}
+                    </p>
+                  ) : null}
+                  {missingHint ? (
+                    <p
+                      className="mt-3 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800"
+                      data-testid="booking-missing-hint"
+                    >
+                      <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                      {missingHint}
                     </p>
                   ) : null}
                   {error ? (

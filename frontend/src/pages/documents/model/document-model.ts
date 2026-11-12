@@ -182,6 +182,41 @@ export function isTranslationAssigneeRole(role: string, isMedicalDocument: boole
 }
 
 /**
+ * Data categories a staff role may receive, the same table the server checks
+ * before a share to a person (domain `access::policy::check_access`). Keys are
+ * the `data_sensitivity` names the document list sends.
+ */
+const SHARE_ROLE_SENSITIVITIES: Record<string, readonly string[] | "all"> = {
+  ceo: "all",
+  ceo_assistant: "all",
+  patient_manager: "all",
+  patient: "all",
+  teamlead_interpreter: ["General", "Patient Identity", "Internal"],
+  interpreter: ["General", "Patient Identity", "Medical"],
+  concierge: ["General", "Patient Identity", "Service"],
+  billing: ["General", "Patient Identity", "Financial"],
+  sales: ["General", "Patient Identity"],
+};
+
+/**
+ * Whether the server would accept sharing this document with a person of this
+ * role: the role must read the document's data category, and an interpreter
+ * gets a medical document only once it is released (not `internal`).
+ */
+export function canShareDocumentWithRole(
+  role: string,
+  document: Pick<DocumentItem, "data_sensitivity" | "visibility">,
+) {
+  const allowed = SHARE_ROLE_SENSITIVITIES[role];
+  if (!allowed) return false;
+  if (allowed !== "all" && !allowed.includes(document.data_sensitivity)) return false;
+  if (role === "interpreter" && document.data_sensitivity === "Medical") {
+    return document.visibility !== "internal";
+  }
+  return true;
+}
+
+/**
  * A refused upload in the user's language instead of the server's English
  * text (QA 2026-11-12 A-05). Unknown errors keep the server text.
  */

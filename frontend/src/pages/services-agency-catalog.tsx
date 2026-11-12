@@ -121,10 +121,10 @@ export function AgencyCatalogReadOnly() {
                   <li key={entry.id} className="space-y-1 px-3 py-2">
                     <p className="flex items-center gap-1.5 break-words text-sm font-medium">
                       <Package aria-hidden="true" className="size-3.5 shrink-0" />
-                      {entry.name}
+                      {entry.label}
                     </p>
-                    {entry.description?.trim() ? (
-                      <p className="break-words text-xs text-muted-foreground">{entry.description}</p>
+                    {entry.shownDescription ? (
+                      <p className="break-words text-xs text-muted-foreground">{entry.shownDescription}</p>
                     ) : null}
                     {entry.items.length > 0 ? (
                       <ul className="list-disc space-y-0.5 pl-5 text-xs">

@@ -317,7 +317,10 @@ export function conciergeOperationalItemsListPath(
 /**
  * Keep personal task workspaces defensive even when an older backend returns
  * a broader management queue. Managers still rely on the server-side scope,
- * while executors only see tasks they own or created.
+ * while executors see tasks they own or created and the tasks of projects the
+ * server shares with them (it lists a project task to an executor only through
+ * project membership — the rule the project page uses; QA 2026-11-12
+ * system-D F5).
  */
 export function conciergeTasksVisibleToActor(
   tasks: ConciergeTask[],
@@ -327,7 +330,10 @@ export function conciergeTasksVisibleToActor(
   if (!actorId) return [];
   if (actorRole !== "concierge" && actorRole !== "interpreter") return tasks;
   return tasks.filter(
-    (task) => task.assigned_to === actorId || task.assigned_by === actorId,
+    (task) =>
+      task.assigned_to === actorId ||
+      task.assigned_by === actorId ||
+      Boolean(task.project_id),
   );
 }
 

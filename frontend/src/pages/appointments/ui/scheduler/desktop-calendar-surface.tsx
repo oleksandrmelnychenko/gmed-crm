@@ -292,6 +292,19 @@ export function DesktopCalendarSurface({
     [lang],
   );
 
+  // FullCalendar names its icon arrows only by `title`; give them that hint
+  // as their accessible name too (QA 2026-11-12 system-D F7).
+  useEffect(() => {
+    const shellElement = shellRef.current;
+    if (!shellElement) return;
+    shellElement
+      .querySelectorAll<HTMLButtonElement>(".fc-prev-button[title], .fc-next-button[title]")
+      .forEach((button) => {
+        const hint = button.getAttribute("title");
+        if (hint) button.setAttribute("aria-label", hint);
+      });
+  }, [calendarView, lang]);
+
   useEffect(() => {
     if (!isTimeGridView || typeof window === "undefined") return;
 

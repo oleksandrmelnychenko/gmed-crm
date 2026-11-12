@@ -108,6 +108,7 @@ async fn list_provider_people(
     ) {
         match load_doctor_people(
             &state,
+            &auth,
             active_only,
             provider_id,
             provider_taxonomy_node_id,
@@ -164,6 +165,7 @@ async fn list_provider_people(
 #[allow(clippy::too_many_arguments)]
 async fn load_doctor_people(
     state: &AppState,
+    auth: &AuthUser,
     active_only: bool,
     provider_id: Option<Uuid>,
     provider_taxonomy_node_id: Option<Uuid>,
@@ -447,17 +449,25 @@ async fn load_doctor_people(
             )
         })
         .collect();
-    let linked_patients_by_doctor = load_doctor_linked_patients_map(state, &doctor_keys).await?;
+    // The same patient scope as the provider detail page: only patients the
+    // caller may see, and no aggregate metric when some are hidden
+    // (QA 2026-11-12 system-D F6: the list showed 3/3, the clinic page 0/0).
+    let linked_patient_scope = super::providers::load_linked_patient_scope(state, auth).await?;
+    let linked_patients_by_doctor =
+        load_doctor_linked_patients_map(state, auth, &linked_patient_scope, &doctor_keys).await?;
 
     Ok(rows
         .into_iter()
         .map(|row| {
             let doctor_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
             let provider_id = row.try_get::<Uuid, _>("provider_id").unwrap_or_default();
-            let linked_patients = linked_patients_by_doctor
-                .get(&(provider_id, doctor_id))
-                .cloned()
-                .unwrap_or_default();
+            let linked = linked_patients_by_doctor.get(&(provider_id, doctor_id));
+            let linked_patients = linked.map(|value| value.items.clone()).unwrap_or_default();
+            // Hidden patients (or a scope that sees none of them) hide the
+            // appointment total as well, exactly as on the provider page.
+            let metrics_restricted = linked_patient_scope.none
+                || linked_patient_scope.finance_only
+                || linked.is_some_and(|value| value.restricted);
             let linked_patient_count = linked_patients.len() as i64;
             let phone = row
                 .try_get::<Option<String>, _>("phone")
@@ -518,18 +528,37 @@ async fn load_doctor_people(
                 "licensing_valid_until": row.try_get::<Option<chrono::NaiveDate>, _>("licensing_valid_until").unwrap_or_default().map(|value| value.to_string()),
                 "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
                 "patient_count": linked_patient_count,
-                "appointment_count": row.try_get::<i64, _>("appointment_count").unwrap_or_default(),
+                "appointment_count": if metrics_restricted {
+                    0
+                } else {
+                    row.try_get::<i64, _>("appointment_count").unwrap_or_default()
+                },
                 "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
             })
         })
         .collect())
 }
 
+/// The linked patients of one doctor at one provider within the caller's scope.
+#[derive(Default)]
+struct DoctorLinkedPatients {
+    items: Vec<Value>,
+    /// Some linked patients are outside the caller's scope.
+    restricted: bool,
+}
+
+/// Linked patients per (provider, doctor), scoped like
+/// `providers::load_provider_patients_json` (the provider detail page): the
+/// same links, the same visibility rule inside the query, the same per-patient
+/// check afterwards, and a finance-only caller sees order-line links alone,
+/// as name + PID.
 async fn load_doctor_linked_patients_map(
     state: &AppState,
+    auth: &AuthUser,
+    scope: &super::providers::LinkedPatientScope,
     doctor_keys: &[(Uuid, Uuid)],
-) -> Result<HashMap<(Uuid, Uuid), Vec<Value>>, axum::response::Response> {
-    if doctor_keys.is_empty() {
+) -> Result<HashMap<(Uuid, Uuid), DoctorLinkedPatients>, axum::response::Response> {
+    if doctor_keys.is_empty() || scope.none {
         return Ok(HashMap::new());
     }
 
@@ -558,6 +587,7 @@ async fn load_doctor_linked_patients_map(
                 JOIN appointments a
                   ON a.provider_id = r.provider_id
                  AND a.doctor_id = r.doctor_id
+                WHERE $8::boolean = false
                 GROUP BY r.provider_id, r.doctor_id, a.patient_id
 
                 UNION ALL
@@ -589,6 +619,7 @@ async fn load_doctor_linked_patients_map(
                 JOIN patient_diagnoses pd
                   ON pd.doctor_id = r.doctor_id
                   OR pd.treating_doctor_id = r.doctor_id
+                WHERE $8::boolean = false
                 GROUP BY r.provider_id, r.doctor_id, pd.patient_id
 
                 UNION ALL
@@ -604,6 +635,7 @@ async fn load_doctor_linked_patients_map(
                 JOIN patient_medications pm
                   ON pm.provider_id = r.provider_id
                  AND pm.doctor_id = r.doctor_id
+                WHERE $8::boolean = false
                 GROUP BY r.provider_id, r.doctor_id, pm.patient_id
 
                 UNION ALL
@@ -619,6 +651,7 @@ async fn load_doctor_linked_patients_map(
                 JOIN patient_examinations pe
                   ON pe.provider_id = r.provider_id
                  AND pe.doctor_id = r.doctor_id
+                WHERE $8::boolean = false
                 GROUP BY r.provider_id, r.doctor_id, pe.patient_id
 
                 UNION ALL
@@ -634,6 +667,7 @@ async fn load_doctor_linked_patients_map(
                 JOIN patient_procedures pp
                   ON pp.provider_id = r.provider_id
                  AND pp.doctor_id = r.doctor_id
+                WHERE $8::boolean = false
                 GROUP BY r.provider_id, r.doctor_id, pp.patient_id
 
                 UNION ALL
@@ -651,6 +685,7 @@ async fn load_doctor_linked_patients_map(
                 JOIN provider_doctor_links pdl
                   ON pdl.provider_id = r.provider_id
                  AND pdl.doctor_id = pr.source_doctor_id
+                WHERE $8::boolean = false
                 GROUP BY r.provider_id, r.doctor_id, pr.patient_id
             ),
             linked AS (
@@ -664,7 +699,7 @@ async fn load_doctor_linked_patients_map(
                 FROM links
                 GROUP BY provider_id, doctor_id, patient_id
             ),
-            ranked AS (
+            scoped AS (
                 SELECT l.provider_id,
                        l.doctor_id,
                        p.id,
@@ -679,22 +714,45 @@ async fn load_doctor_linked_patients_map(
                        l.leistung_count,
                        l.concierge_count,
                        l.last_interaction_at,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY l.provider_id, l.doctor_id
-                           ORDER BY l.last_interaction_at DESC, p.last_name, p.first_name
-                       ) AS rank
+                       (
+                           p.id = ANY($5::uuid[])
+                           OR (
+                               NOT (p.id = ANY($6::uuid[]))
+                               AND CASE
+                                   WHEN $7::boolean IS NOT NULL THEN $7::boolean
+                                   ELSE $3::boolean = false OR p.id = ANY($4::uuid[])
+                               END
+                           )
+                       ) AS visible
                 FROM linked l
                 JOIN patients p ON p.id = l.patient_id
+            ),
+            ranked AS (
+                SELECT s.*,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY s.provider_id, s.doctor_id, s.visible
+                           ORDER BY s.last_interaction_at DESC, s.last_name, s.first_name
+                       ) AS rank
+                FROM scoped s
             )
+            -- Up to 200 visible patients per doctor, plus one marker row when
+            -- some linked patients are hidden (its data is not sent).
             SELECT provider_id, doctor_id, id, patient_id, first_name, last_name,
                    address_street, address_city, address_zip, address_country,
-                   appointment_count, leistung_count, concierge_count, last_interaction_at
+                   appointment_count, leistung_count, concierge_count, last_interaction_at,
+                   visible
             FROM ranked
-            WHERE rank <= 200
-            ORDER BY provider_id, doctor_id, rank"#,
+            WHERE (visible AND rank <= 200) OR (visible IS NOT TRUE AND rank = 1)
+            ORDER BY provider_id, doctor_id, visible DESC, rank"#,
     )
     .bind(provider_ids)
     .bind(doctor_ids)
+    .bind(scope.requires_assignment)
+    .bind(&scope.baseline_patient_ids)
+    .bind(&scope.allowed_record_ids)
+    .bind(&scope.record_rule_ids)
+    .bind(scope.all_decision)
+    .bind(scope.finance_only)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
@@ -705,27 +763,64 @@ async fn load_doctor_linked_patients_map(
         )
     })?;
 
-    let mut patients_by_doctor: HashMap<(Uuid, Uuid), Vec<Value>> = HashMap::new();
+    let mut patients_by_doctor: HashMap<(Uuid, Uuid), DoctorLinkedPatients> = HashMap::new();
+    // The per-patient check is the authoritative one (as on the provider
+    // page); a patient linked to several doctors is checked once.
+    let mut access_by_patient: HashMap<Uuid, bool> = HashMap::new();
     for row in rows {
         let provider_id = row.try_get::<Uuid, _>("provider_id").unwrap_or_default();
         let doctor_id = row.try_get::<Uuid, _>("doctor_id").unwrap_or_default();
-        patients_by_doctor
+        let entry = patients_by_doctor
             .entry((provider_id, doctor_id))
-            .or_default()
-            .push(json!({
-                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
-                "patient_id": row.try_get::<String, _>("patient_id").unwrap_or_default(),
-                "first_name": row.try_get::<String, _>("first_name").unwrap_or_default(),
-                "last_name": row.try_get::<String, _>("last_name").unwrap_or_default(),
-                "address_street": row.try_get::<Option<String>, _>("address_street").unwrap_or_default(),
-                "address_city": row.try_get::<Option<String>, _>("address_city").unwrap_or_default(),
-                "address_zip": row.try_get::<Option<String>, _>("address_zip").unwrap_or_default(),
-                "address_country": row.try_get::<Option<String>, _>("address_country").unwrap_or_default(),
-                "appointment_count": row.try_get::<i64, _>("appointment_count").unwrap_or_default(),
-                "leistung_count": row.try_get::<i64, _>("leistung_count").unwrap_or_default(),
-                "concierge_count": row.try_get::<i64, _>("concierge_count").unwrap_or_default(),
-                "last_interaction_at": row.try_get::<DateTime<Utc>, _>("last_interaction_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-            }));
+            .or_default();
+        // A finance-only caller sees a part of the links, so aggregate
+        // metrics over all of them stay hidden.
+        if scope.finance_only {
+            entry.restricted = true;
+        }
+        let visible = row.try_get::<bool, _>("visible").unwrap_or(false);
+        let Some(patient_uuid) = row.try_get::<Option<Uuid>, _>("id").ok().flatten() else {
+            continue;
+        };
+        if !visible {
+            entry.restricted = true;
+            continue;
+        }
+        let allowed = match access_by_patient.get(&patient_uuid) {
+            Some(allowed) => *allowed,
+            None => {
+                let allowed =
+                    super::providers::can_access_linked_patient(state, auth, patient_uuid).await?;
+                access_by_patient.insert(patient_uuid, allowed);
+                allowed
+            }
+        };
+        if !allowed {
+            entry.restricted = true;
+            continue;
+        }
+        // Finance only: name + PID, no address.
+        let address = |column: &str| -> Option<String> {
+            if scope.finance_only {
+                None
+            } else {
+                row.try_get::<Option<String>, _>(column).unwrap_or_default()
+            }
+        };
+        entry.items.push(json!({
+            "id": patient_uuid,
+            "patient_id": row.try_get::<String, _>("patient_id").unwrap_or_default(),
+            "first_name": row.try_get::<String, _>("first_name").unwrap_or_default(),
+            "last_name": row.try_get::<String, _>("last_name").unwrap_or_default(),
+            "address_street": address("address_street"),
+            "address_city": address("address_city"),
+            "address_zip": address("address_zip"),
+            "address_country": address("address_country"),
+            "appointment_count": row.try_get::<i64, _>("appointment_count").unwrap_or_default(),
+            "leistung_count": row.try_get::<i64, _>("leistung_count").unwrap_or_default(),
+            "concierge_count": row.try_get::<i64, _>("concierge_count").unwrap_or_default(),
+            "last_interaction_at": row.try_get::<DateTime<Utc>, _>("last_interaction_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+        }));
     }
 
     Ok(patients_by_doctor)

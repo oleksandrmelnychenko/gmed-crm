@@ -22,6 +22,17 @@ export const TYPE_OPTIONS: AppointmentKind[] = [
   "internal",
 ];
 
+/**
+ * The appointment types a role may create. The server refuses a concierge any
+ * medical appointment (`concierge_appointment_type_forbidden`), so the create
+ * dialog neither offers nor presets one for that role.
+ */
+export function appointmentTypeOptionsForRole(role?: string | null): AppointmentKind[] {
+  return role === "concierge"
+    ? TYPE_OPTIONS.filter((value) => value !== "medical")
+    : TYPE_OPTIONS;
+}
+
 export const CARE_PATH_KIND_OPTIONS: AppointmentCarePathKind[] = [
   "regular",
   "preventive",

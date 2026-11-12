@@ -279,6 +279,51 @@ async fn provider_people_returns_doctors_staff_counts_and_patient_filter() {
     .execute(&pool)
     .await
     .unwrap();
+    // A patient manager sees the linked patients of their own patients only,
+    // the same scope as the provider detail page.
+    for linked_patient_id in [patient_id, diagnosis_patient_id] {
+        sqlx::query(
+            r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+               VALUES ($1, $2, $3)"#,
+        )
+        .bind(linked_patient_id)
+        .bind(pm_id)
+        .bind(admin_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    // Another patient manager without these patients gets neither the
+    // patients nor the aggregate counts (QA 2026-11-12 system-D F6).
+    let other_pm_id = seed_user(&pool, &format!("{tag}-other"), "patient_manager").await;
+    let (status, other_body) = json_request(
+        &app,
+        "GET",
+        &format!(
+            "/api/v1/provider-people?provider_id={provider_id}&person_type=doctor&search={tag}"
+        ),
+        &auth_header_for(other_pm_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let other_doctor = other_body
+        .as_array()
+        .expect("provider people array")
+        .iter()
+        .find(|item| item["doctor_id"] == doctor_id.to_string())
+        .expect("doctor read model for another manager")
+        .clone();
+    assert_eq!(other_doctor["patient_count"], 0);
+    assert_eq!(other_doctor["appointment_count"], 0);
+    assert_eq!(
+        other_doctor["linked_patients"]
+            .as_array()
+            .map(Vec::len)
+            .unwrap_or_default(),
+        0
+    );
 
     let (status, body) = json_request(
         &app,

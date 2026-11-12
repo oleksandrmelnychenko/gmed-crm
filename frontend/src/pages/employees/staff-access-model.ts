@@ -1,3 +1,5 @@
+import { countryCodeForDisplay, countryNameForDisplay } from "@/components/ui/country-select";
+
 import type {
   StaffAccessCapability,
   StaffAccessResourceType,
@@ -5,6 +7,21 @@ import type {
   StaffDirectAccessRuleInput,
   UpdateStaffUserAccessBody,
 } from "./staff-access-types";
+
+/**
+ * A provider's «city · country» line in the UI language: the catalogue stores
+ * the country as typed («Germany»), elsewhere the UI shows «Германия»
+ * (QA 2026-11-12 system-D F7). Parts that are no known country stay as they are.
+ */
+export function localizeProviderResourceDescription(description: string, lang: string) {
+  if (!description) return description;
+  return description
+    .split(" · ")
+    .map((part) =>
+      countryCodeForDisplay(part) ? countryNameForDisplay(part, lang) || part : part,
+    )
+    .join(" · ");
+}
 
 export const STAFF_ACCESS_CAPABILITIES: Record<
   StaffAccessResourceType,

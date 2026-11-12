@@ -104,6 +104,7 @@ import {
   blankFeedbackForm,
   canReviewStaffFeedback,
   canViewStaffFeedback,
+  feedbackReviewNeedsEdit,
   feedbackScoresPayload,
   feedbackScoreValue,
   formatFeedbackCount,
@@ -2272,7 +2273,12 @@ function useStaffFeedbackWorkspaceContent() {
         </SheetContent>
       </Sheet>
 
-      <Sheet requireChanges open={Boolean(activeReview)} onOpenChange={(open) => !open && setActiveReview(null)}>
+      <Sheet
+        // Not marked dirty, so closing without saving asks nothing.
+        requireChanges={feedbackReviewNeedsEdit(activeReview, reviewStatus)}
+        open={Boolean(activeReview)}
+        onOpenChange={(open) => !open && setActiveReview(null)}
+      >
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
           {activeReview ? (
             <form className="flex h-full flex-col" onSubmit={(event) => void handleReview(event)}>

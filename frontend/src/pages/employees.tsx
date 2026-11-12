@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { KeyRound, Search, ShieldCheck, UsersRound } from "lucide-react";
 
 import { AdminTableCard } from "@/components/admin-page-patterns";
+import { DEFAULT_DATA_TABLE_PAGE_SIZE } from "@/components/data-table/data-table-pager";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
@@ -156,6 +157,9 @@ export function EmployeesPage() {
             defaultDensity="compact"
             defaultFrozenColumns={["name"]}
             dictionary={tr}
+            // ~380 staff rows rendered at once (QA 2026-11-12 system-D F8):
+            // pages of 50, back to page 1 when the search changes.
+            pagination={{ pageSize: DEFAULT_DATA_TABLE_PAGE_SIZE, resetKey: search }}
             toolbarStart={
               <ToolbarField label={t.common_search} className="min-w-[240px] flex-1 sm:max-w-sm">
                 <div className="relative">

@@ -22,6 +22,8 @@ const KNOWN_SPECIALIZATIONS: [string[], KnownSpecializationLabels][] = [
   [["gynecology", "gynaecology", "gynäkologie", "gynaekologie", "гинекология"], { de: "Gynäkologie", ru: "Гинекология" }],
   [["hematology", "haematology", "hämatologie", "haematologie", "гематология"], { de: "Hämatologie", ru: "Гематология" }],
   [["internal_medicine", "internal medicine", "innere medizin", "innere_medizin", "внутренняя медицина", "внутренние болезни"], { de: "Innere Medizin", ru: "Внутренние болезни" }],
+  [["innere_medizin_vorsorge", "innere medizin / vorsorge"], { de: "Innere Medizin / Vorsorge", ru: "Внутренние болезни / профилактика" }],
+  [["vorsorge", "prävention", "praevention", "prevention", "preventive medicine", "профилактика"], { de: "Vorsorge", ru: "Профилактика" }],
   [["neurology", "neurologie", "неврология"], { de: "Neurologie", ru: "Неврология" }],
   [["oncology", "onkologie", "онкология"], { de: "Onkologie", ru: "Онкология" }],
   [
@@ -84,8 +86,16 @@ export function specializationLabelForItem(
   lang: SpecializationLabelLang,
 ) {
   const ownName = (lang === "de" ? item.name_de : item.name_ru)?.trim();
-  if (ownName) return ownName;
   const knownLabels = knownSpecializationLabelsForItem(item);
+  // A Russian name that only repeats the German one is no translation: the
+  // built-in list fills it in («Vorsorge» in the Russian UI, QA 2026-11-12
+  // system-D F7).
+  const untranslated =
+    lang === "ru" &&
+    Boolean(ownName) &&
+    normalizeSpecializationLabelKey(ownName ?? "") ===
+      normalizeSpecializationLabelKey(item.name_de ?? "");
+  if (ownName && !(untranslated && knownLabels)) return ownName;
   if (knownLabels) return knownLabels[lang];
 
   if (lang === "de") {

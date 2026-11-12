@@ -655,22 +655,22 @@ fn redact_provider_patient_metrics(item: &mut Value) {
 /// `can_access_linked_patient`: a record rule decides first, then an "all
 /// patients" rule, then the role baseline (assignments, Concierge tasks). The
 /// per-row filter still runs afterwards as the authoritative check.
-struct LinkedPatientScope {
+pub(super) struct LinkedPatientScope {
     /// The role holds no `patients.view` (Sales): no linked patient, no
     /// interaction and no patient metric leaves the server.
-    none: bool,
+    pub(super) none: bool,
     /// The role sees patients but no appointments (Billing): only patients
     /// linked through order lines, as name + PID, and only order-line
     /// interactions. Appointment, concierge and clinical links stay hidden.
-    finance_only: bool,
-    requires_assignment: bool,
-    baseline_patient_ids: Vec<Uuid>,
-    allowed_record_ids: Vec<Uuid>,
-    record_rule_ids: Vec<Uuid>,
-    all_decision: Option<bool>,
+    pub(super) finance_only: bool,
+    pub(super) requires_assignment: bool,
+    pub(super) baseline_patient_ids: Vec<Uuid>,
+    pub(super) allowed_record_ids: Vec<Uuid>,
+    pub(super) record_rule_ids: Vec<Uuid>,
+    pub(super) all_decision: Option<bool>,
 }
 
-async fn load_linked_patient_scope(
+pub(super) async fn load_linked_patient_scope(
     state: &AppState,
     auth: &AuthUser,
 ) -> Result<LinkedPatientScope, axum::response::Response> {
@@ -742,7 +742,7 @@ struct ProviderLinkedPatients {
     restricted: bool,
 }
 
-async fn can_access_linked_patient(
+pub(super) async fn can_access_linked_patient(
     state: &AppState,
     auth: &AuthUser,
     patient_id: Uuid,

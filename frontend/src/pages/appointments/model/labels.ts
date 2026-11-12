@@ -9,6 +9,7 @@ import {
   type Translations,
   useLanguageBound,
 } from "@/lib/i18n";
+import { pluralWord } from "@/lib/i18n/plural";
 import { doctorSpecialtyLabel, type SpecializationLabelLang } from "@/pages/providers/model/specialization-labels";
 import type {
   AppointmentCarePathKind,
@@ -360,10 +361,14 @@ export function checklistPhaseLabel(phase: string | null | undefined) {
   }
 }
 
+/** «1 открытый пункт», «2 открытых пункта», «5 открытых пунктов». */
 export function attentionIssueLabel(count: number) {
-  return count === 1
-    ? appointmentText("appointments_open_issue")
-    : appointmentText("appointments_open_issues");
+  const one = appointmentText("appointments_open_issue");
+  const few = appointmentText("appointments_open_issues");
+  return pluralWord(getLang(), count, {
+    ru: [one, few, appointmentText("appointments_open_issues_many")],
+    de: [one, few],
+  });
 }
 
 const ATTENTION_LEGACY_REASON_LABEL_KEYS: Record<string, string> = {

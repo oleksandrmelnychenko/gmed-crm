@@ -32,7 +32,7 @@ import {
 import {
   CARE_PATH_KIND_OPTIONS,
   RECURRENCE_FREQUENCY_OPTIONS,
-  TYPE_OPTIONS,
+  appointmentTypeOptionsForRole,
 } from "@/pages/appointments/model/constants";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import { useDebouncedValue } from "@/pages/appointments/data/use-debounced-value";
@@ -246,6 +246,25 @@ function useCreateAppointmentSheetContent({
       return orderId === next ? current : { form: { ...current.form, orderId: next } };
     });
   }, [patientOrders, patientOrdersLoaded]);
+  // Only the types the role may create are offered; a kept draft or seed with
+  // another type moves to the first allowed one (concierge: non-medical).
+  const typeOptions = useMemo(() => appointmentTypeOptionsForRole(userRole), [userRole]);
+  useEffect(() => {
+    dispatchSheetState((current) => {
+      if (typeOptions.includes(current.form.appointmentType)) return current;
+      const nextType = typeOptions[0];
+      if (!nextType) return current;
+      return {
+        form: {
+          ...current.form,
+          appointmentType: nextType,
+          carePathKind: "regular",
+          providerTaxonomyNodeId: "",
+          skipMedicalProviderBinding: false,
+        },
+      };
+    });
+  }, [typeOptions]);
 
   useEffect(() => {
     latestDraftRef.current = draft ?? null;
@@ -657,7 +676,7 @@ function useCreateAppointmentSheetContent({
                       }
                       className={createSheetSelectClassName}
                     >
-                      {TYPE_OPTIONS.map((value) => (
+                      {typeOptions.map((value) => (
                         <option key={value} value={value}>
                           {appointmentTypeLabel(value, tr)}
                         </option>

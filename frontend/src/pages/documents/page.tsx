@@ -205,6 +205,7 @@ import {
   canManageDocumentIntake,
   canManageDocuments,
   canRequestTranslations,
+  canShareDocumentWithRole,
   formatDocumentUploadError,
   isTranslationAssigneeRole,
   canViewTranslationQueue,
@@ -691,6 +692,12 @@ function formatCreateShareError(
   }
   if (error.message.includes("Medical documents can only be shared")) {
     return translations.documents_share_provider_medical_required;
+  }
+  if (error.message.includes("Medical data not released for interpreter")) {
+    return translations.documents_share_user_medical_not_released;
+  }
+  if (error.message.includes("Role does not have access to this data category")) {
+    return translations.documents_share_user_role_not_allowed;
   }
   if (error.message.includes("specialty does not match")) {
     return translations.documents_share_provider_specialty_mismatch;
@@ -1513,6 +1520,18 @@ function StaffDocumentsPage({
       }),
     [providers, shareProviderContextIdSet, shareTargetsRequireMedicalProvider],
   );
+  // Only people the server accepts for every selected document's data category
+  // (QA 2026-11-12 system-D F2: no interpreter for an unreleased medical
+  // document, no concierge for medical data).
+  const shareUserOptions = useMemo(
+    () =>
+      staff.filter((member) =>
+        shareTargetDocuments.every((document) =>
+          canShareDocumentWithRole(member.role, document),
+        ),
+      ),
+    [shareTargetDocuments, staff],
+  );
   const internalShareChannelOptions = useMemo(
     () => shareChannelOptions(INTERNAL_SHARE_CHANNEL_VALUES, lang),
     [lang],
@@ -1536,6 +1555,17 @@ function StaffDocumentsPage({
       channel: DEFAULT_PROVIDER_SHARE_CHANNEL,
     }));
   }, [shareForm.providerId, shareForm.targetType, shareProviderOptions]);
+
+  useEffect(() => {
+    if (
+      shareForm.targetType !== "user" ||
+      !shareForm.userId ||
+      shareUserOptions.some((member) => member.id === shareForm.userId)
+    ) {
+      return;
+    }
+    setShareForm((current) => ({ ...current, userId: "" }));
+  }, [shareForm.targetType, shareForm.userId, shareUserOptions]);
 
   useDebouncedRealtimeSubscription(STAFF_DOCUMENT_REALTIME_EVENTS, (_event, events) => {
     if (!canView) return;
@@ -5600,9 +5630,14 @@ function StaffDocumentsPage({
                               }))
                             }
                             className={selectClassName}
+                            disabled={shareUserOptions.length === 0}
                           >
-                            <option value="">{t.documents_select_user}</option>
-                            {staff.map((item) => (
+                            <option value="">
+                              {shareUserOptions.length === 0 && staff.length > 0
+                                ? t.documents_share_no_allowed_users
+                                : t.documents_select_user}
+                            </option>
+                            {shareUserOptions.map((item) => (
                               <option key={item.id} value={item.id}>
                                 {item.name} · {formatRoleLabel(item.role, lang)}
                               </option>
@@ -7683,7 +7718,7 @@ function StaffDocumentsPage({
                       </div>
                       {detail.classification_suggestion ? (
                         <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-                          {text.suggestedClassification}{" "}
+                          {text.suggestedClassification}:{" "}
                           <span className="font-medium">
                             {localizeDocumentCode(detail.classification_suggestion.art, l)} ·{" "}
                             {documentCategoryValueLabel(

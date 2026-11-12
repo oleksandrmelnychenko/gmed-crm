@@ -123,6 +123,8 @@ const copy = {
     teamWorkload: "Team-Auslastung",
     showTeam: "Team anzeigen ({count})",
     hideTeam: "Team ausblenden",
+    showIdleTeam: "Ohne Aufgaben ({count})",
+    hideIdleTeam: "Ohne Aufgaben ausblenden",
     checklist: "Checkliste",
     comments: "Kommentare",
     reminder: "Erinnerung",
@@ -199,6 +201,8 @@ const copy = {
     teamWorkload: "Загрузка команды",
     showTeam: "Показать команду ({count})",
     hideTeam: "Скрыть команду",
+    showIdleTeam: "Без задач ({count})",
+    hideIdleTeam: "Скрыть сотрудников без задач",
     checklist: "Чек-лист",
     comments: "Комментарии",
     reminder: "Напоминание",
@@ -552,6 +556,9 @@ export function ConciergeTaskManager({
   // Phone width: the team list (dozens of people) stays folded so the tasks
   // come first (QA 2026-10-11). From `md` up it is always shown.
   const [teamExpanded, setTeamExpanded] = useState(false);
+  // People without any active task are folded behind one count, so the board
+  // is not pushed below ~90 empty names (QA 2026-11-12 system-D F8).
+  const [idleTeamShown, setIdleTeamShown] = useState(false);
   const [filters, setFilters] = useState<ConciergeTaskFilters>({ query: "", assignee: "all", status: "all", priority: "all", kind: "all", audience: "all", timing: "all", archive: "active" });
   const effectiveNow = useMemo(() => new Date(Math.max(now.getTime(), clock)), [clock, now]);
   const filtered = useMemo(() => sortConciergeTasks(filterConciergeTasks(tasks, filters, effectiveNow)), [effectiveNow, filters, tasks]);
@@ -582,6 +589,16 @@ export function ConciergeTaskManager({
       .filter((task) => isConciergeTaskPastCompletedVisibility(task, effectiveNow)).length;
   }, [effectiveNow, filters, tasks]);
   const workload = useMemo(() => conciergeTaskWorkload(tasks, assignees, effectiveNow), [assignees, effectiveNow, tasks]);
+  const busyWorkload = useMemo(
+    () =>
+      workload.filter(
+        (item) =>
+          item.active > 0 || item.today > 0 || item.overdue > 0 || filters.assignee === item.assignee.id,
+      ),
+    [filters.assignee, workload],
+  );
+  const idleWorkloadCount = workload.length - busyWorkload.length;
+  const shownWorkload = idleTeamShown ? workload : busyWorkload;
   const assigneeRoles = useMemo(() => new Map(assignees.map((assignee) => [assignee.id, assignee.role])), [assignees]);
   const days = useMemo(() => taskCalendarDays(calendarScale, focusDate), [calendarScale, focusDate]);
   const calendarWeeks = useMemo(() => taskCalendarWeeks(days), [days]);
@@ -674,7 +691,7 @@ export function ConciergeTaskManager({
                   {workload.reduce((total, item) => total + item.active, 0)}
                 </Badge>
               </Button>
-            {workload.map(({ assignee, active: assigneeActive, overdue: assigneeOverdue, today }) => (
+            {shownWorkload.map(({ assignee, active: assigneeActive, overdue: assigneeOverdue, today }) => (
               <Button
                 key={assignee.id}
                 type="button"
@@ -712,6 +729,24 @@ export function ConciergeTaskManager({
               </Button>
             ))}
             </div>
+            {idleWorkloadCount > 0 ? (
+              <div className="mt-1 flex justify-center">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 rounded-md px-2 text-xs text-muted-foreground"
+                  aria-expanded={idleTeamShown}
+                  data-testid="task-team-idle-toggle"
+                  onClick={() => setIdleTeamShown((current) => !current)}
+                >
+                  {idleTeamShown ? <ChevronUp /> : <ChevronDown />}
+                  {idleTeamShown
+                    ? labels.hideIdleTeam
+                    : labels.showIdleTeam.replace("{count}", String(idleWorkloadCount))}
+                </Button>
+              </div>
+            ) : null}
           </div>
         </Section>
       ) : null}

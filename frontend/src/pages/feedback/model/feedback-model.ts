@@ -156,6 +156,18 @@ export function canReviewStaffFeedback(actor?: Actor) {
   return canViewStaffFeedback(actor) && actorRole(actor) !== "ceo_assistant";
 }
 
+/**
+ * Whether saving the review needs an edited field: a new status (the preset
+ * «Проверено» on a submitted entry) is itself the change and saves without a
+ * note; only an unchanged status waits for an edit (QA 2026-11-12 system-D F4).
+ */
+export function feedbackReviewNeedsEdit(
+  item: { status: string } | null | undefined,
+  reviewStatus: string,
+) {
+  return !item || item.status === reviewStatus;
+}
+
 export function patientLabel(item: PatientOption) {
   return `${item.patient_id} - ${[item.first_name, item.last_name].filter(Boolean).join(" ")}`.trim();
 }

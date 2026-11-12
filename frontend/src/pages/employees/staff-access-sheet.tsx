@@ -59,6 +59,7 @@ import {
   canRoleUseMedicalDocuments,
   effectiveProfileAllRule,
   effectiveProfileRule,
+  localizeProviderResourceDescription,
   profileRulesFromDirectRules,
   setDirectAllRuleEnabled,
   setDirectRuleEnabled,
@@ -161,7 +162,7 @@ export function StaffAccessSheet({
   employee: Pick<StaffAccessUser, "id" | "name" | "email" | "role"> | null;
   onClose: () => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const copy = t.staffAccess;
 
   const capabilityLabel = useCallback(
@@ -363,7 +364,12 @@ export function StaffAccessSheet({
       }
     }
     const needle = searches[resourceType].trim().toLocaleLowerCase();
-    return Array.from(byId.values()).filter((item) =>
+    const items = Array.from(byId.values()).map((item) =>
+      resourceType === "provider"
+        ? { ...item, description: localizeProviderResourceDescription(item.description, lang) }
+        : item,
+    );
+    return items.filter((item) =>
       !needle || `${item.label} ${item.description}`.toLocaleLowerCase().includes(needle),
     );
   };

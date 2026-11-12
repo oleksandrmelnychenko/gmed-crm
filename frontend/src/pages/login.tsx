@@ -379,7 +379,12 @@ export function LoginPage() {
               </div>
             ) : null}
 
-            <button className="gmed-login-submit" type="submit" disabled={loading}>
+            <button
+              className="gmed-login-submit"
+              type="submit"
+              disabled={loading}
+              aria-label={loading ? tr.login_loading : tr.login_submit}
+            >
               <span>{loading ? tr.login_loading : tr.login_submit}</span>
               <ArrowRight aria-hidden="true" />
             </button>

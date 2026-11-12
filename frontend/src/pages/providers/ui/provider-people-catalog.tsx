@@ -169,6 +169,33 @@ function mergePeopleCounts(
   return counts;
 }
 
+/**
+ * A short ID per person that tells the listed people apart: the first eight
+ * hex digits of the record id, and where those repeat (ids that share a
+ * prefix) the last eight, else the full id (QA 2026-11-12 system-D F6: every
+ * doctor showed «C1000000»).
+ */
+export function providerPeopleShortCodes(personIds: readonly string[]): Map<string, string> {
+  const hexOf = (id: string) => id.replace(/-/g, "").toUpperCase();
+  const unique = [...new Set(personIds)];
+  const byCode = (code: (id: string) => string, ids: readonly string[]) => {
+    const counts = new Map<string, number>();
+    for (const id of ids) counts.set(code(id), (counts.get(code(id)) ?? 0) + 1);
+    return counts;
+  };
+  const head = (id: string) => hexOf(id).slice(0, 8);
+  const tail = (id: string) => hexOf(id).slice(-8);
+  const headCounts = byCode(head, unique);
+  const tailCounts = byCode(tail, unique);
+  const codes = new Map<string, string>();
+  for (const id of unique) {
+    if ((headCounts.get(head(id)) ?? 0) <= 1) codes.set(id, head(id));
+    else if ((tailCounts.get(tail(id)) ?? 0) <= 1) codes.set(id, tail(id));
+    else codes.set(id, hexOf(id));
+  }
+  return codes;
+}
+
 export function groupProviderPeopleRows(
   rows: readonly ProviderPeopleRow[],
   groupDoctors = true,
@@ -573,15 +600,18 @@ function buildPeopleColumns(
   onOpenProvider: (providerId: string, row: ProviderPeopleRow) => void,
   expandedDoctors: ReadonlySet<string>,
   onToggleExpanded: (row: ProviderPeopleCatalogRow) => void,
+  personCodes: ReadonlyMap<string, string> = new Map(),
 ): ColumnDef<ProviderPeopleCatalogRow>[] {
   const notSet = labels.common_not_set ?? "-";
   const providerLabel = providerCatalogLabel(labels, lang, forceNonMedical);
+  const personCode = (row: ProviderPeopleCatalogRow) =>
+    personCodes.get(row.person_id) ?? row.person_id.slice(0, 8).toUpperCase();
 
   const columns: ColumnDef<ProviderPeopleCatalogRow>[] = [
     {
       id: "person_code",
       label: uiLabel(uiText, "providers_people_person_code", "ID"),
-      accessor: (row) => (row.isProviderChild ? "" : row.person_id.slice(0, 8).toUpperCase()),
+      accessor: (row) => (row.isProviderChild ? "" : personCode(row)),
       filterType: "text",
       searchable: true,
       sortable: true,
@@ -591,7 +621,7 @@ function buildPeopleColumns(
       render: (row) =>
         row.isProviderChild ? null : (
           <span className="font-mono text-xs text-foreground">
-            {row.person_id.slice(0, 8).toUpperCase()}
+            {personCode(row)}
           </span>
         ),
     },
@@ -761,21 +791,8 @@ function buildPeopleColumns(
         </span>
       ),
     },
-    {
-      id: "fachbereich",
-      label: labels.providers_fachbereich ?? localizedFallback(lang, "Fachbereich", "Специализация"),
-      accessor: (row) => specializationSummary(row, lang, ""),
-      filterType: "text",
-      searchable: true,
-      sortable: true,
-      width: 180,
-      group: "clinical",
-      render: (row) => (
-        <span className="truncate text-xs text-foreground">
-          {specializationSummary(row, lang, notSet)}
-        </span>
-      ),
-    },
+    // One specialization column: «Специализация» and «Специализации» showed
+    // the same summary twice (QA 2026-11-12 system-D F6).
     {
       id: "specializations",
       label: uiLabel(uiText, "providers_doctor_specializations", localizedFallback(lang, "Spezialisierungen", "Специализации")),
@@ -1653,6 +1670,10 @@ export function ProviderPeopleCatalog({
     },
     [expandedDoctors],
   );
+  const personCodes = useMemo(
+    () => providerPeopleShortCodes(rows.map((row) => row.person_id)),
+    [rows],
+  );
   const columns = useMemo(
     () => buildPeopleColumns(
       labels,
@@ -1662,8 +1683,9 @@ export function ProviderPeopleCatalog({
       onOpenProvider,
       expandedDoctors,
       toggleExpandedDoctor,
+      personCodes,
     ),
-    [expandedDoctors, forceNonMedical, labels, lang, onOpenProvider, toggleExpandedDoctor, uiText],
+    [expandedDoctors, forceNonMedical, labels, lang, onOpenProvider, personCodes, toggleExpandedDoctor, uiText],
   );
   const countLabelText = uiLabel(uiText, "providers_people_count", localizedFallback(lang, "Personen", "людей"));
 

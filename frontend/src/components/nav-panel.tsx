@@ -206,7 +206,7 @@ export function NavPanel() {
           type="button"
           onClick={logout}
           title={collapsed && !shellPending ? logoutLabel : undefined}
-          aria-label={collapsed && !shellPending ? logoutLabel : undefined}
+          aria-label={logoutLabel}
           aria-busy={shellPending || undefined}
           className={cn(
             "flex items-center rounded-lg text-sidebar-foreground/85 transition-colors hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring motion-reduce:transition-none",
