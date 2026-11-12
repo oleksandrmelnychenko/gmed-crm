@@ -1,5 +1,6 @@
 import { PortalDateChip } from "@/components/ui/portal-date-chip";
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { StaffLink } from "@/components/staff-link";
 import { CheckCircle2, Info, KeyRound, LogOut, Monitor, Save, ShieldCheck, Smartphone, UserRound, type LucideIcon } from "lucide-react";
 
 import { AccountSectionHeading } from "@/components/account-section-heading";
@@ -63,6 +64,7 @@ function AccountSection({ title, icon: Icon, accessory, children }: { title: str
  */
 export function AccountPage() {
   const { l } = useUiText();
+  const { t } = useLang();
   const { user } = useAuth();
   // The lead cabinet keeps the account to profile and language. A lead signs
   // in with the password the manager issued and does not change it here
@@ -91,6 +93,13 @@ export function AccountPage() {
             </AccountSection>
             <SessionsSection version={sessionsVersion} />
           </>
+        )}
+        {/* Staff reach the legal notice from their account (owner 2026-11-12); the portal and
+            the lead cabinet keep their own sidebar link. */}
+        {leadCabinet || user?.role === "patient" ? null : (
+          <p className="px-1 text-xs text-muted-foreground">
+            <StaffLink to="/legal" className="underline underline-offset-2 hover:text-foreground">{t.nav_legal_notice}</StaffLink>
+          </p>
         )}
       </div>
     </div>
