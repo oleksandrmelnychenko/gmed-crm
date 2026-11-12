@@ -4315,3 +4315,277 @@ async fn tasks_name_only_patients_their_author_may_open() {
     }
     assert_eq!(count_task_files(&ctx.app, &ceo, &hidden_name).await, 1);
 }
+
+async fn add_checklist_step(
+    app: &axum::Router,
+    checklist_path: &str,
+    bearer: &str,
+    label: &str,
+) -> String {
+    let (status, step) = json_request(
+        app,
+        "POST",
+        checklist_path,
+        bearer,
+        Some(json!({ "request_id": Uuid::new_v4(), "label": label })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{step}");
+    step["id"].as_str().unwrap().to_string()
+}
+
+/// Owner decision 2026-11-12 (concierge QA A F2): the assignee ticks every
+/// checklist step but edits or deletes only the steps it added itself; the
+/// creator and a higher role keep full control.
+#[tokio::test]
+async fn assignee_ticks_but_cannot_edit_or_delete_the_creators_checklist_steps() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let concierge_id = seed_user(&ctx.pool, "concierge", &format!("step-assignee-{tag}")).await;
+    let ceo_bearer = auth_header_for(ctx.admin_id, "ceo");
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+    let path = "/api/v1/concierge-operational-items";
+    let (status, task) = json_request(
+        &ctx.app,
+        "POST",
+        path,
+        &ceo_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "kind": "task",
+            "title": "Check wheelchair access",
+            "assigned_to": concierge_id,
+            "priority": "normal"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{task}");
+    let checklist_path = format!("{path}/{}/checklist", task["id"].as_str().unwrap());
+    let creator_step =
+        add_checklist_step(&ctx.app, &checklist_path, &ceo_bearer, "Creator step").await;
+    let own_step = add_checklist_step(
+        &ctx.app,
+        &checklist_path,
+        &concierge_bearer,
+        "Assignee step",
+    )
+    .await;
+
+    // The assignee neither renames nor deletes the creator's step...
+    let (status, renamed) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{checklist_path}/{creator_step}/update"),
+        &concierge_bearer,
+        Some(json!({ "request_id": Uuid::new_v4(), "label": "Changed by assignee" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{renamed}");
+    let (status, deleted) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{checklist_path}/{creator_step}/delete"),
+        &concierge_bearer,
+        Some(json!({ "request_id": Uuid::new_v4() })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{deleted}");
+    // ...but ticks it.
+    let (status, ticked) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{checklist_path}/{creator_step}/toggle"),
+        &concierge_bearer,
+        Some(json!({ "request_id": Uuid::new_v4(), "completed": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ticked}");
+    assert_eq!(ticked["is_completed"], true);
+
+    // Its own step stays fully editable; the creator edits any step.
+    let (status, renamed_own) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{checklist_path}/{own_step}/update"),
+        &concierge_bearer,
+        Some(json!({ "request_id": Uuid::new_v4(), "label": "Assignee step, renamed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{renamed_own}");
+    let (status, renamed_by_creator) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{checklist_path}/{own_step}/update"),
+        &ceo_bearer,
+        Some(json!({ "request_id": Uuid::new_v4(), "label": "Renamed by creator" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{renamed_by_creator}");
+    let (status, deleted_own) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{checklist_path}/{own_step}/delete"),
+        &concierge_bearer,
+        Some(json!({ "request_id": Uuid::new_v4() })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{deleted_own}");
+
+    let labels: Vec<String> = sqlx::query_scalar(
+        r#"SELECT label FROM concierge_operational_task_checklist_items
+           WHERE id = $1 AND deleted_at IS NULL"#,
+    )
+    .bind(Uuid::parse_str(&creator_step).unwrap())
+    .fetch_all(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(labels, vec!["Creator step".to_string()]);
+}
+
+/// Concierge QA A F1/F3/F4/F5/F7: own work gives no "new task" notice; a
+/// reopen or pause by the creator notifies the assignee with the old and new
+/// status; the history names what changed; a comment on an archived task is
+/// refused as a conflict, not as a missing task.
+#[tokio::test]
+async fn task_history_and_notices_name_the_change_and_archived_tasks_refuse_comments() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let concierge_id = seed_user(&ctx.pool, "concierge", &format!("notice-assignee-{tag}")).await;
+    let ceo_bearer = auth_header_for(ctx.admin_id, "ceo");
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+    let path = "/api/v1/concierge-operational-items";
+
+    let (status, own) = json_request(
+        &ctx.app,
+        "POST",
+        path,
+        &concierge_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "kind": "task",
+            "title": "Own reminder",
+            "assigned_to": concierge_id,
+            "priority": "normal"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{own}");
+    let own_id = Uuid::parse_str(own["id"].as_str().unwrap()).unwrap();
+    let own_notices: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM user_notifications WHERE user_id = $1 AND entity_id = $2",
+    )
+    .bind(concierge_id)
+    .bind(own_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(own_notices, 0);
+
+    let (status, task) = json_request(
+        &ctx.app,
+        "POST",
+        path,
+        &ceo_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "kind": "task",
+            "title": "Book the table",
+            "assigned_to": concierge_id,
+            "priority": "normal"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{task}");
+    let task_id = Uuid::parse_str(task["id"].as_str().unwrap()).unwrap();
+    let status_path = format!("{path}/{task_id}/status");
+    let mut current = task;
+    for next in [
+        "in_progress",
+        "on_hold",
+        "in_progress",
+        "completed",
+        "in_progress",
+    ] {
+        let (status, moved) = json_request(
+            &ctx.app,
+            "POST",
+            &status_path,
+            &ceo_bearer,
+            Some(json!({ "expected_updated_at": current["updated_at"], "status": next })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{next}: {moved}");
+        current = moved;
+    }
+    let notices: Vec<(String, Value)> = sqlx::query_as(
+        r#"SELECT kind, COALESCE(params, '{}'::jsonb) FROM user_notifications
+           WHERE user_id = $1 AND entity_id = $2
+             AND kind IN ('operational_task_paused', 'operational_task_reopened')
+           ORDER BY created_at, id"#,
+    )
+    .bind(concierge_id)
+    .bind(task_id)
+    .fetch_all(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(notices.len(), 2, "{notices:?}");
+    assert_eq!(notices[0].0, "operational_task_paused");
+    assert_eq!(notices[0].1["previous_status"], "in_progress");
+    assert_eq!(notices[1].0, "operational_task_reopened");
+    assert_eq!(notices[1].1["previous_status"], "completed");
+
+    let detail_path = format!("{path}/{task_id}");
+    let (status, detail) = json_request(&ctx.app, "GET", &detail_path, &ceo_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let moves: Vec<(String, String)> = detail["history"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["event_type"] == "status_changed")
+        .map(|event| {
+            (
+                event["payload"]["previous_status"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                event["payload"]["status"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+            )
+        })
+        .collect();
+    assert!(moves.contains(&("on_hold".to_string(), "in_progress".to_string())));
+    assert!(moves.contains(&("completed".to_string(), "in_progress".to_string())));
+
+    // A recorded creation is listed once, without the system entry.
+    let created: Vec<&Value> = detail["history"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["event_type"] == "created")
+        .collect();
+    assert_eq!(created.len(), 1, "{detail}");
+    assert!(created[0]["payload"]["system"].is_null());
+
+    sqlx::query("UPDATE tasks SET archived_at = now(), archived_by = $2 WHERE id = $1")
+        .bind(task_id)
+        .bind(ctx.admin_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (status, refused) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{detail_path}/comments"),
+        &concierge_bearer,
+        Some(json!({ "request_id": Uuid::new_v4(), "body": "Still there?" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "task_archived");
+}

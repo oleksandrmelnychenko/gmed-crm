@@ -1107,7 +1107,7 @@ function useStaffServicesPageContent() {
       editForm,
     },
     dispatchStaffServicesState,
-  ] = useReducer(staffServicesPageReducer, STAFF_SERVICES_INITIAL_STATE);
+  ] = useReducer(staffServicesPageReducer, STAFF_SERVICES_INITIAL_STATE, (initial) => ({ ...initial, selectedServiceId: new URLSearchParams(window.location.search).get("service") })); // `?service=` opens a service (link from its task)
   const setStaffServicesField = <K extends keyof StaffServicesPageState>(
     field: K,
     value: SetStateAction<StaffServicesPageState[K]>,

@@ -59,6 +59,7 @@ import {
   canAttachToConciergeTask,
   canChangeConciergeTaskStatus,
   canDeleteConciergeTask,
+  canEditConciergeChecklistItem,
   canMarkConciergeTaskNotRequired,
   canModifyConciergeTask,
   conciergeTaskCode,
@@ -91,7 +92,8 @@ import type {
 import { ConciergeTaskAttachments } from "./task-attachments";
 import { ConciergeServiceBookingActionById } from "./provider-booking-dialog";
 import { openSubtaskCount, subtaskProgress } from "./task-workflow";
-import { closeOpenSubtasks, completableParentAfterChild, completeParentTask, ParentCloseChoiceDialog, skippedSubtasksNotice, subtaskCloseStatus, ParentCompletionSuggestionDialog, type ParentCloseRequest, type ParentCompletionSuggestion } from "./subtask-flow";
+import { closeOpenSubtasks, completableParentAfterChild, completeParentTask, needsOpenChecklistConfirmation, OpenChecklistCompletionDialog, ParentCloseChoiceDialog, skippedSubtasksNotice, subtaskCloseStatus, ParentCompletionSuggestionDialog, type OpenChecklistRequest, type ParentCloseRequest, type ParentCompletionSuggestion } from "./subtask-flow";
+import { conciergeTaskHistoryDetail } from "./task-history";
 
 const copy = {
   de: {
@@ -164,6 +166,9 @@ const copy = {
     comment_deleted: "Kommentar gelöscht",
     attachment_added: "Anhang hinzugefügt",
     attachment_deleted: "Anhang entfernt",
+    expense_submitted: "Ausgabe erfasst",
+    service: "Concierge-Service",
+    openService: "Service öffnen",
     archived: "Aufgabe archiviert",
     archiveAction: "Archivieren",
     archivedStatus: "Archiviert",
@@ -269,6 +274,9 @@ const copy = {
     comment_deleted: "Комментарий удалён",
     attachment_added: "Файл прикреплён",
     attachment_deleted: "Файл удалён",
+    expense_submitted: "Добавлен расход",
+    service: "Консьерж-сервис",
+    openService: "Открыть сервис",
     archived: "Задача перемещена в архив",
     archiveAction: "В архив",
     archivedStatus: "В архиве",
@@ -486,6 +494,7 @@ export function ConciergeTaskDetailDialog({
   const { user } = useAuth();
   // The order link only helps people who may open orders.
   const canOpenOrders = hasCapability(user, "orders.view");
+  const canOpenServices = hasCapability(user, "services.view");
   const [detail, setDetail] = useState<ConciergeTaskDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -517,6 +526,7 @@ export function ConciergeTaskDetailDialog({
     : false;
   const [notRequiredConfirmOpen, setNotRequiredConfirmOpen] = useState(false);
   const [parentCloseRequest, setParentCloseRequest] = useState<ParentCloseRequest | null>(null);
+  const [openChecklistRequest, setOpenChecklistRequest] = useState<OpenChecklistRequest | null>(null);
   const [completionSuggestion, setCompletionSuggestion] = useState<ParentCompletionSuggestion | null>(null);
   const canChangeStatus = detail
     ? canChangeConciergeTaskStatus(detail.item, user?.id, user?.role)
@@ -894,13 +904,17 @@ export function ConciergeTaskDetailDialog({
     }
   }
 
-  async function changeStatus() {
+  async function changeStatus(checklistConfirmed = false) {
     if (!taskId || !detail || !canChangeStatus || busy || !pendingStatus || pendingStatus === detail.item.status) return;
     if (pendingStatus === "archive") {
       await changeArchiveState(true);
       return;
     }
     const status = pendingStatus;
+    if (!checklistConfirmed && needsOpenChecklistConfirmation(detail.item, status)) {
+      setOpenChecklistRequest({ task: detail.item, run: () => changeStatus(true) });
+      return;
+    }
     const closeStatus = subtaskCloseStatus(status);
     const openChildren = closeStatus ? openSubtaskCount(detail.item, relatedTasks) : 0;
     if (openChildren > 0 && closeStatus) {
@@ -1134,9 +1148,17 @@ export function ConciergeTaskDetailDialog({
                 </div>
               ) : null}
 
-              {(detail.item.patient_id && detail.item.patient_name) || (detail.item.order_id && canOpenOrders) || (detail.item.provider_id && detail.item.provider_name) || (detail.item.project_id && detail.item.project_name) || detail.item.task_audience === "external" ? (
+              {(detail.item.concierge_service_id && canOpenServices) || (detail.item.patient_id && detail.item.patient_name) || (detail.item.order_id && canOpenOrders) || (detail.item.provider_id && detail.item.provider_name) || (detail.item.project_id && detail.item.project_name) || detail.item.task_audience === "external" ? (
                 <TaskDetailSection icon={Link2} title={labels.links}>
                   <div className="divide-y divide-border/60">
+                    {/* A service task links back to its concierge service (booking reference, budget, notes). */}
+                    {detail.item.concierge_service_id && canOpenServices ? (
+                      <StaffLink to={`/services?service=${detail.item.concierge_service_id}`} data-testid="task-detail-service-link" className="group flex items-center gap-2 px-3 py-2 transition-colors hover:bg-muted/20">
+                        <span className="flex shrink-0 items-center justify-center text-foreground"><ReceiptText className="size-5" /></span>
+                        <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.service}</span><strong className="block truncate text-sm">{labels.openService}</strong></span>
+                        <ExternalLink className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-[var(--brand)]" />
+                      </StaffLink>
+                    ) : null}
                     {/* Generated order work (checklist, appointment concierge tasks) links back to its order. */}
                     {detail.item.order_id && canOpenOrders ? (
                       <StaffLink to={`/orders?order=${detail.item.order_id}`} data-testid="task-detail-order-link" className="group flex items-center gap-2 px-3 py-2 transition-colors hover:bg-muted/20">
@@ -1288,7 +1310,8 @@ export function ConciergeTaskDetailDialog({
                             <span className={cn("block break-words", item.is_completed && "text-muted-foreground line-through")}>{item.label}</span>
                             <time className="mt-0.5 block text-[10px] font-normal text-muted-foreground">{dateTime(item.created_at)}</time>
                           </span>
-                          {canCollaborate && !detail.item.archived_at ? (
+                          {/* The assignee ticks every step but renames or deletes only its own (owner decision 2026-11-12). */}
+                          {canCollaborate && !detail.item.archived_at && canEditConciergeChecklistItem(detail.item, item, user?.id, user?.role) ? (
                             <div className="flex shrink-0 items-center gap-0.5">
                               <Button type="button" size="icon-sm" variant="ghost" className="size-7" aria-label={labels.edit} onClick={() => { setEditingChecklistId(item.id); setChecklistDraft(item.label); }}><Pencil /></Button>
                               <Button type="button" size="icon-sm" variant="ghost" className="size-7 text-destructive hover:text-destructive" aria-label={labels.delete} onClick={() => setPendingChildDelete({ kind: "checklist", id: item.id })}><Trash2 /></Button>
@@ -1343,7 +1366,10 @@ export function ConciergeTaskDetailDialog({
                 <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
               </summary>
               <div className="divide-y divide-border/60 border-t border-border/70">
-                {detail.history.length === 0 ? <p className="px-3 py-3 text-center text-xs text-muted-foreground">{labels.emptyHistory}</p> : detail.history.map((event) => <div key={event.id} className="flex items-start justify-between gap-3 px-3 py-2.5 text-xs"><div><p className="font-medium">{labels[event.event_type as keyof typeof labels] ?? event.event_type}</p><p className="mt-0.5 text-muted-foreground">{event.actor_name ?? "System"}</p></div><time className="shrink-0 text-muted-foreground">{dateTime(event.created_at)}</time></div>)}
+                {detail.history.length === 0 ? <p className="px-3 py-3 text-center text-xs text-muted-foreground">{labels.emptyHistory}</p> : detail.history.map((event) => {
+                  const change = conciergeTaskHistoryDetail(event, lang, detail.checklist);
+                  return <div key={event.id} className="flex items-start justify-between gap-3 px-3 py-2.5 text-xs"><div className="min-w-0"><p className="font-medium">{labels[event.event_type as keyof typeof labels] ?? event.event_type}</p>{change ? <p className="mt-0.5 break-words text-foreground" data-testid="task-history-change">{change}</p> : null}<p className="mt-0.5 text-muted-foreground">{event.actor_name ?? "System"}</p></div><time className="shrink-0 text-muted-foreground">{dateTime(event.created_at)}</time></div>;
+                })}
               </div>
             </details>
             </div>
@@ -1405,6 +1431,11 @@ export function ConciergeTaskDetailDialog({
         request={open ? parentCloseRequest : null}
         lang={lang}
         onDone={() => setParentCloseRequest(null)}
+      />
+      <OpenChecklistCompletionDialog
+        request={open ? openChecklistRequest : null}
+        lang={lang}
+        onDone={() => setOpenChecklistRequest(null)}
       />
       <ParentCompletionSuggestionDialog
         suggestion={open ? completionSuggestion : null}

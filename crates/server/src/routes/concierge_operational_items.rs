@@ -304,6 +304,8 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
           (SELECT COUNT(*) FROM concierge_operational_task_attachments attachment WHERE attachment.task_id = t.id AND attachment.deleted_at IS NULL) AS attachment_count,
           assignee.name AS assigned_to_name, assignee.is_active AS assigned_to_active, assigner.name AS assigned_by_name,
           assigner.role AS assigned_by_role,
+          (COALESCE(cs.billing_status, t.billing_status) IN ('billed', 'settled')
+           AND (t.concierge_service_id IS NOT NULL OR t.service_status IS NOT NULL)) AS service_billing_locked,
           NULLIF(BTRIM(CONCAT_WS(' ', patient.first_name, patient.last_name)), '') AS patient_name,
           patient.birth_date AS patient_birth_date,
           task_provider.name AS provider_name, task_provider.phone AS provider_phone,
@@ -444,6 +446,8 @@ async fn list_items(
                   (SELECT COUNT(*) FROM concierge_operational_task_attachments attachment WHERE attachment.task_id = t.id AND attachment.deleted_at IS NULL) AS attachment_count,
                   assignee.name AS assigned_to_name, assignee.is_active AS assigned_to_active, assigner.name AS assigned_by_name,
                   assigner.role AS assigned_by_role,
+                  (COALESCE(cs.billing_status, t.billing_status) IN ('billed', 'settled')
+                   AND (t.concierge_service_id IS NOT NULL OR t.service_status IS NOT NULL)) AS service_billing_locked,
                   NULLIF(BTRIM(CONCAT_WS(' ', patient.first_name, patient.last_name)), '') AS patient_name,
                   patient.birth_date AS patient_birth_date,
                   task_provider.name AS provider_name, task_provider.phone AS provider_phone,
@@ -1426,18 +1430,24 @@ async fn create_item(
         tracing::error!(error = %error, request_id = %body.request_id, item_id = %item_id, "persist concierge operational create request");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
-    let assignment_notification = match insert_task_notification(
-        &mut tx,
-        assigned_to,
-        "operational_task_assigned",
-        "New task",
-        &fields.title,
-        item_id,
-    )
-    .await
-    {
-        Ok(value) => value,
-        Err(response) => return response,
+    // Work the creator gives itself needs no "new task" notice (concierge QA
+    // A F4: the bell filled with the creator's own tasks).
+    let assignment_notification = if assigned_to != auth.user_id {
+        match insert_task_notification(
+            &mut tx,
+            assigned_to,
+            "operational_task_assigned",
+            "New task",
+            &fields.title,
+            item_id,
+        )
+        .await
+        {
+            Ok(value) => Some(value),
+            Err(response) => return response,
+        }
+    } else {
+        None
     };
     if let Err(error) = tx.commit().await {
         tracing::error!(error = %error, item_id = %item_id, "commit concierge operational item");
@@ -1465,7 +1475,9 @@ async fn create_item(
         "open",
     )
     .await;
-    publish_pending_notification(&state, assignment_notification, item_id).await;
+    if let Some(notification) = assignment_notification {
+        publish_pending_notification(&state, notification, item_id).await;
+    }
 
     match load_item(&state, &auth, item_id).await {
         Ok(Some(value)) => (StatusCode::CREATED, Json(value)).into_response(),
@@ -1516,6 +1528,7 @@ async fn update_item(
     let existing = match sqlx::query(
         r#"SELECT task.assigned_to, task.assigned_by, task.status, task.reminder_at,
                   task.concierge_service_id, task.patient_id,
+                  task.title, task.due_date, task.starts_at, task.ends_at,
                   task.archived_at,
                   task.updated_at, creator.role AS assigned_by_role,
                   EXISTS(SELECT 1 FROM tasks child WHERE child.parent_task_id = task.id AND child.deleted_at IS NULL) AS has_children
@@ -1674,6 +1687,12 @@ async fn update_item(
         return response;
     }
 
+    if let Err(response) =
+        ensure_billed_service_stays_completed(&mut tx, item_id, &existing_status, &body.status)
+            .await
+    {
+        return response;
+    }
     if existing_status != body.status
         && let Err(response) = crate::services::concierge_service_tasks::prepare_task_status_change(
             &mut tx,
@@ -1685,6 +1704,28 @@ async fn update_item(
     {
         return response;
     }
+    let service_before = if existing_status != body.status {
+        match load_linked_service_row(&mut *tx, item_id).await {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(error = %error, item_id = %item_id, "load linked concierge service");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    } else {
+        None
+    };
+    // What the history names when the task moves (concierge QA A F1).
+    let previous_title = existing.try_get::<String, _>("title").unwrap_or_default();
+    let previous_due_at = existing
+        .try_get::<Option<DateTime<Utc>>, _>("due_date")
+        .unwrap_or_default();
+    let previous_starts_at = existing
+        .try_get::<Option<DateTime<Utc>>, _>("starts_at")
+        .unwrap_or_default();
+    let previous_ends_at = existing
+        .try_get::<Option<DateTime<Utc>>, _>("ends_at")
+        .unwrap_or_default();
     let result = sqlx::query(
         r#"UPDATE tasks
            SET title = $2,
@@ -1778,6 +1819,15 @@ async fn update_item(
         "previous_status": existing_status,
         "concierge_service_id": fields.concierge_service_id,
         "reminder_at": fields.reminder_at.as_ref().map(|value| value.to_rfc3339()),
+        "previous_reminder_at": existing_reminder_at.map(|value| value.to_rfc3339()),
+        "title": fields.title.as_str(),
+        "previous_title": previous_title,
+        "due_at": fields.due_at.map(|value| value.to_rfc3339()),
+        "previous_due_at": previous_due_at.map(|value| value.to_rfc3339()),
+        "starts_at": fields.starts_at.map(|value| value.to_rfc3339()),
+        "previous_starts_at": previous_starts_at.map(|value| value.to_rfc3339()),
+        "ends_at": fields.ends_at.map(|value| value.to_rfc3339()),
+        "previous_ends_at": previous_ends_at.map(|value| value.to_rfc3339()),
         "task_audience": fields.task_audience.as_str(),
         "patient_id": fields.patient_id,
         "provider_id": fields.provider_id,
@@ -1824,18 +1874,22 @@ async fn update_item(
     let creator_notified_as_assignee =
         reassignment_notification.is_some() && assigned_to == assigned_by;
     let creator_notification = if auth.user_id != assigned_by && !creator_notified_as_assignee {
-        let title = if existing_status != body.status {
-            "Task status changed"
+        let (title, params) = if existing_status != body.status {
+            (
+                "Task status changed",
+                Some(status_notification_params(&existing_status, &body.status)),
+            )
         } else {
-            "Task updated"
+            ("Task updated", None)
         };
-        match insert_task_notification(
+        match insert_task_notification_with_params(
             &mut tx,
             assigned_by,
             "operational_task_updated",
             title,
             &fields.title,
             item_id,
+            params,
         )
         .await
         {
@@ -1844,6 +1898,32 @@ async fn update_item(
         }
     } else {
         None
+    };
+    // The kept assignee hears that the creator (or a higher role) reopened,
+    // paused or cancelled its task in the edit dialog, as on the status path.
+    let assignee_status_notification = match assignee_notice(&existing_status, &body.status) {
+        Some((kind, notice))
+            if existing_status != body.status
+                && existing_assignee == assigned_to
+                && auth.user_id != assigned_to
+                && assigned_to != assigned_by =>
+        {
+            match insert_task_notification_with_params(
+                &mut tx,
+                assigned_to,
+                kind,
+                notice,
+                &fields.title,
+                item_id,
+                Some(status_notification_params(&existing_status, &body.status)),
+            )
+            .await
+            {
+                Ok(value) => Some(value),
+                Err(response) => return response,
+            }
+        }
+        _ => None,
     };
     if let Err(error) = tx.commit().await {
         tracing::error!(error = %error, item_id = %item_id, "commit concierge task update");
@@ -1883,6 +1963,10 @@ async fn update_item(
     if let Some(notification) = creator_notification {
         publish_pending_notification(&state, notification, item_id).await;
     }
+    if let Some(notification) = assignee_status_notification {
+        publish_pending_notification(&state, notification, item_id).await;
+    }
+    notify_patient_after_service_task_move(&state, service_before, item_id, auth.user_id).await;
 
     match load_item(&state, &auth, item_id).await {
         Ok(Some(value)) => Json(value).into_response(),
@@ -2004,6 +2088,13 @@ pub(crate) async fn update_item_status(
             Err(response) => response,
         };
     }
+    // A billed service stays completed (concierge QA B S2-2).
+    if let Err(response) =
+        ensure_billed_service_stays_completed(&mut tx, item_id, &previous_status, &body.status)
+            .await
+    {
+        return response;
+    }
     // A concierge service follows its task; a billed one cannot be cancelled.
     if let Err(response) = crate::services::concierge_service_tasks::prepare_task_status_change(
         &mut tx,
@@ -2015,6 +2106,13 @@ pub(crate) async fn update_item_status(
     {
         return response;
     }
+    let service_before = match load_linked_service_row(&mut *tx, item_id).await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "load linked concierge service");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
 
     if let Err(error) = sqlx::query(
         r#"UPDATE tasks
@@ -2072,13 +2170,14 @@ pub(crate) async fn update_item_status(
         Err(response) => return response,
     };
     let creator_notification = if auth.user_id != assigned_by {
-        match insert_task_notification(
+        match insert_task_notification_with_params(
             &mut tx,
             assigned_by,
             "operational_task_updated",
             "Task status changed",
             &title,
             item_id,
+            Some(status_notification_params(&previous_status, &body.status)),
         )
         .await
         {
@@ -2089,13 +2188,21 @@ pub(crate) async fn update_item_status(
         None
     };
     // The assignee learns how the author decided on the work it handed in,
-    // and that its task was cancelled.
+    // and that its task was cancelled, reopened or paused.
     let assignee_notification = match assignee_notice(&previous_status, &body.status) {
         Some((kind, decision))
             if auth.user_id != assigned_to && assigned_to != assigned_by && can_review =>
         {
-            match insert_task_notification(&mut tx, assigned_to, kind, decision, &title, item_id)
-                .await
+            match insert_task_notification_with_params(
+                &mut tx,
+                assigned_to,
+                kind,
+                decision,
+                &title,
+                item_id,
+                Some(status_notification_params(&previous_status, &body.status)),
+            )
+            .await
             {
                 Ok(value) => Some(value),
                 Err(response) => return response,
@@ -2107,6 +2214,7 @@ pub(crate) async fn update_item_status(
         tracing::error!(error = %error, item_id = %item_id, "commit concierge task status update");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    notify_patient_after_service_task_move(&state, service_before, item_id, auth.user_id).await;
     crate::routes::workflow_checklists::publish_checklist_item_changes(
         &state,
         auth.user_id,
@@ -2286,6 +2394,7 @@ async fn close_children(
 
     let mut checklist_changes = Vec::new();
     let mut notifications = Vec::new();
+    let mut services_before = Vec::new();
     for child in &open_children {
         if let Err(response) = crate::services::concierge_service_tasks::prepare_task_status_change(
             &mut tx,
@@ -2296,6 +2405,13 @@ async fn close_children(
         .await
         {
             return response;
+        }
+        match load_linked_service_row(&mut *tx, child.id).await {
+            Ok(value) => services_before.push((value, child.id)),
+            Err(error) => {
+                tracing::error!(error = %error, item_id = %child.id, "load linked concierge service");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
         }
         if let Err(error) = sqlx::query(
             r#"UPDATE tasks
@@ -2347,13 +2463,14 @@ async fn close_children(
             Err(response) => return response,
         }
         if auth.user_id != child.assigned_by {
-            match insert_task_notification(
+            match insert_task_notification_with_params(
                 &mut tx,
                 child.assigned_by,
                 "operational_task_updated",
                 "Task status changed",
                 &child.title,
                 child.id,
+                Some(status_notification_params(&child.status, &body.status)),
             )
             .await
             {
@@ -2365,13 +2482,14 @@ async fn close_children(
             && auth.user_id != child.assigned_to
             && child.assigned_to != child.assigned_by
         {
-            match insert_task_notification(
+            match insert_task_notification_with_params(
                 &mut tx,
                 child.assigned_to,
                 kind,
                 title,
                 &child.title,
                 child.id,
+                Some(status_notification_params(&child.status, &body.status)),
             )
             .await
             {
@@ -2421,6 +2539,10 @@ async fn close_children(
     for (notification, child_id) in notifications {
         publish_pending_notification(&state, notification, child_id).await;
     }
+    for (service_before, child_id) in services_before {
+        notify_patient_after_service_task_move(&state, service_before, child_id, auth.user_id)
+            .await;
+    }
 
     Json(serde_json::json!({
         "closed_count": open_children.len(),
@@ -2453,7 +2575,16 @@ fn assignee_notice(previous_status: &str, status: &str) -> Option<(&'static str,
     if let Some(title) = review_decision_title(previous_status, status) {
         return Some(("operational_task_review_decision", title));
     }
-    (status == "cancelled").then_some(("operational_task_cancelled", "Task cancelled"))
+    match (previous_status, status) {
+        (_, "cancelled") => Some(("operational_task_cancelled", "Task cancelled")),
+        // Concierge QA A F3: a reopened or paused task silently returned to
+        // or stopped in the assignee's queue.
+        ("completed" | "cancelled", "in_progress" | "open") => {
+            Some(("operational_task_reopened", "Task reopened"))
+        }
+        (_, "on_hold") => Some(("operational_task_paused", "Task paused")),
+        _ => None,
+    }
 }
 
 async fn archive_item(
@@ -2900,13 +3031,46 @@ async fn get_item_detail(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    // Besides the recorded events (concierge QA A F5 / B S3-2): a task the
+    // system created without a "created" event (concierge service start,
+    // order checklist) shows its creation, and every expense submitted on
+    // the task is listed (vendor only; amounts stay in the expense section,
+    // which not every reader of the task sees).
     let event_rows = match sqlx::query(
-        r#"SELECT event.id, event.event_type, event.actor_id,
-                  actor.name AS actor_name, event.payload, event.created_at
-           FROM concierge_operational_task_events event
-           LEFT JOIN users actor ON actor.id = event.actor_id
-           WHERE event.task_id = $1
-           ORDER BY event.created_at DESC, event.id DESC
+        r#"SELECT history.id, history.event_type, history.actor_id,
+                  history.actor_name, history.payload, history.created_at
+           FROM (
+               SELECT event.id, event.event_type::text AS event_type, event.actor_id,
+                      actor.name AS actor_name, event.payload, event.created_at
+               FROM concierge_operational_task_events event
+               LEFT JOIN users actor ON actor.id = event.actor_id
+               WHERE event.task_id = $1
+               UNION ALL
+               SELECT task.id, 'created'::text, task.assigned_by,
+                      creator.name,
+                      jsonb_build_object(
+                          'system', true,
+                          'concierge_service_id', task.concierge_service_id,
+                          'order_id', task.order_id
+                      ),
+                      task.created_at
+               FROM tasks task
+               LEFT JOIN users creator ON creator.id = task.assigned_by
+               WHERE task.id = $1
+                 AND NOT EXISTS (
+                     SELECT 1 FROM concierge_operational_task_events created
+                     WHERE created.task_id = task.id AND created.event_type = 'created'
+                 )
+               UNION ALL
+               SELECT submission.id, 'expense_submitted'::text, submission.submitted_by,
+                      submitter.name,
+                      jsonb_build_object('vendor_name', submission.vendor_name),
+                      submission.created_at
+               FROM concierge_expense_submissions submission
+               LEFT JOIN users submitter ON submitter.id = submission.submitted_by
+               WHERE submission.task_id = $1
+           ) history
+           ORDER BY history.created_at DESC, history.id DESC
            LIMIT 200"#,
     )
     .bind(item_id)
@@ -3459,7 +3623,7 @@ async fn add_checklist_item(
         .bind(item_id)
         .bind(auth.user_id)
         .bind(body.request_id)
-        .bind(serde_json::json!({ "checklist_id": value }))
+        .bind(serde_json::json!({ "checklist_id": value, "label": label }))
         .execute(&mut *tx)
         .await
         {
@@ -3592,8 +3756,8 @@ async fn update_checklist_item(
         }
         return Json(checklist_item).into_response();
     }
-    let previous_label = match sqlx::query_scalar::<_, String>(
-        r#"SELECT label
+    let (previous_label, step_author) = match sqlx::query_as::<_, (String, Uuid)>(
+        r#"SELECT label, created_by
            FROM concierge_operational_task_checklist_items
            WHERE id = $2 AND task_id = $1 AND deleted_at IS NULL
            FOR UPDATE"#,
@@ -3610,6 +3774,15 @@ async fn update_checklist_item(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    if step_author != auth.user_id {
+        let manages_task = match actor_manages_task(&mut tx, &auth, item_id).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+        if !can_edit_checklist_step(auth.user_id, step_author, manages_task) {
+            return err(StatusCode::FORBIDDEN, CHECKLIST_STEP_AUTHOR_ONLY);
+        }
+    }
     if let Err(error) = sqlx::query(
         r#"UPDATE concierge_operational_task_checklist_items
            SET label = $3, updated_at = now()
@@ -3723,8 +3896,8 @@ async fn delete_checklist_item(
         }
         return StatusCode::NO_CONTENT.into_response();
     }
-    let previous_label = match sqlx::query_scalar::<_, String>(
-        r#"SELECT label
+    let (previous_label, step_author) = match sqlx::query_as::<_, (String, Uuid)>(
+        r#"SELECT label, created_by
            FROM concierge_operational_task_checklist_items
            WHERE id = $2 AND task_id = $1 AND deleted_at IS NULL
            FOR UPDATE"#,
@@ -3741,6 +3914,15 @@ async fn delete_checklist_item(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    if step_author != auth.user_id {
+        let manages_task = match actor_manages_task(&mut tx, &auth, item_id).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+        if !can_edit_checklist_step(auth.user_id, step_author, manages_task) {
+            return err(StatusCode::FORBIDDEN, CHECKLIST_STEP_AUTHOR_ONLY);
+        }
+    }
     if let Err(error) = sqlx::query(
         r#"UPDATE concierge_operational_task_checklist_items
            SET deleted_at = now(), deleted_by = $3, updated_at = now()
@@ -3854,14 +4036,14 @@ async fn toggle_checklist_item(
         }
         return Json(checklist_item).into_response();
     }
-    let updated = match sqlx::query_scalar::<_, Uuid>(
+    let (updated, toggled_label) = match sqlx::query_as::<_, (Uuid, String)>(
         r#"UPDATE concierge_operational_task_checklist_items
            SET is_completed = $3,
                completed_by = CASE WHEN $3 THEN $4 ELSE NULL END,
                completed_at = CASE WHEN $3 THEN now() ELSE NULL END,
                updated_at = now()
            WHERE id = $2 AND task_id = $1 AND deleted_at IS NULL
-           RETURNING id"#,
+           RETURNING id, label"#,
     )
     .bind(item_id)
     .bind(checklist_id)
@@ -3888,6 +4070,7 @@ async fn toggle_checklist_item(
     .bind(serde_json::json!({
         "checklist_id": checklist_id,
         "completed": body.completed,
+        "label": toggled_label,
     }))
     .execute(&mut *tx)
     .await
@@ -3928,6 +4111,7 @@ async fn lock_item_access(
     let query = if for_update {
         r#"SELECT task.assigned_to, task.assigned_by, creator.role AS assigned_by_role,
                   task.patient_id IS NOT NULL AS has_patient,
+                  task.archived_at IS NOT NULL AS archived,
                   EXISTS (
                       SELECT 1
                       FROM crm_projects visible_project
@@ -3953,7 +4137,7 @@ async fn lock_item_access(
            JOIN users creator ON creator.id = task.assigned_by
            WHERE task.id = $1
              AND task.task_scope IN ('general', 'concierge_operational')
-             AND task.deleted_at IS NULL AND task.archived_at IS NULL
+             AND task.deleted_at IS NULL
            FOR UPDATE OF task"#
     } else {
         r#"SELECT task.assigned_to, task.assigned_by, creator.role AS assigned_by_role,
@@ -4022,6 +4206,19 @@ async fn lock_item_access(
             StatusCode::FORBIDDEN,
             "Only the task assignee, creator, project member, or a higher role can access this task",
         ));
+    }
+    // Concierge QA A F7: a change to an archived task answered 404 although
+    // the task exists; the caller who may work on it learns why instead.
+    if for_update && row.try_get::<bool, _>("archived").unwrap_or(false) {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({
+                "error": "Conflict",
+                "code": "task_archived",
+                "message": "The task is archived; restore it before changing it",
+            })),
+        )
+            .into_response());
     }
     Ok(assigned_to)
 }
@@ -4875,6 +5072,9 @@ fn build_item_json(
         "assigned_by_name": row.try_get::<String, _>("assigned_by_name").unwrap_or_default(),
         "assigned_by_role": row.try_get::<String, _>("assigned_by_role").unwrap_or_default(),
         "concierge_service_id": row.try_get::<Option<Uuid>, _>("concierge_service_id").unwrap_or_default(),
+        // The task's concierge service is billed or settled: it stays
+        // completed (concierge QA B S2-2), so the UI offers no reopen.
+        "service_billing_locked": row.try_get::<Option<bool>, _>("service_billing_locked").unwrap_or_default().unwrap_or(false),
         "due_at": format_datetime(row, "due_date"),
         "starts_at": format_datetime(row, "starts_at"),
         "ends_at": format_datetime(row, "ends_at"),
@@ -5009,10 +5209,28 @@ async fn insert_task_notification(
     body: &str,
     item_id: Uuid,
 ) -> Result<PendingNotification, axum::response::Response> {
+    insert_task_notification_with_params(tx, user_id, kind, title, body, item_id, None).await
+}
+
+/// The facts of a status change for the notification (`params`): the bell
+/// words "old → new" from them, like the task history.
+fn status_notification_params(previous_status: &str, status: &str) -> serde_json::Value {
+    serde_json::json!({ "previous_status": previous_status, "status": status })
+}
+
+async fn insert_task_notification_with_params(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+    kind: &str,
+    title: &str,
+    body: &str,
+    item_id: Uuid,
+    params: Option<serde_json::Value>,
+) -> Result<PendingNotification, axum::response::Response> {
     let row = sqlx::query(
         r#"INSERT INTO user_notifications (
-               user_id, kind, title, body, entity_type, entity_id
-           ) VALUES ($1, $2, $3, $4, 'concierge_task', $5)
+               user_id, kind, title, body, entity_type, entity_id, params
+           ) VALUES ($1, $2, $3, $4, 'concierge_task', $5, $6)
            RETURNING id, user_id"#,
     )
     .bind(user_id)
@@ -5020,6 +5238,7 @@ async fn insert_task_notification(
     .bind(title)
     .bind(body)
     .bind(item_id)
+    .bind(params)
     .fetch_one(&mut **tx)
     .await
     .map_err(|error| {
@@ -5054,6 +5273,151 @@ async fn publish_pending_notification(
     )
     .await;
 }
+
+/// The concierge service a task drives, with the columns the patient notice
+/// of `concierge_services` reads.
+async fn load_linked_service_row<'e, E>(
+    executor: E,
+    task_id: Uuid,
+) -> Result<Option<sqlx::postgres::PgRow>, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = Postgres>,
+{
+    sqlx::query(
+        r#"SELECT service.id, service.patient_id, service.title, service.status,
+                  service.starts_at, service.ends_at
+           FROM tasks task
+           JOIN concierge_services service ON service.id = task.concierge_service_id
+           WHERE task.id = $1"#,
+    )
+    .bind(task_id)
+    .fetch_optional(executor)
+    .await
+}
+
+/// The task drives its concierge service (the database derives the service
+/// status), so the patient hears of a completed or cancelled service exactly
+/// as from the service form (concierge QA B S2-1). The change is saved; a
+/// failure here is logged and changes nothing.
+async fn notify_patient_after_service_task_move(
+    state: &AppState,
+    before: Option<sqlx::postgres::PgRow>,
+    task_id: Uuid,
+    actor_id: Uuid,
+) {
+    let Some(before) = before else {
+        return;
+    };
+    match load_linked_service_row(&state.db, task_id).await {
+        // Same service only: an edit may relink the task to another one.
+        Ok(Some(after))
+            if before.try_get::<Uuid, _>("id").ok() == after.try_get::<Uuid, _>("id").ok() =>
+        {
+            crate::routes::concierge_services::notify_patient_of_service_change(
+                state, &before, &after, actor_id,
+            )
+            .await;
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::warn!(error = %error, task_id = %task_id, "load concierge service for the patient notice");
+        }
+    }
+}
+
+const SERVICE_BILLED_REOPEN_CODE: &str = "concierge_service_billed_reopen";
+const SERVICE_BILLED_REOPEN_MESSAGE: &str = "This service is already billed and cannot go back to work; reverse the invoice or issue a credit note first";
+
+/// A move that takes completed work back into progress (reopen). Closing it
+/// as cancelled has its own billed rule (`prepare_task_status_change`).
+fn reopens_completed_work(previous_status: &str, next_status: &str) -> bool {
+    previous_status == "completed" && !matches!(next_status, "completed" | "cancelled")
+}
+
+/// A billed or settled concierge service leaves "completed" only through a
+/// billing reversal or credit note (concierge QA B S2-2): its task is not
+/// reopened in the work center. The same lock the cancel path has.
+async fn ensure_billed_service_stays_completed(
+    conn: &mut sqlx::PgConnection,
+    task_id: Uuid,
+    previous_status: &str,
+    next_status: &str,
+) -> Result<(), axum::response::Response> {
+    if !reopens_completed_work(previous_status, next_status) {
+        return Ok(());
+    }
+    let billing = sqlx::query_scalar::<_, Option<String>>(
+        r#"SELECT COALESCE(service.billing_status, task.billing_status)
+           FROM tasks task
+           LEFT JOIN concierge_services service ON service.id = task.concierge_service_id
+           WHERE task.id = $1
+             AND (task.concierge_service_id IS NOT NULL OR task.service_status IS NOT NULL)"#,
+    )
+    .bind(task_id)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, task_id = %task_id, "load service billing before reopening a task");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })?
+    .flatten();
+    if billing
+        .as_deref()
+        .is_some_and(crate::services::concierge_service_tasks::is_financially_locked)
+    {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({
+                "error": "Conflict",
+                "code": SERVICE_BILLED_REOPEN_CODE,
+                "message": SERVICE_BILLED_REOPEN_MESSAGE,
+            })),
+        )
+            .into_response());
+    }
+    Ok(())
+}
+
+/// Whether the actor may change the text of a checklist step or delete it
+/// (owner decision 2026-11-12 on concierge QA A F2): its own steps always;
+/// steps of others only as the task's creator or a higher role. Ticking a
+/// step stays open to every collaborator.
+fn can_edit_checklist_step(actor_id: Uuid, step_author: Uuid, manages_task: bool) -> bool {
+    actor_id == step_author || manages_task
+}
+
+/// Whether the actor is the task's creator or a higher role within its reach.
+async fn actor_manages_task(
+    conn: &mut sqlx::PgConnection,
+    auth: &AuthUser,
+    item_id: Uuid,
+) -> Result<bool, axum::response::Response> {
+    let row = sqlx::query_as::<_, (Uuid, String)>(
+        r#"SELECT task.assigned_by, creator.role::text
+           FROM tasks task
+           JOIN users creator ON creator.id = task.assigned_by
+           WHERE task.id = $1"#,
+    )
+    .bind(item_id)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, item_id = %item_id, "load task creator for a checklist change");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })?;
+    let Some((assigned_by, assigned_by_role)) = row else {
+        return Ok(false);
+    };
+    let scope = load_task_scope(&mut *conn, auth, item_id).await?;
+    Ok(can_mutate_operational_item(
+        auth,
+        assigned_by,
+        &assigned_by_role,
+        scope,
+    ))
+}
+
+const CHECKLIST_STEP_AUTHOR_ONLY: &str = "Only the step's author, the task creator or a higher role can edit or delete this checklist step";
 
 const CONCIERGE_TASK_REMINDER_INTERVAL_SECS: u64 = 60;
 
@@ -5682,6 +6046,53 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 #[cfg(test)]
 mod work_center_tests {
     use super::*;
+
+    #[test]
+    fn the_assignee_hears_of_reopen_pause_cancel_and_review_decisions() {
+        assert_eq!(
+            assignee_notice("completed", "in_progress"),
+            Some(("operational_task_reopened", "Task reopened"))
+        );
+        assert_eq!(
+            assignee_notice("cancelled", "open"),
+            Some(("operational_task_reopened", "Task reopened"))
+        );
+        assert_eq!(
+            assignee_notice("in_progress", "on_hold"),
+            Some(("operational_task_paused", "Task paused"))
+        );
+        assert_eq!(
+            assignee_notice("open", "cancelled"),
+            Some(("operational_task_cancelled", "Task cancelled"))
+        );
+        assert_eq!(
+            assignee_notice("review", "in_progress"),
+            Some((
+                "operational_task_review_decision",
+                "Task returned for rework"
+            ))
+        );
+        assert_eq!(assignee_notice("open", "in_progress"), None);
+        assert_eq!(assignee_notice("on_hold", "in_progress"), None);
+    }
+
+    #[test]
+    fn only_completed_work_going_back_to_work_counts_as_a_reopen() {
+        assert!(reopens_completed_work("completed", "in_progress"));
+        assert!(reopens_completed_work("completed", "open"));
+        assert!(!reopens_completed_work("completed", "completed"));
+        assert!(!reopens_completed_work("completed", "cancelled"));
+        assert!(!reopens_completed_work("review", "in_progress"));
+    }
+
+    #[test]
+    fn checklist_steps_of_others_need_the_task_creator_or_a_higher_role() {
+        let actor = Uuid::new_v4();
+        let creator = Uuid::new_v4();
+        assert!(can_edit_checklist_step(actor, actor, false));
+        assert!(!can_edit_checklist_step(actor, creator, false));
+        assert!(can_edit_checklist_step(actor, creator, true));
+    }
 
     #[test]
     fn docx_container_accepts_utf8_and_cp437_entry_names() {

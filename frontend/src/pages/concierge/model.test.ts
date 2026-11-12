@@ -29,6 +29,7 @@ import {
   canAssignConciergeTaskToRole,
   canChangeConciergeTaskStatus,
   canDeleteConciergeTask,
+  canEditConciergeChecklistItem,
   canMarkConciergeTaskNotRequired,
   canModifyConciergeTask,
   conciergeTaskNotRequiredPath,
@@ -228,6 +229,21 @@ describe("filterConciergeTaskAssignees", () => {
       "manager",
       "patient_manager",
     )).toEqual(["review", "in_progress", "completed", "cancelled"]);
+  });
+
+  it("offers no reopen for a task whose concierge service is billed (concierge QA B S2-2)", () => {
+    const done = task({ status: "completed", assigned_by: "ceo", assigned_by_role: "ceo" });
+    expect(availableConciergeTaskStatuses(done, "ceo", "ceo")).toEqual(["completed", "in_progress"]);
+    expect(availableConciergeTaskStatuses({ ...done, service_billing_locked: true }, "ceo", "ceo")).toEqual(["completed"]);
+    const refused = Object.assign(new Error("billed"), { body: { code: "concierge_service_billed_reopen" } });
+    expect(conciergeTaskErrorMessage(refused, "ru", "x")).toContain("уже выставлен в счёт");
+  });
+
+  it("lets the assignee rename or delete only its own checklist steps (owner decision 2026-11-12)", () => {
+    const assigned = task({ assigned_by: "creator", assigned_by_role: "patient_manager", assigned_to: "assignee", can_manage: false });
+    expect(canEditConciergeChecklistItem(assigned, { created_by: "assignee" }, "assignee", "concierge")).toBe(true);
+    expect(canEditConciergeChecklistItem(assigned, { created_by: "creator" }, "assignee", "concierge")).toBe(false);
+    expect(canEditConciergeChecklistItem({ ...assigned, can_manage: true }, { created_by: "assignee" }, "creator", "patient_manager")).toBe(true);
   });
 
   it("lets concierge creators delete their own tasks and subtasks after work has started", () => {

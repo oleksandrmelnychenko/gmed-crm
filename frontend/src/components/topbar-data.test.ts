@@ -119,6 +119,15 @@ describe("task notifications", () => {
       .toBe("Aufgabe storniert");
   });
 
+  it("says the old and new status and tells the assignee of a reopen or pause", () => {
+    const moved = { ...taskNotice("operational_task_updated", "Task status changed", "Flowers"), params: { previous_status: "on_hold", status: "in_progress" } } as Notification;
+    expect(localizedNotificationCopy(moved, "ru")).toEqual({ title: "Статус задачи изменён", body: "Flowers · На паузе → В работе" });
+    expect(localizedNotificationCopy(taskNotice("operational_task_reopened", "Task reopened", "Flowers"), "de").title)
+      .toBe("Aufgabe wieder geöffnet");
+    expect(localizedNotificationCopy(taskNotice("operational_task_paused", "Task paused", "Flowers"), "ru").title)
+      .toBe("Задача поставлена на паузу");
+  });
+
   it("keeps unknown titles and other notification kinds unchanged", () => {
     expect(localizedNotificationCopy(taskNotice("operational_task_updated", "Something new", "Flowers"), "ru").title)
       .toBe("Something new");

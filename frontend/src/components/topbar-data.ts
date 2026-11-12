@@ -105,7 +105,9 @@ export function localizedNotificationCopy(
   if (bookingDecisionCopy) return bookingDecisionCopy;
   const taskTitle = taskNotificationTitle(item, lang);
   if (taskTitle) {
-    return { title: taskTitle, body: item.body ? localizeTaskTitle(item.body, lang) : null };
+    const body = item.body ? localizeTaskTitle(item.body, lang) : null;
+    const move = taskStatusMove(item, lang);
+    return { title: taskTitle, body: move ? [body, move].filter(Boolean).join(" · ") : body };
   }
   // Every other server notification (leads, risk review, incidents, DSGVO,
   // appointments, signatures, documents, chat, SOP, ...): code + facts.
@@ -716,7 +718,28 @@ const TASK_NOTIFICATION_TITLES: Record<string, { de: string; ru: string }> = {
   "Task cancelled after review": { de: "Aufgabe nach Prüfung storniert", ru: "Задача отменена после проверки" },
   // Any cancellation by someone else, sent to the assignee (QA C-25).
   "Task cancelled": { de: "Aufgabe storniert", ru: "Задача отменена" },
+  // The creator or a higher role reopened or paused the assignee's task.
+  "Task reopened": { de: "Aufgabe wieder geöffnet", ru: "Задача снова в работе" },
+  "Task paused": { de: "Aufgabe pausiert", ru: "Задача поставлена на паузу" },
 };
+
+const TASK_STATUS_NAMES: Record<string, { de: string; ru: string }> = {
+  open: { de: "Offen", ru: "Открыто" },
+  in_progress: { de: "In Arbeit", ru: "В работе" },
+  on_hold: { de: "Pausiert", ru: "На паузе" },
+  review: { de: "Zur Prüfung", ru: "На проверке" },
+  completed: { de: "Erledigt", ru: "Выполнено" },
+  cancelled: { de: "Storniert", ru: "Отменено" },
+};
+
+/** "Открыто → В работе" from the facts of a task status notice, or null. */
+function taskStatusMove(item: Notification, lang: "ru" | "de"): string | null {
+  const previous = item.params?.previous_status;
+  const current = item.params?.status;
+  if (typeof previous !== "string" || typeof current !== "string" || previous === current) return null;
+  const name = (status: string) => TASK_STATUS_NAMES[status]?.[lang] ?? status;
+  return `${name(previous)} → ${name(current)}`;
+}
 
 function taskNotificationTitle(item: Notification, lang: "ru" | "de"): string | null {
   if (!item.kind.startsWith("operational_task_") && item.kind !== "concierge_task_reminder") {

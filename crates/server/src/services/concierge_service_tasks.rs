@@ -231,7 +231,12 @@ pub(crate) fn plan_service_status_change(
     if !service_move_exists(facts.service_status, target) {
         return Err(ServiceStatusRefusal::Transition);
     }
-    if target == "cancelled" && is_financially_locked(facts.billing_status) {
+    // A billed service is neither cancelled nor taken back to work (concierge
+    // QA B S2-2); a billing reversal or credit note comes first.
+    if is_financially_locked(facts.billing_status)
+        && (target == "cancelled"
+            || (target == "in_service" && facts.service_status == "completed"))
+    {
         return Err(ServiceStatusRefusal::Billed);
     }
     if facts.task_archived {
@@ -952,6 +957,16 @@ mod tests {
         assert_eq!(
             plan_service_status_change(&ceo, &billed, "cancelled"),
             Err(ServiceStatusRefusal::Billed)
+        );
+        let mut billed_done = facts("completed", "completed", ceo.user_id, ceo.user_id, "ceo");
+        billed_done.billing_status = "settled";
+        assert_eq!(
+            plan_service_status_change(&ceo, &billed_done, "in_service"),
+            Err(ServiceStatusRefusal::Billed)
+        );
+        assert_eq!(
+            allowed_service_statuses(&ceo, &billed_done),
+            vec!["completed".to_string()]
         );
         assert!(manual_billing_move_allowed("ready", "billed", "completed"));
         assert!(manual_billing_move_allowed(

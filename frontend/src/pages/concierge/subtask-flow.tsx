@@ -25,6 +25,10 @@ const copy = {
     suggestOpen: "Aufgabe öffnen",
     suggestComplete: "Aufgabe abschließen",
     later: "Später",
+    checklistTitle: "Offene Checklistenpunkte",
+    checklistMessage: (title: string, open: number, total: number) =>
+      `„${title}“ hat noch ${open} von ${total} offenen Checklistenpunkt(en). Die Aufgabe trotzdem abschließen?`,
+    checklistConfirm: "Trotzdem abschließen",
   },
   ru: {
     closeTitle: "Открытые подзадачи",
@@ -41,8 +45,67 @@ const copy = {
     suggestOpen: "Открыть задачу",
     suggestComplete: "Завершить задачу",
     later: "Позже",
+    checklistTitle: "Открытые пункты чек-листа",
+    checklistMessage: (title: string, open: number, total: number) =>
+      `В задаче «${title}» не выполнено пунктов чек-листа: ${open} из ${total}. Всё равно завершить задачу?`,
+    checklistConfirm: "Всё равно завершить",
   },
 } as const;
+
+/** Checklist steps of a task that are not ticked yet. */
+export function openChecklistCount(task: Pick<ConciergeTask, "checklist_total" | "checklist_completed">) {
+  return Math.max(0, (task.checklist_total ?? 0) - (task.checklist_completed ?? 0));
+}
+
+/**
+ * Completing a task with unticked checklist steps is confirmed first
+ * (concierge QA A F8 / B S3-3); the server allows it either way.
+ */
+export function needsOpenChecklistConfirmation(
+  task: Pick<ConciergeTask, "status" | "checklist_total" | "checklist_completed">,
+  status: string,
+) {
+  return status === "completed" && task.status !== "completed" && openChecklistCount(task) > 0;
+}
+
+export type OpenChecklistRequest = {
+  task: ConciergeTask;
+  run: () => Promise<unknown> | unknown;
+};
+
+/** Asks before a task with open checklist steps is completed. */
+export function OpenChecklistCompletionDialog({
+  request,
+  lang,
+  onDone,
+}: {
+  request: OpenChecklistRequest | null;
+  lang: Lang;
+  onDone: () => void;
+}) {
+  const labels = copy[lang];
+  return (
+    <DirtyDismissConfirmDialog
+      open={Boolean(request)}
+      title={labels.checklistTitle}
+      message={request
+        ? labels.checklistMessage(
+          localizeTaskTitle(request.task.title, lang),
+          openChecklistCount(request.task),
+          request.task.checklist_total,
+        )
+        : ""}
+      cancelLabel={labels.cancel}
+      confirmLabel={labels.checklistConfirm}
+      onCancel={onDone}
+      onConfirm={() => {
+        if (!request) return;
+        onDone();
+        void request.run();
+      }}
+    />
+  );
+}
 
 export type ParentCloseAction = "complete" | "cancel" | "archive";
 

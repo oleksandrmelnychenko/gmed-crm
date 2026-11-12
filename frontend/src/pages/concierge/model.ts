@@ -171,6 +171,11 @@ export type ConciergeTask = {
    */
   can_manage?: boolean;
   concierge_service_id: string | null;
+  /**
+   * The task's concierge service is billed or settled: it stays completed
+   * until a billing reversal or credit note (the server refuses a reopen).
+   */
+  service_billing_locked?: boolean;
   due_at: string | null;
   starts_at: string | null;
   ends_at: string | null;
@@ -374,11 +379,13 @@ export function canChangeConciergeTaskStatus(
 }
 
 export function availableConciergeTaskStatuses(
-  task: Pick<ConciergeTask, "status" | "assigned_to" | "assigned_by" | "assigned_by_role" | "can_manage">,
+  task: Pick<ConciergeTask, "status" | "assigned_to" | "assigned_by" | "assigned_by_role" | "can_manage"> & { service_billing_locked?: boolean },
   actorId: string | null | undefined,
   actorRole: string | null | undefined,
 ): ConciergeTaskStatus[] {
   if (!canChangeConciergeTaskStatus(task, actorId, actorRole)) return [task.status];
+  // A billed concierge service is not taken back to work (concierge QA B S2-2).
+  if (task.status === "completed" && task.service_billing_locked) return [task.status];
   const canReview = canModifyConciergeTask(task, actorId, actorRole);
   const transitions: Record<ConciergeTaskStatus, ConciergeTaskStatus[]> = canReview
     ? {
@@ -466,6 +473,24 @@ export function conciergeTaskNotRequiredPath(
   return `/${scope}/${task.workflow_checklist_scope_id}/workflow-checklist/${task.workflow_checklist_item_id}/not-required`;
 }
 
+const CHECKLIST_STEP_AUTHOR_ONLY_ERROR =
+  "Only the step's author, the task creator or a higher role can edit or delete this checklist step";
+
+/**
+ * Whether the actor may rename or delete a checklist step (owner decision
+ * 2026-11-12): its own steps always, the steps of others only as the task's
+ * creator or a higher role. Every collaborator may tick a step.
+ */
+export function canEditConciergeChecklistItem(
+  task: Pick<ConciergeTask, "assigned_by" | "assigned_by_role" | "can_manage">,
+  item: Pick<ConciergeTaskChecklistItem, "created_by">,
+  actorId: string | null | undefined,
+  actorRole: string | null | undefined,
+) {
+  if (!actorId) return false;
+  return item.created_by === actorId || canModifyConciergeTask(task, actorId, actorRole);
+}
+
 export function conciergeTaskErrorMessage(
   error: unknown,
   lang: "de" | "ru",
@@ -481,6 +506,27 @@ export function conciergeTaskErrorMessage(
     error && typeof error === "object" && "body" in error
       ? (error as { body?: { code?: unknown } | null }).body?.code
       : undefined;
+
+  if (code === "concierge_service_billed_reopen") {
+    return lang === "ru"
+      ? "Сервис этой задачи уже выставлен в счёт, поэтому её нельзя вернуть в работу. Сначала сторнируйте счёт или оформите кредит-ноту."
+      : "Der Service dieser Aufgabe ist bereits abgerechnet; die Aufgabe kann nicht wieder in Arbeit genommen werden. Stornieren Sie zuerst die Rechnung oder erstellen Sie eine Gutschrift.";
+  }
+  if (code === "concierge_service_billed") {
+    return lang === "ru"
+      ? "Сервис этой задачи уже выставлен в счёт. Отменить его можно только со сторнированием счёта."
+      : "Der Service dieser Aufgabe ist bereits abgerechnet. Er kann nur mit einer Rechnungsstornierung storniert werden.";
+  }
+  if (code === "task_archived") {
+    return lang === "ru"
+      ? "Задача в архиве. Восстановите её, чтобы вносить изменения."
+      : "Die Aufgabe ist archiviert. Stellen Sie sie wieder her, um sie zu ändern.";
+  }
+  if (message === CHECKLIST_STEP_AUTHOR_ONLY_ERROR) {
+    return lang === "ru"
+      ? "Изменять и удалять этот пункт чек-листа может только его автор, автор задачи или сотрудник с более высокой ролью. Отметить пункт выполненным можно."
+      : "Diesen Checklistenpunkt dürfen nur sein Verfasser, der Ersteller der Aufgabe oder eine höhere Rolle ändern oder löschen. Abhaken ist möglich.";
+  }
 
   if (code === "workflow_checklist_task_delete") {
     return lang === "ru"

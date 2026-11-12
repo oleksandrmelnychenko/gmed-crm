@@ -47,7 +47,7 @@ import {
   taskAttachmentFileKey,
   uploadConciergeTaskAttachment,
 } from "./task-attachments";
-import { closeOpenSubtasks, ParentCloseChoiceDialog, subtaskCloseStatus, type ParentCloseRequest } from "./subtask-flow";
+import { closeOpenSubtasks, needsOpenChecklistConfirmation, OpenChecklistCompletionDialog, ParentCloseChoiceDialog, subtaskCloseStatus, type OpenChecklistRequest, type ParentCloseRequest } from "./subtask-flow";
 
 const copy = {
   de: {
@@ -434,6 +434,7 @@ export function ConciergeTaskEventDialog({
   const [commentError, setCommentError] = useState("");
   const createdTaskRef = useRef<ConciergeTask | null>(null);
   const [parentCloseRequest, setParentCloseRequest] = useState<ParentCloseRequest | null>(null);
+  const [openChecklistRequest, setOpenChecklistRequest] = useState<OpenChecklistRequest | null>(null);
   const commentRequestRef = useRef<{ body: string; requestId: string } | null>(null);
 
   const sortedServices = useMemo(
@@ -575,6 +576,15 @@ export function ConciergeTaskEventDialog({
       return;
     }
     setScheduleError("");
+    // Open checklist steps are confirmed before completing, as on the board.
+    if (item && !createdTaskRef.current && needsOpenChecklistConfirmation(item, status)) {
+      setOpenChecklistRequest({ task: item, run: () => saveAfterChecks() });
+      return;
+    }
+    await saveAfterChecks();
+  }
+
+  async function saveAfterChecks() {
     // Completing a parent here asks about its open sub-tasks exactly like the
     // status actions of the work center do.
     const closeStatus = subtaskCloseStatus(status);
@@ -861,6 +871,11 @@ export function ConciergeTaskEventDialog({
         request={open ? parentCloseRequest : null}
         lang={lang}
         onDone={() => setParentCloseRequest(null)}
+      />
+      <OpenChecklistCompletionDialog
+        request={open ? openChecklistRequest : null}
+        lang={lang}
+        onDone={() => setOpenChecklistRequest(null)}
       />
     </Dialog>
   );

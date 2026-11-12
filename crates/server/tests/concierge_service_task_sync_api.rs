@@ -385,17 +385,24 @@ async fn billing_moves_forward_and_billed_services_are_locked() {
         assert_eq!(status, StatusCode::CONFLICT, "{next}: {body}");
     }
 
-    // A billed service is not cancelled, neither on the service nor its task.
+    // A billed service stays completed (concierge QA B S2-2): its task is not
+    // reopened, neither in the work center nor through the service form, and
+    // the service is not cancelled.
     let (status, body) = move_task(&ctx.app, &ctx.pool, &pm, service_id, "in_progress").await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(service_state(&ctx.pool, service_id).await.1, "billed");
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "concierge_service_billed_reopen");
+    assert_eq!(
+        service_state(&ctx.pool, service_id).await,
+        ("completed".to_string(), "billed".to_string())
+    );
+    let (status, body) =
+        update_service(&ctx.app, &pm, service_id, json!({ "status": "in_service" })).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "concierge_service_billed");
     let (status, body) =
         update_service(&ctx.app, &pm, service_id, json!({ "status": "cancelled" })).await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert_eq!(body["code"], "concierge_service_billed");
-    let (status, body) = move_task(&ctx.app, &ctx.pool, &pm, service_id, "cancelled").await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert_eq!(body["code"], "concierge_service_billed");
+    assert_eq!(task_of(&ctx.pool, service_id).await.1, "completed");
 
     let (status, body) = update_service(
         &ctx.app,

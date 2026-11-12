@@ -42,6 +42,9 @@ import {
   completeParentTask,
   ParentCloseChoiceDialog,
   ParentCompletionSuggestionDialog,
+  needsOpenChecklistConfirmation,
+  OpenChecklistCompletionDialog,
+  type OpenChecklistRequest,
   type ParentCloseRequest,
   type ParentCompletionSuggestion,
 } from "./subtask-flow";
@@ -105,6 +108,7 @@ export function ConciergeTaskManagerPage() {
   const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
   const [pendingDeleteTask, setPendingDeleteTask] = useState<ConciergeTask | null>(null);
   const [parentCloseRequest, setParentCloseRequest] = useState<ParentCloseRequest | null>(null);
+  const [openChecklistRequest, setOpenChecklistRequest] = useState<OpenChecklistRequest | null>(null);
   const [completionSuggestion, setCompletionSuggestion] = useState<ParentCompletionSuggestion | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<ConciergeTask | null>(null);
@@ -228,9 +232,13 @@ export function ConciergeTaskManagerPage() {
   // the dialog itself reports the task as deleted or unavailable and hides its
   // actions. Do not close it from here; that raced the notice.
 
-  async function changeTaskStatus(task: ConciergeTask, status: string): Promise<string | null> {
+  async function changeTaskStatus(task: ConciergeTask, status: string, checklistConfirmed = false): Promise<string | null> {
     if (updatingTaskId || task.archived_at || !canChangeConciergeTaskStatus(task, user?.id, user?.role)) return labels.updateFailed;
     if (!availableConciergeTaskStatuses(task, user?.id, user?.role).includes(status as ConciergeTaskStatus)) return labels.updateFailed;
+    if (!checklistConfirmed && needsOpenChecklistConfirmation(task, status)) {
+      setOpenChecklistRequest({ task, run: () => changeTaskStatus(task, status, true) });
+      return null;
+    }
     const closeStatus = subtaskCloseStatus(status);
     const openChildren = closeStatus ? openSubtaskCount(task, tasks) : 0;
     if (openChildren > 0 && closeStatus) {
@@ -529,7 +537,7 @@ export function ConciergeTaskManagerPage() {
         onRestore={(task) => void changeArchiveState(task, false)}
         onOpen={openTaskDetail}
         onExpense={openTaskExpense}
-        onStatusChange={changeTaskStatus}
+        onStatusChange={(task, status) => changeTaskStatus(task, status)}
         onCreateAt={(date) => openCreateTask(date)}
       />
 
@@ -597,6 +605,11 @@ export function ConciergeTaskManagerPage() {
         request={parentCloseRequest}
         lang={lang}
         onDone={() => setParentCloseRequest(null)}
+      />
+      <OpenChecklistCompletionDialog
+        request={openChecklistRequest}
+        lang={lang}
+        onDone={() => setOpenChecklistRequest(null)}
       />
       <ParentCompletionSuggestionDialog
         suggestion={completionSuggestion}

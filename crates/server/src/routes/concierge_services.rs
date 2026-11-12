@@ -5638,7 +5638,7 @@ fn patient_service_notice_texts(
 /// counts — the condition of `list_my_concierge_services`: a service of a
 /// visit whose plan is not released yet stays silent. The change is already
 /// saved; a failure here is logged and changes nothing.
-async fn notify_patient_of_service_change(
+pub(crate) async fn notify_patient_of_service_change(
     state: &AppState,
     before: &sqlx::postgres::PgRow,
     after: &sqlx::postgres::PgRow,

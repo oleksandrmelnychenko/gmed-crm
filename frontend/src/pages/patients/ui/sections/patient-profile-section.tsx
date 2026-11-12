@@ -34,6 +34,7 @@ import { StatusChip, type StatusChipTone } from "@/components/ui/status-chip";
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import { languageLabel } from "@/components/ui/language-multi-select";
 import { apiFetch } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { EmailDomainWarning } from "@/components/email-domain-warning";
 import { useLang, type Translations, useLanguageBound } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -606,6 +607,8 @@ function usePatientProfileTabContent({
   const { intakeDiscoverySourceLabel, intakeFlowDisplay } = useLanguageHelpers();
   // Country names follow a live language switch (React Compiler).
   const { lang } = useLang();
+  const { user } = useAuth();
+  const readsLinkedTasksOnly = user?.role === "ceo_assistant";
   const {
     canCreateTasks,
     canEditPatientProfile,
@@ -781,7 +784,8 @@ function usePatientProfileTabContent({
 
   return (
     <div className="space-y-5 mt-4 min-h-[400px]">
-      {canCreateTasks && id ? <LinkedTasksSection patientId={id} patientName={[detail.first_name, detail.last_name].filter(Boolean).join(" ")} /> : null}
+      {/* The CEO assistant reads every task: it sees the patient's tasks without creating any here (concierge QA A F6). */}
+      {(canCreateTasks || readsLinkedTasksOnly) && id ? <LinkedTasksSection patientId={id} patientName={[detail.first_name, detail.last_name].filter(Boolean).join(" ")} readOnly={!canCreateTasks} /> : null}
 
       <div className="space-y-3">
         <ProfileSummaryCard

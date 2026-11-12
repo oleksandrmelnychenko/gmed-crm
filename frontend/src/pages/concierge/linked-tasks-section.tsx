@@ -157,11 +157,14 @@ export function LinkedTasksSection({
   patientName,
   providerId,
   className,
+  readOnly = false,
 }: {
   patientId?: string;
   patientName?: string;
   providerId?: string;
   className?: string;
+  /** Lists and opens the tasks without the create action (CEO assistant). */
+  readOnly?: boolean;
 }) {
   const { lang } = useLang();
   const { user } = useAuth();
@@ -187,11 +190,11 @@ export function LinkedTasksSection({
   useTaskRealtimeRefresh(refresh, { busy: submitting || loading });
 
   const openContextTaskCreator = useCallback(() => {
-    if (!patientId && !providerId) return;
+    if (readOnly || (!patientId && !providerId)) return;
     createRequestIdRef.current = crypto.randomUUID();
     setCreateError("");
     setCreateOpen(true);
-  }, [patientId, providerId]);
+  }, [patientId, providerId, readOnly]);
 
   useEffect(() => {
     if (!patientId) return;
@@ -301,15 +304,17 @@ export function LinkedTasksSection({
             </p>
           </div>
         </div>
-        <Button
-          type="button"
-          size="sm"
-          className="h-8 self-start rounded-lg sm:self-auto"
-          onClick={openContextTaskCreator}
-        >
-          <Plus className="size-3.5" />
-          {labels.create}
-        </Button>
+        {readOnly ? null : (
+          <Button
+            type="button"
+            size="sm"
+            className="h-8 self-start rounded-lg sm:self-auto"
+            onClick={openContextTaskCreator}
+          >
+            <Plus className="size-3.5" />
+            {labels.create}
+          </Button>
+        )}
       </div>
 
       {error ? (
@@ -381,7 +386,7 @@ export function LinkedTasksSection({
           ))}
         </div>
       )}
-      {patientId || providerId ? (
+      {!readOnly && (patientId || providerId) ? (
         <ConciergeTaskEventDialog
           item={null}
           services={[]}
