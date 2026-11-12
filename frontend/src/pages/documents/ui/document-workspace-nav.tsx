@@ -21,19 +21,26 @@ type WorkspaceItem = {
 
 export function DocumentWorkspaceNav({
   showTranslationQueue = true,
+  showIntakeQueue = true,
 }: {
   showTranslationQueue?: boolean;
+  /** Only for roles that work the intake queue (QA 2026-11-12 A-09). */
+  showIntakeQueue?: boolean;
 }) {
   const { pathname } = useLocation();
   const { t } = useLang();
 
   const items: WorkspaceItem[] = [
-    {
-      key: "intake",
-      label: t.documents_intake_queue,
-      to: "/documents/intake",
-      icon: Inbox,
-    },
+    ...(showIntakeQueue
+      ? [
+          {
+            key: "intake",
+            label: t.documents_intake_queue,
+            to: "/documents/intake",
+            icon: Inbox,
+          },
+        ]
+      : []),
     {
       key: "documents",
       label: t.nav_documents,

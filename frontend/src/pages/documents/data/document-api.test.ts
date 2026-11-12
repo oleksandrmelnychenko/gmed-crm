@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { apiFetchFile } from "@/lib/api";
+import { apiFetch, apiFetchFile } from "@/lib/api";
 
 import {
   createDocumentPreviewObjectUrl,
   documentPreviewSandbox,
   downloadDocumentFile,
+  fetchDocumentListPage,
   openDocumentPreview,
   revokeDocumentPreviewObjectUrl,
 } from "./document-api";
@@ -219,5 +220,29 @@ describe("document preview API", () => {
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:inline-preview");
+  });
+});
+
+describe("document list paging", () => {
+  const apiFetchMock = vi.mocked(apiFetch);
+
+  beforeEach(() => {
+    apiFetchMock.mockReset();
+  });
+
+  it("asks for a page past the loaded documents and reports more", async () => {
+    apiFetchMock.mockResolvedValue({ items: [{ id: "a" }], offset: 300, has_more: true });
+    const page = await fetchDocumentListPage("/documents?search=Arzt", 300);
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      "/documents?search=Arzt&paged=true&offset=300&limit=300",
+    );
+    expect(page).toEqual({ items: [{ id: "a" }], offset: 300, has_more: true });
+  });
+
+  it("takes a plain list as the last page", async () => {
+    apiFetchMock.mockResolvedValue([{ id: "a" }, { id: "b" }]);
+    const page = await fetchDocumentListPage("/documents", 0);
+    expect(apiFetchMock).toHaveBeenCalledWith("/documents?paged=true&offset=0&limit=300");
+    expect(page).toEqual({ items: [{ id: "a" }, { id: "b" }], offset: 0, has_more: false });
   });
 });

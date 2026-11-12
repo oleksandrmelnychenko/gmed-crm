@@ -301,19 +301,25 @@ export function SpecializationsPage() {
 
   const filteredSpecializations = useMemo(() => {
     const normalizedSearch = search.trim().toLocaleLowerCase();
-    if (!normalizedSearch) {
-      return specializations;
-    }
-    return specializations.filter((item) =>
-      [
-        item.code,
-        item.name_en,
-        item.name_de ?? "",
-        item.name_ru ?? "",
-        item.name_es ?? "",
-      ].some((value) => value.toLocaleLowerCase().includes(normalizedSearch)),
+    const matching = normalizedSearch
+      ? specializations.filter((item) =>
+          [
+            item.code,
+            item.name_en,
+            item.name_de ?? "",
+            item.name_ru ?? "",
+            item.name_es ?? "",
+          ].some((value) => value.toLocaleLowerCase().includes(normalizedSearch)),
+        )
+      : specializations;
+    // Equal display orders go by the name the reader sees, not by the
+    // German slug (QA 2026-11-12 A-13).
+    return matching.toSorted(
+      (left, right) =>
+        left.sort_order - right.sort_order ||
+        specializationName(left, lang).localeCompare(specializationName(right, lang), lang),
     );
-  }, [search, specializations]);
+  }, [lang, search, specializations]);
 
   const selectedSpecialization =
     specializations.find((item) => item.id === selectedSpecializationId) ?? null;
@@ -541,11 +547,10 @@ export function SpecializationsPage() {
                       )}
                     >
                       <BriefcaseMedical className="size-3.5 shrink-0" />
+                      {/* The internal code stays out of the list (QA 2026-11-12 A-13);
+                          the edit form shows it. */}
                       <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
                         {specializationName(item, lang)}
-                      </span>
-                      <span className="inline-flex max-w-24 shrink-0 items-center truncate rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-mono text-[9px] font-medium text-sky-700">
-                        {item.code}
                       </span>
                       <span
                         className="inline-flex shrink-0 items-center rounded-full border border-border/60 bg-background px-1.5 py-0.5 font-mono text-[9px] font-semibold tabular-nums text-foreground"

@@ -156,6 +156,50 @@ export function canRequestTranslations(actor?: Actor) {
   return hasCapability(actor, "documents.upload");
 }
 
+// Roles the backend accepts as a translation assignee (validate_translation_assignee).
+// The shared /documents/meta/staff list also returns billing/it_admin, who would be
+// rejected with a 422 if offered here — so the assignee dropdown is filtered to these.
+const TRANSLATION_ASSIGNEE_ROLES: readonly string[] = [
+  "ceo",
+  "patient_manager",
+  "teamlead_interpreter",
+  "interpreter",
+  "concierge",
+];
+// A medical document goes only to someone who may open it
+// (refuse_medical_paper_assignment, QA 2026-11-12 A-03).
+const MEDICAL_TRANSLATION_ASSIGNEE_ROLES: readonly string[] = [
+  "ceo",
+  "patient_manager",
+  "interpreter",
+];
+
+/** Whether a staff member of this role can be given the translation. */
+export function isTranslationAssigneeRole(role: string, isMedicalDocument: boolean) {
+  return (isMedicalDocument ? MEDICAL_TRANSLATION_ASSIGNEE_ROLES : TRANSLATION_ASSIGNEE_ROLES).includes(
+    role,
+  );
+}
+
+/**
+ * A refused upload in the user's language instead of the server's English
+ * text (QA 2026-11-12 A-05). Unknown errors keep the server text.
+ */
+export function formatDocumentUploadError(error: unknown, lang: Lang, fallback: string) {
+  const message = error instanceof Error ? error.message : "";
+  if (message.includes("Concierge cannot upload medical documents")) {
+    return lang === "de"
+      ? "Der Concierge lädt keine medizinischen Dokumente hoch. Bitte eine nicht medizinische Kategorie wählen."
+      : "Консьерж не загружает медицинские документы. Выберите немедицинскую категорию.";
+  }
+  if (message.includes("Insufficient permissions")) {
+    return lang === "de"
+      ? "Keine Berechtigung, dieses Dokument hochzuladen. Den allgemeinen Upload für Ihre Rolle gibt der CEO in den Zugriffsrechten frei."
+      : "Нет прав загрузить этот документ. Общую загрузку документов для вашей роли открывает CEO в правах доступа.";
+  }
+  return message || fallback;
+}
+
 export function canUpdateTranslations(actor?: Actor) {
   return hasCapability(actor, "documents.upload");
 }

@@ -2951,6 +2951,189 @@ async fn closed_papers_stay_closed_on_an_appointment_and_in_a_translation_reques
     }
 }
 
+/// QA 2026-11-12 A-01: the paged document list says whether older documents
+/// follow and hands them out page by page.
+#[tokio::test]
+async fn paged_document_list_reports_older_documents() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-list-paged");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let mut seeded = Vec::new();
+    for index in 0..3 {
+        seeded.push(
+            seed_unfiled_document(
+                &pool,
+                admin_id,
+                patient_id,
+                "internal",
+                false,
+                "administrative_appointment_confirmation",
+                &format!("{tag}-{index}"),
+            )
+            .await
+            .to_string(),
+        );
+    }
+    let page = |offset: usize| {
+        let app = &app;
+        let bearer = admin_bearer.clone();
+        async move {
+            json_request(
+                app,
+                "GET",
+                &format!(
+                    "/api/v1/documents?patient_id={patient_id}&paged=true&offset={offset}&limit=2"
+                ),
+                &bearer,
+                None,
+            )
+            .await
+        }
+    };
+    let (status, first) = page(0).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(first["has_more"], true, "{first}");
+    assert_eq!(first["items"].as_array().map(Vec::len), Some(2), "{first}");
+    let (status, second) = page(2).await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    assert_eq!(second["has_more"], false, "{second}");
+    let mut ids = listed_ids(&first["items"]);
+    ids.extend(listed_ids(&second["items"]));
+    ids.sort();
+    seeded.sort();
+    assert_eq!(ids, seeded);
+
+    // Without `paged` the plain list as before.
+    let (status, plain) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents?patient_id={patient_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{plain}");
+    assert_eq!(listed_ids(&plain).len(), 3);
+}
+
+/// QA 2026-11-12 A-02, A-03: the interpreter keeps the internal medical
+/// translation he filed himself, and a medical document is assigned for
+/// translation only to someone who may open it.
+#[tokio::test]
+async fn medical_translations_go_only_to_people_who_may_open_them() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-medical-translation");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+    let concierge_id = seed_user(&pool, &format!("{tag}-con"), "concierge").await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    let lead_id = seed_user(&pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
+    seed_patient_assignment(&pool, patient_id, lead_id, admin_id).await;
+
+    let source_id = seed_unfiled_document(
+        &pool,
+        pm_id,
+        patient_id,
+        "released_internal",
+        true,
+        "arztbrief",
+        &format!("{tag}-source"),
+    )
+    .await;
+    let request_id = seed_document_translation_request(&pool, source_id, patient_id, pm_id).await;
+    let assign = |assignee: Uuid| {
+        let app = &app;
+        let bearer = pm_bearer.clone();
+        async move {
+            json_request(
+                app,
+                "POST",
+                &format!("/api/v1/documents/translation-requests/{request_id}/update"),
+                &bearer,
+                Some(json!({ "status": "pending", "assigned_to": assignee })),
+            )
+            .await
+        }
+    };
+    for assignee in [concierge_id, lead_id] {
+        let (status, body) = assign(assignee).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["error"], "translation_medical_paper_not_assignable");
+    }
+    let (status, body) = assign(interpreter_id).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // His own internal medical result stays open to him; the same paper filed
+    // by someone else keeps the release rule.
+    let own_result_id = seed_unfiled_document(
+        &pool,
+        interpreter_id,
+        patient_id,
+        "internal",
+        true,
+        "translated_document",
+        &format!("{tag}-own-result"),
+    )
+    .await;
+    let foreign_result_id = seed_unfiled_document(
+        &pool,
+        pm_id,
+        patient_id,
+        "internal",
+        true,
+        "translated_document",
+        &format!("{tag}-foreign-result"),
+    )
+    .await;
+    for (result_id, expected) in [
+        (own_result_id, StatusCode::OK),
+        (foreign_result_id, StatusCode::FORBIDDEN),
+    ] {
+        let completed_source_id = seed_unfiled_document(
+            &pool,
+            pm_id,
+            patient_id,
+            "released_internal",
+            true,
+            "arztbrief",
+            &format!("{tag}-source-{result_id}"),
+        )
+        .await;
+        let completed_id =
+            seed_document_translation_request(&pool, completed_source_id, patient_id, pm_id).await;
+        sqlx::query(
+            r#"UPDATE document_translation_requests
+               SET assigned_to = $2, status = 'completed', completed_at = now(),
+                   translated_document_id = $3
+               WHERE id = $1"#,
+        )
+        .bind(completed_id)
+        .bind(interpreter_id)
+        .bind(result_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{result_id}"),
+            &interpreter_bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, expected, "{result_id}: {body}");
+    }
+}
+
 #[tokio::test]
 async fn billing_can_access_financial_documents_but_not_medical_ones() {
     let Some((app, pool, admin_id, _)) = test_context().await else {

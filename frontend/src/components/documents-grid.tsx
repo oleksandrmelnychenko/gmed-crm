@@ -28,6 +28,7 @@ import {
   DEFAULT_DOCUMENT_PAGE_SIZE,
   DOCUMENT_PAGE_SIZE_OPTIONS,
   buildDocumentPage,
+  formatDocumentCount,
 } from "@/pages/documents/model/document-pagination";
 
 type DocumentsGridItem = {
@@ -116,7 +117,6 @@ type DocumentsGridProps = {
 type PaginatedDocumentsTableProps = {
   columns: readonly ColumnDef<DocumentsGridItem>[];
   documents: readonly DocumentsGridItem[];
-  filenameLabel: string;
   onOpenDocument: (id: string) => void;
   onSelectionChange: (ids: string[]) => void;
   paginationResetKey: string;
@@ -128,7 +128,6 @@ type PaginatedDocumentsTableProps = {
 function PaginatedDocumentsTable({
   columns,
   documents,
-  filenameLabel,
   onOpenDocument,
   onSelectionChange,
   paginationResetKey,
@@ -136,7 +135,7 @@ function PaginatedDocumentsTable({
   selectedId,
   showSelection,
 }: PaginatedDocumentsTableProps) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [filters, setFilters] = useState<FilterPredicate[]>([]);
   const [sortStack, setSortStack] = useState<SortStack>([
     { field: "updated_at", dir: "desc" },
@@ -336,7 +335,7 @@ function PaginatedDocumentsTable({
         onSelectedIdsChange={updatePageSelection}
         onRowClick={(document) => onOpenDocument(document.id)}
         className="min-h-[360px] rounded-none border-0 shadow-none"
-        footer={`${visibleRows.length} ${filenameLabel.toLowerCase()}`}
+        footer={formatDocumentCount(lang, visibleRows.length)}
       />
     </div>
   );
@@ -604,7 +603,6 @@ export function DocumentsGrid({
       <PaginatedDocumentsTable
         columns={columns}
         documents={documents}
-        filenameLabel={filenameLabel}
         onOpenDocument={onOpenDocument}
         onSelectionChange={onSelectionChange}
         paginationResetKey={paginationResetKey}
@@ -632,9 +630,8 @@ export function DocumentsGrid({
       footer={({ filteredCount, totalCount }) => (
         <span className="tabular-nums">
           {filteredCount === totalCount
-            ? `${totalCount}`
-            : `${filteredCount} / ${totalCount}`}{" "}
-          {filenameLabel.toLowerCase()}
+            ? formatDocumentCount(lang, totalCount)
+            : `${filteredCount} / ${formatDocumentCount(lang, totalCount)}`}
         </span>
       )}
     />

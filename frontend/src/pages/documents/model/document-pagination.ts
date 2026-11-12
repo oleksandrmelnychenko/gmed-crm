@@ -1,6 +1,19 @@
+import type { Lang } from "@/lib/i18n";
+import { formatCount, type PluralWords } from "@/lib/i18n/plural";
+
 export const DEFAULT_DOCUMENT_PAGE_SIZE = 25;
 
 export const DOCUMENT_PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
+
+const DOCUMENT_WORDS: PluralWords = {
+  ru: ["документ", "документа", "документов"],
+  de: ["Dokument", "Dokumente"],
+};
+
+/** "3 документа" / "3 Dokumente" under a document list (QA 2026-11-12 A-12). */
+export function formatDocumentCount(lang: Lang, count: number) {
+  return formatCount(lang, count, DOCUMENT_WORDS);
+}
 
 export type DocumentPage<T> = {
   end: number;

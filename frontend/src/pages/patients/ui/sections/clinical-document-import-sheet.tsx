@@ -128,6 +128,18 @@ const IMPORT_MIME_TYPES = new Set(["application/pdf", "image/png", "image/jpeg"]
 const IMPORT_POLL_BASE_DELAY_MS = 1_800;
 const IMPORT_POLL_MAX_DELAY_MS = 15_000;
 const IMPORT_HISTORY_POLL_DELAY_MS = 4_000;
+/** A job still queued after this long was not picked up by the parser. */
+const IMPORT_QUEUED_HINT_AFTER_MS = 2 * 60_000;
+
+/** Whether the import still waits in the queue after the hint delay. */
+function clinicalImportWaitsTooLong(
+  documentImport: Pick<ClinicalDocumentImport, "status" | "created_at"> | null,
+  now = Date.now(),
+): boolean {
+  if (documentImport?.status !== "queued") return false;
+  const created = Date.parse(documentImport.created_at);
+  return Number.isFinite(created) && now - created >= IMPORT_QUEUED_HINT_AFTER_MS;
+}
 const builderTabClassName = "h-9 min-w-0 shrink-0 rounded-md px-3 text-xs sm:h-8";
 
 export type ExistingClinicalImportItem = {
@@ -2877,6 +2889,15 @@ export function ClinicalDocumentImportSheet({
                     "Das Fenster bleibt geöffnet. Der fertige Entwurf erscheint hier automatisch.",
                   )}
                 </p>
+                {/* A job nobody picks up said nothing (QA 2026-11-12 A-04). */}
+                {clinicalImportWaitsTooLong(documentImport) ? (
+                  <p className="mt-3 max-w-md rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    {tx(
+                      "Распознавание до сих пор не началось: служба распознавания, похоже, недоступна. Документ уже сохранён в карточке. Окно можно закрыть и открыть черновик позже из истории; если так остаётся, сообщите администратору.",
+                      "Die Erkennung hat noch nicht begonnen: Der Erkennungsdienst ist offenbar nicht erreichbar. Das Dokument ist bereits in der Akte gespeichert. Das Fenster kann geschlossen und der Entwurf später aus dem Verlauf geöffnet werden; bleibt es so, bitte die Administration informieren.",
+                    )}
+                  </p>
+                ) : null}
               </div>
             </div>
           ) : null}

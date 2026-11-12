@@ -2367,6 +2367,9 @@ async fn list_specialization_work_types(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[
         Role::Ceo,
+        // The CEO assistant reads the provider catalogues (RBAC matrix, QA
+        // 2026-11-12 A-08).
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::Concierge,
         Role::Billing,
@@ -2397,6 +2400,9 @@ async fn get_specialization_work_type(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[
         Role::Ceo,
+        // The CEO assistant reads the provider catalogues (RBAC matrix, QA
+        // 2026-11-12 A-08).
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::Concierge,
         Role::Billing,

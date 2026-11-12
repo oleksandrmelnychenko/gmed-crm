@@ -174,7 +174,7 @@ import {
   fetchDocumentLookups,
   fetchDocumentShares,
   fetchDocumentVersions,
-  fetchDocuments,
+  fetchDocumentListPage,
   fetchPatientDocumentContext,
   fetchMachineTranslationCapability,
   createMachineTranslationDraft,
@@ -204,6 +204,8 @@ import {
   canManageDocumentIntake,
   canManageDocuments,
   canRequestTranslations,
+  formatDocumentUploadError,
+  isTranslationAssigneeRole,
   canViewTranslationQueue,
   canUpdateTranslations,
   canUploadDocuments,
@@ -280,11 +282,50 @@ import { TemplateImportDialog } from "./ui/template-import-dialog";
  * conclusion, lab_analysis) only to the document already filed under it
  * (QA 2026-10-12 B-12).
  */
-function selectableCategories<T extends { key: string; selectable?: boolean }>(
+function selectableCategories<
+  T extends { key: string; selectable?: boolean; parent_key?: string | null },
+>(
   categories: readonly T[],
   current: string | null | undefined,
 ): T[] {
-  return categories.filter((category) => category.selectable !== false || category.key === current);
+  return orderCategoriesAsTree(
+    categories.filter((category) => category.selectable !== false || category.key === current),
+  );
+}
+
+/**
+ * Each category followed by its subcategories and types, siblings in the
+ * server's order: sorted by number alone, «PERS · Личные документы» sat
+ * between the medical types (QA 2026-11-12 A-12).
+ */
+function orderCategoriesAsTree<T extends { key: string; parent_key?: string | null }>(
+  categories: readonly T[],
+): T[] {
+  const keys = new Set(categories.map((category) => category.key));
+  const children = new Map<string, T[]>();
+  const roots: T[] = [];
+  for (const category of categories) {
+    const parent = category.parent_key;
+    if (parent && parent !== category.key && keys.has(parent)) {
+      const siblings = children.get(parent);
+      if (siblings) siblings.push(category);
+      else children.set(parent, [category]);
+    } else {
+      roots.push(category);
+    }
+  }
+  const ordered: T[] = [];
+  const seen = new Set<string>();
+  const visit = (category: T) => {
+    if (seen.has(category.key)) return;
+    seen.add(category.key);
+    ordered.push(category);
+    for (const child of children.get(category.key) ?? []) visit(child);
+  };
+  roots.forEach(visit);
+  // A cycle in the data leaves nothing out.
+  for (const category of categories) visit(category);
+  return ordered;
 }
 
 /** "1 активный портальный релиз", "2 … релиза", "5 … релизов" (QA 2026-10-12 B2-02). */
@@ -452,16 +493,6 @@ const DOCUMENT_PAYMENT_METHOD_OPTIONS: Array<{
   { value: "other", labelRu: "Другое", labelDe: "Sonstiges" },
 ];
 
-// Roles the backend accepts as a translation assignee (validate_translation_assignee).
-// The shared /documents/meta/staff list also returns billing/it_admin, who would be
-// rejected with a 422 if offered here — so the assignee dropdown is filtered to these.
-const TRANSLATION_ASSIGNEE_ROLES = [
-  "ceo",
-  "patient_manager",
-  "teamlead_interpreter",
-  "interpreter",
-  "concierge",
-] as const;
 
 const TEMPLATE_GROUP_ORDER = [
   "contract",
@@ -478,7 +509,12 @@ const TEMPLATE_GROUP_ORDER = [
 function templateGroupKey(template: DocumentTemplate): string {
   if (template.template_kind === "provider") return "provider";
   if (template.template_kind === "agency") return "agency";
-  return template.category || "generated";
+  // A category without a group of its own joins "generated": each one made
+  // a group of its own under the same heading, repeated before every
+  // template (QA 2026-11-12 A-10).
+  return template.category && TEMPLATE_GROUP_ORDER.includes(template.category)
+    ? template.category
+    : "generated";
 }
 
 function templateGroupLabel(key: string, lang: "de" | "ru"): string {
@@ -1141,6 +1177,9 @@ function StaffDocumentsPage({
   const embedDetailOnly = isRouteDetail || legacyEmbedDetailOnly;
 
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  // Older documents follow beyond the loaded pages (QA 2026-11-12 A-01).
+  const [documentsHaveMore, setDocumentsHaveMore] = useState(false);
+  const [documentsMoreBusy, setDocumentsMoreBusy] = useState(false);
   const [intakeQueue, setIntakeQueue] = useState<DocumentItem[]>([]);
   const [busy, setBusy] = useState(true);
   const [intakeBusy, setIntakeBusy] = useState(false);
@@ -1741,12 +1780,16 @@ function StaffDocumentsPage({
       setBusy(true);
       setError("");
       try {
-        const rows = await fetchDocuments(documentsPath);
+        const page = await fetchDocumentListPage(documentsPath, 0);
         if (!active) return;
-        startTransition(() => setDocuments(rows));
+        startTransition(() => {
+          setDocuments(page.items);
+          setDocumentsHaveMore(page.has_more);
+        });
       } catch (nextError) {
         if (!active) return;
         setDocuments([]);
+        setDocumentsHaveMore(false);
         setError(
           nextError instanceof Error
             ? nextError.message
@@ -1761,6 +1804,25 @@ function StaffDocumentsPage({
       active = false;
     };
   }, [canView, documentsFailedLoadDocumentsText, documentsPath, version]);
+
+  async function loadMoreDocuments() {
+    if (documentsMoreBusy) return;
+    setDocumentsMoreBusy(true);
+    try {
+      const page = await fetchDocumentListPage(documentsPath, documents.length);
+      setDocuments((current) => {
+        const known = new Set(current.map((document) => document.id));
+        return [...current, ...page.items.filter((document) => !known.has(document.id))];
+      });
+      setDocumentsHaveMore(page.has_more);
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error ? nextError.message : documentsFailedLoadDocumentsText,
+      );
+    } finally {
+      setDocumentsMoreBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!canManageIntake) {
@@ -2378,11 +2440,7 @@ function StaffDocumentsPage({
       }
       if (response.id) openDocument(response.id);
     } catch (nextError) {
-      setUploadError(
-        nextError instanceof Error
-          ? nextError.message
-          : t.documents_failed_upload,
-      );
+      setUploadError(formatDocumentUploadError(nextError, lang, t.documents_failed_upload));
     } finally {
       setUploadBusy(false);
     }
@@ -3385,7 +3443,10 @@ function StaffDocumentsPage({
 
   return (
     <div className="space-y-4">
-      <DocumentWorkspaceNav showTranslationQueue={canViewQueue} />
+      <DocumentWorkspaceNav
+        showTranslationQueue={canViewQueue}
+        showIntakeQueue={canManageIntake}
+      />
       {!embedDetailOnly ? (
         <>
       <PageHeader
@@ -3916,6 +3977,23 @@ function StaffDocumentsPage({
             formatDateTime={formatDateTime}
           />
         )}
+        {!busy && documentsHaveMore ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+            <span>
+              {l("documents_list_more_hint").replace("{count}", String(documents.length))}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg bg-card"
+              disabled={documentsMoreBusy}
+              onClick={() => void loadMoreDocuments()}
+            >
+              {l("documents_list_load_more")}
+            </Button>
+          </div>
+        ) : null}
       </DocumentSection>
       ) : null}
         </>
@@ -6775,11 +6853,16 @@ function StaffDocumentsPage({
                           />
                           <DocumentMetaFact
                             label={metaText.financialStatus}
-                            value={labelFromOptions(
-                              detail.financial_status,
-                              DOCUMENT_FINANCIAL_STATUS_OPTIONS,
-                              lang,
-                            )}
+                            value={
+                              // The same words as the edit form (QA 2026-11-12 A-12).
+                              detail.financial_status
+                                ? labelFromOptions(
+                                    detail.financial_status,
+                                    DOCUMENT_FINANCIAL_STATUS_OPTIONS,
+                                    lang,
+                                  )
+                                : metaText.notFinancial
+                            }
                           />
                           <DocumentMetaFact
                             label={metaText.paymentDueDate}
@@ -7021,7 +7104,8 @@ function StaffDocumentsPage({
                           <span className="font-semibold tabular-nums text-foreground">
                             {translationRequests.length}
                           </span>
-                          {t.documents_translation_requests}
+                          {/* The card title already says it (QA 2026-11-12 A-12). */}
+                          {l("documents_translation_requests_total")}
                         </span>
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
                           <span className="font-semibold tabular-nums text-amber-700">
@@ -7399,14 +7483,16 @@ function StaffDocumentsPage({
                                             {staff
                                               .filter(
                                                 (member) =>
-                                                  (
-                                                    TRANSLATION_ASSIGNEE_ROLES as readonly string[]
-                                                  ).includes(member.role) ||
-                                                  member.id === draft.assignedTo,
+                                                  isTranslationAssigneeRole(
+                                                    member.role,
+                                                    Boolean(detail.is_medical),
+                                                  ) || member.id === draft.assignedTo,
                                               )
                                               .map((member) => (
                                                 <option key={member.id} value={member.id}>
-                                                  {member.name} / {formatRoleLabel(member.role, lang)}
+                                                  {member.name.trim()
+                                                    ? `${member.name.trim()} / ${formatRoleLabel(member.role, lang)}`
+                                                    : formatRoleLabel(member.role, lang)}
                                                 </option>
                                               ))}
                                           </NativeComboboxSelect>
@@ -7681,6 +7767,10 @@ function StaffDocumentsPage({
                   </SectionCard>
                 ) : null}
 
+                {/* The portal releases are read with the shares: a role that
+                    does not see the shares saw "0 active releases" next to a
+                    released badge (QA 2026-11-12 A-07). */}
+                {canViewShares ? (
                 <SectionCard
                   icon={ContactRound}
                   title={t.documents_patient_portal}
@@ -7844,6 +7934,7 @@ function StaffDocumentsPage({
                     )}
                   </div>
                 </SectionCard>
+                ) : null}
 
                 {canViewShares ? (
                   <SectionCard

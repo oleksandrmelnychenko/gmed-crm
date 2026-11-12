@@ -2862,7 +2862,19 @@ struct DocumentListQuery {
     access_category: Option<String>,
     financial_status: Option<String>,
     include_archived_versions: Option<bool>,
+    /// `true`: answer `{ items, offset, has_more }` and page past the newest
+    /// [`DOCUMENT_LIST_BATCH`] documents with `offset` / `limit` counted in
+    /// the documents the caller may see (QA 2026-11-12 A-01). Without it the
+    /// plain list of the newest batch, as before.
+    paged: Option<bool>,
+    offset: Option<i64>,
+    limit: Option<i64>,
 }
+
+/// Rows one document list query reads; also the page size of a plain list.
+const DOCUMENT_LIST_BATCH: i64 = 300;
+/// The largest page a paged document list returns.
+const DOCUMENT_LIST_MAX_PAGE: i64 = 1000;
 
 fn normalized_query_value(value: Option<&str>) -> Option<String> {
     value
@@ -15272,6 +15284,17 @@ pub(crate) fn can_view_document_row(
         if assigned_by_name && sensitivity != DataSensitivity::Medical && !is_aml_paper(row) {
             return true;
         }
+        // The translated document the interpreter filed himself on a request
+        // assigned to him stays open to him whatever its release state (RBAC
+        // matrix, interpreter rules (б) and (г)): an internal medical result
+        // was closed to its own translator (QA 2026-11-12 A-02).
+        if auth.role == Role::Interpreter
+            && is_own_translation_document(row)
+            && is_own_upload(auth.user_id, row)
+            && !is_aml_paper(row)
+        {
+            return true;
+        }
         if is_aml_paper(row)
             && !row.try_get::<bool, _>("shared_to_current").unwrap_or(false)
             && !is_own_upload(auth.user_id, row)
@@ -15412,6 +15435,53 @@ async fn refuse_aml_paper_assignment(
             Json(json!({
                 "error": "translation_aml_paper_not_assignable",
                 "message": "An AML paper is not assigned to an interpreter",
+            })),
+        )
+            .into_response());
+    }
+    Ok(())
+}
+
+/// Roles that may open a medical document they are assigned to translate
+/// (`policy::check_access`): the team lead and the concierge never open one,
+/// so a medical translation parked with them could never be done
+/// (QA 2026-11-12 A-03).
+const MEDICAL_TRANSLATION_ASSIGNEE_ROLES_SQL: &str = "('ceo', 'patient_manager', 'interpreter')";
+
+/// A medical document is assigned for translation only to a role that may
+/// open it.
+async fn refuse_medical_paper_assignment(
+    state: &AppState,
+    document_id: Uuid,
+    assignee: Uuid,
+) -> Result<(), axum::response::Response> {
+    let refused = sqlx::query_scalar::<_, bool>(&format!(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM documents d
+               JOIN users assignee ON assignee.id = $2
+               WHERE d.id = $1
+                 AND d.is_medical
+                 AND assignee.role NOT IN {MEDICAL_TRANSLATION_ASSIGNEE_ROLES_SQL}
+           )"#
+    ))
+    .bind(document_id)
+    .bind(assignee)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, %document_id, "check the medical paper of a translation assignment");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate translation assignee",
+        )
+    })?;
+    if refused {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "translation_medical_paper_not_assignable",
+                "message": "A medical document is assigned only to someone who may open it",
             })),
         )
             .into_response());
@@ -32104,7 +32174,26 @@ async fn list_documents(
             Err(resp) => return resp,
         };
 
-    let rows = match sqlx::query(
+    let paged = query.paged.unwrap_or(false);
+    let page_offset = if paged {
+        query.offset.unwrap_or(0).max(0) as usize
+    } else {
+        0
+    };
+    let page_limit = if paged {
+        query
+            .limit
+            .unwrap_or(DOCUMENT_LIST_BATCH)
+            .clamp(1, DOCUMENT_LIST_MAX_PAGE) as usize
+    } else {
+        DOCUMENT_LIST_BATCH as usize
+    };
+    // One document past the page tells whether there are more.
+    let wanted = page_offset + page_limit + 1;
+    let mut visible: Vec<serde_json::Value> = Vec::new();
+    let mut batch_offset: i64 = 0;
+    loop {
+        let rows = match sqlx::query(
         r#"SELECT d.id, d.document_number, d.patient_id, d.lead_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
@@ -32276,8 +32365,10 @@ async fn list_documents(
              AND ($21::boolean OR NOT EXISTS(
                    SELECT 1 FROM documents newer WHERE newer.replaces_document_id = d.id
                  ))
-           ORDER BY d.created_at DESC
-           LIMIT 300"#,
+           -- The id breaks ties, so batches read with OFFSET never skip or
+           -- repeat a document.
+           ORDER BY d.created_at DESC, d.id DESC
+           LIMIT $22 OFFSET $23"#,
     )
     .bind(search)
     .bind(patient_id)
@@ -32292,14 +32383,16 @@ async fn list_documents(
     .bind(klinik)
     .bind(ursprung)
     .bind(auth.user_id)
-    .bind(order_lookup)
-    .bind(appointment_lookup)
+    .bind(order_lookup.as_deref())
+    .bind(appointment_lookup.as_deref())
     .bind(document_direction.as_deref())
     .bind(document_variant.as_deref())
     .bind(access_category.as_deref())
     .bind(financial_status.as_deref())
     .bind(lead_id)
     .bind(query.include_archived_versions.unwrap_or(false))
+    .bind(DOCUMENT_LIST_BATCH)
+    .bind(batch_offset)
     .fetch_all(&state.db)
     .await
     {
@@ -32309,23 +32402,51 @@ async fn list_documents(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load documents");
         }
     };
+        let fetched = rows.len() as i64;
 
-    let items: Vec<_> = rows
-        .iter()
-        .filter(|row| {
-            let document_id = row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil());
-            let is_medical = row.try_get::<bool, _>("is_medical").unwrap_or(false);
-            document_access_allowed(
-                &auth,
-                row,
-                can_view_document_row(&auth, row, &assignment_set),
-                view_acl.decision(auth.role, document_id, AccessCapability::View, is_medical),
-            )
-        })
-        .map(document_json)
+        visible.extend(
+            rows.iter()
+                .filter(|row| {
+                    let document_id = row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil());
+                    let is_medical = row.try_get::<bool, _>("is_medical").unwrap_or(false);
+                    document_access_allowed(
+                        &auth,
+                        row,
+                        can_view_document_row(&auth, row, &assignment_set),
+                        view_acl.decision(
+                            auth.role,
+                            document_id,
+                            AccessCapability::View,
+                            is_medical,
+                        ),
+                    )
+                })
+                .map(document_json),
+        );
+
+        // A plain list keeps its single batch; a paged one reads on until the
+        // page and one more document are found or the documents run out.
+        if !paged || visible.len() >= wanted || fetched < DOCUMENT_LIST_BATCH {
+            break;
+        }
+        batch_offset += DOCUMENT_LIST_BATCH;
+    }
+
+    if !paged {
+        return Json(visible).into_response();
+    }
+    let has_more = visible.len() > page_offset + page_limit;
+    let items: Vec<_> = visible
+        .into_iter()
+        .skip(page_offset)
+        .take(page_limit)
         .collect();
-
-    Json(items).into_response()
+    Json(json!({
+        "items": items,
+        "offset": page_offset,
+        "has_more": has_more,
+    }))
+    .into_response()
 }
 
 async fn list_document_intake_queue(
@@ -33537,6 +33658,17 @@ async fn update_document_translation_request(
                 .unwrap_or_default(),
         )
         && let Err(response) = refuse_aml_paper_assignment(&state, document_id, assignee).await
+    {
+        return response;
+    }
+    if assigns_translator
+        && let (Some(assignee), Some(document_id)) = (
+            assigned_to,
+            request_row
+                .try_get::<Option<Uuid>, _>("document_id")
+                .unwrap_or_default(),
+        )
+        && let Err(response) = refuse_medical_paper_assignment(&state, document_id, assignee).await
     {
         return response;
     }
@@ -35058,6 +35190,45 @@ async fn render_document_translation_pdf(
     .into_response()
 }
 
+/// The default name of a translated document, in the language of the
+/// translation itself: the patient read an English "Translation RU - …" in a
+/// Russian portal (QA 2026-11-12 A-11).
+fn translated_document_default_name(language: &str, source_auto_name: &str) -> String {
+    let code = language.trim().to_lowercase();
+    let word = match code.as_str() {
+        "ru" => "Перевод",
+        "uk" => "Переклад",
+        "de" => "Übersetzung",
+        _ => "Translation",
+    };
+    format!("{word} {} - {source_auto_name}", code.to_uppercase())
+}
+
+#[cfg(test)]
+mod translated_document_default_name_tests {
+    use super::translated_document_default_name;
+
+    #[test]
+    fn names_the_translation_in_its_own_language() {
+        assert_eq!(
+            translated_document_default_name("ru", "Arztbrief"),
+            "Перевод RU - Arztbrief"
+        );
+        assert_eq!(
+            translated_document_default_name(" DE ", "Befund"),
+            "Übersetzung DE - Befund"
+        );
+        assert_eq!(
+            translated_document_default_name("uk", "Befund"),
+            "Переклад UK - Befund"
+        );
+        assert_eq!(
+            translated_document_default_name("en", "Befund"),
+            "Translation EN - Befund"
+        );
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn create_translated_document_from_translation(
     state: &AppState,
@@ -35093,13 +35264,7 @@ async fn create_translated_document_from_translation(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
-        .unwrap_or_else(|| {
-            format!(
-                "Translation {} - {}",
-                target_language.to_uppercase(),
-                source_auto_name
-            )
-        });
+        .unwrap_or_else(|| translated_document_default_name(target_language, &source_auto_name));
     let original_filename = format!(
         "translation-{}-{}.pdf",
         translation_id.simple(),
@@ -35329,13 +35494,7 @@ async fn create_translated_document_from_request(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
-        .unwrap_or_else(|| {
-            format!(
-                "Translation {} - {}",
-                requested_language.to_uppercase(),
-                source_auto_name
-            )
-        });
+        .unwrap_or_else(|| translated_document_default_name(requested_language, &source_auto_name));
     let original_filename = format!(
         "translation-{}-{}.txt",
         request_id.simple(),

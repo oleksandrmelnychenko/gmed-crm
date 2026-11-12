@@ -311,6 +311,9 @@ export function TemplateImportDialog({
       return;
     }
     const target = replaceTarget;
+    // The corrected file replaces the unsaved draft on screen: the refused
+    // upload stayed behind as a second, unusable entry (QA 2026-11-12 A-06).
+    const previousDraft = selected?.status === "draft" ? selected : null;
     void run("upload", tx.importFailed, async () => {
       const response = await importTemplateFile({
         file,
@@ -320,7 +323,15 @@ export function TemplateImportDialog({
         familyId: target?.family_id ?? null,
       });
       setReplaceTarget(null);
-      setTemplates((current) => [response.template, ...current]);
+      if (previousDraft) {
+        await disableImportedTemplate(previousDraft.id).catch(() => undefined);
+      }
+      setTemplates((current) => [
+        response.template,
+        ...current.map((template) =>
+          template.id === previousDraft?.id ? { ...template, status: "disabled" as const } : template,
+        ),
+      ]);
       select(response.template);
     });
   }
@@ -576,6 +587,14 @@ export function TemplateImportDialog({
                       setError("");
                       setNotice("");
                       select(template);
+                      // The opened template shows above the list: bring it
+                      // into view, a click seemed to do nothing (A-06).
+                      window.requestAnimationFrame(() => {
+                        const panel = document.querySelector('[data-testid="template-import-selected"]');
+                        if (panel && typeof panel.scrollIntoView === "function") {
+                          panel.scrollIntoView({ block: "start", behavior: "smooth" });
+                        }
+                      });
                     }}
                   >
                     <span className="min-w-0">

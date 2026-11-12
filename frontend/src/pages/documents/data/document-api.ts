@@ -309,6 +309,41 @@ export function fetchDocuments(path: string) {
   return apiFetch<DocumentItem[]>(path);
 }
 
+/** Documents the server reads per page of the document list. */
+export const DOCUMENT_LIST_PAGE_SIZE = 300;
+
+export type DocumentListPage = {
+  items: DocumentItem[];
+  offset: number;
+  has_more: boolean;
+};
+
+/**
+ * One page of the document list: `offset` counts the documents the caller
+ * may see, `has_more` says whether older ones follow (QA 2026-11-12 A-01).
+ */
+export async function fetchDocumentListPage(
+  path: string,
+  offset: number,
+): Promise<DocumentListPage> {
+  const separator = path.includes("?") ? "&" : "?";
+  const params = new URLSearchParams({
+    paged: "true",
+    offset: String(offset),
+    limit: String(DOCUMENT_LIST_PAGE_SIZE),
+  });
+  const page = await apiFetch<DocumentListPage | DocumentItem[]>(
+    `${path}${separator}${params.toString()}`,
+  );
+  // A server without paging answers the plain list.
+  if (Array.isArray(page)) return { items: page, offset, has_more: false };
+  return {
+    items: Array.isArray(page.items) ? page.items : [],
+    offset: page.offset ?? offset,
+    has_more: page.has_more === true,
+  };
+}
+
 export function fetchDocumentIntakeQueue() {
   return apiFetch<DocumentItem[]>("/documents/intake-queue");
 }

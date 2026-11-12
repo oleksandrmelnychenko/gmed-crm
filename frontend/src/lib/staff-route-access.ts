@@ -98,7 +98,9 @@ const ROLES_EMPLOYEES = [
   "ceo_assistant",
   "concierge",
 ] as const satisfies readonly StaffRole[];
-const ROLES_SPECIALIZATIONS = ["ceo"] as const satisfies readonly StaffRole[];
+// As the server: the PM manages the catalogue (also on the providers page),
+// the CEO assistant reads it (QA 2026-11-12 A-08).
+const ROLES_SPECIALIZATIONS = ["ceo", "patient_manager", "ceo_assistant"] as const satisfies readonly StaffRole[];
 
 // CEO has full access by policy — `AuthUser::require_any_role` in
 // `crates/server/src/auth/middleware.rs` short-circuits to Ok for Ceo,

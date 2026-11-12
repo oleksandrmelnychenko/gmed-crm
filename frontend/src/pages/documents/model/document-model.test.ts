@@ -15,14 +15,41 @@ import {
   emptyGenerateForm,
   emptyUploadForm,
   formatBusinessDocumentNumber,
+  formatDocumentUploadError,
   intakeOpenAction,
   intakeReviewNeedsClassification,
   isMedicalDocumentClassification,
+  isTranslationAssigneeRole,
   patientDocumentAddresseeLabel,
   reviewEditForm,
   withDocumentCategory,
 } from "./document-model";
 import type { DocumentItem, DocumentTemplate, GenerateFormState, PatientOption } from "./types";
+
+describe("translation assignees and upload refusals (QA 2026-11-12)", () => {
+  it("offers a medical document only to roles that may open it", () => {
+    for (const role of ["ceo", "patient_manager", "interpreter"]) {
+      expect(isTranslationAssigneeRole(role, true), role).toBe(true);
+    }
+    for (const role of ["concierge", "teamlead_interpreter", "billing"]) {
+      expect(isTranslationAssigneeRole(role, true), role).toBe(false);
+    }
+    expect(isTranslationAssigneeRole("concierge", false)).toBe(true);
+    expect(isTranslationAssigneeRole("teamlead_interpreter", false)).toBe(true);
+    expect(isTranslationAssigneeRole("billing", false)).toBe(false);
+  });
+
+  it("puts the server's English refusals into the user's language", () => {
+    expect(
+      formatDocumentUploadError(new Error("Concierge cannot upload medical documents"), "ru", "x"),
+    ).toContain("Консьерж не загружает медицинские документы");
+    expect(formatDocumentUploadError(new Error("Insufficient permissions"), "de", "x")).toContain(
+      "Keine Berechtigung",
+    );
+    expect(formatDocumentUploadError(new Error("Datei zu groß"), "ru", "x")).toBe("Datei zu groß");
+    expect(formatDocumentUploadError(null, "ru", "Не удалось загрузить")).toBe("Не удалось загрузить");
+  });
+});
 
 function template(overrides: Partial<DocumentTemplate> = {}): DocumentTemplate {
   return {

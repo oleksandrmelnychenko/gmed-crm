@@ -3,7 +3,18 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_DOCUMENT_PAGE_SIZE,
   buildDocumentPage,
+  formatDocumentCount,
 } from "./document-pagination";
+
+describe("formatDocumentCount", () => {
+  it("counts documents, not file names", () => {
+    expect(formatDocumentCount("ru", 1)).toBe("1 документ");
+    expect(formatDocumentCount("ru", 3)).toBe("3 документа");
+    expect(formatDocumentCount("ru", 25)).toBe("25 документов");
+    expect(formatDocumentCount("de", 1)).toBe("1 Dokument");
+    expect(formatDocumentCount("de", 3)).toBe("3 Dokumente");
+  });
+});
 
 describe("buildDocumentPage", () => {
   const rows = Array.from({ length: 61 }, (_, index) => index + 1);
