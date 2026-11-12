@@ -63,7 +63,7 @@ export function OrderSubscriptionCard({
   const dirty = choice !== (current?.package_id ?? "");
   const resetsConsumption = dirty && Boolean(current?.has_consumption);
   const optionLabels = orderTariffOptionLabels(
-    data.options,
+    data.options ?? [],
     (option) => subscriptionKindLabel(option, lang),
     (amount, currency) => formatMoneyAmount(amount, currency),
   );
