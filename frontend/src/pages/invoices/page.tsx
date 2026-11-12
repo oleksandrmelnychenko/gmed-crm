@@ -903,6 +903,8 @@ function useStaffInvoicesPageContent() {
   // A dashboard counter opens the list filtered like the counter (QA 2026-11-12, B S3-4).
   const initialStatus = INVOICE_FILTER_STATUSES.find((status) => status === searchParams.get("status")) ?? "";
   const createdWithinDays = parseCreatedWithinDays(searchParams.get("created_within_days"));
+  // «Запрошенные авансы» of the Billing home: open advance invoices (release QA 2026-11-13, C F2).
+  const openAdvances = searchParams.get("open_advances") === "1";
   const [filters, setFilters] = useState<Filters>({ ...DEFAULT_FILTERS, patientId: initialPatientId, orderId: initialOrderId, quoteId: initialQuoteId, status: initialStatus });
   const [workspaceState, dispatchWorkspaceState] = useReducer(
     invoiceWorkspaceReducer,
@@ -1212,6 +1214,7 @@ function useStaffInvoicesPageContent() {
   );
   const anyQuickFilterActive =
     createdWithinDays !== null ||
+    openAdvances ||
     filters.search.trim() !== "" ||
     filters.patientId !== "" ||
     filters.orderId !== "" ||
@@ -1924,7 +1927,7 @@ function useStaffInvoicesPageContent() {
     async function loadInvoices() {
       dispatchWorkspaceState({ listBusy: true });
       try {
-        const data = await fetchInvoices(buildInvoicesPath(effectiveFilters, invoicePage, undefined, createdWithinDays));
+        const data = await fetchInvoices(buildInvoicesPath(effectiveFilters, invoicePage, undefined, createdWithinDays, openAdvances));
         if (!ignore) {
           dispatchWorkspaceState({
             invoices: Array.isArray(data.items) ? data.items : [],
@@ -1954,7 +1957,7 @@ function useStaffInvoicesPageContent() {
     return () => {
       ignore = true;
     };
-  }, [createdWithinDays, effectiveFilters, invoicePage, reloadToken, t.common_error]);
+  }, [createdWithinDays, effectiveFilters, invoicePage, openAdvances, reloadToken, t.common_error]);
 
   useEffect(() => {
     setSearchParams(
@@ -2812,6 +2815,22 @@ function useStaffInvoicesPageContent() {
                   <X className="size-3.5" />
                 </Button>
               ) : null}
+              {openAdvances ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-testid="invoices-open-advances-filter"
+                  title={lang === "de" ? "Filter entfernen" : "Снять фильтр"}
+                  onClick={() => {
+                    setInvoicePage(1);
+                    syncQuery({ open_advances: null, page: null });
+                  }}
+                >
+                  {lang === "de" ? "Angeforderte Anzahlungen (unbezahlt)" : "Запрошенные авансы (не оплачены)"}
+                  <X className="size-3.5" />
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant="outline"
@@ -2830,7 +2849,7 @@ function useStaffInvoicesPageContent() {
                   onClick={() => {
                     setFilters(DEFAULT_FILTERS);
                     setInvoicePage(1);
-                    syncQuery({ patient: null, order: null, quote: null, page: null, status: null, created_within_days: null });
+                    syncQuery({ patient: null, order: null, quote: null, page: null, status: null, created_within_days: null, open_advances: null });
                   }}
                 >
                   <X className="size-3.5" />
@@ -2860,7 +2879,18 @@ function useStaffInvoicesPageContent() {
               return null;
             }}
             emptyState={
-              <EmptyState
+              anyQuickFilterActive ? (
+                // A filtered empty list is not a workspace without invoices
+                // (release QA 2026-11-13, C F4).
+                <EmptyState
+                  title={lang === "de" ? "Keine Rechnungen für diesen Filter" : "Нет счетов по этому фильтру"}
+                  description={
+                    lang === "de"
+                      ? "Keine Rechnung passt zu den gewählten Filtern. Setzen Sie die Filter zurück, um alle Rechnungen zu sehen."
+                      : "Ни один счёт не подходит под выбранные фильтры. Сбросьте фильтры, чтобы увидеть все счета."
+                  }
+                />
+              ) : <EmptyState
                 title={t.common_not_set}
                 description={text.emptyInvoicesDescription}
                 action={

@@ -160,7 +160,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     order: "Bezugsauftrag (optional)", noOrder: "Ohne Auftrag", currency: "Währung", quote: "Angebot für Leistungen", noQuote: "Nur Fremdkosten – ohne Angebot", type: "Rechnungsart",
     interim: "Zwischenrechnung", final: "Schlussrechnung", due: "Fällig am", services: "Leistungen", expenses: "Weiterberechenbare Kosten",
     waiting: "Weitere Kosten", amount: "Betrag", source: "Ursprung", payment: "Zahlung", patientInvoice: "Patientenrechnung",
-    noServices: "Für diesen Auftrag gibt es keine offenen Angebotspositionen.", noExpenses: "Keine von GMED bezahlten, noch nicht berechneten Kosten.",
+    noServices: "Für diesen Auftrag gibt es keine offenen Angebotspositionen.", selectQuote: "Kein Angebot gewählt: Wählen Sie oben ein Angebot, um seine Positionen abzurechnen.", noOrderQuotes: "Für diesen Auftrag gibt es kein offenes Angebot.", noOrderForQuote: "Angebotspositionen gibt es nur mit einem Bezugsauftrag.", noExpenses: "Keine von GMED bezahlten, noch nicht berechneten Kosten.",
     create: "Rechnungsentwurf erstellen", creating: "Entwurf wird erstellt…", retry: "Aktualisieren", failed: "Die Abrechnungsdaten konnten nicht geladen werden.",
     saveFailed: "Der Rechnungsentwurf konnte nicht erstellt werden. Prüfen Sie die ausgewählten Positionen.",
     success: "Der Rechnungsentwurf wurde erstellt und die gewählten Kosten wurden reserviert.", open: "Entwurf öffnen",
@@ -200,7 +200,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     order: "Заказ (необязательно)", noOrder: "Без заказа", currency: "Валюта", quote: "Предложение с услугами", noQuote: "Только расходы — без предложения", type: "Тип счёта",
     interim: "Промежуточный", final: "Финальный", due: "Срок оплаты", services: "Услуги", expenses: "Расходы для перевыставления",
     waiting: "Остальные расходы", amount: "Сумма", source: "Источник", payment: "Оплата", patientInvoice: "Счёт пациенту",
-    noServices: "По этому заказу нет доступных позиций предложения.", noExpenses: "Нет оплаченных GMED расходов, которые ещё не выставлены пациенту.",
+    noServices: "По этому заказу нет доступных позиций предложения.", selectQuote: "Предложение не выбрано: выберите предложение выше, чтобы выставить его позиции.", noOrderQuotes: "По этому заказу нет открытого предложения.", noOrderForQuote: "Позиции предложения доступны только при выбранном заказе.", noExpenses: "Нет оплаченных GMED расходов, которые ещё не выставлены пациенту.",
     create: "Создать черновик счёта", creating: "Создаём черновик…", retry: "Обновить", failed: "Не удалось загрузить данные для выставления.",
     saveFailed: "Не удалось создать черновик. Проверьте выбранные позиции.",
     success: "Черновик создан, выбранные расходы зарезервированы за ним.", open: "Открыть черновик",
@@ -568,7 +568,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
 
         <section className="overflow-hidden rounded-xl border border-border/70">
           <div className="border-b border-border/60 px-4 py-3"><AdminSectionTitle icon={BriefcaseMedical}>{copy.services}</AdminSectionTitle></div>
-          {!quote || !serviceLines.some(line => availableQuantity(line) > 0) ? <p className="px-4 py-5 text-sm text-muted-foreground">{overageOnly ? copy.overageOnly(formatMoneyAmount(String(overageTotal), activeCurrency)) : <>{copy.noServices}{quote ? ` ${partlyCreditedHint(lang)}` : ""}</>}</p> : <div className="divide-y divide-border/60">
+          {!quote || !serviceLines.some(line => availableQuantity(line) > 0) ? <p className="px-4 py-5 text-sm text-muted-foreground">{overageOnly ? copy.overageOnly(formatMoneyAmount(String(overageTotal), activeCurrency)) : <>{!order ? copy.noOrderForQuote : !quote ? (orderQuotes.length > 0 ? copy.selectQuote : copy.noOrderQuotes) : copy.noServices}{quote ? ` ${partlyCreditedHint(lang)}` : ""}</>}</p> : <div className="divide-y divide-border/60">
             {serviceLines.map((line, index) => {
               const available = availableQuantity(line);
               if (available <= 0) return null;

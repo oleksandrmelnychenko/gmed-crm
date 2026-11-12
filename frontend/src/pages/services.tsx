@@ -47,6 +47,7 @@ import {
   ConciergeProviderBookingAction,
 } from "@/pages/concierge/provider-booking-dialog";
 import { PostedReceiptsHint } from "@/pages/concierge/posted-receipts-hint";
+import { readsServiceReceipts } from "@/pages/concierge/expense-receipt-model";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -2485,6 +2486,11 @@ function useStaffServicesPageContent() {
                             actualCost={editForm.actualCost}
                             currency={editForm.currency}
                             lang={lang}
+                            enabled={readsServiceReceipts(
+                              user?.role,
+                              user?.id,
+                              selectedService.assigned_concierge_id,
+                            )}
                           />
                         ) : null}
                       </label>

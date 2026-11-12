@@ -628,3 +628,206 @@ async fn a_ready_concierge_service_is_billed_once_from_the_patient_billing_tab()
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
 }
+
+async fn pdf_text(app: &axum::Router, path: &str, bearer: &str) -> String {
+    let request = Request::builder()
+        .method("GET")
+        .uri(path)
+        .header("Authorization", bearer)
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 10 * 1024 * 1024)
+        .await
+        .unwrap();
+    pdf_extract::extract_text_from_mem(&bytes).unwrap()
+}
+
+/// F-B1 (release QA 2026-11-13): an interim invoice of a Concierge service and
+/// its re-billed receipt, both of 12.11.2026, printed the order's planned
+/// appointments weeks ahead as its Leistungszeitraum. Dated lines date the
+/// invoice; the order's appointments only stand in when no line has a date.
+#[tokio::test]
+async fn an_invoice_of_a_concierge_service_and_its_receipt_is_dated_by_its_lines() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let app = context.app;
+    let pool = context.pool;
+    let admin_id = context.admin_id;
+    let tag = Uuid::new_v4().simple().to_string();
+
+    let ceo = auth_header(admin_id, "ceo");
+    let billing = auth_header(seed_user(&pool, &tag, "billing").await, "billing");
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by,
+                               address_street, address_zip, address_city, address_country)
+           VALUES ($1, 'Synth', 'Conciergedate', '1980-02-02', 'diverse', $2,
+                   'Teststraße 1', '10115', 'Berlin', 'Deutschland')
+           RETURNING id"#,
+    )
+    .bind(format!("PT-CD-{tag}"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, currency, created_by)
+           VALUES ($1, $2, 'execution', 'active', 'EUR', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-CD-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // A visit of the order still ahead: the old code printed it.
+    let planned_day = gmed_server::app_time::today() + chrono::Duration::days(40);
+    sqlx::query(
+        r#"INSERT INTO appointments (
+               patient_id, order_id, appointment_type, title, date, status, created_by
+           ) VALUES ($1, $2, 'non_medical', 'Geplanter Termin', $3, 'planned', $4)"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(planned_day)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let service_id = seed_concierge_service(
+        &pool,
+        patient_id,
+        Some(order_id),
+        None,
+        "Airport transfer",
+        "completed",
+        "ready",
+        "EUR",
+        Decimal::ONE,
+        Some(Decimal::new(180, 0)),
+        admin_id,
+    )
+    .await;
+    sqlx::query(
+        r#"UPDATE concierge_services
+           SET starts_at = '2026-11-12 09:00:00+01', completed_at = '2026-11-12 11:00:00+01'
+           WHERE id = $1"#,
+    )
+    .bind(service_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The receipt of 12.11.2026, paid by GMED and settled with the supplier.
+    let provider_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO providers (name, provider_type, address_city, fachbereich, address_country)
+           VALUES ($1, 'medical', 'Berlin', 'Cardiology', 'Germany')
+           RETURNING id"#,
+    )
+    .bind(format!("Clinic {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, receipt) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/external-invoices"),
+        &ceo,
+        json!({
+            "provider_id": provider_id,
+            "external_invoice_number": format!("REST-{tag}"),
+            "invoice_date": "2026-11-12",
+            "amount_net": 100,
+            "amount_vat": 0,
+            "amount_gross": 100,
+            "currency": "EUR",
+            "status": "approved"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{receipt}");
+    let receipt_id = Uuid::parse_str(receipt["id"].as_str().unwrap()).unwrap();
+    let account_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM company_financial_accounts WHERE currency = 'EUR' AND is_default",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, payment) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/company-provider-liabilities/{receipt_id}/settlements"),
+        &ceo,
+        json!({
+            "request_id": Uuid::new_v4(),
+            "financial_account_id": account_id,
+            "amount_gross": "100",
+            "paid_on": gmed_server::app_time::today().to_string(),
+            "payment_method": "bank_transfer"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{payment}");
+
+    let (status, draft) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/billing-invoices"),
+        &billing,
+        json!({
+            "request_id": Uuid::new_v4(),
+            "order_id": order_id,
+            "currency": "EUR",
+            "invoice_type": "interim",
+            "external_invoice_ids": [receipt_id],
+            "concierge_service_ids": [service_id],
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        &billing,
+        json!({ "status": "sent" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let text = pdf_text(
+        &app,
+        &format!("/api/v1/invoices/{invoice_id}/pdf"),
+        &billing,
+    )
+    .await;
+    assert!(text.contains("Leistungsdatum"), "{text}");
+    assert!(text.contains("12.11.2026"), "{text}");
+    assert!(!text.contains("Leistungszeitraum"), "{text}");
+    assert!(
+        !text.contains(&planned_day.format("%d.%m.%Y").to_string()),
+        "{text}"
+    );
+
+    // F-B4: the receipt re-billed at cost and the Concierge service are both
+    // assigned revenue, so no «unassigned revenue» warning.
+    let (status, economics) = get_json(
+        &app,
+        &format!("/api/v1/orders/{order_id}/economics"),
+        &billing,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{economics}");
+    assert!(
+        !economics["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning == "unassigned_invoice_revenue"),
+        "{economics}"
+    );
+}

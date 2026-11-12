@@ -49,6 +49,7 @@ describe("dashboard counters open the matching list (S3-4)", () => {
     expect(metricRoute("sales", "new_leads_30d")).toBe("/leads?archived=true&created_within_days=30");
     expect(metricRoute("billing", "overdue_invoice_count")).toBe("/invoices?status=overdue");
     expect(metricRoute("billing", "invoices_30d")).toBe("/invoices?created_within_days=30");
+    expect(metricRoute("billing", "open_advance_requests_total")).toBe("/invoices?open_advances=1");
     expect(metricRoute("it_admin", "active_sessions")).toBe("/admin/health");
     expect(metricRoute("it_admin", "pending_logins")).toBe("/admin/health");
   });
@@ -74,6 +75,10 @@ describe("dashboard counters open the matching list (S3-4)", () => {
     expect(parseCreatedWithinDays("abc")).toBeNull();
     expect(buildInvoicesPath(DEFAULT_FILTERS, 1, 50, 30)).toContain("created_within_days=30");
     expect(buildInvoicesPath(DEFAULT_FILTERS, 1)).not.toContain("created_within_days");
+    const advances = buildInvoicesPath({ ...DEFAULT_FILTERS, invoiceType: "final" }, 1, 50, null, true);
+    expect(advances).toContain("invoice_type=advance");
+    expect(advances).toContain("open=true");
+    expect(buildInvoicesPath(DEFAULT_FILTERS, 1)).not.toContain("open=");
   });
 });
 

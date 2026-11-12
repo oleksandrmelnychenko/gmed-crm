@@ -231,6 +231,8 @@ export function buildInvoicesPath(
   perPage = DEFAULT_INVOICE_PAGE_SIZE,
   /** The Billing home's «invoices in 30 days» counter: `?created_within_days=30`. */
   createdWithinDays: number | null = null,
+  /** The Billing home's «requested advances» counter: `?open_advances=1` — open advance invoices only. */
+  openAdvances = false,
 ) {
   const params = new URLSearchParams();
   if (createdWithinDays) params.set("created_within_days", String(createdWithinDays));
@@ -239,7 +241,12 @@ export function buildInvoicesPath(
   if (filters.orderId) params.set("order_id", filters.orderId);
   if (filters.quoteId) params.set("quote_id", filters.quoteId);
   if (filters.status) params.set("status", filters.status);
-  if (filters.invoiceType) params.set("invoice_type", filters.invoiceType);
+  if (openAdvances) {
+    params.set("invoice_type", "advance");
+    params.set("open", "true");
+  } else if (filters.invoiceType) {
+    params.set("invoice_type", filters.invoiceType);
+  }
   params.set("page", String(page));
   params.set("per_page", String(perPage));
   return params.size ? `/invoices?${params.toString()}` : "/invoices";

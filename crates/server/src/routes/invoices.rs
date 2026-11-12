@@ -251,6 +251,10 @@ struct ListInvoicesQuery {
     /// Invoices created in the last N days, drafts and cancelled ones left out:
     /// the Billing home's «invoices in 30 days» counter (QA 2026-11-12, B S3-4).
     created_within_days: Option<i32>,
+    /// Released invoices with an amount still open: with `invoice_type=advance`
+    /// the Billing home's «requested advances» counter (release QA
+    /// 2026-11-13, C F2), the rule of `open_advance_requests`.
+    open: Option<bool>,
     page: Option<usize>,
     per_page: Option<usize>,
 }
@@ -7103,6 +7107,10 @@ async fn list_invoices(
              AND ($7::int IS NULL
                   OR (i.created_at >= now() - make_interval(days => $7::int)
                       AND i.status NOT IN ('draft', 'cancelled')))
+             -- The rule of `open_advance_requests` in company_financials.rs.
+             AND ($8::bool IS NOT TRUE
+                  OR (i.status IN ('sent', 'partially_paid', 'overdue')
+                      AND i.total_gross - i.credited_amount - i.paid_amount > 0))
            ORDER BY i.issued_at DESC, i.created_at DESC"#,
     )
     .bind(query.search.as_ref().map(|value| format!("%{}%", value.trim())))
@@ -7112,6 +7120,7 @@ async fn list_invoices(
     .bind(query.status)
     .bind(query.invoice_type)
     .bind(query.created_within_days.map(|days| days.clamp(1, 3660)))
+    .bind(query.open)
     .fetch_all(&state.db)
     .await
     {

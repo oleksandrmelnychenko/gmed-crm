@@ -30,17 +30,21 @@ export function PostedReceiptsHint({
   actualCost,
   currency,
   lang,
+  enabled = true,
 }: {
   serviceId: string;
   actualCost: string;
   currency: string;
   lang: Lang;
+  /** False for a role the server does not let read the receipts: no call, no 403. */
+  enabled?: boolean;
 }) {
   const [totals, setTotals] = useState<ReturnType<typeof postedReceiptTotals> | null>(null);
 
   useEffect(() => {
     let active = true;
     setTotals(null);
+    if (!enabled) return undefined;
     getConciergeExpenses(serviceId)
       .then((response) => {
         if (active) setTotals(postedReceiptTotals(response.items));
@@ -51,7 +55,7 @@ export function PostedReceiptsHint({
     return () => {
       active = false;
     };
-  }, [serviceId]);
+  }, [serviceId, enabled]);
 
   if (!totals?.count) return null;
   const labels = copy[lang];

@@ -72,8 +72,8 @@ export type ConciergeSalesView = {
 type Lang = "ru" | "de" | string;
 
 function stateLabel(service: OrderConciergeSaleService, de: boolean): string {
-  if (service.invoiced) return de ? "In Rechnung (im Erlös)" : "В счёте (учтено в доходе)";
-  if (service.billed) return de ? "Berechnet ohne Rechnungsposition" : "Выставлено без позиции счёта";
+  if (service.invoiced) return de ? "In ausgestellter Rechnung (im Erlös)" : "В выпущенном счёте (учтено в доходе)";
+  if (service.billed) return de ? "Von Hand als berechnet markiert" : "Вручную отмечено как выставленное";
   if (service.billing_status === "ready") return de ? "Bereit zur Abrechnung" : "Готово к выставлению счёта";
   return de ? "Noch nicht berechnet" : "Ещё не выставлено";
 }
@@ -96,12 +96,30 @@ export function conciergeSalesView(
   const invoiced = formatMoney(sales.invoiced_total ?? 0, orderCurrency);
   const unbilled = formatMoney(sales.unbilled_total, orderCurrency);
   const billed = formatMoney(sales.billed_total, orderCurrency);
-  const invoicedPart = invoicedTotal > 0
-    ? de ? `in Rechnungen ${invoiced} (im Erlös), ` : `в счетах ${invoiced} (учтено в доходе), `
-    : "";
+  // Issued invoice, not yet in an issued invoice (a draft included) and
+  // marked billed by hand are three different things (release QA 2026-11-13,
+  // F-B5: «в счетах 180» next to «выставлено 0,00» read as a contradiction).
+  const parts: string[] = [];
+  if (invoicedTotal > 0) {
+    parts.push(de ? `in ausgestellten Rechnungen ${invoiced} (im Erlös)` : `в выпущенных счетах ${invoiced} (учтено в доходе)`);
+  }
+  if (unbilledTotal > 0 || (invoicedTotal <= 0 && billedTotal <= 0)) {
+    parts.push(
+      de
+        ? `noch nicht berechnet ${unbilled} (auch im Rechnungsentwurf; zur Information)`
+        : `ещё не выставлено ${unbilled} (в том числе в черновике счёта; информативно)`,
+    );
+  }
+  if (billedTotal > 0) {
+    parts.push(
+      de
+        ? `von Hand als berechnet markiert ${billed} (ohne Rechnungsposition; zur Information)`
+        : `вручную отмечено как выставленное ${billed} (без позиции счёта; информативно)`,
+    );
+  }
   const summary = de
-    ? `Concierge-Leistungen: ${invoicedPart}noch nicht berechnet ${unbilled}, berechnet ${billed} (zur Information).`
-    : `Услуги Concierge: ${invoicedPart}ещё не выставлено ${unbilled}, выставлено ${billed} (информативно).`;
+    ? `Concierge-Leistungen: ${parts.join(", ")}.`
+    : `Услуги Concierge: ${parts.join(", ")}.`;
   const otherCurrency = sales.other_currency_count > 0
     ? de
       ? ` Leistungen in anderer Währung (${sales.other_currency_count}) sind nicht in diesen Summen.`

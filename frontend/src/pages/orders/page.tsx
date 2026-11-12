@@ -4782,20 +4782,20 @@ function useOrdersPageContent() {
                                                         orderEconomics.unassigned_external_cost_gross,
                                                         orderEconomics.currency,
                                                       ) +
-                                                      "."
+                                                      ". Ordnen Sie die Partnerrechnung unter «Eingangsrechnungen» einer Auftragsleistung zu."
                                                     : "Затраты на партнёров без привязки к услуге: " +
                                                       formatOptionalMoney(
                                                         orderEconomics.unassigned_external_cost_gross,
                                                         orderEconomics.currency,
                                                       ) +
-                                                      "."
+                                                      ". Привяжите счёт партнёра к позиции заказа во «Входящих счетах»."
                                                   : warning === "unbilled_patient_receivable"
                                                     ? lang === "de"
                                                       ? "Ein Teil der vom Patienten zu erstattenden Partnerkosten ist noch keiner Patientenrechnung zugeordnet."
                                                       : "Часть затрат, подлежащих возмещению пациентом, ещё не связана со счётом пациента."
                                                     : lang === "de"
-                                                      ? "Ein Teil des abgerechneten Erlöses ist keiner Auftragsleistung zugeordnet, zum Beispiel Mehrverbrauch aus dem Tarif: Er steht als eigene Rechnungszeile, nicht in der Auftragssumme."
-                                                      : "Часть выставленного дохода не связана с услугой заказа: например, превышение по тарифу идёт отдельной строкой счёта и не входит в сумму заказа."}
+                                                      ? "Ein Teil des abgerechneten Erlöses gehört weder zu einer Auftragsleistung noch zu einer Concierge-Leistung oder einem weiterberechneten Beleg – meist eine freie Rechnungszeile, z. B. Mehrverbrauch aus dem Tarif. Prüfen Sie die Rechnungszeilen dieses Auftrags; gehört die Zeile zu einer Leistung, legen Sie sie im Auftrag an."
+                                                      : "Часть выставленного дохода не относится ни к услуге заказа, ни к услуге Concierge, ни к перевыставленному чеку — обычно это свободная строка счёта, например превышение по тарифу. Проверьте строки счетов этого заказа; если строка относится к услуге, добавьте её в заказ."}
                                       </div>
                                     ))}
                                   </div>

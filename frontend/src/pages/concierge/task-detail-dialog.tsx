@@ -89,7 +89,7 @@ import type {
   ConciergeExpenseMutationResponse,
   ConciergeExpenseSubmitInput,
 } from "./expense-receipt-model";
-import { expenseDecisionReason } from "./expense-receipt-model";
+import { conciergeExpenseSubmitErrorMessage, expenseDecisionReason } from "./expense-receipt-model";
 import { ConciergeTaskAttachments } from "./task-attachments";
 import { ConciergeServiceBookingActionById } from "./provider-booking-dialog";
 import { openSubtaskCount, subtaskProgress } from "./task-workflow";
@@ -1035,7 +1035,7 @@ export function ConciergeTaskDetailDialog({
       return response;
     } catch (submitError) {
       setExpenseError(
-        submitError instanceof Error ? submitError.message : labels.expenseLoadFailed,
+        conciergeExpenseSubmitErrorMessage(submitError, lang, labels.expenseLoadFailed),
       );
       throw submitError;
     } finally {

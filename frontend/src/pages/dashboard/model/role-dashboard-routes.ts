@@ -27,7 +27,8 @@ const METRIC_ROUTES: Record<string, string> = {
   lead_to_patient_conversion_rate_pct: "/leads?status=converted&status_within_days=90",
   // Same figure as "Долг пациентов" on the company finance page.
   outstanding_receivables_total: "/company-finance",
-  open_advance_requests_total: "/invoices",
+  // Open advance invoices only, the rule of `open_advance_requests` (release QA 2026-11-13, C F2).
+  open_advance_requests_total: "/invoices?open_advances=1",
   overdue_invoice_count: "/invoices?status=overdue",
   invoices_30d: "/invoices?created_within_days=30",
   // Sessions and pending second factors are counted on the health page.

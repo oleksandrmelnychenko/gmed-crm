@@ -402,6 +402,22 @@ async fn task_expense_endpoints_use_task_context_and_owner_permissions() {
     .await;
     assert_eq!(status, StatusCode::OK, "{listed}");
     assert_eq!(listed["items"].as_array().map(Vec::len), Some(1));
+    // The service's own list names the receipt sent from its task as well
+    // (release QA 2026-11-13, F-B3: the posted-receipts hint stayed empty).
+    let (status, service_listed) = json_request(
+        &context.app,
+        "GET",
+        &format!("/api/v1/concierge-services/{service_id}/expenses"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{service_listed}");
+    assert_eq!(
+        service_listed["items"][0]["id"],
+        expense_id.to_string(),
+        "{service_listed}"
+    );
 
     let reject_path = format!("/api/v1/tasks/{task_id}/expenses/{expense_id}/reject");
     let rejection = json!({
@@ -811,6 +827,10 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{duplicate_receipt}");
+    assert_eq!(
+        duplicate_receipt["error"], "concierge_expense_duplicate_receipt",
+        "{duplicate_receipt}"
+    );
 
     let (status, forbidden) = submit_fixture_expense(
         &context.app,

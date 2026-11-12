@@ -303,15 +303,22 @@ pub(super) async fn live_service_recipient_name(
 
 /// First and last day the invoiced services were rendered (Leistungszeitraum).
 ///
-/// Service lines are dated by their medical appointment, else by the day the
-/// service was delivered. Without dated lines the order's appointments give the
-/// period (an advance invoice bills services still ahead). Supplier invoices
-/// billed on are dated by their own invoice date as a last resort.
+/// The invoice's own lines date it first: order services by their medical
+/// appointment, else by the day they were delivered; Concierge services by
+/// their service day; re-billed receipts and supplier invoices by their own
+/// invoice date. Only when no line carries a date do the order's appointments
+/// give the period (an advance invoice bills services still ahead) — never
+/// for dated lines: an interim invoice of a Concierge service and its receipt
+/// printed the order's planned visits weeks ahead (QA 2026-11-13, F-B1).
+/// A supplier's date alone dates the invoice only when every line is such a
+/// receipt: next to an undated line it would claim a service date for that
+/// line too (QA 2026-10-31, R4-2).
 pub(super) async fn load_invoice_service_period(
     conn: &mut PgConnection,
     order_id: Option<Uuid>,
     line_items: &Value,
 ) -> Result<Option<(NaiveDate, NaiveDate)>, sqlx::Error> {
+    let mut service_days = concierge_service_days(line_items);
     let source_line_ids = super::extract_source_line_ids(line_items);
     if !source_line_ids.is_empty() {
         let row = sqlx::query(
@@ -331,14 +338,23 @@ pub(super) async fn load_invoice_service_period(
         .bind(&source_line_ids)
         .fetch_one(&mut *conn)
         .await?;
-        if let (Some(first), Some(last)) = (
+        service_days.extend(
             row.try_get::<Option<NaiveDate>, _>("first_day")
                 .unwrap_or_default(),
+        );
+        service_days.extend(
             row.try_get::<Option<NaiveDate>, _>("last_day")
                 .unwrap_or_default(),
-        ) {
-            return Ok(Some((first, last)));
-        }
+        );
+    }
+    let supplier_days = supplier_invoice_days(line_items);
+    if !service_days.is_empty() {
+        service_days.extend(supplier_days);
+        return Ok(day_span(&service_days));
+    }
+    let line_count = line_items.as_array().map_or(0, Vec::len);
+    if !supplier_days.is_empty() && supplier_days.len() == line_count {
+        return Ok(day_span(&supplier_days));
     }
 
     if let Some(order_id) = order_id {
@@ -359,25 +375,35 @@ pub(super) async fn load_invoice_service_period(
             return Ok(Some((first, last)));
         }
     }
+    Ok(None)
+}
 
-    let supplier_days = line_items
+/// Service days (Europe/Berlin) of the Concierge service lines.
+fn concierge_service_days(line_items: &Value) -> Vec<NaiveDate> {
+    line_items
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("source").and_then(Value::as_str) == Some("concierge_service"))
+        .filter_map(|item| item.get("source_service_date").and_then(Value::as_str))
+        .filter_map(|raw| DateTime::parse_from_rfc3339(raw.trim()).ok())
+        .map(|instant| crate::app_time::date_of(instant.with_timezone(&Utc)))
+        .collect()
+}
+
+/// Invoice dates of the re-billed receipts and supplier invoices.
+fn supplier_invoice_days(line_items: &Value) -> Vec<NaiveDate> {
+    line_items
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(|item| item.get("source_invoice_date").and_then(Value::as_str))
         .filter_map(|raw| NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d").ok())
-        .collect::<Vec<_>>();
-    // The supplier's date dates the supplier's cost only: next to an undated
-    // line it would claim a service date for that line too (QA 2026-10-31, R4-2).
-    let line_count = line_items.as_array().map_or(0, Vec::len);
-    if supplier_days.len() < line_count {
-        return Ok(None);
-    }
-    Ok(supplier_days
-        .iter()
-        .min()
-        .copied()
-        .zip(supplier_days.iter().max().copied()))
+        .collect()
+}
+
+fn day_span(days: &[NaiveDate]) -> Option<(NaiveDate, NaiveDate)> {
+    days.iter().min().copied().zip(days.iter().max().copied())
 }
 
 /// An order service (alias `service`) that was neither delivered nor approved
@@ -984,5 +1010,24 @@ mod tests {
             &[],
         );
         assert_eq!(summary(&rows), vec!["Taxed 19% 100.00 19.00 119.00"]);
+    }
+
+    #[test]
+    fn concierge_and_receipt_lines_carry_their_own_service_days() {
+        let lines = json!([
+            {
+                "source": "concierge_service",
+                "source_service_date": "2026-11-11T23:30:00+00:00",
+            },
+            { "source": "concierge_service", "source_service_date": null },
+            { "source": "external_invoice", "source_invoice_date": "2026-11-10" },
+            { "source": "manual" },
+        ]);
+        let day = |d| NaiveDate::from_ymd_opt(2026, 11, d).unwrap();
+        // 23:30 UTC is already the next day in Berlin.
+        assert_eq!(concierge_service_days(&lines), vec![day(12)]);
+        assert_eq!(supplier_invoice_days(&lines), vec![day(10)]);
+        assert_eq!(day_span(&[day(12), day(10)]), Some((day(10), day(12))));
+        assert_eq!(day_span(&[]), None);
     }
 }

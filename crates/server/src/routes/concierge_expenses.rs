@@ -1551,10 +1551,15 @@ async fn submit_expense_for_scope(
             }
         };
         if duplicate_receipt.is_some() {
-            return err(
+            // A code the dialog translates (release QA 2026-11-13, F-B2).
+            return (
                 StatusCode::CONFLICT,
-                "This receipt was already submitted for this task or Concierge service",
-            );
+                Json(json!({
+                    "error": "concierge_expense_duplicate_receipt",
+                    "message": "This receipt was already submitted for this task or Concierge service",
+                })),
+            )
+                .into_response();
         }
     }
 
@@ -1844,14 +1849,6 @@ fn decimal_string(row: &sqlx::postgres::PgRow, column: &str) -> String {
         .unwrap_or(Decimal::ZERO)
         .round_cents()
         .to_string()
-}
-
-async fn load_expense_item(
-    state: &AppState,
-    service_id: Uuid,
-    expense_id: Uuid,
-) -> Result<Option<Value>, Response> {
-    load_expense_item_for_scope(state, ExpenseScope::Service(service_id), expense_id).await
 }
 
 async fn load_expense_item_for_scope(
@@ -2290,10 +2287,18 @@ async fn list_expenses(
     if !can_read_expenses(&auth, &context) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
-    let ids = match sqlx::query_scalar::<_, Uuid>(
-        r#"SELECT id FROM concierge_expense_submissions
-           WHERE concierge_service_id = $1
-           ORDER BY created_at DESC, id DESC"#,
+    // Receipts sent from the service's task carry only the task: the normal
+    // flow is service → «Открыть задачу» → «Добавить расход» (QA 2026-11-13,
+    // F-B3). They belong to the service as well.
+    let ids = match sqlx::query_as::<_, (Uuid, Option<Uuid>, Option<Uuid>)>(
+        r#"SELECT submission.id, submission.concierge_service_id, submission.task_id
+           FROM concierge_expense_submissions submission
+           WHERE submission.concierge_service_id = $1
+              OR submission.task_id IN (
+                  SELECT task.id FROM tasks task
+                  WHERE task.concierge_service_id = $1 AND task.deleted_at IS NULL
+              )
+           ORDER BY submission.created_at DESC, submission.id DESC"#,
     )
     .bind(service_id)
     .fetch_all(&state.db)
@@ -2306,8 +2311,13 @@ async fn list_expenses(
         }
     };
     let mut items = Vec::with_capacity(ids.len());
-    for expense_id in ids {
-        match load_expense_item(&state, service_id, expense_id).await {
+    for (expense_id, expense_service_id, expense_task_id) in ids {
+        let scope = match (expense_service_id, expense_task_id) {
+            (Some(id), _) if id == service_id => ExpenseScope::Service(service_id),
+            (_, Some(task_id)) => ExpenseScope::Task(task_id),
+            _ => continue,
+        };
+        match load_expense_item_for_scope(&state, scope, expense_id).await {
             Ok(Some(item)) => items.push(item),
             Ok(None) => {}
             Err(response) => return response,

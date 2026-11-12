@@ -5276,12 +5276,16 @@ async fn get_order_economics(
                      AND external.amount_net >= 0 AND external.amount_vat >= 0 AND external.amount_gross >= 0
                      AND external.amount_net + external.amount_vat = external.amount_gross
                      AND external.order_leistung_id IS NULL
+                     -- A posted Concierge receipt has no order line by design
+                     -- (owner 2026-11-12 #1): nothing to fix (QA 2026-11-13, F-B4).
+                     AND external.source_concierge_expense_id IS NULL
                ) AS unassigned_cost_count,
                COALESCE(SUM(external.amount_gross) FILTER (
                    WHERE external.status <> 'cancelled'
                      AND external.paid_by <> 'patient'
                      AND (external.service_delivered OR external.status IN ('approved', 'paid'))
                      AND external.order_leistung_id IS NULL
+                     AND external.source_concierge_expense_id IS NULL
                      AND UPPER(external.currency) = $2
                      AND external.amount_net >= 0 AND external.amount_vat >= 0 AND external.amount_gross >= 0
                      AND external.amount_net + external.amount_vat = external.amount_gross
@@ -5590,6 +5594,71 @@ async fn get_order_economics(
         }
     };
     let concierge_invoiced = concierge_invoiced_revenue(&concierge_invoiced_rows);
+    // Receipts and supplier invoices re-billed at cost by an issued invoice
+    // of this order (patient billing tab, the canonical path for Concierge
+    // receipts — owner 2026-11-12 #1) have no order line either: their
+    // revenue is assigned to its receipt, net of credit notes the same way
+    // (QA 2026-11-13, F-B4).
+    let rebilled_receipts_net = match sqlx::query_scalar::<_, rust_decimal::Decimal>(
+        r#"WITH legacy_credits AS (
+               SELECT transaction.invoice_id,
+                      COALESCE(SUM(CASE WHEN transaction.transaction_type = 'credit_note'
+                                        THEN transaction.amount_net ELSE -transaction.amount_net END), 0) AS amount_net
+               FROM invoice_credit_note_transactions transaction
+               JOIN invoices invoice ON invoice.id = transaction.invoice_id
+               WHERE invoice.order_id = $1
+                 AND transaction.line_items IS NULL
+               GROUP BY transaction.invoice_id
+           ), line_credits AS (
+               SELECT transaction.invoice_id,
+                      NULLIF(credited.value ->> 'invoice_line_index', '')::INTEGER AS invoice_line_index,
+                      COALESCE(SUM(CASE WHEN transaction.transaction_type = 'credit_note' THEN 1 ELSE -1 END
+                                   * COALESCE(NULLIF(credited.value ->> 'line_net', '')::NUMERIC, 0)), 0) AS amount_net
+               FROM invoice_credit_note_transactions transaction
+               JOIN invoices invoice ON invoice.id = transaction.invoice_id
+               CROSS JOIN LATERAL jsonb_array_elements(transaction.line_items) AS credited(value)
+               WHERE invoice.order_id = $1
+                 AND transaction.line_items IS NOT NULL
+                 AND jsonb_typeof(transaction.line_items) = 'array'
+               GROUP BY 1, 2
+           )
+           SELECT COALESCE(SUM(GREATEST(
+                      CASE WHEN invoice.total_net > 0
+                           THEN COALESCE(NULLIF(line.value ->> 'line_net', '')::NUMERIC, 0)
+                                * GREATEST(invoice.total_net - COALESCE(legacy.amount_net, 0), 0)
+                                / invoice.total_net
+                           ELSE 0 END
+                      - COALESCE(line_credit.amount_net, 0),
+                      0
+                  )), 0)
+           FROM invoices invoice
+           CROSS JOIN LATERAL jsonb_array_elements(
+               CASE WHEN jsonb_typeof(invoice.line_items) = 'array'
+                    THEN invoice.line_items ELSE '[]'::jsonb END
+           ) WITH ORDINALITY AS line(value, position)
+           LEFT JOIN legacy_credits legacy ON legacy.invoice_id = invoice.id
+           LEFT JOIN line_credits line_credit
+                  ON line_credit.invoice_id = invoice.id
+                 AND line_credit.invoice_line_index = line.position - 1
+           WHERE invoice.order_id = $1
+             AND invoice.invoice_type <> 'advance'
+             AND invoice.status IN ('sent', 'partially_paid', 'paid', 'overdue')
+             AND line.value ->> 'source' = 'external_invoice'
+             AND COALESCE(line.value ->> 'source_order_leistung_id', '') = ''"#,
+    )
+    .bind(order_id)
+    .fetch_one(&mut *economics_transaction)
+    .await
+    {
+        Ok(value) => value.round_commercial(2),
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "load order re-billed receipts");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load order economics",
+            );
+        }
+    };
     if let Err(error) = economics_transaction.commit().await {
         tracing::error!(error = %error, order_id = %order_id, "commit order economics snapshot");
         return err(
@@ -5747,6 +5816,7 @@ async fn get_order_economics(
         .values()
         .map(|amounts| amounts.net)
         .sum::<rust_decimal::Decimal>();
+    assigned_revenue_net += rebilled_receipts_net;
 
     let planned_revenue_gross = planned_revenue_net + planned_revenue_vat;
     let planned_margin_net = planned_passthrough.margin_of(planned_revenue_net, planned_cost_net);

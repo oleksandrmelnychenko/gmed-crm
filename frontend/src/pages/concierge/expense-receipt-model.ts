@@ -1,3 +1,4 @@
+import type { Lang } from "@/lib/i18n";
 import { normalizeMoneyInput } from "@/lib/money";
 
 export const CONCIERGE_EXPENSE_MAX_FILE_SIZE = 25 * 1024 * 1024;
@@ -91,6 +92,39 @@ export function actualCostMismatch(
   if (!totals.count || !Number.isFinite(actualCost)) return false;
   const actualCents = Math.round(actualCost * 100);
   return actualCents !== totals.netCents && actualCents !== totals.grossCents;
+}
+
+/**
+ * Whether the role may read a Concierge service's receipts — the server's
+ * rule (finance roles, or the service's own concierge). Other roles that open
+ * the edit form skip the call instead of drawing a 403 (QA 2026-11-13, F-B3).
+ */
+export function readsServiceReceipts(
+  role: string | null | undefined,
+  userId: string | null | undefined,
+  assignedConciergeId: string | null | undefined,
+) {
+  if (role === "ceo" || role === "billing" || role === "ceo_assistant") return true;
+  return role === "concierge" && !!userId && userId === assignedConciergeId;
+}
+
+const EXPENSE_SUBMIT_ERRORS: Record<string, Record<Lang, string>> = {
+  concierge_expense_duplicate_receipt: {
+    de: "Dieser Beleg wurde für diese Aufgabe oder Concierge-Leistung bereits eingereicht.",
+    ru: "Этот чек уже отправлен по этой задаче или услуге Concierge.",
+  },
+};
+
+/**
+ * The refusal of a receipt submission in the dialog's language; the
+ * server's English text only for refusals without a translation (release QA
+ * 2026-11-13, F-B2).
+ */
+export function conciergeExpenseSubmitErrorMessage(error: unknown, lang: Lang, fallback: string) {
+  const code = error && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
+  const translated = typeof code === "string" ? EXPENSE_SUBMIT_ERRORS[code]?.[lang] : undefined;
+  if (translated) return translated;
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 /**

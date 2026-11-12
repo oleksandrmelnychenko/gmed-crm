@@ -4,6 +4,7 @@ import {
   CONCIERGE_EXPENSE_MAX_FILE_SIZE,
   actualCostMismatch,
   calculateConciergeExpenseGross,
+  conciergeExpenseSubmitErrorMessage,
   calculateConciergeExpenseNetFromGross,
   calculateConciergeExpenseVat,
   calculateConciergeExpenseVatFromGross,
@@ -11,6 +12,7 @@ import {
   expenseDecisionReason,
   postedReceiptTotals,
   moneyStringToMinorUnits,
+  readsServiceReceipts,
   validateConciergeExpenseReceiptFile,
 } from "./expense-receipt-model";
 
@@ -112,5 +114,28 @@ describe("Concierge receipt decisions and posted totals (QA 2026-11-12)", () => 
     expect(actualCostMismatch(10, totals)).toBe(true);
     expect(actualCostMismatch(Number.NaN, totals)).toBe(false);
     expect(actualCostMismatch(10, { count: 0, netCents: 0, grossCents: 0 })).toBe(false);
+  });
+
+  it("reads a service's receipts only for the roles the server lets read them", () => {
+    expect(readsServiceReceipts("ceo", "u1", null)).toBe(true);
+    expect(readsServiceReceipts("billing", "u1", null)).toBe(true);
+    expect(readsServiceReceipts("ceo_assistant", "u1", null)).toBe(true);
+    expect(readsServiceReceipts("concierge", "u1", "u1")).toBe(true);
+    expect(readsServiceReceipts("concierge", "u1", "u2")).toBe(false);
+    expect(readsServiceReceipts("concierge", "u1", null)).toBe(false);
+    expect(readsServiceReceipts("patient_manager", "u1", "u1")).toBe(false);
+    expect(readsServiceReceipts(undefined, undefined, undefined)).toBe(false);
+  });
+
+  it("translates the duplicate receipt refusal and keeps other server texts", () => {
+    const duplicate = Object.assign(new Error("This receipt was already submitted"), {
+      code: "concierge_expense_duplicate_receipt",
+    });
+    expect(conciergeExpenseSubmitErrorMessage(duplicate, "ru", "x")).toBe(
+      "Этот чек уже отправлен по этой задаче или услуге Concierge.",
+    );
+    expect(conciergeExpenseSubmitErrorMessage(duplicate, "de", "x")).toContain("bereits eingereicht");
+    expect(conciergeExpenseSubmitErrorMessage(new Error("Other"), "ru", "x")).toBe("Other");
+    expect(conciergeExpenseSubmitErrorMessage(null, "ru", "fallback")).toBe("fallback");
   });
 });

@@ -55,12 +55,14 @@ describe("conciergeSalesView", () => {
     expect(view).not.toBeNull();
     expect(view?.unbilledTotal).toBe(180);
     expect(view?.billedTotal).toBe(100);
-    expect(view?.summary).toBe("Услуги Concierge: ещё не выставлено 180.00 EUR, выставлено 100.00 EUR (информативно).");
+    expect(view?.summary).toBe(
+      "Услуги Concierge: ещё не выставлено 180.00 EUR (в том числе в черновике счёта; информативно), вручную отмечено как выставленное 100.00 EUR (без позиции счёта; информативно).",
+    );
     expect(view?.note).toContain("не входят в суммы заказа");
     expect(view?.note).toContain("зарплатой");
     expect(view?.rows.map((row) => [row.id, row.state, row.salePrice, row.date])).toEqual([
       ["ready", "Готово к выставлению счёта", "180.00 EUR", "13.11.2026"],
-      ["billed", "Выставлено без позиции счёта", "100.00 EUR", "—"],
+      ["billed", "Вручную отмечено как выставленное", "100.00 EUR", "—"],
     ]);
   });
 
@@ -87,13 +89,29 @@ describe("conciergeSalesView", () => {
     );
     expect(view?.invoicedTotal).toBe(120);
     expect(view?.summary).toBe(
-      "Услуги Concierge: в счетах 120.00 EUR (учтено в доходе), ещё не выставлено 180.00 EUR, выставлено 100.00 EUR (информативно).",
+      "Услуги Concierge: в выпущенных счетах 120.00 EUR (учтено в доходе), ещё не выставлено 180.00 EUR (в том числе в черновике счёта; информативно), вручную отмечено как выставленное 100.00 EUR (без позиции счёта; информативно).",
     );
     const invoiced = view?.rows.find((row) => row.id === "invoiced");
     expect(invoiced?.invoiced).toBe(true);
-    expect(invoiced?.state).toBe("В счёте (учтено в доходе)");
+    expect(invoiced?.state).toBe("В выпущенном счёте (учтено в доходе)");
     expect(invoiced?.salePrice).toBe("120.00 EUR");
     expect(invoiced?.href).toBe("/services?service=invoiced");
+  });
+
+  it("names only the issued invoice when nothing else is open (F-B5)", () => {
+    const base = sales();
+    const view = conciergeSalesView(
+      sales({
+        invoiced_total: "180",
+        unbilled_total: "0",
+        billed_total: "0",
+        services: [{ ...base.services[0], id: "invoiced", invoiced: true, invoiced_net: "180", billing_status: "billed" }],
+      }),
+      money,
+      "EUR",
+      "ru",
+    );
+    expect(view?.summary).toBe("Услуги Concierge: в выпущенных счетах 180.00 EUR (учтено в доходе).");
   });
 
   it("says in German that services in another currency stay outside the sums", () => {
