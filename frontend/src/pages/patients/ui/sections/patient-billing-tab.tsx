@@ -23,6 +23,7 @@ import {
 import { INVOICE_LINE_COMMENT_MAX_LENGTH, isOverageOnlyInvoice, isQuoteClosedForInvoicing } from "@/pages/invoices/model/invoice-model";
 import type { InvoiceLineItem, InvoiceType, QuoteOption } from "@/pages/invoices/model/types";
 import { PatientTerminationSettlements } from "@/pages/invoices/termination-settlement/ui";
+import { doubleBillingWarnings, proposedOrderForExpense } from "./patient-billing-double-billing";
 
 type BillingOrder = {
   id: string;
@@ -31,7 +32,7 @@ type BillingOrder = {
   phase: string;
   currency: string;
   package_coverage_status: string;
-  services: Array<{ id: string; status: string }>;
+  services: Array<{ id: string; status: string; is_cost_passthrough?: boolean; name?: string | null }>;
   cancellation_reason?: string | null;
   termination_settlement?: {
     id: string;
@@ -65,6 +66,9 @@ type BillingExpense = {
   rebilling_waivers?: RebillingWaiver[];
   source_order_id: string | null;
   source_order_number: string | null;
+  /** The order of the cost: its own, else the order of its Concierge service. */
+  proposed_order_id?: string | null;
+  concierge_receipt?: boolean;
   /** The order's settlement is closed: its waivers stay. */
   settlement_closed?: boolean;
   latest_patient_invoice_id: string | null;
@@ -122,6 +126,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
   const [workspace, setWorkspace] = useState<BillingWorkspace | null>(null);
   const [quotes, setQuotes] = useState<QuoteOption[]>([]);
   const [orderId, setOrderId] = useState("");
+  const [proposedOrderId, setProposedOrderId] = useState<string | null>(null);
   const [billingCurrency, setBillingCurrency] = useState("EUR");
   const [quoteId, setQuoteId] = useState("");
   const [invoiceType, setInvoiceType] = useState<InvoiceType>("interim");
@@ -149,6 +154,10 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     total: "Summe des Entwurfs", choose: "Mindestens eine Leistung oder einen Kostenbeleg auswählen.", patientPaid: "Patient selbst", gmedPaid: "GMED", unpaid: "Unbezahlt",
     ready: "Nicht berechnet", reserved: "Im Entwurf / berechnet", afterPayment: "Nach Zahlung", notRequired: "Nicht erforderlich",
     orderService: "Über die Auftragsleistung",
+    viaConciergeService: "Auftrag der Concierge-Leistung",
+    proposedOrder: (order: string) => `Auftrag ${order} aus dem Beleg bzw. seiner Concierge-Leistung übernommen. Bei Bedarf einen anderen wählen.`,
+    transitWarning: (order: string, lines: string) => `Auftrag ${order} enthält eine Durchlaufposition (${lines}). Concierge-Kosten werden über die Belege weiterberechnet; eine Durchlaufposition gilt nur für einen vorab bekannten Preis. Prüfen, dass diese Kosten nicht zusätzlich über die Durchlaufposition berechnet werden.`,
+    rebilledWarning: (lines: string, receipts: string) => `Die Durchlaufposition (${lines}) wird berechnet, obwohl Belege dieses Auftrags bereits weiterberechnet werden (${receipts}). Prüfen, dass der Patient dieselben Kosten nicht doppelt zahlt.`,
     overageOnly: (amount: string) => `Alle Positionen sind abgerechnet. Der Entwurf wird eine Zwischenrechnung über den Mehrverbrauch aus dem Tarif: ${amount}.`,
     orderStatus: { active: "aktiv", paused: "pausiert", completed: "abgeschlossen", cancelled: "storniert" } as Record<string, string>,
     comment: "Anmerkung auf der Rechnung", commentHint: "z. B. 2. und 3. Quartal 2026",
@@ -172,6 +181,10 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     total: "Сумма черновика", choose: "Выберите хотя бы одну услугу или расход.", patientPaid: "Сам пациент", gmedPaid: "GMED", unpaid: "Не оплачен",
     ready: "Не выставлено", reserved: "В черновике / выставлено", afterPayment: "После оплаты", notRequired: "Не требуется",
     orderService: "Через услугу заказа",
+    viaConciergeService: "Заказ услуги Concierge",
+    proposedOrder: (order: string) => `Подставлен заказ ${order} из расхода или его услуги Concierge. При необходимости выберите другой.`,
+    transitWarning: (order: string, lines: string) => `В заказе ${order} есть транзитная позиция (${lines}). Расходы Concierge выставляются через перевыставление чеков; транзитная позиция — только для заранее известной цены. Проверьте, что эти расходы не выставляются ещё раз через транзитную позицию.`,
+    rebilledWarning: (lines: string, receipts: string) => `Выставляется транзитная позиция (${lines}), хотя расходы этого заказа уже перевыставлены по чекам (${receipts}). Проверьте, что пациент не оплатит одни и те же расходы дважды.`,
     overageOnly: (amount: string) => `Все позиции выставлены. Черновик станет промежуточным счётом на превышение по тарифу: ${amount}.`,
     orderStatus: { active: "активен", paused: "на паузе", completed: "завершён", cancelled: "отменён" } as Record<string, string>,
     comment: "Примечание в счёте", commentHint: "например: за 2 и 3 квартал 2026",
@@ -248,6 +261,13 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
   const overageOnly = isOverageOnlyInvoice(quote, { invoiceType: "interim" });
   const overageTotal = billsAllOpenLines || overageOnly ? Number(quote?.open_package_overage_gross ?? 0) : 0;
   const total = serviceTotal + expenseTotal + overageTotal;
+  const billingWarnings = doubleBillingWarnings({
+    orders: workspace?.orders ?? [],
+    expenses: workspace?.expenses ?? [],
+    selectedExpenseIds: selectedExpenses,
+    orderId,
+    selectedQuoteLines: selectedLines.map(index => serviceLines[index]).filter((line): line is InvoiceLineItem => Boolean(line)),
+  });
 
   function selectQuote(nextId: string) {
     const next = orderQuotes.find(item => item.id === nextId) ?? null;
@@ -346,13 +366,30 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     if (expense.billable) return copy.ready;
     return copy.afterPayment;
   };
+  const linkedOrderNumber = (expense: BillingExpense) => expense.proposed_order_id
+    ? workspace?.orders.find(item => item.id === expense.proposed_order_id)?.order_number ?? null
+    : null;
+  // Ticking a receipt while no order is chosen proposes the order of the
+  // receipt or of its Concierge service, so the re-billed revenue lands in
+  // that order's economics (QA 2026-11-12 C-1). Staff may still change it.
+  function toggleExpense(expense: BillingExpense, checked: boolean) {
+    if (checked && !orderId) {
+      const proposed = proposedOrderForExpense(expense, workspace?.orders ?? []);
+      if (proposed) {
+        setOrderId(proposed.id);
+        setBillingCurrency(proposed.currency);
+        setProposedOrderId(proposed.id);
+      }
+    }
+    setSelectedExpenses(current => checked ? [...current, expense.id] : current.filter(id => id !== expense.id));
+  }
   const paymentLabel = (expense: BillingExpense) => expense.paid_by === "patient"
     ? copy.patientPaid : Number(expense.company_paid_gross) > 0 ? copy.gmedPaid : copy.unpaid;
   const expenseColumns: ColumnDef<BillingExpense>[] = [
-    { id: "select", label: "", accessor: row => selectedExpenses.includes(row.id), width: 52, required: true, render: row => <input className={checkboxClass} type="checkbox" disabled={!row.billable || row.currency !== activeCurrency || saving} checked={selectedExpenses.includes(row.id)} aria-label={`${copy.expenses}: ${row.external_invoice_number}`} onChange={event => setSelectedExpenses(current => event.target.checked ? [...current, row.id] : current.filter(id => id !== row.id))} /> },
+    { id: "select", label: "", accessor: row => selectedExpenses.includes(row.id), width: 52, required: true, render: row => <input className={checkboxClass} type="checkbox" disabled={!row.billable || row.currency !== activeCurrency || saving} checked={selectedExpenses.includes(row.id)} aria-label={`${copy.expenses}: ${row.external_invoice_number}`} onChange={event => toggleExpense(row, event.target.checked)} /> },
     { id: "document", label: de ? "Beleg" : "Документ", accessor: row => row.external_invoice_number, width: 190, render: row => <span className="font-mono font-semibold">{row.external_invoice_number}</span> },
     { id: "provider", label: de ? "Leistungserbringer" : "Поставщик", accessor: row => row.provider_name ?? "", width: 210, render: row => row.provider_name || "—" },
-    { id: "source", label: copy.source, accessor: row => row.source_order_number ?? "", width: 170, render: row => row.source_order_number ? <span className="font-mono text-xs">{row.source_order_number}</span> : <StatusBadge tone="neutral">{de ? "Ohne Auftrag" : "Без заказа"}</StatusBadge> },
+    { id: "source", label: copy.source, accessor: row => row.source_order_number ?? linkedOrderNumber(row) ?? "", width: 170, render: row => row.source_order_number ? <span className="font-mono text-xs">{row.source_order_number}</span> : linkedOrderNumber(row) ? <span className="font-mono text-xs" title={copy.viaConciergeService}>{linkedOrderNumber(row)}</span> : <StatusBadge tone="neutral">{de ? "Ohne Auftrag" : "Без заказа"}</StatusBadge> },
     { id: "payment", label: copy.payment, accessor: paymentLabel, width: 135, render: row => <StatusBadge tone={row.paid_by === "patient" ? "info" : Number(row.company_paid_gross) > 0 ? "success" : "neutral"}>{paymentLabel(row)}</StatusBadge> },
     { id: "patient_invoice", label: copy.patientInvoice, accessor: expenseState, width: 190, render: row => row.latest_patient_invoice_id ? <StaffLink className="font-mono text-xs font-semibold text-primary" to={`/invoices?invoice=${row.latest_patient_invoice_id}`}>{row.latest_patient_invoice_number || expenseState(row)}</StaffLink> : <StatusBadge tone={row.billable ? "warning" : "neutral"}>{expenseState(row)}</StatusBadge> },
     { id: "amount", label: copy.amount, accessor: row => Number(row.remaining_receivable_gross), width: 145, render: row => <span className="block text-right font-mono font-semibold tabular-nums">{formatMoneyAmount(row.billable ? row.remaining_receivable_gross : row.amount_gross, row.currency)}</span> },
@@ -386,13 +423,16 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
       </div>
       <form className="space-y-4 p-4" onSubmit={submit}>
         <div className="grid gap-3 lg:grid-cols-5">
-          <Field label={copy.order}><NativeComboboxSelect value={orderId || "__none__"} disabled={busy || saving} onChange={event => { const nextOrderId = event.target.value === "__none__" ? "" : event.target.value; const nextOrder = workspace?.orders.find(item => item.id === nextOrderId); setOrderId(nextOrderId); if (nextOrder) setBillingCurrency(nextOrder.currency); setQuoteId(""); setSelectedLines([]); setLineComments({}); setSelectedExpenses([]); setCreated(null); }}><option value="__none__">{copy.noOrder}</option>{workspace?.orders.map(item => <option key={item.id} value={item.id}>{item.order_number} · {item.cancellation_reason === "contract_terminated" ? (de ? "gekündigt" : "расторгнут") : copy.orderStatus[item.status] ?? item.status} · {item.currency}</option>)}</NativeComboboxSelect></Field>
+          <Field label={copy.order}><NativeComboboxSelect value={orderId || "__none__"} disabled={busy || saving} onChange={event => { const nextOrderId = event.target.value === "__none__" ? "" : event.target.value; const nextOrder = workspace?.orders.find(item => item.id === nextOrderId); setOrderId(nextOrderId); setProposedOrderId(null); if (nextOrder) setBillingCurrency(nextOrder.currency); setQuoteId(""); setSelectedLines([]); setLineComments({}); setSelectedExpenses([]); setCreated(null); }}><option value="__none__">{copy.noOrder}</option>{workspace?.orders.map(item => <option key={item.id} value={item.id}>{item.order_number} · {item.cancellation_reason === "contract_terminated" ? (de ? "gekündigt" : "расторгнут") : copy.orderStatus[item.status] ?? item.status} · {item.currency}</option>)}</NativeComboboxSelect></Field>
           <Field label={copy.currency}><NativeComboboxSelect value={activeCurrency} disabled={Boolean(order) || busy || saving} onChange={event => { setBillingCurrency(event.target.value); setSelectedExpenses([]); setCreated(null); }}>{currencyOptions.map(currency => <option key={currency} value={currency}>{currency}</option>)}</NativeComboboxSelect></Field>
           <Field label={copy.quote}><NativeComboboxSelect value={quoteId || "__empty__"} disabled={!order || busy || saving} onChange={event => selectQuote(event.target.value === "__empty__" ? "" : event.target.value)}><option value="__empty__">{copy.noQuote}</option>{orderQuotes.map(item => <option key={item.id} value={item.id}>{item.quote_number}</option>)}</NativeComboboxSelect></Field>
           <Field label={copy.type}><NativeComboboxSelect value={invoiceType} disabled={saving} onChange={event => { const value = event.target.value as InvoiceType; setInvoiceType(value); if (value === "final") setSelectedLines(serviceLines.map((line, index) => availableQuantity(line) > 0 ? index : -1).filter(index => index >= 0)); }}><option value="interim">{copy.interim}</option><option value="final">{copy.final}</option></NativeComboboxSelect></Field>
           <Field label={copy.due}><Input type="date" disabled={saving} value={dueDate} onChange={event => setDueDate(event.target.value)} /></Field>
         </div>
         {error ? <Banner tone="error">{error}</Banner> : null}
+        {proposedOrderId && proposedOrderId === orderId && order ? <p className="text-xs text-muted-foreground" data-testid="patient-billing-proposed-order">{copy.proposedOrder(order.order_number)}</p> : null}
+        {billingWarnings.transitForSelectedExpenses.map(item => <div key={item.order.id} data-testid="patient-billing-transit-warning"><Banner tone="warning">{copy.transitWarning(item.order.order_number, item.names.join(", "))}</Banner></div>)}
+        {billingWarnings.rebilledForTransitLines ? <div data-testid="patient-billing-rebilled-warning"><Banner tone="warning">{copy.rebilledWarning(billingWarnings.rebilledForTransitLines.lines.join(", "), billingWarnings.rebilledForTransitLines.expenses.map(expense => expense.latest_patient_invoice_number || expense.external_invoice_number).join(", "))}</Banner></div> : null}
         {created ? <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"><div className="flex flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2"><CheckCircle2 className="size-4" />{copy.success}</span><StaffLink className="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground" to={`/invoices?invoice=${created.id}`}>{copy.open}</StaffLink></div></div> : null}
 
         <section className="overflow-hidden rounded-xl border border-border/70">

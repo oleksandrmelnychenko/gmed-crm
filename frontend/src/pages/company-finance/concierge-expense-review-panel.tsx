@@ -41,7 +41,7 @@ import { Banner as ShellBanner, selectClass as shellSelectClassName } from "@/co
 import { appDateKey, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { companyFinanceErrorCode, localizeCompanyFinanceError } from "./errors";
+import { localizeCompanyFinanceError } from "./errors";
 import { useFinanceAutoRefresh } from "./use-finance-auto-refresh";
 import { pdfPreviewBlob } from "@/pages/documents/data/document-api";
 
@@ -49,7 +49,10 @@ import {
   buildExpensePostPayload,
   eligibleExpenseOrderServices,
   eligibleExpenseOrders,
+  externalInvoiceCodeLabel,
   filterConciergeExpenseQueue,
+  unmappedTransitLines,
+  proposedExpenseOrderId,
   resolveStableRequestId,
   validateExpensePostForm,
   validateExpenseRejection,
@@ -163,6 +166,8 @@ const textByLanguage = {
     orderService: "Позиция заказа",
     noOrderService: "Без конкретной позиции",
     lockedMapping: "Назначение было указано при передаче и не может быть заменено.",
+    proposedOrder: "Заказ подставлен из услуги Concierge. При необходимости выберите другой.",
+    transitLineWarning: (names: string) => `В заказе есть транзитная позиция: ${names}. Если этот чек — её расходы, выберите её в «Позиция заказа»: тогда чек станет расходом этой позиции и не будет перевыставлен пациенту второй раз. Иначе пациент может оплатить одни и те же расходы дважды.`,
     agencyPayment: "Оплата GMED",
     paidOn: "Дата оплаты",
     financialAccount: "Счет GMED",
@@ -280,6 +285,8 @@ const textByLanguage = {
     orderService: "Auftragsposition",
     noOrderService: "Ohne konkrete Position",
     lockedMapping: "Die beim Einreichen angegebene Zuordnung kann nicht ersetzt werden.",
+    proposedOrder: "Auftrag aus der Concierge-Leistung übernommen. Bei Bedarf einen anderen wählen.",
+    transitLineWarning: (names: string) => `Der Auftrag enthält eine Durchlaufposition: ${names}. Gehört dieser Beleg zu ihren Kosten, sie unter «Auftragsposition» wählen: Dann ist der Beleg Kosten dieser Position und wird dem Patienten nicht ein zweites Mal weiterberechnet. Sonst kann der Patient dieselben Kosten doppelt zahlen.`,
     agencyPayment: "GMED-Zahlung",
     paidOn: "Zahlungsdatum",
     financialAccount: "GMED-Konto",
@@ -595,7 +602,17 @@ export function ConciergeExpenseReviewPanel({
     });
     try {
       const result = await fetchCompanyConciergeExpenseContext(row.task_id);
-      if (contextRequestRef.current === request) setContext(result);
+      if (contextRequestRef.current === request) {
+        setContext(result);
+        // The order of the Concierge service is proposed, so the re-billed
+        // revenue lands in that order's economics (QA 2026-11-12 C-1).
+        if (row.status === "pending_review" && !row.order_id) {
+          const proposed = proposedExpenseOrderId(row, result);
+          if (proposed) {
+            setForm((current) => (current.orderId ? current : { ...current, orderId: proposed }));
+          }
+        }
+      }
     } catch (error) {
       if (contextRequestRef.current === request) {
         setContextError(error instanceof Error ? error.message : text.contextFailed);
@@ -724,11 +741,7 @@ export function ConciergeExpenseReviewPanel({
       onChanged();
     } catch (error) {
       // A cash account (Kasse) cannot pay more than it holds.
-      setMutationError(
-        companyFinanceErrorCode(error) === "cash_account_insufficient_balance"
-          ? localizeCompanyFinanceError(error, lang, text.postFailed, selected.currency)
-          : error instanceof Error ? error.message : text.postFailed,
-      );
+      setMutationError(localizeCompanyFinanceError(error, lang, text.postFailed, selected.currency));
     } finally {
       setMutationBusy(null);
     }
@@ -762,7 +775,7 @@ export function ConciergeExpenseReviewPanel({
       setSuccessMessage(text.rejectedSuccess);
       onChanged();
     } catch (error) {
-      setMutationError(error instanceof Error ? error.message : text.rejectFailed);
+      setMutationError(localizeCompanyFinanceError(error, lang, text.rejectFailed));
     } finally {
       setMutationBusy(null);
     }
@@ -801,7 +814,7 @@ export function ConciergeExpenseReviewPanel({
       setSuccessMessage(text.reversedSuccess);
       onChanged();
     } catch (error) {
-      setMutationError(error instanceof Error ? error.message : text.reverseFailed);
+      setMutationError(localizeCompanyFinanceError(error, lang, text.reverseFailed));
     } finally {
       setMutationBusy(null);
     }
@@ -811,6 +824,7 @@ export function ConciergeExpenseReviewPanel({
   const availableOrderServices = selected && context
     ? eligibleExpenseOrderServices(selected, context, form.orderId)
     : [];
+  const transitLines = context ? unmappedTransitLines(context, form.orderId, form.orderLeistungId) : [];
   const availableAccounts = selected ? accounts.filter((account) => (
     account.is_active && account.currency.toLocaleUpperCase() === selected.currency.toLocaleUpperCase()
   )) : [];
@@ -1079,6 +1093,9 @@ export function ConciergeExpenseReviewPanel({
                                 <option value="">{text.noOrder}</option>
                                 {availableOrders.map((order) => <option key={order.id} value={order.id}>{order.order_number} · {order.currency}</option>)}
                               </select>
+                              {!selected.order_id && context.mapped_order && form.orderId === context.mapped_order.id ? (
+                                <span className="mt-1 block font-normal text-muted-foreground" data-testid="concierge-expense-proposed-order">{text.proposedOrder}</span>
+                              ) : null}
                             </label>
                             <label className="block text-xs font-medium">
                               {text.orderService}
@@ -1092,6 +1109,11 @@ export function ConciergeExpenseReviewPanel({
                                 {availableOrderServices.map((service) => <option key={service.id} value={service.id}>{service.name}{service.description ? ` · ${service.description}` : ""}</option>)}
                               </select>
                             </label>
+                            {transitLines.length ? (
+                              <div data-testid="concierge-expense-transit-warning">
+                                <ShellBanner tone="warning">{text.transitLineWarning(transitLines.map((line) => line.name).join(", "))}</ShellBanner>
+                              </div>
+                            ) : null}
                           </div>
                         </section>
 
@@ -1164,9 +1186,9 @@ export function ConciergeExpenseReviewPanel({
                         <h3 className="text-sm font-semibold"><SectionHeading icon={FileInput}>{text.externalInvoice}</SectionHeading></h3>
                         <div className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
                           <div className="min-w-0"><span className="block text-muted-foreground">ID</span><span className="block break-all font-mono">{selected.external_invoice.id}</span></div>
-                          <div><span className="block text-muted-foreground">{text.invoiceStatus}</span>{selected.external_invoice.status || "—"}</div>
-                          <div><span className="block text-muted-foreground">{text.payer}</span>{selected.external_invoice.paid_by || "—"}</div>
-                          <div><span className="block text-muted-foreground">{text.settlementStatus}</span>{selected.external_invoice.settlement_status || "—"}</div>
+                          <div><span className="block text-muted-foreground">{text.invoiceStatus}</span>{externalInvoiceCodeLabel("status", selected.external_invoice.status, lang)}</div>
+                          <div><span className="block text-muted-foreground">{text.payer}</span>{externalInvoiceCodeLabel("paid_by", selected.external_invoice.paid_by, lang)}</div>
+                          <div><span className="block text-muted-foreground">{text.settlementStatus}</span>{externalInvoiceCodeLabel("settlement_status", selected.external_invoice.settlement_status, lang)}</div>
                         </div>
                         {selected.order_id ? <StaffLink to={`/orders/${selected.order_id}`} className="mt-3 inline-block text-xs font-medium text-primary hover:underline">{text.order}: {selected.order_number || selected.order_id}</StaffLink> : null}
                       </section>

@@ -183,6 +183,71 @@ const MESSAGES: Record<string, Pair> = {
     "Diese Zahlung wurde bereits mit anderen Angaben gesendet. Seite neu laden.",
     "Эта операция уже отправлена с другими данными. Обновите страницу.",
   ],
+  // Concierge receipt review and storno (QA 2026-11-12 C-5).
+  "reverse the patient invoice allocation before reversing this expense": [
+    "Der Beleg ist bereits in einer Patientenrechnung weiterberechnet. Zuerst diese Rechnung stornieren oder gutschreiben, dann die Auslage stornieren.",
+    "Расход уже перевыставлен пациенту в счёте. Сначала отмените этот счёт или оформите по нему кредит-ноту, затем сторнируйте расход.",
+  ],
+  "cancel or credit the patient invoice for the allocated amount before reversing this expense": [
+    "Die Patientenrechnung mit diesem Beleg ist noch nicht storniert oder gutgeschrieben. Zuerst die Rechnung korrigieren.",
+    "Счёт пациента с этим расходом ещё не отменён и не закрыт кредит-нотой. Сначала исправьте счёт.",
+  ],
+  "reverse all provider payments before reversing this expense": [
+    "Zuerst alle Zahlungen an den Anbieter für diesen Beleg stornieren.",
+    "Сначала отмените все выплаты поставщику по этому расходу.",
+  ],
+  "provider settlement changed; reverse it through the provider payment journal first": [
+    "Die Anbieterabrechnung wurde geändert. Zuerst die Zahlung im Zahlungsjournal des Anbieters stornieren.",
+    "Расчёт с поставщиком изменился. Сначала отмените выплату в журнале выплат поставщику.",
+  ],
+  "provider settlement must be reversed through the canonical journal first": [
+    "Zuerst die Zahlung an den Anbieter im Zahlungsjournal stornieren.",
+    "Сначала отмените выплату поставщику в журнале выплат.",
+  ],
+  "only a posted expense can be reversed": [
+    "Nur eine verbuchte Auslage kann storniert werden. Seite neu laden.",
+    "Сторнировать можно только проведённый расход. Обновите страницу.",
+  ],
+  "expense was already reversed": [
+    "Die Auslage wurde bereits storniert. Seite neu laden.",
+    "Расход уже сторнирован. Обновите страницу.",
+  ],
+  "expense was already reviewed": [
+    "Die Auslage wurde bereits bearbeitet. Seite neu laden.",
+    "Расход уже обработан. Обновите страницу.",
+  ],
+  "reversed_on cannot be in the future": [
+    "Das Stornodatum darf nicht in der Zukunft liegen.",
+    "Дата сторно не может быть в будущем.",
+  ],
+  "reversed_on cannot precede the expense date": [
+    "Das Stornodatum darf nicht vor dem Belegdatum liegen.",
+    "Дата сторно не может быть раньше даты расхода.",
+  ],
+  "reversed_on cannot precede the provider payment": [
+    "Das Stornodatum darf nicht vor der Zahlung an den Anbieter liegen.",
+    "Дата сторно не может быть раньше выплаты поставщику.",
+  ],
+  "reason must contain between 1 and 2000 characters": [
+    "Bitte einen Grund mit höchstens 2000 Zeichen angeben.",
+    "Укажите причину (не более 2000 символов).",
+  ],
+  "order must be active, belong to the same patient, and match the expense currency": [
+    "Der Auftrag muss aktiv sein, zum selben Patienten gehören und die Währung der Auslage haben.",
+    "Заказ должен быть активным, принадлежать тому же пациенту и быть в валюте расхода.",
+  ],
+  "order service must belong to the selected order and currency": [
+    "Die Leistung muss zum gewählten Auftrag und zur Währung gehören.",
+    "Услуга должна относиться к выбранному заказу и валюте.",
+  ],
+  "a non-medical partner or service provider is required before posting": [
+    "Vor dem Verbuchen einen nicht-medizinischen Partner oder Leistungserbringer wählen.",
+    "Перед проводкой укажите немедицинского партнёра или поставщика услуги.",
+  ],
+  "concierge partner and order service provider must match": [
+    "Der Concierge-Partner und der Anbieter der Auftragsleistung müssen übereinstimmen.",
+    "Партнёр консьержа и поставщик услуги заказа должны совпадать.",
+  ],
 };
 
 function errorBody(error: unknown): Record<string, unknown> | null {

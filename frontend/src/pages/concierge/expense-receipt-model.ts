@@ -51,7 +51,58 @@ export type ConciergeExpenseItem = {
   reviewed_by: ConciergeExpenseActor | null;
   submitted_at: string;
   reviewed_at: string | null;
+  /** Submission, review and storno events, with the reviewer's reason. */
+  history?: ConciergeExpenseHistoryEvent[];
 };
+
+export type ConciergeExpenseHistoryEvent = {
+  action: "submitted" | "posted" | "rejected" | "reversed";
+  actor: { id: string | null; display_name: string | null } | null;
+  reason: string | null;
+  created_at: string | null;
+};
+
+/**
+ * Net and gross total of the receipts Billing posted for a service (not
+ * rejected, not reversed, not waiting), in cents to stay exact.
+ */
+export function postedReceiptTotals(items: Pick<ConciergeExpenseItem, "status" | "amount_net" | "amount_gross">[]) {
+  let netCents = 0;
+  let grossCents = 0;
+  let count = 0;
+  for (const item of items) {
+    if (item.status !== "posted") continue;
+    count += 1;
+    netCents += moneyStringToMinorUnits(item.amount_net) ?? 0;
+    grossCents += moneyStringToMinorUnits(item.amount_gross) ?? 0;
+  }
+  return { count, netCents, grossCents };
+}
+
+/**
+ * The concierge types the «actual cost» freely; it should match the posted
+ * receipts (net or gross). A mismatch warns, never blocks (QA 2026-11-12 C-9).
+ * An empty field does not warn.
+ */
+export function actualCostMismatch(
+  actualCost: number,
+  totals: { count: number; netCents: number; grossCents: number },
+) {
+  if (!totals.count || !Number.isFinite(actualCost)) return false;
+  const actualCents = Math.round(actualCost * 100);
+  return actualCents !== totals.netCents && actualCents !== totals.grossCents;
+}
+
+/**
+ * Why Billing rejected or reversed a receipt, shown to the concierge in the
+ * task (QA 2026-11-12 C-7); null for other states or without a reason.
+ */
+export function expenseDecisionReason(item: Pick<ConciergeExpenseItem, "status" | "history">) {
+  if (item.status !== "rejected" && item.status !== "reversed") return null;
+  const event = [...(item.history ?? [])].reverse().find((entry) => entry.action === item.status);
+  const reason = event?.reason?.trim();
+  return reason ? reason : null;
+}
 
 export type ConciergeExpenseListResponse = {
   items: ConciergeExpenseItem[];

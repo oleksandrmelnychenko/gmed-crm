@@ -890,7 +890,8 @@ async fn get_expense_context(
                   service.id AS service_id,
                   COALESCE(service.agency_service_name_snapshot, service.description) AS service_name,
                   COALESCE(service.agency_service_description_snapshot, service.description) AS service_description,
-                  service.provider_id
+                  service.provider_id,
+                  COALESCE(service.is_cost_passthrough AND service.status <> 'cancelled', false) AS is_cost_passthrough
            FROM orders order_row
            LEFT JOIN order_leistungen service
              ON service.order_id = order_row.id
@@ -939,15 +940,28 @@ async fn get_expense_context(
                     "name": row.try_get::<String, _>("service_name").unwrap_or_default(),
                     "description": row.try_get::<String, _>("service_description").unwrap_or_default(),
                     "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
+                    "is_cost_passthrough": row.try_get::<bool, _>("is_cost_passthrough").unwrap_or(false),
                 }));
             }
         }
     }
 
+    let linked_order = if orders.is_empty() {
+        None
+    } else {
+        match linked_expense_order_id(&state, Some(service_id), context.task_id).await {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(error = %error, service_id = %service_id, "load service expense linked order");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load context");
+            }
+        }
+    };
+
     Json(json!({
         "patient": patient,
         "service": service,
-        "mapped_order": Value::Null,
+        "mapped_order": mapped_order_from(linked_order, &orders),
         "eligible_orders": orders,
     }))
     .into_response()
@@ -1004,7 +1018,8 @@ async fn get_task_expense_context(
                       service.id AS service_id,
                       COALESCE(service.agency_service_name_snapshot, service.description) AS service_name,
                       COALESCE(service.agency_service_description_snapshot, service.description) AS service_description,
-                      service.provider_id
+                      service.provider_id,
+                      COALESCE(service.is_cost_passthrough AND service.status <> 'cancelled', false) AS is_cost_passthrough
                FROM orders order_row
                LEFT JOIN order_leistungen service
                  ON service.order_id = order_row.id
@@ -1053,10 +1068,23 @@ async fn get_task_expense_context(
                     "name": row.try_get::<String, _>("service_name").unwrap_or_default(),
                     "description": row.try_get::<String, _>("service_description").unwrap_or_default(),
                     "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
+                    "is_cost_passthrough": row.try_get::<bool, _>("is_cost_passthrough").unwrap_or(false),
                 }));
             }
         }
     }
+
+    let linked_order = if orders.is_empty() {
+        None
+    } else {
+        match linked_expense_order_id(&state, None, Some(task_id)).await {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(error = %error, task_id = %task_id, "load task expense linked order");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load context");
+            }
+        }
+    };
 
     Json(json!({
         "patient": patient,
@@ -1069,10 +1097,56 @@ async fn get_task_expense_context(
             "assigned_by": context.assigned_by,
         },
         "service": Value::Null,
-        "mapped_order": Value::Null,
+        "mapped_order": mapped_order_from(linked_order, &orders),
         "eligible_orders": orders,
     }))
     .into_response()
+}
+
+/// The order a Concierge service is linked to: directly, through its
+/// appointment, or (for a task without a service link) the task's own
+/// order. The review dialog proposes it so the re-billed revenue lands in
+/// the order economics (QA 2026-11-12 C-1).
+async fn linked_expense_order_id(
+    state: &AppState,
+    service_id: Option<Uuid>,
+    task_id: Option<Uuid>,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar::<_, Option<Uuid>>(
+        r#"SELECT COALESCE(
+                      service.order_id,
+                      service_appointment.order_id,
+                      task.order_id,
+                      task_appointment.order_id
+                  )
+           FROM (SELECT $1::uuid AS service_id, $2::uuid AS task_id) requested
+           LEFT JOIN tasks task
+             ON task.id = requested.task_id AND task.deleted_at IS NULL
+           LEFT JOIN concierge_services service
+             ON service.id = COALESCE(requested.service_id, task.concierge_service_id)
+           LEFT JOIN appointments service_appointment
+             ON service_appointment.id = service.appointment_id
+           LEFT JOIN appointments task_appointment
+             ON task_appointment.id = task.appointment_id"#,
+    )
+    .bind(service_id)
+    .bind(task_id)
+    .fetch_one(&state.db)
+    .await
+}
+
+/// The linked order as the dialog lists it, only when it is one of the
+/// eligible orders (same patient, not cancelled).
+fn mapped_order_from(linked_order: Option<Uuid>, orders: &[Value]) -> Value {
+    let Some(linked_order) = linked_order else {
+        return Value::Null;
+    };
+    let linked_text = linked_order.to_string();
+    orders
+        .iter()
+        .find(|order| order.get("id").and_then(Value::as_str) == Some(linked_text.as_str()))
+        .cloned()
+        .unwrap_or(Value::Null)
 }
 
 async fn parse_expense_multipart(mut multipart: Multipart) -> Result<ExpenseMultipart, Response> {

@@ -60,3 +60,11 @@ describe("localizeCompanyFinanceError", () => {
     expect(localizeCompanyFinanceError(null, "ru", "Ошибка")).toBe("Ошибка");
   });
 });
+
+describe("Concierge receipt storno errors (QA 2026-11-12 C-5)", () => {
+  it("explains that the re-billed patient invoice must be corrected first", () => {
+    const error = apiError(409, { error: "Reverse the patient invoice allocation before reversing this expense" });
+    expect(localizeCompanyFinanceError(error, "ru", "x")).toContain("Сначала отмените этот счёт");
+    expect(localizeCompanyFinanceError(error, "de", "x")).toContain("Patientenrechnung");
+  });
+});

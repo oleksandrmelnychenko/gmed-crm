@@ -364,6 +364,8 @@ export type CompanyConciergeExpenseOrderService = {
   name: string;
   description: string | null;
   provider_id: string | null;
+  /** A transit line (pass-through) that may bill the same costs. */
+  is_cost_passthrough?: boolean;
 };
 
 export type CompanyConciergeExpenseOrder = {

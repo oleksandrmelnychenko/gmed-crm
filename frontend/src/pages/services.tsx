@@ -44,6 +44,7 @@ import {
   ConciergeKeepBookingAction,
   ConciergeProviderBookingAction,
 } from "@/pages/concierge/provider-booking-dialog";
+import { PostedReceiptsHint } from "@/pages/concierge/posted-receipts-hint";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -2364,6 +2365,14 @@ function useStaffServicesPageContent() {
                           }
                           className={formInputClassName}
                         />
+                        {selectedService ? (
+                          <PostedReceiptsHint
+                            serviceId={selectedService.id}
+                            actualCost={editForm.actualCost}
+                            currency={editForm.currency}
+                            lang={lang}
+                          />
+                        ) : null}
                       </label>
                       {canEditProtectedServiceFields ? (
                         <>

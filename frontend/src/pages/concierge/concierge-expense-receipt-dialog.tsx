@@ -30,6 +30,7 @@ import {
   calculateConciergeExpenseVat,
   calculateConciergeExpenseVatFromGross,
   conciergeExpenseConsequencePreview,
+  expenseDecisionReason,
   moneyStringToMinorUnits,
   validateConciergeExpenseReceiptFile,
   type ConciergeExpenseContext,
@@ -97,6 +98,7 @@ const copy = {
     posted: "Bestätigt",
     rejected: "Abgelehnt",
     reversed: "Storniert",
+    decisionReason: "Grund",
     download: "Beleg herunterladen",
     noDocument: "Kein Dokument",
     submittedBy: "Eingereicht von {name}",
@@ -152,6 +154,7 @@ const copy = {
     posted: "Подтверждено",
     rejected: "Отклонено",
     reversed: "Сторнировано",
+    decisionReason: "Причина",
     download: "Скачать документ",
     noDocument: "Документа нет",
     submittedBy: "Отправил(а): {name}",
@@ -500,6 +503,9 @@ export function ConciergeExpenseReceiptDialog({
                               <span className="font-mono text-xs font-semibold">{formatMoney(item.amount_gross, item.currency)}</span>
                             </div>
                             <p className="mt-1 text-[11px] text-muted-foreground">{context?.patient?.display_name || service.patient_name || "—"} · {formatDate(item.submitted_at)}</p>
+                            {expenseDecisionReason(item) ? (
+                              <p className="mt-1 whitespace-pre-wrap break-words text-[11px]"><span className="text-muted-foreground">{labels.decisionReason}: </span>{expenseDecisionReason(item)}</p>
+                            ) : null}
                             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                               <p className="text-[10px] text-muted-foreground">{labels.submittedBy.replace("{name}", item.submitted_by.display_name)}</p>
                               {item.receipt ? (

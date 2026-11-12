@@ -7316,7 +7316,11 @@ async fn get_patient_billing_workspace(
                     'services', COALESCE((
                         SELECT jsonb_agg(jsonb_build_object(
                             'id', service.id,
-                            'status', service.status
+                            'status', service.status,
+                            -- A transit line and re-billed receipts may bill the
+                            -- same costs; the tab warns (owner 2026-11-12, C-2).
+                            'is_cost_passthrough', service.is_cost_passthrough,
+                            'name', COALESCE(service.agency_service_name_snapshot, service.description)
                         ) ORDER BY service.created_at, service.id)
                         FROM order_leistungen service
                         WHERE service.order_id = patient_order.id
@@ -7373,6 +7377,10 @@ async fn get_patient_billing_workspace(
                     ), '[]'::jsonb),
                     'source_order_id', external.order_id,
                     'source_order_number', source_order.order_number,
+                    -- The order the cost belongs to: its own, else the order of
+                    -- the Concierge service of the receipt (QA 2026-11-12 C-1).
+                    'proposed_order_id', COALESCE(external.order_id, concierge_link.order_id),
+                    'concierge_receipt', external.source_concierge_expense_id IS NOT NULL,
                     -- A closed settlement keeps its waivers (rebilling_waivers).
                     'settlement_closed', EXISTS (
                         SELECT 1 FROM order_termination_settlements closed_settlement
@@ -7406,6 +7414,23 @@ async fn get_patient_billing_workspace(
                     ORDER BY allocation.created_at DESC
                     LIMIT 1
                 ) allocation_summary ON true
+                LEFT JOIN LATERAL (
+                    SELECT COALESCE(
+                               linked_service.order_id,
+                               service_appointment.order_id,
+                               linked_task.order_id,
+                               task_appointment.order_id
+                           ) AS order_id
+                    FROM concierge_expense_submissions receipt
+                    LEFT JOIN tasks linked_task ON linked_task.id = receipt.task_id
+                    LEFT JOIN concierge_services linked_service
+                      ON linked_service.id = COALESCE(receipt.concierge_service_id, linked_task.concierge_service_id)
+                    LEFT JOIN appointments service_appointment
+                      ON service_appointment.id = linked_service.appointment_id
+                    LEFT JOIN appointments task_appointment
+                      ON task_appointment.id = linked_task.appointment_id
+                    WHERE receipt.id = external.source_concierge_expense_id
+                ) concierge_link ON true
                 WHERE external.patient_id = patient.id
                   AND external.invoice_scope = 'patient_order'
                   AND external.status <> 'cancelled'
@@ -7650,11 +7675,24 @@ async fn create_patient_billing_invoice(
                       external.external_invoice_number, external.invoice_date,
                       external.source_document_id, external.order_id AS source_order_id,
                       COALESCE(NULLIF(BTRIM(provider.name), ''), external.supplier_name, 'Provider') AS provider_name,
-                      settlement.remaining_provider_liability_gross
+                      settlement.remaining_provider_liability_gross,
+                      COALESCE(
+                          NULLIF(BTRIM(concierge_service.title), ''),
+                          NULLIF(BTRIM(task_service.title), ''),
+                          NULLIF(BTRIM(concierge_task.title), '')
+                      ) AS concierge_title
                FROM external_invoices external
                LEFT JOIN providers provider ON provider.id = external.provider_id
                JOIN external_invoice_provider_settlement_balances settlement
                  ON settlement.external_invoice_id = external.id
+               LEFT JOIN concierge_expense_submissions concierge_expense
+                 ON concierge_expense.id = external.source_concierge_expense_id
+               LEFT JOIN concierge_services concierge_service
+                 ON concierge_service.id = concierge_expense.concierge_service_id
+               LEFT JOIN tasks concierge_task
+                 ON concierge_task.id = concierge_expense.task_id
+               LEFT JOIN concierge_services task_service
+                 ON task_service.id = concierge_task.concierge_service_id
                WHERE external.id = $1
                FOR UPDATE OF external"#,
         )
@@ -7732,8 +7770,17 @@ async fn create_patient_billing_invoice(
         let source_number = source
             .try_get::<String, _>("external_invoice_number")
             .unwrap_or_default();
+        // A posted Concierge receipt is named after its service on the
+        // patient's invoice, not supplier + CON-<id> (QA 2026-11-12 C-4).
+        let description = match source
+            .try_get::<Option<String>, _>("concierge_title")
+            .unwrap_or_default()
+        {
+            Some(title) => title,
+            None => format!("{provider_name} · {source_number}"),
+        };
         line_items.push(json!({
-            "description": format!("{provider_name} · {source_number}"),
+            "description": description,
             "quantity": "1",
             "unit": "invoice",
             "unit_price": decimal_to_string(remaining),

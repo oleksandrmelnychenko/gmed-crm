@@ -89,6 +89,7 @@ import type {
   ConciergeExpenseMutationResponse,
   ConciergeExpenseSubmitInput,
 } from "./expense-receipt-model";
+import { expenseDecisionReason } from "./expense-receipt-model";
 import { ConciergeTaskAttachments } from "./task-attachments";
 import { ConciergeServiceBookingActionById } from "./provider-booking-dialog";
 import { openSubtaskCount, subtaskProgress } from "./task-workflow";
@@ -191,6 +192,7 @@ const copy = {
     posted: "Bestätigt",
     rejected: "Abgelehnt",
     reversed: "Storniert",
+    expenseReason: "Grund",
     noReceipt: "Kein Beleg",
     downloadReceipt: "Beleg herunterladen",
     edit: "Bearbeiten",
@@ -299,6 +301,7 @@ const copy = {
     posted: "Подтверждено",
     rejected: "Отклонено",
     reversed: "Сторнировано",
+    expenseReason: "Причина",
     noReceipt: "Документа нет",
     downloadReceipt: "Скачать подтверждение",
     edit: "Изменить",
@@ -1235,6 +1238,11 @@ export function ConciergeTaskDetailDialog({
                             <p className="mt-1 text-xs text-muted-foreground">
                               {dateOnly(item.expense_date)} · {expenseMoney(item.amount_gross, item.currency)}
                             </p>
+                            {expenseDecisionReason(item) ? (
+                              <p className="mt-1 whitespace-pre-wrap break-words text-xs text-foreground" data-testid="task-expense-decision-reason">
+                                <span className="text-muted-foreground">{labels.expenseReason}: </span>{expenseDecisionReason(item)}
+                              </p>
+                            ) : null}
                           </div>
                           {item.receipt ? (
                             <Button

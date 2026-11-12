@@ -1820,6 +1820,38 @@ async fn receipts_of_an_appointment_task_land_on_its_order_and_gmed_paid_ones_ne
     let billing = auth_header(billing_id, "billing");
     let expense_date = gmed_server::app_time::today() - Duration::days(1);
 
+    // The review dialog proposes the order of the service's appointment
+    // (QA 2026-11-12 C-1), for the service and its task alike.
+    let (status, service_context) = json_request(
+        &context.app,
+        "GET",
+        &format!("/api/v1/concierge-services/{service_id}/expense-context"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{service_context}");
+    assert_eq!(
+        service_context["mapped_order"]["id"],
+        json!(order_id),
+        "{service_context}"
+    );
+    let task_id = linked_task_id(&context.pool, service_id).await;
+    let (status, task_context) = json_request(
+        &context.app,
+        "GET",
+        &format!("/api/v1/tasks/{task_id}/expense-context"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{task_context}");
+    assert_eq!(
+        task_context["mapped_order"]["id"],
+        json!(order_id),
+        "{task_context}"
+    );
+
     let (status, created) = submit_fixture_expense(
         &context.app,
         &concierge,
@@ -1878,6 +1910,31 @@ async fn receipts_of_an_appointment_task_land_on_its_order_and_gmed_paid_ones_ne
     assert!(provider_id.is_none());
     // Without a partner the receipt's vendor is the supplier of the payable.
     assert_eq!(supplier_name.as_deref(), Some("Berlin Driver GmbH"));
+
+    // Re-billed to the patient, the line is named after the Concierge
+    // service, not supplier + CON-<id> (QA 2026-11-12 C-4).
+    let (status, rebilled) = json_request(
+        &context.app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/billing-invoices"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "order_id": order_id,
+            "invoice_type": "interim",
+            "external_invoice_ids": [external_invoice_id],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{rebilled}");
+    let rebilled_id = Uuid::parse_str(rebilled["id"].as_str().unwrap()).unwrap();
+    let description: Option<String> =
+        sqlx::query_scalar("SELECT line_items->0->>'description' FROM invoices WHERE id = $1")
+            .bind(rebilled_id)
+            .fetch_one(&context.pool)
+            .await
+            .unwrap();
+    assert_eq!(description.as_deref(), Some("Airport transfer"));
 
     // A receipt nobody has paid yet stays owed to a partner, so it needs one;
     // its patient share is the full amount, booked once delivered.

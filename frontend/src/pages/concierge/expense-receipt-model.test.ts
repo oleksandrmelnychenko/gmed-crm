@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   CONCIERGE_EXPENSE_MAX_FILE_SIZE,
+  actualCostMismatch,
   calculateConciergeExpenseGross,
   calculateConciergeExpenseNetFromGross,
   calculateConciergeExpenseVat,
   calculateConciergeExpenseVatFromGross,
   conciergeExpenseConsequencePreview,
+  expenseDecisionReason,
+  postedReceiptTotals,
   moneyStringToMinorUnits,
   validateConciergeExpenseReceiptFile,
 } from "./expense-receipt-model";
@@ -77,5 +80,37 @@ describe("Concierge expense receipt model", () => {
       companyPaidGross: "0.00",
       patientReceivableAfterDelivery: false,
     });
+  });
+});
+
+describe("Concierge receipt decisions and posted totals (QA 2026-11-12)", () => {
+  it("shows the reason of the latest rejection or storno only", () => {
+    const history = [
+      { action: "submitted" as const, actor: null, reason: null, created_at: "2026-11-12T10:00:00Z" },
+      { action: "posted" as const, actor: null, reason: null, created_at: "2026-11-12T11:00:00Z" },
+      { action: "reversed" as const, actor: null, reason: "  Doppelt erfasst  ", created_at: "2026-11-12T12:00:00Z" },
+    ];
+    expect(expenseDecisionReason({ status: "reversed", history })).toBe("Doppelt erfasst");
+    expect(expenseDecisionReason({ status: "posted", history })).toBeNull();
+    expect(expenseDecisionReason({
+      status: "rejected",
+      history: [{ action: "rejected", actor: null, reason: "Beleg unleserlich", created_at: null }],
+    })).toBe("Beleg unleserlich");
+    expect(expenseDecisionReason({ status: "rejected" })).toBeNull();
+  });
+
+  it("totals posted receipts and warns when the typed actual cost matches neither net nor gross", () => {
+    const totals = postedReceiptTotals([
+      { status: "posted", amount_net: "85.50", amount_gross: "101.75" },
+      { status: "rejected", amount_net: "25.00", amount_gross: "26.75" },
+      { status: "reversed", amount_net: "25.00", amount_gross: "26.75" },
+      { status: "posted", amount_net: "120.00", amount_gross: "142.80" },
+    ]);
+    expect(totals).toEqual({ count: 2, netCents: 20550, grossCents: 24455 });
+    expect(actualCostMismatch(205.5, totals)).toBe(false);
+    expect(actualCostMismatch(244.55, totals)).toBe(false);
+    expect(actualCostMismatch(10, totals)).toBe(true);
+    expect(actualCostMismatch(Number.NaN, totals)).toBe(false);
+    expect(actualCostMismatch(10, { count: 0, netCents: 0, grossCents: 0 })).toBe(false);
   });
 });

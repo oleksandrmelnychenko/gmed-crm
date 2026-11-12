@@ -44,6 +44,7 @@ import { useFinanceAutoRefresh } from "./use-finance-auto-refresh";
 import { describeCashMovement, filterPatientPositions, filterProviderDocuments, filterProviderPositions, providerDisplayName, providerGroupKey, type PatientSideFilter, type ProviderSettlementFilter } from "./table-model";
 import {
   assignAccountingEntryFinancialAccount,
+  fetchCompanyConciergeExpenseQueue,
   fetchCompanyFinancialAccounts,
   fetchCompanyFinancialPosition,
 } from "./data";
@@ -356,6 +357,24 @@ function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
   useFinanceAutoRefresh(() => {
     setReloadToken((current) => current + 1);
   }, loading);
+
+  // The tab badge counts receipts waiting for review before the tab is
+  // opened; the panel (mounted only when open) keeps it current after that
+  // (QA 2026-11-12 C-6). A role without the queue keeps 0.
+  useEffect(() => {
+    if (activeTab === "concierge-expenses") return;
+    let active = true;
+    fetchCompanyConciergeExpenseQueue(true)
+      .then((queue) => {
+        if (active) {
+          setConciergeExpensePendingCount(queue.rows.filter((row) => row.status === "pending_review").length);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [activeTab, reloadToken]);
 
   useEffect(() => {
     let active = true;

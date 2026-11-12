@@ -3,8 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   buildExpensePostPayload,
   eligibleExpenseOrderServices,
+  externalInvoiceCodeLabel,
   filterConciergeExpenseQueue,
+  proposedExpenseOrderId,
   resolveStableRequestId,
+  unmappedTransitLines,
   validateExpensePostForm,
   validateExpenseRejection,
 } from "./concierge-expense-review-model";
@@ -229,5 +232,43 @@ describe("Concierge expense finance review model", () => {
       .toBe("request-2");
     expect(validateExpenseRejection("  missing receipt  ")).toBe(true);
     expect(validateExpenseRejection("   ")).toBe(false);
+  });
+
+  it("proposes the order of the Concierge service when the receipt names none (QA 2026-11-12 C-1)", () => {
+    const linked = { ...context, mapped_order: context.eligible_orders[0] };
+    expect(proposedExpenseOrderId(expense(), linked)).toBe("order-eur");
+    expect(proposedExpenseOrderId(expense(), context)).toBe("");
+    // The order captured with the receipt wins; an order in another currency is not proposed.
+    expect(proposedExpenseOrderId(expense({ order_id: "order-x" }), linked)).toBe("order-x");
+    expect(proposedExpenseOrderId(expense(), { ...context, mapped_order: context.eligible_orders[1] })).toBe("");
+  });
+
+  it("warns about a transit line of the chosen order unless the receipt is mapped to it (C-2)", () => {
+    const withTransit: CompanyConciergeExpenseContext = {
+      ...context,
+      eligible_orders: [{
+        ...context.eligible_orders[0],
+        leistungen: [
+          ...context.eligible_orders[0].leistungen,
+          { id: "line-transit", name: "Durchlaufposten Transfer", description: null, provider_id: null, is_cost_passthrough: true },
+        ],
+      }],
+    };
+    expect(unmappedTransitLines(withTransit, "order-eur", "").map((line) => line.id)).toEqual(["line-transit"]);
+    expect(unmappedTransitLines(withTransit, "order-eur", "line-match").map((line) => line.id)).toEqual(["line-transit"]);
+    expect(unmappedTransitLines(withTransit, "order-eur", "line-transit")).toEqual([]);
+    expect(unmappedTransitLines(withTransit, "", "")).toEqual([]);
+    expect(unmappedTransitLines(context, "order-eur", "")).toEqual([]);
+  });
+
+  it("names the codes of the posted document in the user's language (C-5)", () => {
+    expect(externalInvoiceCodeLabel("status", "paid", "ru")).toBe("Оплачен");
+    expect(externalInvoiceCodeLabel("status", "cancelled", "de")).toBe("Storniert");
+    expect(externalInvoiceCodeLabel("paid_by", "agency", "ru")).toBe("GMED");
+    expect(externalInvoiceCodeLabel("paid_by", "unpaid", "ru")).toBe("Ещё не оплачено");
+    expect(externalInvoiceCodeLabel("settlement_status", "paid_by_patient", "ru")).toBe("Оплачено пациентом");
+    expect(externalInvoiceCodeLabel("settlement_status", "partial", "de")).toBe("Teilweise bezahlt");
+    expect(externalInvoiceCodeLabel("status", null, "ru")).toBe("—");
+    expect(externalInvoiceCodeLabel("status", "constructor", "ru")).toBe("constructor");
   });
 });

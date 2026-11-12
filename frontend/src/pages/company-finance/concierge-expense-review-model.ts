@@ -154,6 +154,86 @@ export function validateExpenseRejection(reason: string) {
   return length >= 1 && length <= 2000;
 }
 
+type CodeLabels = Record<string, [de: string, ru: string]>;
+
+const EXTERNAL_INVOICE_STATUS_LABELS: CodeLabels = {
+  expected: ["Erwartet", "Ожидается"],
+  received: ["Zu prüfen", "На проверке"],
+  approved: ["Zu zahlen", "К оплате"],
+  overdue: ["Überfällig", "Просрочен"],
+  paid: ["Bezahlt", "Оплачен"],
+  cancelled: ["Storniert", "Сторнирован"],
+};
+
+const EXTERNAL_INVOICE_PAYER_LABELS: CodeLabels = {
+  agency: ["GMED", "GMED"],
+  patient: ["Patient", "Пациент"],
+  unpaid: ["Noch nicht bezahlt", "Ещё не оплачено"],
+};
+
+const PROVIDER_SETTLEMENT_LABELS: CodeLabels = {
+  paid: ["Bezahlt", "Оплачено"],
+  partial: ["Teilweise bezahlt", "Частично оплачено"],
+  unpaid: ["Offen", "Не оплачено"],
+  paid_by_patient: ["Vom Patienten bezahlt", "Оплачено пациентом"],
+};
+
+/**
+ * The posted document of a Concierge receipt carries raw codes (status,
+ * payer, supplier settlement); the dialog shows them in the user's
+ * language (QA 2026-11-12 C-5). An unknown code is shown as sent.
+ */
+export function externalInvoiceCodeLabel(
+  kind: "status" | "paid_by" | "settlement_status",
+  code: string | null | undefined,
+  lang: string,
+) {
+  if (!code) return "—";
+  const labels = kind === "status"
+    ? EXTERNAL_INVOICE_STATUS_LABELS
+    : kind === "paid_by"
+      ? EXTERNAL_INVOICE_PAYER_LABELS
+      : PROVIDER_SETTLEMENT_LABELS;
+  const pair = Object.hasOwn(labels, code) ? labels[code] : undefined;
+  if (!pair) return code;
+  return lang === "de" ? pair[0] : pair[1];
+}
+
+/**
+ * The order a receipt's Concierge service or task is linked to, proposed in
+ * the review dialog when the receipt names no order itself (QA 2026-11-12
+ * C-1). Only an order the dialog can choose (same currency, open) counts.
+ */
+export function proposedExpenseOrderId(
+  expense: CompanyConciergeExpenseItem,
+  context: CompanyConciergeExpenseContext,
+) {
+  if (expense.order_id) return expense.order_id;
+  const mapped = context.mapped_order?.id;
+  if (!mapped) return "";
+  return eligibleExpenseOrders(expense, context).some((order) => order.id === mapped) ? mapped : "";
+}
+
+/**
+ * Transit lines (pass-through order positions) of the chosen order that the
+ * receipt is not mapped to. Concierge costs are billed canonically by
+ * re-billing the receipt; a transit line on the same order may bill them a
+ * second time, so the dialog warns (owner decision 2026-11-12, C-2). Mapped
+ * to the transit line itself, the receipt is its cost and is not re-billed.
+ */
+export function unmappedTransitLines(
+  context: CompanyConciergeExpenseContext,
+  orderId: string,
+  orderLeistungId: string,
+) {
+  if (!orderId) return [];
+  const order = context.eligible_orders.find((candidate) => candidate.id === orderId);
+  if (!order) return [];
+  const transit = order.leistungen.filter((service) => service.is_cost_passthrough);
+  if (transit.some((service) => service.id === orderLeistungId)) return [];
+  return transit;
+}
+
 export function resolveStableRequestId(
   registry: Map<string, StableRequestIdEntry>,
   key: string,
