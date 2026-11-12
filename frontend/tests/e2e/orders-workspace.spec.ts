@@ -834,7 +834,8 @@ test("workflow creation keeps the draft and shows request errors inside its shee
   await page.route(`**/orders/${orderId}/workflow-checklist`, route => route.request().method() === "POST"
     ? route.fulfill({status:409, json:{error:"Workflow changed; try again"}}) : route.fallback());
   await sheet.getByRole("button", {name:"Добавить пункт", exact:true}).click();
-  await expect(sheet.getByText("Workflow changed; try again", {exact:true})).toBeVisible();
+  // A refusal reads in the UI language, never as the raw server text (system QA 2026-11-12, F-C10).
+  await expect(sheet.getByRole("alert")).toHaveText("Не удалось создать пункт чек-листа.");
   await expect(sheet.locator("#order-workflow-item-sheet")).toHaveValue("QA workflow task");
   await page.unroute(`**/orders/${orderId}/workflow-checklist`);
   await sheet.getByRole("button", {name:"Добавить пункт", exact:true}).click();
