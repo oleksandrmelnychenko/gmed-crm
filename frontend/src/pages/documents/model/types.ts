@@ -158,6 +158,13 @@ export type TranslationRequest = {
   document_category?: string | null;
   patient_pid?: string | null;
   patient_name?: string | null;
+  /**
+   * Queue only: false when the request is shown to the team lead for
+   * distribution and he does not open the document itself (owner 2026-11-12).
+   */
+  can_open_document?: boolean;
+  /** Queue only: the medical flag of the document (assignee choice). */
+  document_is_medical?: boolean | null;
 };
 
 export type MachineTranslationCapability = {

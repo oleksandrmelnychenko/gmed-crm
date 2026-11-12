@@ -1458,7 +1458,7 @@ async fn patient_manager_keeps_own_manual_intake_until_it_is_linked() {
 
 #[tokio::test]
 async fn concierge_multipart_upload_requires_all_allow_and_stays_nonmedical_internal() {
-    let Some((app, pool, admin_id, _)) = test_context().await else {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
     };
     let tag = unique_tag("concierge-document-upload");
@@ -1474,6 +1474,24 @@ async fn concierge_multipart_upload_requires_all_allow_and_stays_nonmedical_inte
         ("is_medical", "false".to_string()),
         ("visibility", "patient_visible".to_string()),
     ];
+    // The documents page asks before it offers «Загрузить» (owner 2026-11-12).
+    let upload_access = || {
+        let app = &app;
+        let bearer = concierge_bearer.clone();
+        async move {
+            let (status, body) = json_request(
+                app,
+                "GET",
+                "/api/v1/documents/meta/upload-access",
+                &bearer,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            body["can_upload"].as_bool().unwrap()
+        }
+    };
+    assert!(!upload_access().await);
 
     let (status, _) = multipart_upload(
         &app,
@@ -1508,8 +1526,20 @@ async fn concierge_multipart_upload_requires_all_allow_and_stays_nonmedical_inte
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(!upload_access().await);
 
     seed_direct_all_document_upload_rule(&pool, concierge_id, "concierge", "allow", admin_id).await;
+    assert!(upload_access().await);
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/meta/upload-access",
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["can_upload"], true);
     let medical_fields = [
         ("patient_id", patient_id.to_string()),
         ("auto_name", format!("Medical concierge upload {tag}")),
@@ -3132,6 +3162,192 @@ async fn medical_translations_go_only_to_people_who_may_open_them() {
         .await;
         assert_eq!(status, expected, "{result_id}: {body}");
     }
+}
+
+/// Owner 2026-11-12: the interpreter opens the unreleased medical source of a
+/// translation request assigned to him while it is open, and only that one.
+#[tokio::test]
+async fn assigned_interpreter_opens_the_unreleased_medical_source_while_open() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-medical-source");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+
+    let source_id = seed_unfiled_document(
+        &pool,
+        pm_id,
+        patient_id,
+        "internal",
+        true,
+        "arztbrief",
+        &format!("{tag}-source"),
+    )
+    .await;
+    let other_id = seed_unfiled_document(
+        &pool,
+        pm_id,
+        patient_id,
+        "internal",
+        true,
+        "arztbrief",
+        &format!("{tag}-other"),
+    )
+    .await;
+    let request_id = seed_document_translation_request(&pool, source_id, patient_id, pm_id).await;
+    let open = |document_id: Uuid| {
+        let app = &app;
+        let bearer = interpreter_bearer.clone();
+        async move {
+            json_request(
+                app,
+                "GET",
+                &format!("/api/v1/documents/{document_id}"),
+                &bearer,
+                None,
+            )
+            .await
+            .0
+        }
+    };
+    assert_eq!(open(source_id).await, StatusCode::FORBIDDEN);
+
+    let set_request = |status: &'static str| {
+        let pool = &pool;
+        async move {
+            sqlx::query(
+                "UPDATE document_translation_requests SET assigned_to = $2, status = $3 WHERE id = $1",
+            )
+            .bind(request_id)
+            .bind(interpreter_id)
+            .bind(status)
+            .execute(pool)
+            .await
+            .unwrap();
+        }
+    };
+    set_request("in_progress").await;
+    assert_eq!(open(source_id).await, StatusCode::OK);
+    assert_eq!(open(other_id).await, StatusCode::FORBIDDEN);
+
+    set_request("cancelled").await;
+    assert_eq!(open(source_id).await, StatusCode::FORBIDDEN);
+}
+
+/// Owner 2026-11-12: the team lead sees every open translation request whose
+/// document is not medical or already released, without a patient
+/// assignment, and may hand it to a translator; nothing else changes.
+#[tokio::test]
+async fn teamlead_distributes_open_non_medical_and_released_translations() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-teamlead-queue");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let lead_id = seed_user(&pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
+    let lead_bearer = auth_header_for(lead_id, "teamlead_interpreter");
+
+    let mut requests = Vec::new();
+    for (visibility, is_medical, name) in [
+        ("internal", false, "plain"),
+        ("released_internal", true, "released"),
+        ("internal", true, "closed"),
+    ] {
+        let document_id = seed_unfiled_document(
+            &pool,
+            pm_id,
+            patient_id,
+            visibility,
+            is_medical,
+            "arztbrief",
+            &format!("{tag}-{name}"),
+        )
+        .await;
+        let request_id =
+            seed_document_translation_request(&pool, document_id, patient_id, pm_id).await;
+        sqlx::query(
+            "UPDATE document_translation_requests SET source_text = 'Befund' WHERE id = $1",
+        )
+        .bind(request_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        requests.push(request_id);
+    }
+    let (plain, released, closed) = (requests[0], requests[1], requests[2]);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/translation-requests?patient_id={patient_id}"),
+        &lead_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let listed = listed_ids(&body);
+    assert!(listed.contains(&plain.to_string()), "{body}");
+    assert!(listed.contains(&released.to_string()), "{body}");
+    assert!(!listed.contains(&closed.to_string()), "{body}");
+    for item in body.as_array().unwrap() {
+        assert_eq!(item["can_open_document"], false, "{item}");
+        assert!(item["source_text"].is_null(), "{item}");
+    }
+
+    let update = |request_id: Uuid, body: Value| {
+        let app = &app;
+        let bearer = lead_bearer.clone();
+        async move {
+            json_request(
+                app,
+                "POST",
+                &format!("/api/v1/documents/translation-requests/{request_id}/update"),
+                &bearer,
+                Some(body),
+            )
+            .await
+        }
+    };
+    // Only the assignee changes; the texts stay closed to him.
+    let (status, body) = update(
+        plain,
+        json!({ "status": "pending", "assigned_to": interpreter_id, "note": "x" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    // A medical document still goes only to someone who may open it.
+    let (status, body) = update(
+        released,
+        json!({ "status": "pending", "assigned_to": lead_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"], "translation_medical_paper_not_assignable");
+    let (status, body) = update(
+        released,
+        json!({ "status": "in_progress", "assigned_to": interpreter_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["assigned_to"], interpreter_id.to_string());
+    assert!(body["source_text"].is_null(), "{body}");
+    let (status, body) = update(
+        plain,
+        json!({ "status": "pending", "assigned_to": interpreter_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, _) = update(
+        closed,
+        json!({ "status": "pending", "assigned_to": interpreter_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

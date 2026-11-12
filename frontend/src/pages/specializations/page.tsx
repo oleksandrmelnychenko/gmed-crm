@@ -66,6 +66,7 @@ import {
   type WorkTypeDescription,
   type WorkTypeUpsertPayload,
 } from "./data/specialization-work-types-api";
+import { differingLanguageNames, secondaryName } from "./specialization-names";
 
 type Translate = (ru: string, de: string) => string;
 
@@ -591,10 +592,7 @@ export function SpecializationsPage() {
                     {activeBadge(selectedSpecialization.is_active, tx)}
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    DE: {selectedSpecialization.name_de || "-"} · RU:{" "}
-                    {selectedSpecialization.name_ru || "-"} · EN:{" "}
-                    {selectedSpecialization.name_en || "-"} · ES:{" "}
-                    {selectedSpecialization.name_es || "-"} ·{" "}
+                    {differingLanguageNames(selectedSpecialization).map((name) => `${name} · `)}
                     {tx("Порядок отображения", "Anzeigereihenfolge")}:{" "}
                     {selectedSpecialization.sort_order} ·{" "}
                     {tx("Шаблон анамнеза", "Anamnese-Vorlage")}:{" "}
@@ -712,9 +710,11 @@ export function SpecializationsPage() {
                           <p className="truncate text-sm font-semibold text-foreground">
                             {workTypeName(item, lang)}
                           </p>
-                          <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                            {lang === "ru" ? item.name_de : item.name_ru}
-                          </p>
+                          {secondaryName(workTypeName(item, lang), lang === "ru" ? item.name_de : item.name_ru) ? (
+                            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                              {secondaryName(workTypeName(item, lang), lang === "ru" ? item.name_de : item.name_ru)}
+                            </p>
+                          ) : null}
                           {workTypeDescription(item, lang) ? (
                             <p
                               className="mt-1 line-clamp-2 text-xs leading-4 text-muted-foreground"

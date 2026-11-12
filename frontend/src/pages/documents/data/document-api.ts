@@ -487,6 +487,16 @@ export function fetchTranslationRequestQueue(status: TranslationQueueStatusFilte
   );
 }
 
+/**
+ * Whether «Загрузить» may be offered: the concierge needs the CEO's "all
+ * documents · upload" rule (owner 2026-11-12). The upload route checks again.
+ */
+export function fetchDocumentUploadAccess() {
+  return apiFetch<{ can_upload: boolean }>("/documents/meta/upload-access", {
+    cache: "no-store",
+  });
+}
+
 export function createTranslationRequest(
   documentId: string,
   payload: JsonPayload,

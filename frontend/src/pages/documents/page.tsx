@@ -180,6 +180,7 @@ import {
   createMachineTranslationDraft,
   fetchDocumentBlob,
   renderDocumentTranslationPdf,
+  fetchDocumentUploadAccess,
   fetchTranslationRequestQueue,
   type TranslationQueueStatusFilter,
   fetchTranslationRequests,
@@ -1135,7 +1136,12 @@ function StaffDocumentsPage({
   const documentsFailedLoadDocumentText = t.documents_failed_load_document;
   const canView = canViewDocuments(user);
   const canManage = canManageDocuments(user);
-  const canUpload = canUploadDocuments(user);
+  // The concierge uploads only with the CEO's "all documents · upload"
+  // rule (owner 2026-11-12); the page asks the server before it offers the
+  // button, the upload route checks again.
+  const uploadNeedsGrant = user?.role === "concierge" && canUploadDocuments(user);
+  const [uploadGranted, setUploadGranted] = useState(false);
+  const canUpload = canUploadDocuments(user) && (!uploadNeedsGrant || uploadGranted);
   // Importing templates: the CEO only (owner decision 2026-11-10); the
   // server checks the same (`document_template_imports.rs`).
   const canImportTemplates = user?.role === "ceo";
@@ -1741,6 +1747,21 @@ function StaffDocumentsPage({
     () => buildDocumentsPath({ ...filters, search: deferredSearch }),
     [deferredSearch, filters],
   );
+
+  useEffect(() => {
+    if (!uploadNeedsGrant) return;
+    let active = true;
+    fetchDocumentUploadAccess()
+      .then((access) => {
+        if (active) setUploadGranted(access.can_upload === true);
+      })
+      .catch(() => {
+        if (active) setUploadGranted(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [uploadNeedsGrant]);
 
   useEffect(() => {
     if (!canView) return;
@@ -3579,6 +3600,7 @@ function StaffDocumentsPage({
             canUpdateTranslation={canUpdateTranslation}
             canTakeOverAssigned={user?.role !== "interpreter"}
             currentUserId={user?.id ?? null}
+            distributionStaff={user?.role === "teamlead_interpreter" ? staff : undefined}
             emptyText={translationQueueStatus === "open" ? t.documents_translation_queue_empty : t.common_no_results}
             l={l}
             loading={translationQueueBusy}
@@ -8437,10 +8459,20 @@ function DocumentIntakeQueueTable({
   );
 }
 
+/** A request shown only for distribution does not open its document. */
+function openableDocumentColumn(column: ColumnDef<TranslationRequest>): ColumnDef<TranslationRequest> {
+  return {
+    ...column,
+    render: (request) =>
+      request.can_open_document === false ? null : column.render?.(request),
+  };
+}
+
 function DocumentTranslationRequestsTable({
   canUpdateTranslation,
   canTakeOverAssigned,
   currentUserId,
+  distributionStaff,
   emptyText,
   l,
   loading,
@@ -8454,6 +8486,12 @@ function DocumentTranslationRequestsTable({
   /** Interpreters may only take requests that are not assigned to someone else. */
   canTakeOverAssigned: boolean;
   currentUserId: string | null;
+  /**
+   * The team lead distributes open requests (owner 2026-11-12): instead of
+   * «Назначить мне» each open row gets a translator picker. The server keeps
+   * the assignee rules (a medical document only to CEO, PM or interpreter).
+   */
+  distributionStaff?: StaffOption[];
   emptyText: string;
   l: DocumentsLocalizer;
   loading: boolean;
@@ -8475,16 +8513,18 @@ function DocumentTranslationRequestsTable({
   );
   const columns = useMemo<ColumnDef<TranslationRequest>[]>(
     () => [
-      createDocumentPreviewColumn<TranslationRequest>({
-        getId: (request) => request.document_id,
-        getTitle: (request) => request.document_name ?? request.document_id,
-        label: t.documents_preview,
-        onPreview: (request) =>
-          onPreviewDocument(
-            request.document_id,
-            request.document_name ?? request.document_id,
-          ),
-      }),
+      openableDocumentColumn(
+        createDocumentPreviewColumn<TranslationRequest>({
+          getId: (request) => request.document_id,
+          getTitle: (request) => request.document_name ?? request.document_id,
+          label: t.documents_preview,
+          onPreview: (request) =>
+            onPreviewDocument(
+              request.document_id,
+              request.document_name ?? request.document_id,
+            ),
+        }),
+      ),
       {
         id: "document",
         label: t.documents_filename,
@@ -8625,8 +8665,42 @@ function DocumentTranslationRequestsTable({
         accessor: () => "",
         sortable: false,
         filterType: undefined,
-        width: 180,
+        width: distributionStaff ? 240 : 180,
         render: (request) => {
+          const open = request.status !== "completed" && request.status !== "cancelled";
+          if (distributionStaff && canUpdateTranslation && open) {
+            const options = distributionStaff.filter(
+              (member) =>
+                isTranslationAssigneeRole(member.role, Boolean(request.document_is_medical)) ||
+                member.id === request.assigned_to,
+            );
+            return (
+              <NativeComboboxSelect
+                value={request.assigned_to ?? ""}
+                aria-label={t.documents_assignee}
+                className={cn(selectClassName, "h-7 text-[11px]")}
+                disabled={loading}
+                onClick={(event) => event.stopPropagation()}
+                onChange={(event) => {
+                  const assignedTo = event.target.value || null;
+                  void onUpdateRequest(
+                    request,
+                    request.status === "pending" && assignedTo ? "in_progress" : request.status,
+                    { assignedTo },
+                  );
+                }}
+              >
+                <option value="">{t.documents_unassigned}</option>
+                {options.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name.trim()
+                      ? `${member.name.trim()} / ${formatRoleLabel(member.role, lang)}`
+                      : formatRoleLabel(member.role, lang)}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+            );
+          }
           const canAssign =
             canUpdateTranslation &&
             Boolean(currentUserId) &&
@@ -8663,6 +8737,7 @@ function DocumentTranslationRequestsTable({
       canTakeOverAssigned,
       canUpdateTranslation,
       currentUserId,
+      distributionStaff,
       l,
       lang,
       loading,
@@ -8694,7 +8769,9 @@ function DocumentTranslationRequestsTable({
           onPageChange={translationRequestsPagination.onPageChange}
         />
       }
-      onRowClick={(request) => onOpenDocument(request.document_id)}
+      onRowClick={(request) => {
+        if (request.can_open_document !== false) onOpenDocument(request.document_id);
+      }}
       rowAccent={(request) => {
         if (request.status === "completed") return "bg-emerald-500";
         if (request.status === "cancelled") return "bg-rose-500";

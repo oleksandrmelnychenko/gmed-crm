@@ -1878,6 +1878,10 @@ pub fn router() -> Router<AppState> {
         .route("/documents/templates", get(list_document_templates))
         .route("/documents/generate", post(generate_document))
         .route("/documents/meta/staff", get(list_document_staff))
+        .route(
+            "/documents/meta/upload-access",
+            get(get_document_upload_access),
+        )
         .route("/documents/meta/categories", get(list_document_categories))
         .route("/documents/shares/bulk", post(create_bulk_document_shares))
         .route(
@@ -14091,6 +14095,9 @@ fn document_translation_request_json(row: &sqlx::postgres::PgRow) -> serde_json:
         "document_category": row.try_get::<Option<String>, _>("document_category").unwrap_or_default(),
         "patient_pid": row.try_get::<Option<String>, _>("patient_pid").unwrap_or_default(),
         "patient_name": row.try_get::<Option<String>, _>("patient_name").unwrap_or_default(),
+        // Queue rows carry the document's medical flag, so the assignee
+        // picker offers only roles that may open it; null elsewhere.
+        "document_is_medical": row.try_get::<Option<bool>, _>("is_medical").ok().flatten(),
     })
 }
 
@@ -15295,6 +15302,21 @@ pub(crate) fn can_view_document_row(
         {
             return true;
         }
+        // The source document of a translation request assigned to him and
+        // still open (pending or in progress) opens to the interpreter even
+        // when it is medical and not released: the assignment is the release
+        // decision (RBAC matrix, interpreter rule (б); owner 2026-11-12).
+        // Once the request is completed or cancelled, or given to someone
+        // else, the usual release rule applies again; his other medical
+        // documents and the clinical record stay closed.
+        if auth.role == Role::Interpreter
+            && row
+                .try_get::<bool, _>("translation_assigned_to_current")
+                .unwrap_or(false)
+            && !is_aml_paper(row)
+        {
+            return true;
+        }
         if is_aml_paper(row)
             && !row.try_get::<bool, _>("shared_to_current").unwrap_or(false)
             && !is_own_upload(auth.user_id, row)
@@ -15515,6 +15537,44 @@ fn is_interpreter_team_document(row: &sqlx::postgres::PgRow) -> bool {
 /// interpreter, only his own and still unassigned ones he may pick up.
 fn interpreter_sees_only_own_translation_requests(role: Role) -> bool {
     role == Role::Interpreter
+}
+
+/// The team lead distributes the translators' work (owner 2026-11-12): he
+/// sees every open (pending or in progress) translation request whose
+/// document is not medical or is already released, without a patient
+/// assignment, and may hand it to a translator. This opens the request, not
+/// the document: the document itself keeps its own rules, and the assignee
+/// rules are unchanged (a medical document goes only to the CEO, a patient
+/// manager or an interpreter). AML papers and the papers closed to the
+/// interpreters' team (consents, identity scans, GwG) stay out.
+fn teamlead_distributes_translation_request(
+    role: Role,
+    request_status: &str,
+    row: &sqlx::postgres::PgRow,
+) -> bool {
+    if role != Role::TeamleadInterpreter || !matches!(request_status, "pending" | "in_progress") {
+        return false;
+    }
+    if is_aml_paper(row) || is_closed_to_interpreter_team(row) {
+        return false;
+    }
+    let is_medical = row.try_get::<bool, _>("is_medical").unwrap_or(true);
+    let released = row
+        .try_get::<String, _>("visibility")
+        .ok()
+        .and_then(|visibility| parse_share_status(&visibility))
+        .is_some_and(|status| status != ShareStatus::InternalOnly);
+    !is_medical || released
+}
+
+/// A translation request shown only for distribution: the texts stay out,
+/// since the caller does not open the document they come from.
+fn distribution_only_translation_request_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    let mut item = document_translation_request_json(row);
+    item["source_text"] = serde_json::Value::Null;
+    item["translated_text"] = serde_json::Value::Null;
+    item["can_open_document"] = json!(false);
+    item
 }
 
 /// Whether the caller may see this document, by the same rules as the
@@ -33129,6 +33189,7 @@ async fn list_document_translation_request_queue(
                 OR $5::boolean = true
                 OR d.id = ANY($6::uuid[])
                 OR dtr.assigned_to = $4
+                OR ($8::boolean = true AND dtr.status IN ('pending', 'in_progress'))
              )
            ORDER BY dtr.requested_at DESC, dtr.created_at DESC
            LIMIT 1000"#
@@ -33142,6 +33203,7 @@ async fn list_document_translation_request_queue(
         .bind(has_view_allow_all)
         .bind(view_allow_document_ids)
         .bind(own_requests_only)
+        .bind(auth.role == Role::TeamleadInterpreter)
         .fetch_all(&state.db)
         .await
     {
@@ -33157,20 +33219,34 @@ async fn list_document_translation_request_queue(
 
     let items = rows
         .iter()
-        .filter(|row| {
+        .filter_map(|row| {
             let document_id = row
                 .try_get::<Uuid, _>("document_id")
                 .unwrap_or_else(|_| Uuid::nil());
             let is_medical = row.try_get::<bool, _>("is_medical").unwrap_or(false);
-            document_access_allowed(
+            let decision =
+                view_acl.decision(auth.role, document_id, AccessCapability::View, is_medical);
+            let explicitly_denied = matches!(decision, ResourceAccessDecision::Deny(_));
+            let opens_document = document_access_allowed(
                 &auth,
                 row,
                 can_view_document_row(&auth, row, &assignment_set),
-                view_acl.decision(auth.role, document_id, AccessCapability::View, is_medical),
-            )
+                decision,
+            );
+            let request_status = row.try_get::<String, _>("status").unwrap_or_default();
+            if opens_document {
+                let mut item = document_translation_request_json(row);
+                item["can_open_document"] = json!(true);
+                Some(item)
+            } else if !explicitly_denied
+                && teamlead_distributes_translation_request(auth.role, &request_status, row)
+            {
+                Some(distribution_only_translation_request_json(row))
+            } else {
+                None
+            }
         })
         .take(100)
-        .map(document_translation_request_json)
         .collect::<Vec<_>>();
 
     Json(items).into_response()
@@ -33544,7 +33620,33 @@ async fn update_document_translation_request(
         Ok(allowed) => allowed,
         Err(response) => return response,
     };
-    if !can_view || !can_edit {
+    // The team lead hands an open request to a translator without opening its
+    // document (owner 2026-11-12): only the assignee (and the matching
+    // pending/in-progress status) may change then — checked below.
+    let distribution_only = !(can_view && can_edit)
+        && teamlead_distributes_translation_request(
+            auth.role,
+            request_row
+                .try_get::<String, _>("status")
+                .unwrap_or_default()
+                .as_str(),
+            &document_row,
+        )
+        && match resolve_document_explicit_access(
+            &state,
+            &auth,
+            document_id,
+            AccessCapability::View,
+            document_row
+                .try_get::<bool, _>("is_medical")
+                .unwrap_or(false),
+        )
+        .await
+        {
+            Ok(decision) => !matches!(decision, ResourceAccessDecision::Deny(_)),
+            Err(response) => return response,
+        };
+    if (!can_view || !can_edit) && !distribution_only {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -33641,6 +33743,17 @@ async fn update_document_translation_request(
         NullableJsonField::Missing => None,
     };
     let assigned_to_provided = assigned_to_update.is_some();
+    if distribution_only
+        && (!assigned_to_provided
+            || !matches!(next_status, "pending" | "in_progress")
+            || note_update.is_some()
+            || source_language_update.is_some()
+            || source_text_update.is_some()
+            || translated_text_update.is_some()
+            || body.create_translated_document.unwrap_or(false))
+    {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
     let assigned_to = assigned_to_update.flatten();
 
     // Art. 18 DSGVO: the document of a restricted patient is not handed to a
@@ -33878,6 +33991,9 @@ async fn update_document_translation_request(
         }
     };
 
+    if distribution_only {
+        return Json(distribution_only_translation_request_json(&response_row)).into_response();
+    }
     Json(document_translation_request_json(&response_row)).into_response()
 }
 
@@ -39881,6 +39997,50 @@ async fn list_document_staff(
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load document staff")
         }
     }
+}
+
+/// Whether the caller may upload a new (non-medical) document from the
+/// documents page, by the rules of `POST /documents/upload`: a role-level
+/// deny rule closes it, and the concierge needs the CEO's explicit "all
+/// documents · upload" rule (owner 2026-11-12). The page hides «Загрузить»
+/// on `false`; the upload route keeps its own checks.
+async fn get_document_upload_access(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> axum::response::Response {
+    let upload_roles = [
+        Role::Ceo,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::Interpreter,
+        Role::Concierge,
+    ];
+    if !upload_roles.contains(&auth.role) {
+        return Json(json!({ "can_upload": false })).into_response();
+    }
+    let upload_access = match resolve_document_explicit_access(
+        &state,
+        &auth,
+        Uuid::nil(),
+        AccessCapability::Upload,
+        false,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let can_upload = match upload_access {
+        ResourceAccessDecision::DenySystemBoundary | ResourceAccessDecision::Deny(_) => false,
+        ResourceAccessDecision::Allow(_) if auth.role == Role::Concierge => {
+            match has_explicit_all_document_upload_allow(&state, &auth).await {
+                Ok(allowed) => allowed,
+                Err(response) => return response,
+            }
+        }
+        _ => auth.role != Role::Concierge,
+    };
+    Json(json!({ "can_upload": can_upload })).into_response()
 }
 
 async fn list_document_categories(
