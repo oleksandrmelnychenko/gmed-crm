@@ -19,15 +19,17 @@ use gmed_server::state::AppState;
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
 #[tokio::test]
-async fn concierge_projects_are_creator_scoped_and_ceo_can_delete_any_project() {
+async fn concierge_projects_are_creator_managed_member_readable_and_ceo_can_delete_any_project() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {
         return;
     };
     let tag = Uuid::new_v4().simple().to_string();
     let creator = seed_user(&ctx.pool, "concierge", &format!("creator-{tag}")).await;
     let peer = seed_user(&ctx.pool, "concierge", &format!("peer-{tag}")).await;
+    let outsider = seed_user(&ctx.pool, "concierge", &format!("outsider-{tag}")).await;
     let creator_bearer = auth_header_for(creator, "concierge");
     let peer_bearer = auth_header_for(peer, "concierge");
+    let outsider_bearer = auth_header_for(outsider, "concierge");
     let ceo_bearer = auth_header_for(ctx.admin_id, "ceo");
     let create_body =
         json!({ "name": "Creator scoped project", "owner_id": peer, "member_ids": [peer] });
@@ -43,7 +45,9 @@ async fn concierge_projects_are_creator_scoped_and_ceo_can_delete_any_project() 
     assert_eq!(own["created_by"], creator.to_string());
     assert_eq!(own["owner_id"], peer.to_string());
     let own_id = own["id"].as_str().unwrap();
-    // Manager membership and ownership are not substitutes for authorship.
+    // Manager membership and ownership are not substitutes for authorship:
+    // a concierge team member reads the project (owner decision 2026-11-12,
+    // C-11) but never manages it; a concierge outside the team sees nothing.
     sqlx::query("UPDATE crm_project_members SET member_role = 'manager' WHERE project_id = $1 AND user_id = $2")
         .bind(Uuid::parse_str(own_id).unwrap()).bind(peer).execute(&ctx.pool).await.unwrap();
     for path in [
@@ -60,13 +64,28 @@ async fn concierge_projects_are_creator_scoped_and_ceo_can_delete_any_project() 
             json_request(&ctx.app, "GET", &path, &peer_bearer, None)
                 .await
                 .0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            json_request(&ctx.app, "GET", &path, &outsider_bearer, None)
+                .await
+                .0,
             StatusCode::NOT_FOUND
         );
     }
     let (_, peer_list) =
         json_request(&ctx.app, "GET", "/api/v1/projects", &peer_bearer, None).await;
     assert!(
-        !peer_list
+        peer_list
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["id"] == own_id)
+    );
+    let (_, outsider_list) =
+        json_request(&ctx.app, "GET", "/api/v1/projects", &outsider_bearer, None).await;
+    assert!(
+        !outsider_list
             .as_array()
             .unwrap()
             .iter()
@@ -133,18 +152,56 @@ async fn concierge_projects_are_creator_scoped_and_ceo_can_delete_any_project() 
         .0,
         StatusCode::UNPROCESSABLE_ENTITY
     );
+    let task_id = task["id"].as_str().unwrap().to_string();
+    let (status, peer_tasks) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/concierge-operational-items?project_id={own_id}"),
+        &peer_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{peer_tasks}");
+    assert!(
+        peer_tasks
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == task_id.as_str() && row["can_manage"] == false),
+        "{peer_tasks}"
+    );
+    let (status, peer_detail) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/concierge-operational-items/{task_id}"),
+        &peer_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{peer_detail}");
     assert_eq!(
         json_request(
             &ctx.app,
-            "GET",
-            &format!("/api/v1/concierge-operational-items?project_id={own_id}"),
+            "POST",
+            &format!("/api/v1/concierge-operational-items/{task_id}/status"),
             &peer_bearer,
-            None
+            Some(json!({ "expected_updated_at": task["updated_at"], "status": "in_progress" }))
         )
         .await
         .0,
         StatusCode::FORBIDDEN
     );
+    for path in [
+        format!("/api/v1/concierge-operational-items?project_id={own_id}"),
+        format!("/api/v1/concierge-operational-items/{task_id}"),
+    ] {
+        assert_eq!(
+            json_request(&ctx.app, "GET", &path, &outsider_bearer, None)
+                .await
+                .0,
+            StatusCode::FORBIDDEN
+        );
+    }
     let (status, _) = json_request(
         &ctx.app,
         "POST",

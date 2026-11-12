@@ -10,6 +10,7 @@ import {
   formatRatingCount,
   isRateableVisit,
   missingRequiredFeedbackScore,
+  portalSurveyAsksInterpreter,
 } from "./feedback-model";
 
 describe("satisfaction survey (global QA 2026-11-10)", () => {
@@ -47,6 +48,16 @@ describe("satisfaction survey (global QA 2026-11-10)", () => {
     });
     // A visit without an interpreter has nobody to rate.
     expect(feedbackScoresPayload(chosen, { withInterpreter: false }).interpreter_score).toBeNull();
+  });
+
+  it("asks about the interpreter only for a chosen visit with one (owner decision 2026-11-12)", () => {
+    // The general survey names no interpreter.
+    expect(portalSurveyAsksInterpreter(null)).toBe(false);
+    expect(portalSurveyAsksInterpreter(undefined)).toBe(false);
+    expect(portalSurveyAsksInterpreter({ has_interpreter: false })).toBe(false);
+    expect(portalSurveyAsksInterpreter({ has_interpreter: true })).toBe(true);
+    // A visit from an older server answer keeps the question.
+    expect(portalSurveyAsksInterpreter({})).toBe(true);
   });
 
   it("offers only visits that took place", () => {

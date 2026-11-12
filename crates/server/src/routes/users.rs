@@ -659,11 +659,28 @@ async fn list_staff_directory(
     auth.require_any_role(&[Role::Ceo, Role::CeoAssistant, Role::Concierge])?;
 
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
+    // Every active staff account except external interpreters (owner
+    // decision 2026-11-12, screens QA D-5): the `interpreter` role is the
+    // external contractor role; the interpreter team lead is internal staff
+    // (RBAC matrix: team context, planning, report approval) and is listed,
+    // unless an interpreter profile marks the account as external.
     let rows = sqlx::query(
         r#"SELECT id, email, name, role
            FROM users
            WHERE is_active = true
-             AND role IN ('ceo', 'concierge', 'billing')
+             AND role NOT IN ('patient', 'interpreter')
+             AND NOT EXISTS (
+                SELECT 1
+                FROM interpreter_profile_details d
+                WHERE d.user_id = users.id
+                  AND d.employment_kind = 'external'
+             )
+             AND NOT EXISTS (
+                SELECT 1
+                FROM interpreter_profiles p
+                WHERE p.user_id = users.id
+                  AND p.profile->>'employmentKind' = 'external'
+             )
              AND ($1::text = '%%' OR name ILIKE $1 OR email ILIKE $1)
            ORDER BY name ASC"#,
     )

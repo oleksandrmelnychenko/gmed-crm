@@ -114,6 +114,7 @@ import {
   missingRequiredFeedbackScore,
   npsOptions,
   patientLabel,
+  portalSurveyAsksInterpreter,
   roleCanCaptureFeedback,
   scoreOptions,
 } from "./model/feedback-model";
@@ -1260,13 +1261,13 @@ function PatientFeedbackWorkspace() {
     );
   }, [appointments, ratedAppointmentIds]);
 
-  // A visit without an interpreter has nobody to rate; a general feedback and
-  // a visit of an older server answer (no flag) keep the scale.
+  // Only a visit with an interpreter asks about one; the general survey and a
+  // visit without an interpreter do not (owner decision 2026-11-12).
   const selectedAppointment = useMemo(
     () => availableAppointments.find((item) => item.id === form.appointmentId) ?? null,
     [availableAppointments, form.appointmentId],
   );
-  const withInterpreter = selectedAppointment?.has_interpreter !== false;
+  const withInterpreter = portalSurveyAsksInterpreter(selectedAppointment);
 
   const averageOverall = useMemo(() => {
     if (feedback.length === 0) return null;

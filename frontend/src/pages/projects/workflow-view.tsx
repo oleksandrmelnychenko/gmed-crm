@@ -221,7 +221,8 @@ type ProjectWorkflowViewProps = {
   onSelectProject: (projectId: string) => void;
   /** Left out for a role that may not create projects (CEO assistant). */
   onCreateProject?: () => void;
-  onCreateTask: () => void;
+  /** Left out when the caller may not add tasks to the project (a concierge team member). */
+  onCreateTask?: () => void;
   onOpenTask: (taskId: string) => void;
   onAddDependency: (taskId: string, dependsOnTaskId: string) => Promise<void>;
   onRemoveDependency: (dependencyId: string) => Promise<void>;
@@ -654,7 +655,7 @@ export function ProjectWorkflowView({
               </div>
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={labels.progress} aria-valuemin={0} aria-valuemax={100} aria-valuenow={stats.progress}><div className="h-full rounded-full bg-orange-500 transition-[width]" style={{ width: `${stats.progress}%` }} /></div>
               <div className="mt-3 flex flex-wrap justify-end gap-2">
-                <Button type="button" size="sm" variant="outline" disabled={loading} onClick={onCreateTask}><Plus />{labels.createTask}</Button>
+                {onCreateTask ? <Button type="button" size="sm" variant="outline" disabled={loading} onClick={onCreateTask}><Plus />{labels.createTask}</Button> : null}
                 {canEditDependencies && tasks.length > 1 ? <Button type="button" size="sm" onClick={() => setDependencyDialogOpen(true)}><Link2 />{labels.addDependency}</Button> : null}
               </div>
             </div>
@@ -678,7 +679,7 @@ export function ProjectWorkflowView({
           <CircleDashed className="size-10 text-orange-500" />
           <h2 className="mt-3 font-semibold">{labels.emptyTitle}</h2>
           <p className="mt-1 max-w-md text-sm text-muted-foreground">{labels.emptyHint}</p>
-          <Button className="mt-4" onClick={onCreateTask}><Plus />{labels.createTask}</Button>
+          {onCreateTask ? <Button className="mt-4" onClick={onCreateTask}><Plus />{labels.createTask}</Button> : null}
         </div>
       ) : (
         <>

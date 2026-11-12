@@ -111,6 +111,16 @@ export function feedbackScoresPayload(form: FeedbackFormState, options: { withIn
   };
 }
 
+/**
+ * Whether the patient's survey asks about the interpreter: only for a chosen
+ * visit with an interpreter (a visit of an older server answer, without the
+ * flag, keeps the question). The general survey names no interpreter, so it
+ * no longer asks (owner decision 2026-11-12, QA B-05).
+ */
+export function portalSurveyAsksInterpreter(visit: { has_interpreter?: boolean } | null | undefined): boolean {
+  return Boolean(visit) && visit?.has_interpreter !== false;
+}
+
 type RateableVisit = {
   status: string;
   date: string;

@@ -52,6 +52,16 @@ export function canManageProject(project: Project, actor: { id: string; role: st
     || Boolean(project.members?.some(member => member.id === actor.id && member.member_role === "manager"));
 }
 
+/**
+ * Whether the actor may add a task to the project. A concierge reads the
+ * projects of its team (owner decision 2026-11-12) but adds tasks only to a
+ * project it created; the server refuses the rest (422).
+ */
+export function canAddProjectTask(project: Project, actor: { id: string; role: string }) {
+  if (actor.role === "concierge") return project.created_by === actor.id;
+  return true;
+}
+
 export type ProjectFormValue = {
   name: string;
   description: string | null;

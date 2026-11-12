@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canCreateProject, canManageProject, filterProjectMemberOptions, type Project } from "./model";
+import { canAddProjectTask, canCreateProject, canManageProject, filterProjectMemberOptions, type Project } from "./model";
 
 const project = { created_by: "creator", owner_id: "owner", members: [{ id: "manager", member_role: "manager" }] } as Project;
 
@@ -11,6 +11,13 @@ describe("project management permissions", () => {
     for (const id of ["owner", "manager", "outsider"]) {
       expect(canManageProject(project, { id, role: "concierge" })).toBe(false);
     }
+  });
+  it("a concierge team member reads the project but adds tasks only to its own (owner decision 2026-11-12)", () => {
+    expect(canAddProjectTask(project, { id: "creator", role: "concierge" })).toBe(true);
+    for (const id of ["owner", "manager", "outsider"]) {
+      expect(canAddProjectTask(project, { id, role: "concierge" })).toBe(false);
+    }
+    expect(canAddProjectTask(project, { id: "manager", role: "billing" })).toBe(true);
   });
   it("preserves existing access for CEO and other project owners/managers", () => {
     expect(canManageProject(project, { id: "outsider", role: "ceo" })).toBe(true);

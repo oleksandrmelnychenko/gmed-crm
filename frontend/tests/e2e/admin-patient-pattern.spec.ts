@@ -606,18 +606,11 @@ test("CEO can save different default themes for patients and leads", async ({ pa
 });
 
 test("admin routes stay on the patients-style shell", async ({ page }) => {
+  // Notification channels are hidden (owner decision 2026-11-12): the old
+  // address leads back to the dashboard, like every unavailable admin page.
   await page.goto("/admin/notifications");
-  await expect(page.locator("h1", { hasText: "Benachrichtigungskanäle" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Neuer Kanal/i })).toBeVisible();
-  await page.getByRole("button", { name: /Neuer Kanal/i }).click();
-  await expect(
-    page.getByRole("dialog", { name: /Neuer Kanal/i }),
-  ).toBeVisible();
-  await page.screenshot({ path: "test-results/admin-pattern-notifications-sheet.png", fullPage: true });
-  await page.keyboard.press("Escape");
-  // The DataTable also renders a (hidden) card list for phones; click the grid row.
-  await page.getByRole("table").getByText("Primary SMTP").click();
-  await expect(page.getByRole("heading", { name: /Primary SMTP/i })).toBeVisible();
+  await expect(page).not.toHaveURL(/\/admin\/notifications/);
+  await expect(page.locator("h1", { hasText: "Benachrichtigungskanäle" })).toHaveCount(0);
 
   await page.goto("/admin/health");
   await expect(page.locator("h1", { hasText: "Systemstatus" })).toBeVisible();
@@ -669,7 +662,7 @@ test("admin routes stay on the patients-style shell", async ({ page }) => {
 
 
 for (const width of [1440, 390]) {
-  test(`settings and notification workspaces stay organized at ${width}px`, async ({ page }) => {
+  test(`settings workspace stays organized at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 });
     await page.emulateMedia({ reducedMotion: "reduce" });
     const assertNoPageOverflow = async () => {
@@ -704,28 +697,5 @@ for (const width of [1440, 390]) {
     await page.getByRole("tab", { name: /Ausstehende Anmeldungen/ }).click();
     await expect(page.getByText("irina@gmed.de", { exact: true }).filter({ visible: true })).toBeVisible();
     await assertNoPageOverflow();
-
-    await page.goto("/admin/notifications");
-    await expect(page.getByRole("heading", { name: "Benachrichtigungskanäle", exact: true })).toBeVisible();
-    await expect(page.getByText("Primary SMTP", { exact: true }).filter({ visible: true })).toBeVisible();
-    await assertNoPageOverflow();
-    await page.screenshot({ path: `../.tmp/release-audit/admin-notifications-${width}.png`, fullPage: true });
-    await page.locator("#notification-search").fill("Primary");
-    await expect(page.getByText("Ops Webhook", { exact: true }).filter({ visible: true })).toHaveCount(0);
-    await expect(page.getByText("Primary SMTP", { exact: true }).filter({ visible: true })).toBeVisible();
-    await page.getByRole("button", { name: "Zurücksetzen", exact: true }).click();
-    await expect(page.getByText("Ops Webhook", { exact: true }).filter({ visible: true })).toBeVisible();
-    await page.getByText("Ops Webhook", { exact: true }).filter({ visible: true }).click();
-    await assertModal();
-    await expect(page.getByRole("dialog").locator("pre")).toContainText('"secret": "********"');
-    await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Neuer Kanal", exact: true }).click();
-    await assertModal();
-    await page.screenshot({ path: `../.tmp/release-audit/admin-notification-create-${width}.png`, fullPage: true });
-    await page.locator("#channel-name").fill("Mock channel");
-    await page.locator("#channel-config").fill("[]");
-    await page.getByRole("dialog").getByRole("button", { name: "Anlegen", exact: true }).click();
-    await expect(page.getByRole("dialog").getByText("Geben Sie valides JSON ein oder lassen Sie das Feld leer.", { exact: true })).toBeVisible();
-    await expect(page.getByRole("dialog")).toBeVisible();
   });
 }

@@ -27,7 +27,7 @@ import {
 } from "@/pages/concierge/task-event-dialog";
 
 import type { Project, ProjectFormValue, ProjectPriority, ProjectStatus, ProjectWorkflowDependency } from "./model";
-import { canCreateProject, canManageProject, filterProjectMemberOptions, PROJECT_MEMBER_SEARCH_FROM } from "./model";
+import { canAddProjectTask, canCreateProject, canManageProject, filterProjectMemberOptions, PROJECT_MEMBER_SEARCH_FROM } from "./model";
 import { ProjectWorkflowView } from "./workflow-view";
 
 const copy = {
@@ -273,10 +273,9 @@ export function ProjectsPage() {
       setAssignees(userRows);
       setPatients(patientRows);
       if (projectResult.error || !projectResult.value) throw projectResult.error;
-      const projectRows = user?.role === "concierge"
-        ? projectResult.value.filter(project => project.created_by === user.id)
-        : projectResult.value;
-      setProjects((current) => projectRows.map((project) => ({
+      // The server scopes the list: a concierge gets the projects it created
+      // and those whose team it belongs to (owner decision 2026-11-12).
+      setProjects((current) => projectResult.value.map((project) => ({
         ...project,
         members: current.find((entry) => entry.id === project.id)?.members,
       })));
@@ -302,9 +301,6 @@ export function ProjectsPage() {
           .catch((dependencyLoadError: unknown) => ({ value: null, error: displayApiError(dependencyLoadError, labels.loadFailed, labels.apiUnavailable) })),
       ]);
       if (projectId !== activeProjectIdRef.current || requestId !== workflowRequestRef.current) return;
-      if (user?.role === "concierge" && detail.created_by !== user.id) {
-        throw new Error(lang === "de" ? "Nur selbst erstellte Projekte sind verfügbar." : "Доступны только созданные вами проекты.");
-      }
       setProjects((current) => current.some((project) => project.id === detail.id)
         ? current.map((project) => project.id === detail.id ? detail : project)
         : [...current, detail]);
@@ -318,7 +314,7 @@ export function ProjectsPage() {
     } finally {
       if (projectId === activeProjectIdRef.current && requestId === workflowRequestRef.current) setDetailLoading(false);
     }
-  }, [labels.apiUnavailable, labels.loadFailed, lang, user?.id, user?.role]);
+  }, [labels.apiUnavailable, labels.loadFailed]);
 
   useEffect(() => {
     setTasks([]);
@@ -478,6 +474,7 @@ export function ProjectsPage() {
 
   const filtersActive = Boolean(query.trim()) || status !== "all";
   const canEditSelected = Boolean(selected && user && canManageProject(selected, user));
+  const canAddTask = Boolean(selected && user && canAddProjectTask(selected, user));
   const canCreate = canCreateProject(user?.role);
 
   return (
@@ -507,7 +504,7 @@ export function ProjectsPage() {
           canManage={canEditSelected}
           onSelectProject={selectWorkflowProject}
           onCreateProject={canCreate ? openCreate : undefined}
-          onCreateTask={openCreateTask}
+          onCreateTask={canAddTask ? openCreateTask : undefined}
           onOpenTask={(taskId) => staffGo(`/task-manager?task=${taskId}`)}
           onAddDependency={addWorkflowDependency}
           onRemoveDependency={removeWorkflowDependency}

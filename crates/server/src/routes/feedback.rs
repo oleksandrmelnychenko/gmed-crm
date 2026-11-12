@@ -127,6 +127,31 @@ fn is_promoter_average(sum: i64, count: i64) -> bool {
     count > 0 && sum >= 9 * count
 }
 
+/// An interpreter score counts in the averages and the ranking only when the
+/// answer names an interpreter (owner decision 2026-11-12, QA B-05): a score
+/// from the general survey rates nobody. Stored old answers stay readable.
+fn counted_interpreter_score(
+    interpreter_id: Option<Uuid>,
+    interpreter_score: Option<i32>,
+) -> Option<(Uuid, i32)> {
+    interpreter_id.zip(interpreter_score)
+}
+
+/// The patient's own survey keeps an interpreter score only for a visit with
+/// an interpreter; the general survey no longer asks for one (owner decision
+/// 2026-11-12). Staff record what the patient told them.
+fn stored_interpreter_score(
+    patient_survey: bool,
+    interpreter_id: Option<Uuid>,
+    interpreter_score: Option<i32>,
+) -> Option<i32> {
+    if patient_survey && interpreter_id.is_none() {
+        None
+    } else {
+        interpreter_score
+    }
+}
+
 #[derive(Clone)]
 struct StaffRankingSummary {
     user_id: Uuid,
@@ -404,7 +429,12 @@ async fn get_feedback_summary(
 
         overall.push(overall_score);
         patient_manager.push(patient_manager_score);
-        interpreter.push(interpreter_score);
+        let counted_interpreter = counted_interpreter_score(
+            row.try_get::<Option<Uuid>, _>("interpreter_id")
+                .unwrap_or_default(),
+            interpreter_score,
+        );
+        interpreter.push(counted_interpreter.map(|(_, score)| score));
         concierge.push(concierge_score);
         treatment.push(treatment_score);
         doctor.push(doctor_score);
@@ -460,11 +490,7 @@ async fn get_feedback_summary(
                 last_submitted_at: submitted_at,
             });
 
-        if let (Some(interpreter_id), Some(score)) = (
-            row.try_get::<Option<Uuid>, _>("interpreter_id")
-                .unwrap_or_default(),
-            interpreter_score,
-        ) {
+        if let Some((interpreter_id, score)) = counted_interpreter {
             let interpreter_name = row
                 .try_get::<Option<String>, _>("interpreter_name")
                 .unwrap_or_default()
@@ -787,13 +813,13 @@ async fn create_feedback_record(
         None
     };
     let submitted_at = Utc::now();
-    // A visit without an interpreter has no interpreter to rate.
-    let interpreter_score =
-        if patient_survey && context.appointment_id.is_some() && context.interpreter_id.is_none() {
-            None
-        } else {
-            body.interpreter_score
-        };
+    // A visit without an interpreter, and the general survey, have no
+    // interpreter to rate.
+    let interpreter_score = stored_interpreter_score(
+        patient_survey,
+        context.interpreter_id,
+        body.interpreter_score,
+    );
 
     let inserted = sqlx::query(
         r#"INSERT INTO patient_feedback_forms (
@@ -1748,8 +1774,36 @@ fn coded_err(status: StatusCode, code: &str, message: &str) -> axum::response::R
 
 #[cfg(test)]
 mod tests {
-    use super::{appointment_took_place, is_promoter_average};
+    use super::{
+        appointment_took_place, counted_interpreter_score, is_promoter_average,
+        stored_interpreter_score,
+    };
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+    use uuid::Uuid;
+
+    #[test]
+    fn an_interpreter_score_counts_only_with_a_named_interpreter() {
+        let interpreter = Uuid::new_v4();
+        assert_eq!(
+            counted_interpreter_score(Some(interpreter), Some(4)),
+            Some((interpreter, 4))
+        );
+        // A general answer with an old interpreter score rates nobody (B-05).
+        assert_eq!(counted_interpreter_score(None, Some(1)), None);
+        assert_eq!(counted_interpreter_score(Some(interpreter), None), None);
+    }
+
+    #[test]
+    fn the_general_patient_survey_stores_no_interpreter_score() {
+        let interpreter = Uuid::new_v4();
+        assert_eq!(stored_interpreter_score(true, None, Some(3)), None);
+        assert_eq!(
+            stored_interpreter_score(true, Some(interpreter), Some(3)),
+            Some(3)
+        );
+        // Staff record what the patient told them.
+        assert_eq!(stored_interpreter_score(false, None, Some(3)), Some(3));
+    }
 
     #[test]
     fn only_an_average_of_nine_or_ten_is_a_promoter() {

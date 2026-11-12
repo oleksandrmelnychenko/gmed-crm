@@ -96,7 +96,6 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   "admin/security": Fingerprint,
   "admin/health": HeartPulse,
   "admin/compliance": BadgeCheck,
-  "admin/notifications": BellRing,
   "admin/custom-fields": SlidersHorizontal,
   "admin/announcements": Megaphone,
 };

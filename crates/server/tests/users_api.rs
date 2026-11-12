@@ -183,6 +183,73 @@ async fn external_interpreter_profiles_are_hidden_from_users_and_roles() {
     );
 }
 
+/// /employees lists every active staff account except external interpreters
+/// (owner decision 2026-11-12, screens QA D-5).
+#[tokio::test]
+async fn staff_directory_lists_all_staff_except_external_interpreters() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let bearer = auth_header_for(admin_id, "ceo");
+    let tag = format!("staff-dir-{}", Uuid::new_v4().simple());
+    let mut listed_ids = Vec::new();
+    for role in [
+        "ceo_assistant",
+        "patient_manager",
+        "teamlead_interpreter",
+        "concierge",
+        "billing",
+        "sales",
+        "it_admin",
+    ] {
+        listed_ids.push(seed_user(&pool, &tag, role).await);
+    }
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+    let patient_id = seed_user(&pool, &tag, "patient").await;
+    let external_lead_id = seed_user(&pool, &tag, "teamlead_interpreter").await;
+    sqlx::query(
+        r#"INSERT INTO interpreter_profile_details (user_id, status, employment_kind)
+           VALUES ($1, 'active', 'external')
+           ON CONFLICT (user_id)
+           DO UPDATE SET employment_kind = EXCLUDED.employment_kind"#,
+    )
+    .bind(external_lead_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let inactive_id = seed_user(&pool, &tag, "sales").await;
+    sqlx::query("UPDATE users SET is_active = false WHERE id = $1")
+        .bind(inactive_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/staff-directory?search={tag}"),
+        &bearer,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let ids: Vec<String> = body
+        .as_array()
+        .expect("directory array")
+        .iter()
+        .filter_map(|row| row["id"].as_str().map(str::to_string))
+        .collect();
+    for id in &listed_ids {
+        assert!(ids.contains(&id.to_string()), "{id} missing: {body}");
+    }
+    for id in [interpreter_id, patient_id, external_lead_id, inactive_id] {
+        assert!(
+            !ids.contains(&id.to_string()),
+            "{id} must stay hidden: {body}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn create_user_rejects_external_standalone_staff_email() {
     let Some((app, pool, admin_id)) = test_context().await else {

@@ -336,7 +336,7 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
                WHERE visible_project.id = t.project_id
                  AND visible_project.archived_at IS NULL
                  AND (
-                     CASE WHEN (SELECT role FROM users WHERE id = $2) = 'concierge' THEN visible_project.created_by = $2 ELSE (visible_project.owner_id = $2
+                     CASE WHEN (SELECT role FROM users WHERE id = $2) = 'concierge' THEN (visible_project.created_by = $2 OR EXISTS (SELECT 1 FROM crm_project_members concierge_member WHERE concierge_member.project_id = visible_project.id AND concierge_member.user_id = $2)) ELSE (visible_project.owner_id = $2
                      OR EXISTS (
                          SELECT 1 FROM crm_project_members visible_member
                          WHERE visible_member.project_id = visible_project.id
@@ -476,7 +476,7 @@ async fn list_items(
                        WHERE visible_project.id = t.project_id
                          AND visible_project.archived_at IS NULL
                          AND (
-                             CASE WHEN (SELECT role FROM users WHERE id = $9) = 'concierge' THEN visible_project.created_by = $9 ELSE (visible_project.owner_id = $9
+                             CASE WHEN (SELECT role FROM users WHERE id = $9) = 'concierge' THEN (visible_project.created_by = $9 OR EXISTS (SELECT 1 FROM crm_project_members concierge_member WHERE concierge_member.project_id = visible_project.id AND concierge_member.user_id = $9)) ELSE (visible_project.owner_id = $9
                              OR EXISTS (
                                  SELECT 1 FROM crm_project_members visible_member
                                  WHERE visible_member.project_id = visible_project.id
@@ -677,7 +677,7 @@ async fn list_all_attachments(
                      WHERE visible_project.id = task.project_id
                        AND visible_project.archived_at IS NULL
                        AND (
-                           CASE WHEN (SELECT role FROM users WHERE id = $3) = 'concierge' THEN visible_project.created_by = $3 ELSE (visible_project.owner_id = $3
+                           CASE WHEN (SELECT role FROM users WHERE id = $3) = 'concierge' THEN (visible_project.created_by = $3 OR EXISTS (SELECT 1 FROM crm_project_members concierge_member WHERE concierge_member.project_id = visible_project.id AND concierge_member.user_id = $3)) ELSE (visible_project.owner_id = $3
                            OR EXISTS (
                                SELECT 1 FROM crm_project_members visible_member
                                WHERE visible_member.project_id = visible_project.id
@@ -3934,7 +3934,7 @@ async fn lock_item_access(
                       WHERE visible_project.id = task.project_id
                         AND visible_project.archived_at IS NULL
                         AND (
-                            CASE WHEN (SELECT role FROM users WHERE id = $2) = 'concierge' THEN visible_project.created_by = $2 ELSE (visible_project.owner_id = $2
+                            CASE WHEN (SELECT role FROM users WHERE id = $2) = 'concierge' THEN (visible_project.created_by = $2 OR EXISTS (SELECT 1 FROM crm_project_members concierge_member WHERE concierge_member.project_id = visible_project.id AND concierge_member.user_id = $2)) ELSE (visible_project.owner_id = $2
                             OR EXISTS (
                                 SELECT 1 FROM crm_project_members visible_member
                                 WHERE visible_member.project_id = visible_project.id
@@ -3964,7 +3964,7 @@ async fn lock_item_access(
                       WHERE visible_project.id = task.project_id
                         AND visible_project.archived_at IS NULL
                         AND (
-                            CASE WHEN (SELECT role FROM users WHERE id = $2) = 'concierge' THEN visible_project.created_by = $2 ELSE (visible_project.owner_id = $2
+                            CASE WHEN (SELECT role FROM users WHERE id = $2) = 'concierge' THEN (visible_project.created_by = $2 OR EXISTS (SELECT 1 FROM crm_project_members concierge_member WHERE concierge_member.project_id = visible_project.id AND concierge_member.user_id = $2)) ELSE (visible_project.owner_id = $2
                             OR EXISTS (
                                 SELECT 1 FROM crm_project_members visible_member
                                 WHERE visible_member.project_id = visible_project.id
@@ -4040,7 +4040,7 @@ async fn ensure_operational_view_access(
                       WHERE visible_project.id = task.project_id
                         AND visible_project.archived_at IS NULL
                         AND (
-                            CASE WHEN (SELECT role FROM users WHERE id = $2) = 'concierge' THEN visible_project.created_by = $2 ELSE (visible_project.owner_id = $2
+                            CASE WHEN (SELECT role FROM users WHERE id = $2) = 'concierge' THEN (visible_project.created_by = $2 OR EXISTS (SELECT 1 FROM crm_project_members concierge_member WHERE concierge_member.project_id = visible_project.id AND concierge_member.user_id = $2)) ELSE (visible_project.owner_id = $2
                             OR EXISTS (
                                 SELECT 1 FROM crm_project_members visible_member
                                 WHERE visible_member.project_id = visible_project.id
@@ -5348,7 +5348,7 @@ const TASK_SCOPE_QUERY: &str = r#"SELECT task.patient_id IS NOT NULL AS has_pati
               WHERE visible_project.id = task.project_id
                 AND visible_project.archived_at IS NULL
                 AND (
-                    CASE WHEN (SELECT role FROM users WHERE id = $2) = 'concierge' THEN visible_project.created_by = $2 ELSE (visible_project.owner_id = $2
+                    CASE WHEN (SELECT role FROM users WHERE id = $2) = 'concierge' THEN (visible_project.created_by = $2 OR EXISTS (SELECT 1 FROM crm_project_members concierge_member WHERE concierge_member.project_id = visible_project.id AND concierge_member.user_id = $2)) ELSE (visible_project.owner_id = $2
                     OR EXISTS (
                         SELECT 1 FROM crm_project_members visible_member
                         WHERE visible_member.project_id = visible_project.id

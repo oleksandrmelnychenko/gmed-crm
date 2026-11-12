@@ -228,7 +228,6 @@ describe("staff route access by capability", () => {
       "/admin/activity",
       "/admin/health",
       "/admin/api-connections",
-      "/admin/notifications",
       "/admin/announcements",
       "/admin/custom-fields",
       "/admin/datev",
@@ -258,6 +257,12 @@ describe("staff route access by capability", () => {
       "/providers",
     ]) {
       expect(canAccessStaffRoute("it_admin", path), path).toBe(false);
+    }
+    // Notification channels are hidden for everyone (owner decision 2026-11-12).
+    for (const role of ["ceo", "it_admin"]) {
+      expect(canAccessStaffRoute(role, "/admin/notifications"), role).toBe(false);
+      expect(canAccessStaffRoute(role, "/admin/notifications/channel-1"), role).toBe(false);
+      expect(nav(role), role).not.toContain("/admin/notifications");
     }
     const itAdmin = nav("it_admin");
     for (const path of technical) {

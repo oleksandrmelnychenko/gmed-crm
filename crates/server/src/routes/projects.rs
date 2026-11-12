@@ -6,6 +6,7 @@ use axum::{
     routing::{get, post},
 };
 use chrono::{DateTime, NaiveDate, Utc};
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 use serde::Deserialize;
 use sqlx::{Postgres, Row, Transaction};
@@ -121,7 +122,7 @@ async fn list_projects(
            AND ($1::text IS NULL OR project.name ILIKE $1 OR COALESCE(project.description, '') ILIKE $1)
            AND ($2::text IS NULL OR project.status = $2)
            AND ($3::uuid IS NULL OR project.patient_id = $3)
-           AND (CASE WHEN $6::boolean THEN project.created_by = $5 ELSE ($4::boolean OR project.owner_id = $5 OR EXISTS (
+           AND (CASE WHEN $6::boolean THEN (project.created_by = $5 OR EXISTS (SELECT 1 FROM crm_project_members concierge_member WHERE concierge_member.project_id = project.id AND concierge_member.user_id = $5)) ELSE ($4::boolean OR project.owner_id = $5 OR EXISTS (
                 SELECT 1 FROM crm_project_members access_member
                 WHERE access_member.project_id = project.id AND access_member.user_id = $5
            ) OR EXISTS (
@@ -149,12 +150,41 @@ async fn list_projects(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load projects");
         }
     };
-    Json(
-        rows.iter()
-            .filter_map(project_summary_json)
-            .collect::<Vec<_>>(),
-    )
-    .into_response()
+    let mut projects = rows
+        .iter()
+        .filter_map(project_summary_json)
+        .collect::<Vec<_>>();
+    for project in &mut projects {
+        if let Err(response) = hide_unopened_patient_name(&state, &auth, project).await {
+            return response;
+        }
+    }
+    Json(projects).into_response()
+}
+
+/// A concierge reads a project of its team (owner decision 2026-11-12), but
+/// the project's patient only by the patient access rule of the rest of the
+/// code, like a task shared through a project (RBAC matrix, task manager).
+async fn hide_unopened_patient_name(
+    state: &AppState,
+    auth: &AuthUser,
+    project: &mut serde_json::Value,
+) -> Result<(), axum::response::Response> {
+    if auth.role != Role::Concierge {
+        return Ok(());
+    }
+    let Some(patient_id) = project["patient_id"]
+        .as_str()
+        .and_then(|value| Uuid::parse_str(value).ok())
+    else {
+        return Ok(());
+    };
+    let opened = auth.can(Capability::PatientsView)
+        && crate::routes::patients::has_patient_access(state, auth, patient_id).await?;
+    if !opened {
+        project["patient_name"] = serde_json::Value::Null;
+    }
+    Ok(())
 }
 
 async fn create_project(
@@ -818,7 +848,7 @@ async fn load_project(
     let sql = format!(
         "{PROJECT_SELECT}
          WHERE project.id = $1 AND project.archived_at IS NULL
-           AND (CASE WHEN $4::boolean THEN project.created_by = $3 ELSE ($2::boolean OR project.owner_id = $3 OR EXISTS (
+           AND (CASE WHEN $4::boolean THEN (project.created_by = $3 OR EXISTS (SELECT 1 FROM crm_project_members concierge_member WHERE concierge_member.project_id = project.id AND concierge_member.user_id = $3)) ELSE ($2::boolean OR project.owner_id = $3 OR EXISTS (
              SELECT 1 FROM crm_project_members access_member
              WHERE access_member.project_id = project.id AND access_member.user_id = $3
            ) OR EXISTS (
@@ -843,6 +873,7 @@ async fn load_project(
     };
     let mut value = project_summary_json(&row)
         .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load project"))?;
+    hide_unopened_patient_name(state, auth, &mut value).await?;
     let members = sqlx::query(
         r#"SELECT member.user_id, user_row.name, user_row.role, member.member_role
            FROM crm_project_members member JOIN users user_row ON user_row.id = member.user_id
@@ -900,7 +931,7 @@ pub(super) async fn has_project_access(
                FROM crm_projects project
               WHERE project.id = $1
                 AND project.archived_at IS NULL
-                AND (CASE WHEN $4::boolean THEN project.created_by = $3 ELSE ($2::boolean OR project.owner_id = $3 OR EXISTS (
+                AND (CASE WHEN $4::boolean THEN (project.created_by = $3 OR EXISTS (SELECT 1 FROM crm_project_members concierge_member WHERE concierge_member.project_id = project.id AND concierge_member.user_id = $3)) ELSE ($2::boolean OR project.owner_id = $3 OR EXISTS (
                     SELECT 1
                       FROM crm_project_members member
                      WHERE member.project_id = project.id
@@ -952,14 +983,19 @@ async fn project_event_targets(
     project_id: Uuid,
     previous_members: &[Uuid],
 ) -> Vec<Uuid> {
-    // A concierge who is only an owner/member must not receive foreign project payloads.
+    // A concierge receives project payloads only for a project it reads: one
+    // it created or whose team it belongs to now (owner decision 2026-11-12);
+    // being only the owner or a former member is not enough.
     sqlx::query_scalar(
         "SELECT recipient.id FROM crm_projects project JOIN users recipient ON
            recipient.id = project.created_by OR recipient.id = project.owner_id
            OR recipient.id = ANY($2) OR EXISTS (
              SELECT 1 FROM crm_project_members member
              WHERE member.project_id = project.id AND member.user_id = recipient.id)
-         WHERE project.id = $1 AND (recipient.role <> 'concierge' OR recipient.id = project.created_by)",
+         WHERE project.id = $1 AND (recipient.role <> 'concierge' OR recipient.id = project.created_by
+           OR EXISTS (
+             SELECT 1 FROM crm_project_members concierge_member
+             WHERE concierge_member.project_id = project.id AND concierge_member.user_id = recipient.id))",
     )
     .bind(project_id).bind(previous_members).fetch_all(&state.db).await.unwrap_or_default()
 }

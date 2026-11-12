@@ -327,12 +327,6 @@ const AdminCompliancePage = lazy(() =>
   })),
 );
 
-const AdminNotificationsPage = lazy(() =>
-  import("@/pages/admin-notifications").then((module) => ({
-    default: module.AdminNotificationsPage,
-  })),
-);
-
 const AdminCustomFieldsPage = lazy(() =>
   import("@/pages/admin-custom-fields").then((module) => ({
     default: module.AdminCustomFieldsPage,
@@ -523,7 +517,8 @@ function AppRoutes() {
             <Route path="incidents" element={<IncidentReportPage />} />
             <Route path="account" element={<AccountPage />} />
             <Route path="security/two-factor" element={<TwoFactorPage />} />
-            <Route path="admin/notifications" element={<AdminNotificationsPage />} />
+            {/* Notification channels are hidden (owner decision 2026-11-12). */}
+            <Route path="admin/notifications/*" element={<StaffRouteRedirect to="/" replace />} />
             <Route path="admin/custom-fields" element={<AdminCustomFieldsPage />} />
             <Route path="admin/announcements" element={<AdminAnnouncementsPage />} />
             <Route path="*" element={<NotFoundPage />} />

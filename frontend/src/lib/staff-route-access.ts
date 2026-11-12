@@ -397,13 +397,15 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     capability: "admin.signatures",
     nav: { section: "admin", labelKey: "nav_api_connections" },
   },
+  // Notification channels are hidden (owner decision 2026-11-12): e-mail goes
+  // through Mittaro and no channel delivery is built. No menu item and no
+  // role opens the page, so the address leads back to the dashboard; the
+  // server endpoints and stored channels stay as they are.
   {
     id: "admin/notifications",
     match: "prefix",
     path: "/admin/notifications",
-    roles: ROLES_ADMIN,
-    capability: "admin.notifications",
-    nav: { section: "admin", labelKey: "nav_notifications" },
+    roles: [],
   },
   {
     id: "admin/announcements",

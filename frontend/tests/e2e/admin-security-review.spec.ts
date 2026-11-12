@@ -66,7 +66,7 @@ async function expectMetricCardsSideBySide(page: Page, testId: string, count: nu
   }
 }
 
-test("notification and feedback metric cards do not overlap at 375 px", async ({ page }) => {
+test("feedback metric cards do not overlap at 375 px", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await setup(page, "ceo", (path) => {
     if (path === "/feedback/summary") {
@@ -87,8 +87,6 @@ test("notification and feedback metric cards do not overlap at 375 px", async ({
     }
     return undefined;
   });
-  await page.goto("/admin/notifications");
-  await expectMetricCardsSideBySide(page, "notification-metrics", 4);
   await page.goto("/feedback");
   await expectMetricCardsSideBySide(page, "feedback-metrics", 4);
 });
