@@ -58,7 +58,8 @@ test("concierge creates, edits and deletes own project after ownership was trans
   const state = await setup(page);
   await page.goto("/projects?project=own");
   await expect(page.getByRole("link", { name: "Проекты", exact: true })).toBeVisible();
-  await expect(page.getByText("Foreign project", { exact: true })).toHaveCount(0);
+  // A project of its team is listed for reading (owner decision 2026-11-12).
+  await expect(page.getByText("Foreign project", { exact: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "Изменить проект", exact: true }).click();
   let dialog = page.getByRole("dialog");
   await dialog.getByRole("textbox").first().fill("Edited own project");
@@ -81,11 +82,13 @@ test("concierge creates, edits and deletes own project after ownership was trans
   await expect(page.getByRole("complementary").getByRole("heading", { name: "Created by concierge", exact: true })).toBeVisible();
 });
 
-test("concierge cannot open foreign project through a direct URL even as owner or manager", async ({ page }) => {
+// Owner decision 2026-11-12: a concierge in the team reads a project created by someone else,
+// even as owner or manager, but never changes or deletes it.
+test("concierge reads a foreign project of its team but cannot change it, even as owner or manager", async ({ page }) => {
   await setup(page);
   await page.goto("/projects?project=foreign");
   await expect(page.getByRole("button", { name: "Новый проект", exact: true }).filter({ visible: true })).toBeVisible();
-  await expect(page.getByText("Foreign project", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Foreign project", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Удалить проект", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Изменить проект", exact: true })).toHaveCount(0);
 });
