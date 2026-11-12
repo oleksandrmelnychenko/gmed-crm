@@ -27,12 +27,21 @@ import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { isLeadPortalUser } from "@/lib/staff-route-access";
-import { publishLeadCabinetLang, storeLeadCabinetLang } from "@/pages/patient-lead/lead-cabinet-language";
+import { publishLeadCabinetLang, storeLeadCabinetLang, useInterfaceLang } from "@/pages/patient-lead/lead-cabinet-language";
+import { leadAccountText } from "@/pages/patient-lead/lead-shell-text";
 import { TwoFactorSection } from "@/pages/two-factor";
 
 function useUiText() {
   const { t, lang } = useLang();
-  const l = useCallback((key: string) => t.uiText[key] ?? key, [t]);
+  // The lead cabinet's account page speaks the cabinet language, EN and UA
+  // included (QA 2026-11-12, B S3-1: it was German there).
+  const { user } = useAuth();
+  const cabinetLang = useInterfaceLang();
+  const leadCabinet = isLeadPortalUser(user);
+  const l = useCallback(
+    (key: string) => (leadCabinet ? leadAccountText(cabinetLang, key) : null) ?? t.uiText[key] ?? key,
+    [cabinetLang, leadCabinet, t],
+  );
   return { l, lang, t };
 }
 
@@ -59,6 +68,8 @@ export function AccountPage() {
   // in with the password the manager issued and does not change it here
   // (owner decision 2026-10-05); a lost one is replaced by staff.
   const leadCabinet = isLeadPortalUser(user);
+  // A password change ends the other sessions: the list reloads (QA 2026-11-12, B S3-8).
+  const [sessionsVersion, setSessionsVersion] = useState(0);
   return (
     <div className={user?.role === "patient" ? "w-full min-w-0 space-y-3 [&_label]:font-mono [&_label]:text-xs" : "space-y-3"} data-testid="account-page">
       <PageHeader title={l("account_title")} description={l("account_subtitle")} />
@@ -67,7 +78,7 @@ export function AccountPage() {
           <ProfileSection />
           {leadCabinet ? null : (
             <AccountSection title={l("account_password_title")} icon={KeyRound}>
-              <ChangePasswordForm compact />
+              <ChangePasswordForm compact onChanged={() => setSessionsVersion((current) => current + 1)} />
             </AccountSection>
           )}
         </div>
@@ -78,7 +89,7 @@ export function AccountPage() {
             <AccountSection title={l("twofactor_title")} icon={ShieldCheck}>
               <TwoFactorSection embedded />
             </AccountSection>
-            <SessionsSection />
+            <SessionsSection version={sessionsVersion} />
           </>
         )}
       </div>
@@ -376,7 +387,7 @@ export function ChangePasswordForm({
   );
 }
 
-function SessionsSection() {
+function SessionsSection({ version }: { version: number }) {
   const { l } = useUiText();
   const { logout, user } = useAuth();
   const [sessions, setSessions] = useState<AccountSession[] | null>(null);
@@ -394,7 +405,7 @@ function SessionsSection() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, version]);
 
   const revoke = async (session: AccountSession) => {
     setBusy(true);

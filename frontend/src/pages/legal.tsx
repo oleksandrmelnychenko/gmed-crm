@@ -57,6 +57,7 @@ export function LegalNoticePage() {
   } : {};
   const noticeUi = noticeLang === "de" || noticeLang === "ru" ? translationsFor(noticeLang).uiText : t.uiText;
   const l = (key: string) => localizedLabels[key] ?? noticeUi[key] ?? key;
+  const signedInBack = { de: "Zurück", en: "Back", uk: "Назад", ru: "Назад" }[noticeLang] ?? "Назад";
   const [notice, setNotice] = useState<LegalNotice | null>(null);
   const [failed, setFailed] = useState(false);
   const inPortal = user?.role === "patient" && !user.password_change_required;
@@ -150,8 +151,18 @@ export function LegalNoticePage() {
       <header className="space-y-3 pb-1">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <img src="/gmed-logo.png" alt="GMED" className="h-8 w-auto object-contain" />
-          <a href="/login" className={`${buttonVariants({ variant: "outline", size: "sm" })} h-8 rounded-lg bg-field text-xs`}>
-            <ArrowLeft aria-hidden="true" className="size-3.5" />{l("legal_back")}
+          {/* A signed-in user goes back to where they were, not to the sign-in page
+              (QA 2026-11-12, B S3-10: «Назад ко входу» bounced through /login). */}
+          <a
+            href={user ? "/" : "/login"}
+            onClick={user ? (event) => {
+              if (window.history.length <= 1) return;
+              event.preventDefault();
+              window.history.back();
+            } : undefined}
+            className={`${buttonVariants({ variant: "outline", size: "sm" })} h-8 rounded-lg bg-field text-xs`}
+          >
+            <ArrowLeft aria-hidden="true" className="size-3.5" />{user ? signedInBack : l("legal_back")}
           </a>
         </div>
         <h1 className="text-xl font-semibold tracking-tight">{title}</h1>

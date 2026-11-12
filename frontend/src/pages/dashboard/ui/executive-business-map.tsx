@@ -553,7 +553,7 @@ export function ExecutiveBusinessMap({
             chart={<Suspense fallback={null}><ExecutiveSparkline data={orderTrend} tone={orderTone} /></Suspense>}
             detail={<><span className="font-medium text-foreground">{copy.pipeline}:</span> {orderPhases.length > 0 ? copy.phases(orderPhases.length) : copy.noOrders}.</>}
             action={copy.orderAction}
-            onClick={() => go("/orders")}
+            onClick={() => go("/orders?status=active")}
           />
           <BusinessDomain
             icon={Building2}

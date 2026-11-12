@@ -295,3 +295,88 @@ export function leadPortalFeatureLabels(lang: LeadCabinetLang | string | null | 
 export function leadShellNavLabel(text: LeadShellText, id: string, fallback: string): string {
   return (text.nav as Partial<Record<string, string>>)[id] ?? fallback;
 }
+
+/**
+ * The account page of the lead cabinet (profile, language, appearance) in the
+ * cabinet language, keyed like the catalog texts it replaces (QA 2026-11-12,
+ * B S3-1: in EN and UA the page was German). The lead has no password, second
+ * factor or sessions there, so the subtitle names what the page holds.
+ */
+type LeadAccountTextKey =
+  | "account_title"
+  | "account_subtitle"
+  | "account_profile_title"
+  | "account_profile_email"
+  | "account_profile_name"
+  | "account_profile_phone"
+  | "account_profile_language"
+  | "account_profile_save"
+  | "account_profile_saved"
+  | "account_profile_error_name_required"
+  | "account_profile_error_name"
+  | "account_profile_error_phone";
+
+const LEAD_ACCOUNT_TEXT: Record<LeadCabinetLang, Record<LeadAccountTextKey, string>> = {
+  de: {
+    account_title: "Konto",
+    account_subtitle: "Profil, Sprache und Darstellung.",
+    account_profile_title: "Profil",
+    account_profile_email: "E-Mail",
+    account_profile_name: "Name",
+    account_profile_phone: "Telefon",
+    account_profile_language: "Sprache der Oberfläche",
+    account_profile_save: "Profil speichern",
+    account_profile_saved: "Profil gespeichert.",
+    account_profile_error_name_required: "Bitte geben Sie Ihren Namen an.",
+    account_profile_error_name: "Bitte einen Namen mit höchstens 200 Zeichen angeben.",
+    account_profile_error_phone: "Telefon: nur Ziffern, +, Leerzeichen, Bindestrich und Klammern (max. 40 Zeichen).",
+  },
+  en: {
+    account_title: "Account",
+    account_subtitle: "Profile, language and appearance.",
+    account_profile_title: "Profile",
+    account_profile_email: "E-mail",
+    account_profile_name: "Name",
+    account_profile_phone: "Phone",
+    account_profile_language: "Interface language",
+    account_profile_save: "Save profile",
+    account_profile_saved: "Profile saved.",
+    account_profile_error_name_required: "Please enter your name.",
+    account_profile_error_name: "Please enter a name of at most 200 characters.",
+    account_profile_error_phone: "Phone: digits, +, spaces, hyphens and brackets only (at most 40 characters).",
+  },
+  uk: {
+    account_title: "Обліковий запис",
+    account_subtitle: "Профіль, мова та оформлення.",
+    account_profile_title: "Профіль",
+    account_profile_email: "E-mail",
+    account_profile_name: "Ім'я",
+    account_profile_phone: "Телефон",
+    account_profile_language: "Мова інтерфейсу",
+    account_profile_save: "Зберегти профіль",
+    account_profile_saved: "Профіль збережено.",
+    account_profile_error_name_required: "Вкажіть ім'я.",
+    account_profile_error_name: "Вкажіть ім'я не довше 200 символів.",
+    account_profile_error_phone: "Телефон: лише цифри, +, пробіли, дефіс і дужки (не більше 40 символів).",
+  },
+  ru: {
+    account_title: "Аккаунт",
+    account_subtitle: "Профиль, язык и оформление.",
+    account_profile_title: "Профиль",
+    account_profile_email: "E-mail",
+    account_profile_name: "Имя",
+    account_profile_phone: "Телефон",
+    account_profile_language: "Язык интерфейса",
+    account_profile_save: "Сохранить профиль",
+    account_profile_saved: "Профиль сохранён.",
+    account_profile_error_name_required: "Укажите имя.",
+    account_profile_error_name: "Укажите имя не длиннее 200 символов.",
+    account_profile_error_phone: "Телефон: только цифры, +, пробелы, дефис и скобки (не более 40 символов).",
+  },
+};
+
+/** A text of the lead cabinet's account page, or `null` for a key it does not word. */
+export function leadAccountText(lang: LeadCabinetLang | string | null | undefined, key: string): string | null {
+  const table = LEAD_ACCOUNT_TEXT[asLeadCabinetLang(lang) ?? "ru"];
+  return (table as Partial<Record<string, string>>)[key] ?? null;
+}

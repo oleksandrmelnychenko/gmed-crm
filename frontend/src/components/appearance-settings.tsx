@@ -12,7 +12,8 @@ import { AccountSectionHeading } from "@/components/account-section-heading";
 import { AppearanceControlColors } from "@/components/appearance-control-colors";
 import { CONTRAST_LEVEL_TEXT } from "@/components/appearance-menu";
 import { Button } from "@/components/ui/button";
-import { useLang } from "@/lib/i18n";
+// The lead cabinet's own language, EN and UA included (QA 2026-11-12, B S3-1).
+import { useInterfaceLang } from "@/pages/patient-lead/lead-cabinet-language";
 import {
   addAppearanceTheme, BUILTIN_THEMES, CONTRAST_LEVELS, DEFAULT_THEME, withControls, MAX_THEME_JSON_LENGTH,
   parseAppearanceTheme, ThemeValidationError, type AppearanceTheme, type ThemeErrorCode,
@@ -71,7 +72,7 @@ export function AppearanceSettings() {
     sectionRef.current?.scrollIntoView({ block: "start" });
     sectionRef.current?.focus({ preventScroll: true });
   }, [search, key]);
-  const { lang } = useLang();
+  const lang = useInterfaceLang();
   const text = TEXT[lang as keyof typeof TEXT] ?? TEXT.en;
   const contrastText = CONTRAST_LEVEL_TEXT[lang as keyof typeof CONTRAST_LEVEL_TEXT] ?? CONTRAST_LEVEL_TEXT.en;
   const { theme: selectedTheme, themes, contrast, controls, save } = useAppearanceTheme();

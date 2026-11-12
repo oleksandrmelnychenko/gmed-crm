@@ -10,6 +10,7 @@ import {
   Send,
   MessageSquare,
   LoaderCircle,
+  Search,
   UserRoundPlus,
   Users,
 } from "lucide-react";
@@ -62,6 +63,7 @@ import {
 import { GmedWordmark } from "@/components/gmed-wordmark";
 import { BuildReleaseWidget } from "@/components/build-release-widget";
 import { AppearanceMenu } from "@/components/appearance-menu";
+import { openCommandPalette } from "@/components/command-palette";
 import { AiMark } from "@/components/ui/ai-mark";
 import { OverflowMenu } from "@/components/ui/overflow-menu";
 import { countryNameForDisplay } from "@/components/ui/country-select";
@@ -515,6 +517,20 @@ export function Topbar() {
               />
             </div>
           )}
+
+          {/* Global search, also on phones: Ctrl+K alone hid it (QA 2026-11-12, B S3-5). */}
+          {!isPatientPortal && user ? (
+            <TopbarIconButton
+              onClick={() => {
+                setNotifOpen(false);
+                setUsersOpen(false);
+                openCommandPalette();
+              }}
+              title={`${t.common_search} (${lang === "de" ? "Strg" : "Ctrl"}+K)`}
+            >
+              <Search aria-hidden="true" className="size-[17px]" />
+            </TopbarIconButton>
+          ) : null}
 
           {showLeadShortcut ? (
             <div className="relative">

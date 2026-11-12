@@ -131,7 +131,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { ApiRequestError, clearApiCache } from "@/lib/api";
-import { sectionLoadErrorText } from "@/lib/section-load-error";
+import { recordLoadErrorText } from "@/lib/section-load-error";
 import { appDateKey, dateKeyToDate, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
@@ -1964,9 +1964,11 @@ function StaffDocumentsPage({
         setTextExtraction(null);
         setEditForm(null);
         setShares([]);
+        // A missing, malformed or another person's document reads alike, in the
+        // user's language (QA 2026-11-12, B S3-2: "Document not found").
         setDetailError(
-          nextError instanceof ApiRequestError && nextError.status === 403
-            ? sectionLoadErrorText(nextError)
+          nextError instanceof ApiRequestError && nextError.status !== undefined
+            ? recordLoadErrorText(nextError)
             : nextError instanceof Error
               ? nextError.message
               : documentsFailedLoadDocumentText,

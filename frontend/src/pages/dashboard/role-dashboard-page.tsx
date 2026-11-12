@@ -80,6 +80,7 @@ import {
   roleDashboardFocusTasks,
   type DashboardServiceRequest,
 } from "./model/role-dashboard-focus";
+import { metricRoute } from "./model/role-dashboard-routes";
 import { greetingFor } from "./model/staff-dashboard-formatters";
 import {
   roleDashboardDefinition,
@@ -161,38 +162,6 @@ const ROLE_DASHBOARD_EVENTS = [
   // An interpreter's booking or answer reaches the others as a notification.
   "notification.created",
 ] as const;
-
-const METRIC_ROUTES: Record<string, string> = {
-  active_patients: "/patients",
-  active_orders: "/orders",
-  appointments_next_7d: "/appointments",
-  completed_appointments_30d: "/appointments",
-  upcoming_hours_30d: "/appointments",
-  open_tasks: "/task-manager",
-  overdue_tasks: "/task-manager?timing=overdue",
-  open_checklist_items: "/task-manager",
-  // The service tiles open the services list (/concierge is the task board).
-  active_services: "/services",
-  completed_services_30d: "/services",
-  ready_for_billing: "/services",
-  portal_requests_30d: "/services",
-  new_leads_30d: "/leads",
-  qualified_leads_30d: "/leads",
-  converted_leads_30d: "/leads",
-  lead_to_patient_conversion_rate_pct: "/leads",
-  outstanding_receivables_total: "/company-finance",
-  open_advance_requests_total: "/invoices",
-  overdue_invoice_count: "/company-finance",
-  invoices_30d: "/company-finance",
-  active_sessions: "/admin/security",
-  locked_accounts: "/admin/users",
-  pending_logins: "/admin/security",
-  failed_logins_24h: "/admin/activity",
-  blocked_logins_24h: "/admin/activity",
-  active_users: "/admin/users",
-  db_active_connections: "/admin/health",
-  audit_events_24h: "/admin/activity",
-};
 
 function numberValue(value: unknown): number | null {
   if (Array.isArray(value)) return value.length;
@@ -433,6 +402,15 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
   );
   const showLiveFocus = (canUseTaskManager || loadsBookings) && !preview;
   const secondaryMetrics = definition.metrics.slice(4);
+  // A focus item tied to a counter shows while the counter is above 0 and
+  // opens its list (QA 2026-11-12, B S3-4).
+  const staticFocus = definition.focus.flatMap((label, index) => {
+    const metricKey = definition.focusMetrics?.[index] ?? null;
+    if (!metricKey) return [{ label, to: undefined as string | undefined }];
+    if (loading || (numberValue(kpi?.[metricKey]) ?? 0) <= 0) return [];
+    const route = metricRoute(role, metricKey);
+    return [{ label, to: route && availableRoutes.has(route.split("?")[0]) ? route : undefined }];
+  });
   const copy = lang === "de"
     ? {
         priorities: "Fokus heute",
@@ -441,6 +419,7 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
         unavailable: "Aktuelle Kennzahlen konnten nicht geladen werden.",
         live: "Live priorisiert",
         allClear: "Keine dringenden Aufgaben in Ihrer persönlichen Queue.",
+        nothingOpen: "Derzeit ist nichts offen.",
         overdue: "Überfällig",
         today: "Heute",
         noDue: "Ohne Frist",
@@ -459,6 +438,7 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
         unavailable: "Актуальные показатели пока не удалось загрузить.",
         live: "Приоритеты в реальном времени",
         allClear: "В вашей очереди сейчас нет срочных задач.",
+        nothingOpen: "Сейчас открытых пунктов нет.",
         overdue: "Просрочено",
         today: "Сегодня",
         noDue: "Без срока",
@@ -504,7 +484,7 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
       {hasScorecard ? (
       <section className="grid gap-3 min-[420px]:grid-cols-2 xl:grid-cols-4">
         {definition.metrics.slice(0, 4).map((metricItem) => {
-          const route = METRIC_ROUTES[metricItem.key];
+          const route = metricRoute(role, metricItem.key);
           const canOpenRoute = route && availableRoutes.has(route.split("?")[0]);
           return (
             <MetricCard
@@ -727,15 +707,37 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
                 <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
                 <p className="text-[12.5px] leading-5 text-muted-foreground">{copy.allClear}</p>
               </div>
+            ) : staticFocus.length === 0 ? (
+              <div className="flex items-center gap-3 px-4 py-5">
+                <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
+                <p className="text-[12.5px] leading-5 text-muted-foreground">{copy.nothingOpen}</p>
+              </div>
             ) : (
-              definition.focus.map((item, index) => (
-                <div key={item} className="flex items-start gap-3 px-4 py-3">
-                  <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border border-border text-[10px] font-semibold text-muted-foreground">
-                    {index + 1}
+              staticFocus.map((item, index) => {
+                const content = (
+                  <>
+                    <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border border-border text-[10px] font-semibold text-muted-foreground">
+                      {index + 1}
+                    </div>
+                    <p className="min-w-0 flex-1 text-[12.5px] leading-5 text-foreground">{item.label}</p>
+                  </>
+                );
+                return item.to ? (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => staffGo(item.to as string)}
+                    className="group flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  >
+                    {content}
+                    <ArrowUpRight className="mt-1 size-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
+                  </button>
+                ) : (
+                  <div key={item.label} className="flex items-start gap-3 px-4 py-3">
+                    {content}
                   </div>
-                  <p className="text-[12.5px] leading-5 text-foreground">{item}</p>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </article>

@@ -1437,6 +1437,37 @@ export function computeLeadConversionGate(
   return { canConvertRole, canConvert, disabledReason };
 }
 
+/**
+ * A period a dashboard counter opens the list with (QA 2026-11-12, B S3-4):
+ * leads created (`created_within_days`) or put into their status
+ * (`status_within_days`) in the last N days, as the sales KPIs count them.
+ */
+export type LeadListPeriod = { field: "created" | "status"; days: number };
+
+export function leadListPeriodFromSearchParams(params: URLSearchParams): LeadListPeriod | null {
+  for (const [key, field] of [["created_within_days", "created"], ["status_within_days", "status"]] as const) {
+    const value = params.get(key);
+    if (value && /^\d{1,4}$/.test(value) && Number(value) >= 1) {
+      return { field, days: Number(value) };
+    }
+  }
+  return null;
+}
+
+export function filterLeadsByPeriod<T extends Pick<Lead, "created_at" | "status_changed_at">>(
+  leads: readonly T[],
+  period: LeadListPeriod | null,
+  now: Date = new Date(),
+): T[] {
+  if (!period) return [...leads];
+  const cutoff = now.getTime() - period.days * 24 * 60 * 60 * 1000;
+  return leads.filter((lead) => {
+    const stamp = period.field === "created" ? lead.created_at : (lead.status_changed_at ?? lead.created_at);
+    const time = Date.parse(stamp ?? "");
+    return Number.isFinite(time) && time >= cutoff;
+  });
+}
+
 export function filterLeadsByContact(
   leads: readonly Lead[],
   filters: { email: string; phone: string },

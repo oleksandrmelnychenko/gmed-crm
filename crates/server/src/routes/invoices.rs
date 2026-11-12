@@ -248,6 +248,9 @@ struct ListInvoicesQuery {
     quote_id: Option<Uuid>,
     status: Option<String>,
     invoice_type: Option<String>,
+    /// Invoices created in the last N days, drafts and cancelled ones left out:
+    /// the Billing home's «invoices in 30 days» counter (QA 2026-11-12, B S3-4).
+    created_within_days: Option<i32>,
     page: Option<usize>,
     per_page: Option<usize>,
 }
@@ -7096,6 +7099,10 @@ async fn list_invoices(
              AND ($5::text IS NULL
                   OR invoice_display_status(i.status, i.total_gross, i.credited_amount) = $5)
              AND ($6::text IS NULL OR i.invoice_type = $6)
+             -- The rule of `invoices_30d` in stats.rs (load_billing_kpis).
+             AND ($7::int IS NULL
+                  OR (i.created_at >= now() - make_interval(days => $7::int)
+                      AND i.status NOT IN ('draft', 'cancelled')))
            ORDER BY i.issued_at DESC, i.created_at DESC"#,
     )
     .bind(query.search.as_ref().map(|value| format!("%{}%", value.trim())))
@@ -7104,6 +7111,7 @@ async fn list_invoices(
     .bind(query.quote_id)
     .bind(query.status)
     .bind(query.invoice_type)
+    .bind(query.created_within_days.map(|days| days.clamp(1, 3660)))
     .fetch_all(&state.db)
     .await
     {

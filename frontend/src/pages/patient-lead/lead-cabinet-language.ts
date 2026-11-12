@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from "react";
 
-import type { Lang } from "@/lib/i18n";
+import { useAuth } from "@/lib/auth";
+import { useLang, type Lang } from "@/lib/i18n";
+import { isLeadPortalUser } from "@/lib/staff-route-access";
 
 import { asLeadCabinetLang, resolveLeadCabinetLang, type LeadCabinetLang } from "./lead-request-text";
 
@@ -82,6 +84,19 @@ export function useLeadCabinetLangState(
   if (user?.id && current?.userId === user.id) return { lang: current.lang, settled: true };
   const chosen = readStoredLeadCabinetLang(user?.id) ?? asLeadCabinetLang(user?.preferred_language);
   return { lang: resolveLeadCabinetLang(chosen, null, portalLang), settled: chosen !== null };
+}
+
+/**
+ * The language a shared part of the shell (the theme menu, the appearance
+ * settings, the account page) speaks for the signed-in login: the cabinet
+ * language in the lead cabinet (DE, EN, UA, RU), else the portal language
+ * (QA 2026-11-12, B S3-1).
+ */
+export function useInterfaceLang(): LeadCabinetLang {
+  const { user } = useAuth();
+  const { lang } = useLang();
+  const cabinetLang = useLeadCabinetLang(user, lang);
+  return isLeadPortalUser(user) ? cabinetLang : lang;
 }
 
 /** The language alone (`useLeadCabinetLangState`). */

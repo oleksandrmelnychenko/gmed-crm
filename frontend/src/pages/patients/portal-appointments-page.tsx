@@ -331,11 +331,9 @@ function usePatientAppointmentsPageContent() {
     [requests],
   );
   // A cancelled visit stays in the list with its status but is not counted
-  // as scheduled (global QA 2026-11-10).
-  const scheduledCount = useMemo(
-    () => appointments.filter((item) => item.status !== "cancelled").length,
-    [appointments],
-  );
+  // as scheduled (global QA 2026-11-10). Nor is a past one: the badge counts
+  // what «Мои визиты» on the home page counts (QA 2026-11-12, B S3-4).
+  const scheduledCount = upcomingAppointments.length;
   const appointmentsById = useMemo(
     () => new Map(appointments.map((item) => [item.id, item])),
     [appointments],

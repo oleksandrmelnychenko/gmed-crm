@@ -189,6 +189,7 @@ import {
   updateInvoiceVisibility,
 } from "./data/invoice-api";
 import { InternalNoteEditor } from "@/components/internal-note-editor";
+import { recordLoadErrorText } from "@/lib/section-load-error";
 import {
   DEFAULT_FILTERS,
   DEFAULT_INVOICE_PAGE_SIZE,
@@ -201,6 +202,7 @@ import {
   INVOICE_TYPES,
   blankCreateForm,
   buildInvoicesPath,
+  parseCreatedWithinDays,
   buildSearchParams,
   createInvoiceLineSelection,
   advancePrepaymentDueDate,
@@ -898,7 +900,10 @@ function useStaffInvoicesPageContent() {
   const initialCreateOpen = searchParams.get("create") === "1";
   const initialPage = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
 
-  const [filters, setFilters] = useState<Filters>({ ...DEFAULT_FILTERS, patientId: initialPatientId, orderId: initialOrderId, quoteId: initialQuoteId });
+  // A dashboard counter opens the list filtered like the counter (QA 2026-11-12, B S3-4).
+  const initialStatus = INVOICE_FILTER_STATUSES.find((status) => status === searchParams.get("status")) ?? "";
+  const createdWithinDays = parseCreatedWithinDays(searchParams.get("created_within_days"));
+  const [filters, setFilters] = useState<Filters>({ ...DEFAULT_FILTERS, patientId: initialPatientId, orderId: initialOrderId, quoteId: initialQuoteId, status: initialStatus });
   const [workspaceState, dispatchWorkspaceState] = useReducer(
     invoiceWorkspaceReducer,
     undefined,
@@ -1206,6 +1211,7 @@ function useStaffInvoicesPageContent() {
     appDateKey(),
   );
   const anyQuickFilterActive =
+    createdWithinDays !== null ||
     filters.search.trim() !== "" ||
     filters.patientId !== "" ||
     filters.orderId !== "" ||
@@ -1918,7 +1924,7 @@ function useStaffInvoicesPageContent() {
     async function loadInvoices() {
       dispatchWorkspaceState({ listBusy: true });
       try {
-        const data = await fetchInvoices(buildInvoicesPath(effectiveFilters, invoicePage));
+        const data = await fetchInvoices(buildInvoicesPath(effectiveFilters, invoicePage, undefined, createdWithinDays));
         if (!ignore) {
           dispatchWorkspaceState({
             invoices: Array.isArray(data.items) ? data.items : [],
@@ -1948,7 +1954,7 @@ function useStaffInvoicesPageContent() {
     return () => {
       ignore = true;
     };
-  }, [effectiveFilters, invoicePage, reloadToken, t.common_error]);
+  }, [createdWithinDays, effectiveFilters, invoicePage, reloadToken, t.common_error]);
 
   useEffect(() => {
     setSearchParams(
@@ -1984,7 +1990,9 @@ function useStaffInvoicesPageContent() {
       } catch (error) {
         if (!ignore) {
           dispatchWorkspaceState({
-            detailError: error instanceof Error ? error.message : t.common_error,
+            // Another person's or a missing invoice reads alike, translated
+            // (QA 2026-11-12, B S3-2: "Insufficient permissions").
+            detailError: recordLoadErrorText(error, lang),
             detailBusy: false,
           });
         }
@@ -1994,7 +2002,7 @@ function useStaffInvoicesPageContent() {
     return () => {
       ignore = true;
     };
-  }, [applyLoadedInvoiceDetail, selectedInvoiceId, reloadToken, t.common_error]);
+  }, [applyLoadedInvoiceDetail, lang, selectedInvoiceId, reloadToken]);
 
   useEffect(() => {
     if (!access.canAccounting) {
@@ -2786,6 +2794,24 @@ function useStaffInvoicesPageContent() {
             </ToolbarField>
 
             <div className="ml-auto flex items-center gap-1">
+              {createdWithinDays !== null ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-testid="invoices-created-within-filter"
+                  title={lang === "de" ? "Filter entfernen" : "Снять фильтр"}
+                  onClick={() => {
+                    setInvoicePage(1);
+                    syncQuery({ created_within_days: null, page: null });
+                  }}
+                >
+                  {lang === "de"
+                    ? `Erstellt in ${createdWithinDays} Tagen`
+                    : `Созданы за ${createdWithinDays} дн.`}
+                  <X className="size-3.5" />
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant="outline"
@@ -2804,7 +2830,7 @@ function useStaffInvoicesPageContent() {
                   onClick={() => {
                     setFilters(DEFAULT_FILTERS);
                     setInvoicePage(1);
-                    syncQuery({ patient: null, order: null, quote: null, page: null });
+                    syncQuery({ patient: null, order: null, quote: null, page: null, status: null, created_within_days: null });
                   }}
                 >
                   <X className="size-3.5" />

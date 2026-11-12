@@ -218,12 +218,22 @@ export function invoicesPermissions(actor?: Actor): InvoicesPermissions {
   };
 }
 
+/** `?created_within_days=` of a dashboard link: a whole number of days, else no filter. */
+export function parseCreatedWithinDays(value: string | null | undefined): number | null {
+  if (!value || !/^\d{1,4}$/.test(value)) return null;
+  const days = Number(value);
+  return days >= 1 && days <= 3660 ? days : null;
+}
+
 export function buildInvoicesPath(
   filters: Filters,
   page: number,
   perPage = DEFAULT_INVOICE_PAGE_SIZE,
+  /** The Billing home's «invoices in 30 days» counter: `?created_within_days=30`. */
+  createdWithinDays: number | null = null,
 ) {
   const params = new URLSearchParams();
+  if (createdWithinDays) params.set("created_within_days", String(createdWithinDays));
   if (filters.search.trim()) params.set("search", filters.search.trim());
   if (filters.patientId) params.set("patient_id", filters.patientId);
   if (filters.orderId) params.set("order_id", filters.orderId);

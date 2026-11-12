@@ -7,10 +7,11 @@ import { DEFAULT_THEME, themeCssVariables, withContrast, withControls } from "@/
 import { useAppearanceTheme } from "@/lib/use-appearance-theme";
 import { useLang } from "@/lib/i18n";
 import { useNavState } from "@/lib/nav-state";
-import { isLeadPortalUser } from "@/lib/staff-route-access";
+import { isLeadPortalUser, pageLabelKeyForPath } from "@/lib/staff-route-access";
 import { cn } from "@/lib/utils";
 import { useLeadCabinetLang } from "@/pages/patient-lead/lead-cabinet-language";
-import { leadShellText } from "@/pages/patient-lead/lead-shell-text";
+import { leadShellNavLabel, leadShellText } from "@/pages/patient-lead/lead-shell-text";
+import { useLocation } from "react-router-dom";
 
 import { NavPanel } from "../nav-panel";
 import { Topbar } from "../topbar";
@@ -39,6 +40,18 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
   const leadPortal = leadShell !== null;
   const patientPortal = user?.role === "patient";
   const themeScope = !user ? null : patientPortal ? "patient-portal-theme" : "staff-portal-theme";
+  // The browser tab names the page: "GMED · Пациенты" (QA 2026-11-12, B S3-10).
+  const { pathname } = useLocation();
+  const pageLabel = useMemo(() => {
+    const page = pageLabelKeyForPath(pathname, leadPortal ? "lead" : patientPortal ? "patient" : "staff");
+    if (!page) return null;
+    const catalog = t as unknown as Record<string, string | undefined>;
+    const fallback = catalog[page.labelKey] ?? t.uiText[page.labelKey] ?? "";
+    return leadShell ? leadShellNavLabel(leadShell, page.id, fallback) : fallback;
+  }, [leadPortal, leadShell, pathname, patientPortal, t]);
+  useEffect(() => {
+    document.title = pageLabel ? `GMED · ${pageLabel}` : "GMED";
+  }, [pageLabel]);
   const { theme, contrast, controls } = useAppearanceTheme();
   // The default uses the existing stylesheet unchanged, including its legacy dark palette.
   // A contrast level or own control colours write the full palette, Graphite included.

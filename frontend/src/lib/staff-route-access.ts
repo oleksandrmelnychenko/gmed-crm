@@ -823,6 +823,45 @@ export function canAccessStaffRoute(
   return false;
 }
 
+/**
+ * Whether `pathname` is an address of the app at all (a staff, patient-portal
+ * or lead-cabinet page), whoever may open it. An unknown address shows the
+ * 404 page inside the shell; a known one the user may not open still leads to
+ * the home page (QA 2026-11-12, B S3-3).
+ */
+export function isKnownAppPath(pathname: string): boolean {
+  const p = normalizePathname(pathname);
+  return (
+    STAFF_ROUTE_RULES.some((rule) => pathMatches(p, rule)) ||
+    canAccessPatientPortalRoute(p) ||
+    canAccessLeadPortalRoute(p)
+  );
+}
+
+/**
+ * The catalog key of the page's name for the browser tab: the menu entry of
+ * the address (a record page takes its list's entry). `null`: no named page.
+ */
+export function pageLabelKeyForPath(
+  pathname: string,
+  portal: "staff" | "patient" | "lead" = "staff",
+): { id: string; labelKey: string } | null {
+  const p = normalizePathname(pathname);
+  if (portal !== "staff") {
+    const items = portal === "lead"
+      ? [...LEAD_PORTAL_NAV_ITEMS, PATIENT_LEAD_REQUEST_ITEM, TRUSTED_PERSONS_ITEM]
+      : [...PATIENT_PORTAL_NAV_ITEMS, PATIENT_LEAD_REQUEST_ITEM, TRUSTED_PERSONS_ITEM];
+    const item = items.find((candidate) => candidate.to === p);
+    return item ? { id: item.id, labelKey: item.labelKey } : null;
+  }
+  const list = `/${p.split("/")[1] ?? ""}`;
+  for (const candidate of p === list ? [p] : [p, list]) {
+    const rule = STAFF_ROUTE_RULES.find((entry) => entry.nav && pathMatches(candidate, entry));
+    if (rule?.nav) return { id: rule.id, labelKey: rule.nav.labelKey };
+  }
+  return null;
+}
+
 export type StaffRouteRulePeek = {
   id: string;
   roles: readonly string[];

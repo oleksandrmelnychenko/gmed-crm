@@ -10,6 +10,7 @@ import {
   canAccessLeadPortalRoute,
   canAccessPatientPortalRoute,
   canAccessStaffRoute,
+  isKnownAppPath,
   isLeadPortalUser,
 } from "@/lib/staff-route-access";
 
@@ -56,10 +57,13 @@ export function AuthenticatedAppShell() {
   }
 
   const leadCabinet = isLeadPortalUser(user);
-  if (leadCabinet && !canAccessLeadPortalRoute(location.pathname)) {
+  // An address the app does not have shows the 404 page inside the shell; a
+  // known page the login may not open still leads home (QA 2026-11-12, B S3-3).
+  const knownPath = isKnownAppPath(location.pathname);
+  if (leadCabinet && knownPath && !canAccessLeadPortalRoute(location.pathname)) {
     return <Navigate to="/" replace />;
   }
-  if (user.role === "patient" && !canAccessPatientPortalRoute(location.pathname)) {
+  if (user.role === "patient" && knownPath && !canAccessPatientPortalRoute(location.pathname)) {
     return <Navigate to="/" replace />;
   }
 
@@ -82,16 +86,19 @@ function AuthenticatedAppShellContent() {
   const accountPage = ["/account", "/request", "/trusted-persons", "/legal", "/security"].some(
     (path) => location.pathname === path || location.pathname.startsWith(`${path}/`),
   );
-  const needsPatient = !accountPage && patients.length > 1 && !patients.some((patient) => patient.id === patientId);
+  // The 404 page needs no patient picked and no subscription.
+  const unknownPath = !isKnownAppPath(location.pathname);
+  const needsPatient = !accountPage && !unknownPath && patients.length > 1 && !patients.some((patient) => patient.id === patientId);
   // A pause keeps the agreed visits, the subscriptions page and the chat open.
   const subscriptionPaused = isPortalSubscriptionPaused(user ?? null, patientId);
-  const subscriptionLocked = user?.role === "patient" && !isLeadPortalUser(user)
+  const subscriptionLocked = user?.role === "patient" && !isLeadPortalUser(user) && !unknownPath
     && !hasPortalSubscription(user, patientId) && !isBasicPortalRoute(location.pathname)
     && !(subscriptionPaused && isPausedPortalRoute(location.pathname));
 
   if (
     user &&
     user.role !== "patient" &&
+    !unknownPath &&
     !canAccessStaffRoute(user.role, location.pathname, user.capabilities)
   ) {
     return <Navigate to="/" replace />;

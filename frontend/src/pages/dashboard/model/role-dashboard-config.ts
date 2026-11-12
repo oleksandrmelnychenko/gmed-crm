@@ -21,6 +21,12 @@ export type RoleDashboardDefinition = {
   subtitle: string;
   metrics: RoleDashboardMetric[];
   focus: string[];
+  /**
+   * Per focus item, the counter it is about: the item shows only while that
+   * counter is above 0 and opens the counter's list (QA 2026-11-12, B S3-4:
+   * "check locked accounts" stood there with 0 locked). `null`: always shown.
+   */
+  focusMetrics?: readonly (string | null)[];
   preview: Record<string, unknown>;
   /**
    * The role's primary modules in cabinet order (unfiltered; the page shows
@@ -223,6 +229,7 @@ export function roleDashboardDefinition(role: string, lang: Lang): RoleDashboard
           l(lang, { ru: "Разобрать заблокированные учётные записи", de: "Gesperrte Konten bearbeiten" }),
           l(lang, { ru: "Проверить ожидающие MFA-входы", de: "Ausstehende MFA-Anmeldungen prüfen" }),
         ],
+        focusMetrics: ["failed_logins_24h", "locked_accounts", "pending_logins"],
         preview: {
           active_sessions: 5,
           locked_accounts: 1,

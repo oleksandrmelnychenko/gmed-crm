@@ -2,7 +2,8 @@ import { Menu } from "@base-ui/react/menu";
 import { Check, Palette, Settings2 } from "lucide-react";
 
 import { toast } from "@/components/ui/toast";
-import { useLang } from "@/lib/i18n";
+// The lead cabinet's own language, EN and UA included (QA 2026-11-12, B S3-1).
+import { useInterfaceLang } from "@/pages/patient-lead/lead-cabinet-language";
 import { CONTRAST_LEVELS, type ContrastLevel } from "@/lib/appearance-theme";
 import { useAppearanceTheme } from "@/lib/use-appearance-theme";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -25,7 +26,7 @@ export const CONTRAST_LEVEL_TEXT = {
 const ITEM_CLASS = "flex min-h-8 w-full cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none data-highlighted:bg-[var(--control-highlight,var(--accent))] data-highlighted:text-accent-foreground";
 
 export function AppearanceMenu({ onOpen }: { onOpen?: () => void }) {
-  const { lang } = useLang();
+  const lang = useInterfaceLang();
   const { staffGo } = useStaffNavigate();
   const text = TEXT[lang as keyof typeof TEXT] ?? TEXT.en;
   const contrastText = CONTRAST_LEVEL_TEXT[lang as keyof typeof CONTRAST_LEVEL_TEXT] ?? CONTRAST_LEVEL_TEXT.en;

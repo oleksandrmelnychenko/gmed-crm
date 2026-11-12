@@ -2680,6 +2680,8 @@ async fn list_patients(
                        array_to_string(p.languages, ' ')
                      ), $12)
                   OR (length(regexp_replace($2, '\D', '', 'g')) >= 3
+                      -- A phone-like query only (QA 2026-11-12, B S3-6).
+                      AND $2 !~ '[[:alpha:]]'
                       AND phone_digits(concat_ws(' ', p.phone_primary, p.phone_secondary)) LIKE '%' || regexp_replace($2, '\D', '', 'g') || '%'))
              AND (
                 $3::uuid IS NULL

@@ -443,6 +443,9 @@ struct ListOrdersQuery {
     provider_id: Option<Uuid>,
     provider_taxonomy_node_id: Option<Uuid>,
     doctor_id: Option<Uuid>,
+    /// Only orders of patients assigned to the caller: the PM home's «active
+    /// orders of your patients» counter opens this list (QA 2026-11-12, B S3-4).
+    assigned_to_me: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -798,6 +801,17 @@ async fn list_orders(
                     )
                 )
              )
+             -- The same rule as the PM's `active_orders` KPI (stats.rs).
+             AND (
+                $14::boolean IS NOT TRUE
+                OR EXISTS (
+                    SELECT 1
+                    FROM patient_assignments mine
+                    WHERE mine.patient_id = o.patient_id
+                      AND mine.user_id = $12
+                      AND mine.revoked_at IS NULL
+                )
+             )
            ORDER BY o.created_at DESC, o.id DESC
            LIMIT 200"#,
     ))
@@ -814,6 +828,7 @@ async fn list_orders(
     .bind(reads_every_order(auth.role))
     .bind(auth.user_id)
     .bind(read_scope == OrderReadScope::InterpreterTeam)
+    .bind(query.assigned_to_me.unwrap_or(false))
     .fetch_all(&state.db)
     .await
     {

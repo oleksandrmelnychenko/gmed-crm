@@ -200,6 +200,11 @@ export function LoginPage() {
         dispatchLoginState({
           error: loginError,
         });
+        // Back to the password, which the alert now describes (QA 2026-11-12, B S3-10).
+        window.requestAnimationFrame(() => {
+          const field = document.getElementById("password");
+          if (field instanceof HTMLInputElement) field.select();
+        });
       }
     } finally {
       dispatchLoginState({ loading: false });
@@ -232,7 +237,8 @@ export function LoginPage() {
       ) {
         dispatchLoginState({ totpChallenge: null, totpCode: "", error: tr.login_totp_error });
       } else {
-        dispatchLoginState({ error: tr.login_totp_error });
+        // A wrong code is cleared for the next try (QA 2026-11-12, B S3-10).
+        dispatchLoginState({ error: tr.login_totp_error, totpCode: "" });
       }
     } finally {
       dispatchLoginState({ loading: false });
@@ -328,8 +334,8 @@ export function LoginPage() {
                   autoComplete="current-password"
                   placeholder={tr.login_password}
                   value={password}
-                  aria-invalid={Boolean(fieldErrors.password)}
-                  aria-describedby={fieldErrors.password ? "login-password-error" : undefined}
+                  aria-invalid={Boolean(fieldErrors.password) || Boolean(error && !totpChallenge)}
+                  aria-describedby={fieldErrors.password ? "login-password-error" : error && !totpChallenge ? "login-error" : undefined}
                   onChange={(event) =>
                     dispatchLoginState((current) => ({
                       password: event.target.value,
@@ -367,7 +373,7 @@ export function LoginPage() {
             ) : null}
 
             {error ? (
-              <div className="gmed-login-error" role="alert">
+              <div className="gmed-login-error" role="alert" id="login-error">
                 <AlertCircle aria-hidden="true" />
                 <span>{error}</span>
               </div>

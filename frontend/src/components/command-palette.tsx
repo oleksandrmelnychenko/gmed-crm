@@ -18,8 +18,32 @@ import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
-import { listStaffNavItems } from "@/lib/staff-route-access";
+import { canAccessStaffRoute, listStaffNavItems } from "@/lib/staff-route-access";
 import { cn } from "@/lib/utils";
+
+/** Fired by the top bar's search button; the palette opens on it. */
+export const OPEN_COMMAND_PALETTE_EVENT = "gmed:open-command-palette";
+
+export function openCommandPalette() {
+  window.dispatchEvent(new Event(OPEN_COMMAND_PALETTE_EVENT));
+}
+
+/**
+ * Which record lists the palette searches for this user: those whose list
+ * page the role may open (the server answers 403 for the others).
+ */
+export function commandPaletteSearchKinds(
+  user: { role?: string | null; capabilities?: readonly string[] | null } | null | undefined,
+): { patients: boolean; leads: boolean; orders: boolean } {
+  const role = user?.role ?? "";
+  if (!role || role === "patient") return { patients: false, leads: false, orders: false };
+  const capabilities = user?.capabilities ?? null;
+  return {
+    patients: canAccessStaffRoute(role, "/patients", capabilities),
+    leads: canAccessStaffRoute(role, "/leads", capabilities),
+    orders: canAccessStaffRoute(role, "/orders", capabilities),
+  };
+}
 
 type PaletteItem = {
   key: string;
@@ -83,7 +107,8 @@ export function CommandPalette() {
     setHits({ patients: [], leads: [], orders: [] });
   }, []);
 
-  // Global hotkey: Ctrl/Cmd+K toggles the palette.
+  // Global hotkey: Ctrl/Cmd+K toggles the palette; the top bar's search
+  // button opens it too (QA 2026-11-12, B S3-5: the shortcut alone hid it).
   useEffect(() => {
     if (!isStaff) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -92,9 +117,17 @@ export function CommandPalette() {
         setOpen((current) => !current);
       }
     };
+    const onOpenRequest = () => setOpen(true);
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener(OPEN_COMMAND_PALETTE_EVENT, onOpenRequest);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener(OPEN_COMMAND_PALETTE_EVENT, onOpenRequest);
+    };
   }, [isStaff]);
+
+  // Only the kinds the role may list: the others answered 403 (QA 2026-11-12, B S3-5).
+  const searchKinds = useMemo(() => commandPaletteSearchKinds(user), [user]);
 
   useEffect(() => {
     if (open) inputRef.current?.focus();
@@ -114,9 +147,15 @@ export function CommandPalette() {
       setBusy(true);
       const encoded = encodeURIComponent(trimmed);
       void Promise.all([
-        apiFetch<PatientHit[]>(`/patients?search=${encoded}`).catch(() => []),
-        apiFetch<LeadHit[]>(`/leads?search=${encoded}`).catch(() => []),
-        apiFetch<OrderHit[]>(`/orders?search=${encoded}`).catch(() => []),
+        searchKinds.patients
+          ? apiFetch<PatientHit[]>(`/patients?search=${encoded}`).catch(() => [])
+          : Promise.resolve([] as PatientHit[]),
+        searchKinds.leads
+          ? apiFetch<LeadHit[]>(`/leads?search=${encoded}`).catch(() => [])
+          : Promise.resolve([] as LeadHit[]),
+        searchKinds.orders
+          ? apiFetch<OrderHit[]>(`/orders?search=${encoded}`).catch(() => [])
+          : Promise.resolve([] as OrderHit[]),
       ]).then(([patients, leads, orders]) => {
         if (requestSeq.current !== seq) return;
         setHits({
@@ -128,7 +167,7 @@ export function CommandPalette() {
       });
     }, trimmed.length < 2 ? 0 : SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [open, query]);
+  }, [open, query, searchKinds]);
 
   const navItems = useMemo(() => {
     if (!user || user.role === "patient") return [];

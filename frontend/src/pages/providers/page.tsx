@@ -236,6 +236,7 @@ import {
   textareaClass as shellTextareaClass,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
+import { recordLoadErrorText } from "@/lib/section-load-error";
 import { useSecurePersistedState } from "@/lib/secure-persist";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { CountrySelect } from "@/pages/patients/ui/shared/patient-form-primitives";
@@ -2366,6 +2367,13 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           ? "Dieser Provider ist für Ihre Rolle nicht freigegeben."
           : "Этот провайдер недоступен для вашей роли.",
       );
+      return;
+    }
+    // A missing or malformed provider id: say so, not only "loading failed"
+    // (QA 2026-11-12, B S3-2).
+    const status = (error as { status?: unknown } | null)?.status;
+    if (status === 400 || status === 404 || status === 422) {
+      setDetailError(recordLoadErrorText(error, lang));
       return;
     }
     setDetailError(providerLoadErrorMessage(error, t.common_failed_load));

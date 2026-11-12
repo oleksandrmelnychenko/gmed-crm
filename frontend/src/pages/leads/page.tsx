@@ -134,6 +134,8 @@ import {
   complianceOptionSelectable,
   complianceSignedWithoutDocument,
   filterLeadsByContact,
+  filterLeadsByPeriod,
+  leadListPeriodFromSearchParams,
   formatSize,
   leadErrorMessage,
   leadListShowsConverted,
@@ -537,14 +539,26 @@ function useLeadsPageContent() {
         typeof (value as Record<string, unknown>).includeArchived === "string",
     },
   );
-  const [filters, setFiltersState] = useState<LeadFilters>(() => ({
-    ...DEFAULT_FILTERS,
-    status: persistedLeadFilters.status,
-    leadType: persistedLeadFilters.leadType,
-    source: persistedLeadFilters.source,
-    country: persistedLeadFilters.country,
-    includeArchived: persistedLeadFilters.includeArchived,
-  }));
+  const [filters, setFiltersState] = useState<LeadFilters>(() => {
+    // A dashboard counter opens the list with its own filters only: a
+    // remembered type or country would change the number (QA 2026-11-12, B S3-4).
+    const linkedStatus = STATUS_OPTIONS.find((status) => status === searchParams.get("status"));
+    if (linkedStatus || searchParams.get("archived") === "true" || leadListPeriodFromSearchParams(searchParams)) {
+      return {
+        ...DEFAULT_FILTERS,
+        status: linkedStatus ?? "",
+        includeArchived: searchParams.get("archived") === "true" ? "true" : "false",
+      };
+    }
+    return {
+      ...DEFAULT_FILTERS,
+      status: persistedLeadFilters.status,
+      leadType: persistedLeadFilters.leadType,
+      source: persistedLeadFilters.source,
+      country: persistedLeadFilters.country,
+      includeArchived: persistedLeadFilters.includeArchived,
+    };
+  });
   const setFilters: typeof setFiltersState = useCallback(
     (value: LeadFilters | ((prev: LeadFilters) => LeadFilters)) => {
       setFiltersState((prev) => {
@@ -753,10 +767,22 @@ function useLeadsPageContent() {
     [deferredSearch, filters]
   );
   const leadsPath = useMemo(() => buildLeadsPath(effectiveFilters), [effectiveFilters]);
+  const listPeriod = useMemo(() => leadListPeriodFromSearchParams(searchParams), [searchParams]);
   const filteredLeads = useMemo(
-    () => filterLeadsByContact(leads, { email: filters.email, phone: filters.phone }),
-    [filters.email, filters.phone, leads]
+    () => filterLeadsByPeriod(
+      filterLeadsByContact(leads, { email: filters.email, phone: filters.phone }),
+      listPeriod,
+    ),
+    [filters.email, filters.phone, leads, listPeriod]
   );
+  const clearListPeriod = useCallback(() => {
+    const params = new URLSearchParams(searchParams);
+    params.delete("created_within_days");
+    params.delete("status_within_days");
+    params.delete("archived");
+    params.delete("status");
+    setSearchParams(params, { replace: true });
+  }, [searchParams, setSearchParams]);
   const leadPaginationResetKey = JSON.stringify(filters);
   // One-time password of a login created from the "new lead" sheet.
   const [issuedPortalAccess, setIssuedPortalAccess] = useState<PortalCredentials | null>(null);
@@ -1662,6 +1688,7 @@ function useLeadsPageContent() {
   }
 
   const anyQuickFilterActive =
+    listPeriod !== null ||
     filters.search.trim() !== "" ||
     filters.status !== "" ||
     filters.leadType !== "" ||
@@ -3569,12 +3596,30 @@ function useLeadsPageContent() {
               >
                 <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
               </Button>
+              {listPeriod ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-testid="leads-period-filter"
+                  title={lang === "de" ? "Filter entfernen" : "Снять фильтр"}
+                  onClick={clearListPeriod}
+                >
+                  {listPeriod.field === "created"
+                    ? lang === "de" ? `Erstellt in ${listPeriod.days} Tagen` : `Созданы за ${listPeriod.days} дн.`
+                    : lang === "de" ? `Status in ${listPeriod.days} Tagen erreicht` : `Статус получен за ${listPeriod.days} дн.`}
+                  <X className="size-3.5" />
+                </Button>
+              ) : null}
               {anyQuickFilterActive ? (
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => setFilters(DEFAULT_FILTERS)}
+                  onClick={() => {
+                    setFilters(DEFAULT_FILTERS);
+                    if (listPeriod) clearListPeriod();
+                  }}
                 >
                   <X className="size-3.5" />
                   {t.common_reset}

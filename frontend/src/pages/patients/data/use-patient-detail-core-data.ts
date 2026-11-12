@@ -1,7 +1,7 @@
 import { startTransition, useEffect, useReducer } from "react";
 
-import { ApiRequestError, apiFetch } from "@/lib/api";
-import { sectionLoadErrorText } from "@/lib/section-load-error";
+import { apiFetch } from "@/lib/api";
+import { recordLoadErrorText } from "@/lib/section-load-error";
 
 import type {
   PatientAssignment,
@@ -157,14 +157,10 @@ export function usePatientDetailCoreData({
             type: "error",
             requestKey,
             patientId: id,
-            // A refused card reads in the user's language, not the server's
-            // "Insufficient permissions" (QA 2026-11-01 T2-10).
-            message:
-              error instanceof ApiRequestError && error.status === 403
-                ? sectionLoadErrorText(error)
-                : error instanceof Error
-                  ? error.message
-                  : String(error),
+            // A refused, missing or malformed card reads in the user's language,
+            // not the server's "Insufficient permissions" / "Patient not found"
+            // (QA 2026-11-01 T2-10, QA 2026-11-12 B S3-2).
+            message: recordLoadErrorText(error),
           });
         });
       });

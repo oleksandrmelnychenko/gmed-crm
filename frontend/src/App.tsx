@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   BrowserRouter,
+  Link,
   Outlet,
   Routes,
   Route,
@@ -26,7 +27,8 @@ import { getLang, useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { LegacyCasesRedirect } from "@/pages/cases/legacy-cases-redirect";
 import { reloadOnceForStaleChunk } from "@/lib/stale-chunk";
-
+import { isLeadPortalUser } from "@/lib/staff-route-access";
+import { useLeadCabinetLang } from "@/pages/patient-lead/lead-cabinet-language";
 
 const DashboardPage = lazy(() =>
   import("@/pages/dashboard").then((module) => ({
@@ -339,21 +341,53 @@ const AdminAnnouncementsPage = lazy(() =>
   })),
 );
 
+/** The 404 page in the lead cabinet's other two languages (DE and RU come from the catalogs). */
+const NOT_FOUND_CABINET_TEXT = {
+  en: {
+    title: "Page not found",
+    body: "This address does not exist or is not available in this session.",
+    home: "To the start page",
+  },
+  uk: {
+    title: "Сторінку не знайдено",
+    body: "Такої адреси немає або вона недоступна для цього сеансу.",
+    home: "На головну",
+  },
+} as const;
+
 function NotFoundPage() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const { user } = useAuth();
+  const cabinetLang = useLeadCabinetLang(user, lang);
+  // Inside the shell with a way back (QA 2026-11-12, B S3-3: an unknown
+  // address landed on the home page without a word).
+  const cabinetText = isLeadPortalUser(user) && (cabinetLang === "en" || cabinetLang === "uk")
+    ? NOT_FOUND_CABINET_TEXT[cabinetLang]
+    : null;
+  const text = cabinetText ?? {
+    title: t.app_not_found_title,
+    body: t.app_not_found_body,
+    home: lang === "de" ? "Zur Startseite" : "На главную",
+  };
 
   return (
-    <div className="flex min-h-[calc(100vh-3rem)] items-center justify-center px-6">
-      <div className="max-w-lg rounded-3xl border border-border bg-card p-8 text-center shadow-sm">
+    <div className="flex min-h-[calc(100dvh-6rem)] items-center justify-center px-4 sm:px-6" data-testid="not-found-page">
+      <div className="max-w-lg rounded-3xl border border-border bg-card p-6 text-center shadow-sm sm:p-8">
         <p className="text-sm font-semibold text-muted-foreground">
           404
         </p>
         <h1 className="mt-3 text-2xl font-semibold text-foreground">
-          {t.app_not_found_title}
+          {text.title}
         </h1>
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          {t.app_not_found_body}
+          {text.body}
         </p>
+        <Link
+          to="/"
+          className="mt-5 inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {text.home}
+        </Link>
       </div>
     </div>
   );

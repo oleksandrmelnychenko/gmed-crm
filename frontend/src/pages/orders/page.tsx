@@ -1066,6 +1066,8 @@ function useOrdersPageContent() {
         providerId: searchParams.get("provider") ?? "",
         doctorId: searchParams.get("doctor") ?? "",
         providerTaxonomyNodeId: searchParams.get("taxonomy") ?? "",
+        // A dashboard counter opens the list with its status (QA 2026-11-12, B S3-4).
+        status: ORDER_STATUSES.find((status) => status === searchParams.get("status")) ?? "",
       },
       orders: [],
       loading: true,
@@ -2512,6 +2514,8 @@ function useOrdersPageContent() {
         if (filters.phase) params.set("phase", filters.phase);
         if (filters.status) params.set("status", filters.status);
         if (filters.patientId) params.set("patient_id", filters.patientId);
+        // «Активные заказы по вашим пациентам» of the PM home (QA 2026-11-12, B S3-4).
+        if (searchParams.get("assigned") === "me") params.set("assigned_to_me", "true");
         // Provider/doctor filters would reveal lines outside an order-part
         // reader's projection; the server refuses them for these roles.
         if (!permissions.readsOnlyOrderPart) {
@@ -3498,7 +3502,9 @@ function useOrdersPageContent() {
     );
   }
 
+  const assignedToMe = searchParams.get("assigned") === "me";
   const anyQuickFilterActive =
+    assignedToMe ||
     filters.search.trim() !== "" ||
     filters.phase !== "" ||
     filters.status !== "" ||
@@ -3846,6 +3852,20 @@ function useOrdersPageContent() {
                 </Button>
               )}
               <div className="flex h-8 items-center gap-1.5">
+                  {assignedToMe ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-md bg-field px-2.5"
+                      data-testid="orders-assigned-to-me-filter"
+                      title={lang === "de" ? "Filter entfernen" : "Снять фильтр"}
+                      onClick={() => syncQuery({ assigned: null })}
+                    >
+                      {lang === "de" ? "Nur meine Patienten" : "Только мои пациенты"}
+                      <X className="size-3.5" />
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
                     variant="outline"
@@ -3866,6 +3886,8 @@ function useOrdersPageContent() {
                     onClick={() => {
                       setFilters(DEFAULT_FILTERS);
                       syncQuery({
+                        assigned: null,
+                        status: null,
                         patient: null,
                         taxonomy: null,
                         provider: null,

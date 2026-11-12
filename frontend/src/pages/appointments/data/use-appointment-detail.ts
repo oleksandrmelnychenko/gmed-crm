@@ -8,6 +8,7 @@ import {
 } from "react";
 
 import { ApiRequestError, apiFetch } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { localizeBlockedAppointmentTitle } from "@/lib/blocked-appointment";
 import {
   fetchAppointmentDetailResourceGroup,
@@ -297,6 +298,9 @@ export function useAppointmentDetail({
   permissions,
 }: UseAppointmentDetailOptions) {
   const { appointmentText } = useAppointmentLabels();
+  // The team lead reads his team's visits without being a curator: the curators
+  // request only answered 403 in the console (QA 2026-11-12, B S3-9).
+  const readsCurators = useAuth().user?.role !== "teamlead_interpreter";
   const { settleAppointmentDetailResourceResults } = useLanguageHelpers();
   const [detailState, dispatchDetailState] = useReducer(
     appointmentDetailReducer,
@@ -428,7 +432,7 @@ export function useAppointmentDetail({
         );
         let assignments: PatientAssignment[] = [];
         let assignmentsError = "";
-        if (!appointmentDetail.is_blocked && permissions.canViewNotes) {
+        if (!appointmentDetail.is_blocked && permissions.canViewNotes && readsCurators) {
           try {
             assignments = await apiFetch<PatientAssignment[]>(
               `/patients/${appointmentDetail.patient_id}/assignments`,
@@ -479,6 +483,7 @@ export function useAppointmentDetail({
     detailOpen,
     detailVersion,
     permissions.canViewNotes,
+    readsCurators,
     selectedId,
   ]);
 

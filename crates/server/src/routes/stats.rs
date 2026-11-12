@@ -2121,6 +2121,9 @@ async fn load_billing_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
 }
 
 async fn load_sales_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
+    // "Qualified / converted in 30 days" count the status change, not any later
+    // edit of the lead: the leads list filters the same column when a counter
+    // opens it (QA 2026-11-12, B S3-4).
     let summary = sqlx::query(
         r#"SELECT
                 (SELECT COUNT(*)::bigint
@@ -2129,18 +2132,18 @@ async fn load_sales_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
                 (SELECT COUNT(*)::bigint
                  FROM leads
                  WHERE qualification_status = 'qualified'
-                   AND updated_at >= now() - interval '30 days') AS qualified_leads_30d,
+                   AND status_changed_at >= now() - interval '30 days') AS qualified_leads_30d,
                 (SELECT COUNT(*)::bigint
                  FROM leads
                  WHERE qualification_status = 'converted'
-                   AND updated_at >= now() - interval '30 days') AS converted_leads_30d,
+                   AND status_changed_at >= now() - interval '30 days') AS converted_leads_30d,
                 (SELECT COUNT(*)::bigint
                  FROM leads
                  WHERE created_at >= now() - interval '90 days') AS leads_90d,
                 (SELECT COUNT(*)::bigint
                  FROM leads
                  WHERE qualification_status = 'converted'
-                   AND updated_at >= now() - interval '90 days') AS converted_leads_90d,
+                   AND status_changed_at >= now() - interval '90 days') AS converted_leads_90d,
                 (SELECT COUNT(*)::bigint
                  FROM providers
                  WHERE provider_type = 'medical'

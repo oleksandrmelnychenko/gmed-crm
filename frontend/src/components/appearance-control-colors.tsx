@@ -2,7 +2,8 @@ import { SectionHeading } from "@/components/ui/section-heading";
 import { ChartColumn, CircleDot, ListFilter, MousePointer2, Palette, RotateCcw, Table2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { useLang } from "@/lib/i18n";
+// The lead cabinet's own language, EN and UA included (QA 2026-11-12, B S3-1).
+import { useInterfaceLang } from "@/pages/patient-lead/lead-cabinet-language";
 import { withContrast, type ControlColor, type ControlColors, type ThemeColors } from "@/lib/appearance-theme";
 import { useAppearanceTheme } from "@/lib/use-appearance-theme";
 import { cn } from "@/lib/utils";
@@ -90,7 +91,7 @@ function effectiveColor(colors: ThemeColors, key: ControlColor): string {
 }
 
 export function AppearanceControlColors({ onError }: { onError: (cause: unknown) => void }) {
-  const { lang } = useLang();
+  const lang = useInterfaceLang();
   const text = TEXT[lang as keyof typeof TEXT] ?? TEXT.en;
   const { theme, contrast, controls, save } = useAppearanceTheme();
   const colors: ThemeColors = { ...withContrast(theme, contrast).colors, ...controls };

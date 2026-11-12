@@ -2039,7 +2039,10 @@ async fn list_leads(
                              notes, message, primary_concern_text,
                              additional_concerns, selected_program
                            ), $10)
+                        -- The digits of a phone-like query only: "a4e3b1" matched
+                        -- every phone with "431" (QA 2026-11-12, B S3-6).
                         OR (length(regexp_replace($3, '\D', '', 'g')) >= 3
+                            AND $3 !~ '[[:alpha:]]'
                             AND phone_digits(concat_ws(' ', phone, whatsapp_number)) LIKE '%' || regexp_replace($3, '\D', '', 'g') || '%')
                     )
                 )
@@ -2052,6 +2055,7 @@ async fn list_leads(
                              city, country, source
                            ), $10)
                         OR (length(regexp_replace($3, '\D', '', 'g')) >= 3
+                            AND $3 !~ '[[:alpha:]]'
                             AND phone_digits(concat_ws(' ', phone, whatsapp_number)) LIKE '%' || regexp_replace($3, '\D', '', 'g') || '%')
                     )
                 )
