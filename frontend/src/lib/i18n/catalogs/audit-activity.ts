@@ -59,6 +59,10 @@ const ACTIONS: Record<string, Pair> = {
   create_custom_field: ["Пользовательское поле создано", "Benutzerdefiniertes Feld angelegt"],
   update_custom_field: ["Пользовательское поле изменено", "Benutzerdefiniertes Feld geändert"],
   delete_custom_field: ["Пользовательское поле удалено", "Benutzerdefiniertes Feld gelöscht"],
+  set_custom_field_values: [
+    "Дополнительные поля изменены",
+    "Zusätzliche Felder geändert",
+  ],
   noop: ["Без изменений", "Keine Änderung"],
 
   // Leads and the lead cabinet

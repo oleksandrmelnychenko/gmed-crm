@@ -3955,6 +3955,9 @@ pub(crate) async fn anonymize_patient_identity(
     sqlx::query(
         r#"WITH removed_login_emails AS (
                DELETE FROM portal_login_emails WHERE patient_id = $1
+           ), removed_custom_values AS (
+               DELETE FROM custom_field_values WHERE entity_id = $1
+                  AND field_id IN (SELECT id FROM custom_fields WHERE entity_type = 'patient')
            )
            UPDATE patients
            SET patient_id = $2,

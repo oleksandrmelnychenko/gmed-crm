@@ -56,6 +56,7 @@ import {
   humanizeFunctionalLabel,
 } from "../shared/patient-form-primitives";
 import { PatientOverviewCard } from "../sections/patient-overview-card";
+import { CustomFieldsSection } from "@/components/custom-fields/custom-fields-section";
 import { PatientClinicalDocumentActions } from "../sections/patient-clinical-document-actions";
 
 const loadPatientProfileTab = () => import("../sections/patient-profile-section");
@@ -885,6 +886,16 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               t={t}
               tr={tr}
             />
+              {/* Fields from /admin/custom-fields (owner decision 2026-11-12); the server
+                  decides who reads and edits them, a restricted card is read only. */}
+              {id ? (
+                <CustomFieldsSection
+                  key={`custom-fields-${id}`}
+                  entityId={id}
+                  locked={processingRestricted}
+                  className="rounded-2xl border border-border/70 bg-card p-4 shadow-sm"
+                />
+              ) : null}
             </div>
           ) : null}
 

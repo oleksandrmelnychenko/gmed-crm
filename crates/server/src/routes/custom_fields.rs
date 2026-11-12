@@ -372,37 +372,76 @@ async fn delete_field(
     Json(serde_json::json!({"ok": true})).into_response()
 }
 
+/// Every active field of the entity's type with its stored value (`null`
+/// when none), for the «Дополнительные поля» section of the staff lead card
+/// and patient card (owner decision 2026-11-12, screens QA item 3).
+/// «Обязательное» is only reported, never enforced. `can_edit` tells the card
+/// whether this user may change the values now (the rule of the write).
 async fn get_values(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(entity_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = authorize_values_access(&state, &auth, entity_id, false).await {
-        return e;
-    }
+    let scope = match authorize_values_access(&state, &auth, entity_id, false).await {
+        Ok(scope) => scope,
+        Err(e) => return e,
+    };
+    let can_edit = match scope.entity_type {
+        "patient" => {
+            auth.can(Capability::PatientsEdit)
+                && matches!(
+                    crate::routes::patients::has_patient_edit_access(&state, &auth, entity_id)
+                        .await,
+                    Ok(true)
+                )
+        }
+        _ => auth.can(Capability::LeadsEdit) && scope.converted_patient_id.is_none(),
+    };
 
-    match sqlx::query!(
-        r#"SELECT cfv.field_id, cf.field_key, cf.field_label, cf.field_type, cfv.value
-           FROM custom_field_values cfv
-           JOIN custom_fields cf ON cf.id = cfv.field_id
-           WHERE cfv.entity_id = $1 AND cf.is_active = true
-           ORDER BY cf.sort_order"#,
-        entity_id
+    type FieldRow = (
+        Uuid,
+        String,
+        String,
+        String,
+        Option<serde_json::Value>,
+        bool,
+        i32,
+        Option<String>,
+    );
+    match sqlx::query_as::<_, FieldRow>(
+        r#"SELECT cf.id, cf.field_key, cf.field_label, cf.field_type, cf.options,
+                  cf.is_required, cf.sort_order, cfv.value
+           FROM custom_fields cf
+           LEFT JOIN custom_field_values cfv
+                  ON cfv.field_id = cf.id AND cfv.entity_id = $1
+           WHERE cf.entity_type = $2 AND cf.is_active = true
+           ORDER BY cf.sort_order, cf.field_label, cf.id"#,
     )
+    .bind(entity_id)
+    .bind(scope.entity_type)
     .fetch_all(&state.db)
     .await
     {
         Ok(rows) => {
-            let data: Vec<serde_json::Value> = rows
+            let fields: Vec<serde_json::Value> = rows
                 .into_iter()
-                .map(|r| {
-                    serde_json::json!({
-                        "field_id": r.field_id, "field_key": r.field_key,
-                        "field_label": r.field_label, "field_type": r.field_type, "value": r.value,
-                    })
-                })
+                .map(
+                    |(id, key, label, field_type, options, is_required, sort_order, value)| {
+                        serde_json::json!({
+                            "field_id": id, "field_key": key, "field_label": label,
+                            "field_type": field_type, "options": options,
+                            "is_required": is_required, "sort_order": sort_order,
+                            "value": value,
+                        })
+                    },
+                )
                 .collect();
-            Json(data).into_response()
+            Json(serde_json::json!({
+                "entity_type": scope.entity_type,
+                "can_edit": can_edit,
+                "fields": fields,
+            }))
+            .into_response()
         }
         Err(e) => {
             tracing::error!(error = %e, "get custom field values");
@@ -421,16 +460,85 @@ struct FieldValue {
     value: Option<String>,
 }
 
+const MAX_VALUE_LEN: usize = 2000;
+
+/// The stored form of one value, checked against its field. Empty (or only
+/// spaces) clears the value. A date is stored as `YYYY-MM-DD` (the card shows
+/// DD.MM.YYYY, which is accepted too), a checkbox as `true`/`false`, a number
+/// with a decimal point (a decimal comma is accepted), a list value must be
+/// one of the field's options. «Обязательное» is not checked here.
+fn normalized_value(
+    field_type: &str,
+    options: Option<&serde_json::Value>,
+    raw: Option<&str>,
+) -> Result<Option<String>, &'static str> {
+    let Some(text) = raw.map(str::trim).filter(|text| !text.is_empty()) else {
+        return Ok(None);
+    };
+    if text.chars().count() > MAX_VALUE_LEN {
+        return Err("custom_field_value_too_long");
+    }
+    match field_type {
+        "number" => {
+            let candidate = text.replace(',', ".");
+            let plain = candidate
+                .chars()
+                .all(|ch| ch.is_ascii_digit() || matches!(ch, '.' | '-' | '+'));
+            match candidate.parse::<f64>() {
+                Ok(number) if plain && number.is_finite() => Ok(Some(candidate)),
+                _ => Err("custom_field_value_number_invalid"),
+            }
+        }
+        "date" => chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d")
+            .or_else(|_| chrono::NaiveDate::parse_from_str(text, "%d.%m.%Y"))
+            .map(|date| Some(date.format("%Y-%m-%d").to_string()))
+            .map_err(|_| "custom_field_value_date_invalid"),
+        "boolean" => match text {
+            "true" | "false" => Ok(Some(text.to_string())),
+            _ => Err("custom_field_value_boolean_invalid"),
+        },
+        "select" => {
+            let known = options
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|items| items.iter().any(|item| item.as_str() == Some(text)));
+            if known {
+                Ok(Some(text.to_string()))
+            } else {
+                Err("custom_field_value_option_invalid")
+            }
+        }
+        _ => Ok(Some(text.to_string())),
+    }
+}
+
+/// A refused value with its code and the field it belongs to.
+fn value_refusal(code: &str, field_id: Uuid) -> axum::response::Response {
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(serde_json::json!({
+            "error": code,
+            "code": code,
+            "message": "Invalid custom field value",
+            "field_id": field_id,
+        })),
+    )
+        .into_response()
+}
+
 async fn set_values(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(entity_id): Path<Uuid>,
     Json(body): Json<SetValuesReq>,
 ) -> axum::response::Response {
-    let entity_type = match authorize_values_access(&state, &auth, entity_id, true).await {
-        Ok(value) => value,
+    let scope = match authorize_values_access(&state, &auth, entity_id, true).await {
+        Ok(scope) => scope,
         Err(e) => return e,
     };
+    let entity_type = scope.entity_type;
+    if body.values.is_empty() {
+        return Json(serde_json::json!({"ok": true})).into_response();
+    }
 
     // Only active fields defined for this entity type may carry its values.
     let field_ids: Vec<Uuid> = body
@@ -440,19 +548,28 @@ async fn set_values(
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
-    match sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM custom_fields
+    if field_ids.len() != body.values.len() {
+        return coded_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "custom_field_value_duplicate",
+            "A field is named twice",
+        );
+    }
+    type Definition = (Uuid, String, String, Option<serde_json::Value>);
+    let definitions = match sqlx::query_as::<_, Definition>(
+        "SELECT id, field_key, field_type, options FROM custom_fields
          WHERE id = ANY($1) AND entity_type = $2 AND is_active = true",
     )
     .bind(&field_ids)
     .bind(entity_type)
-    .fetch_one(&state.db)
+    .fetch_all(&state.db)
     .await
     {
-        Ok(known) if known == field_ids.len() as i64 => {}
+        Ok(rows) if rows.len() == field_ids.len() => rows,
         Ok(_) => {
-            return err(
+            return coded_err(
                 StatusCode::UNPROCESSABLE_ENTITY,
+                "custom_field_not_found",
                 "Unknown custom field for this entity",
             );
         }
@@ -460,49 +577,97 @@ async fn set_values(
             tracing::error!(error = %e, entity_id = %entity_id, "validate custom field ids");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
-    }
+    };
 
+    let mut checked: Vec<(Uuid, &str, Option<String>)> = Vec::with_capacity(body.values.len());
     for fv in &body.values {
-        if let Err(e) = sqlx::query!(
-            "INSERT INTO custom_field_values (field_id, entity_id, value) VALUES ($1, $2, $3)
-             ON CONFLICT (field_id, entity_id) DO UPDATE SET value = $3, updated_at = now()",
-            fv.field_id,
-            entity_id,
-            fv.value
-        )
-        .execute(&state.db)
-        .await
-        {
-            tracing::error!(error = %e, field_id = %fv.field_id, entity_id = %entity_id, "set custom field value");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        let Some((_, field_key, field_type, options)) =
+            definitions.iter().find(|(id, _, _, _)| *id == fv.field_id)
+        else {
+            return value_refusal("custom_field_not_found", fv.field_id);
+        };
+        match normalized_value(field_type, options.as_ref(), fv.value.as_deref()) {
+            Ok(value) => checked.push((fv.field_id, field_key.as_str(), value)),
+            Err(code) => return value_refusal(code, fv.field_id),
         }
     }
 
-    // Field ids only: the values may be personal data.
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin set custom field values");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    for (field_id, _, value) in &checked {
+        let written = match value {
+            Some(value) => {
+                sqlx::query(
+                    "INSERT INTO custom_field_values (field_id, entity_id, value) VALUES ($1, $2, $3)
+                     ON CONFLICT (field_id, entity_id) DO UPDATE SET value = $3, updated_at = now()",
+                )
+                .bind(*field_id)
+                .bind(entity_id)
+                .bind(value)
+                .execute(&mut *tx)
+                .await
+            }
+            None => {
+                sqlx::query(
+                    "DELETE FROM custom_field_values WHERE field_id = $1 AND entity_id = $2",
+                )
+                .bind(*field_id)
+                .bind(entity_id)
+                .execute(&mut *tx)
+                .await
+            }
+        };
+        if let Err(e) = written {
+            tracing::error!(error = %e, field_id = %field_id, entity_id = %entity_id, "set custom field value");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "commit set custom field values");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    // Field ids and keys only: the values may be personal data.
+    let field_keys: Vec<&str> = checked.iter().map(|(_, key, _)| *key).collect();
     state.audit_sender.try_send(audit::domain_event(
         "set_custom_field_values",
         Some(auth.user_id),
         entity_type,
         Some(entity_id),
-        serde_json::json!({ "field_ids": field_ids }),
+        serde_json::json!({ "field_ids": field_ids, "field_keys": field_keys }),
     ));
 
     Json(serde_json::json!({"ok": true})).into_response()
 }
 
-/// Object scope of custom field VALUES. The entity is resolved as a patient
-/// (`patients.edit` plus the canonical patient access rule; writes also need
-/// the edit rule with the Art. 18 / Art. 17 DSGVO lock) or as a lead
-/// (`leads.edit`, the rule of the lead routes; a converted lead is frozen).
-/// `admin.custom_fields` manages field definitions only and opens no values.
-/// Any other entity is refused with 404. Returns the entity type.
+/// The entity a value request names, as resolved by [`authorize_values_access`].
+struct ValuesScope {
+    entity_type: &'static str,
+    /// Set for a lead that became a patient (its values are frozen).
+    converted_patient_id: Option<Uuid>,
+}
+
+/// Object scope of custom field VALUES: the rule of the card they sit on.
+/// A patient is read with `patients.view` and the canonical patient access
+/// rule (as `GET /patients/{id}`), written with `patients.edit` and the edit
+/// rule with the Art. 18 / Art. 17 DSGVO lock. A lead is read with
+/// `leads.view` (as `GET /leads/{id}`), written with `leads.edit`; a converted
+/// lead is frozen (409 `lead_converted`). `admin.custom_fields` manages field
+/// definitions only and opens no values; client accounts hold none of these
+/// capabilities. Any other entity is refused with 404.
 async fn authorize_values_access(
     state: &AppState,
     auth: &AuthUser,
     entity_id: Uuid,
     write: bool,
-) -> Result<&'static str, axum::response::Response> {
-    auth.require_any_capability(&[Capability::PatientsEdit, Capability::LeadsEdit])?;
+) -> Result<ValuesScope, axum::response::Response> {
+    let (patient_capability, lead_capability) = values_capabilities(write);
+    auth.require_any_capability(&[patient_capability, lead_capability])?;
 
     let is_patient =
         sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
@@ -514,7 +679,7 @@ async fn authorize_values_access(
                 err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
             })?;
     if is_patient {
-        auth.require_capability(Capability::PatientsEdit)?;
+        auth.require_capability(patient_capability)?;
         if !crate::routes::patients::has_patient_access(state, auth, entity_id).await? {
             return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
         }
@@ -523,7 +688,10 @@ async fn authorize_values_access(
         {
             return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
         }
-        return Ok("patient");
+        return Ok(ValuesScope {
+            entity_type: "patient",
+            converted_patient_id: None,
+        });
     }
 
     let lead = sqlx::query_scalar::<_, Option<Uuid>>(
@@ -539,15 +707,25 @@ async fn authorize_values_access(
     match lead {
         None => Err(err(StatusCode::NOT_FOUND, "Entity not found")),
         Some(converted_patient_id) => {
-            auth.require_capability(Capability::LeadsEdit)?;
-            if write && converted_patient_id.is_some() {
-                return Err(err(
-                    StatusCode::CONFLICT,
-                    "Converted lead must use its patient context",
-                ));
+            auth.require_capability(lead_capability)?;
+            if write && let Some(patient_id) = converted_patient_id {
+                return Err(crate::routes::leads::lead_converted_response(patient_id));
             }
-            Ok("lead")
+            Ok(ValuesScope {
+                entity_type: "lead",
+                converted_patient_id,
+            })
         }
+    }
+}
+
+/// The (patient, lead) capabilities a read or a write of values needs: the
+/// capabilities of reading or editing the card itself.
+fn values_capabilities(write: bool) -> (Capability, Capability) {
+    if write {
+        (Capability::PatientsEdit, Capability::LeadsEdit)
+    } else {
+        (Capability::PatientsView, Capability::LeadsView)
     }
 }
 
@@ -565,7 +743,11 @@ fn coded_err(status: StatusCode, code: &str, message: &str) -> axum::response::R
 
 #[cfg(test)]
 mod tests {
-    use super::{UpsertField, valid_field_key, validated_definition};
+    use super::{
+        UpsertField, normalized_value, valid_field_key, validated_definition, values_capabilities,
+    };
+    use gmed_domain::access::capabilities::Capability;
+    use gmed_domain::role::Role;
     use serde_json::json;
 
     fn field(field_type: &str, options: Option<serde_json::Value>) -> UpsertField {
@@ -629,5 +811,98 @@ mod tests {
         let mut empty_label = field("text", None);
         empty_label.field_label = "   ".to_string();
         assert_eq!(refused(empty_label), Some("custom_field_label_invalid"));
+    }
+
+    #[test]
+    fn values_are_checked_against_their_field_type() {
+        let options = json!(["Charité", "Vivantes"]);
+        let check =
+            |field_type: &str, raw: Option<&str>| normalized_value(field_type, Some(&options), raw);
+        // Empty clears; «Обязательное» never blocks.
+        assert_eq!(check("text", None), Ok(None));
+        assert_eq!(check("number", Some("   ")), Ok(None));
+        assert_eq!(
+            check("text", Some("  frei  ")),
+            Ok(Some("frei".to_string()))
+        );
+        assert_eq!(
+            check("text", Some(&"x".repeat(2001))),
+            Err("custom_field_value_too_long")
+        );
+
+        assert_eq!(check("number", Some("12,5")), Ok(Some("12.5".to_string())));
+        assert_eq!(check("number", Some("-3")), Ok(Some("-3".to_string())));
+        for bad in ["abc", "1e5", "inf", "NaN", "1.2.3"] {
+            assert_eq!(
+                check("number", Some(bad)),
+                Err("custom_field_value_number_invalid"),
+                "{bad}"
+            );
+        }
+
+        assert_eq!(
+            check("date", Some("2026-11-12")),
+            Ok(Some("2026-11-12".to_string()))
+        );
+        assert_eq!(
+            check("date", Some("12.11.2026")),
+            Ok(Some("2026-11-12".to_string()))
+        );
+        assert_eq!(
+            check("date", Some("2026-02-30")),
+            Err("custom_field_value_date_invalid")
+        );
+
+        assert_eq!(check("boolean", Some("true")), Ok(Some("true".to_string())));
+        assert_eq!(
+            check("boolean", Some("false")),
+            Ok(Some("false".to_string()))
+        );
+        assert_eq!(
+            check("boolean", Some("ja")),
+            Err("custom_field_value_boolean_invalid")
+        );
+
+        assert_eq!(
+            check("select", Some("Charité")),
+            Ok(Some("Charité".to_string()))
+        );
+        assert_eq!(
+            check("select", Some("Helios")),
+            Err("custom_field_value_option_invalid")
+        );
+        assert_eq!(
+            normalized_value("select", None, Some("Charité")),
+            Err("custom_field_value_option_invalid")
+        );
+    }
+
+    #[test]
+    fn values_follow_the_card_capabilities() {
+        assert_eq!(
+            values_capabilities(false),
+            (Capability::PatientsView, Capability::LeadsView)
+        );
+        assert_eq!(
+            values_capabilities(true),
+            (Capability::PatientsEdit, Capability::LeadsEdit)
+        );
+        // Read-only roles read the values of the cards they open, and only
+        // those; a client account opens none.
+        let reads = |role: Role| {
+            let (patient, lead) = values_capabilities(false);
+            (role.can(patient), role.can(lead))
+        };
+        assert_eq!(reads(Role::CeoAssistant), (true, true));
+        assert_eq!(reads(Role::Sales), (false, true));
+        assert_eq!(reads(Role::Billing), (true, false));
+        assert_eq!(reads(Role::Patient), (false, false));
+        let writes = |role: Role| {
+            let (patient, lead) = values_capabilities(true);
+            (role.can(patient), role.can(lead))
+        };
+        assert_eq!(writes(Role::CeoAssistant), (false, false));
+        assert_eq!(writes(Role::Sales), (false, true));
+        assert_eq!(writes(Role::PatientManager), (true, true));
     }
 }

@@ -505,7 +505,7 @@ export const adminSystemRu: AdminSystemTranslations = {
   cf_delete_confirm:
     "Удалить поле «{label}»? Оно исчезнет из списка; уже сохранённые значения останутся в базе, но показываться не будут. Ключ можно будет использовать снова.",
   cf_not_on_forms:
-    "Поля пока не показываются в карточках и формах лидов, пациентов, заказов и провайдеров: подключение к формам ещё не сделано.",
+    "Поля лида и пациента показываются в карточке лида и в карточке пациента (раздел «Дополнительные поля»). Поля заказов и провайдеров пока нигде не показываются.",
   cf_error_key_invalid:
     "Ключ поля: только латинские строчные буквы, цифры и «_», первая — буква, до 63 символов.",
   cf_error_key_exists: "Поле с таким ключом для этого типа сущности уже есть.",
@@ -994,7 +994,7 @@ export const adminSystemDe: AdminSystemTranslations = {
   cf_delete_confirm:
     "Feld „{label}“ löschen? Es verschwindet aus der Liste; bereits gespeicherte Werte bleiben in der Datenbank, werden aber nicht mehr angezeigt. Der Schlüssel kann wieder verwendet werden.",
   cf_not_on_forms:
-    "Die Felder erscheinen noch in keiner Karte und keinem Formular von Leads, Patienten, Aufträgen oder Anbietern: die Anbindung an die Formulare fehlt noch.",
+    "Felder für Leads und Patienten erscheinen in der Lead-Karte und in der Patientenkarte (Bereich „Zusätzliche Felder“). Felder für Aufträge und Anbieter werden noch nirgends angezeigt.",
   cf_error_key_invalid:
     "Feldschlüssel: nur kleine lateinische Buchstaben, Ziffern und „_“, zuerst ein Buchstabe, höchstens 63 Zeichen.",
   cf_error_key_exists: "Für diesen Objekttyp gibt es bereits ein Feld mit diesem Schlüssel.",

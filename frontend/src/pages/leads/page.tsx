@@ -183,6 +183,7 @@ import { LeadConfirmDialog } from "./ui/lead-confirm-dialog";
 import { LeadUncountedParentsNotice } from "./ui/lead-uncounted-parents-notice";
 import { ServicesInternalNoteField } from "./ui/lead-wizard-visibility";
 import { LeadIdentityDocumentsBlock } from "./ui/lead-identity-documents-block";
+import { CustomFieldsSection } from "@/components/custom-fields/custom-fields-section";
 import {
   LEAD_PURGED_EVENT,
   LEAD_TIME_REFRESH_EVENTS,
@@ -3296,6 +3297,18 @@ function useLeadsPageContent() {
                       title={(count) => <SectionTitle>{`${t.lead_identity_documents} (${count})`}</SectionTitle>}
                     />
                   </section>
+                )}
+
+                {isAnonymizedLead(detail) ? null : (
+                  // Fields from /admin/custom-fields (owner decision 2026-11-12):
+                  // not medical, so every role that opens the lead card sees them.
+                  <CustomFieldsSection
+                    key={`custom-fields-${detail.id}`}
+                    entityId={detail.id}
+                    locked={detailOutOfWork || detailIsConverted}
+                    className={cardClass("p-4")}
+                    renderTitle={(title) => <SectionTitle>{title}</SectionTitle>}
+                  />
                 )}
 
                 <section className={cardClass("p-4")}>
