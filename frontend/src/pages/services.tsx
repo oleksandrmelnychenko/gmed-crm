@@ -1180,8 +1180,15 @@ function useStaffServicesPageContent() {
       : "Подтверждённое бронирование закрывает требование «Немедицинские услуги» этого заказа.";
   const noOrderLabel = lang === "de" ? "Ohne Auftrag" : "Без заказа";
 
-  const { canCreateService, canEditService, canEditProtectedServiceFields } =
-    servicesPermissions(user);
+  const {
+    canCreateService,
+    canEditService,
+    canEditProtectedServiceFields,
+    canEditServiceCostEstimate,
+  } = servicesPermissions(user);
+  // The concierge edits the internal estimate alone, without provider,
+  // quantity and price (owner decision 2026-11-12).
+  const editsCostEstimateOnly = canEditServiceCostEstimate && !canEditProtectedServiceFields;
 
   useDebouncedRealtimeSubscription(STAFF_SERVICES_REALTIME_EVENTS, () => {
     clearApiCache("/concierge-services");
@@ -1686,6 +1693,12 @@ function useStaffServicesPageContent() {
         setEditError(t.staff_services_currency_invalid);
         return;
       }
+    } else if (editsCostEstimateOnly) {
+      costEstimate = optionalMoney(editForm.costEstimate);
+      if (Number.isNaN(costEstimate)) {
+        setEditError(t.staff_services_cost_invalid);
+        return;
+      }
     }
 
     const operationalPayload: ConciergeServiceUpdatePayload = {
@@ -1716,7 +1729,9 @@ function useStaffServicesPageContent() {
             billing_notes: editForm.billingNotes.trim() || null,
             ...operationalPayload,
           }
-        : operationalPayload;
+        : editsCostEstimateOnly && !amountsLocked
+          ? { ...operationalPayload, cost_estimate: costEstimate }
+          : operationalPayload;
 
     setEditBusy(true);
     try {
@@ -2310,6 +2325,27 @@ function useStaffServicesPageContent() {
                             />
                           </label>
                         </>
+                      ) : null}
+                      {editsCostEstimateOnly ? (
+                        <label className="space-y-1.5 text-sm">
+                          <span className="text-xs font-medium text-muted-foreground">
+                            {t.staff_services_form_cost_estimate}
+                            <PatientVisibilityMark visible={false} label={t.staff_services_hidden_from_patient} />
+                          </span>
+                          <Input
+                            inputMode="decimal"
+                            readOnly={amountsLocked}
+                            value={editForm.costEstimate}
+                            onChange={(event) =>
+                              setEditForm((current) =>
+                                current
+                                  ? { ...current, costEstimate: event.target.value }
+                                  : current,
+                              )
+                            }
+                            className={formInputClassName}
+                          />
+                        </label>
                       ) : null}
                       <label className="space-y-1.5 text-sm">
                         <span className="text-xs font-medium text-muted-foreground">

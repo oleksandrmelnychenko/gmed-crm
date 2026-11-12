@@ -357,6 +357,7 @@ describe("services, hotels, SOPs, feedback, reports", () => {
         canCreateService: has("services.edit"),
         canEditService: has("services.edit"),
         canEditProtectedServiceFields: has("services.edit") && has("providers.registry"),
+        canEditServiceCostEstimate: has("services.edit"),
       });
       expect(hotelPermissions(actor)).toEqual({
         canViewPage: has("hotels.view"),

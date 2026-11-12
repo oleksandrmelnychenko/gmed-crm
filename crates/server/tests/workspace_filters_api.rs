@@ -10785,6 +10785,69 @@ async fn concierge_service_update_and_completion_flow_sets_ready_for_billing() {
         "Concierge can only update operational service fields"
     );
 
+    // Owner decision 2026-11-12: the concierge may set the internal cost
+    // estimate of an existing service, and nothing of the protected fields.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/concierge-services/{service_id}/update"),
+        &concierge_bearer,
+        Some(json!({ "cost_estimate": 450.50 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["cost_estimate"], "450.50");
+    for refused in [
+        json!({ "cost_estimate": 10.0, "title": "Renamed" }),
+        json!({ "cost_estimate": 10.0, "quantity": 2 }),
+        json!({ "provider_id": provider_id }),
+        json!({ "unit_price": 10.0 }),
+        json!({ "currency": "CHF" }),
+        json!({ "billing_status": "ready" }),
+        json!({ "billing_notes": "Concierge billing note" }),
+    ] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/concierge-services/{service_id}/update"),
+            &concierge_bearer,
+            Some(refused.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{refused}: {body}");
+        assert_eq!(
+            body["message"],
+            "Concierge can only update operational service fields"
+        );
+    }
+    let stored_estimate: Option<rust_decimal::Decimal> =
+        sqlx::query_scalar("SELECT cost_estimate FROM concierge_services WHERE id = $1")
+            .bind(Uuid::parse_str(&service_id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        stored_estimate.map(|value| value.to_string()).as_deref(),
+        Some("450.50")
+    );
+    let audit_service_id = Uuid::parse_str(&service_id).unwrap();
+    support::wait_until("concierge cost estimate audit", || async {
+        sqlx::query_scalar::<_, bool>(
+            r#"SELECT EXISTS(
+                   SELECT 1 FROM audit_log
+                   WHERE action = 'update_concierge_service'
+                     AND entity_id = $1
+                     AND user_id = $2
+                     AND context->>'cost_estimate_changed' = 'true')"#,
+        )
+        .bind(audit_service_id)
+        .bind(concierge_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    })
+    .await;
+
     sqlx::query(
         r#"UPDATE appointment_checklists
            SET is_completed = true,

@@ -1741,6 +1741,23 @@ async fn portal_service_api_never_carries_internal_staff_text() {
     // Staff set their own estimate; the patient's budget stays as requested.
     assert_eq!(saved["cost_estimate"], "123.45");
     assert_eq!(saved["patient_budget"], "450.00");
+
+    // Owner decision 2026-11-12: the concierge may change the internal
+    // estimate too; it stays internal like the PM's.
+    let concierge_id = seed_user(&pool, &format!("{tag}-concierge"), "concierge").await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+    let (status, concierge_saved) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/concierge-services/{request_id}/update"),
+        &concierge_bearer,
+        Some(json!({ "cost_estimate": 234.56 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{concierge_saved}");
+    assert_eq!(concierge_saved["cost_estimate"], "234.56");
+    assert_eq!(concierge_saved["patient_budget"], "450.00");
     let stored_patient_budget: Option<rust_decimal::Decimal> =
         sqlx::query_scalar("SELECT patient_budget FROM concierge_services WHERE id = $1")
             .bind(Uuid::parse_str(&request_id).unwrap())
@@ -1774,7 +1791,7 @@ async fn portal_service_api_never_carries_internal_staff_text() {
     .await;
     assert_eq!(status, StatusCode::OK, "{portal}");
     let serialized = portal.to_string();
-    for hidden in ["INTERNAL", "987.65", "123.45"] {
+    for hidden in ["INTERNAL", "987.65", "123.45", "234.56"] {
         assert!(
             !serialized.contains(hidden),
             "{hidden} must not reach the portal: {portal}"

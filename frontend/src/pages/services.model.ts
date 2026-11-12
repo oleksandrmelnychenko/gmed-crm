@@ -6,6 +6,9 @@ export type ServicesPermissions = {
   canEditService: boolean;
   /** Provider link, title and price: the registry owners, not the concierge desk. */
   canEditProtectedServiceFields: boolean;
+  /** The internal cost estimate of an existing service: every editor, the
+   * concierge included (owner decision 2026-11-12). */
+  canEditServiceCostEstimate: boolean;
 };
 
 export function servicesPermissions(actor?: Actor): ServicesPermissions {
@@ -15,5 +18,6 @@ export function servicesPermissions(actor?: Actor): ServicesPermissions {
     canCreateService: canEdit,
     canEditService: canEdit,
     canEditProtectedServiceFields: canEdit && hasCapability(actor, "providers.registry"),
+    canEditServiceCostEstimate: canEdit,
   };
 }

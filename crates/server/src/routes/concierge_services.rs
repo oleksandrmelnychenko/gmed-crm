@@ -5203,6 +5203,11 @@ async fn update_concierge_service(
         Some("billed") | Some("settled") => Some(chrono::Utc::now()),
         _ => None,
     };
+    let cost_estimate_changed = match (cost_estimate, existing_cost_estimate) {
+        (Some(next), Some(current)) => (next - current).abs() >= 0.005,
+        (None, None) => false,
+        _ => true,
+    };
     let audit_status = requested_status.clone();
     let audit_billing_status = billing_status_update.clone();
     let audit_assigned_concierge_id = body.assigned_concierge_id;
@@ -5466,6 +5471,7 @@ async fn update_concierge_service(
             "assigned_concierge_id": audit_assigned_concierge_id,
             "task_id": task_change.as_ref().map(|change| change.0),
             "patient_visible_note_changed": patient_visible_note_changed,
+            "cost_estimate_changed": cost_estimate_changed,
         }),
     ));
     if let Some((task_id, assigned_to, previous_status, next_status)) = task_change.as_ref() {
@@ -6758,6 +6764,9 @@ fn validate_update_fields_for_role(
         return Ok(());
     }
 
+    // Concierge keeps the operational fields and, by the owner's decision of
+    // 2026-11-12, the internal cost estimate of an existing service; title,
+    // provider, quantity, prices and billing stay with PM and CEO.
     if auth.role == Role::Concierge {
         if body.provider_id.is_some()
             || body.provider_service_id.is_some()
@@ -6765,7 +6774,6 @@ fn validate_update_fields_for_role(
             || body.service_kind.is_some()
             || body.taxonomy_node_id.is_some()
             || body.title.is_some()
-            || body.cost_estimate.is_present()
             || body.quantity.is_some()
             || body.unit_price.is_some()
             || body.billing_status.is_some()
