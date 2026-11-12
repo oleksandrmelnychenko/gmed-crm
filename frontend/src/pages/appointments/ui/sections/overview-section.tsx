@@ -25,7 +25,10 @@ import {
   billingReversalRequestFromError,
   requestAppointmentBillingReversal,
 } from "@/pages/appointments/model/billing-reversal-request";
-import { isClosedAppointmentStatus } from "@/pages/appointments/model/completion-rules";
+import {
+  isClosedAppointmentStatus,
+  visibleInterpreterResponse,
+} from "@/pages/appointments/model/completion-rules";
 import {
   useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
@@ -123,6 +126,10 @@ function AppointmentOverviewSection({
     ? appointmentText("appointments_delete_locked")
     : appointmentText("appointments_delete_action");
   const detailLineageBadge = recurrenceLineageBadge(detail, t);
+  const interpreterResponse = visibleInterpreterResponse(
+    detail.status,
+    detail.interpreter_response,
+  );
   const patientInitials = detail.patient_name
     .split(/\s+/)
     .filter(Boolean)
@@ -241,10 +248,10 @@ function AppointmentOverviewSection({
             {detailLineageBadge}
           </span>
         ) : null}
-        {detail.interpreter_response ? (
+        {interpreterResponse ? (
           <span className="rounded-full border border-border/60 bg-muted/25 px-2.5 py-1 text-[10.5px] font-semibold text-muted-foreground">
             {appointmentText("appointments_interpreter")}{" "}
-            {responseLabel(detail.interpreter_response)}
+            {responseLabel(interpreterResponse)}
           </span>
         ) : null}
       </div>
@@ -281,9 +288,12 @@ function AppointmentOverviewSection({
       <DirtyDismissConfirmDialog
         open={cancelConfirmOpen}
         title={appointmentText("appointments_cancel_confirmation_title")}
-        message={appointmentText("appointments_cancel_single_confirmation_message", {
-          title: detail.title,
-        })}
+        message={appointmentText(
+          detail.recurrence_frequency
+            ? "appointments_cancel_occurrence_confirmation_message"
+            : "appointments_cancel_single_confirmation_message",
+          { title: detail.title },
+        )}
         cancelLabel={appointmentText("appointments_cancel_confirmation_keep")}
         confirmLabel={appointmentText("appointments_cancel_confirmation_action")}
         destructive

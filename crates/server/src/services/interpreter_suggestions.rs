@@ -19,6 +19,10 @@ pub struct InterpreterSuggestion {
     pub total_report_hours: String,
     pub average_feedback_score: Option<f64>,
     pub last_worked_at: Option<String>,
+    /// Booked on another visit that overlaps this one (concierge QA
+    /// 2026-11-12, E F2): such an interpreter is never the recommendation,
+    /// and assigning him would be refused with 409.
+    pub is_busy: bool,
     pub score: i64,
     pub reasons: Vec<String>,
 }
@@ -29,7 +33,8 @@ pub async fn load_appointment_interpreter_suggestions(
 ) -> Result<Vec<InterpreterSuggestion>, sqlx::Error> {
     let rows = sqlx::query(&format!(
         r#"WITH target AS (
-                SELECT a.id, a.patient_id, COALESCE(p.languages, ARRAY[]::text[]) AS patient_languages
+                SELECT a.id, a.patient_id, a.date, a.time_start, a.time_end,
+                       COALESCE(p.languages, ARRAY[]::text[]) AS patient_languages
                 FROM appointments a
                 JOIN patients p ON p.id = a.patient_id
                 WHERE a.id = $1
@@ -49,7 +54,29 @@ pub async fn load_appointment_interpreter_suggestions(
                   AND a.interpreter_id IS NOT NULL
                   AND a.interpreter_response IS DISTINCT FROM 'declined'
                   AND a.id <> $1
+                  -- "Worked before": visits that took place, not cancelled
+                  -- or future ones (concierge QA 2026-11-12, E F5).
+                  AND a.status <> 'cancelled'
+                  AND a.date <= (now() AT TIME ZONE 'Europe/Berlin')::date
                 GROUP BY a.interpreter_id
+           ),
+           -- Interpreters booked on another visit at the same time: the same
+           -- overlap rule as the 409 check of the assignment.
+           busy AS (
+                SELECT DISTINCT other.interpreter_id
+                FROM target
+                JOIN appointments other
+                  ON other.date = target.date
+                 AND other.id <> target.id
+                WHERE other.interpreter_id IS NOT NULL
+                  AND other.status <> 'cancelled'
+                  AND other.interpreter_response IS DISTINCT FROM 'declined'
+                  AND (
+                        (target.time_start IS NULL AND target.time_end IS NULL)
+                     OR (other.time_start IS NULL AND other.time_end IS NULL)
+                     OR (target.time_start < other.time_end
+                         AND other.time_start < target.time_end)
+                  )
            ),
            feedback AS (
                 SELECT interpreter_id,
@@ -79,7 +106,8 @@ pub async fn load_appointment_interpreter_suggestions(
                   COALESCE(history.approved_report_count, 0)::bigint AS approved_report_count,
                   COALESCE(history.total_report_hours, 0) AS total_report_hours,
                   feedback.average_feedback_score,
-                  history.last_worked_at
+                  history.last_worked_at,
+                  (busy.interpreter_id IS NOT NULL) AS is_busy
            FROM target
            JOIN users u ON u.is_active = true
                        AND u.role IN ('interpreter', 'teamlead_interpreter')
@@ -89,6 +117,7 @@ pub async fn load_appointment_interpreter_suggestions(
            LEFT JOIN history ON history.interpreter_id = u.id
            LEFT JOIN feedback ON feedback.interpreter_id = u.id
            LEFT JOIN languages lang ON lang.interpreter_id = u.id
+           LEFT JOIN busy ON busy.interpreter_id = u.id
            WHERE COALESCE(pref.preference, 'neutral') <> 'avoid'
              -- not blocked, terminated or without AVV (owner decision 2026-09-28)
              AND {assignable}
@@ -132,6 +161,7 @@ pub async fn load_appointment_interpreter_suggestions(
             .try_get::<Option<chrono::NaiveDate>, _>("last_worked_at")
             .unwrap_or_default()
             .map(|value| value.to_string());
+        let is_busy = row.try_get::<bool, _>("is_busy").unwrap_or(false);
 
         let language_status = language_status(&languages, &patient_languages);
         let (score, reasons) = suggestion_score(
@@ -160,15 +190,17 @@ pub async fn load_appointment_interpreter_suggestions(
                 .to_string(),
             average_feedback_score,
             last_worked_at,
+            is_busy,
             score,
             reasons,
         });
     }
 
+    // Free interpreters first: the top entry is the recommendation.
     suggestions.sort_by(|left, right| {
-        right
-            .score
-            .cmp(&left.score)
+        left.is_busy
+            .cmp(&right.is_busy)
+            .then_with(|| right.score.cmp(&left.score))
             .then_with(|| left.interpreter_name.cmp(&right.interpreter_name))
     });
     Ok(suggestions)

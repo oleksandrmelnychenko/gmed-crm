@@ -65,39 +65,42 @@ export function useAppointmentSchedulerActions({
   const handleInlineReschedule = useCallback(
     async (info: EventDropArg | EventResizeDoneArg) => {
       const source = appointmentsIndex.get(info.event.id);
+      // A drop either saves or goes back with a message; it never leaves the
+      // card at the new place without a request (concierge QA 2026-11-12, E F4).
       if (
         !source ||
         !canRescheduleAppointmentItem(canEditSchedule, source) ||
         !info.event.start
       ) {
         info.revert();
+        onAppointmentsError(dictionary.common_failed_update);
         return;
       }
-
-      const nextDate = toDateInput(info.event.start);
-      const nextTimeStart = info.event.allDay
-        ? ""
-        : toTimeInput(info.event.start);
-      const nextTimeEnd = info.event.allDay
-        ? ""
-        : info.event.end
-          ? toTimeInput(info.event.end)
-          : source.time_end || "";
-      const localWarnings = buildLocalScheduleWarnings(
-        appointments,
-        {
-          appointmentId: source.id,
-          date: nextDate,
-          timeStart: nextTimeStart,
-          timeEnd: nextTimeEnd,
-          ownerUserId: source.owner_user_id,
-          providerId: source.provider_id,
-          doctorId: source.doctor_id,
-        },
-        dictionary,
-      );
+      const startDate = info.event.start;
 
       try {
+        const nextDate = toDateInput(startDate);
+        const nextTimeStart = info.event.allDay
+          ? ""
+          : toTimeInput(startDate);
+        const nextTimeEnd = info.event.allDay
+          ? ""
+          : info.event.end
+            ? toTimeInput(info.event.end)
+            : source.time_end || "";
+        const localWarnings = buildLocalScheduleWarnings(
+          appointments,
+          {
+            appointmentId: source.id,
+            date: nextDate,
+            timeStart: nextTimeStart,
+            timeEnd: nextTimeEnd,
+            ownerUserId: source.owner_user_id,
+            providerId: source.provider_id,
+            doctorId: source.doctor_id,
+          },
+          dictionary,
+        );
         const result = await updateAppointmentSchedule({
           appointmentId: source.id,
           appointmentType: source.type,
@@ -208,6 +211,7 @@ export function useAppointmentSchedulerActions({
         appointmentId,
         recurrenceScope,
         title: appointmentsIndex.get(appointmentId)?.title ?? "",
+        recurring: Boolean(appointmentsIndex.get(appointmentId)?.recurrence_frequency),
       });
     },
     [appointmentsIndex, onDismissQuickActionMenu, performStatusChange],
@@ -243,11 +247,13 @@ export type PendingAppointmentCancellation = {
   recurrenceScope: AppointmentRecurringActionScope;
   /** Title of the appointment the action was started on. */
   title: string;
+  /** The appointment belongs to a series: "single" cancels only this one. */
+  recurring?: boolean;
 };
 
 /** Title and text of the confirmation of a cancellation, by its scope. */
 export function appointmentCancellationConfirmation(
-  pending: Pick<PendingAppointmentCancellation, "recurrenceScope" | "title">,
+  pending: Pick<PendingAppointmentCancellation, "recurrenceScope" | "title" | "recurring">,
   text: (key: string, values?: Record<string, string | number>) => string,
 ): { title: string; message: string } {
   const values = { title: pending.title };
@@ -265,6 +271,13 @@ export function appointmentCancellationConfirmation(
   }
   return {
     title: text("appointments_cancel_confirmation_title"),
-    message: text("appointments_cancel_single_confirmation_message", values),
+    // One occurrence of a series says that the rest of the series stays
+    // (concierge QA 2026-11-12, E F9).
+    message: text(
+      pending.recurring
+        ? "appointments_cancel_occurrence_confirmation_message"
+        : "appointments_cancel_single_confirmation_message",
+      values,
+    ),
   };
 }

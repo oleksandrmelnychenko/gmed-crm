@@ -38,6 +38,20 @@ export function isClosedAppointmentStatus(status: string | null | undefined): bo
 }
 
 /**
+ * The interpreter answer worth showing for a visit. A cancelled visit waits
+ * for no answer any more, so its «pending» is hidden (concierge QA
+ * 2026-11-12, E F6); an answer given before the cancellation stays.
+ */
+export function visibleInterpreterResponse<T extends string>(
+  status: string | null | undefined,
+  response: T | null | undefined,
+): T | null {
+  if (!response) return null;
+  if (status === "cancelled" && response === "pending") return null;
+  return response;
+}
+
+/**
  * Interpreter reports (submit and approve) open once the coordinator has
  * confirmed the appointment; planned or cancelled appointments take none.
  */

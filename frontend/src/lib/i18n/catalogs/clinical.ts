@@ -189,6 +189,7 @@ export interface ClinicalTranslations {
   appointments_interpreter_hours_approved: string;
   appointments_interpreter_languages: string;
   appointments_interpreter_selected: string;
+  appointments_interpreter_busy_at_this_time: string;
   appointments_interpreter_use: string;
   appointments_interpreter_history_title: string;
   appointments_interpreter_total_relationships: string;
@@ -415,6 +416,7 @@ export const clinicalRu: ClinicalTranslations = {
   appointments_interpreter_hours_approved: "ч согласовано",
   appointments_interpreter_languages: "Языки",
   appointments_interpreter_selected: "Выбран",
+  appointments_interpreter_busy_at_this_time: "Занят в это время",
   appointments_interpreter_use: "Выбрать",
   appointments_interpreter_history_title: "История переводчиков для этого пациента",
   appointments_interpreter_total_relationships: "всего связей",
@@ -643,6 +645,7 @@ export const clinicalDe: ClinicalTranslations = {
   appointments_interpreter_hours_approved: "Std. freigegeben",
   appointments_interpreter_languages: "Sprachen",
   appointments_interpreter_selected: "Ausgewählt",
+  appointments_interpreter_busy_at_this_time: "Zu dieser Zeit belegt",
   appointments_interpreter_use: "Auswählen",
   appointments_interpreter_history_title: "Dolmetscherhistorie für diesen Patienten",
   appointments_interpreter_total_relationships: "Beziehungen gesamt",

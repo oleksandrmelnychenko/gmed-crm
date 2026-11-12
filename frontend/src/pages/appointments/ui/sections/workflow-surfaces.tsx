@@ -72,12 +72,14 @@ import {
   futureCompletionTargets,
   isAppointmentCompletionTooEarly,
   isClosedAppointmentStatus,
+  visibleInterpreterResponse,
 } from "@/pages/appointments/model/completion-rules";
 import {
   CLOSED_WITHOUT_COMPLETION_BADGE_CLASS,
   useClosureLabels,
 } from "@/pages/appointments/model/closure";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
+import { useScheduleWarnings } from "@/pages/appointments/model/schedule-warnings";
 import { useAppointmentErrorMessages } from "@/pages/appointments/model/error-message";
 import {
   appointmentStatusBadgeClassName,
@@ -503,6 +505,8 @@ function AppointmentWorkflowTab({
 type InterpreterSectionState = {
   assignInterpreterId: string;
   assignmentSheetOpen: boolean;
+  /** Why the last assignment failed, shown inside the dialog. */
+  assignError: string | null;
   busyAction: string;
   suggestions: InterpreterSuggestion[];
   suggestionsLoading: boolean;
@@ -530,6 +534,7 @@ function createInterpreterSectionState(detail: AppointmentDetail): InterpreterSe
   return {
     assignInterpreterId: detail.interpreter_id ?? "",
     assignmentSheetOpen: false,
+    assignError: null,
     busyAction: "",
     suggestions: [],
     suggestionsLoading: false,
@@ -603,6 +608,7 @@ function AppointmentInterpreterSection({
   onError: (message: string) => void;
 }) {
   const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
+  const { formatScheduleConflictError } = useScheduleWarnings();
   const { appointmentText } = useAppointmentLabels();
   const [
     {
@@ -617,6 +623,7 @@ function AppointmentInterpreterSection({
       preferenceSavingId,
       interpreterContextNonce,
       assignmentSheetOpen,
+      assignError,
     },
     dispatchInterpreterState,
   ] = useReducer(interpreterSectionReducer, detail, createInterpreterSectionState);
@@ -627,6 +634,7 @@ function AppointmentInterpreterSection({
       value: {
         assignInterpreterId: detail.interpreter_id ?? "",
         assignmentSheetOpen: false,
+        assignError: null,
         busyAction: "",
       },
     });
@@ -727,7 +735,10 @@ function AppointmentInterpreterSection({
   async function handleAssignInterpreter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!assignInterpreterId) return;
-    dispatchInterpreterState({ type: "patch", value: { busyAction: "assign" } });
+    dispatchInterpreterState({
+      type: "patch",
+      value: { busyAction: "assign", assignError: null },
+    });
     try {
       await apiFetch<{ ok: boolean }>(
         `/appointments/${detail.id}/assign-interpreter`,
@@ -742,12 +753,17 @@ function AppointmentInterpreterSection({
       });
       onRefresh();
     } catch (error) {
-      onError(
-        appointmentActionErrorMessage(
-          error,
-          appointmentText("appointments_failed_to_assign_interpreter"),
-        ),
-      );
+      // Shown inside the still-open dialog, with the clashing visit of a 409
+      // (concierge QA 2026-11-12, E F2), not on the page behind it.
+      dispatchInterpreterState({
+        type: "patch",
+        value: {
+          assignError: formatScheduleConflictError(
+            error,
+            appointmentText("appointments_failed_to_assign_interpreter"),
+          ),
+        },
+      });
     } finally {
       dispatchInterpreterState({ type: "patch", value: { busyAction: "" } });
     }
@@ -788,6 +804,7 @@ function AppointmentInterpreterSection({
         <InterpreterAssignmentManagement
           assignInterpreterId={assignInterpreterId}
           assignmentSheetOpen={assignmentSheetOpen}
+          assignError={assignError}
           busyAction={busyAction}
           detail={detail}
           history={history}
@@ -802,7 +819,7 @@ function AppointmentInterpreterSection({
           onOpenChange={(open) =>
             dispatchInterpreterState({
               type: "patch",
-              value: { assignmentSheetOpen: open },
+              value: { assignmentSheetOpen: open, assignError: null },
             })
           }
           onSelect={(value) =>
@@ -814,7 +831,10 @@ function AppointmentInterpreterSection({
           onSetPreference={handleSetInterpreterPreference}
         />
       ) : null}
-      {canRespond && detail.interpreter_id === currentUserId ? (
+      {/* A cancelled visit asks for no answer (concierge QA 2026-11-12, E F6). */}
+      {canRespond &&
+      detail.interpreter_id === currentUserId &&
+      detail.status !== "cancelled" ? (
         // The assignee answers on a page that is otherwise read-only for them.
         <WritableScope>
           <InterpreterResponseControls
@@ -833,6 +853,7 @@ function AppointmentInterpreterSection({
 function InterpreterAssignmentManagement({
   assignInterpreterId,
   assignmentSheetOpen,
+  assignError,
   busyAction,
   detail,
   history,
@@ -850,6 +871,7 @@ function InterpreterAssignmentManagement({
 }: {
   assignInterpreterId: string;
   assignmentSheetOpen: boolean;
+  assignError: string | null;
   busyAction: string;
   detail: AppointmentDetail;
   history: InterpreterHistoryItem[];
@@ -899,18 +921,31 @@ function InterpreterAssignmentManagement({
       {
         id: "response",
         label: t.users_status,
-        accessor: (row) => responseLabel(row.interpreter_response ?? "pending"),
+        accessor: (row) => {
+          const response = visibleInterpreterResponse(
+            row.status,
+            row.interpreter_response ?? "pending",
+          );
+          return response ? responseLabel(response) : "";
+        },
         width: 240,
-        render: (row) => (
+        render: (row) => {
+          const response = visibleInterpreterResponse(
+            row.status,
+            row.interpreter_response ?? "pending",
+          );
+          return (
           <span className="flex min-w-0 flex-col items-start gap-0.5">
+            {response ? (
             <span
               className={cn(
                 "inline-flex rounded-full border px-2 py-0.5 font-mono text-[10px] font-medium",
                 interpreterResponseBadgeClassName(row.interpreter_response),
               )}
             >
-              {responseLabel(row.interpreter_response ?? "pending")}
+              {responseLabel(response)}
             </span>
+            ) : null}
             {row.interpreter_response_comment ? (
               <span
                 data-testid="interpreter-response-comment"
@@ -921,7 +956,8 @@ function InterpreterAssignmentManagement({
               </span>
             ) : null}
           </span>
-        ),
+          );
+        },
       },
     ],
     [t],
@@ -995,6 +1031,11 @@ function InterpreterAssignmentManagement({
         }
       >
         <WorkflowSheetBody>
+          {assignError ? (
+            <Banner tone="error" withIcon>
+              {assignError}
+            </Banner>
+          ) : null}
           <WorkflowSheetSection
             icon={Languages}
             title={appointmentText("appointments_interpreter_assignment")}

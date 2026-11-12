@@ -63,6 +63,27 @@ export function interpreterPlanningSummary(
 }
 
 /**
+ * The interpreter line of the order's planning card. The «required» flag is
+ * the staff's planning setting; when it is off but visits of the order have
+ * an interpreter booked, the line shows those bookings instead of «Не
+ * требуется» (concierge QA 2026-11-12, E F12).
+ */
+export function interpreterPlanningLine(
+  planning: InterpreterAssignmentCounters &
+    Pick<OrderPlanningPreparation, "interpreter_needed">,
+  text: (key: string, values?: Record<string, string | number>) => string,
+): string {
+  if (planning.interpreter_required) return interpreterPlanningSummary(planning, text);
+  if (planning.interpreter_assigned > 0) {
+    return text("orders_planning_interpreter_summary", {
+      assigned: planning.interpreter_assigned,
+      confirmed: planning.interpreter_confirmed,
+    });
+  }
+  return text("orders_nicht_erforderlich");
+}
+
+/**
  * The order appointment to open for checking the interpreter: the first live
  * assignment the interpreter has not accepted yet, otherwise the first one.
  */

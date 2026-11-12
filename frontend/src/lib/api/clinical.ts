@@ -15,6 +15,8 @@ export type InterpreterSuggestion = {
   total_report_hours: string;
   average_feedback_score: number | null;
   last_worked_at: string | null;
+  /** Booked on another visit at this time: never the recommendation. */
+  is_busy?: boolean;
   score: number;
   reasons: string[];
 };

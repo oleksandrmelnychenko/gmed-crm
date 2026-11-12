@@ -4,7 +4,17 @@ import {
   futureCompletionTargets,
   isAppointmentCompletionTooEarly,
   isInterpreterReportTooEarly,
+  visibleInterpreterResponse,
 } from "./completion-rules";
+
+describe("visibleInterpreterResponse", () => {
+  it("hides the pending answer of a cancelled visit and keeps given answers", () => {
+    expect(visibleInterpreterResponse("cancelled", "pending")).toBeNull();
+    expect(visibleInterpreterResponse("cancelled", "accepted")).toBe("accepted");
+    expect(visibleInterpreterResponse("planned", "pending")).toBe("pending");
+    expect(visibleInterpreterResponse("planned", null)).toBeNull();
+  });
+});
 
 describe("isAppointmentCompletionTooEarly", () => {
   afterEach(() => {

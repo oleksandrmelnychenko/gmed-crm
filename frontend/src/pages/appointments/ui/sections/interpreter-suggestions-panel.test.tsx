@@ -34,6 +34,50 @@ describe("InterpreterSuggestionsPanel", () => {
     expect(html).toContain("Язык неизвестен");
   });
 
+  it("never recommends an interpreter who is busy at that time", () => {
+    const base = {
+      role: "interpreter",
+      preference: "neutral" as const,
+      language_status: "language listed",
+      languages: [],
+      previous_appointment_count: 0,
+      completed_appointment_count: 0,
+      approved_report_count: 0,
+      total_report_hours: "0",
+      average_feedback_score: null,
+      last_worked_at: null,
+      reasons: ["available interpreter"],
+    };
+    const html = renderToStaticMarkup(
+      <InterpreterSuggestionsPanel
+        suggestions={[
+          { ...base, interpreter_id: "busy", interpreter_name: "Busy Interpreter", score: 70, is_busy: true },
+          { ...base, interpreter_id: "free", interpreter_name: "Free Interpreter", score: 10 },
+        ]}
+        history={[
+          {
+            interpreter_id: "free",
+            interpreter_name: "Free Interpreter",
+            role: "interpreter",
+            preference: "neutral",
+            appointment_count: 1,
+            completed_appointment_count: 1,
+            approved_report_count: 0,
+            total_report_hours: "0",
+            average_feedback_score: null,
+            feedback_count: 0,
+            last_appointment_date: "2027-04-28",
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("Рекомендуется сейчас: Free Interpreter");
+    expect(html).toContain("Занят в это время");
+    expect(html).toContain("28.04.2027");
+    expect(html).not.toContain("2027-04-28");
+  });
+
   it("renders preference controls and patient interpreter history", () => {
     const html = renderToStaticMarkup(
       <InterpreterSuggestionsPanel

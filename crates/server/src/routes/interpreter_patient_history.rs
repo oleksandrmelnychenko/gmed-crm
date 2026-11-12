@@ -71,6 +71,8 @@ async fn get_interpreter_patient_history(
                       AND ir.interpreter_id = $1
                 WHERE a.interpreter_id = $1
                   AND a.interpreter_response IS DISTINCT FROM 'declined'
+                  AND a.status <> 'cancelled'
+                  AND a.date <= (now() AT TIME ZONE 'Europe/Berlin')::date
                   AND (
                         $2::uuid IS NULL
                         OR EXISTS (
@@ -211,6 +213,10 @@ async fn get_patient_interpreter_history(
                 WHERE a.patient_id = $1
                   AND a.interpreter_id IS NOT NULL
                   AND a.interpreter_response IS DISTINCT FROM 'declined'
+                  -- Only visits that took place count as working together:
+                  -- no cancelled or future ones (concierge QA 2026-11-12, E F5).
+                  AND a.status <> 'cancelled'
+                  AND a.date <= (now() AT TIME ZONE 'Europe/Berlin')::date
                 GROUP BY a.interpreter_id
            ),
            feedback AS (

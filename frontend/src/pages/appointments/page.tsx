@@ -1328,7 +1328,7 @@ function useStaffAppointmentsPageContent() {
             scopedAppointments,
             todayDate,
             t.appointments_today,
-          ).slice(0, 8)
+          )
         : [],
     [scopedAppointments, t.appointments_today, todayDate, useMobileAgenda],
   );

@@ -758,7 +758,7 @@ export function ConciergeTaskManager({
       {view === "calendar" ? (
         <div className="rounded-lg bg-card">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3">
-            <div className="flex items-center gap-1"><Button type="button" size="icon-sm" variant="ghost" onClick={() => shiftCalendar(-1)}><ChevronLeft /></Button><Button type="button" size="sm" variant="ghost" onClick={() => setFocusDate(new Date())}>{labels.today}</Button><Button type="button" size="icon-sm" variant="ghost" onClick={() => shiftCalendar(1)}><ChevronRight /></Button></div>
+            <div className="flex items-center gap-1"><Button type="button" size="icon-sm" variant="ghost" aria-label={lang === "ru" ? "Предыдущий период" : "Vorheriger Zeitraum"} onClick={() => shiftCalendar(-1)}><ChevronLeft /></Button><Button type="button" size="sm" variant="ghost" onClick={() => setFocusDate(new Date())}>{labels.today}</Button><Button type="button" size="icon-sm" variant="ghost" aria-label={lang === "ru" ? "Следующий период" : "Nächster Zeitraum"} onClick={() => shiftCalendar(1)}><ChevronRight /></Button></div>
             <div className="flex items-center gap-2">
               <Badge variant="secondary" className="rounded-md tabular-nums">{labels.calendarWeekShort} {isoWeekNumber(focusDate)}</Badge>
               <h3 className="text-sm font-semibold">{appDateTimeFormat(calendarLocale, { month: "long", year: "numeric" }).format(focusDate)}</h3>

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   CalendarClock,
   CalendarDays,
@@ -28,6 +29,7 @@ import { appointmentStatusBadgeClassName } from "@/pages/appointments/appearance
 import {
   useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
+import { visibleInterpreterResponse } from "@/pages/appointments/model/completion-rules";
 import { useRecurrenceLabels } from "@/pages/appointments/model/recurrence";
 import { useAppointmentFormatters } from "@/pages/appointments/model/runtime-formatters";
 import type {
@@ -78,6 +80,9 @@ type InterpreterMobileAgendaProps = {
   emptyText: string;
   onOpenDetail: (id: string) => void;
 };
+
+/** Days with visits shown at once on the phone agenda, and per «Показать ещё». */
+const MOBILE_AGENDA_DAY_PAGE = 8;
 
 /** "1 приём", "2 приёма", "5 приёмов" in the day header (QA D-17). */
 const APPOINTMENT_COUNT_WORDS: PluralWords = {
@@ -167,6 +172,10 @@ function MobileAgendaCard({
     item.location ||
     item.owner_name ||
     appointmentText("appointments_operational_slot");
+  const interpreterResponse = visibleInterpreterResponse(
+    item.status,
+    item.interpreter_response,
+  );
 
   return (
     <div className={appointmentMobileAgendaCardClassName}>
@@ -209,9 +218,9 @@ function MobileAgendaCard({
       <p className="mt-2.5 text-xs font-medium text-muted-foreground">{summary}</p>
 
       <div className="mt-2.5 flex flex-wrap gap-1.5">
-        {item.interpreter_response ? (
+        {interpreterResponse ? (
           <span className={appointmentMobileAgendaInfoBadgeClassName}>
-            {appointmentText("appointments_interpreter")} {responseLabel(item.interpreter_response)}
+            {appointmentText("appointments_interpreter")} {responseLabel(interpreterResponse)}
           </span>
         ) : null}
         {item.recurrence_frequency ? (
@@ -273,6 +282,15 @@ export function InterpreterMobileAgenda({
   onOpenDetail,
 }: InterpreterMobileAgendaProps) {
   const { lang } = useLang();
+  const { appointmentText } = useAppointmentLabels();
+  // Days are shown in pages of 8 with «Показать ещё», never cut silently
+  // (concierge QA 2026-11-12, E F3). A new scope starts at the first page.
+  const sectionsKey = sections.map((section) => section.date).join("|");
+  const [paging, setPaging] = useState({ key: sectionsKey, count: MOBILE_AGENDA_DAY_PAGE });
+  const visibleDayCount =
+    paging.key === sectionsKey ? paging.count : MOBILE_AGENDA_DAY_PAGE;
+  const visibleSections = sections.slice(0, visibleDayCount);
+  const hiddenDayCount = sections.length - visibleSections.length;
   return (
     <div className="space-y-4">
       <section className={appointmentSectionCardClassName("p-4")}>
@@ -362,7 +380,7 @@ export function InterpreterMobileAgenda({
           <EmptyState text={emptyText} />
         </section>
       ) : (
-        sections.map((section) => (
+        visibleSections.map((section) => (
           <section
             key={section.date}
             className={appointmentSectionCardClassName("p-4 md:p-5")}
@@ -395,6 +413,26 @@ export function InterpreterMobileAgenda({
           </section>
         ))
       )}
+      {hiddenDayCount > 0 ? (
+        <div className="flex justify-center">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="rounded-lg"
+            onClick={() =>
+              setPaging({
+                key: sectionsKey,
+                count: visibleDayCount + MOBILE_AGENDA_DAY_PAGE,
+              })
+            }
+          >
+            {appointmentText("appointments_mobile_agenda_show_more", {
+              count: hiddenDayCount,
+            })}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

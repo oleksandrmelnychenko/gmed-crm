@@ -4,6 +4,7 @@ import {
   appointmentWorkflowHref,
   interpreterAppointmentToReview,
   interpreterAssignmentState,
+  interpreterPlanningLine,
   interpreterPlanningSummary,
 } from "./interpreter-assignment";
 import type { OrderPipelineAppointment } from "./order-pipeline";
@@ -23,6 +24,18 @@ describe("interpreterPlanningSummary", () => {
     expect(interpreterPlanningSummary({ ...counters, interpreter_needed: 3 }, text)).toBe(
       'orders_planning_interpreter_of_summary:{"assigned":2,"needed":3,"confirmed":1}',
     );
+  });
+
+  it("shows booked interpreters even when the order flag says not required", () => {
+    expect(
+      interpreterPlanningLine({ ...counters, interpreter_required: false }, text),
+    ).toBe('orders_planning_interpreter_summary:{"assigned":3,"confirmed":1}');
+    expect(
+      interpreterPlanningLine(
+        { ...counters, interpreter_required: false, interpreter_assigned: 0 },
+        text,
+      ),
+    ).toBe("orders_nicht_erforderlich:undefined");
   });
 
   it("keeps the plain counts without the needed number", () => {

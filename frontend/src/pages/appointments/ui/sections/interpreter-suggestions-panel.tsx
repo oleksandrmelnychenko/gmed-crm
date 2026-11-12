@@ -3,6 +3,7 @@ import { SectionHeading } from "@/components/ui/section-heading";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Banner, CountBadge, Section, tokens } from "@/components/ui-shell";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import {
   useAppointmentLabels,
@@ -55,7 +56,10 @@ export function InterpreterSuggestionsPanel({
     roleLabel,
   } = useAppointmentLabels();
   const { t } = useLang();
-  const topSuggestion = suggestions[0] ?? null;
+  // An interpreter booked on another visit at this time is never the
+  // recommendation: assigning him is refused (concierge QA 2026-11-12, E F2).
+  const topSuggestion =
+    suggestions.find((suggestion) => !suggestion.is_busy) ?? null;
   const preferredCount = history.filter(
     (item) => item.preference === "preferred",
   ).length;
@@ -130,6 +134,14 @@ export function InterpreterSuggestionsPanel({
                       <Badge variant="outline" className="rounded-full">
                         {interpreterLanguageStatusLabel(suggestion.language_status)}
                       </Badge>
+                      {suggestion.is_busy ? (
+                        <Badge
+                          variant="outline"
+                          className="rounded-full border-amber-300 bg-amber-50 text-amber-900"
+                        >
+                          {t.appointments_interpreter_busy_at_this_time}
+                        </Badge>
+                      ) : null}
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
                       {suggestion.previous_appointment_count}{" "}
@@ -256,7 +268,7 @@ export function InterpreterSuggestionsPanel({
                         {item.total_report_hours}
                         {t.appointments_interpreter_hours_approved}
                         {item.last_appointment_date
-                          ? ` - ${t.appointments_interpreter_last} ${item.last_appointment_date}`
+                          ? ` - ${t.appointments_interpreter_last} ${formatAppDate(item.last_appointment_date)}`
                           : ""}
                       </p>
                       {item.preference_note ? (

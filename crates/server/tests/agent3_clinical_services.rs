@@ -183,6 +183,42 @@ async fn interpreter_suggestions_prefer_history_and_exclude_avoid_without_langua
     .await
     .unwrap();
 
+    // A cancelled and a future visit with the preferred interpreter do not
+    // count as "worked before" (concierge QA 2026-11-12, E F5).
+    sqlx::query(
+        r#"INSERT INTO appointments (
+                patient_id, interpreter_id, appointment_type, title, date, time_start,
+                time_end, status, created_by
+           ) VALUES
+                ($1, $2, 'medical', 'Cancelled visit', '2026-04-12', '09:00', '10:00', 'cancelled', $3),
+                ($1, $2, 'medical', 'Future visit', '2099-04-12', '09:00', '10:00', 'planned', $3)"#,
+    )
+    .bind(patient_id)
+    .bind(preferred_interpreter_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The neutral interpreter is booked for another patient at the same time
+    // (E F2): marked busy and never ranked above a free interpreter.
+    let other_patient_id = seed_patient(&pool, admin_id, &format!("{tag}-other")).await;
+    sqlx::query(
+        r#"INSERT INTO appointments (
+                patient_id, interpreter_id, appointment_type, title, date, time_start,
+                time_end, status, created_by
+           ) VALUES (
+                $1, $2, 'medical', 'Overlapping visit', '2026-05-10', '09:30', '10:30',
+                'planned', $3
+           )"#,
+    )
+    .bind(other_patient_id)
+    .bind(neutral_interpreter_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
     let suggestions = load_appointment_interpreter_suggestions(&pool, target_appointment_id)
         .await
         .unwrap();
@@ -190,6 +226,14 @@ async fn interpreter_suggestions_prefer_history_and_exclude_avoid_without_langua
     assert!(!suggestions.is_empty());
     assert_eq!(suggestions[0].interpreter_id, preferred_interpreter_id);
     assert_eq!(suggestions[0].preference, "preferred");
+    assert!(!suggestions[0].is_busy);
+    assert_eq!(suggestions[0].previous_appointment_count, 1);
+    if let Some(neutral) = suggestions
+        .iter()
+        .find(|item| item.interpreter_id == neutral_interpreter_id)
+    {
+        assert!(neutral.is_busy);
+    }
     assert!(
         suggestions[0]
             .reasons

@@ -7,6 +7,7 @@ import deLocale from "@fullcalendar/core/locales/de";
 import ruLocale from "@fullcalendar/core/locales/ru";
 import type { EventInput, LocaleInput } from "@fullcalendar/core";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -19,6 +20,7 @@ import {
 
 import { berlinNowNaive } from "@/lib/app-time-zone";
 import { appointmentCalendarTitleViews } from "@/pages/appointments/model/calendar-title";
+import { resolveTimeGridHours } from "@/pages/appointments/model/calendar-hours";
 import {
   CALENDAR_FIRST_DAY,
   CALENDAR_WEEK_NUMBER_CALCULATION,
@@ -71,6 +73,14 @@ const RU_CALENDAR_LOCALE: LocaleInput = {
 // unshifted in any browser zone. "Now" must be naive Berlin time as well, or
 // the today column and the now indicator follow the browser's clock.
 const berlinCalendarNow = () => berlinNowNaive();
+
+// The calendar runs in the browser's "local" zone on naive Berlin wall times,
+// so the period's dates are read with local getters.
+function localDateKey(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
 
 type AdaptiveEventHeights = {
   eventMinHeight: number;
@@ -210,6 +220,26 @@ export function DesktopCalendarSurface({
     if (appointmentId) onOpenQuickActions(event, appointmentId);
   };
   const isTimeGridView = isTimeGridCalendarView(calendarView);
+  // The shown period, to fit the visible hours to its visits (E F1).
+  const [visibleRange, setVisibleRange] = useState<{
+    start: string;
+    end: string;
+  } | null>(null);
+  const handleDatesSet = useCallback<NonNullable<FullCalendarProps["datesSet"]>>(
+    (info) => {
+      const start = localDateKey(info.start);
+      const end = localDateKey(info.end);
+      setVisibleRange((current) =>
+        current?.start === start && current.end === end ? current : { start, end },
+      );
+      datesSet?.(info);
+    },
+    [datesSet],
+  );
+  const timeGridHours = useMemo(
+    () => resolveTimeGridHours(events, visibleRange?.start, visibleRange?.end),
+    [events, visibleRange],
+  );
   const eventLayoutKey = useMemo(
     () =>
       events
@@ -373,8 +403,8 @@ export function DesktopCalendarSurface({
           weekNumberCalculation={CALENDAR_WEEK_NUMBER_CALCULATION}
           weekText={lang === "de" ? "KW" : "Нед."}
           slotDuration="00:30:00"
-          slotMinTime="06:00:00"
-          slotMaxTime="22:00:00"
+          slotMinTime={timeGridHours.slotMinTime}
+          slotMaxTime={timeGridHours.slotMaxTime}
           dayMaxEvents={3}
           now={berlinCalendarNow}
           nowIndicator
@@ -390,7 +420,7 @@ export function DesktopCalendarSurface({
           eventResize={eventResize}
           eventContent={eventContent}
           eventDidMount={markCalendarEventElement}
-          datesSet={datesSet}
+          datesSet={handleDatesSet}
           events={events}
         />
       </div>

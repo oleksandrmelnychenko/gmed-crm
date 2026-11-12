@@ -345,7 +345,7 @@ import {
 } from "./ui/order-cancellation";
 import { normalizeOrderCancellationSettlement } from "./model/order-cancellation";
 import { debtRecheckCopy } from "./model/debt-recheck";
-import { interpreterPlanningSummary } from "./model/interpreter-assignment";
+import { interpreterPlanningLine } from "./model/interpreter-assignment";
 import { OrderFollowupMilestones } from "./ui/order-followup-milestones";
 import { readableServiceLineNotes } from "./model/service-line-notes";
 import {
@@ -5485,15 +5485,10 @@ function useOrdersPageContent() {
                         />
                         <PlanningMetric
                           label={l("orders_dolmetscher")}
-                          value={
-                            orderDetail.planning_preparation
-                              .interpreter_required
-                              ? interpreterPlanningSummary(
-                                  orderDetail.planning_preparation,
-                                  l,
-                                )
-                              : l("orders_nicht_erforderlich")
-                          }
+                          value={interpreterPlanningLine(
+                            orderDetail.planning_preparation,
+                            l,
+                          )}
                         />
                         <PlanningMetric
                           label={l("orders_dolmetscher_briefing")}
