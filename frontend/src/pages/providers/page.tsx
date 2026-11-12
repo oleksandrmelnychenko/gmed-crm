@@ -16,6 +16,7 @@ import {
 } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
+  Archive,
   ArrowUpRight,
   BadgeCheck,
   BadgeInfo,
@@ -143,6 +144,7 @@ import {
   applyStaffFieldChange,
   buildProviderAttributeValueOptionsQuery,
   buildProvidersQuery,
+  canListProviderDocuments,
   canManageProviderPeople,
   compactDate,
   compactDateTime,
@@ -173,6 +175,8 @@ import {
   taxonomyAttributeValueOptions,
   contactEmailsValid,
   firstNoMailContactEmail,
+  providerWebsiteHref,
+  providerWebsiteValid,
   toDoctorPayload,
   toProviderPayload,
   toServicePayload,
@@ -243,6 +247,7 @@ import { ProviderSelectWithTaxonomyFilter } from "./ui/provider-select-with-taxo
 import { ProviderTaxonomyCascadeSelect } from "./ui/provider-taxonomy-cascade-select";
 import { fetchCompanyProviderFinancialSummary } from "@/pages/company-finance/data";
 import type { CompanyProviderFinancialSummary } from "@/pages/company-finance/types";
+import { numberValidityProps } from "@/lib/number-validity";
 
 const selectClassName = shellSelectClassName;
 const formSelectClassName = cn(
@@ -1735,6 +1740,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       : "/providers";
   const permissions = useMemo(() => providerPermissions(user), [user]);
   const canViewPatients = hasCapability(user, "patients.view");
+  const canListDocuments = canListProviderDocuments(user);
   const providerPageCopy = useMemo(() => {
     if (!permissions.forceNonMedical) {
       return {
@@ -2352,8 +2358,18 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   }, []);
 
   const applyProviderDetailError = useCallback((error: unknown) => {
+    // 403: the provider is outside the user's scope (e.g. a medical provider
+    // for Concierge), not a broken page (QA C-01).
+    if ((error as { status?: unknown } | null)?.status === 403) {
+      setDetailError(
+        lang === "de"
+          ? "Dieser Provider ist für Ihre Rolle nicht freigegeben."
+          : "Этот провайдер недоступен для вашей роли.",
+      );
+      return;
+    }
     setDetailError(providerLoadErrorMessage(error, t.common_failed_load));
-  }, [t.common_failed_load]);
+  }, [lang, t.common_failed_load]);
 
   const finishProviderDetailLoad = useCallback(() => {
     setDetailBusy(false);
@@ -2801,6 +2817,10 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       setCreateError(emailDomainWarningText(createNoMail, lang));
       return;
     }
+    if (!providerWebsiteValid(payload.website)) {
+      setCreateError(providerWebsiteInvalidText(lang));
+      return;
+    }
     setCreateBusy(true);
     setCreateError("");
 
@@ -2827,6 +2847,10 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     const providerNoMail = firstNoMailContactEmail(payload.contacts);
     if (providerNoMail) {
       setProviderError(emailDomainWarningText(providerNoMail, lang));
+      return;
+    }
+    if (!providerWebsiteValid(payload.website)) {
+      setProviderError(providerWebsiteInvalidText(lang));
       return;
     }
 
@@ -3508,7 +3532,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
                   <ProviderProfileReadOnlySection detail={detail} />
 
-                  {detail.provider_type !== "medical" ? (
+                  {canListDocuments && detail.provider_type !== "medical" ? (
                     <ProviderDocumentsSection
                       detail={detail}
                       canManage={permissions.canManageRegistry}
@@ -3595,7 +3619,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   <InteractionHistorySection
                     detail={detail}
                   />
-                  {detail.provider_type === "medical" ? (
+                  {canListDocuments && detail.provider_type === "medical" ? (
                     <ProviderDocumentsSection
                       detail={detail}
                       canManage={permissions.canManageRegistry}
@@ -4244,7 +4268,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     onOpenAppointments={() => window.open(`/appointments?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
                   />
 
-                  {detail.provider_type !== "medical" ? (
+                  {canListDocuments && detail.provider_type !== "medical" ? (
                     <ProviderDocumentsSection
                       detail={detail}
                       canManage={permissions.canManageRegistry}
@@ -4367,7 +4391,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                 <InteractionHistorySection
                   detail={detail}
                 />
-                {detail.provider_type === "medical" ? (
+                {canListDocuments && detail.provider_type === "medical" ? (
                   <ProviderDocumentsSection
                     detail={detail}
                     canManage={permissions.canManageRegistry}
@@ -4521,6 +4545,25 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
       {relationshipDeleteConfirmDialog}
     </>
+  );
+}
+
+function providerWebsiteInvalidText(lang: string) {
+  return lang === "de"
+    ? "Webseite: bitte eine Webadresse wie www.klinik.de eingeben."
+    : "Сайт: укажите веб-адрес, например www.klinik.de.";
+}
+
+/** A website as a link when it is a web address; older free text stays plain (QA C-09). */
+function ProviderWebsiteValue({ value, fallback }: { value: string | null | undefined; fallback: string }) {
+  const text = (value ?? "").trim();
+  if (!text) return <>{fallback}</>;
+  const href = providerWebsiteHref(text);
+  if (!href) return <>{text}</>;
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:underline">
+      {text}
+    </a>
   );
 }
 
@@ -4749,7 +4792,11 @@ function ProviderProfileReadOnlySection({ detail }: { detail: ProviderDetail }) 
       <Section icon={Contact} className={providerDetailSectionClassName} title={l("patients_contact")}>
         <div className="space-y-3">
           <div className="grid gap-x-8 gap-y-1 lg:grid-cols-2">
-            <ReadOnlyLine label={t.providers_website} value={detail.website || fallback} wrap />
+            <ReadOnlyLine
+              label={t.providers_website}
+              value={<ProviderWebsiteValue value={detail.website} fallback={fallback} />}
+              wrap
+            />
           </div>
           <ReadOnlyContacts
             contacts={detail.contacts}
@@ -6775,9 +6822,9 @@ function ProviderSheetHero({
                   {providerActionBusy === "delete" ? (
                     <LoaderCircle className="size-3.5 animate-spin" />
                   ) : (
-                    <Trash2 className="size-3.5" />
+                    <Archive className="size-3.5" />
                   )}
-                  {l("patients_delete")}
+                  {t.common_archive}
                 </Button>
               ) : null}
               </div>
@@ -8641,6 +8688,7 @@ function ProviderProfileFields({
         <Field label={lang === "ru" ? "Внутренний рейтинг" : "Interne Bewertung"}>
           <Input
             type="number"
+            {...numberValidityProps(lang)}
             min="0"
             max="5"
             step="0.5"

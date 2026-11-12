@@ -48,6 +48,7 @@ import { fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
 import { specializationSummaryForItems } from "@/pages/providers/model/specialization-labels";
 import type { ProviderTaxonomyNode, SpecializationItem } from "@/pages/providers/model/types";
 import { ProviderTaxonomyCascadeSelect } from "@/pages/providers/ui/provider-taxonomy-cascade-select";
+import { countryNameForDisplay } from "@/components/ui/country-select";
 import { fetchReportsExport, fetchReportsWorkspace } from "./data/reports-api";
 import {
   formatChange,
@@ -284,6 +285,18 @@ function reportBackendLabel(
   const conciergeKind = value.match(/^concierge_service_kind\.(.+)$/)?.[1];
   if (conciergeKind) return serviceKindLabel(conciergeKind);
   return agencyServiceNameLabel(undefined, value, translations);
+}
+
+/** A country of the reports in the UI language; the server sends ISO codes or English names (QA C-08). */
+function reportCountry(value: string | null | undefined, lang: "de" | "ru", unknown: string) {
+  const text = (value ?? "").trim();
+  if (!text || text.toLowerCase() === "unknown") return unknown;
+  return countryNameForDisplay(text, lang) || text;
+}
+
+/** "City, country" with the country in the UI language, as on /providers. */
+function reportLocation(city: string | null | undefined, country: string | null | undefined, lang: "de" | "ru") {
+  return [city, country ? countryNameForDisplay(country, lang) || country : null].filter(Boolean).join(", ");
 }
 
 function reportTaxonomyLabel(
@@ -900,7 +913,7 @@ function useReportsPageContent() {
         width: 220,
         render: (row) => (
           <span className="text-xs text-foreground">
-            {[row.address_city, row.address_country].filter(Boolean).join(", ") || text.locationNotSet}
+            {reportLocation(row.address_city, row.address_country, lang) || text.locationNotSet}
           </span>
         ),
       },
@@ -1045,7 +1058,7 @@ function useReportsPageContent() {
         width: 220,
         render: (row) => (
           <span className="text-xs text-foreground">
-            {[row.address_city, row.address_country].filter(Boolean).join(", ") || text.locationNotSet}
+            {reportLocation(row.address_city, row.address_country, lang) || text.locationNotSet}
           </span>
         ),
       },
@@ -1154,7 +1167,7 @@ function useReportsPageContent() {
         width: 220,
         render: (row) => (
           <span className="text-xs text-foreground">
-            {[row.address_city, row.address_country].filter(Boolean).join(", ") || text.locationNotSet}
+            {reportLocation(row.address_city, row.address_country, lang) || text.locationNotSet}
           </span>
         ),
       },
@@ -1235,7 +1248,7 @@ function useReportsPageContent() {
         width: 220,
         render: (row) => (
           <span className="text-xs text-foreground">
-            {[row.address_city, row.address_country].filter(Boolean).join(", ") || text.locationNotSet}
+            {reportLocation(row.address_city, row.address_country, lang) || text.locationNotSet}
           </span>
         ),
       },
@@ -1248,7 +1261,6 @@ function useReportsPageContent() {
         render: (row) => (
           <ReportTaxonomyBadge
             label={reportTaxonomyLabel(row, text.unknown, lang)}
-            code={row.taxonomy_node_code}
           />
         ),
       },
@@ -1325,7 +1337,7 @@ function useReportsPageContent() {
       {
         id: "country",
         label: text.countries.title,
-        accessor: (row) => row.country,
+        accessor: (row) => reportCountry(row.country, lang, text.unknown),
         width: 220,
         pinned: "left",
         sortable: true,
@@ -1395,7 +1407,7 @@ function useReportsPageContent() {
         width: 220,
         render: (row) => (
           <span className="text-xs text-foreground">
-            {[row.address_city, row.address_country].filter(Boolean).join(", ") || text.locationNotSet}
+            {reportLocation(row.address_city, row.address_country, lang) || text.locationNotSet}
           </span>
         ),
       },
@@ -2312,7 +2324,7 @@ function useReportsPageContent() {
                           <div className="p-3">
                             <p className="text-xs text-muted-foreground">{text.countries.title}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">
-                              {[detail.row.address_city, detail.row.address_country].filter(Boolean).join(", ") || text.locationNotSet}
+                              {reportLocation(detail.row.address_city, detail.row.address_country, lang) || text.locationNotSet}
                             </p>
                           </div>
                           <div className="p-3">

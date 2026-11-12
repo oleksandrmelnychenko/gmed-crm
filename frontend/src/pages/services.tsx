@@ -2448,7 +2448,9 @@ function useStaffServicesPageContent() {
                           <p className="rounded-md border bg-muted/40 px-3 py-2 tabular-nums">
                             {formatPortalCurrency(selectedService.patient_budget, selectedService.currency)}
                           </p>
-                          <p className="text-xs text-muted-foreground">{t.staff_services_patient_budget_hint}</p>
+                          <p className="text-xs text-muted-foreground">{canEditProtectedServiceFields
+                              ? t.staff_services_patient_budget_hint
+                              : t.staff_services_patient_budget_hint_concierge}</p>
                         </div>
                       ) : null}
                       <label className="space-y-1.5 text-sm">

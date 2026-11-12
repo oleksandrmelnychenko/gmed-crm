@@ -108,6 +108,7 @@ import type {
 import { cn } from "@/lib/utils";
 import { formatMoneyAmount, moneyInputText, moneyLineAmounts, parseMoneyInput } from "@/lib/money";
 import { MoneyInput } from "@/components/ui/money-input";
+import { numberValidityProps } from "@/lib/number-validity";
 
 /** A catalogue date as DD.MM.YYYY (owner rule), e.g. a price version period. */
 function catalogDate(value: string | null | undefined) {
@@ -3737,6 +3738,7 @@ function useFinanceCatalogPageContent() {
                       <Field label={t.revenue_agency_service_vat_percent}>
                         <Input
                           type="number"
+                          {...numberValidityProps(lang)}
                           min="0"
                           max="100"
                           step="0.01"

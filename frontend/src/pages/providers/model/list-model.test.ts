@@ -10,6 +10,7 @@ import {
   blankStaffForm,
   buildProviderAttributeValueOptionsQuery,
   buildProvidersQuery,
+  canListProviderDocuments,
   canManageProviderPeople,
   composeDoctorDisplayName,
   composeStaffDisplayName,
@@ -30,6 +31,8 @@ import {
   providerPeopleCountLabel,
   providerLoadErrorMessage,
   providerPermissions,
+  providerWebsiteHref,
+  providerWebsiteValid,
   splitDoctorTitleValue,
   taxonomyAttributeValueOptions,
   taxonomyAttributeValue,
@@ -1063,5 +1066,30 @@ describe("doctor relationships", () => {
     expect(
       doctorRelationshipTargetLabel({ target_doctor_name: "Release Target", target_doctor_title: null }),
     ).toBe("Release Target");
+  });
+});
+
+describe("provider website (QA C-09)", () => {
+  it("accepts web addresses and links them", () => {
+    expect(providerWebsiteHref("www.klinik.de")).toBe("https://www.klinik.de");
+    expect(providerWebsiteHref("http://klinik.de/kontakt")).toBe("http://klinik.de/kontakt");
+    expect(providerWebsiteValid("")).toBe(true);
+  });
+
+  it("refuses free text", () => {
+    expect(providerWebsiteValid("qa-c-synthetika")).toBe(false);
+    expect(providerWebsiteValid("mail@clinic.de")).toBe(false);
+    expect(providerWebsiteValid("klinik .de")).toBe(false);
+  });
+});
+
+describe("provider documents list (QA C-01/C-04)", () => {
+  it("follows the server's roles", () => {
+    for (const role of ["ceo", "ceo_assistant", "patient_manager", "concierge", "billing", "sales"]) {
+      expect(canListProviderDocuments(role), role).toBe(true);
+    }
+    for (const role of ["interpreter", "teamlead_interpreter", "it_admin", "patient"]) {
+      expect(canListProviderDocuments(role), role).toBe(false);
+    }
   });
 });

@@ -567,7 +567,7 @@ async fn can_access_provider(
     resolve_provider_access(state, auth, provider_id, provider_type, capability).await
 }
 
-async fn ensure_provider_access(
+pub(crate) async fn ensure_provider_access(
     state: &AppState,
     auth: &AuthUser,
     provider_id: Uuid,
@@ -2095,6 +2095,23 @@ fn require_provider_catalog_read(
     }
 }
 
+/// Reading one provider record (profile, doctors, staff, templates, services)
+/// follows the list: every role with `providers.view` opens it read-only
+/// (QA C-01, 2026-11-12: CEO Assistant, Teamlead Interpreter and Interpreter
+/// saw the list but got 403 on every profile). Record rules and the Concierge
+/// medical boundary still apply per provider.
+#[allow(clippy::result_large_err)]
+fn require_provider_directory_read(auth: &AuthUser) -> Result<(), axum::response::Response> {
+    auth.require_capability(Capability::ProvidersView)
+}
+
+/// Interpreters have no finance column in the RBAC matrix («Фінанси: Ні»):
+/// they read the provider profile without its price list and without the
+/// interaction log (order lines and service costs).
+fn provider_prices_hidden(role: Role) -> bool {
+    matches!(role, Role::Interpreter | Role::TeamleadInterpreter)
+}
+
 async fn list_specializations(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -3264,13 +3281,7 @@ async fn get_provider(
     Extension(auth): Extension<AuthUser>,
     Path(provider_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Concierge,
-        Role::Billing,
-        Role::Sales,
-    ]) {
+    if let Err(e) = require_provider_directory_read(&auth) {
         return e;
     }
 
@@ -3399,10 +3410,13 @@ async fn get_provider(
     if let Err(resp) = filter_doctor_linked_patient_items(&state, &auth, &mut doctors).await {
         return resp;
     }
-    let services = match services {
+    let mut services = match services {
         Ok(items) => items,
         Err(resp) => return resp,
     };
+    if provider_prices_hidden(auth.role) {
+        services.clear();
+    }
     let linked_patients = match linked_patients {
         Ok(linked) => linked.items,
         Err(resp) => return resp,
@@ -3416,11 +3430,14 @@ async fn get_provider(
         Ok(items) => items,
         Err(resp) => return resp,
     };
-    let interactions =
+    let interactions = if provider_prices_hidden(auth.role) {
+        Vec::new()
+    } else {
         match filter_accessible_patient_items(&state, &auth, interactions, "patient_uuid").await {
             Ok(items) => items,
             Err(resp) => return resp,
-        };
+        }
+    };
     let templates = match templates {
         Ok(items) => items,
         Err(resp) => return resp,
@@ -3862,13 +3879,7 @@ async fn list_provider_templates(
     Extension(auth): Extension<AuthUser>,
     Path(provider_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Concierge,
-        Role::Billing,
-        Role::Sales,
-    ]) {
+    if let Err(e) = require_provider_directory_read(&auth) {
         return e;
     }
     if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, false).await {
@@ -4138,13 +4149,7 @@ async fn list_doctor_relationships(
     Extension(auth): Extension<AuthUser>,
     Path((provider_id, doctor_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Concierge,
-        Role::Billing,
-        Role::Sales,
-    ]) {
+    if let Err(e) = require_provider_directory_read(&auth) {
         return e;
     }
     if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, false).await {
@@ -4581,13 +4586,7 @@ async fn list_doctors(
     Extension(auth): Extension<AuthUser>,
     Path(provider_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Concierge,
-        Role::Billing,
-        Role::Sales,
-    ]) {
+    if let Err(e) = require_provider_directory_read(&auth) {
         return e;
     }
     if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, false).await {
@@ -4619,13 +4618,7 @@ async fn get_doctor(
     Extension(auth): Extension<AuthUser>,
     Path((provider_id, doctor_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Concierge,
-        Role::Billing,
-        Role::Sales,
-    ]) {
+    if let Err(e) = require_provider_directory_read(&auth) {
         return e;
     }
     if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, false).await {
@@ -5429,13 +5422,7 @@ async fn list_provider_staff(
     Extension(auth): Extension<AuthUser>,
     Path(provider_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Concierge,
-        Role::Billing,
-        Role::Sales,
-    ]) {
+    if let Err(e) = require_provider_directory_read(&auth) {
         return e;
     }
     if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, false).await {
@@ -5736,14 +5723,11 @@ async fn list_services(
     Extension(auth): Extension<AuthUser>,
     Path(provider_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Concierge,
-        Role::Billing,
-        Role::Sales,
-    ]) {
+    if let Err(e) = require_provider_directory_read(&auth) {
         return e;
+    }
+    if provider_prices_hidden(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
     if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, false).await {
         return resp;
@@ -5764,14 +5748,11 @@ async fn get_service(
     Extension(auth): Extension<AuthUser>,
     Path((provider_id, service_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Concierge,
-        Role::Billing,
-        Role::Sales,
-    ]) {
+    if let Err(e) = require_provider_directory_read(&auth) {
         return e;
+    }
+    if provider_prices_hidden(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
     if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, false).await {
         return resp;

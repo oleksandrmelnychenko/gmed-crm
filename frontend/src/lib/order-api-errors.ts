@@ -47,6 +47,7 @@ export const ORDER_API_ERROR_KEYS: Record<string, string> = {
   price_version_date_taken: "api_catalog_price_version_date_taken",
   price_version_last: "api_catalog_price_version_last",
   price_version_used: "api_catalog_price_version_used",
+  price_version_used_locked: "api_catalog_price_version_used_locked",
   tax_profile_system: "api_catalog_tax_profile_system",
   tax_profile_default: "api_catalog_tax_profile_default",
   // An archived profile is never chosen for a new price, package or line (QA round 14).

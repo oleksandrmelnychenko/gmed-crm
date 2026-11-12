@@ -112,7 +112,9 @@ export function ProviderDocumentsSection({
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [patientId, setPatientId] = useState("");
-  const [isMedical, setIsMedical] = useState(detail.provider_type === "medical");
+  // Off by default: most uploads are contracts and price lists; a medical
+  // document is ticked on purpose and then needs a patient (QA C-09).
+  const [isMedical, setIsMedical] = useState(false);
   const linkedPatientOptions = useMemo(
     () => detail.linked_patients.map((patient) => ({
       id: patient.id,
@@ -168,7 +170,7 @@ export function ProviderDocumentsSection({
     setTitle("");
     setNotes("");
     setPatientId("");
-    setIsMedical(detail.provider_type === "medical");
+    setIsMedical(false);
     setError("");
     setDialogOpen(true);
   }

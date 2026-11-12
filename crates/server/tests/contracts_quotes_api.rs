@@ -4188,6 +4188,122 @@ async fn finance_catalog_package_price_sold_to_a_patient_stays_in_the_history() 
     assert!(kept);
 }
 
+/// QA C-03 (2026-11-12): a used agency price keeps its amount and VAT; the
+/// edit is refused with a code and the old amount stays in the history. An
+/// unused price stays editable.
+#[tokio::test]
+async fn finance_catalog_used_agency_price_keeps_its_amount() {
+    let Some((app, pool, _admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("agency-price-used");
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing = auth_header_for(billing_id, "billing");
+    let (status, service) = json_request(
+        &app,
+        "POST",
+        "/api/v1/agency-services",
+        &billing,
+        Some(json!({
+            "service_key": format!("used_price_{}", Uuid::new_v4().simple()),
+            "service_name": format!("Used price {tag}"),
+            "unit_label": "unit",
+            "unit_price": 1234.56,
+            "currency": "EUR",
+            "vat_rate": 19.0,
+            "is_active": true,
+            "valid_from": "2026-01-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {service}");
+    let service_id = Uuid::parse_str(service["id"].as_str().expect("service id")).unwrap();
+    let (status, future) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/agency-services/{service_id}/price-versions"),
+        &billing,
+        Some(json!({
+            "name": "Future price",
+            "unit_price": 2000,
+            "currency": "EUR",
+            "vat_rate": 19,
+            "valid_from": "2027-01-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {future}");
+    let future_id = future["id"].as_str().expect("future price id").to_string();
+    let used_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM agency_service_price_versions WHERE agency_service_id = $1 AND valid_from = '2026-01-01'",
+    )
+    .bind(service_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let package_id =
+        seed_service_package(&pool, &format!("used_price_{}", Uuid::new_v4().simple())).await;
+    sqlx::query(
+        r#"INSERT INTO service_package_items (
+                package_id, agency_service_id, agency_service_price_version_id,
+                description, included_quantity
+           ) VALUES ($1, $2, $3, 'Used price item', 1)"#,
+    )
+    .bind(package_id)
+    .bind(service_id)
+    .bind(used_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let edit = |unit_price: f64, valid_from: &str| {
+        json!({ "name": "Edited", "unit_price": unit_price, "currency": "EUR",
+            "vat_rate": 19, "valid_from": valid_from, "valid_to": "2026-12-31" })
+    };
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/agency-services/{service_id}/price-versions/{used_id}"),
+        &billing,
+        Some(edit(1500.0, "2026-01-01")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "response: {body}");
+    assert_eq!(body["error"], "price_version_used_locked");
+    let kept: rust_decimal::Decimal =
+        sqlx::query_scalar("SELECT unit_price FROM agency_service_price_versions WHERE id = $1")
+            .bind(used_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(kept, rust_decimal::Decimal::new(123456, 2));
+
+    // The same amount with another name stays possible …
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/agency-services/{service_id}/price-versions/{used_id}"),
+        &billing,
+        Some(edit(1234.56, "2026-01-01")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {body}");
+
+    // … and an unused price changes its amount.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/agency-services/{service_id}/price-versions/{future_id}"),
+        &billing,
+        Some(
+            json!({ "name": "Future price", "unit_price": 2100, "currency": "EUR",
+            "vat_rate": 19, "valid_from": "2027-01-01" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {body}");
+}
+
 /// An archived VAT profile is never chosen for new use (QA round 14): a new
 /// price, a new package or a new line refuse it with 409; a price that
 /// already carries it keeps it on an edit. The only price says so by code.

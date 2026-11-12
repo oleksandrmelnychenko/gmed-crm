@@ -6,10 +6,12 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { StatusChip } from "@/components/ui/status-chip";
 import { formatAppDate } from "@/lib/app-time-zone";
+import { formatMoneyAmount } from "@/lib/money";
 import { subscriptionKindLabel } from "@/pages/patients/model/list-model";
 
 import {
   fetchOrderSubscription,
+  orderTariffOptionLabels,
   setOrderSubscription,
   type OrderSubscription,
 } from "../data/order-subscription-api";
@@ -60,6 +62,11 @@ export function OrderSubscriptionCard({
   const current = data.current;
   const dirty = choice !== (current?.package_id ?? "");
   const resetsConsumption = dirty && Boolean(current?.has_consumption);
+  const optionLabels = orderTariffOptionLabels(
+    data.options,
+    (option) => subscriptionKindLabel(option, lang),
+    (amount, currency) => formatMoneyAmount(amount, currency),
+  );
 
   async function save() {
     setBusy(true);
@@ -129,7 +136,7 @@ export function OrderSubscriptionCard({
               <option value="">{de ? "Kein Tarif" : "Без тарифа"}</option>
               {data.options.map((option) => (
                 <option key={option.id} value={option.id}>
-                  {`${subscriptionKindLabel(option, lang)} · ${option.name ?? option.package_key}`}
+                  {optionLabels.get(option.id)}
                 </option>
               ))}
             </NativeComboboxSelect>

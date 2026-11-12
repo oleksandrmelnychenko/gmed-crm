@@ -20,7 +20,7 @@ import type {
 } from "./types";
 import type { ProviderPeopleRow } from "./people-types";
 import { appDateKey, dateKeyToDate, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
-import { hasCapability, type Actor } from "@/lib/permissions";
+import { actorRole, hasCapability, type Actor } from "@/lib/permissions";
 import {
   formatEnumLabelFromKeys,
   getLang,
@@ -865,6 +865,25 @@ export function providerPermissions(actor?: Actor): ProviderPermissions {
   };
 }
 
+/**
+ * Roles the server lets list a provider's documents
+ * (`routes/provider_documents.rs`). Interpreters and IT Admin open the
+ * provider profile but not its files (RBAC matrix, QA C-01/C-04).
+ */
+const PROVIDER_DOCUMENT_LIST_ROLES = new Set([
+  "ceo",
+  "ceo_assistant",
+  "patient_manager",
+  "concierge",
+  "billing",
+  "sales",
+]);
+
+export function canListProviderDocuments(actor: Actor) {
+  const role = actorRole(actor);
+  return Boolean(role && PROVIDER_DOCUMENT_LIST_ROLES.has(role));
+}
+
 export function canManageProviderPeople(actor: Actor, providerType: ProviderType) {
   const { canEditProvider, forceNonMedical } = providerPermissions(actor);
   return canEditProvider && (!forceNonMedical || providerType === "non_medical");
@@ -1696,6 +1715,40 @@ export function applyStaffFieldChange(
 /** Whether every e-mail contact is name@domain.tld; the server refuses the rest (422). Empty rows are dropped anyway. */
 export function contactEmailsValid(contacts: readonly { contact_kind: "phone" | "email"; value: string }[]) {
   return contacts.every((contact) => contact.contact_kind !== "email" || !contact.value.trim() || isValidEmailAddress(contact.value));
+}
+
+const WEBSITE_HOST_LABEL = /^[A-Za-z0-9À-￿](?:[A-Za-z0-9À-￿-]{0,61}[A-Za-z0-9À-￿])?$/;
+
+/**
+ * The http(s) address a website value opens, or null when it is no web
+ * address: an optional `http://`/`https://`, then a host of at least two
+ * labels with a top-level domain of two or more letters, then an optional
+ * path. `qa-c-synthetika` or `mail@clinic.de` are refused (QA C-09).
+ */
+export function providerWebsiteHref(value: string | null | undefined): string | null {
+  const raw = (value ?? "").trim();
+  if (!raw || /\s/.test(raw)) return null;
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  let url: URL;
+  try {
+    url = new URL(withScheme);
+  } catch {
+    return null;
+  }
+  if (url.username || url.password) return null;
+  const host = url.hostname;
+  const labels = host.split(".");
+  if (labels.length < 2 || !labels.every((label) => WEBSITE_HOST_LABEL.test(label) || label.startsWith("xn--"))) {
+    return null;
+  }
+  const tld = labels[labels.length - 1];
+  if (!/^[A-Za-z]{2,}$/.test(tld) && !tld.toLowerCase().startsWith("xn--")) return null;
+  return withScheme;
+}
+
+/** An empty website is allowed; anything else must be a web address. */
+export function providerWebsiteValid(value: string | null | undefined) {
+  return !(value ?? "").trim() || providerWebsiteHref(value) !== null;
 }
 
 /** The first e-mail contact whose domain is already known to receive no mail (the server refuses it, 422). */

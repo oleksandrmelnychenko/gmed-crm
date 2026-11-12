@@ -277,9 +277,9 @@ async fn provider_documents_link_medical_files_to_both_provider_and_patient_with
     assert_eq!(visible[0]["patient_id"], patient_id.to_string());
     assert_eq!(visible[0]["is_medical"], true);
 
-    // The provider page follows the document rules: a medical file of a
-    // patient is not listed (with the patient's name) to a concierge, who has
-    // no medical access and no assignment to that patient.
+    // The provider page follows the provider and document rules: a concierge
+    // has no scope on a medical provider (QA C-04, 2026-11-12), so its file
+    // list, including the patient's medical file and name, stays closed.
     let (status, hidden) = json_request(
         &ctx.app,
         "GET",
@@ -288,8 +288,13 @@ async fn provider_documents_link_medical_files_to_both_provider_and_patient_with
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{hidden}");
-    assert_eq!(hidden.as_array().map(Vec::len), Some(0), "{hidden}");
+    assert_eq!(status, StatusCode::FORBIDDEN, "{hidden}");
+
+    // IT Admin has no documents column in the RBAC matrix.
+    let it_admin_id = seed_user(&ctx.pool, "it_admin", &tag).await;
+    let it_admin = auth_header_for(it_admin_id, "it_admin");
+    let (status, denied_admin) = json_request(&ctx.app, "GET", &path, &it_admin, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied_admin}");
 
     let (status, denied_list) = json_request(&ctx.app, "GET", &path, &interpreter, None).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{denied_list}");

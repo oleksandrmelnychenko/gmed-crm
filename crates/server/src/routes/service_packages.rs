@@ -1396,6 +1396,46 @@ async fn save_service_package_price_version(
     }
 
     let saved_id = if let Some(price_version_id) = price_version_id {
+        // GoBD (QA C-03, 2026-11-12): a price a patient package was sold at
+        // keeps its amount, VAT and currency; a new price is a new version.
+        let current = match sqlx::query_as::<_, (Decimal, Decimal, String, bool)>(
+            r#"SELECT price.base_price_net, price.base_price_vat, price.currency,
+                      EXISTS (SELECT 1 FROM patient_service_packages sold
+                              WHERE sold.package_price_version_id = price.id) AS used
+               FROM service_package_price_versions price
+               WHERE price.id = $1 AND price.package_id = $2
+               FOR UPDATE OF price"#,
+        )
+        .bind(price_version_id)
+        .bind(package_id)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(Some(row)) => row,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Price version not found"),
+            Err(error) => {
+                tracing::error!(%error, %package_id, %price_version_id, "check package price version usage before update");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to save price version",
+                );
+            }
+        };
+        let (current_net, current_vat, current_currency, is_used) = current;
+        if is_used
+            && (current_net != base_net
+                || current_vat != base_vat
+                || !current_currency.eq_ignore_ascii_case(&currency))
+        {
+            return (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": "price_version_used_locked",
+                    "message": "This price version is already used; create a new price version instead",
+                })),
+            )
+                .into_response();
+        }
         match sqlx::query_scalar::<_, Uuid>(
             r#"UPDATE service_package_price_versions
                SET name = $3,
@@ -3378,7 +3418,13 @@ async fn set_order_subscription(
                 .bind(patient_id)
                 .bind(Some(order_id))
                 .bind(package_id)
-                .bind("active")
+                // A tariff chosen while the order is paused starts paused;
+                // resuming the order resumes it (QA C-02).
+                .bind(if status == "paused" {
+                    "paused"
+                } else {
+                    "active"
+                })
                 .bind(Some(starts_on))
                 .bind(ends_on)
                 .bind(None::<String>)

@@ -485,3 +485,85 @@ async fn portal_subscriptions_are_self_scoped_visible_and_client_safe() {
     let (status, body) = get_json(&app, "/api/v1/me/subscriptions", &manager_bearer).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "manager response: {body:?}");
 }
+
+async fn post_order_status(
+    app: &axum::Router,
+    order_id: Uuid,
+    bearer: &str,
+    status: &str,
+) -> (StatusCode, Value) {
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/orders/{order_id}/status"))
+        .header("Authorization", bearer)
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&json!({ "status": status })).unwrap(),
+        ))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let code = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    (code, serde_json::from_slice(&bytes).unwrap_or(json!(null)))
+}
+
+/// QA C-02 (2026-11-12): pausing an order pauses its tariff, resuming the
+/// order resumes it, and both steps are in the activity log.
+#[tokio::test]
+async fn pausing_an_order_pauses_its_subscription_and_resuming_resumes_it() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("order-pause-subscription");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let (package_id, _) = seed_package(&pool, admin_id, &tag).await;
+    let subscription_id = seed_subscription(
+        &pool,
+        patient_id,
+        Some(order_id),
+        package_id,
+        "active",
+        -1,
+        30,
+        true,
+        admin_id,
+    )
+    .await;
+    let ceo = auth_header_for(admin_id, "ceo");
+    let subscription_status = |pool: PgPool| async move {
+        sqlx::query_scalar::<_, String>("SELECT status FROM patient_service_packages WHERE id = $1")
+            .bind(subscription_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+
+    let (status, body) = post_order_status(&app, order_id, &ceo, "paused").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(subscription_status(pool.clone()).await, "paused");
+
+    let (status, body) = post_order_status(&app, order_id, &ceo, "active").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(subscription_status(pool.clone()).await, "active");
+
+    let actions: Vec<String> = sqlx::query_scalar(
+        r#"SELECT action FROM audit_log
+           WHERE entity_type = 'patient' AND entity_id = $1
+             AND action IN ('pause_patient_service_package', 'resume_patient_service_package')
+           ORDER BY created_at, action"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        actions,
+        vec![
+            "pause_patient_service_package",
+            "resume_patient_service_package"
+        ]
+    );
+}

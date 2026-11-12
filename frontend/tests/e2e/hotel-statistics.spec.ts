@@ -260,7 +260,7 @@ test("room count persists, recalculates the report and a failed save stays recov
   const hotelRow = page.getByTestId("hotel-table").getByRole("row").filter({ has: page.getByRole("button", { name: "Hotel Lindenhof", exact: true }) });
   await hotelRow.getByRole("cell").nth(1).click();
   const dialog = page.getByRole("dialog");
-  const editor = dialog.getByRole("spinbutton", { name: "Номеров stay-0", exact: true });
+  const editor = dialog.getByRole("spinbutton", { name: "Номеров · BOOK-0", exact: true });
   await editor.fill("2"); state.fail = true;
   await dialog.getByRole("button", { name: "Сохранить", exact: true }).click();
   await expect(dialog.getByRole("alert")).toBeVisible(); await expect(editor).toHaveValue("2");
@@ -269,7 +269,7 @@ test("room count persists, recalculates the report and a failed save stays recov
   await expect(dialog.getByRole("button", { name: "Сохранить", exact: true })).toHaveCount(0);
   await page.reload();
   await page.getByRole("button", { name: "Hotel Lindenhof", exact: true }).click();
-  await expect(page.getByRole("dialog").getByRole("spinbutton", { name: "Номеров stay-0", exact: true })).toHaveValue("2");
+  await expect(page.getByRole("dialog").getByRole("spinbutton", { name: "Номеров · BOOK-0", exact: true })).toHaveValue("2");
   expect(state.mutations).toBe(2);
 });
 
@@ -278,7 +278,7 @@ test("a failed refresh after saving breakfast preserves other unsaved booking ed
   await page.goto("/hotels");
   await page.getByRole("button", { name: "Hotel Lindenhof", exact: true }).click();
   const dialog = page.getByRole("dialog");
-  const rooms = dialog.getByRole("spinbutton", { name: "Номеров stay-0", exact: true });
+  const rooms = dialog.getByRole("spinbutton", { name: "Номеров · BOOK-0", exact: true });
   await rooms.fill("3");
   const breakfast = page.getByTestId("breakfast-stay-0");
   await breakfast.getByRole("button").click();
@@ -305,7 +305,7 @@ test("patient search and stay export preserve hidden drafts and guarded closing"
   await page.getByRole("button", { name: "Hotel Lindenhof", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("link", { name: "Test Patient 0", exact: true })).toHaveAttribute("href", "/patients/patient-0");
-  const room = dialog.getByRole("spinbutton", { name: "Номеров stay-0", exact: true });
+  const room = dialog.getByRole("spinbutton", { name: "Номеров · BOOK-0", exact: true });
   await room.fill("4");
   const search = dialog.getByRole("textbox", { name: "Пациент или номер бронирования", exact: true });
   await search.fill("BOOK-6");

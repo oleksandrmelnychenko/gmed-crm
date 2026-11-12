@@ -48,6 +48,14 @@ async fn list_provider_documents(
     if let Err(response) = require_provider_document_view_role(&auth) {
         return response;
     }
+    // The file list follows the provider record: a provider outside the
+    // caller's scope (record deny, Concierge and a medical provider) lists
+    // nothing, as its profile does.
+    if let Err(response) =
+        crate::routes::providers::ensure_provider_access(&state, &auth, provider_id, false).await
+    {
+        return response;
+    }
     let search = query
         .q
         .as_deref()
@@ -363,13 +371,18 @@ fn normalized(value: Option<String>, max: usize) -> Option<String> {
 
 #[allow(clippy::result_large_err)]
 fn require_provider_document_view_role(auth: &AuthUser) -> Result<(), axum::response::Response> {
+    // IT Admin has no documents column in the RBAC matrix («Документи: Ні»)
+    // and no provider profile: it does not list provider files (QA C-04,
+    // 2026-11-12). The CEO Assistant reads what it may open (matrix
+    // «Читання лише дозволеного»); record-bound files still pass the
+    // document rules below. Interpreters never list provider files.
     auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::Concierge,
         Role::Billing,
         Role::PatientManager,
         Role::Sales,
-        Role::ItAdmin,
     ])
 }
 

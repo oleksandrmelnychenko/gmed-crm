@@ -184,6 +184,7 @@ export interface OperationsTranslations {
   staff_services_form_patient_request_note: string;
   staff_services_form_patient_budget: string;
   staff_services_patient_budget_hint: string;
+  staff_services_patient_budget_hint_concierge: string;
   staff_services_visible_to_patient: string;
   staff_services_hidden_from_patient: string;
   staff_services_patient_request_note_hint: string;
@@ -801,6 +802,7 @@ export const operationsRu: OperationsTranslations = {
   staff_services_form_patient_request_note: "Текст пациента из запроса",
   staff_services_form_patient_budget: "Бюджет пациента из запроса",
   staff_services_patient_budget_hint: "Указал пациент в портале и видит его как «Ваш бюджет»; сотрудники его не меняют. Внутренняя оценка — отдельное поле.",
+  staff_services_patient_budget_hint_concierge: "Указал пациент в портале и видит его как «Ваш бюджет»; сотрудники его не меняют. Внутреннюю оценку стоимости вносит менеджер пациента или CEO; цену партнёра — кнопка «Забронировать у партнёра».",
   staff_services_visible_to_patient: "Видно пациенту в портале",
   staff_services_hidden_from_patient: "Пациенту не видно",
   staff_services_patient_request_note_hint: "Написал пациент в портале; сотрудники этот текст не меняют.",
@@ -1470,6 +1472,7 @@ export const operationsDe: OperationsTranslations = {
   staff_services_form_patient_request_note: "Text des Patienten aus der Anfrage",
   staff_services_form_patient_budget: "Budget des Patienten aus der Anfrage",
   staff_services_patient_budget_hint: "Vom Patienten im Portal angegeben und dort als «Ihr Budget» sichtbar; das Team ändert es nicht. Die interne Schätzung ist ein eigenes Feld.",
+  staff_services_patient_budget_hint_concierge: "Vom Patienten im Portal angegeben und dort als «Ihr Budget» sichtbar; das Team ändert es nicht. Die interne Kostenschätzung trägt das Patientenmanagement oder der CEO ein; den Partnerpreis übernimmt «Beim Partner buchen».",
   staff_services_visible_to_patient: "Für den Patienten im Portal sichtbar",
   staff_services_hidden_from_patient: "Für den Patienten nicht sichtbar",
   staff_services_patient_request_note_hint: "Vom Patienten im Portal geschrieben; das Team ändert diesen Text nicht.",

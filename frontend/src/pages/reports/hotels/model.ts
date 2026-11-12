@@ -197,6 +197,22 @@ export function monthAxisLabel(month: string, lang: "de" | "ru") {
   return name && year ? `${name} ${year}` : month;
 }
 
+/** An amount in German notation for the CSV ("9.999.999,99"), as the screens show it (QA C-06). */
+export function csvAmount(value: bigint | string | null | undefined) {
+  const cents = typeof value === "bigint" ? value : moneyCents(value ?? null);
+  if (cents === null) return "";
+  const negative = cents < 0n;
+  const abs = negative ? -cents : cents;
+  const whole = (abs / 100n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `${negative ? "-" : ""}${whole},${String(abs % 100n).padStart(2, "0")}`;
+}
+
+/** A date of the CSV as DD.MM.YYYY; anything else stays as it came. */
+export function csvDate(value: string | null | undefined) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value ?? "");
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : value ?? "";
+}
+
 export function csvCell(value: string | number) {
   let text = String(value);
   if (/^[\s]*[=+\-@\t\r]/.test(text)) text = `'${text}`;

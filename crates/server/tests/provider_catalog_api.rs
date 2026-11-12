@@ -1333,3 +1333,68 @@ async fn providers_list_supports_minimum_rating_filter() {
         "expected avg_rating 4.5, got {avg_rating}"
     );
 }
+
+/// QA C-01 (2026-11-12): every role with `providers.view` opens the profile it
+/// sees in the list; interpreters read it without prices and interactions.
+#[tokio::test]
+async fn provider_view_roles_open_the_profile_read_only() {
+    let Some((app, pool, _, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("provider-view-roles");
+    let provider_id = seed_provider_with_type(&pool, &tag, "medical", "Germany").await;
+    sqlx::query(
+        r#"INSERT INTO service_catalog (
+                provider_id, service_name, price, currency, valid_from
+           ) VALUES ($1, $2, 1234.56, 'EUR', CURRENT_DATE - 30)"#,
+    )
+    .bind(provider_id)
+    .bind(format!("Service {tag}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for role in ["ceo_assistant", "teamlead_interpreter", "interpreter"] {
+        let user_id = seed_staff_user(&pool, &format!("{tag}-{role}"), role).await;
+        let bearer = auth_header_for(user_id, role);
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/providers/{provider_id}"),
+            &bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{role}: {body}");
+        assert_eq!(body["id"], json!(provider_id.to_string()));
+        let services = body["services"].as_array().cloned().unwrap_or_default();
+        let (services_status, _) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/providers/{provider_id}/services"),
+            &bearer,
+            None,
+        )
+        .await;
+        if role == "ceo_assistant" {
+            assert_eq!(services.len(), 1, "{role} reads the price list");
+            assert_eq!(services_status, StatusCode::OK);
+        } else {
+            assert!(services.is_empty(), "{role} must not read prices");
+            assert!(body["interactions"].as_array().is_some_and(Vec::is_empty));
+            assert_eq!(services_status, StatusCode::FORBIDDEN);
+        }
+        let (status, _) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/providers/{provider_id}/update"),
+            &bearer,
+            Some(provider_update_payload(
+                &format!("Changed {tag}"),
+                "medical",
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{role} stays read-only");
+    }
+}

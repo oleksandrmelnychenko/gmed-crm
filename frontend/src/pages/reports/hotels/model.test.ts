@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { canAccessStaffRoute } from "@/lib/staff-route-access";
-import { decimal, emptyBreakfast, filterHotelStays, groupHotels, hotelsCsv, initialFilters, matchesStaySearch, moneyCents, monthAxisLabel, monthlyCosts, stayCost, stayNights, summarizeBreakfast, summarizeStays, type HotelStay } from "./model";
+import { csvAmount, csvDate, decimal, emptyBreakfast, filterHotelStays, groupHotels, hotelsCsv, initialFilters, matchesStaySearch, moneyCents, monthAxisLabel, monthlyCosts, stayCost, stayNights, summarizeBreakfast, summarizeStays, type HotelStay } from "./model";
 
 describe("hotel chart months (QA C2-16)", () => {
   it("names the month with the full year, never 'февр. 26 г.'", () => {
@@ -98,6 +98,13 @@ describe("hotel negotiation statistics", () => {
     expect(moneyCents("NaN")).toBeNull(); expect(moneyCents("1.001")).toBeNull();
     const csv = hotelsCsv(["Hotel", "Cost"], [["=HYPERLINK(\"bad\")", "10.00"], ["Hotel; A", ""]]);
     expect(csv).toContain('"\'=HYPERLINK(""bad"")"'); expect(csv).toContain('"Hotel; A";""');
+  });
+  it("writes German amounts and DD.MM.YYYY dates into the CSV (QA C-06)", () => {
+    expect(csvAmount("9999999.99")).toBe("9.999.999,99");
+    expect(csvAmount(45000n)).toBe("450,00");
+    expect(csvAmount(null)).toBe("");
+    expect(csvDate("2026-11-20")).toBe("20.11.2026");
+    expect(csvDate(null)).toBe("");
   });
   it("restricts the hotel screen to the corresponding reporting roles", () => {
     for (const role of ["ceo", "ceo_assistant", "billing", "patient_manager", "concierge"]) {

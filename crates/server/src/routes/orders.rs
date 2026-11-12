@@ -6400,6 +6400,53 @@ async fn update_status(
         {
             return failed(error, "audit");
         }
+        // The order's tariff follows a pause and its resumption (QA C-02,
+        // 2026-11-12): a paused subscription closes new portal actions but
+        // keeps booked visits, the chat and the patient's own requests
+        // readable (`portal_subscription.rs`, owner decision 2026-11-10).
+        let subscription_change = match (current_status.as_str(), requested_status.as_str()) {
+            ("active", "paused") => Some(("active", "paused", "pause_patient_service_package")),
+            ("paused", "active") => Some(("paused", "active", "resume_patient_service_package")),
+            _ => None,
+        };
+        if let Some((from, to, action)) = subscription_change {
+            let changed = match sqlx::query_as::<_, (Uuid, Uuid)>(
+                r#"UPDATE patient_service_packages
+                   SET status = $3, updated_at = now()
+                   WHERE order_id = $1 AND status = $2
+                   RETURNING id, patient_id"#,
+            )
+            .bind(order_id)
+            .bind(from)
+            .bind(to)
+            .fetch_all(&mut *tx)
+            .await
+            {
+                Ok(rows) => rows,
+                Err(error) => return failed(error, "subscription"),
+            };
+            for (patient_service_package_id, patient_id) in changed {
+                if let Err(error) = audit::write_in_transaction(
+                    &mut tx,
+                    &audit::domain_event(
+                        action,
+                        Some(auth.user_id),
+                        "patient",
+                        Some(patient_id),
+                        serde_json::json!({
+                            "patient_service_package_id": patient_service_package_id,
+                            "order_id": order_id,
+                            "from_status": from,
+                            "status": to,
+                        }),
+                    ),
+                )
+                .await
+                {
+                    return failed(error, "subscription audit");
+                }
+            }
+        }
         if let Err(error) = tx.commit().await {
             return failed(error, "commit");
         }

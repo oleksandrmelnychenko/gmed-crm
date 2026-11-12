@@ -1990,6 +1990,46 @@ async fn save_agency_service_price_version(
     }
 
     let saved_id = if let Some(price_version_id) = price_version_id {
+        // GoBD (QA C-03, 2026-11-12): a price an order line, service group or
+        // package was billed at keeps its amount, VAT and currency; a new
+        // price is a new version. Name and dates of the version stay editable.
+        let used = match sqlx::query_as::<_, (Decimal, Decimal, String, bool)>(
+            r#"SELECT price.unit_price, price.vat_rate, price.currency,
+                      (EXISTS (SELECT 1 FROM order_leistungen WHERE agency_service_price_version_id = price.id)
+                       OR EXISTS (SELECT 1 FROM order_service_groups WHERE agency_service_price_version_id = price.id)
+                       OR EXISTS (SELECT 1 FROM service_package_items WHERE agency_service_price_version_id = price.id)
+                       OR EXISTS (SELECT 1 FROM service_package_consumptions WHERE agency_service_price_version_id = price.id)) AS used
+               FROM agency_service_price_versions price
+               WHERE price.id = $1 AND price.agency_service_id = $2
+               FOR UPDATE OF price"#,
+        )
+        .bind(price_version_id)
+        .bind(service_id)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(Some(row)) => row,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Price version not found"),
+            Err(error) => {
+                tracing::error!(%error, %service_id, %price_version_id, "check agency price version usage before update");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to save price version",
+                );
+            }
+        };
+        let (current_price, current_vat, current_currency, is_used) = used;
+        if is_used
+            && (current_price.round_cents() != payload.unit_price
+                || current_vat.round_commercial(2) != payload.vat_rate
+                || !current_currency.eq_ignore_ascii_case(&payload.currency))
+        {
+            return coded_err(
+                StatusCode::CONFLICT,
+                "price_version_used_locked",
+                "This price version is already used; create a new price version instead",
+            );
+        }
         match sqlx::query_scalar::<_, Uuid>(
             r#"UPDATE agency_service_price_versions
                SET name = $3,
