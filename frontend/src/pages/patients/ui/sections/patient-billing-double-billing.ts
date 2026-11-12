@@ -104,3 +104,38 @@ export function proposedOrderForExpense<T extends { id: string; currency: string
   if (!orderId) return null;
   return orders.find((order) => order.id === orderId && order.currency === expense.currency) ?? null;
 }
+
+/** A receipt of the billing workspace with the patient invoice that re-bills it. */
+export type RebilledReceipt = DoubleBillingExpense & {
+  latest_patient_invoice_number?: string | null;
+};
+
+/** How re-billed receipts are named in a warning: their patient invoice, else their number. */
+export function rebilledReceiptLabels(expenses: RebilledReceipt[]) {
+  return [...new Set(expenses.map((expense) => (
+    expense.latest_patient_invoice_number?.trim() || expense.external_invoice_number
+  )).filter(Boolean))];
+}
+
+/**
+ * Warning where a transit line is added to an order (order page) or billed
+ * (invoice dialog) while receipts of the same order are already re-billed to
+ * the patient. Only a warning: staff may still save (owner 2026-11-12, C-2).
+ */
+export function transitLineRebilledWarning(
+  lang: string,
+  lineNames: string[],
+  expenses: RebilledReceipt[],
+) {
+  const receipts = rebilledReceiptLabels(expenses);
+  if (!receipts.length) return null;
+  const lines = lineNames.map((name) => name.trim()).filter(Boolean).join(", ");
+  if (lang === "de") {
+    return `Belege dieses Auftrags wurden dem Patienten bereits weiterberechnet (${receipts.join(", ")}). `
+      + `Concierge-Kosten werden über die Belege berechnet; eine Durchlaufposition${lines ? ` (${lines})` : ""} gilt nur für einen vorab bekannten Preis. `
+      + "Prüfen, dass der Patient dieselben Kosten nicht doppelt zahlt.";
+  }
+  return `Расходы этого заказа уже перевыставлены пациенту по чекам (${receipts.join(", ")}). `
+    + `Расходы Concierge выставляются через перевыставление чеков; транзитная позиция${lines ? ` (${lines})` : ""} — только для заранее известной цены. `
+    + "Проверьте, что пациент не оплатит одни и те же расходы дважды.";
+}

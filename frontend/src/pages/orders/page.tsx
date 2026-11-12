@@ -128,6 +128,8 @@ import {
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import { OrderTerminationBanner } from "@/pages/invoices/termination-settlement/ui";
+import { transitLineRebilledWarning } from "@/pages/patients/ui/sections/patient-billing-double-billing";
+import { useOrderRebilledReceipts } from "@/pages/patients/ui/sections/use-order-rebilled-receipts";
 import { StatusChip } from "@/components/ui/status-chip";
 import { ReadOnlyScope } from "@/components/read-only-scope";
 import {
@@ -3477,6 +3479,14 @@ function useOrdersPageContent() {
     }
   }
 
+  // A new transit line while receipts of the order are already re-billed:
+  // the same cost may be billed twice (owner 2026-11-12, C-2). Warning only.
+  const transitRebilledReceipts = useOrderRebilledReceipts({
+    patientId: orderDetail?.patient_id,
+    orderId: selectedOrderId,
+    enabled: leistungOpen && leistungForm.isCostPassthrough && hasCapability(user, "invoices.view"),
+  });
+
   if (!permissions.canViewPage) {
     return (
       <EmptyState title={tx.orders_title} description={tx.orders_subtitle} />
@@ -3498,6 +3508,9 @@ function useOrdersPageContent() {
   ].filter(Boolean).length;
   const providerFiltersShown = moreFiltersOpen || providerFiltersCount > 0;
   const detailPatientId = orderDetail?.patient_id || null;
+  const transitRebilledWarning = leistungForm.isCostPassthrough
+    ? transitLineRebilledWarning(lang, [leistungForm.description], transitRebilledReceipts)
+    : null;
   const detailLeadId =
     orderDetail?.lead_id || orderDetail?.source_lead_id || null;
   const detailLeadLabel = lang === "de" ? "Lead" : "Лид";
@@ -9645,6 +9658,12 @@ function useOrdersPageContent() {
                 </span>
               </label>
             </div>
+
+            {transitRebilledWarning ? (
+              <div data-testid="order-transit-rebilled-warning">
+                <Banner tone="warning" withIcon>{transitRebilledWarning}</Banner>
+              </div>
+            ) : null}
 
             {leistungForm.isCostPassthrough ? (
               <Field htmlFor="order-service-externalDocumentId" label={t.orders_supporting_document}>

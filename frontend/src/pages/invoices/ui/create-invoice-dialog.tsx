@@ -10,8 +10,12 @@ import { Input } from "@/components/ui/input";
 import { CountBadge, checkboxClass, inputClass, selectClass, textareaClass, tokens } from "@/components/ui-shell";
 import { INTERNAL_NOTE_MAX_LENGTH } from "@/lib/internal-note";
 import { agencyServiceNameLabel } from "@/lib/agency-service-labels";
+import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { hasCapability } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
+import { transitLineRebilledWarning } from "@/pages/patients/ui/sections/patient-billing-double-billing";
+import { useOrderRebilledReceipts } from "@/pages/patients/ui/sections/use-order-rebilled-receipts";
 import {
   INVOICE_LINE_COMMENT_MAX_LENGTH,
   INVOICE_TYPES,
@@ -52,6 +56,7 @@ type Props = {
 
 export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, optionsError, form, quotes, selectedQuote, onOpenChange, onFormChange, onSubmit, onRetry }: Props) {
   const { t, lang } = useLang();
+  const { user } = useAuth();
   const de = lang === "de";
   const money = (value: unknown) => formatCurrency(value, lang, selectedQuote?.currency);
   const orderId = selectedQuote?.order_id ?? "";
@@ -111,6 +116,19 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   const footerError = Boolean(error || optionsError);
   const final = form.invoiceType === "final";
   const servicesOutsideQuote = selectedQuote?.services_outside_quote ?? [];
+  // Transit lines billed while receipts of the order are already re-billed:
+  // the same cost may be billed twice (owner 2026-11-12, C-2). Warning only.
+  const selectedTransitLines = prepaymentSplit
+    ? []
+    : form.selectedLineIndexes.map((index) => lines[index]).filter((line) => line?.is_cost_passthrough);
+  const transitRebilledReceipts = useOrderRebilledReceipts({
+    patientId: selectedQuote?.patient_id,
+    orderId,
+    enabled: open && selectedTransitLines.length > 0 && hasCapability(user, "invoices.view"),
+  });
+  const transitRebilledWarning = selectedTransitLines.length
+    ? transitLineRebilledWarning(lang, selectedTransitLines.map((line) => line.description), transitRebilledReceipts)
+    : null;
   const typeLabels = {
     advance: t.revenue_invoice_type_advance,
     interim: t.revenue_invoice_type_interim,
@@ -222,6 +240,11 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     {de
                       ? `Nicht in dieser Rechnung: ${servicesOutsideQuote.join(", ")}. Diese Leistungen sind erbracht, stehen aber nicht im Angebot. Der Auftrag lässt sich erst abschließen, wenn sie abgerechnet sind: Erstellen Sie ein neues Angebot.`
                       : `Не войдёт в этот счёт: ${servicesOutsideQuote.join(", ")}. Эти услуги оказаны, но их нет в предложении. Заказ нельзя будет завершить, пока они не выставлены: создайте новое предложение.`}
+                  </p>
+                ) : null}
+                {transitRebilledWarning ? (
+                  <p role="status" data-testid="invoice-transit-rebilled-warning" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
+                    {transitRebilledWarning}
                   </p>
                 ) : null}
                 <p className="text-xs leading-5 text-muted-foreground" data-testid="invoice-draft-numbering-hint">
