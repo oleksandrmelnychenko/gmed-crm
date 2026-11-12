@@ -81,6 +81,9 @@ async function openCreate(page: Page, lang = "ru") {
 // the top-bar copy may ever be shown: a first frame with the in-page copy let a click
 // resolve to the button that was hidden right after, and the click then waited forever.
 test("on desktop the header actions appear only in the top bar", async ({ page }) => {
+  // A wide desktop: since the search button joined the top bar (system QA 2026-11-12) two
+  // actions no longer fit next to the title at 1280 px and stay in the page, as designed.
+  await page.setViewportSize({ width: 1440, height: 900 });
   await prepare(page);
   await page.addInitScript(() => {
     // Every DOM state another task (a user, a test) could see, not only painted frames.

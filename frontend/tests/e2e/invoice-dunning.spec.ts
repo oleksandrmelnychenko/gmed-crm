@@ -50,7 +50,7 @@ test("draft reminders are blocked before opening the form, with a Russian explan
   state.invoice.status = "draft";
   await page.goto(`/invoices?invoice=${invoiceId}`);
   await expect(page.getByRole("button", { name: "Добавить напоминание", exact: true })).toBeDisabled();
-  await expect(page.locator("#invoice-dunning-block-reason")).toContainText("Сначала отправьте счёт");
+  await expect(page.locator("#invoice-dunning-block-reason")).toContainText("Сначала выставьте счёт");
   expect(state.writes).toEqual([]);
   expect(state.errors).toEqual([]);
 });
