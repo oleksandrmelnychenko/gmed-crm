@@ -1566,6 +1566,22 @@ async fn patient_sees_staff_processing_updates_for_portal_service_and_loses_canc
     .await;
     assert_eq!(status, StatusCode::OK, "{booked}");
     assert_eq!(booked["service"]["status"], "booked");
+    // The name the patient gave stays; the partner booking fills only an
+    // empty vendor name (concierge QA 2026-11-12 D-5).
+    assert_eq!(booked["service"]["vendor_name"], "Airport Hilton");
+    // The patient is told that the booking was requested (D-3 / B S2-1).
+    let booking_notices: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM user_notifications
+           WHERE user_id = $1
+             AND kind = 'patient_service_status_changed'
+             AND entity_id = $2::uuid"#,
+    )
+    .bind(patient_user_id)
+    .bind(service_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(booking_notices, 1);
     let (status, updated) = json_request(
         &app,
         "POST",

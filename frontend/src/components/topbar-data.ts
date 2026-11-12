@@ -477,7 +477,7 @@ const SERVICE_KIND_LABELS: Record<string, { de: string; ru: string }> = {
   vip_terminal: { de: "VIP-Terminal", ru: "VIP-терминал" },
   flight: { de: "Flug", ru: "Перелёт" },
   chauffeur: { de: "Chauffeur", ru: "Водитель" },
-  translation_support: { de: "Übersetzungsunterstützung", ru: "Помощь с переводом" },
+  translation_support: { de: "Übersetzungsunterstützung", ru: "Поддержка перевода" },
   other: { de: "Sonstiges", ru: "Другое" },
 };
 
@@ -485,15 +485,22 @@ function conciergeServiceRequestNotificationCopy(
   item: Notification,
   lang: "ru" | "de",
 ): Pick<Notification, "title" | "body"> | null {
-  if (item.kind !== "concierge_service_request") return null;
+  const withdrawn = item.kind === "concierge_service_request_withdrawn";
+  if (item.kind !== "concierge_service_request" && !withdrawn) return null;
   const data = parseNotificationBody<{
     patient_label?: string;
     service_kind?: string;
     title?: string;
     starts_at?: string | null;
   }>(item.body);
-  const patient = data?.patient_label ?? item.title.replace(/^Patient service request:\s*/, "");
-  const title = `${lang === "de" ? "Serviceanfrage des Patienten" : "Запрос услуги от пациента"}: ${patient}`;
+  const patient = data?.patient_label
+    ?? item.title.replace(/^Patient (?:service request|withdrew a service request):\s*/, "");
+  // The patient withdrew the request in the portal (concierge QA 2026-11-12 B S3-4).
+  const requestHeading = lang === "de" ? "Serviceanfrage des Patienten" : "Запрос услуги от пациента";
+  const withdrawnHeading = lang === "de"
+    ? "Serviceanfrage vom Patienten zurückgezogen"
+    : "Пациент отозвал запрос услуги";
+  const title = `${withdrawn ? withdrawnHeading : requestHeading}: ${patient}`;
   if (!data) return { title, body: item.body };
   const slot = (data.starts_at ? formatAppDateTime(data.starts_at) : "")
     || (lang === "de" ? "ohne Wunschtermin" : "без желаемого времени");
@@ -883,9 +890,9 @@ export function notificationHrefForRole(item: Notification, role: string) {
   if (item.entity_type === "order") return `/orders?order=${item.entity_id}`;
   if (item.entity_type === "appointment") return `/appointments?appointment=${item.entity_id}`;
   if (item.entity_type === "appointment_request") return "/appointments";
-  if (item.entity_type === "concierge_service") {
-    return role === "concierge" ? "/concierge" : "/services";
-  }
+  // The service itself, for every staff role: the concierge's /concierge
+  // redirects to the task board, where a patient request is not (QA D-2).
+  if (item.entity_type === "concierge_service") return `/services?service=${item.entity_id}`;
   if (item.entity_type === "concierge_task") {
     return [
       "ceo",

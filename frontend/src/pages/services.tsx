@@ -14,6 +14,7 @@ import {
   useReducer,
   type SetStateAction,
 } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   BedDouble,
   BusFront,
@@ -78,12 +79,12 @@ import {
   selectClass as shellSelectClassName,
   textareaClass as shellTextareaClassName,
 } from "@/components/ui-shell";
-import { apiFetch, clearApiCache } from "@/lib/api";
+import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { moneyInputText, parseMoneyInput, roundCents } from "@/lib/money";
+import { moneyInputMessage, moneyInputText, parseMoneyInput, roundCents } from "@/lib/money";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
-import { servicesPermissions } from "@/pages/services.model";
+import { autoFilledCostEstimate, servicesPermissions } from "@/pages/services.model";
 import { AgencyCatalogReadOnly } from "@/pages/services-agency-catalog";
 import { readsAgencyCatalogWithoutPrices } from "@/pages/services-agency-catalog.model";
 import {
@@ -838,9 +839,15 @@ function buildServiceColumns(t: Translations, lang: Lang): ColumnDef<StaffConcie
       width: 180,
       sortable: true,
       render: (row) => (
-        <span className="truncate text-xs text-foreground">
-          {row.vendor_name ?? t.common_not_set}
-        </span>
+        // Without a patient-facing name the linked partner is shown, muted:
+        // "not set" read as if no partner were chosen (QA D-5).
+        row.vendor_name ? (
+          <span className="truncate text-xs text-foreground">{row.vendor_name}</span>
+        ) : (
+          <span className="truncate text-xs text-muted-foreground">
+            {row.provider_name ?? t.common_not_set}
+          </span>
+        )
       ),
     },
     {
@@ -1298,6 +1305,9 @@ function useStaffServicesPageContent() {
   );
 
   const lastAutoTitleRef = useRef<string>("");
+  // The estimate the catalogue item filled in last: a catalogue change
+  // replaces only that value or an empty field, never a typed one (QA D-4).
+  const lastAutoCostEstimateRef = useRef<string>("");
 
   const handleServiceKindChange = (nextKind: string) => {
     const nextAutoTitle = serviceKindLabel(nextKind, t);
@@ -1315,6 +1325,7 @@ function useStaffServicesPageContent() {
     setCreateError("");
     setCreateForm(blankCreateServiceForm(defaultConciergeId));
     lastAutoTitleRef.current = "";
+    lastAutoCostEstimateRef.current = "";
     setCreateOpen(true);
   }, [defaultConciergeId]);
 
@@ -1324,6 +1335,7 @@ function useStaffServicesPageContent() {
     setCreateBusy(false);
     setCreateForm(blankCreateServiceForm(defaultConciergeId));
     lastAutoTitleRef.current = "";
+    lastAutoCostEstimateRef.current = "";
   }, [defaultConciergeId]);
 
   const openServiceDetail = useCallback((service: StaffConciergeService) => {
@@ -1341,6 +1353,24 @@ function useStaffServicesPageContent() {
     setEditBusy(false);
     setEditForm(null);
   }, []);
+
+  // `?service=<id>` (a bell notification about a service, e.g. a patient
+  // request) opens that service once the list has it (concierge QA D-2).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkedServiceId = searchParams.get("service");
+  useEffect(() => {
+    if (!deepLinkedServiceId || loading) return;
+    const target = items.find((item) => item.id === deepLinkedServiceId);
+    if (target) openServiceDetail(target);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("service");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [deepLinkedServiceId, items, loading, openServiceDetail, setSearchParams]);
 
   const openEditService = useCallback(() => {
     if (!selectedService) return;
@@ -1594,11 +1624,17 @@ function useStaffServicesPageContent() {
       selectedProviderServiceTotal === null
         ? null
         : roundCents(selectedProviderServiceTotal);
+    // A typed estimate wins; the catalogue total only fills an empty field (D-4).
     const costEstimate =
-      calculatedCostEstimate ?? optionalMoney(createForm.costEstimate);
+      optionalMoney(createForm.costEstimate) ?? calculatedCostEstimate;
     const actualCost = optionalMoney(createForm.actualCost);
     if (Number.isNaN(costEstimate) || Number.isNaN(actualCost)) {
       setCreateError(t.staff_services_cost_invalid);
+      return;
+    }
+    // Never negative, like the server (D-1).
+    if ((costEstimate ?? 0) < 0 || (actualCost ?? 0) < 0) {
+      setCreateError(moneyInputMessage("negative", lang));
       return;
     }
 
@@ -1704,6 +1740,11 @@ function useStaffServicesPageContent() {
       }
     }
 
+    if ((costEstimate ?? 0) < 0 || (actualCost ?? 0) < 0) {
+      setEditError(moneyInputMessage("negative", lang));
+      return;
+    }
+
     const operationalPayload: ConciergeServiceUpdatePayload = {
       status: editForm.status,
       booking_reference: editForm.bookingReference.trim() || null,
@@ -1760,6 +1801,15 @@ function useStaffServicesPageContent() {
       clearApiCache("/concierge-services");
       dispatchStaffServicesState({ type: "update-success", updated });
     } catch (err) {
+      // A service is not completed before the day it starts (QA C-3).
+      if (err instanceof ApiRequestError && err.code === "concierge_service_completion_before_start") {
+        setEditError(
+          lang === "de"
+            ? "Der Service kann erst ab seinem Starttag abgeschlossen werden."
+            : "Сервис можно завершить не раньше дня его начала.",
+        );
+        return;
+      }
       setEditError(err instanceof Error ? err.message : t.common_failed_update);
     } finally {
       setEditBusy(false);
@@ -2767,8 +2817,9 @@ function useStaffServicesPageContent() {
                 </AdminFormSection>
 
                 <AdminFormSection icon={UserRoundCheck} title={t.staff_services_create_section_assignment}>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="space-y-1.5 text-sm">
+                  {/* minmax(0, 1fr) columns and min-w-0: a long name stays inside the 390 px dialog (QA D-10). */}
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <label className="min-w-0 space-y-1.5 text-sm">
                       <span className="text-xs font-medium text-muted-foreground">
                         {t.staff_services_form_concierge}
                       </span>
@@ -2780,7 +2831,7 @@ function useStaffServicesPageContent() {
                             assignedConciergeId: event.target.value,
                           }))
                         }
-                        className={formSelectClassName}
+                        className={cn(formSelectClassName, "w-full min-w-0 max-w-full")}
                       >
                         <option value="">{t.staff_services_unassigned}</option>
                         {conciergeStaff.map((member) => (
@@ -2875,6 +2926,8 @@ function useStaffServicesPageContent() {
                             service,
                             createForm.quantity,
                           );
+                          const previousAuto = lastAutoCostEstimateRef.current;
+                          const nextAuto = nextTotal === null ? "" : formatMoneyInput(nextTotal);
                           setCreateForm((current) => ({
                             ...current,
                             providerServiceId,
@@ -2882,12 +2935,10 @@ function useStaffServicesPageContent() {
                               !current.title.trim() && service
                                 ? service.service_name
                                 : current.title,
-                            costEstimate:
-                              nextTotal === null
-                                ? current.costEstimate
-                                : formatMoneyInput(nextTotal),
+                            costEstimate: autoFilledCostEstimate(current.costEstimate, previousAuto, nextAuto),
                             currency: service?.currency ?? current.currency,
                           }));
+                          lastAutoCostEstimateRef.current = nextAuto;
                         }}
                         className={formSelectClassName}
                         disabled={!createForm.providerId || providerServicesLoading}
@@ -2922,14 +2973,14 @@ function useStaffServicesPageContent() {
                             selectedProviderService,
                             quantity,
                           );
+                          const previousAuto = lastAutoCostEstimateRef.current;
+                          const nextAuto = nextTotal === null ? "" : formatMoneyInput(nextTotal);
                           setCreateForm((current) => ({
                             ...current,
                             quantity,
-                            costEstimate:
-                              nextTotal === null
-                                ? current.costEstimate
-                                : formatMoneyInput(nextTotal),
+                            costEstimate: autoFilledCostEstimate(current.costEstimate, previousAuto, nextAuto),
                           }));
+                          lastAutoCostEstimateRef.current = nextAuto;
                         }}
                         className={formInputClassName}
                       />
@@ -2956,7 +3007,6 @@ function useStaffServicesPageContent() {
                       </span>
                       <Input
                         inputMode="decimal"
-                        readOnly={selectedProviderServiceTotal !== null}
                         value={createForm.costEstimate}
                         onChange={(event) =>
                           setCreateForm((current) => ({
@@ -2966,6 +3016,15 @@ function useStaffServicesPageContent() {
                         }
                         className={formInputClassName}
                       />
+                      {selectedProviderServiceTotal !== null
+                        && createForm.costEstimate.trim()
+                        && createForm.costEstimate !== formatMoneyInput(selectedProviderServiceTotal) ? (
+                        <span className="block text-xs text-muted-foreground">
+                          {lang === "de"
+                            ? `Weicht vom Katalogpreis ab (${formatMoneyInput(selectedProviderServiceTotal)}); Ihre Schätzung wird gespeichert.`
+                            : `Отличается от цены каталога (${formatMoneyInput(selectedProviderServiceTotal)}); сохранится ваша оценка.`}
+                        </span>
+                      ) : null}
                     </label>
                     <label className="space-y-1.5 text-sm">
                       <span className="text-xs font-medium text-muted-foreground">

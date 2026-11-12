@@ -5,7 +5,9 @@ import { t } from "@/lib/i18n";
 import {
   feedbackStatusLabel,
   formatPortalAverage,
+  isOpenOwnServiceRequest,
   PORTAL_REQUEST_DATE_PROBLEM_KEYS,
+  portalUpcomingServices,
   portalAppointmentPlaceLabel,
   portalDocumentTypeLabels,
   portalDocumentValueLabel,
@@ -92,5 +94,29 @@ describe("feedbackStatusLabel", () => {
     expect(feedbackStatusLabel("reviewed")).toBe(ru.feedback_status_reviewed);
     expect(feedbackStatusLabel("archived")).toBe(ru.feedback_status_archived);
     expect(feedbackStatusLabel("something_else")).toBe(ru.common_unknown_value);
+  });
+});
+
+describe("portal services (concierge QA 2026-11-12 D-8, D-9)", () => {
+  it("counts only the patient's own requests nobody booked yet", () => {
+    expect(isOpenOwnServiceRequest({ request_source: "patient_portal", status: "planned" })).toBe(true);
+    expect(isOpenOwnServiceRequest({ request_source: "patient_portal", status: "confirmed" })).toBe(false);
+    expect(isOpenOwnServiceRequest({ request_source: "staff", status: "planned" })).toBe(false);
+  });
+
+  it("lists open services soonest first, closed ones after", () => {
+    const services = [
+      { id: "late", status: "confirmed", starts_at: "2026-11-20T09:00:00Z" },
+      { id: "done", status: "completed", starts_at: "2026-11-01T09:00:00Z" },
+      { id: "no-time", status: "planned", starts_at: null },
+      { id: "evening", status: "confirmed", starts_at: "2026-11-14T19:00:00Z" },
+      { id: "noon", status: "confirmed", starts_at: "2026-11-14T13:30:00Z" },
+    ];
+    expect(portalUpcomingServices(services).map((item) => item.id)).toEqual([
+      "noon",
+      "evening",
+      "late",
+      "no-time",
+    ]);
   });
 });

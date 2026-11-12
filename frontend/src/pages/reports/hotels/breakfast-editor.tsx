@@ -8,7 +8,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import type { Lang } from "@/lib/i18n";
-import { formatMoneyAmount } from "@/lib/money";
+import { formatMoneyAmount, moneyInputPayload } from "@/lib/money";
 import { breakfastCopy } from "./breakfast-copy";
 import { breakfastModes, moneyCents, type BreakfastDetails, type BreakfastMode, type HotelStay } from "./model";
 
@@ -41,7 +41,9 @@ export function BreakfastEditor({ stay, lang, editable, onSaved, onDirty }: { st
   }
   async function save() {
     if (!changed || busy) return;
-    const amount = draft.amount.trim().replace(",", ".");
+    // German money format with thousands separators ("1.234,50"), like every
+    // money field (concierge QA 2026-11-12 D-7); unreadable text fails below.
+    const amount = draft.amount.trim() ? moneyInputPayload(draft.amount) ?? "invalid" : "";
     if ((draft.count && (!/^\d+$/.test(draft.count) || Number(draft.count) < 1 || Number(draft.count) > 100000))
       || (paid && amount && (moneyCents(amount) === null || moneyCents(amount)! > 999999999999n))) { setError(labels.invalid); return; }
     if (paid && amount && draft.currency !== stay.currency) { setError(labels.currencyChanged); return; }

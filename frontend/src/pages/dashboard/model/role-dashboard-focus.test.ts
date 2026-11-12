@@ -5,6 +5,7 @@ import type { ConciergeTask } from "@/pages/concierge/model";
 import {
   dashboardTaskTitle,
   isConciergeTaskDueToday,
+  openPatientServiceRequests,
   roleDashboardFocusTasks,
 } from "./role-dashboard-focus";
 
@@ -56,14 +57,28 @@ function task(overrides: Partial<ConciergeTask>): ConciergeTask {
 describe("role dashboard focus", () => {
   const now = new Date("2026-08-24T10:00:00.000Z");
 
-  it("puts overdue work before today's and future work", () => {
+  it("puts overdue work before today's and leaves later days out", () => {
     const result = roleDashboardFocusTasks([
       task({ id: "future", priority: "urgent", due_at: "2026-08-25T09:00:00.000Z" }),
       task({ id: "today", priority: "normal", due_at: "2026-08-24T18:00:00.000Z" }),
       task({ id: "overdue", priority: "low", due_at: "2026-08-23T18:00:00.000Z" }),
+      task({ id: "undated", priority: "low" }),
     ], now);
 
-    expect(result.map((item) => item.id)).toEqual(["overdue", "today", "future"]);
+    // Concierge QA 2026-11-12 D-9: «Фокус на сегодня» is today's work only.
+    expect(result.map((item) => item.id)).toEqual(["overdue", "today", "undated"]);
+  });
+
+  it("lists the open portal requests, soonest wish first", () => {
+    const result = openPatientServiceRequests([
+      { id: "later", title: "Opera", status: "planned", request_source: "patient_portal", starts_at: "2026-08-30T17:00:00Z" },
+      { id: "staff", title: "Transfer", status: "planned", request_source: "staff", starts_at: "2026-08-25T08:00:00Z" },
+      { id: "booked", title: "Hotel", status: "booked", request_source: "patient_portal", starts_at: "2026-08-25T08:00:00Z" },
+      { id: "soon", title: "Taxi", status: "planned", request_source: "patient_portal", starts_at: "2026-08-25T08:00:00Z" },
+      { id: "no-wish", title: "Pharmacy", status: "planned", request_source: "patient_portal", starts_at: null },
+    ]);
+
+    expect(result.map((item) => item.id)).toEqual(["soon", "later", "no-wish"]);
   });
 
   it("ignores completed and archived tasks and applies the limit", () => {

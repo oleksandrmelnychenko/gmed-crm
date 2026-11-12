@@ -189,6 +189,7 @@ import {
   orderPrepaymentErrorMessage,
   orderPrepaymentPayload,
 } from "./model/order-prepayment";
+import { OrderConciergeServicesList } from "./ui/order-concierge-services";
 import { OrderPeriodCard, orderPeriodError } from "./ui/order-period-card";
 import { OrderPrepaymentCard } from "./ui/order-prepayment-card";
 import { OrderPrepaymentFields } from "./ui/order-prepayment-fields";
@@ -5907,6 +5908,11 @@ function useOrdersPageContent() {
                                 })
                               : l("orders_nicht_erforderlich")
                           }
+                        />
+                        <OrderConciergeServicesList
+                          orderId={orderDetail.id}
+                          patientId={orderDetail.patient_id}
+                          lang={lang}
                         />
                         <OrderSummaryLine
                           label={l("orders_dolmetscher_support")}

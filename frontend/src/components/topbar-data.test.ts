@@ -244,6 +244,16 @@ describe("concierge expense and service request notifications", () => {
     expect(copy.body).toBe("Трансфер · Airport pickup · без желаемого времени");
   });
 
+  it("names a request the patient withdrew", () => {
+    const body = JSON.stringify({ patient_label: "PT-1 · Anna", service_kind: "translation_support", title: "Opera", starts_at: null });
+    expect(localizedNotificationCopy(notice("concierge_service_request_withdrawn", body), "ru")).toEqual({
+      title: "Пациент отозвал запрос услуги: PT-1 · Anna",
+      body: "Поддержка перевода · Opera · без желаемого времени",
+    });
+    expect(localizedNotificationCopy(notice("concierge_service_request_withdrawn", body), "de").title)
+      .toBe("Serviceanfrage vom Patienten zurückgezogen: PT-1 · Anna");
+  });
+
   it("asks for a decision on a concierge booking whose appointment was cancelled", () => {
     const body = JSON.stringify({ title: "Hotel Adlon", vendor_name: "Adlon", starts_at: null, reason: "appointment_cancelled" });
     expect(localizedNotificationCopy(notice("concierge_booking_decision", body), "de")).toEqual({
@@ -334,7 +344,8 @@ describe("notificationHrefForRole", () => {
 
   it("keeps entity-specific staff destinations", () => {
     expect(notificationHrefForRole(notification("order"), "ceo")).toBe("/orders?order=entity-1");
-    expect(notificationHrefForRole(notification("concierge_service"), "concierge")).toBe("/concierge");
+    expect(notificationHrefForRole(notification("concierge_service"), "concierge")).toBe("/services?service=entity-1");
+    expect(notificationHrefForRole(notification("concierge_service"), "patient_manager")).toBe("/services?service=entity-1");
     expect(notificationHrefForRole(notification("concierge_task"), "concierge")).toBe("/task-manager?task=entity-1");
     expect(notificationHrefForRole(notification("concierge_task"), "billing")).toBe("/task-manager?task=entity-1");
     expect(notificationHrefForRole(notification("concierge_task"), "patient_manager")).toBe("/task-manager?task=entity-1");

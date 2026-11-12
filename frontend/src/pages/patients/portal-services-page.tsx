@@ -46,6 +46,7 @@ import {
   fetchPortalServices,
 } from "@/pages/patients/data/portal-api";
 import {
+  isOpenOwnServiceRequest,
   usePortalLabels,
 } from "@/pages/patients/model/portal-shared";
 import type { PortalConciergeServiceItem } from "@/pages/patients/model/portal-shared";
@@ -407,8 +408,10 @@ export function PatientServicesPage() {
     };
   }, [version, subscriptionPaused, t.services_failed_load]);
 
+  // «Открытые запросы»: the patient's own requests nobody has booked yet;
+  // a service the team planned or booked is not a request (QA D-8).
   const openItems = useMemo(
-    () => services.filter((item) => !["completed", "cancelled"].includes(item.status)),
+    () => services.filter(isOpenOwnServiceRequest),
     [services],
   );
   const bookedItems = useMemo(

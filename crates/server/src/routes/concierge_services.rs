@@ -934,6 +934,7 @@ async fn cancel_my_concierge_service(
                 }),
             )
             .await;
+            notify_staff_of_withdrawn_request(&state, &existing, patient_id).await;
 
             match load_service_row(&state, service_id).await {
                 Ok(Some(service)) => Json(build_portal_service_json(&service)).into_response(),
@@ -948,6 +949,92 @@ async fn cancel_my_concierge_service(
                 "Failed to cancel concierge service request",
             )
         }
+    }
+}
+
+/// Tells the service's concierge and the patient's managers that the patient
+/// withdrew a portal request (concierge QA 2026-11-12 B S3-4): the same
+/// recipients as the request notice, plus the assigned concierge. The
+/// withdrawal is already saved; a failure is logged and changes nothing.
+async fn notify_staff_of_withdrawn_request(
+    state: &AppState,
+    service: &sqlx::postgres::PgRow,
+    patient_id: Uuid,
+) {
+    let Ok(service_id) = service.try_get::<Uuid, _>("id") else {
+        return;
+    };
+    let assigned_concierge_id = service
+        .try_get::<Option<Uuid>, _>("assigned_concierge_id")
+        .unwrap_or_default();
+    let title = service.try_get::<String, _>("title").unwrap_or_default();
+    let service_kind = service
+        .try_get::<String, _>("service_kind")
+        .unwrap_or_default();
+    let starts_at = service
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("starts_at")
+        .unwrap_or_default();
+    let patient_label = load_patient_label(state, patient_id)
+        .await
+        .unwrap_or_else(|| "Patient".to_string());
+    let body = serde_json::json!({
+        "patient_label": patient_label,
+        "service_kind": service_kind,
+        "title": title,
+        "starts_at": starts_at.map(|value| value.to_rfc3339()),
+    })
+    .to_string();
+    let rows = match sqlx::query(
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+           SELECT DISTINCT u.id, 'concierge_service_request_withdrawn', $2, $3, 'concierge_service', $1
+           FROM users u
+           WHERE u.is_active = true
+             AND (
+                 u.id = $5
+                 OR (
+                     u.role IN ('patient_manager', 'concierge')
+                     AND EXISTS (
+                         SELECT 1 FROM patient_assignments pa
+                         WHERE pa.patient_id = $4
+                           AND pa.user_id = u.id
+                           AND pa.revoked_at IS NULL
+                     )
+                 )
+             )
+           RETURNING id, user_id"#,
+    )
+    .bind(service_id)
+    .bind(format!("Patient withdrew a service request: {patient_label}"))
+    .bind(body)
+    .bind(patient_id)
+    .bind(assigned_concierge_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(error = %error, service_id = %service_id, "notify staff of a withdrawn service request");
+            return;
+        }
+    };
+    for row in rows {
+        let (Ok(notification_id), Ok(user_id)) = (
+            row.try_get::<Uuid, _>("id"),
+            row.try_get::<Uuid, _>("user_id"),
+        ) else {
+            continue;
+        };
+        crate::realtime::publish_notification_event(
+            state,
+            user_id,
+            "notification.created",
+            Some(notification_id),
+            serde_json::json!({
+                "entity_type": "concierge_service",
+                "entity_id": service_id,
+            }),
+        )
+        .await;
     }
 }
 
@@ -2207,7 +2294,7 @@ async fn book_concierge_service_provider(
     if let Err(error) = sqlx::query(
         r#"UPDATE concierge_services
            SET provider_id = $2,
-               vendor_name = $3,
+               vendor_name = COALESCE(NULLIF(btrim(vendor_name), ''), $3),
                vendor_contact = $4,
                booking_reference = $5,
                starts_at = $6,
@@ -2236,7 +2323,7 @@ async fn book_concierge_service_provider(
     if let Err(error) = sqlx::query(
         r#"UPDATE tasks
            SET provider_id = $2,
-               vendor_name = $3,
+               vendor_name = COALESCE(NULLIF(btrim(vendor_name), ''), $3),
                vendor_contact = $4,
                booking_reference = $5,
                task_kind = 'event',
@@ -2347,11 +2434,16 @@ async fn book_concierge_service_provider(
     .await;
 
     match load_service_row(&state, service_id).await {
-        Ok(Some(row)) => Json(serde_json::json!({
-            "service": build_service_json_for_actor(&row, &auth),
-            "interaction_id": interaction_id,
-        }))
-        .into_response(),
+        Ok(Some(row)) => {
+            // The patient hears of the booking and of its confirmation like of
+            // any other status change (concierge QA 2026-11-12 D-3 / B S2-1).
+            notify_patient_of_service_change(&state, &service_for_access, &row, auth.user_id).await;
+            Json(serde_json::json!({
+                "service": build_service_json_for_actor(&row, &auth),
+                "interaction_id": interaction_id,
+            }))
+            .into_response()
+        }
         Ok(None) => err(StatusCode::NOT_FOUND, "Concierge service not found"),
         Err(response) => response,
     }
@@ -3323,6 +3415,11 @@ async fn book_task_provider(
             "Completed or cancelled task cannot be booked",
         );
     }
+    // The service before the booking: the patient is told what changed.
+    let service_before = match task.concierge_service_id {
+        Some(service_id) => load_service_row(&state, service_id).await.ok().flatten(),
+        None => None,
+    };
     if matches!(
         task.billing_status.as_str(),
         "billed" | "settled" | "waived" | "reversed"
@@ -3499,7 +3596,7 @@ async fn book_task_provider(
     if let Err(error) = sqlx::query(
         r#"UPDATE tasks
            SET provider_id = $2,
-               vendor_name = $3,
+               vendor_name = COALESCE(NULLIF(btrim(vendor_name), ''), $3),
                vendor_contact = $4,
                booking_reference = $5,
                task_kind = 'event',
@@ -3551,7 +3648,7 @@ async fn book_task_provider(
     if let Some(service_id) = task.concierge_service_id
         && let Err(error) = sqlx::query(
             r#"UPDATE concierge_services
-               SET provider_id = $2, vendor_name = $3, vendor_contact = $4,
+               SET provider_id = $2, vendor_name = COALESCE(NULLIF(btrim(vendor_name), ''), $3), vendor_contact = $4,
                    booking_reference = $5, starts_at = $6, ends_at = $7,
                    service_address = $8, status = $9, updated_at = now()
                WHERE id = $1"#,
@@ -3630,6 +3727,11 @@ async fn book_task_provider(
         }),
     )
     .await;
+    if let (Some(service_id), Some(before)) = (task.concierge_service_id, service_before.as_ref())
+        && let Ok(Some(after)) = load_service_row(&state, service_id).await
+    {
+        notify_patient_of_service_change(&state, before, &after, auth.user_id).await;
+    }
 
     match load_task_service_row(&state, task_id).await {
         Ok(Some(row)) => Json(serde_json::json!({
@@ -4629,9 +4731,24 @@ async fn create_concierge_service(
             Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
         },
     };
-    let cost_estimate = match unit_price {
-        Some(value) if provider_service_pricing.is_some() => Some(round_money(quantity * value)),
-        _ => body.cost_estimate,
+    // The amounts are never negative, as on update (concierge QA 2026-11-12 D-1).
+    let requested_cost_estimate =
+        match normalize_optional_non_negative(body.cost_estimate, "cost_estimate") {
+            Ok(value) => value,
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        };
+    let actual_cost = match normalize_optional_non_negative(body.actual_cost, "actual_cost") {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    // An estimate the user typed wins over quantity × catalogue price; the
+    // catalogue total only fills an empty estimate (D-4).
+    let cost_estimate = match (requested_cost_estimate, unit_price) {
+        (Some(value), _) => Some(round_money(value)),
+        (None, Some(value)) if provider_service_pricing.is_some() => {
+            Some(round_money(quantity * value))
+        }
+        (None, _) => None,
     };
 
     let currency = body
@@ -4678,7 +4795,7 @@ async fn create_concierge_service(
     .bind(starts_at)
     .bind(ends_at)
     .bind(cost_estimate)
-    .bind(body.actual_cost)
+    .bind(actual_cost)
     .bind(quantity)
     .bind(unit_price)
     .bind(currency.to_uppercase())
@@ -4820,6 +4937,13 @@ async fn update_concierge_service(
             .try_get::<bool, _>("task_eligible")
             .unwrap_or(false);
     if let Some(next_status) = requested_status.as_deref() {
+        // Like an appointment, a service is not completed before the day it
+        // starts (concierge QA 2026-11-12 C-3).
+        if next_status == "completed"
+            && let Some(starts_at) = completion_blocking_start(&existing)
+        {
+            return completion_before_start_response(starts_at);
+        }
         if standalone {
             if !is_allowed_service_status_transition(
                 &current_status,
@@ -5550,6 +5674,13 @@ async fn update_concierge_service(
 fn patient_service_status_labels(status: &str) -> [&'static str; 4] {
     match status {
         "planned" => ["geplant", "запланирован", "заплановано", "planned"],
+        "booked" => [
+            "beim Partner angefragt",
+            "бронь запрошена",
+            "бронювання запитано",
+            "booking requested",
+        ],
+        "confirmed" => ["bestätigt", "подтверждён", "підтверджено", "confirmed"],
         "in_service" => ["in Bearbeitung", "в работе", "в роботі", "in progress"],
         "completed" => ["abgeschlossen", "выполнен", "виконано", "completed"],
         "cancelled" => ["storniert", "отменён", "скасовано", "cancelled"],
@@ -7410,11 +7541,15 @@ fn build_service_json_for_actor(row: &sqlx::postgres::PgRow, auth: &AuthUser) ->
     let mut value = build_service_json_for_role(row, auth.role);
     let state = service_tasks::ServiceTaskState::from_row(row);
     let task_eligible = row.try_get::<bool, _>("task_eligible").unwrap_or(false);
-    let allowed_statuses = if state.linked_task_id.is_none() && !task_eligible {
+    let mut allowed_statuses = if state.linked_task_id.is_none() && !task_eligible {
         standalone_allowed_statuses(auth, &state.service_status)
     } else {
         service_tasks::allowed_service_statuses(auth, &state.facts())
     };
+    // A service that starts on a later day is not offered as completed (C-3).
+    if state.service_status != "completed" && completion_blocking_start(row).is_some() {
+        allowed_statuses.retain(|status| status != "completed");
+    }
     if let Some(service) = value.as_object_mut() {
         service.insert(
             "linked_task_status".to_string(),
@@ -7458,6 +7593,42 @@ fn build_service_json_for_actor(row: &sqlx::postgres::PgRow, auth: &AuthUser) ->
         );
     }
     value
+}
+
+const SERVICE_COMPLETION_BEFORE_START_CODE: &str = "concierge_service_completion_before_start";
+
+/// The start of a service that begins on a later Berlin day than today: such
+/// a service cannot be completed yet (the appointment rule "not completed
+/// before its date", concierge QA 2026-11-12 C-3). `None` when the service
+/// has no start or starts today or earlier.
+fn completion_blocking_start(row: &sqlx::postgres::PgRow) -> Option<chrono::DateTime<chrono::Utc>> {
+    let starts_at = row
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("starts_at")
+        .ok()
+        .flatten()?;
+    completion_precedes_start(starts_at, crate::app_time::today()).then_some(starts_at)
+}
+
+fn completion_precedes_start(
+    starts_at: chrono::DateTime<chrono::Utc>,
+    today: chrono::NaiveDate,
+) -> bool {
+    crate::app_time::date_of(starts_at) > today
+}
+
+fn completion_before_start_response(
+    starts_at: chrono::DateTime<chrono::Utc>,
+) -> axum::response::Response {
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(serde_json::json!({
+            "error": "Unprocessable Entity",
+            "code": SERVICE_COMPLETION_BEFORE_START_CODE,
+            "message": "Concierge service cannot be completed before the day it starts",
+            "starts_at": starts_at.to_rfc3339(),
+        })),
+    )
+        .into_response()
 }
 
 /// A legacy service in a medical context never gets a task; its status keeps
@@ -7596,6 +7767,46 @@ mod service_kind_tests {
         assert_eq!(
             derive_service_kind(Some("nonmedical_other"), Some("Freizeit"), "VIP terminal"),
             "vip_terminal"
+        );
+    }
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use super::{completion_precedes_start, normalize_optional_non_negative};
+    use chrono::{NaiveDate, TimeZone, Utc};
+
+    #[test]
+    fn a_service_of_a_later_berlin_day_is_not_completed_yet() {
+        let today = NaiveDate::from_ymd_opt(2026, 11, 12).unwrap();
+        // 13.11 08:00 Berlin.
+        let tomorrow = Utc.with_ymd_and_hms(2026, 11, 13, 7, 0, 0).unwrap();
+        assert!(completion_precedes_start(tomorrow, today));
+        // 12.11 22:30 Berlin: today counts.
+        let late_today = Utc.with_ymd_and_hms(2026, 11, 12, 21, 30, 0).unwrap();
+        assert!(!completion_precedes_start(late_today, today));
+        // 13.11 00:30 Berlin, still 12.11 in UTC: a later day.
+        let after_midnight = Utc.with_ymd_and_hms(2026, 11, 12, 23, 30, 0).unwrap();
+        assert!(completion_precedes_start(after_midnight, today));
+    }
+
+    #[test]
+    fn negative_amounts_are_refused_on_create() {
+        assert_eq!(
+            normalize_optional_non_negative(Some(-5.0), "cost_estimate"),
+            Err("value must be non-negative")
+        );
+        assert_eq!(
+            normalize_optional_non_negative(Some(-0.01), "actual_cost"),
+            Err("value must be non-negative")
+        );
+        assert_eq!(
+            normalize_optional_non_negative(Some(95.25), "cost_estimate"),
+            Ok(Some(95.25))
+        );
+        assert_eq!(
+            normalize_optional_non_negative(None, "actual_cost"),
+            Ok(None)
         );
     }
 }

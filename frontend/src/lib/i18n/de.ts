@@ -1836,7 +1836,7 @@ export const de = {
   services_type_vip_terminal: "VIP-Terminal",
   services_type_flight: "Flug",
   services_type_chauffeur: "Chauffeur",
-  services_type_translation_support: "Sprachunterstützung",
+  services_type_translation_support: "Übersetzungsunterstützung",
   services_type_other: "Sonstiges",
   services_form_title: "Titel",
   services_form_title_placeholder: "Hotelübernachtung am Flughafen",

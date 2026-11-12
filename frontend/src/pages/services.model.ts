@@ -21,3 +21,17 @@ export function servicesPermissions(actor?: Actor): ServicesPermissions {
     canEditServiceCostEstimate: canEdit,
   };
 }
+
+/**
+ * The estimate field after a catalogue item or the quantity changed: the new
+ * catalogue total replaces only an empty field or the value the catalogue
+ * filled in before; an estimate the user typed stays (concierge QA D-4).
+ */
+export function autoFilledCostEstimate(
+  current: string,
+  previousAuto: string,
+  nextAuto: string,
+): string {
+  const untouched = !current.trim() || current === previousAuto;
+  return untouched ? nextAuto : current;
+}

@@ -926,16 +926,10 @@ describe("weekly availability helpers", () => {
     ]);
   });
 
-  it("shows every day as closed when no availability was selected", () => {
-    expect(formatWeeklyAvailabilityDisplayItems("", "ru").map((item) => item.label)).toEqual([
-      "Пн (Закрыто)",
-      "Вт (Закрыто)",
-      "Ср (Закрыто)",
-      "Чт (Закрыто)",
-      "Пт (Закрыто)",
-      "Сб (Закрыто)",
-      "Вс (Закрыто)",
-    ]);
+  it("shows nothing (the caller says «не указано») when no hours were entered", () => {
+    // Concierge QA 2026-11-12 D-11: not seven «Закрыто» days.
+    expect(formatWeeklyAvailabilityDisplayItems("", "ru")).toEqual([]);
+    expect(formatWeeklyAvailabilityDisplayItems(null, "de")).toEqual([]);
   });
 
   it("keeps midnight as an end-of-day closing time and displays it as 24:00", () => {

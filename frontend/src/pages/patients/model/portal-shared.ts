@@ -703,6 +703,33 @@ export type PortalConciergeServiceItem = {
   can_cancel: boolean;
 };
 
+/**
+ * A request the patient sent in the portal that nobody has booked yet: the
+ * «Открытые запросы» counter. Services the team planned or booked are not
+ * the patient's requests (concierge QA 2026-11-12 D-8).
+ */
+export function isOpenOwnServiceRequest(
+  item: Pick<PortalConciergeServiceItem, "request_source" | "status">,
+): boolean {
+  return item.request_source === "patient_portal" && item.status === "planned";
+}
+
+/**
+ * The services of the dashboard tile: open ones soonest first (no time
+ * last), then the closed ones in the order the server sent them (D-9).
+ */
+export function portalUpcomingServices<
+  T extends Pick<PortalConciergeServiceItem, "status" | "starts_at">,
+>(services: T[], limit = 4): T[] {
+  const closed = (item: T) => item.status === "completed" || item.status === "cancelled";
+  const time = (item: T) =>
+    item.starts_at ? new Date(item.starts_at).getTime() : Number.POSITIVE_INFINITY;
+  const open = services
+    .filter((item) => !closed(item))
+    .toSorted((left, right) => (time(left) === time(right) ? 0 : time(left) < time(right) ? -1 : 1));
+  return [...open, ...services.filter(closed)].slice(0, Math.max(0, limit));
+}
+
 export type PortalPrivacyRequest = {
   id: string;
   request_type: string;

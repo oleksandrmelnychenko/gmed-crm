@@ -40,6 +40,8 @@ export type BookableConciergeService = {
   provider_id: string | null;
   provider_name: string | null;
   booking_reference: string | null;
+  /** The supplier name the patient sees; the booking keeps it when set. */
+  vendor_name?: string | null;
   vendor_contact: string | null;
   service_address?: string | null;
   starts_at: string | null;
@@ -93,6 +95,8 @@ const copy = {
     provider: "Partner",
     chooseProvider: "Partner auswählen",
     providerFixed: "Der Service ist mit diesem Partner verknüpft.",
+    vendorKept: (name: string) => `Der Patient sieht weiterhin den Anbieter „${name}“.`,
+    vendorFromPartner: "Der Patient sieht den Namen des Partners als Anbieter.",
     state: "Buchungsstand",
     details: "Buchungsdetails",
     requested: "Angefragt",
@@ -147,6 +151,8 @@ const copy = {
     provider: "Партнёр",
     chooseProvider: "Выберите партнёра",
     providerFixed: "Сервис уже связан с этим партнёром.",
+    vendorKept: (name: string) => `Пациент по-прежнему видит поставщика «${name}».`,
+    vendorFromPartner: "Пациент увидит имя партнёра как поставщика.",
     state: "Этап брони",
     details: "Детали бронирования",
     requested: "Запрошено",
@@ -435,6 +441,12 @@ export function ConciergeProviderBookingDialog<TService extends BookableConcierg
                         </NativeComboboxSelect>
                       </ConciergeField>
                       {providerFixed ? <p className="text-xs text-muted-foreground">{labels.providerFixed}</p> : null}
+                      {/* The booking keeps a supplier name the patient already sees (QA D-5). */}
+                      <p className="text-xs text-muted-foreground" data-testid="booking-vendor-hint">
+                        {service.vendor_name?.trim()
+                          ? labels.vendorKept(service.vendor_name.trim())
+                          : labels.vendorFromPartner}
+                      </p>
                       {provider ? (
                         <div className="grid grid-cols-3 gap-2">
                           <Button nativeButton={false} render={<a href={callUrl ?? "#"} />} variant="outline" size="sm" disabled={!callUrl}><Phone />{labels.call}</Button>

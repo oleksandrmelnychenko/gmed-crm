@@ -4060,6 +4060,10 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               </NativeComboboxSelect>
               </ToolbarField>
 
+              {/* Medical-only filters are left out for hotels, restaurants and the
+                  concierge's non-medical list instead of shown disabled (QA D-11). */}
+              {permissions.forceNonMedical || filters.providerType === "non_medical" ? null : (
+              <>
               <ToolbarField label={t.providers_fachbereich} className="w-[180px]">
               <div>
                 <SpecializationMultiSelect
@@ -4068,7 +4072,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   items={specializations}
                   placeholder={t.providers_fachbereich}
                   compact
-                  disabled={permissions.forceNonMedical || filters.providerType === "non_medical"}
                   onChange={(nextValue) => setServerFilter("specializations", nextValue, "specializations")}
                 />
               </div>
@@ -4080,11 +4083,12 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   data-readonly="exempt"
                   items={insuranceProviders}
                   compact
-                  disabled={permissions.forceNonMedical || filters.providerType === "non_medical"}
                   onChange={(nextValue) => setServerFilter("insuranceProvider", nextValue, "insurance")}
                 />
               </div>
               </ToolbarField>
+              </>
+              )}
               </div>
         </div>
 
@@ -4618,8 +4622,11 @@ function WeeklyAvailabilityBadgeList({
   value: string | null | undefined;
   className?: string;
 }) {
-  const { lang } = useLang();
+  const { t, lang } = useLang();
   const rows = formatWeeklyAvailabilityDisplayItems(value, lang);
+  if (rows.length === 0) {
+    return <span className="text-sm text-muted-foreground">{t.common_not_set}</span>;
+  }
 
   return (
     <div className={cn("flex flex-wrap gap-x-2 gap-y-2.5", className)}>
@@ -6857,9 +6864,12 @@ function ProviderSheetHero({
               {insuranceTypeLine || t.common_not_set}
             </HeroInfoTableRow>
           ) : null}
-          <HeroInfoTableRow icon={Stethoscope} label={t.providers_fachbereich}>
-            {specializationLine || t.common_not_set}
-          </HeroInfoTableRow>
+          {/* Specializations are medical only (concierge QA 2026-11-12 D-11). */}
+          {isMedical ? (
+            <HeroInfoTableRow icon={Stethoscope} label={t.providers_fachbereich}>
+              {specializationLine || t.common_not_set}
+            </HeroInfoTableRow>
+          ) : null}
           <HeroInfoTableRow
             icon={CalendarClock}
             label={l("providers_opening_hours")}
@@ -8187,7 +8197,8 @@ function ServiceSection({
           rowActionsWidth={100}
         />
 
-      <ProviderWorkTypesCatalog detail={detail} />
+      {/* Work types belong to medical specializations; a hotel or restaurant has none (QA D-11). */}
+      {detail.provider_type === "medical" ? <ProviderWorkTypesCatalog detail={detail} /> : null}
     </section>
   );
 }

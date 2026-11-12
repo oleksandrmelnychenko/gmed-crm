@@ -1413,7 +1413,7 @@ export const operationsDe: OperationsTranslations = {
   staff_services_kind_vip_terminal: "VIP-Terminal",
   staff_services_kind_flight: "Flug",
   staff_services_kind_chauffeur: "Chauffeur",
-  staff_services_kind_translation_support: "Dolmetscher-Support",
+  staff_services_kind_translation_support: "Übersetzungsunterstützung",
   staff_services_kind_other: "Sonstiges",
   staff_services_source_patient_portal: "Patientenportal",
   staff_services_source_appointment_bootstrap: "Aus Termin",

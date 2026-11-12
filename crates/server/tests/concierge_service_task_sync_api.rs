@@ -629,3 +629,76 @@ async fn portal_request_tasks_are_authored_by_the_coordinating_staff_member() {
             .unwrap();
     assert_eq!(patient_notices, 0);
 }
+
+/// Concierge QA 2026-11-12: a service is not completed before the day it
+/// starts (C-3), and negative amounts are refused on create as on update (D-1).
+#[tokio::test]
+async fn a_future_service_is_not_completed_and_amounts_are_never_negative() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let fx = fixture(&ctx.pool, ctx.admin_id, &tag).await;
+    let pm = auth_header_for(fx.pm_id, "patient_manager");
+
+    for amounts in [
+        json!({ "cost_estimate": -5 }),
+        json!({ "actual_cost": -7.5 }),
+    ] {
+        let mut request = json!({
+            "patient_id": fx.patient_id,
+            "assigned_concierge_id": fx.concierge_id,
+            "service_kind": "transfer",
+            "title": "Negative transfer",
+        });
+        for (key, value) in amounts.as_object().unwrap() {
+            request[key] = value.clone();
+        }
+        let (status, body) = json_request(
+            &ctx.app,
+            "POST",
+            "/api/v1/concierge-services",
+            &pm,
+            Some(request),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    }
+
+    let starts_at = (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339();
+    let (status, body) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/concierge-services",
+        &pm,
+        Some(json!({
+            "patient_id": fx.patient_id,
+            "assigned_concierge_id": fx.concierge_id,
+            "service_kind": "transfer",
+            "title": "Transfer in three days",
+            "starts_at": starts_at,
+            "cost_estimate": 95.25,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["cost_estimate"], "95.25");
+    let service_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let (status, body) =
+        update_service(&ctx.app, &pm, service_id, json!({ "status": "in_service" })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        !body["allowed_statuses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "completed"),
+        "{body}"
+    );
+    let (status, body) =
+        update_service(&ctx.app, &pm, service_id, json!({ "status": "completed" })).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "concierge_service_completion_before_start");
+    assert_eq!(service_state(&ctx.pool, service_id).await.0, "in_service");
+}

@@ -44,6 +44,7 @@ import {
   invoiceStatusTone,
   nextActionTone,
   portalAppointmentPlaceLabel,
+  portalUpcomingServices,
   privacyStatusTone,
   recommendationStatusTone,
   usePortalLabels,
@@ -329,7 +330,8 @@ function usePatientDashboardPageContent() {
     () => upcomingAppointmentItems.slice(0, 4),
     [upcomingAppointmentItems],
   );
-  const recentServices = useMemo(() => services.slice(0, 4), [services]);
+  // Open services soonest first, then the closed ones (concierge QA D-9).
+  const recentServices = useMemo(() => portalUpcomingServices(services, 4), [services]);
   const recentInvoices = useMemo(() => invoices.slice(0, 4), [invoices]);
   const topNextActions = useMemo(
     () => nextActions.toSorted(compareNextActions).slice(0, 6),

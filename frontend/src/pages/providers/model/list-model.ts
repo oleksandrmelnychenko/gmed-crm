@@ -775,6 +775,9 @@ export function formatWeeklyAvailabilityDisplayItems(
   // whose data came through as an object/array) must never throw and crash the
   // whole page — fall back to free text / empty instead.
   const source = (typeof value === "string" ? value : "").trim();
+  // Hours never entered are "not specified", not seven closed days
+  // (concierge QA 2026-11-12 D-11); the caller shows its own empty text.
+  if (!source) return [];
   try {
     const schedule = parseWeeklyAvailability(source);
     const hasStructuredHours = schedule.some((row) => {

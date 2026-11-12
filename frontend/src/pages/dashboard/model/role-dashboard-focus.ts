@@ -38,6 +38,53 @@ export function isConciergeTaskDueToday(task: ConciergeTask, now: Date): boolean
   );
 }
 
+/**
+ * Whether a task belongs to "Фокус на сегодня": overdue, due today or
+ * without a date. Work of a later Berlin day waits for its day (concierge
+ * QA 2026-11-12 D-9).
+ */
+export function isConciergeTaskForToday(task: ConciergeTask, now: Date): boolean {
+  const scheduledAt = conciergeTaskScheduledAt(task);
+  if (!scheduledAt) return true;
+  return appDateKey(scheduledAt) <= appDateKey(now) || isConciergeTaskOverdue(task, now);
+}
+
+/** A service the patient requested in the portal that nobody has booked yet. */
+export type DashboardServiceRequest = {
+  id: string;
+  title: string;
+  status: string;
+  request_source: string;
+  patient_name?: string | null;
+  starts_at: string | null;
+  booking_reference?: string | null;
+  created_at?: string | null;
+};
+
+/**
+ * The open portal requests of the concierge's services, soonest wish first:
+ * a request has no task on the board until it is taken, so "Фокус на
+ * сегодня" lists it itself (concierge QA 2026-11-12 D-2).
+ */
+export function openPatientServiceRequests(
+  services: DashboardServiceRequest[],
+  limit = 4,
+): DashboardServiceRequest[] {
+  const time = (value: string | null | undefined) =>
+    value ? new Date(value).getTime() : Number.POSITIVE_INFINITY;
+  return services
+    .filter(
+      (service) =>
+        service.request_source === "patient_portal"
+        && service.status === "planned"
+        && !service.booking_reference,
+    )
+    .sort((left, right) =>
+      time(left.starts_at) - time(right.starts_at)
+      || time(left.created_at) - time(right.created_at))
+    .slice(0, Math.max(0, limit));
+}
+
 export function roleDashboardFocusTasks(
   tasks: ConciergeTask[],
   now: Date,
@@ -45,6 +92,7 @@ export function roleDashboardFocusTasks(
 ): ConciergeTask[] {
   return tasks
     .filter((task) => !task.archived_at && isConciergeTaskActive(task))
+    .filter((task) => isConciergeTaskForToday(task, now))
     .sort((left, right) => {
       const overdueDelta = Number(isConciergeTaskOverdue(right, now))
         - Number(isConciergeTaskOverdue(left, now));

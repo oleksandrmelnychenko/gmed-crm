@@ -76,7 +76,9 @@ import {
 import {
   dashboardTaskTitle,
   isConciergeTaskDueToday,
+  openPatientServiceRequests,
   roleDashboardFocusTasks,
+  type DashboardServiceRequest,
 } from "./model/role-dashboard-focus";
 import { greetingFor } from "./model/staff-dashboard-formatters";
 import {
@@ -169,10 +171,11 @@ const METRIC_ROUTES: Record<string, string> = {
   open_tasks: "/task-manager",
   overdue_tasks: "/task-manager?timing=overdue",
   open_checklist_items: "/task-manager",
-  active_services: "/concierge",
-  completed_services_30d: "/concierge",
-  ready_for_billing: "/concierge",
-  portal_requests_30d: "/concierge",
+  // The service tiles open the services list (/concierge is the task board).
+  active_services: "/services",
+  completed_services_30d: "/services",
+  ready_for_billing: "/services",
+  portal_requests_30d: "/services",
   new_leads_30d: "/leads",
   qualified_leads_30d: "/leads",
   converted_leads_30d: "/leads",
@@ -297,6 +300,9 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
     user?.id && TASK_MANAGER_ROLES.includes(role as (typeof TASK_MANAGER_ROLES)[number]),
   );
   const loadsBookings = Boolean(user?.id && user.role === role && roleHasDashboardBookings(role));
+  // The concierge's open portal requests (no task yet) join the focus (QA D-2).
+  const [serviceRequestRows, setServiceRequestRows] = useState<DashboardServiceRequest[]>([]);
+  const loadsServiceRequests = Boolean(user?.id && user.role === role && role === "concierge");
 
   const refreshDashboard = useCallback(() => {
     if (preview) {
@@ -364,12 +370,32 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
           if (!cancelled) setBookingRows([]);
         });
 
-    void Promise.all([kpiRequest, taskRequest, bookingRequest]);
+    const serviceRequest = loadsServiceRequests
+      ? apiFetch<DashboardServiceRequest[]>("/concierge-services?mine_only=true", { forceFresh: true })
+          .then((rows) => {
+            if (!cancelled) setServiceRequestRows(Array.isArray(rows) ? rows : []);
+          })
+          .catch(() => {
+            if (!cancelled) setServiceRequestRows([]);
+          })
+      : Promise.resolve().then(() => {
+          if (!cancelled) setServiceRequestRows([]);
+        });
+
+    void Promise.all([kpiRequest, taskRequest, bookingRequest, serviceRequest]);
 
     return () => {
       cancelled = true;
     };
-  }, [canUseTaskManager, definition, hasScorecard, loadsBookings, preview, user?.id]);
+  }, [
+    canUseTaskManager,
+    definition,
+    hasScorecard,
+    loadsBookings,
+    loadsServiceRequests,
+    preview,
+    user?.id,
+  ]);
 
   useEffect(() => refreshDashboard(), [refreshDashboard]);
   useDebouncedRealtimeSubscription(ROLE_DASHBOARD_EVENTS, refreshDashboard, 300);
@@ -401,6 +427,10 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
     () => roleDashboardBookingItems(bookingRows, user?.id, role, 4),
     [bookingRows, role, user?.id],
   );
+  const serviceRequestItems = useMemo(
+    () => openPatientServiceRequests(serviceRequestRows, 4),
+    [serviceRequestRows],
+  );
   const showLiveFocus = (canUseTaskManager || loadsBookings) && !preview;
   const secondaryMetrics = definition.metrics.slice(4);
   const copy = lang === "de"
@@ -419,6 +449,8 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
         answerBooking: "Einsatz bestätigen oder ablehnen",
         replaceInterpreter: "Dolmetscher hat abgelehnt – anderen buchen",
         interpreter: "Dolmetscher",
+        patientRequest: "Serviceanfrage des Patienten",
+        noWish: "ohne Wunschtermin",
       }
     : {
         priorities: "Фокус на сегодня",
@@ -435,6 +467,8 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
         answerBooking: "Подтвердите или отклоните участие",
         replaceInterpreter: "Переводчик отказался — назначьте другого",
         interpreter: "Переводчик",
+        patientRequest: "Запрос услуги от пациента",
+        noWish: "без желаемого времени",
       };
 
   return (
@@ -552,8 +586,36 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
                   <div className="h-4 w-full animate-pulse rounded bg-muted" />
                 </div>
               ))
-            ) : showLiveFocus && (bookingItems.length > 0 || focusTasks.length > 0) ? (
+            ) : showLiveFocus
+              && (serviceRequestItems.length > 0 || bookingItems.length > 0 || focusTasks.length > 0) ? (
               <>
+              {serviceRequestItems.map((item) => (
+                <button
+                  key={`service-request:${item.id}`}
+                  type="button"
+                  data-testid="dashboard-service-request"
+                  onClick={() => staffGo(`/services?service=${encodeURIComponent(item.id)}`)}
+                  className="group flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                >
+                  <span className="mt-1.5 size-2 shrink-0 rounded-full bg-amber-500" />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+                      <span className="font-medium text-amber-700">{copy.patientRequest}</span>
+                      <span aria-hidden="true">·</span>
+                      {item.starts_at ? <PortalDateChip timestamp={item.starts_at} /> : copy.noWish}
+                    </span>
+                    <span className="mt-1 block break-words text-[12.5px] font-medium leading-5 text-foreground">
+                      {item.title}
+                    </span>
+                    {item.patient_name ? (
+                      <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                        {`${copy.patient}: ${item.patient_name}`}
+                      </span>
+                    ) : null}
+                  </span>
+                  <ArrowUpRight className="mt-1 size-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
+                </button>
+              ))}
               {bookingItems.map((item) => {
                 const when = [formatAppDate(item.date) || item.date, item.timeStart]
                   .filter(Boolean)
