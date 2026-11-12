@@ -4572,7 +4572,9 @@ async fn task_history_and_notices_name_the_change_and_archived_tasks_refuse_comm
     assert_eq!(created.len(), 1, "{detail}");
     assert!(created[0]["payload"]["system"].is_null());
 
-    sqlx::query("UPDATE tasks SET archived_at = now(), archived_by = $2 WHERE id = $1")
+    sqlx::query(
+        "UPDATE tasks SET status = 'completed', archived_at = now(), archived_by = $2 WHERE id = $1",
+    )
         .bind(task_id)
         .bind(ctx.admin_id)
         .execute(&ctx.pool)

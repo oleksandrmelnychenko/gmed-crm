@@ -3420,7 +3420,7 @@ async fn unused_agency_service_can_be_deleted() {
 }
 
 #[tokio::test]
-async fn sales_and_concierge_cannot_access_agency_service_catalog() {
+async fn sales_cannot_read_and_concierge_cannot_write_agency_service_catalog() {
     let Some((app, pool, _admin_id, _)) = test_context().await else {
         return;
     };
@@ -3431,10 +3431,21 @@ async fn sales_and_concierge_cannot_access_agency_service_catalog() {
     let sales_bearer = auth_header_for(sales_id, "sales");
     let concierge_bearer = auth_header_for(concierge_id, "concierge");
 
-    for bearer in [&sales_bearer, &concierge_bearer] {
-        let (status, _) = json_request(&app, "GET", "/api/v1/agency-services", bearer, None).await;
-        assert_eq!(status, StatusCode::FORBIDDEN);
+    // The concierge reads the catalogue without prices (owner decision 2026-11-12); Sales does not.
+    let (status, _) =
+        json_request(&app, "GET", "/api/v1/agency-services", &sales_bearer, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/api/v1/agency-services",
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
 
+    for bearer in [&sales_bearer, &concierge_bearer] {
         let (status, _) = json_request(
             &app,
             "POST",
