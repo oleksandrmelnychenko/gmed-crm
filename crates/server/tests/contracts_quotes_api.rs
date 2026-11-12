@@ -2713,6 +2713,148 @@ async fn agency_service_catalog_supports_create_read_only_visibility_and_update(
 }
 
 #[tokio::test]
+async fn concierge_reads_agency_services_and_packages_without_prices_and_never_writes() {
+    let Some((app, pool, _admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("concierge-catalog");
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    let concierge = auth_header_for(concierge_id, "concierge");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/agency-services",
+        &bearer,
+        Some(json!({
+            "service_name": format!("Transfer {tag}"),
+            "description": "Airport transfer",
+            "unit_label": "trip",
+            "unit_price": 120.0,
+            "currency": "EUR",
+            "vat_rate": 19.0,
+            "is_active": true,
+            "valid_from": "2026-01-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let service_id = body["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/service-packages",
+        &bearer,
+        Some(json!({
+            "package_key": format!("pkg_{}", tag.replace('-', "_")),
+            "name": format!("Package {tag}"),
+            "base_price_net": 500,
+            "items": [{
+                "description": "Transfer",
+                "included_quantity": 2,
+                "unit_label": "trip",
+                "overage_unit_price_net": "60.00"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let package_id = body["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/agency-services?search={tag}"),
+        &concierge,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], service_id);
+    assert_eq!(items[0]["unit_label"], "trip");
+    for hidden in [
+        "unit_price",
+        "vat_rate",
+        "currency",
+        "price_versions",
+        "usage_count",
+    ] {
+        assert!(items[0].get(hidden).is_none(), "{hidden}: {body}");
+    }
+
+    let (status, body) =
+        json_request(&app, "GET", "/api/v1/service-packages", &concierge, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let package = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|package| package["id"] == package_id.as_str())
+        .expect("active package listed for the concierge");
+    assert_eq!(package["items"][0]["included_quantity"].as_str(), Some("2"));
+    for hidden in [
+        "base_price_net",
+        "base_price_vat",
+        "base_price_gross",
+        "price_versions",
+    ] {
+        assert!(package.get(hidden).is_none(), "{hidden}: {package}");
+    }
+    assert!(package["items"][0].get("overage_unit_price_net").is_none());
+    assert!(!package.to_string().contains("price"), "{package}");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/agency-services",
+        &concierge,
+        Some(json!({ "service_name": "Nope", "unit_price": 1.0, "valid_from": "2026-01-01" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/agency-services/{service_id}/update"),
+        &concierge,
+        Some(json!({ "service_name": "Nope", "unit_price": 1.0, "valid_from": "2026-01-01" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/agency-services/{service_id}"),
+        &concierge,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/service-packages",
+        &concierge,
+        Some(json!({ "package_key": "nope", "name": "Nope", "base_price_net": 1, "items": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/service-packages/{package_id}"),
+        &concierge,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn order_service_keeps_catalog_snapshot_and_used_catalog_item_is_archived() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;

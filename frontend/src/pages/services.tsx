@@ -84,6 +84,8 @@ import { moneyInputText, parseMoneyInput, roundCents } from "@/lib/money";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
 import { servicesPermissions } from "@/pages/services.model";
+import { AgencyCatalogReadOnly } from "@/pages/services-agency-catalog";
+import { readsAgencyCatalogWithoutPrices } from "@/pages/services-agency-catalog.model";
 import {
   conciergeBillingStatusOptions,
   conciergeServiceStatusOptions,
@@ -3117,6 +3119,11 @@ export function ServicesPage() {
   return (
     <ReadOnlyScope active={!hasCapability(user, "services.edit")}>
       <StaffServicesPage />
+      {readsAgencyCatalogWithoutPrices(user?.role) ? (
+        <div className="mt-4">
+          <AgencyCatalogReadOnly />
+        </div>
+      ) : null}
     </ReadOnlyScope>
   );
 }

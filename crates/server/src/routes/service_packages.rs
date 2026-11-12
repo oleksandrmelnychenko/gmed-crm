@@ -898,14 +898,74 @@ async fn list_service_packages(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if !can_read_packages(auth.role) {
+    let priceless = !can_read_packages(auth.role);
+    if priceless && !reads_package_catalog_without_prices(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     match load_service_package_payloads(&state, None).await {
+        Ok(packages) if priceless => Json(
+            packages
+                .iter()
+                // A retired package is no choice for the concierge.
+                .filter(|package| package["is_active"].as_bool() == Some(true))
+                .map(priceless_service_package)
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
         Ok(packages) => Json(packages).into_response(),
         Err(resp) => resp,
     }
+}
+
+/// The concierge reads GMED's own service packages without any price (owner
+/// decision 4 of 2026-11-12): name, description and what a package contains,
+/// never amounts, VAT, tax profiles, price versions, price validity or usage.
+fn reads_package_catalog_without_prices(role: Role) -> bool {
+    role == Role::Concierge
+}
+
+/// Whitelists, so a price field added to the full answer later never leaks.
+const PRICELESS_PACKAGE_FIELDS: &[&str] =
+    &["id", "package_key", "name", "description", "is_active"];
+const PRICELESS_PACKAGE_ITEM_FIELDS: &[&str] = &[
+    "id",
+    "package_id",
+    "agency_service_id",
+    "agency_service_name",
+    "service_key",
+    "description",
+    "included_quantity",
+    "unit_label",
+    "requires_patient_approval",
+    "sort_order",
+];
+
+fn pick_fields(value: &Value, fields: &[&str]) -> serde_json::Map<String, Value> {
+    let mut out = serde_json::Map::new();
+    if let Some(object) = value.as_object() {
+        for key in fields {
+            if let Some(field) = object.get(*key) {
+                out.insert((*key).to_string(), field.clone());
+            }
+        }
+    }
+    out
+}
+
+fn priceless_service_package(package: &Value) -> Value {
+    let mut out = pick_fields(package, PRICELESS_PACKAGE_FIELDS);
+    let items = package["items"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| Value::Object(pick_fields(item, PRICELESS_PACKAGE_ITEM_FIELDS)))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    out.insert("items".to_string(), Value::Array(items));
+    Value::Object(out)
 }
 
 async fn create_service_package(
@@ -3522,6 +3582,74 @@ mod subscription_tests {
         assert!(package_period_covers(day(10), day(10), today));
         assert!(!package_period_covers(day(11), None, today));
         assert!(!package_period_covers(None, day(9), today));
+    }
+
+    #[test]
+    fn the_concierge_reads_packages_without_any_price() {
+        assert!(reads_package_catalog_without_prices(Role::Concierge));
+        assert!(!reads_package_catalog_without_prices(Role::Sales));
+        let full = serde_json::json!({
+            "id": "p",
+            "package_key": "gmed_one",
+            "name": "GMED One",
+            "description": "Programm",
+            "is_active": true,
+            "currency": "EUR",
+            "base_price_net": "1000.00",
+            "base_price_vat": "190.00",
+            "base_price_gross": "1190.00",
+            "tax_profile_id": "t",
+            "tax_profile_vat_rate": "19",
+            "valid_from": "2026-01-01",
+            "price_versions": [{ "base_price_net": "900.00" }],
+            "usage_count": 4,
+            "items": [{
+                "id": "i",
+                "agency_service_name": "Transfer",
+                "description": "Transfer",
+                "included_quantity": "2",
+                "unit_label": "trip",
+                "overage_unit_price_net": "50.00",
+                "agency_service_unit_price": "50.00",
+                "agency_service_currency": "EUR",
+                "agency_service_vat_rate": "19",
+                "agency_service_price_version_id": "v",
+                "tax_profile_id": "t",
+                "tax_profile_name": "Standard",
+                "tax_profile_vat_rate": "19",
+            }],
+        });
+        let view = priceless_service_package(&full);
+        assert_eq!(view["name"], "GMED One");
+        assert_eq!(view["items"][0]["included_quantity"], "2");
+        assert_eq!(view["items"][0]["agency_service_name"], "Transfer");
+        let package_keys = view.as_object().unwrap();
+        for hidden in [
+            "currency",
+            "base_price_net",
+            "base_price_vat",
+            "base_price_gross",
+            "tax_profile_id",
+            "tax_profile_vat_rate",
+            "valid_from",
+            "price_versions",
+            "usage_count",
+        ] {
+            assert!(!package_keys.contains_key(hidden), "{hidden}");
+        }
+        let item_keys = view["items"][0].as_object().unwrap();
+        for hidden in [
+            "overage_unit_price_net",
+            "agency_service_unit_price",
+            "agency_service_currency",
+            "agency_service_vat_rate",
+            "agency_service_price_version_id",
+            "tax_profile_id",
+            "tax_profile_name",
+            "tax_profile_vat_rate",
+        ] {
+            assert!(!item_keys.contains_key(hidden), "{hidden}");
+        }
     }
 
     #[test]

@@ -1552,13 +1552,51 @@ fn can_manage_contracts(role: Role) -> bool {
     role.can(Capability::ContractsEdit)
 }
 
+/// The concierge reads GMED's own agency services without any price (owner
+/// decision 4 of 2026-11-12): the list, never the amounts, VAT, price versions,
+/// validity of a price or usage. Writes stay refused.
+pub(crate) fn reads_agency_catalog_without_prices(role: Role) -> bool {
+    role == Role::Concierge
+}
+
+/// The fields of an agency service the concierge may read: a whitelist, so a
+/// price field added to the full answer later never leaks into this one.
+const PRICELESS_AGENCY_SERVICE_FIELDS: &[&str] = &[
+    "id",
+    "service_key",
+    "service_name",
+    "description",
+    "description_items",
+    "name_ru",
+    "description_ru",
+    "unit_label",
+    "is_active",
+];
+
+pub(crate) fn priceless_agency_service(item: &Value) -> Value {
+    let mut out = serde_json::Map::new();
+    if let Some(fields) = item.as_object() {
+        for key in PRICELESS_AGENCY_SERVICE_FIELDS {
+            if let Some(value) = fields.get(*key) {
+                out.insert((*key).to_string(), value.clone());
+            }
+        }
+    }
+    Value::Object(out)
+}
+
 async fn list_agency_services(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
-    Query(query): Query<ListAgencyServicesQuery>,
+    Query(mut query): Query<ListAgencyServicesQuery>,
 ) -> axum::response::Response {
-    if !can_read_contracts(auth.role) {
+    let priceless = !can_read_contracts(auth.role);
+    if priceless && !reads_agency_catalog_without_prices(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    if priceless {
+        // A retired service is no choice for the concierge.
+        query.active_only = Some(true);
     }
 
     match sqlx::query(
@@ -1654,6 +1692,13 @@ async fn list_agency_services(
                         "usage_count": row.try_get::<i64, _>("usage_count").unwrap_or_default(),
                         "price_versions": row.try_get::<Value, _>("price_versions").unwrap_or_else(|_| json!([])),
                     })
+                })
+                .map(|item| {
+                    if priceless {
+                        priceless_agency_service(&item)
+                    } else {
+                        item
+                    }
                 })
                 .collect();
             Json(items).into_response()
@@ -5621,6 +5666,52 @@ async fn update_quote_internal_note(
         Ok(Some(value)) => Json(value).into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "Quote not found"),
         Err(resp) => resp,
+    }
+}
+
+#[cfg(test)]
+mod priceless_catalog_tests {
+    use super::{priceless_agency_service, reads_agency_catalog_without_prices};
+    use gmed_domain::role::Role;
+    use serde_json::json;
+
+    #[test]
+    fn the_concierge_reads_agency_services_without_any_price() {
+        assert!(reads_agency_catalog_without_prices(Role::Concierge));
+        assert!(!reads_agency_catalog_without_prices(Role::Interpreter));
+        let full = json!({
+            "id": "a",
+            "service_key": "transfer",
+            "service_name": "Transfer",
+            "name_ru": "Трансфер",
+            "unit_label": "trip",
+            "is_active": true,
+            "unit_price": "89.5",
+            "currency": "EUR",
+            "vat_rate": "19",
+            "valid_from": "2026-01-01",
+            "valid_to": null,
+            "usage_count": 3,
+            "due_in_full_on_termination": true,
+            "price_versions": [{ "unit_price": "80" }],
+        });
+        let view = priceless_agency_service(&full);
+        let keys = view.as_object().unwrap();
+        assert_eq!(view["service_name"], "Transfer");
+        assert_eq!(view["name_ru"], "Трансфер");
+        assert_eq!(view["unit_label"], "trip");
+        for hidden in [
+            "unit_price",
+            "currency",
+            "vat_rate",
+            "valid_from",
+            "valid_to",
+            "usage_count",
+            "due_in_full_on_termination",
+            "price_versions",
+        ] {
+            assert!(!keys.contains_key(hidden), "{hidden}");
+        }
     }
 }
 
