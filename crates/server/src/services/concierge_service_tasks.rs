@@ -461,8 +461,40 @@ fn conflict(code: &str, message: &str) -> axum::response::Response {
         .into_response()
 }
 
+pub(crate) const SERVICE_COMPLETION_BEFORE_START_CODE: &str =
+    "concierge_service_completion_before_start";
+
+/// Whether a service that starts at `starts_at` begins on a later Berlin day
+/// than `today`: such a service cannot be completed yet (the appointment
+/// rule "not completed before its date", concierge QA 2026-11-12 C-3).
+pub(crate) fn completion_precedes_start(
+    starts_at: chrono::DateTime<chrono::Utc>,
+    today: chrono::NaiveDate,
+) -> bool {
+    crate::app_time::date_of(starts_at) > today
+}
+
+/// The refusal of a completion before the service's start day. The code is
+/// also the `error`, so every screen shows the translated text.
+pub(crate) fn completion_before_start_response(
+    starts_at: chrono::DateTime<chrono::Utc>,
+) -> axum::response::Response {
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(json!({
+            "error": SERVICE_COMPLETION_BEFORE_START_CODE,
+            "code": SERVICE_COMPLETION_BEFORE_START_CODE,
+            "message": "Concierge service cannot be completed before the day it starts",
+            "starts_at": starts_at.to_rfc3339(),
+        })),
+    )
+        .into_response()
+}
+
 /// Before a work-center status change: names the actor for the derived
-/// service audit and refuses to cancel the task of a billed service.
+/// service audit, refuses to complete the task of a service that starts on a
+/// later Berlin day (concierge QA 2026-11-12 C-3, as on the service form) and
+/// refuses to cancel the task of a billed service.
 pub(crate) async fn prepare_task_status_change(
     conn: &mut PgConnection,
     task_id: Uuid,
@@ -478,6 +510,27 @@ pub(crate) async fn prepare_task_status_change(
             .into_response()
     };
     set_audit_actor(conn, actor_id).await.map_err(failed)?;
+    if next_status == "completed" {
+        let starts_at = sqlx::query_scalar::<_, Option<chrono::DateTime<chrono::Utc>>>(
+            r#"SELECT service.starts_at
+               FROM tasks task
+               JOIN concierge_services service ON service.id = task.concierge_service_id
+               WHERE task.id = $1
+                 AND task.status <> 'completed'
+                 AND service.status <> 'completed'"#,
+        )
+        .bind(task_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(failed)?
+        .flatten();
+        if let Some(starts_at) = starts_at
+            && completion_precedes_start(starts_at, crate::app_time::today())
+        {
+            return Err(completion_before_start_response(starts_at));
+        }
+        return Ok(());
+    }
     if next_status != "cancelled" {
         return Ok(());
     }

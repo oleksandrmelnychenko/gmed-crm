@@ -57,6 +57,17 @@ import { cn } from "@/lib/utils";
 import { formatMoneyLabel, parseMoneyInput } from "@/lib/money";
 import { portalServiceContext } from "./model/portal-service-context";
 import { portalServiceNotes } from "./model/portal-service-notes";
+import {
+  blankServiceDetailsForm,
+  serviceDetailsError,
+  serviceDetailsKind,
+  serviceDetailsPayload,
+  serviceDetailsRows,
+  serviceDetailsTitle,
+  taxonomyCodeOf,
+  type ServiceDetailsForm,
+} from "@/pages/concierge/service-details";
+import { ServiceDetailsFields } from "@/pages/concierge/service-details-fields";
 
 type ServiceRequestFormState = {
   serviceKind: string;
@@ -68,10 +79,13 @@ type ServiceRequestFormState = {
   endsAt: string;
   costEstimate: string;
   serviceNotes: string;
+  /** The optional own fields of a restaurant, transfer or tickets request. */
+  details: ServiceDetailsForm;
 };
 
 function blankServiceRequestForm(): ServiceRequestFormState {
   return {
+    details: blankServiceDetailsForm(),
     serviceKind: "hotel",
     taxonomyNodeId: "",
     title: "",
@@ -161,9 +175,15 @@ type PatientServicesRequestSectionProps = {
   requestBusy: boolean;
   requestError: string;
   t: Record<string, string>;
+  lang: Lang;
   onFormChange: Dispatch<SetStateAction<ServiceRequestFormState>>;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
 };
+
+/** The request kind with own fields: a ride by its type, otherwise the chosen category. */
+function requestDetailsKind(form: ServiceRequestFormState, taxonomyLeaves: ProviderTaxonomyNode[]) {
+  return serviceDetailsKind(form.serviceKind, taxonomyCodeOf(form.taxonomyNodeId, taxonomyLeaves));
+}
 
 function PatientServicesRequestSection({
   form,
@@ -171,9 +191,11 @@ function PatientServicesRequestSection({
   requestBusy,
   requestError,
   t,
+  lang,
   onFormChange,
   onSubmit,
 }: PatientServicesRequestSectionProps) {
+  const detailsKind = requestDetailsKind(form, taxonomyLeaves);
   return (
     <AdminDialogScaffold
       title={t.services_request_title}
@@ -241,6 +263,29 @@ function PatientServicesRequestSection({
             }
           />
         </Field>
+
+        {detailsKind ? (
+          <fieldset className="space-y-2" data-testid="portal-service-details">
+            <legend className="text-sm font-semibold text-foreground">
+              {serviceDetailsTitle(detailsKind, lang)}
+            </legend>
+            <ServiceDetailsFields
+              kind={detailsKind}
+              value={form.details}
+              lang={lang}
+              idPrefix="portal-service-details"
+              inputClassName={inputClass}
+              textareaClassName={textareaClass}
+              labelClassName="text-xs font-medium text-foreground"
+              onChange={(key, value) =>
+                onFormChange((current) => ({
+                  ...current,
+                  details: { ...current.details, [key]: value },
+                }))
+              }
+            />
+          </fieldset>
+        ) : null}
 
         <div className="grid gap-3 sm:grid-cols-2">
           <Field
@@ -435,6 +480,12 @@ export function PatientServicesPage() {
       dispatchPageState({ requestError: uiText("api_portal_service_period_inverted", lang), notice: "" });
       return;
     }
+    const detailsKind = requestDetailsKind(form, taxonomyLeaves);
+    const detailsError = serviceDetailsError(detailsKind, form.details, lang);
+    if (detailsError) {
+      dispatchPageState({ requestError: detailsError, notice: "" });
+      return;
+    }
     dispatchPageState({
       requestBusy: true,
       requestError: "",
@@ -454,6 +505,8 @@ export function PatientServicesPage() {
         patient_budget: form.costEstimate.trim() ? parseMoneyInput(form.costEstimate) : undefined,
         // Stored as the patient's own note; staff never overwrite it.
         patient_note: form.serviceNotes || undefined,
+        // The optional own fields of a restaurant, transfer or tickets request.
+        details: serviceDetailsPayload(detailsKind, form.details),
       });
       setRequestOpen(false);
       dispatchPageState((current) => ({
@@ -585,6 +638,10 @@ export function PatientServicesPage() {
                     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                       {item.vendor_name && <InfoRow label={t.services_vendor} value={item.vendor_name} />}
                       {item.booking_reference && <InfoRow label={t.services_booking_reference} value={item.booking_reference} />}
+                      {/* Persons, time, pickup place, event: the booking facts, never a staff note. */}
+                      {serviceDetailsRows(item.details_kind, item.details, lang).map((row) => (
+                        <InfoRow key={row.key} label={row.label} value={row.value} />
+                      ))}
                       {item.patient_budget != null && item.patient_budget !== "" ? (
                         <InfoRow label={t.services_your_budget} value={formatMoneyLabel(item.patient_budget, item.currency)} />
                       ) : null}
@@ -632,6 +689,7 @@ export function PatientServicesPage() {
           requestBusy={requestBusy}
           requestError={requestError}
           t={t as unknown as Record<string, string>}
+          lang={lang}
           onFormChange={setForm}
           onSubmit={handleSubmit}
         />

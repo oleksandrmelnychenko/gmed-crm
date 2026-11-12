@@ -517,6 +517,12 @@ export function conciergeTaskErrorMessage(
       ? "Сервис этой задачи уже выставлен в счёт. Отменить его можно только со сторнированием счёта."
       : "Der Service dieser Aufgabe ist bereits abgerechnet. Er kann nur mit einer Rechnungsstornierung storniert werden.";
   }
+  // The task of a service that starts on a later day is not completed yet (QA C-3).
+  if (code === "concierge_service_completion_before_start") {
+    return lang === "ru"
+      ? "Сервис этой задачи начинается позже: выполнить задачу можно не раньше дня начала сервиса."
+      : "Der Service dieser Aufgabe beginnt später: Die Aufgabe kann erst ab dem Starttag des Service erledigt werden.";
+  }
   if (code === "task_archived") {
     return lang === "ru"
       ? "Задача в архиве. Восстановите её, чтобы вносить изменения."

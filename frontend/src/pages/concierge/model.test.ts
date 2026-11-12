@@ -90,6 +90,14 @@ describe("filterConciergeTaskAssignees", () => {
     expect(rows.map((user) => user.name)).toEqual(["Berta", "nameless@test"]);
   });
 
+  it("says why the task of a service starting later cannot be completed yet (QA C-3)", () => {
+    const error = Object.assign(new Error("Concierge service cannot be completed before the day it starts"), {
+      body: { error: "concierge_service_completion_before_start", code: "concierge_service_completion_before_start" },
+    });
+    expect(conciergeTaskErrorMessage(error, "ru", "fallback")).toMatch(/не раньше дня начала сервиса/);
+    expect(conciergeTaskErrorMessage(error, "de", "fallback")).toMatch(/erst ab dem Starttag/);
+  });
+
   it("localizes task permission errors returned by the API", () => {
     const error = new Error(
       "Only the task creator or a higher role can change this task",

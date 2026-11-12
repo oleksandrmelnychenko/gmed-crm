@@ -21,6 +21,8 @@ use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
+mod details;
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route(
@@ -138,6 +140,10 @@ struct CreateConciergeServiceRequest {
     /// The only staff text the patient portal shows.
     patient_visible_note: Option<String>,
     billing_notes: Option<String>,
+    /// The own fields of the service kind (restaurant, transfer, tickets);
+    /// schema in `details.rs`.
+    #[serde(default)]
+    details: Option<serde_json::Value>,
 }
 
 #[derive(Default)]
@@ -194,6 +200,9 @@ struct UpdateConciergeServiceRequest {
     service_notes: NullablePatchValue,
     patient_visible_note: NullablePatchValue,
     billing_notes: NullablePatchValue,
+    /// Replaces the own fields of the service kind; missing or `null`
+    /// keeps them, `{}` clears them.
+    details: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -257,6 +266,10 @@ struct CreateMyConciergeServiceRequest {
     /// never overwrite it (`service_notes` is the name older clients send).
     #[serde(alias = "service_notes")]
     patient_note: Option<String>,
+    /// The optional own fields of the service kind (restaurant, transfer,
+    /// tickets) the patient filled in.
+    #[serde(default)]
+    details: Option<serde_json::Value>,
 }
 
 struct NonMedicalAppointmentContext {
@@ -539,6 +552,26 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         .into_response()
 }
 
+/// Checks the `details` of a request against the own fields of the service
+/// kind; a refusal is coded, so the staff UI and the portal translate it.
+#[allow(clippy::result_large_err)]
+fn checked_details(
+    kind: Option<details::DetailsKind>,
+    value: &serde_json::Value,
+) -> Result<serde_json::Value, axum::response::Response> {
+    details::validate_details(kind, value).map_err(|message| {
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(serde_json::json!({
+                "error": details::DETAILS_INVALID_CODE,
+                "code": details::DETAILS_INVALID_CODE,
+                "message": message,
+            })),
+        )
+            .into_response()
+    })
+}
+
 /// [`err`] with a machine-readable `code` the UI turns into its own words.
 fn err_with_code(status: StatusCode, message: &str, code: &str) -> axum::response::Response {
     (
@@ -570,7 +603,7 @@ async fn list_my_concierge_services(
                   cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
                   cs.vendor_contact, cs.service_address, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
                   cs.quantity, cs.unit_price, cs.currency, cs.billing_status,
-                  cs.patient_request_note, cs.patient_visible_note, cs.patient_budget,
+                  cs.patient_request_note, cs.patient_visible_note, cs.patient_budget, cs.details,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at, cs.request_source,
                   p.patient_id AS patient_code, p.first_name, p.last_name,
                   pr.name AS provider_name,
@@ -704,18 +737,34 @@ async fn create_my_concierge_service(
     {
         return resp;
     }
+    // The optional own fields of the kind (restaurant, transfer, tickets).
+    let details_kind = details::details_kind(
+        &service_kind,
+        load_taxonomy_code(&state, body.taxonomy_node_id)
+            .await
+            .as_deref(),
+    );
+    let request_details = match checked_details(
+        details_kind,
+        body.details.as_ref().unwrap_or(&serde_json::Value::Null),
+    ) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
 
     let service_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO concierge_services (
                 patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind, taxonomy_node_id,
                 title, status, booking_reference, vendor_name, vendor_contact,
                 starts_at, ends_at, patient_budget, actual_cost, currency,
-                billing_status, patient_request_note, billing_notes, request_source, created_by
+                billing_status, patient_request_note, billing_notes, request_source, created_by,
+                details
            ) VALUES (
                 $1, NULL, NULL, $2, $3, $4,
                 $5, 'planned', NULL, $6, $7,
                 $8, $9, $10, NULL, $11,
-                'draft', $12, NULL, 'patient_portal', $13
+                'draft', $12, NULL, 'patient_portal', $13,
+                $14
            )
            RETURNING id"#,
     )
@@ -732,6 +781,7 @@ async fn create_my_concierge_service(
     .bind(currency.to_uppercase())
     .bind(normalized_notes.clone())
     .bind(auth.user_id)
+    .bind(request_details)
     .fetch_one(&state.db)
     .await
     {
@@ -4694,6 +4744,23 @@ async fn create_concierge_service(
         ),
     };
 
+    // The own fields of the kind (restaurant, transfer, tickets).
+    let service_details = match body.details.as_ref() {
+        Some(value) => {
+            let details_kind = details::details_kind(
+                &service_kind,
+                load_taxonomy_code(&state, taxonomy_node_id)
+                    .await
+                    .as_deref(),
+            );
+            match checked_details(details_kind, value) {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            }
+        }
+        None => serde_json::json!({}),
+    };
+
     let starts_at = match parse_optional_datetime(body.starts_at.as_deref()) {
         Ok(Some(value)) => Some(value),
         Ok(None) => appointment_ctx.as_ref().and_then(|ctx| ctx.starts_at),
@@ -4772,13 +4839,13 @@ async fn create_concierge_service(
                 title, status, booking_reference, vendor_name, vendor_contact,
                 starts_at, ends_at, cost_estimate, actual_cost, quantity, unit_price, currency,
                 billing_status, service_notes, billing_notes, request_source, created_by,
-                patient_visible_note, order_id
+                patient_visible_note, order_id, details
            ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7,
                 $8, 'planned', $9, $10, $11,
                 $12, $13, $14, $15, $16, $17, $18,
                 'draft', $19, $20, 'staff', $21,
-                $22, $23
+                $22, $23, $24
            ) RETURNING id"#,
     )
     .bind(body.patient_id)
@@ -4806,6 +4873,7 @@ async fn create_concierge_service(
         body.patient_visible_note.as_deref(),
     ))
     .bind(body.order_id)
+    .bind(service_details)
     .fetch_one(&state.db)
     .await
     {
@@ -4942,7 +5010,7 @@ async fn update_concierge_service(
         if next_status == "completed"
             && let Some(starts_at) = completion_blocking_start(&existing)
         {
-            return completion_before_start_response(starts_at);
+            return service_tasks::completion_before_start_response(starts_at);
         }
         if standalone {
             if !is_allowed_service_status_transition(
@@ -5163,6 +5231,37 @@ async fn update_concierge_service(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     let patient_visible_note_changed = patient_visible_note != existing_patient_visible_note;
+    // The own fields of the kind the service has after this save; a caller
+    // who sees the service redacted cannot change them.
+    let details_update = match body.details.as_ref() {
+        Some(value) if !redaction.hides_notes() => {
+            let service_kind_after = body.service_kind.clone().unwrap_or_else(|| {
+                existing
+                    .try_get::<String, _>("service_kind")
+                    .unwrap_or_default()
+            });
+            let taxonomy_code_after = match body.taxonomy_node_id {
+                Some(taxonomy_node_id) => load_taxonomy_code(&state, Some(taxonomy_node_id)).await,
+                None => existing
+                    .try_get::<Option<String>, _>("taxonomy_node_code")
+                    .unwrap_or_default(),
+            };
+            let details_kind =
+                details::details_kind(&service_kind_after, taxonomy_code_after.as_deref());
+            match checked_details(details_kind, value) {
+                Ok(value) => Some(value),
+                Err(resp) => return resp,
+            }
+        }
+        _ => None,
+    };
+    let details_changed = details_update.as_ref().is_some_and(|next| {
+        existing
+            .try_get::<Option<serde_json::Value>, _>("details")
+            .unwrap_or_default()
+            .as_ref()
+            != Some(next)
+    });
     let billing_notes = match parse_optional_text_patch(
         &body.billing_notes,
         existing
@@ -5532,7 +5631,8 @@ async fn update_concierge_service(
                provider_service_id = COALESCE($20, provider_service_id),
                quantity = COALESCE($21, quantity),
                unit_price = COALESCE($22, unit_price),
-               patient_visible_note = $23
+               patient_visible_note = $23,
+               details = COALESCE($24, details)
            WHERE id = $1"#,
     )
     .bind(service_id)
@@ -5558,6 +5658,7 @@ async fn update_concierge_service(
     .bind(quantity)
     .bind(unit_price)
     .bind(patient_visible_note)
+    .bind(details_update)
     .execute(&mut *tx)
     .await
     {
@@ -5596,6 +5697,7 @@ async fn update_concierge_service(
             "task_id": task_change.as_ref().map(|change| change.0),
             "patient_visible_note_changed": patient_visible_note_changed,
             "cost_estimate_changed": cost_estimate_changed,
+            "details_changed": details_changed,
         }),
     ));
     if let Some((task_id, assigned_to, previous_status, next_status)) = task_change.as_ref() {
@@ -6008,7 +6110,7 @@ const SERVICE_ROW_SELECT: &str = r#"SELECT cs.id, cs.patient_id, cs.appointment_
                   cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
                   cs.vendor_contact, cs.service_address, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
                   cs.quantity, cs.unit_price, cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes, cs.request_source,
-                  cs.patient_request_note, cs.patient_visible_note, cs.patient_budget,
+                  cs.patient_request_note, cs.patient_visible_note, cs.patient_budget, cs.details,
                   cs.key_status, cs.key_responsible_user_id, cs.key_status_at,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at,
                   cs.booking_decision_required_at,
@@ -6938,6 +7040,7 @@ fn validate_update_fields_for_role(
             || body.unit_price.is_some()
             || body.service_notes.is_present()
             || body.patient_visible_note.is_present()
+            || body.details.is_some()
             || body.currency.is_some()
         {
             return Err(err(
@@ -7327,7 +7430,12 @@ fn can_patient_cancel_service(row: &sqlx::postgres::PgRow) -> bool {
 /// with staff; the patient sees only the budget they typed into their own
 /// request (`patient_budget`, owner 2026-11-11).
 fn build_portal_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    // The own fields of the kind (persons, time, pickup place, event) are
+    // the patient's booking facts, never a staff note (owner 2026-11-12).
+    let (details_kind, details) = details::details_json(row);
     serde_json::json!({
+        "details_kind": details_kind,
+        "details": details,
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
         "appointment_id": row.try_get::<Option<Uuid>, _>("appointment_id").unwrap_or_default(),
         "appointment_title": row.try_get::<Option<String>, _>("appointment_title").unwrap_or_default(),
@@ -7368,7 +7476,7 @@ fn build_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         row.try_get::<String, _>("last_name").unwrap_or_default()
     );
 
-    serde_json::json!({
+    let mut service = serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
         "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
         "patient_name": patient_name,
@@ -7428,7 +7536,14 @@ fn build_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "billing_reversal_order_leistung_id": row.try_get::<Option<Uuid>, _>("billing_reversal_order_leistung_id").unwrap_or_default(),
         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
         "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-    })
+    });
+    // The own fields of the service kind (restaurant, transfer, tickets).
+    let (details_kind, details) = details::details_json(row);
+    if let Some(object) = service.as_object_mut() {
+        object.insert("details_kind".to_string(), details_kind);
+        object.insert("details".to_string(), details);
+    }
+    service
 }
 
 /// What a role without medical access must not see of a service: the
@@ -7503,9 +7618,15 @@ fn build_service_json_for_role(row: &sqlx::postgres::PgRow, role: Role) -> serde
     }
 
     if redaction.hides_notes() {
-        for field in ["service_notes", "patient_note", "patient_visible_note"] {
+        for field in [
+            "service_notes",
+            "patient_note",
+            "patient_visible_note",
+            "details_kind",
+        ] {
             service.insert(field.to_string(), serde_json::Value::Null);
         }
+        service.insert("details".to_string(), serde_json::json!({}));
     }
 
     if redaction.medical_provider {
@@ -7595,8 +7716,6 @@ fn build_service_json_for_actor(row: &sqlx::postgres::PgRow, auth: &AuthUser) ->
     value
 }
 
-const SERVICE_COMPLETION_BEFORE_START_CODE: &str = "concierge_service_completion_before_start";
-
 /// The start of a service that begins on a later Berlin day than today: such
 /// a service cannot be completed yet (the appointment rule "not completed
 /// before its date", concierge QA 2026-11-12 C-3). `None` when the service
@@ -7606,29 +7725,8 @@ fn completion_blocking_start(row: &sqlx::postgres::PgRow) -> Option<chrono::Date
         .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("starts_at")
         .ok()
         .flatten()?;
-    completion_precedes_start(starts_at, crate::app_time::today()).then_some(starts_at)
-}
-
-fn completion_precedes_start(
-    starts_at: chrono::DateTime<chrono::Utc>,
-    today: chrono::NaiveDate,
-) -> bool {
-    crate::app_time::date_of(starts_at) > today
-}
-
-fn completion_before_start_response(
-    starts_at: chrono::DateTime<chrono::Utc>,
-) -> axum::response::Response {
-    (
-        StatusCode::UNPROCESSABLE_ENTITY,
-        Json(serde_json::json!({
-            "error": "Unprocessable Entity",
-            "code": SERVICE_COMPLETION_BEFORE_START_CODE,
-            "message": "Concierge service cannot be completed before the day it starts",
-            "starts_at": starts_at.to_rfc3339(),
-        })),
-    )
-        .into_response()
+    service_tasks::completion_precedes_start(starts_at, crate::app_time::today())
+        .then_some(starts_at)
 }
 
 /// A legacy service in a medical context never gets a task; its status keeps
@@ -7773,7 +7871,8 @@ mod service_kind_tests {
 
 #[cfg(test)]
 mod completion_tests {
-    use super::{completion_precedes_start, normalize_optional_non_negative};
+    use super::normalize_optional_non_negative;
+    use crate::services::concierge_service_tasks::completion_precedes_start;
     use chrono::{NaiveDate, TimeZone, Utc};
 
     #[test]

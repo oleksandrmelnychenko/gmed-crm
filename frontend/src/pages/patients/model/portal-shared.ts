@@ -696,6 +696,10 @@ export type PortalConciergeServiceItem = {
   patient_budget?: string | null;
   /** The note staff wrote for the patient; the internal staff note never reaches the portal. */
   patient_visible_note: string | null;
+  /** The kind with own fields (restaurant, transfer, tickets); null for the generic form. */
+  details_kind?: string | null;
+  /** The own fields of that kind: persons, time, pickup place, event — never a staff note. */
+  details?: Partial<Record<string, string | number>> | null;
   request_source: string;
   completed_at: string | null;
   created_at: string;

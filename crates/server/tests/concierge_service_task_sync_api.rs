@@ -701,4 +701,118 @@ async fn a_future_service_is_not_completed_and_amounts_are_never_negative() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["code"], "concierge_service_completion_before_start");
     assert_eq!(service_state(&ctx.pool, service_id).await.0, "in_service");
+
+    // The same rule through the service's task in the work center (fix 39).
+    let (status, body) = move_task(&ctx.app, &ctx.pool, &pm, service_id, "completed").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"], "concierge_service_completion_before_start");
+    assert_eq!(body["code"], "concierge_service_completion_before_start");
+    assert_eq!(service_state(&ctx.pool, service_id).await.0, "in_service");
+    assert_ne!(task_of(&ctx.pool, service_id).await.1, "completed");
+
+    // Once the service starts today, the task completes it.
+    sqlx::query("UPDATE concierge_services SET starts_at = now() WHERE id = $1")
+        .bind(service_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (status, body) = move_task(&ctx.app, &ctx.pool, &pm, service_id, "completed").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(service_state(&ctx.pool, service_id).await.0, "completed");
+}
+
+/// Owner decision 2026-11-12 (concierge QA D-6): a service kind has its own
+/// fields, validated by kind on the server; a kind without own fields keeps
+/// the generic form.
+#[tokio::test]
+async fn a_transfer_keeps_its_own_fields_validated_by_kind() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let fx = fixture(&ctx.pool, ctx.admin_id, &tag).await;
+    let pm = auth_header_for(fx.pm_id, "patient_manager");
+    let concierge = auth_header_for(fx.concierge_id, "concierge");
+    let create = |details: Value| {
+        json!({
+            "patient_id": fx.patient_id,
+            "assigned_concierge_id": fx.concierge_id,
+            "service_kind": "transfer",
+            "title": "Airport pickup",
+            "details": details,
+        })
+    };
+
+    for details in [
+        json!({ "persons": 2 }),
+        json!({ "flight_number": "x".repeat(31) }),
+        json!({ "pickup_place": 5 }),
+        json!(["flight_number"]),
+    ] {
+        let (status, body) = json_request(
+            &ctx.app,
+            "POST",
+            "/api/v1/concierge-services",
+            &pm,
+            Some(create(details)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["error"], "concierge_service_details_invalid");
+    }
+
+    let (status, body) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/concierge-services",
+        &pm,
+        Some(create(json!({
+            "flight_number": " LH 1234 ",
+            "pickup_place": "Flughafen BER",
+            "luggage_note": "",
+        }))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["details_kind"], "transfer");
+    assert_eq!(
+        body["details"],
+        json!({ "flight_number": "LH 1234", "pickup_place": "Flughafen BER" })
+    );
+    let service_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    // The concierge keeps them up to date (operational fields).
+    let (status, body) = update_service(
+        &ctx.app,
+        &concierge,
+        service_id,
+        json!({ "details": { "flight_number": "LH 1235", "dropoff_place": "Charité" } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["details"],
+        json!({ "flight_number": "LH 1235", "dropoff_place": "Charité" })
+    );
+
+    // A hotel has no own fields: none are shown and none are accepted.
+    let (status, body) = update_service(
+        &ctx.app,
+        &pm,
+        service_id,
+        json!({ "service_kind": "hotel" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["details_kind"], Value::Null);
+    assert_eq!(body["details"], json!({}));
+    let (status, body) = update_service(
+        &ctx.app,
+        &pm,
+        service_id,
+        json!({ "details": { "flight_number": "LH 1" } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"], "concierge_service_details_invalid");
 }

@@ -21,6 +21,7 @@ import {
   CalendarClock,
   CalendarPlus,
   CarFront,
+  ClipboardList,
   ConciergeBell,
   ContactRound,
   Crown,
@@ -92,6 +93,21 @@ import {
   conciergeServiceStatusOptions,
   isConciergeServiceFinancialLocked,
 } from "@/pages/concierge/model";
+import {
+  blankServiceDetailsForm,
+  serviceDetailsError,
+  serviceDetailsFormFrom,
+  serviceDetailsKind,
+  serviceDetailsPayload,
+  serviceDetailsRows,
+  serviceDetailsTitle,
+  taxonomyCodeOf,
+  type ServiceDetails,
+  type ServiceDetailsForm,
+  type ServiceDetailsKey,
+  type ServiceDetailsKind,
+} from "@/pages/concierge/service-details";
+import { ServiceDetailsFields } from "@/pages/concierge/service-details-fields";
 import {
   formatEnumLabelFromKeys,
   uiText,
@@ -169,6 +185,10 @@ type StaffConciergeService = {
   patient_budget?: string | null;
   /** The only staff text the patient portal shows. */
   patient_visible_note?: string | null;
+  /** The kind with own fields (restaurant, transfer, tickets); null keeps the generic form. */
+  details_kind?: string | null;
+  /** The own fields of that kind; the patient sees them too. */
+  details?: ServiceDetails | null;
   billing_notes: string | null;
   request_source: string;
   completed_at: string | null;
@@ -243,6 +263,8 @@ type CreateServiceFormState = {
   serviceNotes: string;
   patientVisibleNote: string;
   billingNotes: string;
+  /** The own fields of the service kind (restaurant, transfer, tickets). */
+  details: ServiceDetailsForm;
 };
 
 type EditServiceFormState = CreateServiceFormState & {
@@ -272,6 +294,7 @@ type ConciergeServiceUpdatePayload = Partial<{
   service_notes: string | null;
   patient_visible_note: string | null;
   billing_notes: string | null;
+  details: Record<string, string | number>;
 }>;
 
 const STAFF_SERVICES_CACHE_TTL_MS = 10_000;
@@ -360,6 +383,7 @@ function blankCreateServiceForm(defaultConciergeId = ""): CreateServiceFormState
     serviceNotes: "",
     patientVisibleNote: "",
     billingNotes: "",
+    details: blankServiceDetailsForm(),
   };
 }
 
@@ -386,6 +410,7 @@ function buildEditServiceForm(service: StaffConciergeService, lang: Lang): EditS
     serviceNotes: localizeTaskNote(service.service_notes, lang),
     patientVisibleNote: service.patient_visible_note ?? "",
     billingNotes: service.billing_notes ?? "",
+    details: serviceDetailsFormFrom(service.details),
     status: service.status,
     billingStatus: service.billing_status,
   };
@@ -1270,6 +1295,31 @@ function useStaffServicesPageContent() {
     () => items.find((item) => item.id === selectedServiceId) ?? null,
     [items, selectedServiceId],
   );
+  // The own fields follow the service kind (rides) or the chosen category.
+  const createDetailsKind = serviceDetailsKind(
+    createForm.serviceKind,
+    taxonomyCodeOf(createForm.taxonomyNodeId, taxonomyNodes),
+  );
+  const editDetailsKind = editForm
+    ? serviceDetailsKind(
+        editForm.serviceKind,
+        taxonomyCodeOf(editForm.taxonomyNodeId, taxonomyNodes, {
+          id: selectedService?.taxonomy_node_id,
+          code: selectedService?.taxonomy_node_code,
+        }),
+      )
+    : null;
+  const selectedServiceDetailsRows = serviceDetailsRows(
+    selectedService?.details_kind,
+    selectedService?.details,
+    lang,
+  );
+  const setCreateDetailsField = (key: ServiceDetailsKey, value: string) =>
+    setCreateForm((current) => ({ ...current, details: { ...current.details, [key]: value } }));
+  const setEditDetailsField = (key: ServiceDetailsKey, value: string) =>
+    setEditForm((current) =>
+      current ? { ...current, details: { ...current.details, [key]: value } } : current,
+    );
   const selectedProviderService = useMemo(
     () =>
       providerServices.find((service) => service.id === createForm.providerServiceId) ??
@@ -1643,6 +1693,11 @@ function useStaffServicesPageContent() {
       setCreateError(t.staff_services_currency_invalid);
       return;
     }
+    const detailsError = serviceDetailsError(createDetailsKind, createForm.details, lang);
+    if (detailsError) {
+      setCreateError(detailsError);
+      return;
+    }
 
     setCreateBusy(true);
     try {
@@ -1670,6 +1725,7 @@ function useStaffServicesPageContent() {
           service_notes: createForm.serviceNotes.trim() || null,
           patient_visible_note: createForm.patientVisibleNote.trim() || null,
           billing_notes: createForm.billingNotes.trim() || null,
+          details: serviceDetailsPayload(createDetailsKind, createForm.details),
         }),
       });
       clearApiCache("/concierge-services");
@@ -1744,6 +1800,11 @@ function useStaffServicesPageContent() {
       setEditError(moneyInputMessage("negative", lang));
       return;
     }
+    const detailsError = serviceDetailsError(editDetailsKind, editForm.details, lang);
+    if (detailsError) {
+      setEditError(detailsError);
+      return;
+    }
 
     const operationalPayload: ConciergeServiceUpdatePayload = {
       status: editForm.status,
@@ -1755,6 +1816,7 @@ function useStaffServicesPageContent() {
       actual_cost: actualCost,
       service_notes: editForm.serviceNotes.trim() || null,
       patient_visible_note: editForm.patientVisibleNote.trim() || null,
+      details: serviceDetailsPayload(editDetailsKind, editForm.details),
     };
     const updatePayload: ConciergeServiceUpdatePayload =
       canEditProtectedServiceFields
@@ -2474,6 +2536,21 @@ function useStaffServicesPageContent() {
                     ) : null}
                   </Section>
 
+                  {editDetailsKind ? (
+                    <Section icon={ClipboardList} title={serviceDetailsTitle(editDetailsKind, lang)}>
+                      <ServiceDetailsFields
+                        kind={editDetailsKind}
+                        value={editForm.details}
+                        lang={lang}
+                        onChange={setEditDetailsField}
+                        inputClassName={formInputClassName}
+                        textareaClassName={formTextareaClassName}
+                        idPrefix="edit-service-details"
+                      />
+                      <p className="mt-2 text-xs text-muted-foreground">{t.staff_services_visible_to_patient}</p>
+                    </Section>
+                  ) : null}
+
                   <Section icon={NotebookPen} title={t.staff_services_create_section_vendor_notes}>
                     <div className="grid gap-3 md:grid-cols-2">
                       <label className="space-y-1.5 text-sm">
@@ -2667,6 +2744,24 @@ function useStaffServicesPageContent() {
                       <ServiceSummaryLine label={t.staff_services_form_end} value={selectedService.ends_at && <PortalDateChip timestamp={selectedService.ends_at} />} />
                     </div>
                   </Section>
+
+                  {selectedServiceDetailsRows.length > 0 && selectedService.details_kind ? (
+                    <Section
+                      icon={ClipboardList}
+                      title={serviceDetailsTitle(selectedService.details_kind as ServiceDetailsKind, lang)}
+                    >
+                      <div className="grid gap-1" data-testid="service-details-view">
+                        {selectedServiceDetailsRows.map((row) => (
+                          <ServiceDetailField
+                            key={row.key}
+                            label={`${row.label} · ${t.staff_services_visible_to_patient}`}
+                            value={row.value}
+                            multiline={row.key === "dietary_notes" || row.key === "luggage_note"}
+                          />
+                        ))}
+                      </div>
+                    </Section>
+                  ) : null}
 
                   <Section icon={UserRoundCheck} title={t.staff_services_create_section_assignment}>
                     <div className="grid gap-1">
@@ -3059,6 +3154,21 @@ function useStaffServicesPageContent() {
                     ) : null}
                   </div>
                 </AdminFormSection>
+
+                {createDetailsKind ? (
+                  <AdminFormSection icon={ClipboardList} title={serviceDetailsTitle(createDetailsKind, lang)}>
+                    <ServiceDetailsFields
+                      kind={createDetailsKind}
+                      value={createForm.details}
+                      lang={lang}
+                      onChange={setCreateDetailsField}
+                      inputClassName={formInputClassName}
+                      textareaClassName={formTextareaClassName}
+                      idPrefix="create-service-details"
+                    />
+                    <p className="mt-2 text-xs text-muted-foreground">{t.staff_services_visible_to_patient}</p>
+                  </AdminFormSection>
+                ) : null}
 
                 <AdminFormSection icon={NotebookPen} title={t.staff_services_create_section_vendor_notes}>
                   <div className="grid gap-3 sm:grid-cols-2">

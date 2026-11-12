@@ -15,6 +15,10 @@ export const CARE_API_ERROR_KEYS: Record<string, string> = {
   // Patient's own service requests (concierge_services.rs)
   portal_service_period_inverted: "api_portal_service_period_inverted",
   portal_service_start_in_past: "api_portal_service_start_in_past",
+  // The own fields of a restaurant, transfer or tickets service (concierge_services/details.rs).
+  concierge_service_details_invalid: "api_concierge_service_details_invalid",
+  // A service is not completed before its start day, on the service form and through its task (QA C-3).
+  concierge_service_completion_before_start: "api_concierge_service_completion_before_start",
   // Patient's document upload (documents.rs `upload_my_document`)
   portal_upload_no_file: "api_portal_upload_no_file",
   portal_upload_type_not_allowed: "api_portal_upload_type_not_allowed",
