@@ -7475,7 +7475,7 @@ async fn get_patient_billing_workspace(
                         THEN ROUND(service.quantity * service.unit_price, 2)::text END,
                     'invoice_id', reservation.invoice_id,
                     'invoice_number', reservation.invoice_number,
-                    'billable', service.unit_price > 0 AND service.quantity > 0
+                    'billable', COALESCE(service.unit_price > 0 AND service.quantity > 0, FALSE)
                         AND reservation.invoice_id IS NULL
                 ) ORDER BY COALESCE(service.starts_at, service.completed_at, service.created_at), service.id)
                 FROM concierge_services service
