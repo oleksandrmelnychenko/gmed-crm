@@ -963,6 +963,12 @@ export function ConciergeTaskDetailDialog({
       }
     } catch (statusError) {
       setError(conciergeTaskErrorMessage(statusError, lang, labels.status));
+      // A refusal by the server (start-day rule, rights, conflict) keeps the
+      // task as it is, so the select shows the real status again (release QA
+      // 2026-11-13, A5); a network or server error keeps the choice to retry.
+      if (statusError instanceof ApiRequestError && (statusError.status ?? 500) < 500) {
+        setPendingStatus("");
+      }
     } finally {
       setBusy(false);
     }
@@ -1011,6 +1017,18 @@ export function ConciergeTaskDetailDialog({
     }
   }
 
+  async function refreshHistory() {
+    if (!taskId) return;
+    try {
+      const payload = await apiFetch<ConciergeTaskDetail>(`/concierge-operational-items/${taskId}`, { forceFresh: true });
+      setDetail((current) => current?.item.id === payload.item.id
+        ? { ...current, history: payload.history }
+        : current);
+    } catch {
+      // The next full load shows the history; the expense itself is saved.
+    }
+  }
+
   async function submitLinkedExpense(
     input: ConciergeExpenseSubmitInput,
   ): Promise<ConciergeExpenseMutationResponse> {
@@ -1032,6 +1050,10 @@ export function ConciergeTaskDetailDialog({
       ]);
       clearApiCache(`/tasks/${taskId}/expenses`);
       onChanged();
+      // The history gets «Добавлен расход» on the server (release QA
+      // 2026-11-13, A4). Only the history is replaced: a new task object
+      // would reset the open receipt dialog.
+      void refreshHistory();
       return response;
     } catch (submitError) {
       setExpenseError(
@@ -1439,11 +1461,22 @@ export function ConciergeTaskDetailDialog({
         request={open ? parentCloseRequest : null}
         lang={lang}
         onDone={() => setParentCloseRequest(null)}
+        onCancel={() => {
+          // Nothing changed: the select shows the real status again.
+          if (parentCloseRequest && !parentCloseRequest.archive) setPendingStatus("");
+          setParentCloseRequest(null);
+        }}
       />
       <OpenChecklistCompletionDialog
         request={open ? openChecklistRequest : null}
         lang={lang}
         onDone={() => setOpenChecklistRequest(null)}
+        onCancel={() => {
+          // The task stays open: the select shows the real status again
+          // (release QA 2026-11-13, A5).
+          setPendingStatus("");
+          setOpenChecklistRequest(null);
+        }}
       />
       <ParentCompletionSuggestionDialog
         suggestion={open ? completionSuggestion : null}

@@ -74,6 +74,8 @@ describe("InterpreterSuggestionsPanel", () => {
 
     expect(html).toContain("Рекомендуется сейчас: Free Interpreter");
     expect(html).toContain("Занят в это время");
+    expect(html).toContain("Языка пациента нет в списке");
+    expect(html).not.toContain("Неизвестное значение");
     expect(html).toContain("28.04.2027");
     expect(html).not.toContain("2027-04-28");
   });

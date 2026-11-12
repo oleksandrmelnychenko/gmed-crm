@@ -102,6 +102,10 @@ export function ConciergeTaskManagerPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  // A status change the server refused by its rules (start day, rights): a
+  // reload never makes it succeed, so its notice offers no «Повторить»
+  // (release QA 2026-11-13, A5).
+  const [ruleRefusal, setRuleRefusal] = useState("");
   const [version, setVersion] = useState(0);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
@@ -309,6 +313,11 @@ export function ConciergeTaskManagerPage() {
         : !(updateError instanceof ApiRequestError) || (updateError.status ?? 500) >= 500 ? labels.updateFailed
           : conciergeTaskErrorMessage(updateError, lang, labels.updateFailed);
       if (conflict) requestRefresh();
+      setRuleRefusal(
+        !conflict && updateError instanceof ApiRequestError && (updateError.status ?? 500) < 500
+          ? message
+          : "",
+      );
       setError(message);
       return message;
     } finally {
@@ -510,9 +519,11 @@ export function ConciergeTaskManagerPage() {
       {error ? (
         <div role="alert" className="flex flex-col gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive sm:flex-row sm:items-center sm:justify-between">
           <span>{error}</span>
-          <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={requestRefresh}>
-            <RefreshCw />{labels.retry}
-          </Button>
+          {error !== ruleRefusal ? (
+            <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={requestRefresh}>
+              <RefreshCw />{labels.retry}
+            </Button>
+          ) : null}
         </div>
       ) : null}
 

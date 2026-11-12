@@ -247,6 +247,17 @@ describe("concierge expense and service request notifications", () => {
     expect(copy.body).toBe("Трансфер · Airport pickup · без желаемого времени");
   });
 
+  it("names a restaurant or ticket request by its category, not «Другое»", () => {
+    const body = JSON.stringify({ patient_label: "PT-1 · Anna", service_kind: "other", taxonomy_name_de: "Restaurants", taxonomy_name_ru: "Рестораны", title: "Dinner", starts_at: null });
+    expect(localizedNotificationCopy(notice("concierge_service_request", body), "ru").body)
+      .toBe("Рестораны · Dinner · без желаемого времени");
+    expect(localizedNotificationCopy(notice("concierge_service_request_withdrawn", body), "de").body)
+      .toBe("Restaurants · Dinner · ohne Wunschtermin");
+    const plain = JSON.stringify({ patient_label: "PT-1 · Anna", service_kind: "other", title: "Gift", starts_at: null });
+    expect(localizedNotificationCopy(notice("concierge_service_request", plain), "ru").body)
+      .toBe("Другое · Gift · без желаемого времени");
+  });
+
   it("names a request the patient withdrew", () => {
     const body = JSON.stringify({ patient_label: "PT-1 · Anna", service_kind: "translation_support", title: "Opera", starts_at: null });
     expect(localizedNotificationCopy(notice("concierge_service_request_withdrawn", body), "ru")).toEqual({

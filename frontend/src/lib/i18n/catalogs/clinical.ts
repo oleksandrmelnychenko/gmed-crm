@@ -106,6 +106,8 @@ export interface ClinicalTranslations {
   appointment_interpreter_language_status_unknown: string;
   appointment_interpreter_language_status_match: string;
   appointment_interpreter_language_status_missing: string;
+  appointment_interpreter_language_status_listed: string;
+  appointment_interpreter_language_status_patient_unknown: string;
   appointment_interpreter_reason_preferred_patient: string;
   appointment_interpreter_reason_worked_before: string;
   appointment_interpreter_reason_high_feedback: string;
@@ -330,6 +332,8 @@ export const clinicalRu: ClinicalTranslations = {
   appointment_interpreter_language_status_unknown: "Язык неизвестен",
   appointment_interpreter_language_status_match: "Язык подходит",
   appointment_interpreter_language_status_missing: "Нет нужного языка",
+  appointment_interpreter_language_status_listed: "Языка пациента нет в списке",
+  appointment_interpreter_language_status_patient_unknown: "Язык пациента не указан",
   appointment_interpreter_reason_preferred_patient: "Предпочтителен для этого пациента",
   appointment_interpreter_reason_worked_before: "Работал ранее",
   appointment_interpreter_reason_high_feedback: "Высокая оценка",
@@ -559,6 +563,8 @@ export const clinicalDe: ClinicalTranslations = {
   appointment_interpreter_language_status_unknown: "Sprache unbekannt",
   appointment_interpreter_language_status_match: "Sprache passt",
   appointment_interpreter_language_status_missing: "Sprache fehlt",
+  appointment_interpreter_language_status_listed: "Patientensprache nicht hinterlegt",
+  appointment_interpreter_language_status_patient_unknown: "Patientensprache nicht angegeben",
   appointment_interpreter_reason_preferred_patient: "Für diesen Patienten bevorzugt",
   appointment_interpreter_reason_worked_before: "Bereits zusammengearbeitet",
   appointment_interpreter_reason_high_feedback: "Hohe Bewertung",

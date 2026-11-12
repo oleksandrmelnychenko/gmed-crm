@@ -3,6 +3,7 @@ import { SectionHeading } from "@/components/ui/section-heading";
 import { memo } from "react";
 
 import { useLang } from "@/lib/i18n";
+import { visibleInterpreterResponse } from "@/pages/appointments/model/completion-rules";
 import {
   useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
@@ -48,13 +49,19 @@ function AppointmentSnapshotSection({
     });
   }
 
-  if (detail.interpreter_name || detail.interpreter_response) {
+  // A cancelled visit waits for no answer: its «pending» is hidden here as in
+  // the overview badge, the agenda and the table (release QA 2026-11-13, A1).
+  const interpreterResponse = visibleInterpreterResponse(
+    detail.status,
+    detail.interpreter_response,
+  );
+  if (detail.interpreter_name || interpreterResponse) {
     snapshotCards.push({
       label: appointmentText("appointments_interpreter"),
       value: detail.interpreter_name || tr.common_not_set,
-      meta: detail.interpreter_response
+      meta: interpreterResponse
         ? [
-            responseLabel(detail.interpreter_response),
+            responseLabel(interpreterResponse),
             detail.interpreter_response_comment,
           ].filter(Boolean).join(" · ")
         : tr.common_not_set,

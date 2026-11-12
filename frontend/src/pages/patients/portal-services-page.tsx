@@ -58,6 +58,7 @@ import { cn } from "@/lib/utils";
 import { formatMoneyLabel, parseMoneyInput } from "@/lib/money";
 import { portalServiceContext } from "./model/portal-service-context";
 import { portalServiceNotes } from "./model/portal-service-notes";
+import { serviceRequestPlaceholders } from "./model/portal-service-request-placeholders";
 import {
   blankServiceDetailsForm,
   serviceDetailsError,
@@ -197,6 +198,7 @@ function PatientServicesRequestSection({
   onSubmit,
 }: PatientServicesRequestSectionProps) {
   const detailsKind = requestDetailsKind(form, taxonomyLeaves);
+  const placeholders = serviceRequestPlaceholders(form.serviceKind, detailsKind, lang);
   return (
     <AdminDialogScaffold
       title={t.services_request_title}
@@ -240,7 +242,7 @@ function PatientServicesRequestSection({
               id="portal-service-title"
               value={form.title}
               onChange={(event) => onFormChange((current) => ({ ...current, title: event.target.value }))}
-              placeholder={t.services_form_title_placeholder}
+              placeholder={placeholders.title}
               className={inputClass}
               required
             />
@@ -297,7 +299,7 @@ function PatientServicesRequestSection({
               id="portal-service-vendor"
               value={form.vendorName}
               onChange={(event) => onFormChange((current) => ({ ...current, vendorName: event.target.value }))}
-              placeholder={t.services_form_preferred_vendor_placeholder}
+              placeholder={placeholders.vendor}
               className={inputClass}
             />
           </Field>
@@ -350,7 +352,7 @@ function PatientServicesRequestSection({
             id="portal-service-notes"
             value={form.serviceNotes}
             onChange={(event) => onFormChange((current) => ({ ...current, serviceNotes: event.target.value }))}
-            placeholder={t.services_form_notes_placeholder}
+            placeholder={placeholders.notes}
             className={cn(textareaClass, "min-h-24")}
           />
         </Field>
@@ -601,9 +603,11 @@ export function PatientServicesPage() {
               </EmptyCell>
             ) : (
               services.map((item) => {
-                const contextParts = [item.provider_name, item.assigned_concierge_name, item.appointment_title]
+                // The supplier under its patient-facing name: the vendor row
+                // below, else the partner's own name (release QA 2026-11-13, A3).
+                const contextParts = [item.vendor_name || item.provider_name, item.assigned_concierge_name, item.appointment_title]
                   .filter((value): value is string => Boolean(value?.trim()));
-                const context = portalServiceContext(item);
+                const context = portalServiceContext(item, { vendorShownSeparately: true });
                 const { starts_at: start, ends_at: end } = item;
                 const period = formatPortalTimeWindow(start, end);
                 return (

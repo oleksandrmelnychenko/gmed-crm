@@ -813,10 +813,14 @@ async fn create_my_concierge_service(
     let patient_label = load_patient_label(&state, patient_id)
         .await
         .unwrap_or_else(|| "Patient".to_string());
+    let (taxonomy_name_de, taxonomy_name_ru) =
+        load_taxonomy_names(&state, body.taxonomy_node_id).await;
     // The staff UI words the notification in its language from these facts.
     let notification_body = serde_json::json!({
         "patient_label": patient_label,
         "service_kind": service_kind,
+        "taxonomy_name_de": taxonomy_name_de,
+        "taxonomy_name_ru": taxonomy_name_ru,
         "title": body.title.trim(),
         "starts_at": starts_at.map(|value| value.to_rfc3339()),
     })
@@ -1024,12 +1028,20 @@ async fn notify_staff_of_withdrawn_request(
     let starts_at = service
         .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("starts_at")
         .unwrap_or_default();
+    let taxonomy_name_de = service
+        .try_get::<Option<String>, _>("taxonomy_node_name_de")
+        .unwrap_or_default();
+    let taxonomy_name_ru = service
+        .try_get::<Option<String>, _>("taxonomy_node_name_ru")
+        .unwrap_or_default();
     let patient_label = load_patient_label(state, patient_id)
         .await
         .unwrap_or_else(|| "Patient".to_string());
     let body = serde_json::json!({
         "patient_label": patient_label,
         "service_kind": service_kind,
+        "taxonomy_name_de": taxonomy_name_de,
+        "taxonomy_name_ru": taxonomy_name_ru,
         "title": title,
         "starts_at": starts_at.map(|value| value.to_rfc3339()),
     })
@@ -6944,6 +6956,29 @@ async fn validate_non_medical_taxonomy_node(
 
 /// Code of a partner category, used to derive a service kind; a lookup
 /// failure only means the kind is derived from the title.
+/// The German and Russian name of a service category, for the staff notice of
+/// a portal request: «Рестораны» says more than the kind «Другое» (release QA
+/// 2026-11-13, A6). A failure leaves the names out; the notice still goes.
+async fn load_taxonomy_names(
+    state: &AppState,
+    taxonomy_node_id: Option<Uuid>,
+) -> (Option<String>, Option<String>) {
+    let Some(taxonomy_node_id) = taxonomy_node_id else {
+        return (None, None);
+    };
+    sqlx::query_as::<_, (Option<String>, Option<String>)>(
+        "SELECT name_de, name_ru FROM provider_taxonomy_nodes WHERE id = $1",
+    )
+    .bind(taxonomy_node_id)
+    .fetch_optional(&state.db)
+    .await
+    .unwrap_or_else(|error| {
+        tracing::warn!(error = %error, taxonomy_node_id = %taxonomy_node_id, "load taxonomy names for a notice");
+        None
+    })
+    .unwrap_or((None, None))
+}
+
 async fn load_taxonomy_code(state: &AppState, taxonomy_node_id: Option<Uuid>) -> Option<String> {
     let taxonomy_node_id = taxonomy_node_id?;
     sqlx::query_scalar::<_, String>("SELECT code FROM provider_taxonomy_nodes WHERE id = $1")

@@ -204,6 +204,9 @@ const INTERPRETER_LANGUAGE_STATUS_LABEL_KEYS = {
   "language match": "appointment_interpreter_language_status_match",
   "language missing": "appointment_interpreter_language_status_missing",
   "missing language": "appointment_interpreter_language_status_missing",
+  // The interpreter lists languages, none of them the patient's.
+  "language listed": "appointment_interpreter_language_status_listed",
+  "patient language unknown": "appointment_interpreter_language_status_patient_unknown",
 } satisfies LabelKeyMap;
 
 /** Reasons `interpreter_suggestions.rs` sends (English, fixed texts). */

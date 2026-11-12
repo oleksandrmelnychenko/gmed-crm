@@ -78,10 +78,13 @@ export function OpenChecklistCompletionDialog({
   request,
   lang,
   onDone,
+  onCancel,
 }: {
   request: OpenChecklistRequest | null;
   lang: Lang;
   onDone: () => void;
+  /** Runs instead of `onDone` when the person keeps the task open. */
+  onCancel?: () => void;
 }) {
   const labels = copy[lang];
   return (
@@ -97,7 +100,7 @@ export function OpenChecklistCompletionDialog({
         : ""}
       cancelLabel={labels.cancel}
       confirmLabel={labels.checklistConfirm}
-      onCancel={onDone}
+      onCancel={onCancel ?? onDone}
       onConfirm={() => {
         if (!request) return;
         onDone();
@@ -159,10 +162,13 @@ export function ParentCloseChoiceDialog({
   request,
   lang,
   onDone,
+  onCancel,
 }: {
   request: ParentCloseRequest | null;
   lang: Lang;
   onDone: () => void;
+  /** Runs instead of `onDone` when the person closes nothing. */
+  onCancel?: () => void;
 }) {
   const labels = copy[lang];
   const choose = (closeChildren: boolean) => {
@@ -178,7 +184,7 @@ export function ParentCloseChoiceDialog({
       cancelLabel={labels.cancel}
       confirmLabel={labels.keepOpen}
       saveLabel={labels.closeAll}
-      onCancel={onDone}
+      onCancel={onCancel ?? onDone}
       onConfirm={() => choose(false)}
       onSave={() => choose(true)}
     />

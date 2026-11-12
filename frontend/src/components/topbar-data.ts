@@ -490,6 +490,8 @@ function conciergeServiceRequestNotificationCopy(
   const data = parseNotificationBody<{
     patient_label?: string;
     service_kind?: string;
+    taxonomy_name_de?: string | null;
+    taxonomy_name_ru?: string | null;
     title?: string;
     starts_at?: string | null;
   }>(item.body);
@@ -504,7 +506,15 @@ function conciergeServiceRequestNotificationCopy(
   if (!data) return { title, body: item.body };
   const slot = (data.starts_at ? formatAppDateTime(data.starts_at) : "")
     || (lang === "de" ? "ohne Wunschtermin" : "без желаемого времени");
-  const kind = SERVICE_KIND_LABELS[data.service_kind ?? ""]?.[lang];
+  // A restaurant or ticket request is the kind «other» with a category: the
+  // category says what is requested (release QA 2026-11-13, A6).
+  const category = (lang === "de"
+    ? data.taxonomy_name_de || data.taxonomy_name_ru
+    : data.taxonomy_name_ru || data.taxonomy_name_de)?.trim();
+  const knownKind = data.service_kind && data.service_kind !== "other"
+    ? SERVICE_KIND_LABELS[data.service_kind]?.[lang]
+    : undefined;
+  const kind = knownKind || category || SERVICE_KIND_LABELS[data.service_kind ?? ""]?.[lang];
   return { title, body: [kind, data.title, slot].filter(Boolean).join(" · ") };
 }
 
