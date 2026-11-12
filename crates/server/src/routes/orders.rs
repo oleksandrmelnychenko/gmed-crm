@@ -5493,6 +5493,88 @@ async fn get_order_economics(
             );
         }
     };
+    // Concierge services billed by an issued invoice line of this order
+    // (F-C8, `invoice_concierge_service_lines`): their revenue is exact, net
+    // of the credit notes on that line, the same way as an order service
+    // above. It is already in the invoice revenue; here it is assigned.
+    let concierge_invoiced_rows = match sqlx::query(
+        r#"WITH legacy_credits AS (
+               SELECT transaction.invoice_id,
+                      COALESCE(SUM(CASE WHEN transaction.transaction_type = 'credit_note'
+                                        THEN transaction.amount_net ELSE -transaction.amount_net END), 0) AS amount_net,
+                      COALESCE(SUM(CASE WHEN transaction.transaction_type = 'credit_note'
+                                        THEN transaction.amount_vat ELSE -transaction.amount_vat END), 0) AS amount_vat,
+                      COALESCE(SUM(CASE WHEN transaction.transaction_type = 'credit_note'
+                                        THEN transaction.amount_gross ELSE -transaction.amount_gross END), 0) AS amount_gross
+               FROM invoice_credit_note_transactions transaction
+               JOIN invoices invoice ON invoice.id = transaction.invoice_id
+               WHERE invoice.order_id = $1
+                 AND transaction.line_items IS NULL
+               GROUP BY transaction.invoice_id
+           ), line_credits AS (
+               SELECT transaction.invoice_id,
+                      NULLIF(credited.value ->> 'invoice_line_index', '')::INTEGER AS invoice_line_index,
+                      COALESCE(SUM(CASE WHEN transaction.transaction_type = 'credit_note' THEN 1 ELSE -1 END
+                                   * COALESCE(NULLIF(credited.value ->> 'line_net', '')::NUMERIC, 0)), 0) AS amount_net,
+                      COALESCE(SUM(CASE WHEN transaction.transaction_type = 'credit_note' THEN 1 ELSE -1 END
+                                   * COALESCE(NULLIF(credited.value ->> 'line_vat', '')::NUMERIC, 0)), 0) AS amount_vat,
+                      COALESCE(SUM(CASE WHEN transaction.transaction_type = 'credit_note' THEN 1 ELSE -1 END
+                                   * COALESCE(NULLIF(credited.value ->> 'line_gross', '')::NUMERIC, 0)), 0) AS amount_gross
+               FROM invoice_credit_note_transactions transaction
+               JOIN invoices invoice ON invoice.id = transaction.invoice_id
+               CROSS JOIN LATERAL jsonb_array_elements(transaction.line_items) AS credited(value)
+               WHERE invoice.order_id = $1
+                 AND transaction.line_items IS NOT NULL
+                 AND jsonb_typeof(transaction.line_items) = 'array'
+               GROUP BY 1, 2
+           )
+           SELECT link.concierge_service_id,
+                  COALESCE(SUM(GREATEST(
+                      CASE WHEN invoice.total_net > 0 THEN link.amount_net
+                           * GREATEST(invoice.total_net - COALESCE(legacy.amount_net, 0), 0)
+                           / invoice.total_net ELSE 0 END
+                      - COALESCE(line_credit.amount_net, 0),
+                      0
+                  )), 0) AS amount_net,
+                  COALESCE(SUM(GREATEST(
+                      CASE WHEN invoice.total_vat > 0 THEN link.amount_vat
+                           * GREATEST(invoice.total_vat - COALESCE(legacy.amount_vat, 0), 0)
+                           / invoice.total_vat ELSE 0 END
+                      - COALESCE(line_credit.amount_vat, 0),
+                      0
+                  )), 0) AS amount_vat,
+                  COALESCE(SUM(GREATEST(
+                      CASE WHEN invoice.total_gross > 0 THEN link.amount_gross
+                           * GREATEST(invoice.total_gross - COALESCE(legacy.amount_gross, 0), 0)
+                           / invoice.total_gross ELSE 0 END
+                      - COALESCE(line_credit.amount_gross, 0),
+                      0
+                  )), 0) AS amount_gross
+           FROM invoice_concierge_service_lines link
+           JOIN invoices invoice ON invoice.id = link.invoice_id
+           LEFT JOIN legacy_credits legacy ON legacy.invoice_id = invoice.id
+           LEFT JOIN line_credits line_credit
+                  ON line_credit.invoice_id = invoice.id
+                 AND line_credit.invoice_line_index = link.invoice_line_index
+           WHERE invoice.order_id = $1
+             AND invoice.invoice_type <> 'advance'
+             AND invoice.status IN ('sent', 'partially_paid', 'paid', 'overdue')
+           GROUP BY link.concierge_service_id"#,
+    )
+    .bind(order_id)
+    .fetch_all(&mut *economics_transaction)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "load order concierge invoice lines");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load order economics",
+            );
+        }
+    };
+    let concierge_invoiced = concierge_invoiced_revenue(&concierge_invoiced_rows);
     if let Err(error) = economics_transaction.commit().await {
         tracing::error!(error = %error, order_id = %order_id, "commit order economics snapshot");
         return err(
@@ -5645,6 +5727,12 @@ async fn get_order_economics(
         })
         .collect::<Vec<_>>();
 
+    // Invoice lines that bill a concierge service are assigned revenue too.
+    assigned_revenue_net += concierge_invoiced
+        .values()
+        .map(|amounts| amounts.net)
+        .sum::<rust_decimal::Decimal>();
+
     let planned_revenue_gross = planned_revenue_net + planned_revenue_vat;
     let planned_margin_net = planned_passthrough.margin_of(planned_revenue_net, planned_cost_net);
     let agency_revenue_net = revenue_net - actual_passthrough.revenue_net;
@@ -5709,7 +5797,7 @@ async fn get_order_economics(
     {
         warnings.push("unassigned_invoice_revenue");
     }
-    let concierge_sales = order_concierge_sales(&concierge_rows, &currency);
+    let concierge_sales = order_concierge_sales(&concierge_rows, &currency, &concierge_invoiced);
 
     Json(serde_json::json!({
         "order_id": order_id,
@@ -5777,18 +5865,84 @@ fn concierge_sale_price(
     (quantity * unit_price).round_commercial(2)
 }
 
-/// The informational «Concierge services» block of the order economics
-/// (owner 2026-11-12, decision 7): sale prices split into billed (billing
-/// status billed/settled, already part of the invoice revenue) and not billed
-/// yet (draft/ready). Never part of the order totals: no order line or
-/// invoice line is linked to a concierge service.
-fn order_concierge_sales(rows: &[sqlx::postgres::PgRow], currency: &str) -> serde_json::Value {
+/// Revenue of one concierge service from the issued invoice lines that bill
+/// it (net of their credit notes).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ConciergeInvoicedAmounts {
+    net: rust_decimal::Decimal,
+    vat: rust_decimal::Decimal,
+    gross: rust_decimal::Decimal,
+}
+
+fn concierge_invoiced_revenue(
+    rows: &[sqlx::postgres::PgRow],
+) -> std::collections::HashMap<Uuid, ConciergeInvoicedAmounts> {
+    rows.iter()
+        .filter_map(|row| {
+            let service_id = row.try_get::<Uuid, _>("concierge_service_id").ok()?;
+            let amount = |column: &str| {
+                row.try_get::<rust_decimal::Decimal, _>(column)
+                    .unwrap_or(rust_decimal::Decimal::ZERO)
+                    .round_commercial(2)
+            };
+            Some((
+                service_id,
+                ConciergeInvoicedAmounts {
+                    net: amount("amount_net"),
+                    vat: amount("amount_vat"),
+                    gross: amount("amount_gross"),
+                },
+            ))
+        })
+        .collect()
+}
+
+/// One concierge service of the order as the «Concierge services» block
+/// counts it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConciergeSaleState {
+    /// Billed by an issued invoice line of the order: counted exactly in the
+    /// order revenue (F-C8).
+    Invoiced,
+    /// Billing status billed/settled set by hand, no invoice line names it:
+    /// information only.
+    BilledWithoutInvoiceLine,
+    /// Not billed yet (draft/ready, also when a draft holds it): planned,
+    /// information only.
+    NotBilled,
+}
+
+fn concierge_sale_state(billing_status: &str, invoiced: bool) -> ConciergeSaleState {
+    if invoiced {
+        ConciergeSaleState::Invoiced
+    } else if matches!(billing_status, "billed" | "settled") {
+        ConciergeSaleState::BilledWithoutInvoiceLine
+    } else {
+        ConciergeSaleState::NotBilled
+    }
+}
+
+/// The «Concierge services» block of the order economics (owner 2026-11-12,
+/// decision 7; F-C8). A service billed by an issued invoice line of the order
+/// is counted exactly: its revenue (net of credit notes) is part of the
+/// invoice revenue and assigned like an order service (`invoiced_total`).
+/// Every other service stays information next to the totals, never added to
+/// them (`counted_in_totals` = false for `billed_total`/`unbilled_total`): a
+/// service billed by hand has no invoice line to count, an unbilled one may
+/// be an order line as well.
+fn order_concierge_sales(
+    rows: &[sqlx::postgres::PgRow],
+    currency: &str,
+    invoiced: &std::collections::HashMap<Uuid, ConciergeInvoicedAmounts>,
+) -> serde_json::Value {
+    let mut invoiced_total = rust_decimal::Decimal::ZERO;
     let mut billed_total = rust_decimal::Decimal::ZERO;
     let mut unbilled_total = rust_decimal::Decimal::ZERO;
     let mut other_currency_count = 0_usize;
     let services = rows
         .iter()
         .map(|row| {
+            let service_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
             let quantity = row
                 .try_get::<rust_decimal::Decimal, _>("quantity")
                 .unwrap_or(rust_decimal::Decimal::ZERO);
@@ -5800,25 +5954,31 @@ fn order_concierge_sales(rows: &[sqlx::postgres::PgRow], currency: &str) -> serd
             let billing_status = row
                 .try_get::<String, _>("billing_status")
                 .unwrap_or_default();
-            let billed = matches!(billing_status.as_str(), "billed" | "settled");
+            let invoice_amounts = invoiced.get(&service_id).copied();
+            let state = concierge_sale_state(&billing_status, invoice_amounts.is_some());
             let service_currency = row
                 .try_get::<String, _>("currency")
                 .unwrap_or_else(|_| currency.to_string());
             let currency_matches_order = service_currency == currency;
-            if !currency_matches_order {
-                other_currency_count += 1;
-            } else if billed {
-                billed_total += sale_price;
-            } else {
-                unbilled_total += sale_price;
+            match (state, invoice_amounts) {
+                // An invoice of the order is in the order's currency.
+                (ConciergeSaleState::Invoiced, Some(amounts)) => invoiced_total += amounts.net,
+                _ if !currency_matches_order => other_currency_count += 1,
+                (ConciergeSaleState::BilledWithoutInvoiceLine, _) => billed_total += sale_price,
+                _ => unbilled_total += sale_price,
             }
             serde_json::json!({
-                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "id": service_id,
                 "title": row.try_get::<String, _>("title").unwrap_or_default(),
                 "service_kind": row.try_get::<String, _>("service_kind").unwrap_or_default(),
                 "status": row.try_get::<String, _>("status").unwrap_or_default(),
                 "billing_status": billing_status,
-                "billed": billed,
+                "billed": state != ConciergeSaleState::NotBilled,
+                // Counted in the order revenue through its invoice line.
+                "invoiced": state == ConciergeSaleState::Invoiced,
+                "invoiced_net": invoice_amounts.map(|amounts| economics_money(amounts.net)),
+                "invoiced_vat": invoice_amounts.map(|amounts| economics_money(amounts.vat)),
+                "invoiced_gross": invoice_amounts.map(|amounts| economics_money(amounts.gross)),
                 "currency": service_currency,
                 "currency_matches_order": currency_matches_order,
                 "quantity": economics_money(quantity),
@@ -5832,9 +5992,10 @@ fn order_concierge_sales(rows: &[sqlx::postgres::PgRow], currency: &str) -> serd
         })
         .collect::<Vec<_>>();
     serde_json::json!({
-        // No reliable link to order or invoice lines: the amounts are
-        // information next to the order totals, never added to them.
+        // `billed_total` and `unbilled_total` are information next to the
+        // order totals; `invoiced_total` is already part of them.
         "counted_in_totals": false,
+        "invoiced_total": economics_money(invoiced_total),
         "billed_total": economics_money(billed_total),
         "unbilled_total": economics_money(unbilled_total),
         "other_currency_count": other_currency_count,
@@ -15087,6 +15248,37 @@ mod tests {
                 rust_decimal::Decimal::new(3333, 2)
             ),
             rust_decimal::Decimal::new(5000, 2)
+        );
+    }
+
+    #[test]
+    fn a_concierge_service_counts_exactly_only_through_its_invoice_line() {
+        // F-C8: an issued invoice line counts, whatever the billing status.
+        assert_eq!(
+            concierge_sale_state("billed", true),
+            ConciergeSaleState::Invoiced
+        );
+        assert_eq!(
+            concierge_sale_state("settled", true),
+            ConciergeSaleState::Invoiced
+        );
+        // Billed by hand: information only.
+        assert_eq!(
+            concierge_sale_state("billed", false),
+            ConciergeSaleState::BilledWithoutInvoiceLine
+        );
+        assert_eq!(
+            concierge_sale_state("settled", false),
+            ConciergeSaleState::BilledWithoutInvoiceLine
+        );
+        // Ready or on a draft: planned, information only.
+        assert_eq!(
+            concierge_sale_state("ready", false),
+            ConciergeSaleState::NotBilled
+        );
+        assert_eq!(
+            concierge_sale_state("draft", false),
+            ConciergeSaleState::NotBilled
         );
     }
 }

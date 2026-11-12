@@ -272,10 +272,13 @@ export function SettlementActions({
   const [busy, setBusy] = useState<"invoice" | "settle" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [forceTarget, setForceTarget] = useState<TerminationSettlement | null>(null);
+  // The draft is created only after a confirmation (screens QA 2026-11-12, F-C13).
+  const [confirmInvoice, setConfirmInvoice] = useState(false);
 
   if (settlement.status !== "open" || (!canCreate && !canFinance)) return null;
 
   async function createInvoice() {
+    setConfirmInvoice(false);
     setBusy("invoice");
     setError(null);
     try {
@@ -331,7 +334,7 @@ export function SettlementActions({
             data-action="write"
             disabled={busy !== null || !invoiceAllowed}
             title={invoiceAllowed ? undefined : tx("Нет невыставленной суммы.", "Kein nicht berechneter Betrag.")}
-            onClick={() => void createInvoice()}
+            onClick={() => setConfirmInvoice(true)}
           >
             {busy === "invoice" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FilePlus2 className="size-3.5" />}
             {tx("Создать финальный счёт", "Schlussrechnung erstellen")}
@@ -355,6 +358,35 @@ export function SettlementActions({
         ) : null}
       </div>
       {error ? <Banner tone="error">{error}</Banner> : null}
+      <Dialog open={confirmInvoice} onOpenChange={(open) => { if (!open && busy === null) setConfirmInvoice(false); }}>
+        {confirmInvoice ? (
+          <DialogContent className="sm:max-w-[480px]" data-testid="termination-final-invoice-confirm">
+            <DialogHeader>
+              <DialogTitle><SectionHeading icon={FilePlus2}>{tx("Создать финальный счёт?", "Schlussrechnung erstellen?")}</SectionHeading></DialogTitle>
+              <DialogDescription>
+                {tx(
+                  "Будет создан черновик финального счёта на невыставленную сумму этого заказа. Номер он получит при выпуске; до выпуска черновик можно отменить.",
+                  "Es wird ein Entwurf der Schlussrechnung über den nicht berechneten Betrag dieses Auftrags erstellt. Die Nummer erhält er bei der Ausstellung; bis dahin kann der Entwurf storniert werden.",
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            {invoiceAmount > 0 ? (
+              <p className="font-mono text-sm font-semibold tabular-nums">
+                {formatMoneyAmount(invoiceAmount, settlement.currency || "EUR")}
+              </p>
+            ) : null}
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setConfirmInvoice(false)}>
+                {tx("Отмена", "Abbrechen")}
+              </Button>
+              <Button type="button" data-action="write" disabled={busy !== null} onClick={() => void createInvoice()}>
+                <FilePlus2 className="size-4" />
+                {tx("Создать черновик", "Entwurf erstellen")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        ) : null}
+      </Dialog>
       <ForceSettleDialog
         settlement={forceTarget}
         lang={lang}

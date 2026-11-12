@@ -28,6 +28,14 @@ export const BILLING_API_ERROR_KEYS: Record<string, string> = {
   advance_over_billed_quote: "api_billing_advance_over_billed_quote",
   // An interim invoice leaves what an unpaid advance asks for (QA 2026-11-01, Z1 N1).
   interim_over_open_advance: "api_billing_interim_over_open_advance",
+  // Concierge services billed at their sale price (invoices/concierge_lines.rs, F-C8).
+  concierge_service_not_ready: "api_billing_concierge_service_not_ready",
+  concierge_service_without_price: "api_billing_concierge_service_without_price",
+  concierge_service_already_invoiced: "api_billing_concierge_service_already_invoiced",
+  concierge_service_other_order: "api_billing_concierge_service_other_order",
+  concierge_service_other_currency: "api_billing_concierge_service_other_currency",
+  concierge_service_no_tax_profile: "api_billing_concierge_service_no_tax_profile",
+  invoice_bills_changed_concierge_service: "api_billing_invoice_bills_changed_concierge_service",
   // advance_settlement.rs
   advance_rest_already_closed: "api_billing_advance_rest_already_closed",
   advance_not_settled_by_final_invoice: "api_billing_advance_not_settled_by_final_invoice",

@@ -93,12 +93,23 @@ async fn list_ready_concierge_services(
                   service.completed_at,
                   service.quantity,
                   service.unit_price,
-                  UPPER(service.currency) AS currency
+                  UPPER(service.currency) AS currency,
+                  reservation.invoice_id AS draft_invoice_id
            FROM concierge_services service
            JOIN patients patient ON patient.id = service.patient_id
            LEFT JOIN appointments appointment ON appointment.id = service.appointment_id
            LEFT JOIN orders linked_order
              ON linked_order.id = COALESCE(service.order_id, appointment.order_id)
+           -- A live draft that already bills the service (F-C8).
+           LEFT JOIN LATERAL (
+               SELECT link.invoice_id
+               FROM invoice_concierge_service_lines link
+               JOIN invoices invoice ON invoice.id = link.invoice_id
+               WHERE link.concierge_service_id = service.id
+                 AND invoice.status <> 'cancelled'
+               ORDER BY link.created_at DESC
+               LIMIT 1
+           ) reservation ON true
            WHERE service.billing_status = 'ready'
              AND service.status <> 'cancelled'
              AND ($1::uuid IS NULL OR service.patient_id = $1::uuid)
@@ -168,6 +179,8 @@ async fn list_ready_concierge_services(
                 "unit_price": unit_price.map(money_text),
                 "sale_price": sale_price,
                 "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
+                // Already on a live draft of the patient's billing tab.
+                "draft_invoice_id": row.try_get::<Option<Uuid>, _>("draft_invoice_id").unwrap_or_default(),
             })
         })
         .collect::<Vec<_>>();

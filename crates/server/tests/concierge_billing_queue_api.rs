@@ -376,3 +376,255 @@ async fn concierge_sale_prices_are_information_in_the_economics_and_ready_ones_f
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+async fn json_request(
+    app: &axum::Router,
+    method: &str,
+    path: &str,
+    bearer: &str,
+    body: Value,
+) -> (StatusCode, Value) {
+    let request = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("Authorization", bearer)
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(json!(null)),
+    )
+}
+
+async fn billing_status_of(pool: &PgPool, service_id: Uuid) -> String {
+    sqlx::query_scalar("SELECT billing_status FROM concierge_services WHERE id = $1")
+        .bind(service_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+fn money(value: &Value) -> Decimal {
+    value
+        .as_str()
+        .and_then(|text| text.parse::<Decimal>().ok())
+        .unwrap_or_else(|| panic!("money value expected, got {value}"))
+}
+
+/// F-C8 (screens QA 2026-11-12): a ready concierge service with a sale price
+/// is billed from the patient's billing tab, exactly once; the release moves
+/// it to billed and the order economics count it; a cancelled invoice gives
+/// it back to billing.
+#[tokio::test]
+async fn a_ready_concierge_service_is_billed_once_from_the_patient_billing_tab() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let app = context.app;
+    let pool = context.pool;
+    let admin_id = context.admin_id;
+    let tag = Uuid::new_v4().simple().to_string();
+
+    let billing = auth_header(seed_user(&pool, &tag, "billing").await, "billing");
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by,
+                               address_street, address_zip, address_city, address_country)
+           VALUES ($1, 'Synth', 'Conciergebill', '1980-02-02', 'diverse', $2,
+                   'Teststraße 1', '10115', 'Berlin', 'Deutschland')
+           RETURNING id"#,
+    )
+    .bind(format!("PT-CB-{tag}"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, currency, created_by)
+           VALUES ($1, $2, 'execution', 'active', 'EUR', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-CB-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let priced_id = seed_concierge_service(
+        &pool,
+        patient_id,
+        Some(order_id),
+        None,
+        "Airport transfer",
+        "completed",
+        "ready",
+        "EUR",
+        Decimal::ONE,
+        Some(Decimal::new(120, 0)),
+        admin_id,
+    )
+    .await;
+    let unpriced_id = seed_concierge_service(
+        &pool,
+        patient_id,
+        Some(order_id),
+        None,
+        "Pharmacy run",
+        "completed",
+        "ready",
+        "EUR",
+        Decimal::ONE,
+        None,
+        admin_id,
+    )
+    .await;
+    let path = format!("/api/v1/patients/{patient_id}/billing-invoices");
+    let draft_body = |services: Vec<Uuid>, order: Option<Uuid>| {
+        json!({
+            "request_id": Uuid::new_v4(),
+            "order_id": order,
+            "currency": "EUR",
+            "invoice_type": "interim",
+            "external_invoice_ids": [],
+            "concierge_service_ids": services,
+        })
+    };
+
+    // Without its order, without a price: refused.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &billing,
+        draft_body(vec![priced_id], None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "concierge_service_other_order");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &billing,
+        draft_body(vec![unpriced_id], Some(order_id)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"], "concierge_service_without_price");
+
+    // The draft bills 1 × 120 net with the default VAT and names the service.
+    let (status, draft) = json_request(
+        &app,
+        "POST",
+        &path,
+        &billing,
+        draft_body(vec![priced_id], Some(order_id)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let invoice_id = Uuid::parse_str(draft["id"].as_str().unwrap()).unwrap();
+    let (line, total_net): (Value, Decimal) =
+        sqlx::query_as("SELECT line_items->0, total_net FROM invoices WHERE id = $1")
+            .bind(invoice_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(line["source"], "concierge_service");
+    assert_eq!(line["source_concierge_service_id"], priced_id.to_string());
+    assert_eq!(line["description"], "Airport transfer");
+    assert_eq!(money(&line["line_net"]), Decimal::new(120, 0));
+    assert_eq!(total_net, Decimal::new(12000, 2));
+    // A draft only reserves the service.
+    assert_eq!(billing_status_of(&pool, priced_id).await, "ready");
+
+    // Never twice: a second draft is refused.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &billing,
+        draft_body(vec![priced_id], Some(order_id)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "concierge_service_already_invoiced");
+
+    // The billing tab lists both, neither billable now.
+    let (status, workspace) = get_json(
+        &app,
+        &format!("/api/v1/patients/{patient_id}/billing-workspace"),
+        &billing,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{workspace}");
+    let listed = workspace["concierge_services"].as_array().unwrap();
+    let priced = listed
+        .iter()
+        .find(|item| item["id"] == priced_id.to_string())
+        .unwrap();
+    assert_eq!(priced["billable"], false);
+    assert_eq!(priced["invoice_id"], invoice_id.to_string());
+    let unpriced = listed
+        .iter()
+        .find(|item| item["id"] == unpriced_id.to_string())
+        .unwrap();
+    assert_eq!(unpriced["billable"], false);
+    assert!(unpriced["sale_price_net"].is_null());
+
+    // The release bills the service; the economics count it exactly.
+    let status_path = format!("/api/v1/invoices/{invoice_id}/status");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &status_path,
+        &billing,
+        json!({ "status": "sent" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(billing_status_of(&pool, priced_id).await, "billed");
+    let (status, economics) = get_json(
+        &app,
+        &format!("/api/v1/orders/{order_id}/economics"),
+        &billing,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{economics}");
+    assert_eq!(economics["actual"]["recognized_revenue_net"], "120");
+    assert_eq!(economics["concierge_sales"]["invoiced_total"], "120");
+    assert_eq!(economics["concierge_sales"]["billed_total"], "0");
+    assert!(
+        !economics["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning == "unassigned_invoice_revenue"),
+        "{economics}"
+    );
+
+    // Cancelling the released invoice gives the service back to billing.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &status_path,
+        &billing,
+        json!({ "status": "cancelled", "reason": "Falscher Empfänger" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(billing_status_of(&pool, priced_id).await, "ready");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &billing,
+        draft_body(vec![priced_id], Some(order_id)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+}

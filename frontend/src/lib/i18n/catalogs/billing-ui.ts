@@ -30,6 +30,20 @@ export const billingUiDe = {
     "Eine unbezahlte Vorauszahlungsrechnung fordert diesen Betrag bereits. Bitte weniger Positionen wählen oder die Vorauszahlung zuerst verbuchen.",
   "api_billing_quote_behind_actual_services":
     "Die erbrachten Leistungen übersteigen dieses Angebot ({services_label}). Bitte ein neues Angebot mit den tatsächlichen Mengen erstellen.",
+  "api_billing_concierge_service_not_ready":
+    "Die Concierge-Leistung „{service_label}“ ist nicht (mehr) abrechnungsbereit. Bitte die Daten aktualisieren.",
+  "api_billing_concierge_service_without_price":
+    "Die Concierge-Leistung „{service_label}“ hat keinen Verkaufspreis. Bitte den Preis in der Leistung erfassen.",
+  "api_billing_concierge_service_already_invoiced":
+    "Die Concierge-Leistung „{service_label}“ wird bereits von einer anderen Rechnung berechnet.",
+  "api_billing_concierge_service_other_order":
+    "Die Concierge-Leistung „{service_label}“ gehört zu einem anderen Auftrag. Bitte ihren Auftrag wählen.",
+  "api_billing_concierge_service_other_currency":
+    "Die Concierge-Leistung „{service_label}“ ist in einer anderen Währung bepreist.",
+  "api_billing_concierge_service_no_tax_profile":
+    "Kein aktives Standard-Steuerprofil: die MwSt. der Concierge-Leistung ist unbekannt. Bitte in den Steuerprofilen festlegen.",
+  "api_billing_invoice_bills_changed_concierge_service":
+    "Eine Concierge-Leistung des Entwurfs hat sich seit dem Entwurf geändert ({services_label}). Bitte den Entwurf stornieren und eine neue Rechnung erstellen.",
   "api_billing_advance_rest_already_closed": "Die Anzahlungsrechnung hat keinen offenen Rest mehr.",
   "api_billing_advance_not_settled_by_final_invoice":
     "Noch keine ausgestellte Schlussrechnung rechnet diese Anzahlung ab.",
@@ -61,6 +75,20 @@ export const billingUiRu = {
     "Неоплаченный счёт на предоплату уже требует эту сумму. Выберите меньше позиций или сначала проведите оплату предоплаты.",
   "api_billing_quote_behind_actual_services":
     "Оказанные услуги превышают это предложение ({services_label}). Создайте новое предложение с фактическими количествами.",
+  "api_billing_concierge_service_not_ready":
+    "Услуга Concierge «{service_label}» не готова (уже не готова) к выставлению счёта. Обновите данные.",
+  "api_billing_concierge_service_without_price":
+    "У услуги Concierge «{service_label}» нет цены продажи. Укажите цену в услуге.",
+  "api_billing_concierge_service_already_invoiced":
+    "Услуга Concierge «{service_label}» уже выставлена другим счётом.",
+  "api_billing_concierge_service_other_order":
+    "Услуга Concierge «{service_label}» относится к другому заказу. Выберите её заказ.",
+  "api_billing_concierge_service_other_currency":
+    "Цена услуги Concierge «{service_label}» указана в другой валюте.",
+  "api_billing_concierge_service_no_tax_profile":
+    "Нет активного налогового профиля по умолчанию: НДС услуги Concierge неизвестен. Задайте его в налоговых профилях.",
+  "api_billing_invoice_bills_changed_concierge_service":
+    "Услуга Concierge в черновике изменилась после его создания ({services_label}). Отмените черновик и создайте новый счёт.",
   "api_billing_advance_rest_already_closed": "У авансового счёта больше нет открытого остатка.",
   "api_billing_advance_not_settled_by_final_invoice": "Этот аванс ещё не закрыт выпущенным финальным счётом.",
 } as const satisfies Record<keyof typeof billingUiDe, string>;

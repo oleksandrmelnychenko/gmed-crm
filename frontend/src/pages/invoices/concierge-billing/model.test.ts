@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   canReadConciergeBillingQueue,
+  conciergeQueueAction,
   conciergeQueueBadge,
   conciergeQueuePatients,
   filterConciergeQueue,
@@ -56,6 +57,21 @@ describe("concierge billing queue model", () => {
     expect(filterConciergeQueue(rows, "p2").map((row) => row.id)).toEqual(["a", "c"]);
     expect(filterConciergeQueue(rows, "")).toHaveLength(4);
     expect(patientLabel({ patient_name: " ", patient_pid: null })).toBe("—");
+  });
+
+  it("sends an unpriced service to its price, a reserved one to its draft, the rest to billing", () => {
+    expect(conciergeQueueAction({ ...item("a", "p1", "Anna", null), sale_price: null })).toEqual({
+      kind: "set_price",
+      href: "/services?service=a",
+    });
+    expect(conciergeQueueAction({ ...item("b", "p1", "Anna", null), draft_invoice_id: "inv 1" })).toEqual({
+      kind: "open_draft",
+      href: "/invoices?invoice=inv%201",
+    });
+    expect(conciergeQueueAction(item("c", "p1", "Anna", null))).toEqual({
+      kind: "bill",
+      href: "/patients/p1?tab=billing",
+    });
   });
 
   it("links to the patient's billing tab and shows a badge only for open work", () => {

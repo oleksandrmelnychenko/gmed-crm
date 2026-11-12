@@ -56,12 +56,44 @@ describe("conciergeSalesView", () => {
     expect(view?.unbilledTotal).toBe(180);
     expect(view?.billedTotal).toBe(100);
     expect(view?.summary).toBe("Услуги Concierge: ещё не выставлено 180.00 EUR, выставлено 100.00 EUR (информативно).");
-    expect(view?.note).toContain("не входит в суммы заказа");
+    expect(view?.note).toContain("не входят в суммы заказа");
     expect(view?.note).toContain("зарплатой");
     expect(view?.rows.map((row) => [row.id, row.state, row.salePrice, row.date])).toEqual([
       ["ready", "Готово к выставлению счёта", "180.00 EUR", "13.11.2026"],
-      ["billed", "Выставлено", "100.00 EUR", "—"],
+      ["billed", "Выставлено без позиции счёта", "100.00 EUR", "—"],
     ]);
+  });
+
+  it("counts a service billed by an invoice line exactly and says so (F-C8)", () => {
+    const base = sales();
+    const view = conciergeSalesView(
+      sales({
+        invoiced_total: "120",
+        services: [
+          ...base.services,
+          {
+            ...base.services[1],
+            id: "invoiced",
+            title: "Airport transfer",
+            invoiced: true,
+            invoiced_net: "120",
+            sale_price: "120",
+          },
+        ],
+      }),
+      money,
+      "EUR",
+      "ru",
+    );
+    expect(view?.invoicedTotal).toBe(120);
+    expect(view?.summary).toBe(
+      "Услуги Concierge: в счетах 120.00 EUR (учтено в доходе), ещё не выставлено 180.00 EUR, выставлено 100.00 EUR (информативно).",
+    );
+    const invoiced = view?.rows.find((row) => row.id === "invoiced");
+    expect(invoiced?.invoiced).toBe(true);
+    expect(invoiced?.state).toBe("В счёте (учтено в доходе)");
+    expect(invoiced?.salePrice).toBe("120.00 EUR");
+    expect(invoiced?.href).toBe("/services?service=invoiced");
   });
 
   it("says in German that services in another currency stay outside the sums", () => {

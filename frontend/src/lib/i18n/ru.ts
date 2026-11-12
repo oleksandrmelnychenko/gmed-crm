@@ -1398,7 +1398,7 @@ export const ru = {
   invoices_workspace_record_collections: "Отправить последнее требование",
   invoices_workspace_dunning_unavailable: "Не удалось проверить счёт. Обновите данные перед добавлением напоминания.",
   invoices_workspace_dunning_ineligible: "Для оплаченного, отменённого счёта или счёта без задолженности напоминания не создаются.",
-  invoices_workspace_dunning_not_sent: "Сначала отправьте счёт клиенту и обновите его статус. Для черновика напоминания недоступны.",
+  invoices_workspace_dunning_not_sent: "Сначала выставьте счёт кнопкой «Выставить» в «Обзоре счёта». Для черновика напоминания недоступны.",
   invoices_workspace_dunning_covered: "Напоминание недоступно: сумма покрыта переплатой или оплаченным авансом. Зачтите их вместо напоминания.",
   invoices_workspace_dunning_missing_due_date: "Укажите срок оплаты счёта, чтобы определить просрочку.",
   invoices_workspace_dunning_not_overdue: "Срок оплаты ещё не истёк. Напоминание доступно со следующего дня после срока оплаты.",

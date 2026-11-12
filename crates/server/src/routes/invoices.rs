@@ -33,6 +33,7 @@ use gmed_domain::role::Role;
 
 pub(crate) mod advance_application;
 pub(crate) mod advance_settlement;
+mod concierge_lines;
 mod credit_note_pdf;
 pub(crate) mod credit_notes;
 mod credit_transfers;
@@ -290,6 +291,9 @@ struct CreatePatientBillingInvoiceRequest {
     internal_note: Option<String>,
     line_items: Option<Vec<CreateInvoiceLineSelection>>,
     external_invoice_ids: Vec<Uuid>,
+    /// Ready concierge services billed at their sale price (F-C8).
+    #[serde(default)]
+    concierge_service_ids: Vec<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -7434,6 +7438,54 @@ async fn get_patient_billing_workspace(
                 WHERE external.patient_id = patient.id
                   AND external.invoice_scope = 'patient_order'
                   AND external.status <> 'cancelled'
+            ), '[]'::jsonb),
+            -- Ready concierge services billed at their sale price (F-C8):
+            -- net quantity × unit price, VAT of the default tax profile. A
+            -- service without a price, or one a live draft already bills, is
+            -- listed but not billable.
+            'concierge_vat_rate', (
+                SELECT profile.vat_rate::text
+                FROM tax_profiles profile
+                WHERE profile.is_default AND profile.is_active
+                  AND profile.valid_from <= CURRENT_DATE
+                  AND (profile.valid_to IS NULL OR profile.valid_to >= CURRENT_DATE)
+                ORDER BY profile.valid_from DESC
+                LIMIT 1
+            ),
+            'concierge_services', COALESCE((
+                SELECT jsonb_agg(jsonb_build_object(
+                    'id', service.id,
+                    'title', service.title,
+                    'service_kind', service.service_kind,
+                    'order_id', COALESCE(service.order_id, appointment.order_id),
+                    'order_number', service_order.order_number,
+                    'service_date', COALESCE(service.starts_at, service.completed_at),
+                    'currency', UPPER(service.currency),
+                    'quantity', service.quantity::text,
+                    'unit_price', service.unit_price::text,
+                    'sale_price_net', CASE WHEN service.unit_price > 0 AND service.quantity > 0
+                        THEN ROUND(service.quantity * service.unit_price, 2)::text END,
+                    'invoice_id', reservation.invoice_id,
+                    'invoice_number', reservation.invoice_number,
+                    'billable', service.unit_price > 0 AND service.quantity > 0
+                        AND reservation.invoice_id IS NULL
+                ) ORDER BY COALESCE(service.starts_at, service.completed_at, service.created_at), service.id)
+                FROM concierge_services service
+                LEFT JOIN appointments appointment ON appointment.id = service.appointment_id
+                LEFT JOIN orders service_order
+                  ON service_order.id = COALESCE(service.order_id, appointment.order_id)
+                LEFT JOIN LATERAL (
+                    SELECT invoice.id AS invoice_id, invoice.invoice_number
+                    FROM invoice_concierge_service_lines link
+                    JOIN invoices invoice ON invoice.id = link.invoice_id
+                    WHERE link.concierge_service_id = service.id
+                      AND invoice.status <> 'cancelled'
+                    ORDER BY link.created_at DESC
+                    LIMIT 1
+                ) reservation ON true
+                WHERE service.patient_id = patient.id
+                  AND service.billing_status = 'ready'
+                  AND service.status <> 'cancelled'
             ), '[]'::jsonb)
         )
         FROM patients patient
@@ -7496,7 +7548,8 @@ async fn create_patient_billing_invoice(
         .clone()
         .unwrap_or_else(|| "interim".to_string());
     if !is_valid_invoice_type(&invoice_type)
-        || (!body.external_invoice_ids.is_empty() && invoice_type == "advance")
+        || ((!body.external_invoice_ids.is_empty() || !body.concierge_service_ids.is_empty())
+            && invoice_type == "advance")
     {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -7578,7 +7631,17 @@ async fn create_patient_billing_invoice(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    if snapshot.line_items.as_array().is_none_or(Vec::is_empty) && external_ids.is_empty() {
+    let concierge_ids = body
+        .concierge_service_ids
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if snapshot.line_items.as_array().is_none_or(Vec::is_empty)
+        && external_ids.is_empty()
+        && concierge_ids.is_empty()
+    {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Select at least one invoice item",
@@ -7799,6 +7862,27 @@ async fn create_patient_billing_invoice(
         snapshot.total_gross = (snapshot.total_gross + remaining).round_cents();
         external_allocations.push((external_id, remaining));
     }
+    // Ready concierge services at their sale price (F-C8): one line each,
+    // linked to the service so it is billed once and moves to `billed` with
+    // the release.
+    let mut concierge_totals = (snapshot.total_net, snapshot.total_vat, snapshot.total_gross);
+    let concierge_links = match concierge_lines::append_lines(
+        &mut transaction,
+        patient_id,
+        body.order_id,
+        &mut currency,
+        &concierge_ids,
+        line_items,
+        &mut concierge_totals,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    snapshot.total_net = concierge_totals.0;
+    snapshot.total_vat = concierge_totals.1;
+    snapshot.total_gross = concierge_totals.2;
     let Some(currency) = currency else {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -7927,6 +8011,17 @@ async fn create_patient_billing_invoice(
         }
     }
 
+    if let Err(error) =
+        concierge_lines::insert_links(&mut transaction, invoice_id, &concierge_links, auth.user_id)
+            .await
+    {
+        tracing::error!(%error, %invoice_id, "link patient billing concierge services");
+        return err(
+            StatusCode::CONFLICT,
+            "A concierge service was selected by another draft; reload and try again",
+        );
+    }
+
     // The draft reserves its services through the allocations; they become
     // `invoiced` when the invoice is released.
     if invoice_snapshot_has_package_overage(&snapshot)
@@ -7964,6 +8059,8 @@ async fn create_patient_billing_invoice(
             "order_id": body.order_id,
             "quote_id": body.quote_id,
             "external_invoice_count": external_allocations.len(),
+            "concierge_service_count": concierge_links.len(),
+            "concierge_service_ids": concierge_links.iter().map(|link| link.service_id).collect::<Vec<_>>(),
             "service_line_count": snapshot.allocations.len(),
             "payer_source": payer.source,
             "payer": payer.record.to_audit_json(),
@@ -14722,6 +14819,26 @@ async fn update_invoice_status(
                 }
             }
         }
+        // A concierge service the draft bills must still be ready at the price
+        // of the draft (F-C8); the rows stay locked until the release commits.
+        match concierge_lines::changed_services_on_draft(&mut transaction, invoice_id).await {
+            Ok(services) if services.is_empty() => {}
+            Ok(services) => {
+                return coded_err(
+                    StatusCode::CONFLICT,
+                    concierge_lines::RELEASE_BLOCKED,
+                    "A concierge service of the draft changed after the draft was made; cancel the draft and make a new invoice",
+                    json!({ "services_label": services.join(", ") }),
+                );
+            }
+            Err(error) => {
+                tracing::error!(%error, %invoice_id, "check the concierge services of a draft");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update invoice",
+                );
+            }
+        }
         match release::issuer_tax_registration_configured(&mut transaction).await {
             Ok(true) => {}
             Ok(false) => {
@@ -14902,6 +15019,32 @@ async fn update_invoice_status(
                 return err(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to update invoice",
+                );
+            }
+            // Concierge services move to `billed` with the release and back
+            // to `ready` when a released invoice is cancelled (F-C8).
+            if releasing
+                && let Err(e) =
+                    concierge_lines::mark_billed(&mut transaction, invoice_id, auth.user_id).await
+            {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "mark released concierge services");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update invoice",
+                );
+            }
+            if requested_status == "cancelled"
+                && let Err(e) = concierge_lines::reopen_after_cancellation(
+                    &mut transaction,
+                    invoice_id,
+                    auth.user_id,
+                )
+                .await
+            {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "reopen concierge services of a cancelled invoice");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to release cancelled invoice services",
                 );
             }
 

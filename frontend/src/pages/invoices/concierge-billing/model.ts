@@ -20,7 +20,33 @@ export type ConciergeBillingQueueItem = {
   /** quantity × unit price; null when the service has no sale price. */
   sale_price: string | null;
   currency: string;
+  /** A live draft of the billing tab already bills the service (F-C8). */
+  draft_invoice_id?: string | null;
 };
+
+/**
+ * What the queue row offers (screens QA 2026-11-12, F-C8): a service without
+ * a sale price is set on the service first (the billing tab does not offer
+ * it), one on a draft opens that draft, the rest is billed on the patient's
+ * billing tab.
+ */
+export type ConciergeQueueAction =
+  | { kind: "set_price"; href: string }
+  | { kind: "open_draft"; href: string }
+  | { kind: "bill"; href: string };
+
+export function conciergeQueueAction(item: ConciergeBillingQueueItem): ConciergeQueueAction {
+  if (item.sale_price === null) return { kind: "set_price", href: conciergeServiceHref(item.id) };
+  if (item.draft_invoice_id) {
+    return { kind: "open_draft", href: `/invoices?invoice=${encodeURIComponent(item.draft_invoice_id)}` };
+  }
+  return { kind: "bill", href: patientBillingHref(item.patient_id) };
+}
+
+/** The service on the Services page, where its sale price is set. */
+export function conciergeServiceHref(serviceId: string): string {
+  return `/services?service=${encodeURIComponent(serviceId)}`;
+}
 
 export type ConciergeBillingQueue = {
   items: ConciergeBillingQueueItem[];

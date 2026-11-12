@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { fetchConciergeBillingQueue } from "./api";
 import {
   canReadConciergeBillingQueue,
+  conciergeQueueAction,
   conciergeQueuePatients,
   filterConciergeQueue,
   patientBillingHref,
@@ -149,21 +150,37 @@ export function ConciergeBillingQueue({
       accessor: (row) => (row.sale_price === null ? null : Number(row.sale_price)),
       width: 140,
       render: (row) => (
-        <span className="block text-right font-mono tabular-nums">
-          {row.sale_price === null ? "—" : formatMoneyAmount(row.sale_price, row.currency || "EUR")}
-        </span>
+        row.sale_price === null ? (
+          <span className="block text-right text-xs font-medium text-amber-700 dark:text-amber-300" data-testid="concierge-queue-no-price">
+            {tx("Нет цены продажи", "Kein Verkaufspreis")}
+          </span>
+        ) : (
+          <span className="block text-right font-mono tabular-nums">
+            {formatMoneyAmount(row.sale_price, row.currency || "EUR")}
+          </span>
+        )
       ),
     },
     {
       id: "action",
       label: tx("Действие", "Aktion"),
       accessor: () => "",
-      width: 190,
-      render: (row) => (
-        <StaffLink className="text-sm font-medium text-primary hover:underline" to={patientBillingHref(row.patient_id)}>
-          {tx("Выставить счёт пациенту", "Dem Patienten berechnen")}
-        </StaffLink>
-      ),
+      width: 210,
+      render: (row) => {
+        // F-C8: an unpriced service cannot be billed; its price is set on
+        // the service. A service already on a draft opens that draft.
+        const action = conciergeQueueAction(row);
+        const label = action.kind === "set_price"
+          ? tx("Указать цену в услуге", "Preis in der Leistung erfassen")
+          : action.kind === "open_draft"
+            ? tx("В черновике — открыть", "Im Entwurf – öffnen")
+            : tx("Выставить счёт пациенту", "Dem Patienten berechnen");
+        return (
+          <StaffLink className="text-sm font-medium text-primary hover:underline" to={action.href}>
+            {label}
+          </StaffLink>
+        );
+      },
     },
   ];
 

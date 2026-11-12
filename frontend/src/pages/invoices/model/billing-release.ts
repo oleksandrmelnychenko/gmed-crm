@@ -80,6 +80,15 @@ const INVOICE_CREATION_ERRORS: Record<string, LocalizedText> = {
     de: "Für einen genehmigten Mehrverbrauch fehlt der Preis, er lässt sich nicht berechnen. Lehnen Sie ihn mit Begründung im Tarif des Patienten ab und erfassen Sie ihn nach der Preisangabe neu.",
     ru: "Для подтверждённого превышения не указана цена, его нельзя выставить. Отклоните его с причиной в тарифе пациента, а после указания цены запишите заново.",
   },
+  // Patient billing tab: concierge services (F-C8).
+  "Selected concierge service not found": {
+    de: "Die gewählte Concierge-Leistung wurde nicht gefunden. Aktualisieren Sie die Daten.",
+    ru: "Выбранная услуга Concierge не найдена. Обновите данные.",
+  },
+  "A concierge service was selected by another draft; reload and try again": {
+    de: "Eine Concierge-Leistung wurde gerade in einen anderen Entwurf übernommen. Aktualisieren Sie die Daten.",
+    ru: "Услуга Concierge только что попала в другой черновик. Обновите данные.",
+  },
   "At least one invoice line must be selected": CHECK_SELECTION,
   "Selected invoice line does not exist": CHECK_SELECTION,
   "Invalid invoice line quantity": CHECK_SELECTION,

@@ -55,6 +55,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Send,
   X,
 } from "lucide-react";
 
@@ -3189,22 +3190,47 @@ function useStaffInvoicesPageContent() {
                 <SectionCard
                   icon={ReceiptText} title={text.invoiceOverview}
                   action={
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      className="size-8 rounded-lg"
-                      onClick={() => {
-                        setStatusError(null);
-                        setStatusConfirmation(null);
-                        setStornoConfirmOpen(false);
-                        setStatusDialogOpen(true);
-                      }}
-                      disabled={!access.canManage}
-                      aria-label={t.common_edit}
-                    >
-                      <Pencil className="size-3.5" />
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      {/* A draft is issued with a named button, not only the
+                          pencil (screens QA 2026-11-12, F-C9). */}
+                      {detail.status === "draft" && access.canManage ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="h-8 gap-1.5 rounded-lg"
+                          data-action="write"
+                          data-testid="invoice-issue-draft"
+                          onClick={() => {
+                            setStatusError(null);
+                            setStatusConfirmation(null);
+                            setStornoConfirmOpen(false);
+                            setStatusForm((current) => ({ ...current, status: "sent" }));
+                            setStatusDialogOpen(true);
+                          }}
+                        >
+                          <Send className="size-3.5" />
+                          {lang === "de" ? "Ausstellen" : "Выставить"}
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="size-8 rounded-lg"
+                        onClick={() => {
+                          setStatusError(null);
+                          setStatusConfirmation(null);
+                          setStornoConfirmOpen(false);
+                          // A status preset by «Выставить» and then dismissed is not kept.
+                          setStatusForm((current) => ({ ...current, status: invoiceToStatusForm(detail).status }));
+                          setStatusDialogOpen(true);
+                        }}
+                        disabled={!access.canManage}
+                        aria-label={t.common_edit}
+                      >
+                        <Pencil className="size-3.5" />
+                      </Button>
+                    </div>
                   }
                 >
                   <div className="space-y-4">
@@ -4571,7 +4597,9 @@ function useStaffInvoicesPageContent() {
                           setDunningError(null);
                           setDunningDialogOpen(true);
                         }}
-                        disabled={!canCreateDunning}
+                        // Never on a draft: the reason is said next to it (F-C9).
+                        disabled={!canCreateDunning || detail.status === "draft"}
+                        title={dunningBlockKey ? t[dunningBlockKey] : undefined}
                         aria-describedby={
                           dunningBlockKey
                             ? "invoice-dunning-block-reason"
