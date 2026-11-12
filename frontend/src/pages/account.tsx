@@ -1,6 +1,5 @@
 import { PortalDateChip } from "@/components/ui/portal-date-chip";
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { StaffLink } from "@/components/staff-link";
 import { CheckCircle2, Info, KeyRound, LogOut, Monitor, Save, ShieldCheck, Smartphone, UserRound, type LucideIcon } from "lucide-react";
 
 import { AccountSectionHeading } from "@/components/account-section-heading";
@@ -98,7 +97,8 @@ export function AccountPage() {
             the lead cabinet keep their own sidebar link. */}
         {leadCabinet || user?.role === "patient" ? null : (
           <p className="px-1 text-xs text-muted-foreground">
-            <StaffLink to="/legal" className="underline underline-offset-2 hover:text-foreground">{t.nav_legal_notice}</StaffLink>
+            {/* A plain link: /legal is open to everybody and is not a staff route StaffLink knows. */}
+            <a href="/legal" className="underline underline-offset-2 hover:text-foreground">{t.nav_legal_notice}</a>
           </p>
         )}
       </div>
