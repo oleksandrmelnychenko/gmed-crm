@@ -33446,10 +33446,7 @@ async fn create_document_translation_request(
         Err(sqlx::Error::Database(db_error))
             if db_error.constraint() == Some("idx_document_translation_requests_active") =>
         {
-            return err(
-                StatusCode::CONFLICT,
-                "An active translation request already exists for this language",
-            );
+            return crate::routes::patient_document_requests::translation_request_active_exists();
         }
         Err(e) => {
             tracing::error!(error = %e, document_id = %id, "create document translation request");

@@ -3,6 +3,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useState,
   type FormEvent,
   type SetStateAction,
 } from "react";
@@ -36,6 +37,7 @@ import { codedAdminErrorText } from "@/pages/admin-pages.helpers";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
@@ -664,17 +666,29 @@ export function AdminCustomFieldsPage() {
     confirmMessage: closeUnsavedConfirmMessage,
   });
 
-  const onDelete = useCallback(async (field: CustomField) => {
-    // A deleted field disappears from the list: ask first (screens QA E F6).
-    if (!window.confirm(formatUiText(t.cf_delete_confirm, { label: field.field_label }))) return;
+  // A deleted field disappears from the list: ask first (screens QA E F6), in
+  // the page's own dialog like the other admin deletes — a suppressed browser
+  // confirm() made the button silently do nothing (QA 2026-11-12 S3-12).
+  const [pendingDelete, setPendingDelete] = useState<CustomField | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const onDelete = useCallback((field: CustomField) => {
+    setPendingDelete(field);
+  }, []);
+  const confirmDelete = useCallback(async () => {
+    const field = pendingDelete;
+    if (!field) return;
+    setDeleting(true);
     setMsg(null);
     try {
       await deleteAdminCustomField(field.id);
     } catch (e) {
       setMsg(codedAdminErrorText(e, fieldErrorMessages, t.common_error));
+    } finally {
+      setDeleting(false);
+      setPendingDelete(null);
     }
     void load();
-  }, [fieldErrorMessages, load, t.cf_delete_confirm, t.common_error]);
+  }, [fieldErrorMessages, load, pendingDelete, t.common_error]);
 
   const activeFields = fields.filter((f) => f.is_active);
   const entityTypeLabel = useCallback(
@@ -758,7 +772,7 @@ export function AdminCustomFieldsPage() {
             variant="destructive"
             onClick={(event) => {
               event.stopPropagation();
-              void onDelete(field);
+              onDelete(field);
             }}
           >
             {t.common_delete}
@@ -827,6 +841,18 @@ export function AdminCustomFieldsPage() {
           t={t as unknown as Record<string, string>}
         />
       ) : null}
+
+      <DirtyDismissConfirmDialog
+        open={pendingDelete !== null}
+        destructive
+        title={t.common_delete}
+        message={pendingDelete ? formatUiText(t.cf_delete_confirm, { label: pendingDelete.field_label }) : ""}
+        cancelLabel={t.common_cancel}
+        confirmLabel={t.common_delete}
+        confirmDisabled={deleting}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => void confirmDelete()}
+      />
     </div>
   );
 }

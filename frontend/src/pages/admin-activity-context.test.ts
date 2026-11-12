@@ -175,3 +175,37 @@ describe("activity log: stored codes in words (screens QA 2026-11-12, E F12)", (
     expect(activityContextSummary({ source: "invoice_recipient" }, de)).toBe("Quelle: Rechnungsempfänger");
   });
 });
+
+describe("activity log: access matrix changes (QA 2026-11-12 S3-3, E-3)", () => {
+  const cell = {
+    new_value: {
+      role: "sales",
+      entity_type: "patient",
+      field_name: "diagnosis",
+      access_level: "hidden",
+      condition_type: null,
+    },
+    previous_value: { access_level: "full", condition_type: null },
+  };
+
+  it("names role, field and the level as old → new", () => {
+    expect(activityContextSummary(cell, ru)).toBe(
+      "Роль: Отдел продаж · Поле: Диагнозы · Уровень доступа: Полный доступ → Скрыто",
+    );
+    expect(activityContextSummary(cell, de)).toBe(
+      "Rolle: Vertrieb · Feld: Diagnosen · Zugriffsstufe: Vollzugriff → Ausgeblendet",
+    );
+  });
+
+  it("shows the new level alone for rows written before the old one was stored", () => {
+    expect(activityContextSummary({ new_value: cell.new_value }, ru)).toBe(
+      "Роль: Отдел продаж · Поле: Диагнозы · Уровень доступа: Скрыто",
+    );
+  });
+
+  it("counts the rules of a matrix reset", () => {
+    expect(activityContextSummary({ entity_type: "patient", restored: 126, changed: 3 }, ru)).toBe(
+      "Восстановлено правил: 126 · Изменено правил: 3",
+    );
+  });
+});

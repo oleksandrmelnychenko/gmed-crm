@@ -68,13 +68,23 @@ async fn add_ip(
         return e;
     }
 
-    if body.cidr.trim().is_empty() {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "CIDR is required");
+    // Only an IP address or a network is stored: any other text broke the
+    // login check once the allow-list was on (QA 2026-11-12 E-4).
+    let cidr = body.cidr.trim();
+    if parse_ip_network(cidr).is_none() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(serde_json::json!({
+                "error": "ip_whitelist_cidr_invalid",
+                "message": "Enter an IP address or a network in CIDR notation, e.g. 203.0.113.0/24",
+            })),
+        )
+            .into_response();
     }
 
     match sqlx::query!(
         "INSERT INTO ip_whitelist (cidr, description, created_by) VALUES ($1, $2, $3) RETURNING id",
-        body.cidr.trim(),
+        cidr,
         body.description,
         auth.user_id
     )
@@ -332,11 +342,13 @@ async fn system_health(
             .await
             .unwrap_or(0);
 
-    let active_sessions =
-        sqlx::query_scalar!(r#"SELECT count(*) AS "c!" FROM token_families WHERE NOT is_revoked"#)
-            .fetch_one(&state.db)
-            .await
-            .unwrap_or(0);
+    // One definition with the settings tab and the IT admin dashboard.
+    let active_sessions = super::admin_settings::count_active_sessions(
+        &state.db,
+        super::users::can_see_portal_accounts(&auth),
+    )
+    .await
+    .unwrap_or(0);
     let pending_logins = sqlx::query_scalar::<_, i64>(
         "SELECT count(*) FROM pending_logins WHERE status = 'pending' AND expires_at > now()",
     )
@@ -950,6 +962,106 @@ fn suspicious_event_route(
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(serde_json::json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message }))).into_response()
+}
+
+/// An IP allow-list entry as address and prefix length: "203.0.113.7"
+/// (a single address), "203.0.113.0/24" or "2001:db8::/32". `None` for any
+/// other text. Host bits under the prefix are allowed, as Postgres `inet`
+/// allows them.
+pub(crate) fn parse_ip_network(raw: &str) -> Option<(std::net::IpAddr, u8)> {
+    let raw = raw.trim();
+    let (address, prefix) = match raw.split_once('/') {
+        Some((address, prefix)) => (address, Some(prefix)),
+        None => (raw, None),
+    };
+    let address: std::net::IpAddr = address.parse().ok()?;
+    let max_prefix: u8 = if address.is_ipv4() { 32 } else { 128 };
+    let prefix = match prefix {
+        None => max_prefix,
+        Some(text) => {
+            if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            let value: u8 = text.parse().ok()?;
+            if value > max_prefix {
+                return None;
+            }
+            value
+        }
+    };
+    Some((address, prefix))
+}
+
+/// Whether `ip` lies in the network (same address family only, as the
+/// Postgres `<<=` operator).
+pub(crate) fn ip_in_network(ip: std::net::IpAddr, network: (std::net::IpAddr, u8)) -> bool {
+    use std::net::IpAddr;
+    let (net, prefix) = network;
+    match (ip, net) {
+        (IpAddr::V4(ip), IpAddr::V4(net)) => {
+            let mask: u32 = if prefix == 0 {
+                0
+            } else {
+                u32::MAX << (32 - u32::from(prefix))
+            };
+            (u32::from(ip) & mask) == (u32::from(net) & mask)
+        }
+        (IpAddr::V6(ip), IpAddr::V6(net)) => {
+            let mask: u128 = if prefix == 0 {
+                0
+            } else {
+                u128::MAX << (128 - u32::from(prefix))
+            };
+            (u128::from(ip) & mask) == (u128::from(net) & mask)
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod ip_network_tests {
+    use super::{ip_in_network, parse_ip_network};
+
+    #[test]
+    fn accepts_addresses_and_networks_only() {
+        for valid in [
+            "203.0.113.7",
+            "203.0.113.0/24",
+            " 10.0.0.1/8 ",
+            "0.0.0.0/0",
+            "2001:db8::/32",
+            "::1",
+        ] {
+            assert!(parse_ip_network(valid).is_some(), "{valid}");
+        }
+        for invalid in [
+            "",
+            "abc.def",
+            "203.0.113.0/33",
+            "203.0.113.0/",
+            "203.0.113/24",
+            "2001:db8::/129",
+            "10.0.0.1/-1",
+            "10.0.0.1/+8",
+            "1.2.3.4 5",
+        ] {
+            assert!(parse_ip_network(invalid).is_none(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn matches_like_postgres_contained_or_equal() {
+        let ip = |text: &str| -> std::net::IpAddr { text.parse().unwrap() };
+        let net = |text: &str| parse_ip_network(text).unwrap();
+        assert!(ip_in_network(ip("203.0.113.7"), net("203.0.113.0/24")));
+        assert!(!ip_in_network(ip("203.0.114.7"), net("203.0.113.0/24")));
+        assert!(ip_in_network(ip("203.0.113.7"), net("203.0.113.7")));
+        assert!(!ip_in_network(ip("203.0.113.8"), net("203.0.113.7")));
+        assert!(ip_in_network(ip("8.8.8.8"), net("0.0.0.0/0")));
+        assert!(ip_in_network(ip("2001:db8::1"), net("2001:db8::/32")));
+        assert!(!ip_in_network(ip("2001:db9::1"), net("2001:db8::/32")));
+        assert!(!ip_in_network(ip("203.0.113.7"), net("::/0")));
+    }
 }
 
 #[cfg(test)]

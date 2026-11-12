@@ -5,6 +5,7 @@ import { ru } from "@/lib/i18n/ru";
 
 import {
   customMaintenanceMessage,
+  isValidIpWhitelistEntry,
   securityActorName,
   securityEventRoute,
   securityReasonLabel,
@@ -57,5 +58,21 @@ describe("security page texts (QA E-06)", () => {
     expect(customMaintenanceMessage("  Update 22:00–23:00 ")).toBe("Update 22:00–23:00");
     expect(ru.security_maintenance_default_msg).toBe("Идут технические работы");
     expect(de.security_maintenance_default_msg).toBe("Wartungsarbeiten laufen");
+  });
+});
+
+describe("IP allow-list entry (QA 2026-11-12 E-4)", () => {
+  it("accepts addresses and networks only, as the server does", () => {
+    for (const valid of ["203.0.113.7", "203.0.113.0/24", " 10.0.0.1/8 ", "0.0.0.0/0", "2001:db8::/32", "::1"]) {
+      expect(isValidIpWhitelistEntry(valid), valid).toBe(true);
+    }
+    for (const invalid of ["", "abc.def", "203.0.113.0/33", "203.0.113.0/", "203.0.113/24", "2001:db8::/129", "10.0.0.1/-1", "1.2.3.4 5", "256.1.1.1"]) {
+      expect(isValidIpWhitelistEntry(invalid), invalid).toBe(false);
+    }
+  });
+
+  it("explains the format in Russian and German", () => {
+    expect(ru.uiText.api_ip_whitelist_cidr_invalid).toContain("203.0.113.0/24");
+    expect(de.uiText.api_ip_whitelist_cidr_invalid).toContain("203.0.113.0/24");
   });
 });

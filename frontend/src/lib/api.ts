@@ -546,6 +546,10 @@ const LOCALIZED_API_ERRORS: Record<string, string> = {
   minor_own_login_closed: "api_minor_own_login_closed",
   // The payer declaration's phone (lead_payer.rs, field `phone`).
   payer_phone_invalid: "api_payer_phone_invalid",
+  // A second open translation request into one language (patient_document_requests.rs, documents.rs).
+  translation_request_active_exists: "api_translation_request_active_exists",
+  // An IP allow-list entry that is no IP address or network (admin_security.rs).
+  ip_whitelist_cidr_invalid: "api_ip_whitelist_cidr_invalid",
   // Trusted contacts of a lead (leads.rs, lead_representatives.rs): a guardian of a minor needs
   // the custody "guardian"; a new or changed phone number needs six digits.
   relation_guardian_needs_custody: "api_relation_guardian_needs_custody",

@@ -104,12 +104,98 @@ function formatContextValue(key: string, value: unknown, t: Translations): strin
   return formatScalar(key, value, t);
 }
 
+/** Labels of the patient fields of the access matrix (as on /admin/access). */
+const ACCESS_FIELD_LABEL_KEYS: Record<string, string> = {
+  name: "field_name",
+  birth_date: "field_birth_date",
+  phone: "field_phone",
+  email: "field_email",
+  nationality: "field_nationality",
+  languages: "field_languages",
+  insurance: "field_insurance",
+  diagnosis: "field_diagnosis",
+  medications: "field_medications",
+  allergies: "field_allergies",
+  vitals: "field_vitals",
+  internal_notes: "field_internal_notes",
+  travel_data: "field_travel_data",
+  functional_labels: "access_field_functional_labels",
+};
+
+const ACCESS_LEVEL_LABEL_KEYS: Record<string, string> = {
+  full: "access_full",
+  masked: "access_masked",
+  hidden: "access_hidden",
+  conditional: "access_conditional",
+};
+
+function translationByKey(t: Translations, key: string | undefined): string | undefined {
+  if (!key) return undefined;
+  const value = (t as unknown as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * A cell change of the access matrix (QA 2026-11-12 S3-3: the row showed
+ * «—»): role, field and the level as "old → new". The server stores the new
+ * cell under `new_value` and, since this fix, the old one under
+ * `previous_value`.
+ */
+function accessPolicyContextEntries(
+  context: Record<string, unknown>,
+  t: Translations,
+): ActivityContextEntry[] | null {
+  const next = context.new_value;
+  if (!isValueRecord(next as ActivityValues) || typeof (next as Record<string, unknown>).field_name !== "string") {
+    return null;
+  }
+  const after = next as Record<string, unknown>;
+  const before = isValueRecord(context.previous_value as ActivityValues)
+    ? (context.previous_value as Record<string, unknown>)
+    : null;
+  const levelText = (level: unknown, condition: unknown): string | null => {
+    if (typeof level !== "string" || !level) return null;
+    const label = translationByKey(t, ACCESS_LEVEL_LABEL_KEYS[level]) ?? level;
+    if (typeof condition === "string" && condition) {
+      return `${label} (${t.uiText[`activity_value_${condition}`] ?? condition})`;
+    }
+    return label;
+  };
+  const entries: ActivityContextEntry[] = [];
+  const role = typeof after.role === "string" ? after.role : "";
+  if (role) {
+    entries.push({
+      key: "role",
+      label: contextKeyLabel("role", t) ?? "role",
+      value: roleLabel(role, t) ?? role,
+    });
+  }
+  const field = after.field_name as string;
+  entries.push({
+    key: "field_name",
+    label: contextKeyLabel("field_name", t) ?? "field_name",
+    value: translationByKey(t, ACCESS_FIELD_LABEL_KEYS[field]) ?? field,
+  });
+  const to = levelText(after.access_level, after.condition_type);
+  if (to) {
+    const from = before ? levelText(before.access_level, before.condition_type) : null;
+    entries.push({
+      key: "access_level",
+      label: contextKeyLabel("access_level", t) ?? "access_level",
+      value: from && from !== to ? `${from} → ${to}` : to,
+    });
+  }
+  return entries;
+}
+
 /** The known, non-empty entries of an audit context, in their stored order. */
 export function activityContextEntries(
   context: Record<string, unknown> | null | undefined,
   t: Translations,
 ): ActivityContextEntry[] {
   if (!context || typeof context !== "object") return [];
+  const accessPolicy = accessPolicyContextEntries(context, t);
+  if (accessPolicy) return accessPolicy;
   const entries: ActivityContextEntry[] = [];
   for (const [key, raw] of Object.entries(context)) {
     if (REQUEST_KEYS.has(key) || isIdKey(key)) continue;

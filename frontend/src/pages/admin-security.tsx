@@ -417,6 +417,40 @@ export function customMaintenanceMessage(message: string): string {
   return trimmed === DEFAULT_MAINTENANCE_MESSAGE ? "" : trimmed;
 }
 
+const IPV4_PART = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
+
+function isIpv4(text: string): boolean {
+  const parts = text.split(".");
+  return parts.length === 4 && parts.every((part) => IPV4_PART.test(part));
+}
+
+function isIpv6(text: string): boolean {
+  if (!/^[0-9a-fA-F:.]+$/.test(text) || !text.includes(":")) return false;
+  try {
+    // The URL parser accepts exactly the valid IPv6 notations.
+    return new URL(`http://[${text}]/`).hostname.length > 2;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether an allow-list entry is an IP address or a network in CIDR
+ * notation, as the server checks it (admin_security.rs `parse_ip_network`,
+ * QA 2026-11-12 E-4).
+ */
+export function isValidIpWhitelistEntry(raw: string): boolean {
+  const text = raw.trim();
+  const slash = text.indexOf("/");
+  const address = slash === -1 ? text : text.slice(0, slash);
+  const prefix = slash === -1 ? null : text.slice(slash + 1);
+  const v4 = isIpv4(address);
+  if (!v4 && !isIpv6(address)) return false;
+  if (prefix === null) return true;
+  if (!/^\d{1,3}$/.test(prefix)) return false;
+  return Number(prefix) <= (v4 ? 32 : 128);
+}
+
 function useAdminSecurityPageContent() {
   const { t, lang } = useLang();
   const [securityState, dispatchSecurityState] = useReducer(
@@ -633,6 +667,10 @@ function useAdminSecurityPageContent() {
   async function addIp(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!newCidr.trim()) return;
+    if (!isValidIpWhitelistEntry(newCidr)) {
+      setIpError(t.uiText.api_ip_whitelist_cidr_invalid);
+      return;
+    }
 
     setIpBusy(true);
     setIpError("");

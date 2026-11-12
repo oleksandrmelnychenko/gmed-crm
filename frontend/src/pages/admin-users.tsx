@@ -31,17 +31,14 @@ import {
   UsersRound,
 } from "lucide-react";
 
-import { AdminGuideButton } from "@/components/admin-guide";
+import { AdminGuideButton, GuideSection } from "@/components/admin-guide";
 import {
   SheetActionsFooter,
   SheetFormFooter,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
 import { AdminDialogScaffold, AdminFormSection } from "@/components/admin-dialog-scaffold";
-import {
-  DataTablePager,
-  useDataTablePagination,
-} from "@/components/data-table/data-table-pager";
+import { DEFAULT_DATA_TABLE_PAGE_SIZE } from "@/components/data-table/data-table-pager";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import {
@@ -538,7 +535,10 @@ function useAdminUsersPageContent() {
         roleLabel(u.role).toLowerCase().includes(q),
     );
   }, [users, search, roleLabel]);
-  const usersPagination = useDataTablePagination(filtered, search);
+  // The table's own filters and sorting run over the whole list before it is
+  // paged, so the count and the pages follow them (QA 2026-11-12 E-1: the role
+  // filter and the «Создан» sort only reordered the current page of 50).
+  const [tableFilteredCount, setTableFilteredCount] = useState<number | null>(null);
 
   const columns = useMemo<ColumnDef<User>[]>(
     () => [
@@ -1104,7 +1104,20 @@ function useAdminUsersPageContent() {
         description={t.users_subtitle}
         actions={(
           <>
-            <AdminGuideButton title={t.users_title} description={t.users_subtitle} showTableToolbarGuide={false} />
+            <AdminGuideButton title={t.users_title} description={t.users_subtitle}>
+              <GuideSection icon={UserRoundPlus} title={t.admin_system_users_guide_create_title}>
+                {t.admin_system_users_guide_create_body}
+              </GuideSection>
+              <GuideSection icon={KeyRound} title={t.admin_system_users_guide_password_title}>
+                {t.admin_system_users_guide_password_body}
+              </GuideSection>
+              <GuideSection icon={UserRoundX} title={t.admin_system_users_guide_status_title}>
+                {t.admin_system_users_guide_status_body}
+              </GuideSection>
+              <GuideSection icon={LogOut} title={t.admin_system_users_guide_sessions_title}>
+                {t.admin_system_users_guide_sessions_body}
+              </GuideSection>
+            </AdminGuideButton>
             <Button
               type="button"
               variant="outline"
@@ -1632,11 +1645,13 @@ function useAdminUsersPageContent() {
           title={t.users_title}
           icon={UsersRound}
           description={t.users_subtitle}
-          count={filtered.length}
+          count={tableFilteredCount ?? filtered.length}
           className="overflow-hidden"
         >
           <DataTableSurface
-            rows={usersPagination.pagedRows}
+            rows={filtered}
+            onFilteredCountChange={setTableFilteredCount}
+            pagination={{ pageSize: DEFAULT_DATA_TABLE_PAGE_SIZE, resetKey: search }}
             columns={columns}
             toolbarStart={
               <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
@@ -1650,17 +1665,6 @@ function useAdminUsersPageContent() {
                 />
               </div>
               </ToolbarField>
-            }
-            toolbarAfter={
-              <DataTablePager
-                pageIndex={usersPagination.pageIndex}
-                pageSize={usersPagination.pageSize}
-                totalPages={usersPagination.totalPages}
-                totalRows={usersPagination.totalRows}
-                previousLabel={t.pagination_previous}
-                nextLabel={t.pagination_next}
-                onPageChange={usersPagination.onPageChange}
-              />
             }
             defaultDensity="compact"
             rowsGrowWithContent

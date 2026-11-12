@@ -422,7 +422,9 @@ async fn my_kpis(
         }),
         "billing" => load_billing_kpis(&state).await.map(Some),
         "sales" => load_sales_kpis(&state).await.map(Some),
-        "it_admin" => load_it_admin_kpis(&state).await.map(Some),
+        "it_admin" => load_it_admin_kpis(&state, super::users::can_see_portal_accounts(&auth))
+            .await
+            .map(Some),
         _ => return err(StatusCode::FORBIDDEN, "Forbidden"),
     };
 
@@ -1523,16 +1525,20 @@ async fn load_ceo_assistant_kpis(
     }))
 }
 
-async fn load_it_admin_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
+async fn load_it_admin_kpis(
+    state: &AppState,
+    include_portal_sessions: bool,
+) -> Result<Value, sqlx::Error> {
+    // One definition with /admin/health and the sessions tab of /admin/settings
+    // (QA 2026-11-12 S3-4: the dashboard counted users with a session).
+    let active_sessions =
+        super::admin_settings::count_active_sessions(&state.db, include_portal_sessions).await?;
     let row = sqlx::query(
         r#"SELECT
                 (SELECT COUNT(*)::bigint FROM users WHERE is_active = true) AS active_users,
                 (SELECT COUNT(*)::bigint FROM users
                  WHERE locked_until IS NOT NULL AND locked_until > now()) AS locked_accounts,
                 (SELECT COUNT(*)::bigint FROM pending_logins WHERE status = 'pending' AND expires_at > now()) AS pending_logins,
-                (SELECT COUNT(DISTINCT user_id)::bigint
-                 FROM token_families
-                 WHERE is_revoked = false) AS active_sessions,
                 (SELECT COUNT(*)::bigint FROM audit_log
                  WHERE created_at >= now() - interval '24 hours') AS audit_events_24h,
                 (SELECT COUNT(*)::bigint FROM audit_log
@@ -1557,7 +1563,7 @@ async fn load_it_admin_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
         "active_users": row.try_get::<i64, _>("active_users").unwrap_or(0),
         "locked_accounts": row.try_get::<i64, _>("locked_accounts").unwrap_or(0),
         "pending_logins": row.try_get::<i64, _>("pending_logins").unwrap_or(0),
-        "active_sessions": row.try_get::<i64, _>("active_sessions").unwrap_or(0),
+        "active_sessions": active_sessions,
         "audit_events_24h": row.try_get::<i64, _>("audit_events_24h").unwrap_or(0),
         "auth_alerts_24h": row.try_get::<i64, _>("auth_alerts_24h").unwrap_or(0),
         "failed_logins_24h": row.try_get::<i64, _>("failed_logins_24h").unwrap_or(0),

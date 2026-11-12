@@ -66,7 +66,10 @@ import {
   portalRequestDateProblem,
   usePortalLabels,
 } from "@/pages/patients/model/portal-shared";
-import { isUpcomingPortalAppointment } from "@/pages/appointments/model/portal-appointment-visibility";
+import {
+  isUpcomingPortalAppointment,
+  orderPortalVisits,
+} from "@/pages/appointments/model/portal-appointment-visibility";
 import type {
   PortalAppointmentItem,
   PortalAppointmentRequestItem,
@@ -338,10 +341,10 @@ function usePatientAppointmentsPageContent() {
     () => new Map(appointments.map((item) => [item.id, item])),
     [appointments],
   );
-  const firstPastVisitIndex = useMemo(() => {
-    const today = appDateKey();
-    return appointments.findIndex((item) => item.date < today);
-  }, [appointments]);
+  const { items: orderedAppointments, firstPastIndex: firstPastVisitIndex } = useMemo(
+    () => orderPortalVisits(appointments),
+    [appointments],
+  );
   const nextAppointment = useMemo(
     () => {
       let next: PortalAppointmentItem | null = null;
@@ -471,7 +474,7 @@ function usePatientAppointmentsPageContent() {
               </EmptyCell>
             ) : (
               <div className="space-y-3">
-                {appointments.map((item, index) => (
+                {orderedAppointments.map((item, index) => (
                   <Fragment key={item.id}>
                   {/* The list is the server's: today's and coming visits first, in date order, then
                       the past ones, newest first. The line says where the past ones begin — without

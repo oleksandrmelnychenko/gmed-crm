@@ -19,6 +19,18 @@ export interface AdminSystemTranslations {
   admin_system_access_reset_title: string;
   admin_system_access_reset_body: string;
   admin_system_access_cycle_hint: string;
+  admin_system_access_reset_confirm_title: string;
+  admin_system_access_reset_confirm_message: string;
+  admin_system_access_reset_done: string;
+  admin_system_users_guide_create_title: string;
+  admin_system_users_guide_create_body: string;
+  admin_system_users_guide_password_title: string;
+  admin_system_users_guide_password_body: string;
+  admin_system_users_guide_status_title: string;
+  admin_system_users_guide_status_body: string;
+  admin_system_users_guide_sessions_title: string;
+  admin_system_users_guide_sessions_body: string;
+  admin_system_access_saved: string;
   admin_system_export_error_prefix: string;
   admin_system_entity_id_separator: string;
   admin_system_record_count_appointments: string;
@@ -480,7 +492,24 @@ export const adminSystemRu: AdminSystemTranslations = {
   admin_system_access_reset_body:
     "Кнопка сброса возвращает все уровни к стандартной конфигурации.",
   admin_system_access_cycle_hint:
-    "Уровень переключается по циклу: полный -> маска -> скрыто -> условно -> полный.",
+    "Уровень переключается по циклу: полный → маска → скрыто → условно → полный. Каждое нажатие сохраняется сразу.",
+  admin_system_access_reset_confirm_title: "Сбросить матрицу доступа?",
+  admin_system_access_reset_confirm_message:
+    "Все настраиваемые уровни доступа к полям пациента для всех ролей вернутся к значениям по умолчанию. Ваши изменения матрицы будут потеряны, отменить сброс нельзя. Системные правила не меняются. Сброс записывается в журнал активности.",
+  admin_system_access_reset_done: "Матрица доступа сброшена по умолчанию",
+  admin_system_users_guide_create_title: "Новый пользователь",
+  admin_system_users_guide_create_body:
+    "«Новый пользователь»: имя, e-mail и роль. Роль определяет, какие разделы и данные видит сотрудник. Портальные входы пациентов и лидов создаются в карточке пациента или лида.",
+  admin_system_users_guide_password_title: "Пароль",
+  admin_system_users_guide_password_body:
+    "Одноразовый пароль показывается один раз — скопируйте и передайте его лично. При первом входе сотрудник задаёт свой пароль. Пароль можно также задать вручную в карточке пользователя.",
+  admin_system_users_guide_status_title: "Деактивация и блокировка",
+  admin_system_users_guide_status_body:
+    "Деактивированный пользователь не может войти, его данные и история сохраняются. После нескольких неверных паролей вход блокируется на время — кнопка с замком снимает блокировку.",
+  admin_system_users_guide_sessions_title: "Сессии",
+  admin_system_users_guide_sessions_body:
+    "Столбец «Сессии» показывает активные входы пользователя. Кнопка выхода завершает их на всех устройствах.",
+  admin_system_access_saved: "Сохранено",
   admin_system_export_error_prefix: "Ошибка",
   admin_system_entity_id_separator: " - ",
   admin_system_record_count_appointments: "Визиты",
@@ -971,7 +1000,24 @@ export const adminSystemDe: AdminSystemTranslations = {
   admin_system_access_reset_body:
     "Die Reset-Schaltfläche setzt alle Stufen auf die Standardkonfiguration zurück.",
   admin_system_access_cycle_hint:
-    "Die Stufe wechselt im Zyklus: Voll -> Maskiert -> Ausgeblendet -> Bedingt -> Voll.",
+    "Die Stufe wechselt im Zyklus: Voll → Maskiert → Ausgeblendet → Bedingt → Voll. Jeder Klick wird sofort gespeichert.",
+  admin_system_access_reset_confirm_title: "Zugriffsmatrix zurücksetzen?",
+  admin_system_access_reset_confirm_message:
+    "Alle einstellbaren Zugriffsstufen auf Patientenfelder werden für alle Rollen auf die Standardwerte zurückgesetzt. Ihre Änderungen an der Matrix gehen verloren, das Zurücksetzen lässt sich nicht rückgängig machen. Systemregeln bleiben unverändert. Das Zurücksetzen wird im Aktivitätsprotokoll erfasst.",
+  admin_system_access_reset_done: "Zugriffsmatrix auf Standard zurückgesetzt",
+  admin_system_users_guide_create_title: "Neuer Benutzer",
+  admin_system_users_guide_create_body:
+    "„Neuer Benutzer“: Name, E-Mail und Rolle. Die Rolle bestimmt, welche Bereiche und Daten die Person sieht. Portalzugänge von Patienten und Leads entstehen in der Patienten- bzw. Lead-Akte.",
+  admin_system_users_guide_password_title: "Passwort",
+  admin_system_users_guide_password_body:
+    "Ein Einmalpasswort wird nur einmal angezeigt — kopieren und persönlich weitergeben. Bei der ersten Anmeldung legt die Person ein eigenes Passwort fest. Ein Passwort kann auch manuell in der Benutzerkarte gesetzt werden.",
+  admin_system_users_guide_status_title: "Deaktivieren und Sperre",
+  admin_system_users_guide_status_body:
+    "Ein deaktivierter Benutzer kann sich nicht anmelden; Daten und Verlauf bleiben erhalten. Nach mehreren falschen Passwörtern wird die Anmeldung vorübergehend gesperrt — die Schaltfläche mit dem Schloss hebt die Sperre auf.",
+  admin_system_users_guide_sessions_title: "Sitzungen",
+  admin_system_users_guide_sessions_body:
+    "Die Spalte „Sitzungen“ zeigt die aktiven Anmeldungen. Die Abmelde-Schaltfläche beendet sie auf allen Geräten.",
+  admin_system_access_saved: "Gespeichert",
   admin_system_export_error_prefix: "Fehler",
   admin_system_entity_id_separator: " - ",
   admin_system_record_count_appointments: "Termine",

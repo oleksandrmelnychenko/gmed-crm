@@ -135,6 +135,30 @@ async fn update_setting(
 
 // ── Session management (admin force-logout) ─────────────────
 
+/// What an "active session" is, the one definition behind /admin/health, the
+/// sessions tab of /admin/settings and the IT admin dashboard (QA 2026-11-12
+/// S3-4: they showed 500, 200 and 242): a sign-in (token family) that is not
+/// revoked — the session sweeper revokes idle and expired ones. Portal logins
+/// of patients and leads count only for a reader who sees patients, as in
+/// the session list. `$1` is that permission.
+const ACTIVE_SESSIONS_FROM_WHERE: &str = r#"FROM token_families tf
+           JOIN users u ON u.id = tf.user_id
+           WHERE NOT tf.is_revoked
+             AND ($1::bool OR u.role <> 'patient')"#;
+
+/// The number of active sessions (see `ACTIVE_SESSIONS_FROM_WHERE`).
+pub(crate) async fn count_active_sessions(
+    db: &gmed_db::DbPool,
+    include_portal_accounts: bool,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar::<_, i64>(&format!(
+        "SELECT count(*)::bigint {ACTIVE_SESSIONS_FROM_WHERE}"
+    ))
+    .bind(include_portal_accounts)
+    .fetch_one(db)
+    .await
+}
+
 async fn list_all_sessions(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -145,17 +169,16 @@ async fn list_all_sessions(
 
     // Sessions of patient and lead portal logins are patient data: only a role
     // that sees patients lists them (QA E-05).
-    match sqlx::query(
+    // Every active session, not the first 200: the tab shows their number
+    // next to the counter of /admin/health (QA 2026-11-12 S3-4); the page
+    // pages the list itself.
+    match sqlx::query(&format!(
         r#"SELECT tf.id AS family_id, tf.user_id, u.name AS user_name, u.email AS user_email, u.role,
                   tf.device_fingerprint, tf.ip_address, tf.user_agent,
                   tf.created_at, tf.last_activity_at
-           FROM token_families tf
-           JOIN users u ON u.id = tf.user_id
-           WHERE NOT tf.is_revoked
-             AND ($1::bool OR u.role <> 'patient')
-           ORDER BY tf.last_activity_at DESC
-           LIMIT 200"#,
-    )
+           {ACTIVE_SESSIONS_FROM_WHERE}
+           ORDER BY tf.last_activity_at DESC"#
+    ))
     .bind(super::users::can_see_portal_accounts(&auth))
     .fetch_all(&state.db)
     .await
@@ -332,6 +355,7 @@ pub const ACCESS_AUDIT_ACTIONS: &[&str] = &[
     "totp_reset",
     "toggle_mfa",
     "update_access_policy",
+    "reset_access_policies",
     "create_staff_access_profile",
     "update_staff_access_profile",
     "clone_staff_access_profile",

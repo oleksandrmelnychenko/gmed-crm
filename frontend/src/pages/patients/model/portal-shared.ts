@@ -719,6 +719,17 @@ export function isOpenOwnServiceRequest(
 }
 
 /**
+ * The status a patient reads for a service: an own request nobody has
+ * booked yet is «Запрошено», not «Запланировано» — nobody planned it
+ * (QA 2026-11-12 S3-14). Other statuses as stored.
+ */
+export function portalServiceStatus(
+  item: Pick<PortalConciergeServiceItem, "request_source" | "status">,
+): string {
+  return isOpenOwnServiceRequest(item) ? "requested" : item.status;
+}
+
+/**
  * The services of the dashboard tile: open ones soonest first (no time
  * last), then the closed ones in the order the server sent them (D-9).
  */

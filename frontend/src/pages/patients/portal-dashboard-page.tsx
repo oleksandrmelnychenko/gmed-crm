@@ -44,6 +44,7 @@ import {
   invoiceStatusTone,
   nextActionTone,
   portalAppointmentPlaceLabel,
+  portalServiceStatus,
   portalUpcomingServices,
   privacyStatusTone,
   recommendationStatusTone,
@@ -775,8 +776,8 @@ function usePatientDashboardPageContent() {
                         <p className={cn("mt-1", tokens.text.muted)}>{portalServiceContext(item)}</p>
                       ) : null}
                     </div>
-                    <StatusBadge status={item.status} className={conciergeServiceStatusTone(item.status)}>
-                      {portalStatusLabel(item.status)}
+                    <StatusBadge status={portalServiceStatus(item)} className={conciergeServiceStatusTone(item.status)}>
+                      {portalStatusLabel(portalServiceStatus(item))}
                     </StatusBadge>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">

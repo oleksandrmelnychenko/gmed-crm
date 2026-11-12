@@ -344,6 +344,91 @@ async fn login_rejects_wrong_password() {
     assert_eq!(body["error"], "unauthorized");
 }
 
+/// QA 2026-11-12 E-4: the allow-list stores only addresses and networks, and
+/// a stored entry that is none (written before the check existed) never
+/// breaks the sign-in: it is skipped, the valid entries still decide.
+#[tokio::test]
+async fn ip_whitelist_rejects_invalid_entries_and_ignores_stored_ones_at_login() {
+    let Some((app, pool)) = test_context().await else {
+        return;
+    };
+    let ceo_id = seed_user(&pool, "ip-whitelist", "ceo").await;
+    let bearer = ceo_admin_bearer(ceo_id);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/admin/ip-whitelist",
+        Some(&bearer),
+        Some(json!({ "cidr": "abc.def", "description": "invalid" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"], "ip_whitelist_cidr_invalid");
+    let stored: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM ip_whitelist WHERE cidr = 'abc.def'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, 0);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/admin/ip-whitelist",
+        Some(&bearer),
+        Some(json!({ "cidr": " 127.0.0.0/8 ", "description": "loopback" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let stored: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM ip_whitelist WHERE cidr = '127.0.0.0/8'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, 1, "the entry is stored trimmed");
+
+    // A legacy invalid row next to the valid one, and the list switched on.
+    sqlx::query(
+        "INSERT INTO ip_whitelist (cidr, description) VALUES ('abc.def', 'legacy invalid')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE system_settings SET value = 'true'::jsonb, updated_at = now() WHERE key = 'ip_whitelist_enabled'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let login = || {
+        json_request(
+            &app,
+            "POST",
+            "/api/v1/auth/login",
+            None,
+            Some(json!({ "email": "admin@gmed.de", "password": "admin123" })),
+        )
+    };
+    let (status, body) = login().await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the loopback entry admits the test client: {body}"
+    );
+
+    // Without a valid entry the invalid one admits nobody, and the answer is
+    // the allow-list refusal, not a server error.
+    sqlx::query("DELETE FROM ip_whitelist WHERE cidr = '127.0.0.0/8'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = login().await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"], "ip_blocked");
+}
+
 #[tokio::test]
 async fn login_validation_rejects_invalid_email() {
     let Some((app, _pool)) = test_context().await else {

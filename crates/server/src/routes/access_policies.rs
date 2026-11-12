@@ -491,6 +491,22 @@ async fn update_policy(
         Some(false) => {}
     }
 
+    // The cell before the change, for the activity log ("old → new", QA
+    // 2026-11-12 S3-3). A failed read only leaves the old side empty.
+    let previous = sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT access_level, condition_type FROM field_access_policies
+         WHERE role = $1 AND entity_type = $2 AND field_name = $3",
+    )
+    .bind(&body.role)
+    .bind(&body.entity_type)
+    .bind(&body.field_name)
+    .fetch_optional(&state.db)
+    .await
+    .unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "Read the access policy before its update");
+        None
+    });
+
     let result = sqlx::query!(
         "UPDATE field_access_policies
          SET access_level = $4, condition_type = $5, updated_by = $6, updated_at = now()
@@ -532,7 +548,11 @@ async fn update_policy(
                 "field_name": body.field_name,
                 "access_level": body.access_level,
                 "condition_type": body.condition_type,
-            }
+            },
+            "previous_value": previous.map(|(access_level, condition_type)| serde_json::json!({
+                "access_level": access_level,
+                "condition_type": condition_type,
+            })),
         }),
     ));
 
@@ -578,6 +598,53 @@ async fn reset_entity(
     }
 
     let (roles, fields, levels, conditions, locks) = default_patient_policy_columns();
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to reset policies: begin");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reset policies",
+            );
+        }
+    };
+
+    // How many editable cells differ from the defaults right now: the audit
+    // row names what the reset actually changed (QA 2026-11-12 E-3).
+    let changed = match sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT count(*)
+        FROM field_access_policies p
+        LEFT JOIN UNNEST($2::text[], $3::text[], $4::text[], $5::text[])
+            AS t(role, field_name, access_level, condition_type)
+          ON t.role = p.role AND t.field_name = p.field_name
+        WHERE p.entity_type = $1
+          AND NOT p.is_system_locked
+          AND (
+            t.role IS NULL
+            OR p.access_level IS DISTINCT FROM t.access_level
+            OR p.condition_type IS DISTINCT FROM t.condition_type
+          )
+        "#,
+    )
+    .bind(&body.entity_type)
+    .bind(&roles)
+    .bind(&fields)
+    .bind(&levels)
+    .bind(&conditions)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(changed) => changed,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to reset policies: count changes");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reset policies",
+            );
+        }
+    };
+
     let result = sqlx::query(
         r#"
         WITH deleted AS (
@@ -613,34 +680,68 @@ async fn reset_entity(
     .bind(&levels)
     .bind(&conditions)
     .bind(&locks)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await;
 
-    match result {
-        Ok(r) => {
-            tracing::info!(by = %auth.user_id, entity = %body.entity_type, restored = r.rows_affected(), "Access policies reset to defaults");
-            crate::realtime::publish_admin_event(
-                &state,
-                Some(auth.user_id),
-                "access_policy.reset",
-                "access_policy",
-                auth.user_id,
-                serde_json::json!({
-                    "entity_type": body.entity_type,
-                    "restored": r.rows_affected(),
-                }),
-            )
-            .await;
-            StatusCode::NO_CONTENT.into_response()
-        }
+    let restored = match result {
+        Ok(r) => r.rows_affected(),
         Err(e) => {
             tracing::error!(error = %e, "Failed to reset policies");
-            err(
+            return err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to reset policies",
-            )
+            );
         }
+    };
+
+    // The reset is an access change like a single cell edit: it is audited in
+    // the same transaction, so the matrix never changes without its row.
+    if let Err(e) = audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "reset_access_policies",
+            Some(auth.user_id),
+            "field_access_policy",
+            None,
+            serde_json::json!({
+                "entity_type": body.entity_type,
+                "restored": restored,
+                "changed": changed,
+            }),
+        ),
+    )
+    .await
+    {
+        tracing::error!(error = %e, "Failed to reset policies: audit");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reset policies",
+        );
     }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "Failed to reset policies: commit");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reset policies",
+        );
+    }
+
+    tracing::info!(by = %auth.user_id, entity = %body.entity_type, restored, changed, "Access policies reset to defaults");
+    crate::realtime::publish_admin_event(
+        &state,
+        Some(auth.user_id),
+        "access_policy.reset",
+        "access_policy",
+        auth.user_id,
+        serde_json::json!({
+            "entity_type": body.entity_type,
+            "restored": restored,
+            "changed": changed,
+        }),
+    )
+    .await;
+    StatusCode::NO_CONTENT.into_response()
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {

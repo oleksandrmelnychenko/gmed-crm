@@ -114,6 +114,23 @@ pub(crate) fn request_ip(
     crate::rate_limit::client_ip(headers, peer.map(|Extension(ConnectInfo(addr))| addr))
 }
 
+/// Whether an allow-list entry covers the client address. Entries that are
+/// no IP address or network are ignored (and logged), never an error.
+pub(crate) fn ip_whitelist_allows(client_ip: &str, entries: &[String]) -> bool {
+    let Ok(client) = client_ip.trim().parse::<std::net::IpAddr>() else {
+        return false;
+    };
+    entries.iter().any(
+        |entry| match crate::routes::admin_security::parse_ip_network(entry) {
+            Some(network) => crate::routes::admin_security::ip_in_network(client, network),
+            None => {
+                tracing::warn!(entry = %entry, "Ignoring an invalid IP whitelist entry");
+                false
+            }
+        },
+    )
+}
+
 /// Whether the IP allow-list (`ip_whitelist_enabled`) refuses this address.
 /// An unknown address is refused while the list is on.
 async fn blocked_by_ip_whitelist(state: &AppState, ip: Option<&str>) -> bool {
@@ -131,20 +148,18 @@ async fn blocked_by_ip_whitelist(state: &AppState, ip: Option<&str>) -> bool {
     }
 
     let client_ip = ip.unwrap_or("0.0.0.0");
-    let allowed = sqlx::query(
-        r#"SELECT EXISTS(
-                SELECT 1
-                FROM ip_whitelist
-                WHERE is_active = true
-                  AND $1::inet <<= cidr::inet
-            ) AS allowed"#,
-    )
-    .bind(client_ip)
-    .fetch_one(&state.db)
-    .await
-    .ok()
-    .and_then(|row| row.try_get::<bool, _>("allowed").ok())
-    .unwrap_or(false);
+    // The entries are matched here, not with `cidr::inet` in SQL: one stored
+    // entry that is no address made that cast fail for every sign-in
+    // (QA 2026-11-12 E-4). An invalid entry is skipped with a warning.
+    let entries =
+        sqlx::query_scalar::<_, String>("SELECT cidr FROM ip_whitelist WHERE is_active = true")
+            .fetch_all(&state.db)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "Read the IP whitelist");
+                Vec::new()
+            });
+    let allowed = ip_whitelist_allows(client_ip, &entries);
     if !allowed {
         tracing::warn!(ip = client_ip, "Blocked by IP whitelist");
     }

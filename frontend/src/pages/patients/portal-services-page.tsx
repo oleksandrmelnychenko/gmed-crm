@@ -47,6 +47,7 @@ import {
 } from "@/pages/patients/data/portal-api";
 import {
   isOpenOwnServiceRequest,
+  portalServiceStatus,
   usePortalLabels,
 } from "@/pages/patients/model/portal-shared";
 import type { PortalConciergeServiceItem } from "@/pages/patients/model/portal-shared";
@@ -610,8 +611,8 @@ export function PatientServicesPage() {
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <div className="flex flex-wrap gap-2">
-                          <StatusBadge status={item.status} tone={serviceStatusBadgeTone(item.status)}>
-                            {portalStatusLabel(item.status)}
+                          <StatusBadge status={portalServiceStatus(item)} tone={serviceStatusBadgeTone(item.status)}>
+                            {portalStatusLabel(portalServiceStatus(item))}
                           </StatusBadge>
                           <CountBadge>
                             {conciergeServiceKindLabel(item.service_kind)}

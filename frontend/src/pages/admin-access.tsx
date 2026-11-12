@@ -4,6 +4,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useState,
   type SetStateAction,
 } from "react";
 import {
@@ -31,6 +32,8 @@ import {
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
+import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
+import { toast } from "@/components/ui/toast";
 import {
   Sheet,
   SheetContent,
@@ -420,26 +423,35 @@ function useAdminAccessPageContent() {
         access_level: newLevel,
         condition_type: condition,
       });
+      // One click saves at once: say what was saved (QA 2026-11-12 S3-2).
+      toast.success(
+        `${t.admin_system_access_saved}: ${fieldLabel(field)} · ${roleLabel(role)} — ${accessCellText(t, role, newLevel, false)}`,
+      );
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : t.common_error);
       await loadPolicies();
     } finally {
       setSaveBusyToken("");
     }
-  }, [loadPolicies, policies, t.common_error]);
+  }, [fieldLabel, loadPolicies, policies, roleLabel, t]);
 
+  // The reset rewrites the whole matrix: it is asked first and confirmed by a
+  // toast (QA 2026-11-12 E-2); the server writes the audit row.
+  const [confirmReset, setConfirmReset] = useState(false);
   const resetPolicies = useCallback(async () => {
+    setConfirmReset(false);
     setResetBusy(true);
     setError("");
     try {
       await resetAccessPolicies();
+      toast.success(t.admin_system_access_reset_done);
       await loadPolicies();
     } catch (resetError) {
       setError(resetError instanceof Error ? resetError.message : t.common_error);
     } finally {
       setResetBusy(false);
     }
-  }, [loadPolicies, t.common_error]);
+  }, [loadPolicies, t.admin_system_access_reset_done, t.common_error]);
 
   const accessColumns = useMemo<ColumnDef<AccessMatrixRow>[]>(() => [
     {
@@ -608,7 +620,7 @@ function useAdminAccessPageContent() {
                 variant="default"
                 className="h-9 rounded-lg gap-1.5 px-3.5"
                 disabled={resetBusy}
-                onClick={() => void resetPolicies()}
+                onClick={() => setConfirmReset(true)}
               >
                 <RotateCcw className="size-3.5" />
                 {t.access_reset}
@@ -773,6 +785,17 @@ function useAdminAccessPageContent() {
           </AdminSheetScaffold>
         </SheetContent>
       </Sheet>
+      <DirtyDismissConfirmDialog
+        open={confirmReset}
+        destructive
+        title={t.admin_system_access_reset_confirm_title}
+        message={t.admin_system_access_reset_confirm_message}
+        cancelLabel={t.common_cancel}
+        confirmLabel={t.access_reset}
+        confirmDisabled={resetBusy}
+        onCancel={() => setConfirmReset(false)}
+        onConfirm={() => void resetPolicies()}
+      />
     </>
   );
 }

@@ -160,10 +160,7 @@ async fn create_my_document_translation_request(
         Err(sqlx::Error::Database(db_error))
             if db_error.constraint() == Some("idx_document_translation_requests_active") =>
         {
-            return err(
-                StatusCode::CONFLICT,
-                "An active translation request already exists for this language",
-            );
+            return translation_request_active_exists();
         }
         Err(e) => {
             tracing::error!(error = %e, document_id = %document_id, patient_id = %patient_id, "create patient translation request");
@@ -405,6 +402,21 @@ async fn notify_assigned_staff(
             }
         }
     }
+}
+
+/// 409 for a second open translation request of one document into the same
+/// language, with a code the screens translate (QA 2026-11-12 E-5: the
+/// portal showed the English server text). Staff requests (documents.rs)
+/// answer the same way.
+pub(crate) fn translation_request_active_exists() -> axum::response::Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": "translation_request_active_exists",
+            "message": "An active translation request already exists for this language",
+        })),
+    )
+        .into_response()
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {

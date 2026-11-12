@@ -49,11 +49,11 @@ export function LegalNoticePage() {
   const localizedLabels: Partial<Record<string, string>> = noticeLang === "en" ? {
     legal_imprint_title: "Legal notice", legal_privacy_title: "Privacy notice",
     legal_load_error: "The agency contact details could not be loaded.",
-    legal_phone: "Telephone", legal_email: "Email", legal_vat_id: "VAT ID", legal_back: "Back to sign in",
+    legal_phone: "Telephone", legal_email: "Email", legal_vat_id: "VAT ID", legal_back: "Back to sign in", legal_back_app: "Back to GMED",
   } : noticeLang === "uk" ? {
     legal_imprint_title: "Правова інформація", legal_privacy_title: "Декларація про захист даних",
     legal_load_error: "Не вдалося завантажити контактні дані агентства.",
-    legal_phone: "Телефон", legal_email: "Електронна пошта", legal_vat_id: "Номер ПДВ", legal_back: "Назад до входу",
+    legal_phone: "Телефон", legal_email: "Електронна пошта", legal_vat_id: "Номер ПДВ", legal_back: "Назад до входу", legal_back_app: "Назад до GMED",
   } : {};
   const noticeUi = noticeLang === "de" || noticeLang === "ru" ? translationsFor(noticeLang).uiText : t.uiText;
   const l = (key: string) => localizedLabels[key] ?? noticeUi[key] ?? key;

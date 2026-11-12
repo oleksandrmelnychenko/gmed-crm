@@ -310,6 +310,7 @@ export const ACCESS_ACTIONS = new Set([
   "totp_reset",
   "toggle_mfa",
   "update_access_policy",
+  "reset_access_policies",
   "create_staff_access_profile",
   "update_staff_access_profile",
   "clone_staff_access_profile",

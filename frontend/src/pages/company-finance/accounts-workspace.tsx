@@ -35,7 +35,7 @@ import { Input } from "@/components/ui/input";
 import { useReadOnly } from "@/components/read-only-scope";
 import { Banner as ShellBanner, selectClass as shellSelectClassName } from "@/components/ui-shell";
 import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
-import { useLang } from "@/lib/i18n";
+import { formatPluralCount, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import {
@@ -104,7 +104,8 @@ const copy = {
     transferUnavailable: "Нужно минимум два активных счета в одной валюте",
     transferReversalTitle: "Сторно внутреннего перевода",
     transferReversalDescription: "Сумма вернется на исходный счет.",
-    movementCount: "движений",
+    // QA 2026-11-12 S3-5: «1 движений».
+    movementCount: { one: "{count} движение", few: "{count} движения", many: "{count} движений" },
     default: "По умолчанию",
     inactive: "Неактивен",
     makeDefault: "Сделать основным",
@@ -176,7 +177,7 @@ const copy = {
     transferUnavailable: "Mindestens zwei aktive Konten derselben Währung sind erforderlich",
     transferReversalTitle: "Interne Umbuchung stornieren",
     transferReversalDescription: "Der Betrag wird auf das ursprüngliche Konto zurückgebucht.",
-    movementCount: "Bewegungen",
+    movementCount: { one: "{count} Bewegung", few: "{count} Bewegungen", many: "{count} Bewegungen" },
     default: "Standard",
     inactive: "Inaktiv",
     makeDefault: "Als Standard setzen",
@@ -688,7 +689,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
                 <div className="min-w-[calc(50%-0.5rem)] flex-auto sm:min-w-0"><dt className="text-muted-foreground">{text.corrections}</dt><dd className="mt-1 whitespace-nowrap font-medium tabular-nums">{money(account.adjustment_balance)}</dd></div>
               </dl>
               <p className="mt-2 text-[11px] text-muted-foreground">
-                {formatDate(account.opening_balance_on)} · {account.movement_count + (account.transfer_count ?? 0)} {text.movementCount}
+                {formatDate(account.opening_balance_on)} · {formatPluralCount(lang, account.movement_count + (account.transfer_count ?? 0), text.movementCount)}
               </p>
               {readOnly ? null : (
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2 pt-1">

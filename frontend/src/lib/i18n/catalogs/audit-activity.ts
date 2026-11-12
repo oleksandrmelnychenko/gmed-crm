@@ -33,6 +33,10 @@ const ACTIONS: Record<string, Pair> = {
     "Zugriffe bei Rollenwechsel entzogen",
   ],
   update_access_policy: ["Правило доступа изменено", "Zugriffsregel geändert"],
+  reset_access_policies: [
+    "Матрица доступа сброшена по умолчанию",
+    "Zugriffsmatrix auf Standard zurückgesetzt",
+  ],
   create_staff_access_profile: ["Профиль доступа создан", "Zugriffsprofil angelegt"],
   update_staff_access_profile: ["Профиль доступа изменён", "Zugriffsprofil geändert"],
   clone_staff_access_profile: ["Профиль доступа скопирован", "Zugriffsprofil kopiert"],

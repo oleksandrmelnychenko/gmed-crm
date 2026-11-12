@@ -12,6 +12,7 @@ import {
   portalDocumentTypeLabels,
   portalDocumentValueLabel,
   portalRequestDateProblem,
+  portalServiceStatus,
 } from "./portal-shared";
 
 describe("appointment request dates (global QA 2026-11-10)", () => {
@@ -102,6 +103,12 @@ describe("portal services (concierge QA 2026-11-12 D-8, D-9)", () => {
     expect(isOpenOwnServiceRequest({ request_source: "patient_portal", status: "planned" })).toBe(true);
     expect(isOpenOwnServiceRequest({ request_source: "patient_portal", status: "confirmed" })).toBe(false);
     expect(isOpenOwnServiceRequest({ request_source: "staff", status: "planned" })).toBe(false);
+  });
+
+  it("calls an own request nobody booked «requested», not «planned» (QA 2026-11-12 S3-14)", () => {
+    expect(portalServiceStatus({ request_source: "patient_portal", status: "planned" })).toBe("requested");
+    expect(portalServiceStatus({ request_source: "staff", status: "planned" })).toBe("planned");
+    expect(portalServiceStatus({ request_source: "patient_portal", status: "booked" })).toBe("booked");
   });
 
   it("lists open services soonest first, closed ones after", () => {

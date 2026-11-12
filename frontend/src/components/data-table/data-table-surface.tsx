@@ -1,4 +1,4 @@
-import { useMemo, useReducer, type ReactNode, type SetStateAction } from "react";
+import { useEffect, useMemo, useReducer, type ReactNode, type SetStateAction } from "react";
 
 import { WritableScope } from "@/components/read-only-scope";
 import { useLang } from "@/lib/i18n";
@@ -58,6 +58,8 @@ export type DataTableSurfaceProps<T> = Omit<
   footer?: ReactNode | ((context: DataTableSurfaceFooterContext<T>) => ReactNode);
   groupLabels?: Record<string, string>;
   maxFrozenColumns?: number;
+  /** Told how many rows the table's own filters leave (for a count shown outside the table). */
+  onFilteredCountChange?: (count: number) => void;
   pagination?: {
     className?: string;
     pageSize?: number;
@@ -119,6 +121,7 @@ export function DataTableSurface<T>({
   footer,
   groupLabels,
   maxFrozenColumns = DEFAULT_MAX_FROZEN_COLUMNS,
+  onFilteredCountChange,
   pagination,
   rowActionsLabel,
   rowActionsWidth,
@@ -244,6 +247,10 @@ export function DataTableSurface<T>({
       filteredCount: sorted.length,
     };
   }, [accessors, expandRow, filters, rows, sortAccessors, sortStack]);
+
+  useEffect(() => {
+    onFilteredCountChange?.(filteredCount);
+  }, [filteredCount, onFilteredCountChange]);
 
   const paginationResetKey = pagination
     ? `${pagination.resetKey ?? ""}:${JSON.stringify(filters)}:${JSON.stringify(sortStack)}`

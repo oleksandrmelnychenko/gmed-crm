@@ -321,10 +321,9 @@ export function SendStep({
               </span>
             </label>
           </div>
-          {/* Everything else is there: say why "send" is still off (the button alone does not). */}
-          {sendable && ready && !confirmed ? (
-            <p className="text-xs text-muted-foreground" data-testid="lead-request-declaration-hint">{text.declarationRequired}</p>
-          ) : null}
+          {/* Why "send" is still off is said once, next to the button
+              (`lead-request-submit-reason`); the same hint here printed it
+              twice (QA 2026-11-12 S3-18). */}
         </Section>
       ) : null}
       {sendable && staffMode ? (
