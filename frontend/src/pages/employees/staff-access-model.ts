@@ -48,6 +48,39 @@ export function canRoleUseMedicalDocuments(role: string) {
   return MEDICAL_DATA_ROLES.has(role.trim().toLowerCase());
 }
 
+/**
+ * The «all documents» row for a role without medical access: view, download,
+ * edit and use would include medical documents, so the server refuses them
+ * (absolute boundary). Uploading new documents is the one grant that stays
+ * non-medical — the upload route refuses a medical upload for such a role —
+ * so it is offered as «non-medical only» (QA 2026-11-13 F-x2).
+ */
+export function isAllDocumentsRuleLocked(
+  resourceType: StaffAccessResourceType,
+  capability: StaffAccessCapability,
+  targetCanUseMedicalDocuments: boolean,
+) {
+  return resourceType === "document" && !targetCanUseMedicalDocuments && capability !== "upload";
+}
+
+export function isNonMedicalOnlyUploadRule(
+  resourceType: StaffAccessResourceType,
+  capability: StaffAccessCapability,
+  targetCanUseMedicalDocuments: boolean,
+) {
+  return resourceType === "document" && !targetCanUseMedicalDocuments && capability === "upload";
+}
+
+const ABSOLUTE_BOUNDARY_MESSAGE = "Allow rule crosses an absolute resource access boundary";
+
+/** The server's English boundary refusal in the UI language. */
+export function staffAccessErrorMessage(
+  message: string,
+  copy: { medicalAllLocked: string },
+) {
+  return message.trim() === ABSOLUTE_BOUNDARY_MESSAGE ? copy.medicalAllLocked : message;
+}
+
 export function ruleMatchesRecord(
   rule: StaffAccessRule,
   resourceType: StaffAccessResourceType,

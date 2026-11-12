@@ -5,9 +5,35 @@ import {
   canRoleUseMedicalDocuments,
   effectiveProfileAllRule,
   effectiveProfileRule,
+  isAllDocumentsRuleLocked,
+  isNonMedicalOnlyUploadRule,
   setDirectAllRuleEnabled,
   setDirectRuleEnabled,
+  staffAccessErrorMessage,
 } from "./staff-access-model";
+
+// QA 2026-11-13 F-x2: the CEO can grant a concierge the non-medical upload;
+// «all» for view/download/edit stays locked and is explained.
+describe("all-documents rules for roles without medical access", () => {
+  it("offers only the upload, as non-medical only", () => {
+    expect(isAllDocumentsRuleLocked("document", "upload", false)).toBe(false);
+    expect(isNonMedicalOnlyUploadRule("document", "upload", false)).toBe(true);
+    for (const capability of ["view", "use", "edit", "download"] as const) {
+      expect(isAllDocumentsRuleLocked("document", capability, false), capability).toBe(true);
+    }
+    expect(isAllDocumentsRuleLocked("document", "view", true)).toBe(false);
+    expect(isNonMedicalOnlyUploadRule("document", "upload", true)).toBe(false);
+    expect(isAllDocumentsRuleLocked("provider", "view", false)).toBe(false);
+  });
+
+  it("explains the server's boundary refusal", () => {
+    const copy = { medicalAllLocked: "Включает медицинские" };
+    expect(
+      staffAccessErrorMessage("Allow rule crosses an absolute resource access boundary", copy),
+    ).toBe("Включает медицинские");
+    expect(staffAccessErrorMessage("Database error", copy)).toBe("Database error");
+  });
+});
 
 describe("staff access model", () => {
   it("allows only the CEO to manage employee access", () => {

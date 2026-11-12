@@ -19,6 +19,9 @@ export type StaffAccessCopy = {
   resourceCount: string;
   empty: string;
   medicalLocked: string;
+  medicalAllLocked: string;
+  nonMedicalUploadOnly: string;
+  nonMedicalUploadHint: string;
   directDeny: string;
   inheritedRule: string;
   globalRules: string;
@@ -82,6 +85,11 @@ export const staffAccessDe = {
   resourceCount: "Angezeigt: {shown} von {total}",
   empty: "Keine Ressourcen gefunden.",
   medicalLocked: "Medizinisches Dokument: für die Rolle des ausgewählten Mitarbeiters systemweit gesperrt.",
+  medicalAllLocked:
+    "«Alle» umfasst auch medizinische Dokumente, die für diese Rolle systemweit gesperrt sind. Erlauben Sie einzelne Dokumente in der Liste unten.",
+  nonMedicalUploadOnly: "Nur nicht medizinische",
+  nonMedicalUploadHint:
+    "Neue Dokumente hochladen: Diese Rolle darf nur nicht medizinische Dokumente hochladen; medizinische lehnt das System weiterhin ab.",
   directDeny: "Direkt verboten",
   inheritedRule: "Profil",
   globalRules: "Globale persönliche Regeln",
@@ -143,6 +151,11 @@ export const staffAccessRu = {
   resourceCount: "Показано: {shown} из {total}",
   empty: "Ресурсы не найдены.",
   medicalLocked: "Медицинский документ: доступ для роли выбранного сотрудника заблокирован системой.",
+  medicalAllLocked:
+    "«Все» включает и медицинские документы, которые для этой роли закрыты системой. Разрешите отдельные документы в списке ниже.",
+  nonMedicalUploadOnly: "Только немедицинские",
+  nonMedicalUploadHint:
+    "Загрузка новых документов: эта роль может загружать только немедицинские документы; медицинские система по-прежнему отклоняет.",
   directDeny: "Прямой запрет",
   inheritedRule: "Профиль",
   globalRules: "Глобальные персональные правила",

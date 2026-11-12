@@ -1093,10 +1093,14 @@ async fn load_patient_account_statement(
     // out of the totals above and summed on its own. Staff totals unchanged.
     let mut third_party_invoiced = Decimal::ZERO;
     let mut third_party_due = Decimal::ZERO;
+    // The same open amount for both scopes: the staff card header leaves it
+    // out of the patient's own balance (owner 2026-11-12 #7, QA F-x6); the
+    // staff statement totals keep it.
+    let mut third_party_open_due = Decimal::ZERO;
 
     for row in invoice_rows {
-        let separate_third_party =
-            portal_scope && row.try_get::<bool, _>("third_party_payer").unwrap_or(false);
+        let is_third_party = row.try_get::<bool, _>("third_party_payer").unwrap_or(false);
+        let separate_third_party = portal_scope && is_third_party;
         let invoice_type = row.try_get::<String, _>("invoice_type").unwrap_or_default();
         let mut status = row.try_get::<String, _>("status").unwrap_or_default();
         let total_gross = row
@@ -1161,6 +1165,9 @@ async fn load_patient_account_statement(
         } else {
             (paid + applied - (total_gross - credited)).max(Decimal::ZERO)
         };
+        if amounts_visible && is_third_party && status != "draft" {
+            third_party_open_due += due;
+        }
         if amounts_visible && separate_third_party {
             if status != "draft" {
                 third_party_invoiced += (total_gross - credited).max(Decimal::ZERO);
@@ -1702,6 +1709,10 @@ async fn load_patient_account_statement(
     } else {
         Value::Null
     };
+    // Open on third parties' invoices, in both scopes: the staff card header
+    // shows the patient's own balance without it (QA 2026-11-13 F-x6).
+    statement["summary"]["third_party_open_due"] =
+        serde_json::json!(decimal_to_string(third_party_open_due));
     Ok(statement)
 }
 

@@ -57,6 +57,8 @@ import {
   downloadPortalDunningLetter,
   openPortalInvoicePdf,
   portalInvoiceIsThirdParty,
+  portalInvoiceNeedsPaymentProof,
+  portalThirdPartyPayerLabel,
   portalOwnOpenBalances,
   portalStatementAvailableCredit,
   portalStatementOpenAmount,
@@ -396,13 +398,14 @@ function usePatientInvoicesPageContent() {
     [invoices],
   );
   const proofPendingCount = useMemo(
-    () =>
-      invoices.filter(
-        (item) =>
-          !["paid", "cancelled"].includes(item.status) &&
-          !item.last_payment_proof_at,
-      ).length,
+    () => invoices.filter(portalInvoiceNeedsPaymentProof).length,
     [invoices],
+  );
+  // The detail payload has no payer flag; the list row of the same invoice has.
+  const detailIsThirdParty = Boolean(
+    detail &&
+      (portalInvoiceIsThirdParty(detail) ||
+        invoices.some((item) => item.id === detail.id && portalInvoiceIsThirdParty(item))),
   );
 
   async function handlePaymentProofUpload(event: FormEvent<HTMLFormElement>) {
@@ -464,12 +467,23 @@ function usePatientInvoicesPageContent() {
       ? `Guthaben ${formatPortalCurrency(availableCreditTotal, accountStatement?.currency)} verfügbar – die Buchhaltung verrechnet es mit einer Rechnung`
       : `Доступно ${formatPortalCurrency(availableCreditTotal, accountStatement?.currency)} переплаты/предоплаты – бухгалтерия зачтёт её в счёт`
     : undefined;
-  const thirdPartyPaidByText = (payer: string | null | undefined) => {
-    const name = payer?.trim() || (lang === "de" ? "einem Dritten" : "третье лицо");
+  const thirdPartyPaidByText = (invoice: PortalInvoiceItem) => {
+    const payer = portalThirdPartyPayerLabel(
+      invoice.third_party_payer_name,
+      invoice.status === "paid",
+      lang,
+    );
     return lang === "de"
-      ? `Bezahlt von ${name} – nicht in Ihrem offenen Saldo`
-      : `Оплачивает ${name} – не входит в ваш открытый баланс`;
+      ? `${payer} – nicht in Ihrem offenen Saldo`
+      : `${payer} – не входит в ваш открытый баланс`;
   };
+  // A third party's invoice asks no payment proof of the patient (QA F-x6).
+  const paymentProofText = (invoice: PortalInvoiceItem) =>
+    invoice.last_payment_proof_at
+      ? <PortalDateChip title={t.portal_invoices_uploaded} timestamp={invoice.last_payment_proof_at} />
+      : portalInvoiceIsThirdParty(invoice)
+        ? lang === "de" ? "Nicht nötig – der Zahler zahlt" : "Не нужно – оплачивает плательщик"
+        : t.portal_invoices_not_uploaded;
   const overpaymentText = (amount: number) =>
     lang === "de"
       ? `Überzahlung ${formatPortalCurrency(amount, accountStatement?.currency)} als Guthaben`
@@ -720,13 +734,13 @@ function usePatientInvoicesPageContent() {
           {statementSplit.thirdParty.length > 0 ? (
             <div className="mt-4 space-y-2" data-testid="portal-statement-third-party">
               <div className={tokens.text.eyebrow}>
-                {lang === "de" ? "Von Dritten bezahlte Rechnungen (nicht in Ihrem Saldo)" : "Счета, которые оплачивает третье лицо (не входят в ваш баланс)"}
+                {lang === "de" ? "Rechnungen, die Dritte zahlen (nicht in Ihrem Saldo)" : "Счета, которые оплачивает третье лицо (не входят в ваш баланс)"}
               </div>
               {statementSplit.thirdParty.map((group) => (
                 <ListItem key={`third-party:${group.payer}`} className="space-y-2">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="text-sm font-semibold text-foreground">
-                      {lang === "de" ? "Bezahlt von" : "Оплачивает"} {group.payer || (lang === "de" ? "einem Dritten" : "третье лицо")}
+                      {portalThirdPartyPayerLabel(group.payer, group.due <= 0.004, lang)}
                     </div>
                     <div className="text-right text-xs text-muted-foreground">
                       {lang === "de" ? "Offen beim Zahler" : "Открыто у плательщика"}{" "}
@@ -813,7 +827,7 @@ function usePatientInvoicesPageContent() {
                         </button>
                         <div className="mt-0.5 text-xs text-muted-foreground">{invoice.order_number}</div>
                         {portalInvoiceIsThirdParty(invoice) ? (
-                          <div className="mt-0.5 text-xs text-muted-foreground" data-testid="portal-invoice-third-party">{thirdPartyPaidByText(invoice.third_party_payer_name)}</div>
+                          <div className="mt-0.5 text-xs text-muted-foreground" data-testid="portal-invoice-third-party">{thirdPartyPaidByText(invoice)}</div>
                         ) : null}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-muted-foreground"><PortalDateChip timestamp={invoice.issued_at} /></td>
@@ -824,7 +838,7 @@ function usePatientInvoicesPageContent() {
                         {amountsVisible ? portalInvoiceCreditLine(invoice, lang, formatPortalCurrency) ? <div className="mt-0.5 text-xs font-sans text-muted-foreground">{portalInvoiceCreditLine(invoice, lang, formatPortalCurrency)}</div> : null : null}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right font-mono font-semibold tabular-nums text-foreground">{amountsVisible ? formatPortalCurrency(balanceDue, invoice.currency) : t.portal_invoices_hidden}</td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">{invoice.last_payment_proof_at ? <PortalDateChip title={t.portal_invoices_uploaded} timestamp={invoice.last_payment_proof_at} /> : t.portal_invoices_not_uploaded}</td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{paymentProofText(invoice)}</td>
                     </tr>
                   );
                 })}
@@ -853,7 +867,7 @@ function usePatientInvoicesPageContent() {
                         {t.portal_invoices_issued} <PortalDateChip timestamp={invoice.issued_at} />
                       </p>
                       {portalInvoiceIsThirdParty(invoice) ? (
-                        <p className="mt-1 text-xs text-muted-foreground">{thirdPartyPaidByText(invoice.third_party_payer_name)}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{thirdPartyPaidByText(invoice)}</p>
                       ) : null}
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -879,7 +893,7 @@ function usePatientInvoicesPageContent() {
                     <InfoRow
                       className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
                       label={t.portal_invoices_payment_proof}
-                      value={invoice.last_payment_proof_at ? <PortalDateChip title={t.portal_invoices_uploaded} timestamp={invoice.last_payment_proof_at} /> : t.portal_invoices_not_uploaded}
+                      value={paymentProofText(invoice)}
                     />
                   </div>
                 </ListItem>
@@ -1247,20 +1261,26 @@ function usePatientInvoicesPageContent() {
                         <SectionHeading icon={FileCheck}>{t.portal_invoices_payment_proof}</SectionHeading>
                       </h2>
                       <p className={cn("mt-1", tokens.text.muted)}>
-                        {t.portal_invoices_upload_transfer_receipt_or_payment_confirmation_once_funds_were}
+                        {detailIsThirdParty
+                          ? lang === "de"
+                            ? "Diese Rechnung zahlt der Zahler; von Ihnen ist kein Zahlungsnachweis nötig."
+                            : "Этот счёт оплачивает плательщик; подтверждение оплаты от вас не нужно."
+                          : t.portal_invoices_upload_transfer_receipt_or_payment_confirmation_once_funds_were}
                       </p>
                     </div>
-                    <Button
-                      type="button"
-                      className={tokens.control.primaryButton}
-                      disabled={uploadBusy || ["paid", "cancelled"].includes(detail.status)}
-                      onClick={() => {
-                        dispatchInvoicesState({ uploadError: "", uploadOpen: true });
-                      }}
-                    >
-                      <Upload className="size-4" />
-                      {t.portal_invoices_upload_payment_proof}
-                    </Button>
+                    {detailIsThirdParty ? null : (
+                      <Button
+                        type="button"
+                        className={tokens.control.primaryButton}
+                        disabled={uploadBusy || ["paid", "cancelled"].includes(detail.status)}
+                        onClick={() => {
+                          dispatchInvoicesState({ uploadError: "", uploadOpen: true });
+                        }}
+                      >
+                        <Upload className="size-4" />
+                        {t.portal_invoices_upload_payment_proof}
+                      </Button>
+                    )}
                   </div>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_uploaded_proofs} value={String(detail.payment_proof_count ?? 0)} />

@@ -109,7 +109,9 @@ async function mount(page: Page, lang: "ru" | "de", documents: Json[]) {
     const method = request.method();
     let response: unknown = [];
     if (method !== "GET") {
-      calls.push({ path, body: request.postData() ? request.postDataJSON() : null });
+      // The paper signature is a multipart upload (the scan), not JSON.
+      const multipart = path.endsWith("/paper-signature");
+      calls.push({ path, body: !multipart && request.postData() ? request.postDataJSON() : null });
     }
     if (path === "/me") {
       response = { id: "qa-user", email: "intake@example.com", name: "Intake QA", role: "ceo", created_at: "2026-01-01T00:00:00Z" };
@@ -165,7 +167,7 @@ async function mount(page: Page, lang: "ru" | "de", documents: Json[]) {
     } else if (/^\/documents\/[^/]+\/download$/.test(path)) {
       await route.fulfill({ contentType: "application/pdf", body: "%PDF-1.4\n%%EOF\n" });
       return;
-    } else if (/^\/documents\/[^/]+\/mark-signed$/.test(path)) {
+    } else if (/^\/documents\/[^/]+\/(mark-signed|paper-signature)$/.test(path)) {
       await route.fulfill({ status: 422, contentType: "application/json", body: JSON.stringify(incomplete) });
       return;
     }
@@ -228,17 +230,28 @@ test("a refused confirmation names the organisation's missing data and leads to 
   await expect(sheetActions.getByRole("button", { name: "Обновить для организации-плательщика", exact: true })).toBeVisible();
   const row = wizard.getByRole("button", { name: `${sheetName}.pdf` }).locator("xpath=ancestor::div[@data-document-row][1]");
   await row.scrollIntoViewIfNeeded();
+  // The payer's sheet is signed only with the scan (QA 2026-11-13 F-x7).
   await row.getByRole("button", { name: "Подтвердить подпись" }).click();
-  const refusal = wizard.locator('[data-document-row-error="gwg-org-1"]');
-  await expect(refusal.locator("[data-document-row-error-text]")).toHaveText(
+  const confirm = page.getByRole("dialog", { name: "Подтверждение подписи" });
+  await expect(confirm).toBeVisible();
+  await confirm.locator('input[type="file"]').setInputFiles({
+    name: "gwg-org-scan.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("%PDF-1.4 signed scan"),
+  });
+  await confirm.getByRole("checkbox").check();
+  await confirm.getByRole("button", { name: "Сохранить как подписанный" }).click();
+  await expect(confirm.getByRole("alert")).toContainText(
     "Подтвердить подпись нельзя: не хватает данных организации-плательщика: плательщик ещё не отправил ответы по своей ссылке, правовая форма, представитель организации, причина оплаты. Эти данные организация-плательщик вносит по своей ссылке, либо их вносит сотрудник с подписанной бумажной анкеты («Анкета плательщика» → «На бумаге» в разделе «Кто платит»); затем сформируйте лист заново.",
   );
-  expect(calls.filter((call) => call.path === "/documents/gwg-org-1/mark-signed")).toHaveLength(1);
+  await expect(confirm.getByTestId("paper-signature-error-jump")).toHaveText("Перейти к плательщику");
+  expect(calls.filter((call) => call.path === "/documents/gwg-org-1/paper-signature")).toHaveLength(1);
+  expect(calls.filter((call) => call.path === "/documents/gwg-org-1/mark-signed")).toHaveLength(0);
   await page.screenshot({ path: testInfo.outputPath("lead-gwg-legal-entity-refused-ru.png"), animations: "disabled" });
 
-  await refusal.getByRole("button", { name: "Перейти к плательщику" }).click();
-  await expect(refusal).toHaveCount(0);
-  await expect(wizard.locator("#lead-wizard-payer-declaration")).toBeFocused();
+  await confirm.getByTestId("paper-signature-error-jump").click();
+  await expect(confirm).toHaveCount(0);
+  await expect(wizard.locator("#lead-wizard-payer-declaration")).toBeInViewport();
 });
 
 test("the preview names the refusal and leads to who pays, in German", async ({ page }, testInfo) => {
@@ -249,14 +262,25 @@ test("the preview names the refusal and leads to who pays, in German", async ({ 
   await expect(sheetActions.getByRole("button", { name: "Für zahlende Organisation aktualisieren", exact: true })).toBeVisible();
   await wizard.getByRole("button", { name: `${sheetName}.pdf` }).click();
   const preview = page.getByRole("dialog", { name: `${sheetName}.pdf` });
+  // The payer's sheet is signed only with the scan (QA 2026-11-13 F-x7).
   await preview.getByRole("button", { name: "Unterschrift bestätigen" }).click();
-  await expect(preview.getByRole("alert")).toContainText(
+  const confirm = page.getByRole("dialog", { name: "Unterschrift bestätigen" });
+  await expect(confirm).toBeVisible();
+  await confirm.locator('input[type="file"]').setInputFiles({
+    name: "gwg-org-scan.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("%PDF-1.4 signed scan"),
+  });
+  await confirm.getByRole("checkbox").check();
+  await confirm.getByRole("button", { name: "Als unterschrieben speichern" }).click();
+  await expect(confirm.getByRole("alert")).toContainText(
     "Die Unterschrift kann nicht bestätigt werden: Es fehlen Angaben der zahlenden Organisation: Angaben der zahlenden Person über den eigenen Zugang fehlen, Rechtsform, vertretungsberechtigte Person, Zweck der Zahlung.",
   );
   await page.screenshot({ path: testInfo.outputPath("lead-gwg-legal-entity-preview-refused-de.png"), animations: "disabled" });
-  const jump = preview.getByTestId("lead-document-preview-jump");
+  const jump = confirm.getByTestId("paper-signature-error-jump");
   await expect(jump).toHaveText("Zur zahlenden Person");
   await jump.click();
+  await expect(confirm).toHaveCount(0);
   await expect(preview).toHaveCount(0);
   await expect(wizard.getByRole("tab", { name: "Unterlagen", exact: false })).toHaveAttribute("aria-selected", "true");
   // The step scrolls to "who pays"; closing the preview hands the focus back to its row.

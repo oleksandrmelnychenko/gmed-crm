@@ -345,6 +345,39 @@ export function portalInvoiceIsThirdParty(invoice: Pick<PortalInvoiceItem, "thir
   return invoice.third_party_payer === true;
 }
 
+/**
+ * Whether the portal asks the patient for a payment proof of this invoice:
+ * open, without a proof yet, and the patient's own invoice. A third party's
+ * invoice is never the patient's to prove (owner 2026-11-12 #7, QA F-x6).
+ */
+export function portalInvoiceNeedsPaymentProof(
+  invoice: Pick<PortalInvoiceItem, "status" | "last_payment_proof_at" | "third_party_payer">,
+): boolean {
+  return (
+    !["paid", "cancelled"].includes(invoice.status) &&
+    !invoice.last_payment_proof_at &&
+    !portalInvoiceIsThirdParty(invoice)
+  );
+}
+
+/**
+ * Who pays a third party's invoice: «zahlt <Zahler>» while it is open,
+ * «bezahlt von <Zahler>» only once it is settled (QA F-x6).
+ */
+export function portalThirdPartyPayerLabel(
+  payer: string | null | undefined,
+  settled: boolean,
+  lang: string,
+): string {
+  const name = payer?.trim();
+  if (lang === "de") {
+    if (settled) return `Bezahlt von ${name || "einem Dritten"}`;
+    return `Zahlt ${name || "ein Dritter"}`;
+  }
+  if (settled) return `Оплачено: ${name || "третье лицо"}`;
+  return `Оплачивает ${name || "третье лицо"}`;
+}
+
 /** The patient's own open balance per currency: visible, not cancelled, not paid by a third party. */
 export function portalOwnOpenBalances(
   invoices: readonly Pick<PortalInvoiceItem, "currency" | "status" | "balance_due" | "third_party_payer" | "portal_visibility">[],

@@ -59,11 +59,14 @@ import {
   canRoleUseMedicalDocuments,
   effectiveProfileAllRule,
   effectiveProfileRule,
+  isAllDocumentsRuleLocked,
+  isNonMedicalOnlyUploadRule,
   localizeProviderResourceDescription,
   profileRulesFromDirectRules,
   setDirectAllRuleEnabled,
   setDirectRuleEnabled,
   STAFF_ACCESS_CAPABILITIES,
+  staffAccessErrorMessage,
 } from "./staff-access-model";
 import type {
   StaffAccessCapability,
@@ -399,7 +402,9 @@ export function StaffAccessSheet({
         setConflict(true);
         setSaveError(copy.conflict);
       } else {
-        setSaveError(reason instanceof Error ? reason.message : copy.saveError);
+        setSaveError(
+          reason instanceof Error ? staffAccessErrorMessage(reason.message, copy) : copy.saveError,
+        );
       }
     } finally {
       if (activeEmployeeIdRef.current === requestedEmployeeId) setSaving(false);
@@ -444,7 +449,11 @@ export function StaffAccessSheet({
       setProfileDescription("");
     } catch (reason) {
       if (activeEmployeeIdRef.current !== requestedEmployeeId) return;
-      setProfileError(reason instanceof Error ? reason.message : copy.profileCreateError);
+      setProfileError(
+        reason instanceof Error
+          ? staffAccessErrorMessage(reason.message, copy)
+          : copy.profileCreateError,
+      );
     } finally {
       if (activeEmployeeIdRef.current === requestedEmployeeId) setProfileBusy(false);
     }
@@ -583,6 +592,11 @@ export function StaffAccessSheet({
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-foreground">{copy.all}</p>
                         <p className="text-xs text-muted-foreground">{copy.allScopeHint}</p>
+                        {resourceType === "document" && !targetCanUseMedicalDocuments ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {copy.medicalAllLocked} {copy.nonMedicalUploadHint}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                   </td>
@@ -594,8 +608,16 @@ export function StaffAccessSheet({
                       capability,
                     );
                     const checked = (direct?.effect ?? inherited?.effect) === "allow";
-                    const medicalAllLocked =
-                      resourceType === "document" && !targetCanUseMedicalDocuments;
+                    const medicalAllLocked = isAllDocumentsRuleLocked(
+                      resourceType,
+                      capability,
+                      targetCanUseMedicalDocuments,
+                    );
+                    const nonMedicalOnly = isNonMedicalOnlyUploadRule(
+                      resourceType,
+                      capability,
+                      targetCanUseMedicalDocuments,
+                    );
                     return (
                       <td key={capability} className="px-2 py-3 text-center align-middle">
                         <div className="flex flex-col items-center gap-1">
@@ -607,8 +629,10 @@ export function StaffAccessSheet({
                             )}
                             title={
                               medicalAllLocked
-                                ? copy.medicalLocked
-                                : `${copy.all}: ${capabilityLabel(capability)}`
+                                ? copy.medicalAllLocked
+                                : nonMedicalOnly
+                                  ? copy.nonMedicalUploadHint
+                                  : `${copy.all}: ${capabilityLabel(capability)}`
                             }
                           >
                             <input
@@ -629,6 +653,11 @@ export function StaffAccessSheet({
                               className="size-3.5 accent-[var(--primary)]"
                             />
                           </label>
+                          {nonMedicalOnly ? (
+                            <span className="max-w-20 text-[9px] leading-tight text-muted-foreground">
+                              {copy.nonMedicalUploadOnly}
+                            </span>
+                          ) : null}
                           {inherited && !direct ? (
                             <span className="rounded bg-sky-50 px-1 py-0.5 text-[9px] font-semibold text-sky-700">
                               {copy.inheritedRule}

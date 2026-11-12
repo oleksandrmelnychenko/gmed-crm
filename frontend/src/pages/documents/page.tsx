@@ -74,6 +74,7 @@ import {
 } from "@/components/data-table/data-table-pager";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import { createDocumentPreviewColumn } from "@/components/data-table/document-preview-column";
+import { splitTranslationTree } from "@/components/data-table/document-translation-tree";
 import type { ColumnDef } from "@/components/data-table/types";
 import { DocumentsGrid } from "@/components/documents-grid";
 import {
@@ -208,6 +209,7 @@ import {
   canShareDocumentWithRole,
   formatDocumentUploadError,
   isTranslationAssigneeRole,
+  sortTranslationAssignees,
   canViewTranslationQueue,
   canUpdateTranslations,
   canUploadDocuments,
@@ -678,6 +680,10 @@ function formatCreateShareError(
   translations: ReturnType<typeof runtimeTranslations>,
 ) {
   if (!(error instanceof Error)) return translations.documents_failed_create_share;
+  // QA 2026-11-13 F-x8: the block after the consent withdrawal, translated.
+  if (error.message.includes("revoked sharing with third parties")) {
+    return translations.documents_share_third_party_revoked;
+  }
   if (error.message.includes("Provider shares require a cover message")) {
     return translations.documents_share_message_required;
   }
@@ -1192,6 +1198,12 @@ function StaffDocumentsPage({
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   // Older documents follow beyond the loaded pages (QA 2026-11-12 A-01).
   const [documentsHaveMore, setDocumentsHaveMore] = useState(false);
+  // The rows the table counts: a translation sits under its source document,
+  // so the hint names the same number as the table's footer (QA F-x1).
+  const documentsListedCount = useMemo(
+    () => splitTranslationTree(documents).roots.length,
+    [documents],
+  );
   const [documentsMoreBusy, setDocumentsMoreBusy] = useState(false);
   const [intakeQueue, setIntakeQueue] = useState<DocumentItem[]>([]);
   const [busy, setBusy] = useState(true);
@@ -4034,7 +4046,7 @@ function StaffDocumentsPage({
         {!busy && documentsHaveMore ? (
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
             <span>
-              {l("documents_list_more_hint").replace("{count}", String(documents.length))}
+              {l("documents_list_more_hint").replace("{count}", String(documentsListedCount))}
             </span>
             <Button
               type="button"
@@ -8706,15 +8718,23 @@ function DocumentTranslationRequestsTable({
         render: (request) => {
           const open = request.status !== "completed" && request.status !== "cancelled";
           if (distributionStaff && canUpdateTranslation && open) {
-            const options = distributionStaff.filter(
-              (member) =>
-                isTranslationAssigneeRole(member.role, Boolean(request.document_is_medical)) ||
-                member.id === request.assigned_to,
+            // Interpreters first, named as translators, with a search (QA F-x9).
+            const options = sortTranslationAssignees(
+              distributionStaff.filter(
+                (member) =>
+                  isTranslationAssigneeRole(member.role, Boolean(request.document_is_medical)) ||
+                  member.id === request.assigned_to,
+              ),
             );
+            const roleLabel = (role: string) =>
+              role === "interpreter"
+                ? lang === "de" ? "Übersetzer/in" : "Переводчик"
+                : formatRoleLabel(role, lang);
             return (
               <NativeComboboxSelect
                 value={request.assigned_to ?? ""}
                 aria-label={t.documents_assignee}
+                searchPlaceholder={lang === "de" ? "Name suchen" : "Найти по имени"}
                 className={cn(selectClassName, "h-7 text-[11px]")}
                 disabled={loading}
                 onClick={(event) => event.stopPropagation()}
@@ -8731,8 +8751,8 @@ function DocumentTranslationRequestsTable({
                 {options.map((member) => (
                   <option key={member.id} value={member.id}>
                     {member.name.trim()
-                      ? `${member.name.trim()} / ${formatRoleLabel(member.role, lang)}`
-                      : formatRoleLabel(member.role, lang)}
+                      ? `${member.name.trim()} / ${roleLabel(member.role)}`
+                      : roleLabel(member.role)}
                   </option>
                 ))}
               </NativeComboboxSelect>

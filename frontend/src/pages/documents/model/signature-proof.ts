@@ -43,7 +43,8 @@ const PROOF_REQUIRED_SIGNATURE_TEMPLATES = new Set([
  * An uploaded scan is the proof itself.
  */
 export function signatureNeedsProof(
-  document: Pick<DocumentItem, "generated_template_id" | "signed_at">,
+  document: Pick<DocumentItem, "generated_template_id" | "signed_at"> &
+    Partial<Pick<DocumentItem, "generated_bindings">>,
   kind: string | null | undefined,
 ): boolean {
   const template = document.generated_template_id?.trim();
@@ -51,8 +52,28 @@ export function signatureNeedsProof(
     kind
     && template
     && !document.signed_at
-    && (PROOF_REQUIRED_SIGNATURE_KINDS.has(kind) || PROOF_REQUIRED_SIGNATURE_TEMPLATES.has(template)),
+    && (
+      PROOF_REQUIRED_SIGNATURE_KINDS.has(kind)
+      || PROOF_REQUIRED_SIGNATURE_TEMPLATES.has(template)
+      || isPayerGwgSheet(template, document.generated_bindings)
+    ),
   );
+}
+
+/**
+ * The payer's GwG sheet (subject "payer": a person's or an organisation's
+ * legal-entity form): signed only with the scan, like the enhanced-check
+ * sheet (owner 2026-10-11, QA 2026-11-13 F-x7). The patient's own GwG sheet
+ * stays one click. Mirrors `is_payer_gwg_sheet` in routes/documents.rs.
+ */
+export function isPayerGwgSheet(
+  template: string | null | undefined,
+  bindings: Record<string, unknown> | null | undefined,
+): boolean {
+  if (template?.trim() !== "gwg_identification") return false;
+  const sheet = bindings?.gwg_identification;
+  if (!sheet || typeof sheet !== "object") return false;
+  return (sheet as { subject?: unknown }).subject === "payer";
 }
 
 /**

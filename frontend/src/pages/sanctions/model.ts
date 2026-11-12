@@ -81,6 +81,25 @@ export const PATIENT_RELATION_ROLES = ["default_payer", "invoice_payer", "legal_
 
 /** `relation` of a free-text payer contact of an order or invoice (`payer_contact`). */
 export const PAYER_CONTACT_RELATION = "payer_contact";
+/** A beneficial owner of a paying organisation (`sanctions/screening.rs`). */
+export const PAYER_BENEFICIAL_OWNER_RELATION = "payer_beneficial_owner";
+
+/**
+ * Whose record the hit belongs to, beside the matched person's own name: the
+ * lead or the patient (QA F-x4: the header named the lead as if it matched).
+ * Nothing when the matched person is that record's own name.
+ */
+export function sanctionsHitOwnerLabel(
+  hit: { owner_name?: string | null; lead_id?: string | null; patient_id?: string | null },
+  matchedName: string,
+  t: Pick<Translations, "sanctions_owner_lead" | "sanctions_owner_patient">,
+): string | null {
+  const owner = hit.owner_name?.trim();
+  if (!owner) return null;
+  if (owner.toLocaleLowerCase() === matchedName.trim().toLocaleLowerCase()) return null;
+  const template = hit.lead_id ? t.sanctions_owner_lead : hit.patient_id ? t.sanctions_owner_patient : "{name}";
+  return template.replace("{name}", owner);
+}
 
 /**
  * What the hit is about. A bank says whose payment route it is: the payer's
@@ -95,6 +114,11 @@ export function subjectKindLabel(
 ): string {
   if (kind === "lead_bank") {
     return subjectRef === PAYER_BANK_REF ? t.sanctions_kind_payer_bank : t.sanctions_kind_patient_bank;
+  }
+  // A beneficial owner of a paying organisation is screened under the payer's
+  // kind (`payer-owner-<n>`, relation `payer_beneficial_owner`, QA F-x4).
+  if (kind === "lead_payer" && relation === PAYER_BENEFICIAL_OWNER_RELATION) {
+    return t.sanctions_kind_payer_beneficial_owner;
   }
   if (kind === "patient_relation") {
     switch (relation) {

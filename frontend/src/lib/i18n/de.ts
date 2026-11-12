@@ -1519,6 +1519,8 @@ export const de = {
     "Dolmetscher erhalten ein medizinisches Dokument erst, wenn es intern freigegeben ist. Ändere zuerst die Sichtbarkeit des Dokuments.",
   documents_share_user_role_not_allowed:
     "Diese Rolle hat keinen Zugriff auf diese Datenkategorie. Wähle eine andere Person.",
+  documents_share_third_party_revoked:
+    "Der Patient hat die Weitergabe an Dritte widerrufen: Dokumente gehen erst nach einer neuen Einwilligung wieder an Leistungserbringer.",
   documents_share_no_allowed_users:
     "Für diese Datenkategorie gibt es keine Mitarbeitenden, an die das Dokument freigegeben werden kann.",
   documents_share_provider_specialty_mismatch:

@@ -40,6 +40,8 @@ export type PatientBalancePresentation = {
   signedAmount?: number | null;
   side: PatientBalanceSide;
   needsReconciliation: boolean;
+  /** Open on invoices a third party pays: shown beside, not in, the balance. */
+  thirdPartyDue?: number;
 };
 
 export function resolvePatientBalancePresentation(
@@ -74,13 +76,23 @@ export function resolvePatientBalancePresentation(
   }
 
   if (rawBalance.trim() === "") return null;
-  const signedAmount = Number(rawBalance);
+  const ledgerAmount = Number(rawBalance);
 
-  if (!Number.isFinite(signedAmount)) return null;
+  if (!Number.isFinite(ledgerAmount)) return null;
+
+  // A third party's open invoice is not the patient's own debt (owner
+  // 2026-11-12 #7, QA 2026-11-13 F-x6): the header leaves it out and names it.
+  const rawThirdPartyDue = (summary as { third_party_open_due?: unknown }).third_party_open_due;
+  const thirdPartyDue =
+    typeof rawThirdPartyDue === "string" && Number.isFinite(Number(rawThirdPartyDue))
+      ? Math.max(0, Number(rawThirdPartyDue))
+      : 0;
+  const signedAmount = Math.round((ledgerAmount - thirdPartyDue) * 100) / 100;
 
   return {
     amount: Math.abs(signedAmount),
     side: signedAmount > 0 ? "debit" : signedAmount < 0 ? "credit" : "settled",
     needsReconciliation,
+    ...(thirdPartyDue > 0 ? { thirdPartyDue } : {}),
   };
 }

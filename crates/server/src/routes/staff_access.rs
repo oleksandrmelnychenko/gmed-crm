@@ -1166,11 +1166,12 @@ async fn validate_rule_set(
                     resource_type: rule.resource_type,
                     resource_id: rule.resource_id.unwrap_or_else(Uuid::nil),
                     capability: rule.capability,
-                    // An all-documents allow must be safe for the most sensitive
-                    // matching document. Runtime resolution repeats this check.
                     is_medical: is_medical
-                        || (rule.resource_type == ResourceType::Document
-                            && rule.scope_type == ScopeType::All),
+                        || all_document_allow_reaches_medical(
+                            rule.resource_type,
+                            rule.scope_type,
+                            rule.capability,
+                        ),
                 };
                 if !passes_absolute_resource_boundary(*role, &request) {
                     return Err(err(
@@ -1243,8 +1244,11 @@ async fn prepare_direct_rules(
                 resource_id: rule.resource_id.unwrap_or_else(Uuid::nil),
                 capability: rule.capability,
                 is_medical: is_medical
-                    || (rule.resource_type == ResourceType::Document
-                        && rule.scope_type == ScopeType::All),
+                    || all_document_allow_reaches_medical(
+                        rule.resource_type,
+                        rule.scope_type,
+                        rule.capability,
+                    ),
             };
             if !passes_absolute_resource_boundary(role, &request) {
                 return Err(err(
@@ -1266,6 +1270,25 @@ async fn prepare_direct_rules(
         });
     }
     Ok(prepared)
+}
+
+/// Whether an allow rule must be checked as if it opened a medical document.
+///
+/// An all-documents allow must be safe for the most sensitive matching
+/// document, so view/use/edit/download on `all` count as medical. Upload on
+/// `all` is the non-medical document upload grant (owner 2026-11-12, QA
+/// 2026-11-13 F-x2): it adds no access to stored documents, and every upload
+/// re-runs the absolute boundary with the new document's own medical
+/// classification, so a role without medical access can still never upload
+/// a medical paper.
+fn all_document_allow_reaches_medical(
+    resource_type: ResourceType,
+    scope_type: ScopeType,
+    capability: AccessCapability,
+) -> bool {
+    resource_type == ResourceType::Document
+        && scope_type == ScopeType::All
+        && capability != AccessCapability::Upload
 }
 
 fn validate_scope(scope_type: ScopeType, resource_id: Option<Uuid>) -> Result<(), Response> {
@@ -1656,4 +1679,40 @@ fn err(status: StatusCode, message: &str) -> Response {
         })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_document_upload_allow_is_the_non_medical_upload_grant() {
+        assert!(!all_document_allow_reaches_medical(
+            ResourceType::Document,
+            ScopeType::All,
+            AccessCapability::Upload,
+        ));
+        for capability in [
+            AccessCapability::View,
+            AccessCapability::Use,
+            AccessCapability::Edit,
+            AccessCapability::Download,
+        ] {
+            assert!(all_document_allow_reaches_medical(
+                ResourceType::Document,
+                ScopeType::All,
+                capability,
+            ));
+        }
+        assert!(!all_document_allow_reaches_medical(
+            ResourceType::Document,
+            ScopeType::Record,
+            AccessCapability::View,
+        ));
+        assert!(!all_document_allow_reaches_medical(
+            ResourceType::Provider,
+            ScopeType::All,
+            AccessCapability::View,
+        ));
+    }
 }

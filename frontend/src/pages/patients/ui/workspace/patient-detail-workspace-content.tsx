@@ -650,13 +650,18 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
           .filter(Boolean)
           .join(" ")
       : accountStatementLoading ? "…" : "—";
+  const balanceThirdPartyNote = balance?.thirdPartyDue
+    ? lang === "de"
+      ? `Nicht enthalten: ${formatMoney(String(balance.thirdPartyDue), accountStatement?.currency)} offen auf Rechnungen, die ein Dritter zahlt. `
+      : `Не включено: ${formatMoney(String(balance.thirdPartyDue), accountStatement?.currency)} открыто по счетам, которые оплачивает третье лицо. `
+    : "";
   const balanceTitle = balance?.needsReconciliation
     ? lang === "de"
       ? "Berechneter Saldo – Abstimmung erforderlich. Finanzübersicht öffnen."
       : "Расчётное сальдо — требуется сверка. Открыть финансовый обзор."
     : lang === "de"
-      ? "Finanzübersicht öffnen"
-      : "Открыть финансовый обзор";
+      ? `${balanceThirdPartyNote}Finanzübersicht öffnen`
+      : `${balanceThirdPartyNote}Открыть финансовый обзор`;
 
   const clinicalImportAttentionCount = clinicalImports.filter((item) =>
     ["queued", "processing", "review_required", "applying"].includes(item.status),

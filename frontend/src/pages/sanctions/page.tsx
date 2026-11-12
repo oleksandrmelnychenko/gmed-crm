@@ -51,6 +51,7 @@ import { RiskSettingsTab } from "./risk-settings";
 import {
   FISALIS_URL,
   PATIENT_RELATION_ROLES,
+  PAYER_BENEFICIAL_OWNER_RELATION,
   PAYER_CONTACT_RELATION,
   countryList,
   dobMatchLabel,
@@ -61,6 +62,7 @@ import {
   listEntryNames,
   regulationLabel,
   safeLegalActUrl,
+  sanctionsHitOwnerLabel,
   scorePercent,
   subjectChanged,
   subjectKindLabel,
@@ -90,6 +92,9 @@ function sanctionsRelationLabel(relation: string, lang: "ru" | "de"): string {
     .map((part) => {
       if (part === "payer") return tx("плательщик", "Zahler");
       if (part === "invoice_recipient") return tx("получатель счёта", "Rechnungsempfänger");
+      if (part === PAYER_BENEFICIAL_OWNER_RELATION) {
+        return tx("бенефициар плательщика", "wirtschaftlich Berechtigter des Zahlers");
+      }
       return trustedContactRelationLabel(part, tx);
     })
     .join(", ");
@@ -173,6 +178,7 @@ export function HitCard({
   // For a bank FiSaLis is searched by the bank's name as well.
   const name = fisalisSearchText(subject);
   const bank = hit.subject_kind === "lead_bank";
+  const ownerLabel = sanctionsHitOwnerLabel(hit, name, t);
   const listBirthDates = entry.birth_dates
     .map((birth) => formatListBirthDate(birth, t))
     .filter(Boolean)
@@ -210,7 +216,9 @@ export function HitCard({
             <span className="text-sm font-semibold" data-testid="sanctions-hit-kind">
               {subjectKindLabel(hit.subject_kind, t, hit.subject_ref, subject.relation)}
             </span>
-            {hit.owner_name ? <span className="text-sm text-muted-foreground">· {hit.owner_name}</span> : null}
+            {/* The matched person first, then whose record it is (QA F-x4). */}
+            {name ? <span className="text-sm font-medium" data-testid="sanctions-hit-person">· {name}</span> : null}
+            {ownerLabel ? <span className="text-sm text-muted-foreground" data-testid="sanctions-hit-owner">· {ownerLabel}</span> : null}
             {hit.patient_number ? <span className="font-mono text-xs text-muted-foreground">{hit.patient_number}</span> : null}
           </div>
           <p className="break-words text-xs leading-5 text-muted-foreground">

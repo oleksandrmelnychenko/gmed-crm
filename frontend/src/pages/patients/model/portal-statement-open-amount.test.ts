@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   portalInvoiceIsThirdParty,
+  portalInvoiceNeedsPaymentProof,
   portalOwnOpenBalances,
+  portalThirdPartyPayerLabel,
   portalStatementAvailableCredit,
   portalStatementOpenAmount,
   portalStatementSettled,
@@ -25,6 +27,19 @@ describe("third-party invoices in the patient's portal balance", () => {
     expect(
       portalOwnOpenBalances([{ ...own, portal_visibility: { visible_to_patient: true, amounts_visible_to_patient: false, line_items_visible_to_patient: true, pdf_visible_to_patient: true, redaction_reason: null } }]).size,
     ).toBe(0);
+  });
+
+  // QA 2026-11-13 F-x6: no payment proof asked for the payer's invoice;
+  // «zahlt» while open, «bezahlt von» only once paid.
+  it("asks no payment proof for a third party's invoice and names who pays", () => {
+    expect(portalInvoiceNeedsPaymentProof({ ...own, last_payment_proof_at: null })).toBe(true);
+    expect(portalInvoiceNeedsPaymentProof({ ...lukas, last_payment_proof_at: null })).toBe(false);
+    expect(portalInvoiceNeedsPaymentProof({ ...own, status: "paid", last_payment_proof_at: null })).toBe(false);
+    expect(portalInvoiceNeedsPaymentProof({ ...own, last_payment_proof_at: "2026-11-12T10:00:00Z" })).toBe(false);
+    expect(portalThirdPartyPayerLabel("Lukas Pfannkuchen", false, "de")).toBe("Zahlt Lukas Pfannkuchen");
+    expect(portalThirdPartyPayerLabel("Lukas Pfannkuchen", true, "de")).toBe("Bezahlt von Lukas Pfannkuchen");
+    expect(portalThirdPartyPayerLabel(null, true, "de")).toBe("Bezahlt von einem Dritten");
+    expect(portalThirdPartyPayerLabel(" ", false, "ru")).toBe("Оплачивает третье лицо");
   });
 
   it("lists a third party's invoice and its credit notes on their own, by payer", () => {

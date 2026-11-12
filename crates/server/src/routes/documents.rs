@@ -2486,6 +2486,51 @@ async fn record_signed_consent_tx(
     Ok(())
 }
 
+/// The payer's GwG identification sheet (subject `payer`, a person's or an
+/// organisation's legal-entity form). The patient's own sheet stays one click.
+pub(crate) fn is_payer_gwg_sheet(
+    generated_template_id: Option<&str>,
+    generated_bindings: Option<&Value>,
+) -> bool {
+    generated_template_id.map(str::trim) == Some("gwg_identification")
+        && generated_bindings
+            .and_then(|bindings| bindings.get("gwg_identification"))
+            .and_then(|sheet| sheet.get("subject"))
+            .and_then(Value::as_str)
+            == Some("payer")
+}
+
+#[cfg(test)]
+mod payer_gwg_sheet_proof_tests {
+    use super::is_payer_gwg_sheet;
+    use serde_json::json;
+
+    #[test]
+    fn only_the_payers_gwg_sheet_needs_the_scan() {
+        let payer = json!({"gwg_identification": {"subject": "payer"}});
+        let organisation =
+            json!({"gwg_identification": {"subject": "payer", "form": "legal_entity"}});
+        let own = json!({"gwg_identification": {"subject": "contract_partner"}});
+        let parent = json!({"gwg_identification": {"subject": "representative:1"}});
+        assert!(is_payer_gwg_sheet(Some("gwg_identification"), Some(&payer)));
+        assert!(is_payer_gwg_sheet(
+            Some("gwg_identification"),
+            Some(&organisation)
+        ));
+        assert!(!is_payer_gwg_sheet(Some("gwg_identification"), Some(&own)));
+        assert!(!is_payer_gwg_sheet(
+            Some("gwg_identification"),
+            Some(&parent)
+        ));
+        assert!(!is_payer_gwg_sheet(Some("gwg_identification"), None));
+        assert!(!is_payer_gwg_sheet(
+            Some("enhanced_due_diligence"),
+            Some(&payer)
+        ));
+        assert!(!is_payer_gwg_sheet(None, Some(&payer)));
+    }
+}
+
 /// Record a document as the signed evidence for a compliance requirement, and
 /// atomically flip the matching flag on the linked patient's `legal_status`
 /// (#13). Replaces the previous two-step dance of "upload a scan" + "separately
@@ -2704,13 +2749,28 @@ async fn mark_document_signed(
     }
     // Owner decision 2026-10-11: a generated consent, confidentiality release
     // or framework contract is signed only with proof (scan or QES).
+    let already_signed = document
+        .try_get::<bool, _>("already_signed")
+        .unwrap_or(false);
     if super::contracts::mark_signed_needs_proof(
         kind,
         generated_template_id.as_deref(),
-        document
-            .try_get::<bool, _>("already_signed")
-            .unwrap_or(false),
+        already_signed,
     ) {
+        return super::contracts::signature_proof_required_response();
+    }
+    // The payer's GwG sheet is signed only with the scan too, like the
+    // enhanced-check sheet (owner 2026-10-11, QA 2026-11-13 F-x7).
+    if !already_signed
+        && is_payer_gwg_sheet(
+            generated_template_id.as_deref(),
+            document
+                .try_get::<Option<Value>, _>("generated_bindings")
+                .ok()
+                .flatten()
+                .as_ref(),
+        )
+    {
         return super::contracts::signature_proof_required_response();
     }
     // The refusals of a paper signature (paper.rs, QA 2026-10-31): a replaced
@@ -5210,6 +5270,40 @@ fn sanitize_filename(name: &str) -> String {
 /// them is dropped (QA 2026-10-11): "Patientenformular – Angaben und
 /// Erklärungen · Anna Muster · 2026-10-11" becomes
 /// `Patientenformular_Angaben_und_Erklärungen_Anna_Muster_2026-10-11.pdf`.
+/// The extension of a translation's old technical file name
+/// (`translation-<32 hex>-<language>.txt|pdf`, before QA 2026-11-13 F-x5).
+fn legacy_translation_file_extension(file_name: &str) -> Option<&str> {
+    let rest = file_name.strip_prefix("translation-")?;
+    let (stem, extension) = rest.rsplit_once('.')?;
+    let (id, language) = stem.split_once('-')?;
+    let technical = id.len() == 32
+        && id.chars().all(|c| c.is_ascii_hexdigit())
+        && (2..=8).contains(&language.len())
+        && language.chars().all(|c| c.is_ascii_alphabetic());
+    (technical && matches!(extension, "txt" | "pdf")).then_some(extension)
+}
+
+/// The file name staff and the patient see and download: a translation stored
+/// under its old technical name is named after its title instead
+/// («Übersetzung DE - Befund» → `Übersetzung_DE_Befund.txt`); the stored file
+/// itself is unchanged. Every other name is returned as it is.
+pub(crate) fn display_document_file_name(file_name: &str, auto_name: &str) -> String {
+    match legacy_translation_file_extension(file_name) {
+        Some(extension) if !auto_name.trim().is_empty() => {
+            generated_document_file_name(auto_name, extension)
+        }
+        _ => file_name.to_string(),
+    }
+}
+
+/// [`display_document_file_name`] for an optional stored name.
+pub(crate) fn display_original_filename(
+    file_name: Option<String>,
+    auto_name: &str,
+) -> Option<String> {
+    file_name.map(|name| display_document_file_name(&name, auto_name))
+}
+
 fn generated_document_file_name(name: &str, extension: &str) -> String {
     let stem = name
         .split(|c: char| !(c.is_alphanumeric() || c == '.' || c == '-'))
@@ -13941,7 +14035,10 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
         "appointment_title": row.try_get::<Option<String>, _>("appointment_title").unwrap_or_default(),
         "auto_name": row.try_get::<String, _>("auto_name").unwrap_or_default(),
-        "original_filename": row.try_get::<Option<String>, _>("original_filename").unwrap_or_default(),
+        "original_filename": display_original_filename(
+            row.try_get::<Option<String>, _>("original_filename").unwrap_or_default(),
+            &row.try_get::<String, _>("auto_name").unwrap_or_default(),
+        ),
         "art": art,
         "category": category,
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
@@ -35170,11 +35267,8 @@ async fn render_document_translation_pdf(
     let auto_name = translated_row
         .try_get::<String, _>("auto_name")
         .unwrap_or_else(|_| title.clone());
-    let original_filename = format!(
-        "translation-{}-{}.pdf",
-        translation_id.simple(),
-        target_language.to_lowercase()
-    );
+    // Named after the translation's title, not its id (QA 2026-11-13 F-x5).
+    let original_filename = generated_document_file_name(&auto_name, "pdf");
     let notes = format!(
         "Translation {} -> {} of document {} (PDF rendered from text)",
         source_language.as_deref().unwrap_or("auto"),
@@ -35319,7 +35413,39 @@ fn translated_document_default_name(language: &str, source_auto_name: &str) -> S
 
 #[cfg(test)]
 mod translated_document_default_name_tests {
-    use super::translated_document_default_name;
+    use super::{display_document_file_name, translated_document_default_name};
+
+    // QA 2026-11-13 F-x5: an old translation's technical file name is shown
+    // and downloaded under its title; other names stay as they are.
+    #[test]
+    fn an_old_translation_file_is_named_after_its_title() {
+        assert_eq!(
+            display_document_file_name(
+                "translation-b66a3d46bdaa4abf9d6c691ffa009f15-de.txt",
+                "Übersetzung DE - Internal MRI report",
+            ),
+            "Übersetzung_DE_Internal_MRI_report.txt"
+        );
+        assert_eq!(
+            display_document_file_name(
+                "translation-c262d3c14f414733a0c2566d3a2798bf-ru.pdf",
+                "Перевод RU - Released discharge note",
+            ),
+            "Перевод_RU_Released_discharge_note.pdf"
+        );
+        assert_eq!(
+            display_document_file_name("translation-de.pdf", "Translation DE - Befund"),
+            "translation-de.pdf"
+        );
+        assert_eq!(
+            display_document_file_name("Arztbrief.pdf", "Translation DE - Befund"),
+            "Arztbrief.pdf"
+        );
+        assert_eq!(
+            display_document_file_name("translation-b66a3d46bdaa4abf9d6c691ffa009f15-de.txt", " "),
+            "translation-b66a3d46bdaa4abf9d6c691ffa009f15-de.txt"
+        );
+    }
 
     #[test]
     fn names_the_translation_in_its_own_language() {
@@ -35378,11 +35504,8 @@ async fn create_translated_document_from_translation(
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| translated_document_default_name(target_language, &source_auto_name));
-    let original_filename = format!(
-        "translation-{}-{}.pdf",
-        translation_id.simple(),
-        target_language.trim().to_lowercase()
-    );
+    // Named after the translation's title, not its id (QA 2026-11-13 F-x5).
+    let original_filename = generated_document_file_name(&auto_name, "pdf");
     // The translation is rendered as a branded PDF with the agency letterhead
     // (same layout as the free-text document template). The heading states the
     // language pair in the target language; the source document is named first.
@@ -35608,11 +35731,8 @@ async fn create_translated_document_from_request(
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| translated_document_default_name(requested_language, &source_auto_name));
-    let original_filename = format!(
-        "translation-{}-{}.txt",
-        request_id.simple(),
-        requested_language.trim().to_lowercase()
-    );
+    // Named after the translation's title, not its id (QA 2026-11-13 F-x5).
+    let original_filename = generated_document_file_name(&auto_name, "txt");
     let data = translated_text.as_bytes().to_vec();
     let notes = format!("Generated from translation request {request_id}");
     let persist_input = NewStoredDocument {
@@ -35889,6 +36009,8 @@ pub(crate) async fn load_staff_document_copy(
         }
     };
 
+    // An old translation is handed out under its title (QA 2026-11-13 F-x5).
+    let filename = display_document_file_name(&filename, &auto_name);
     Ok(StaffDocumentCopy {
         row,
         data,
@@ -35994,7 +36116,10 @@ async fn list_my_uploaded_documents(
                         "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
                         "appointment_title": row.try_get::<Option<String>, _>("appointment_title").unwrap_or_default(),
                         "auto_name": row.try_get::<String, _>("auto_name").unwrap_or_default(),
-                        "original_filename": row.try_get::<Option<String>, _>("original_filename").unwrap_or_default(),
+                        "original_filename": display_original_filename(
+                            row.try_get::<Option<String>, _>("original_filename").unwrap_or_default(),
+                            &row.try_get::<String, _>("auto_name").unwrap_or_default(),
+                        ),
                         "art": row.try_get::<String, _>("art").unwrap_or_default(),
                         "category": row.try_get::<Option<String>, _>("category").unwrap_or_default(),
                         "status": row.try_get::<String, _>("status").unwrap_or_default(),

@@ -72,6 +72,24 @@ describe("resolvePatientBalancePresentation", () => {
     });
   });
 
+  // QA 2026-11-13 F-x6: a payer's open 550 € invoice is not the patient's debt.
+  it("leaves a third party's open invoice out of the patient's own balance", () => {
+    expect(
+      resolvePatientBalancePresentation({
+        closing_balance: "550.00",
+        balance_side: "debit",
+        third_party_open_due: "550.00",
+      }),
+    ).toEqual({ amount: 0, side: "settled", needsReconciliation: false, thirdPartyDue: 550 });
+    expect(
+      resolvePatientBalancePresentation({
+        closing_balance: "650.00",
+        balance_side: "debit",
+        third_party_open_due: "550",
+      }),
+    ).toEqual({ amount: 100, side: "debit", needsReconciliation: false, thirdPartyDue: 550 });
+  });
+
   it("does not render an invalid balance", () => {
     expect(
       resolvePatientBalancePresentation({

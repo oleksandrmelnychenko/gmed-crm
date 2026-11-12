@@ -174,6 +174,31 @@ const MEDICAL_TRANSLATION_ASSIGNEE_ROLES: readonly string[] = [
   "interpreter",
 ];
 
+// The order of the team lead's translator picker: the interpreters he
+// distributes to first, then the other allowed roles (QA 2026-11-13 F-x9).
+const TRANSLATION_ASSIGNEE_ORDER: readonly string[] = [
+  "interpreter",
+  "teamlead_interpreter",
+  "patient_manager",
+  "ceo",
+  "concierge",
+];
+
+/** Allowed translation assignees, interpreters first, each role by name. */
+export function sortTranslationAssignees<T extends { role: string; name: string }>(
+  members: readonly T[],
+): T[] {
+  const rank = (role: string) => {
+    const index = TRANSLATION_ASSIGNEE_ORDER.indexOf(role);
+    return index === -1 ? TRANSLATION_ASSIGNEE_ORDER.length : index;
+  };
+  return [...members].sort(
+    (left, right) =>
+      rank(left.role) - rank(right.role) ||
+      left.name.trim().localeCompare(right.name.trim()),
+  );
+}
+
 /** Whether a staff member of this role can be given the translation. */
 export function isTranslationAssigneeRole(role: string, isMedicalDocument: boolean) {
   return (isMedicalDocument ? MEDICAL_TRANSLATION_ASSIGNEE_ROLES : TRANSLATION_ASSIGNEE_ROLES).includes(

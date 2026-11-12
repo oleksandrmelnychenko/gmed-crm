@@ -178,6 +178,19 @@ describe("signature proof", () => {
     expect(signatureNeedsProof({ generated_template_id: null, signed_at: null }, "identity")).toBe(false);
   });
 
+  // QA 2026-11-13 F-x7: the payer's GwG sheet needs the scan like the EDD sheet.
+  it("asks for the scan of the payer's GwG sheet, not of the patient's", () => {
+    const sheet = (bindings: Record<string, unknown>) => ({
+      generated_template_id: "gwg_identification",
+      signed_at: null,
+      generated_bindings: { gwg_identification: bindings },
+    });
+    expect(signatureNeedsProof(sheet({ subject: "payer" }), "other")).toBe(true);
+    expect(signatureNeedsProof(sheet({ subject: "payer", form: "legal_entity" }), "other")).toBe(true);
+    expect(signatureNeedsProof(sheet({ subject: "contract_partner" }), "other")).toBe(false);
+    expect(signatureNeedsProof({ ...sheet({ subject: "payer" }), signed_at: "2026-11-12T10:00:00Z" }, "other")).toBe(false);
+  });
+
   it("shows a paper-signed patient form as signed although it records no kind", () => {
     const signed = { signed_at: "2026-10-12T09:00:00Z", compliance_kind: null };
     expect(documentSignedFor(signed, "other")).toBe(true);

@@ -1411,6 +1411,7 @@ export interface Translations
   documents_share_provider_medical_required: string;
   documents_share_user_medical_not_released: string;
   documents_share_user_role_not_allowed: string;
+  documents_share_third_party_revoked: string;
   documents_share_no_allowed_users: string;
   documents_share_provider_specialty_mismatch: string;
   documents_share_external_release_required: string;

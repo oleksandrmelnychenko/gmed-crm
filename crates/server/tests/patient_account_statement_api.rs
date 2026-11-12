@@ -828,6 +828,10 @@ async fn a_third_party_invoice_stays_out_of_the_patients_portal_balance() {
     assert_eq!(staff["summary"]["invoiced_gross"], "350", "{staff}");
     assert_eq!(staff["summary"]["invoice_due"], "350", "{staff}");
     assert!(staff["summary"]["third_party_due"].is_null());
+    // The staff card header leaves it out of the patient's own balance
+    // (QA 2026-11-13 F-x6); both scopes name the open amount.
+    assert_eq!(staff["summary"]["third_party_open_due"], "250", "{staff}");
+    assert_eq!(portal["summary"]["third_party_open_due"], "250", "{portal}");
 
     let (status, invoices) = request_json(&app, "/api/v1/me/invoices", &patient).await;
     assert_eq!(status, StatusCode::OK, "{invoices:?}");

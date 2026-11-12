@@ -21,6 +21,7 @@ import {
   isMedicalDocumentClassification,
   isTranslationAssigneeRole,
   patientDocumentAddresseeLabel,
+  sortTranslationAssignees,
   reviewEditForm,
   withDocumentCategory,
 } from "./document-model";
@@ -37,6 +38,22 @@ describe("translation assignees and upload refusals (QA 2026-11-12)", () => {
     expect(isTranslationAssigneeRole("concierge", false)).toBe(true);
     expect(isTranslationAssigneeRole("teamlead_interpreter", false)).toBe(true);
     expect(isTranslationAssigneeRole("billing", false)).toBe(false);
+  });
+
+  // QA 2026-11-13 F-x9: the team lead finds the interpreters first.
+  it("lists interpreters first in the translator picker", () => {
+    const sorted = sortTranslationAssignees([
+      { role: "ceo", name: "Anna CEO" },
+      { role: "interpreter", name: "Zoe Interpreter" },
+      { role: "patient_manager", name: "Paul PM" },
+      { role: "interpreter", name: "Boris Interpreter" },
+    ]);
+    expect(sorted.map((member) => member.name)).toEqual([
+      "Boris Interpreter",
+      "Zoe Interpreter",
+      "Paul PM",
+      "Anna CEO",
+    ]);
   });
 
   it("puts the server's English refusals into the user's language", () => {

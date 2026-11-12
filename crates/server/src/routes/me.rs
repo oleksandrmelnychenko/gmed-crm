@@ -620,7 +620,10 @@ async fn list_my_documents(
                         "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
                         "appointment_id": row.try_get::<Option<Uuid>, _>("appointment_id").unwrap_or_default(),
                         "auto_name": row.try_get::<String, _>("auto_name").unwrap_or_default(),
-                        "original_filename": row.try_get::<Option<String>, _>("original_filename").unwrap_or_default(),
+                        "original_filename": crate::routes::documents::display_original_filename(
+                            row.try_get::<Option<String>, _>("original_filename").unwrap_or_default(),
+                            &row.try_get::<String, _>("auto_name").unwrap_or_default(),
+                        ),
                         "art": row.try_get::<String, _>("art").unwrap_or_default(),
                         "category": row.try_get::<Option<String>, _>("category").unwrap_or_default(),
                         "status": row.try_get::<String, _>("status").unwrap_or_default(),
@@ -732,7 +735,9 @@ async fn download_my_document(
         Err(_) => return err(StatusCode::NOT_FOUND, "Document file not found on disk"),
     };
 
-    let disposition = crate::content_disposition::attachment(&filename);
+    let disposition = crate::content_disposition::attachment(
+        &crate::routes::documents::display_document_file_name(&filename, &auto_name),
+    );
 
     match axum::response::Response::builder()
         .header("content-type", mime_type)

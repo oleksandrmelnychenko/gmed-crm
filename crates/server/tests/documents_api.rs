@@ -1589,6 +1589,134 @@ async fn concierge_multipart_upload_requires_all_allow_and_stays_nonmedical_inte
     );
 }
 
+/// QA 2026-11-13 F-x2: the CEO grants the concierge the non-medical document
+/// upload rule through the access API (no 422), the documents page then offers
+/// «Загрузить», a non-medical upload works and a medical one stays refused. An
+/// all-documents view rule still crosses the medical boundary.
+#[tokio::test]
+async fn ceo_grants_concierge_non_medical_upload_rule_through_access_api() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("concierge-upload-grant");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/staff-access/users/{concierge_id}/update"),
+        &admin_bearer,
+        Some(json!({
+            "expected_access_revision": 0,
+            "profile_id": null,
+            "direct_rules": [{
+                "resource_type": "document",
+                "scope_type": "all",
+                "resource_id": null,
+                "capability": "view",
+                "effect": "allow",
+                "reason": "all documents would include medical ones"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body["message"],
+        "Allow rule crosses an absolute resource access boundary"
+    );
+
+    let upload_access = || {
+        let app = &app;
+        let bearer = concierge_bearer.clone();
+        async move {
+            let (status, body) = json_request(
+                app,
+                "GET",
+                "/api/v1/documents/meta/upload-access",
+                &bearer,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            body["can_upload"].as_bool().unwrap()
+        }
+    };
+    assert!(!upload_access().await);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/staff-access/users/{concierge_id}/update"),
+        &admin_bearer,
+        Some(json!({
+            "expected_access_revision": 0,
+            "profile_id": null,
+            "direct_rules": [{
+                "resource_type": "document",
+                "scope_type": "all",
+                "resource_id": null,
+                "capability": "upload",
+                "effect": "allow",
+                "reason": "concierge files receipts and vouchers"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(upload_access().await);
+
+    let nonmedical_fields = [
+        ("patient_id", patient_id.to_string()),
+        ("auto_name", format!("Concierge voucher {tag}")),
+        ("art", "uploaded_document".to_string()),
+        ("category", "general".to_string()),
+        ("is_medical", "false".to_string()),
+        ("visibility", "internal".to_string()),
+    ];
+    let (status, uploaded) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &concierge_bearer,
+        &nonmedical_fields,
+        &format!("concierge-voucher-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-concierge-voucher%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{uploaded}");
+    let document_id = Uuid::parse_str(uploaded["id"].as_str().unwrap()).unwrap();
+    let is_medical: bool = sqlx::query_scalar("SELECT is_medical FROM documents WHERE id = $1")
+        .bind(document_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(!is_medical);
+
+    let medical_fields = [
+        ("patient_id", patient_id.to_string()),
+        ("auto_name", format!("Concierge medical {tag}")),
+        ("art", "medical_report".to_string()),
+        ("category", "medical".to_string()),
+        ("is_medical", "true".to_string()),
+        ("visibility", "internal".to_string()),
+    ];
+    let (status, _) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &concierge_bearer,
+        &medical_fields,
+        &format!("concierge-medical-grant-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-concierge-medical-grant%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
 #[tokio::test]
 async fn interpreter_uploads_land_in_teamlead_review_queue_and_teamlead_can_release_them() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
