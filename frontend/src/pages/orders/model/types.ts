@@ -3,6 +3,7 @@ import type { SpecializationItem } from "@/pages/providers/model/types";
 import type { EstimateOutdatedReason } from "./estimate-outdated";
 import type { OrderPrepaymentTerms } from "./order-prepayment";
 import type { PartnerCostAmounts } from "./partner-cost-amounts";
+import type { OrderConciergeSales } from "./order-concierge-sales";
 
 export type OrderPhase = "discovery" | "intake" | "execution" | "closure" | "followup";
 export type OrderStatus = "active" | "paused" | "completed" | "cancelled";
@@ -402,6 +403,8 @@ export type OrderEconomics = {
     | "unassigned_invoice_revenue"
   >;
   services: OrderServiceEconomics[];
+  /** Concierge sale prices: information only, never in the totals above. */
+  concierge_sales?: OrderConciergeSales;
 };
 
 export type OrderProcessGates = {

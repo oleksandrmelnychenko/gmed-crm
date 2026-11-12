@@ -14,6 +14,7 @@ pub mod company_financial_account_transfers;
 pub mod company_financial_accounts;
 pub mod company_financials;
 pub mod company_provider_settlements;
+pub mod concierge_billing_queue;
 pub mod concierge_expenses;
 pub mod concierge_operational_items;
 pub mod concierge_services;
@@ -122,6 +123,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(company_financial_accounts::router())
         .merge(company_financial_account_transfers::router())
         .merge(company_provider_settlements::router())
+        .merge(concierge_billing_queue::router())
         .merge(concierge_expenses::router())
         .merge(concierge_services::router())
         .merge(hotel_statistics::router())

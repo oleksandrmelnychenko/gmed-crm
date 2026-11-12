@@ -328,6 +328,7 @@ import type {
 } from "./model/types";
 import { OrderAmendmentsPanel } from "./ui/order-amendments-panel";
 import { OrderEconomicsTable } from "./ui/order-economics-table";
+import { OrderConciergeSales } from "./ui/order-concierge-sales";
 import { OrderExistingPatientDocuments } from "./ui/order-existing-patient-documents";
 import { OrderGroupPanel } from "./ui/order-group-panel";
 import { OrderPipelinePanel } from "./ui/order-pipeline-panel";
@@ -4692,6 +4693,7 @@ function useOrdersPageContent() {
                                 : `Ещё не выставлено счётом: ${formatMoney(orderNotYetBilledGross(orderDetail.total_estimated, orderEconomics.actual.billed_to_patient_gross), orderEconomics.currency)}. «Осталось получить» считает только выпущенные счета.`}
                             </p>
                           ) : null}
+                          <OrderConciergeSales economics={orderEconomics} lang={lang} formatMoney={formatOptionalMoney} />
                           {Number(orderEconomics.actual.advance_available_gross ?? 0) > 0 ||
                           Number(orderEconomics.actual.patient_credit_gross ?? 0) > 0 ? (
                             <p className="text-xs text-muted-foreground">

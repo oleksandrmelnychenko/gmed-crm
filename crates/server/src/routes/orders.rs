@@ -5451,6 +5451,48 @@ async fn get_order_economics(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load order economics");
         }
     };
+    // Concierge services of the order (owner 2026-11-12, decision 7). The
+    // concierge is salaried: a service adds no cost of its own (partner
+    // invoices and posted receipts above are the only costs). Its sale price
+    // (quantity × unit price) is listed for information only: no order line
+    // or invoice line names the concierge service, so it never enters the
+    // totals above. A billed one is already in the invoice revenue, an
+    // unbilled one may be an order line as well; adding it would count it
+    // twice. Cancelled, waived and reversed services and services without a
+    // sale price add nothing.
+    let concierge_rows = match sqlx::query(
+        r#"SELECT service.id,
+                  service.title,
+                  service.service_kind,
+                  service.status,
+                  service.billing_status,
+                  UPPER(service.currency) AS currency,
+                  service.quantity,
+                  service.unit_price,
+                  service.starts_at
+           FROM concierge_services service
+           LEFT JOIN appointments appointment ON appointment.id = service.appointment_id
+           WHERE COALESCE(service.order_id, appointment.order_id) = $1
+             AND service.status <> 'cancelled'
+             AND service.billing_status NOT IN ('waived', 'reversed')
+             AND service.unit_price IS NOT NULL
+             AND service.unit_price > 0
+             AND service.quantity > 0
+           ORDER BY service.starts_at NULLS LAST, service.created_at, service.id"#,
+    )
+    .bind(order_id)
+    .fetch_all(&mut *economics_transaction)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "load order concierge sales");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load order economics",
+            );
+        }
+    };
     if let Err(error) = economics_transaction.commit().await {
         tracing::error!(error = %error, order_id = %order_id, "commit order economics snapshot");
         return err(
@@ -5667,6 +5709,7 @@ async fn get_order_economics(
     {
         warnings.push("unassigned_invoice_revenue");
     }
+    let concierge_sales = order_concierge_sales(&concierge_rows, &currency);
 
     Json(serde_json::json!({
         "order_id": order_id,
@@ -5720,8 +5763,83 @@ async fn get_order_economics(
         "unassigned_external_cost_gross": margin_visible.then(|| economics_money(external.try_get::<rust_decimal::Decimal, _>("unassigned_cost_gross").unwrap_or(rust_decimal::Decimal::ZERO))),
         "warnings": warnings,
         "services": services,
+        "concierge_sales": concierge_sales,
     }))
     .into_response()
+}
+
+/// Sale price of a concierge service: quantity × unit price, commercially
+/// rounded to cents.
+fn concierge_sale_price(
+    quantity: rust_decimal::Decimal,
+    unit_price: rust_decimal::Decimal,
+) -> rust_decimal::Decimal {
+    (quantity * unit_price).round_commercial(2)
+}
+
+/// The informational «Concierge services» block of the order economics
+/// (owner 2026-11-12, decision 7): sale prices split into billed (billing
+/// status billed/settled, already part of the invoice revenue) and not billed
+/// yet (draft/ready). Never part of the order totals: no order line or
+/// invoice line is linked to a concierge service.
+fn order_concierge_sales(rows: &[sqlx::postgres::PgRow], currency: &str) -> serde_json::Value {
+    let mut billed_total = rust_decimal::Decimal::ZERO;
+    let mut unbilled_total = rust_decimal::Decimal::ZERO;
+    let mut other_currency_count = 0_usize;
+    let services = rows
+        .iter()
+        .map(|row| {
+            let quantity = row
+                .try_get::<rust_decimal::Decimal, _>("quantity")
+                .unwrap_or(rust_decimal::Decimal::ZERO);
+            let unit_price = row
+                .try_get::<Option<rust_decimal::Decimal>, _>("unit_price")
+                .unwrap_or_default()
+                .unwrap_or(rust_decimal::Decimal::ZERO);
+            let sale_price = concierge_sale_price(quantity, unit_price);
+            let billing_status = row
+                .try_get::<String, _>("billing_status")
+                .unwrap_or_default();
+            let billed = matches!(billing_status.as_str(), "billed" | "settled");
+            let service_currency = row
+                .try_get::<String, _>("currency")
+                .unwrap_or_else(|_| currency.to_string());
+            let currency_matches_order = service_currency == currency;
+            if !currency_matches_order {
+                other_currency_count += 1;
+            } else if billed {
+                billed_total += sale_price;
+            } else {
+                unbilled_total += sale_price;
+            }
+            serde_json::json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "title": row.try_get::<String, _>("title").unwrap_or_default(),
+                "service_kind": row.try_get::<String, _>("service_kind").unwrap_or_default(),
+                "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                "billing_status": billing_status,
+                "billed": billed,
+                "currency": service_currency,
+                "currency_matches_order": currency_matches_order,
+                "quantity": economics_money(quantity),
+                "unit_price": economics_money(unit_price),
+                "sale_price": economics_money(sale_price),
+                "starts_at": row
+                    .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("starts_at")
+                    .unwrap_or_default()
+                    .map(|value| value.to_rfc3339()),
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        // No reliable link to order or invoice lines: the amounts are
+        // information next to the order totals, never added to them.
+        "counted_in_totals": false,
+        "billed_total": economics_money(billed_total),
+        "unbilled_total": economics_money(unbilled_total),
+        "other_currency_count": other_currency_count,
+        "services": services,
+    })
 }
 
 /// Persist the commercial basis assembled by the lead wizard: the live gross
@@ -14950,6 +15068,25 @@ mod tests {
                 rust_decimal::Decimal::new(40, 0)
             ),
             rust_decimal::Decimal::new(60, 0)
+        );
+    }
+
+    #[test]
+    fn concierge_sale_price_is_quantity_times_unit_price_in_cents() {
+        assert_eq!(
+            concierge_sale_price(
+                rust_decimal::Decimal::new(2, 0),
+                rust_decimal::Decimal::new(18_000, 2)
+            ),
+            rust_decimal::Decimal::new(36_000, 2)
+        );
+        // 1.5 × 33.33 = 49.995 → 50.00 (commercial rounding).
+        assert_eq!(
+            concierge_sale_price(
+                rust_decimal::Decimal::new(15, 1),
+                rust_decimal::Decimal::new(3333, 2)
+            ),
+            rust_decimal::Decimal::new(5000, 2)
         );
     }
 }

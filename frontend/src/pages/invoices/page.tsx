@@ -45,6 +45,7 @@ import {
   Eye,
   FileText,
   FileWarning,
+  ConciergeBell,
   FileUp,
   FileInput,
   FileOutput,
@@ -100,6 +101,8 @@ import { seedTaxProfileNameByText, seedTaxProfileText } from "@/lib/tax-profile-
 import { InvoiceImportSheet } from "./ui/invoice-import-sheet";
 import { IncomingInvoices } from "./ui/incoming-invoices";
 import { TerminationSettlementQueue } from "./termination-settlement/queue";
+import { ConciergeBillingQueue, useConciergeBillingQueueCount } from "./concierge-billing/queue";
+import { canReadConciergeBillingQueue, conciergeQueueBadge } from "./concierge-billing/model";
 import { PaymentEditForm } from "./ui/payment-edit-form";
 import { CreditNoteForm, CreditNoteLinesSummary } from "./ui/credit-note-form";
 import {
@@ -604,6 +607,7 @@ function useStaffInvoicesPageContent() {
   const datevActive = searchParams.get("source") === "datev";
   const incomingActive = searchParams.get("source") === "incoming";
   const settlementsActive = searchParams.get("source") === "settlements";
+  const conciergeActive = searchParams.get("source") === "concierge";
   const datevDemo = searchParams.get("datev_mode") === "demo";
   const access = invoicesPermissions(user);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
@@ -950,6 +954,11 @@ function useStaffInvoicesPageContent() {
     accountingBusy,
     accountingError,
   } = workspaceState;
+  // Concierge services ready to bill (owner 2026-11-12, decision 8): the tab
+  // badge counts them; the open list refreshes the number.
+  const conciergeQueueCount = useConciergeBillingQueueCount(reloadToken);
+  const [conciergeQueueLiveCount, setConciergeQueueLiveCount] = useState<number | null>(null);
+  const conciergeBadge = conciergeQueueBadge(conciergeQueueLiveCount ?? conciergeQueueCount);
   // "Refunds to the patient" lists money paid out. Moving credit to another
   // invoice is shown under the credit balance, not as a refund (QA D3-05).
   const cashRefundTransactions = refundTransactions.filter(
@@ -2561,10 +2570,17 @@ function useStaffInvoicesPageContent() {
 
         <div className="-mx-2.5 overflow-x-auto overflow-y-hidden px-2.5 pb-1 sm:mx-0 sm:px-0">
           <nav aria-label={lang === "de" ? "Rechnungsquelle" : "Источник счетов"} className="flex w-max min-w-full justify-center gap-1">
-            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant="ghost" data-workspace-tab aria-current={!datevActive && !incomingActive && !settlementsActive ? "page" : undefined} onClick={() => syncQuery({ source: null, datev_mode: null }, { replace: false })}><FileOutput className="size-4" aria-hidden />{lang === "de" ? "Ausgangsrechnungen" : "Исходящие"}</Button>
+            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant="ghost" data-workspace-tab aria-current={!datevActive && !incomingActive && !settlementsActive && !conciergeActive ? "page" : undefined} onClick={() => syncQuery({ source: null, datev_mode: null }, { replace: false })}><FileOutput className="size-4" aria-hidden />{lang === "de" ? "Ausgangsrechnungen" : "Исходящие"}</Button>
             <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant="ghost" data-workspace-tab aria-current={incomingActive ? "page" : undefined} onClick={() => syncQuery({ source: "incoming", invoice: null, datev_mode: null }, { replace: false })}><FileInput className="size-4" aria-hidden />{lang === "de" ? "Eingangsrechnungen" : "Входящие"}</Button>
             <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant="ghost" data-workspace-tab aria-current={datevActive ? "page" : undefined} onClick={() => syncQuery({ source: "datev", invoice: null }, { replace: false })}><Landmark className="size-4" aria-hidden />{lang === "de" ? "Aus DATEV" : "Из DATEV"}</Button>
             <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant="ghost" data-workspace-tab aria-current={settlementsActive ? "page" : undefined} onClick={() => syncQuery({ source: "settlements", invoice: null, datev_mode: null }, { replace: false })}><FileWarning className="size-4" aria-hidden />{lang === "de" ? "Abrechnung bei Kündigung" : "Расчёты при расторжении"}</Button>
+            {canReadConciergeBillingQueue(user?.role) ? (
+              <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant="ghost" data-workspace-tab aria-current={conciergeActive ? "page" : undefined} onClick={() => syncQuery({ source: "concierge", invoice: null, datev_mode: null }, { replace: false })}>
+                <ConciergeBell className="size-4" aria-hidden />
+                {lang === "de" ? "Concierge zur Abrechnung" : "Concierge к выставлению"}
+                {conciergeBadge ? <Badge variant="secondary" className="ml-1 rounded-full px-1.5 py-0 text-[11px] tabular-nums" data-testid="concierge-billing-badge">{conciergeBadge}</Badge> : null}
+              </Button>
+            ) : null}
           </nav>
         </div>
         <DatevWorkspace active={datevActive} demo={datevDemo} onConnection={canStaffPath("/admin/datev") ? () => staffGo("/admin/datev") : undefined} onModeChange={(demo) => syncQuery({ datev_mode: demo ? "demo" : null })} />
@@ -2589,7 +2605,8 @@ function useStaffInvoicesPageContent() {
 
         {incomingActive ? <IncomingInvoices key={`${filters.patientId}:${filters.orderId}`} canManage={access.canManage} patientId={filters.patientId} orderId={filters.orderId} reloadToken={reloadToken} onChanged={() => { clearApiCache("/invoices/accounting-ledger"); setReloadToken(current => current + 1); }} /> : null}
         {settlementsActive ? <TerminationSettlementQueue onOpenInvoice={(invoiceId) => syncQuery({ source: null, invoice: invoiceId }, { replace: false })} /> : null}
-        <div hidden={datevActive || incomingActive || settlementsActive} className="space-y-5">
+        {conciergeActive ? <ConciergeBillingQueue initialPatientId={filters.patientId} onCount={setConciergeQueueLiveCount} /> : null}
+        <div hidden={datevActive || incomingActive || settlementsActive || conciergeActive} className="space-y-5">
         {optionsError ? <ShellBanner tone="error">{optionsError}</ShellBanner> : null}
 
         <div className="space-y-3">
@@ -2840,7 +2857,7 @@ function useStaffInvoicesPageContent() {
         </div>
 
         </div>
-        <div hidden={datevActive || settlementsActive} className="space-y-5">
+        <div hidden={datevActive || settlementsActive || conciergeActive} className="space-y-5">
         {access.canAccounting ? (
           <>
             <div className="space-y-2">
