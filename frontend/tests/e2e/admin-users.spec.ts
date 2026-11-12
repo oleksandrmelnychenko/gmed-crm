@@ -169,8 +169,16 @@ test("IT admin creates a user with a one-time password that is shown once", asyn
   await expect(sheet.getByRole("radio", { name: "Одноразовый пароль (сгенерирует сервер)" })).toHaveAttribute("aria-checked", "true");
   await expect(sheet.locator('input[type="password"]')).toHaveCount(0);
 
-  // The technical admin never sees the CEO role in the dropdown.
+  // No role is preselected; creating without one is refused (QA 2026-11-12 D-6).
   const roleSelect = sheet.getByRole("combobox", { name: "Роль" });
+  await expect(roleSelect).toContainText("Выберите роль");
+  await sheet.getByPlaceholder("Макс Мюллер").fill("Neue Person");
+  await sheet.getByPlaceholder("max@gmed.de").fill("neue.person@example.com");
+  await sheet.getByRole("button", { name: "Создать пользователя", exact: true }).click();
+  await expect(sheet).toContainText("Выберите роль: от неё зависит, какие данные увидит пользователь.");
+  expect(state.createBodies).toEqual([]);
+
+  // The technical admin never sees the CEO role in the dropdown.
   await roleSelect.click();
   await expect(page.getByRole("option", { name: "Бухгалтерия" })).toBeVisible();
   await expect(page.getByRole("option", { name: "Генеральный директор" })).toHaveCount(0);

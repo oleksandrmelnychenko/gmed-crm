@@ -225,6 +225,7 @@ type AdminUserErrorMessages = {
   users_portal_account_managed_elsewhere?: string;
   users_portal_role_change_forbidden?: string;
   users_email_already_exists?: string;
+  users_role_required?: string;
 };
 
 /**
@@ -244,6 +245,9 @@ export function describeAdminUserError(
   };
   if (details.code === "last_ceo_protected") {
     return messages.users_last_ceo_protected;
+  }
+  if (details.code === "role_required" && messages.users_role_required) {
+    return messages.users_role_required;
   }
   if (details.code === "portal_account_managed_elsewhere" && messages.users_portal_account_managed_elsewhere) {
     return messages.users_portal_account_managed_elsewhere;

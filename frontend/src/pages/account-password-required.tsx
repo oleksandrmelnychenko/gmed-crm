@@ -11,17 +11,29 @@ import { ChangePasswordForm } from "@/pages/account";
  * account is asked to set its own password instead of being told it "was
  * reset or has expired". An older server sends no reason: the general text.
  */
-export function passwordRequiredBodyKey(reason: User["password_change_reason"]): string {
+export function passwordRequiredBodyKey(reason: User["password_change_reason"], portal = false): string {
+  // A patient is not told about "the administrator" or "work" (QA 2026-11-12).
+  const tail = portal ? "_portal" : "";
   switch (reason) {
     case "initial":
-      return "account_password_required_body_initial";
+      return `account_password_required_body_initial${tail}`;
     case "reset":
-      return "account_password_required_body_reset";
+      return `account_password_required_body_reset${tail}`;
     case "expired":
-      return "account_password_required_body_expired";
+      return `account_password_required_body_expired${tail}`;
     default:
       return "account_password_required_body";
   }
+}
+
+/**
+ * After a reset or on the first sign-in the user holds the one-time password
+ * GMED issued, not an own "current" one: the first field says so.
+ */
+export function passwordRequiredCurrentLabelKey(reason: User["password_change_reason"]): string {
+  return reason === "initial" || reason === "reset"
+    ? "account_password_current_temporary"
+    : "account_password_current";
 }
 
 /**
@@ -63,11 +75,14 @@ export function AccountPasswordRequiredPage() {
         <div className="space-y-1">
           <h1 className="text-lg font-semibold text-foreground">{l("account_password_required_title")}</h1>
           <p className="text-sm leading-6 text-muted-foreground" data-testid="password-required-reason">
-            {l(passwordRequiredBodyKey(user.password_change_reason))}
+            {l(passwordRequiredBodyKey(user.password_change_reason, user.role === "patient"))}
           </p>
           <p className="text-xs text-muted-foreground">{user.email}</p>
         </div>
-        <ChangePasswordForm onChanged={onChanged} />
+        <ChangePasswordForm
+          onChanged={onChanged}
+          currentLabelKey={passwordRequiredCurrentLabelKey(user.password_change_reason)}
+        />
         <div className="border-t border-border pt-4">
           <Button type="button" variant="ghost" className="h-9 rounded-lg" onClick={() => void logout()}>
             {t.nav_logout}

@@ -27,6 +27,7 @@ import {
   groupByCategory,
   groupDocumentVersions,
   isArchiveTargetComplete,
+  linkableUserLabel,
   monthOptions,
   monthRange,
   personnelMimeType,
@@ -314,5 +315,20 @@ describe("documents table", () => {
     expect(formatFileSize(1536)).toBe("1.5 KB");
     expect(formatFileSize(5 * 1024 * 1024)).toBe("5.0 MB");
     expect(formatFileSize(-1)).toBe("");
+  });
+});
+
+describe("linkableUserLabel (QA 2026-11-12 D-9)", () => {
+  it("names the account, its e-mail and role", () => {
+    expect(linkableUserLabel({ name: "Eva Muster", email: "eva@example.com", role: "billing" }, "Бухгалтерия")).toBe(
+      "Eva Muster · eva@example.com · Бухгалтерия",
+    );
+  });
+
+  it("never starts with a separator when the account has no name", () => {
+    expect(linkableUserLabel({ name: "  ", email: "x@example.com", role: "sales" }, "Продажи")).toBe(
+      "x@example.com · Продажи",
+    );
+    expect(linkableUserLabel({ name: "", email: "x@example.com", role: "odd" }, undefined)).toBe("x@example.com");
   });
 });

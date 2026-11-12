@@ -96,6 +96,9 @@ const LEAD_CABINET_LANGUAGE_OPTIONS: readonly { value: ProfileLanguage; label: s
 
 function ProfileSection() {
   const { l, lang, setLangFromProfile } = useProfileLanguage();
+  const { t } = useLang();
+  // The role name as the sidebar says it, not the role code (QA 2026-11-12).
+  const roleNames = t as unknown as Record<string, string | undefined>;
   const { user, refreshUser } = useAuth();
   const portalUser = user?.role === "patient";
   // The lead cabinet speaks DE, EN, UA and RU: its account offers the same
@@ -198,7 +201,7 @@ function ProfileSection() {
           {/* A raw role code means nothing to a lead, parent or patient. */}
           {portalUser ? null : (
             <Field label={l("account_profile_role")} htmlFor="account-role">
-              <Input id="account-role" value={profile?.role ?? ""} readOnly disabled className="h-9 rounded-lg border-transparent bg-transparent px-3 font-mono text-xs text-foreground disabled:opacity-100" />
+              <Input id="account-role" value={profile?.role ? (roleNames[`role_${profile.role}`] ?? profile.role) : ""} readOnly disabled className="h-9 rounded-lg border-transparent bg-transparent px-3 text-sm text-foreground disabled:opacity-100" />
             </Field>
           )}
         </div>
@@ -277,7 +280,16 @@ function useProfileLanguage() {
  * Current + new + confirm. Used on /account and on the forced-change screen;
  * `onChanged` lets the caller leave the gated state.
  */
-export function ChangePasswordForm({ onChanged, compact = false }: { onChanged?: () => void | Promise<void>; compact?: boolean }) {
+export function ChangePasswordForm({
+  onChanged,
+  compact = false,
+  currentLabelKey = "account_password_current",
+}: {
+  onChanged?: () => void | Promise<void>;
+  compact?: boolean;
+  /** The first field's label: "one-time password" on the forced-change screen after a reset. */
+  currentLabelKey?: string;
+}) {
   const { l } = useUiText();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -319,7 +331,7 @@ export function ChangePasswordForm({ onChanged, compact = false }: { onChanged?:
       {error ? <Banner tone="error">{error}</Banner> : null}
       {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
       <div className={compact ? "grid gap-3" : "grid gap-3 md:grid-cols-3"}>
-        <Field label={l("account_password_current")} htmlFor="account-password-current" required>
+        <Field label={l(currentLabelKey)} htmlFor="account-password-current" required>
           <Input
             id="account-password-current"
             type="password"

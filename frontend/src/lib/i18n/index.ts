@@ -113,6 +113,9 @@ export interface Translations
   users_name: string;
   users_name_placeholder: string;
   users_name_required: string;
+  users_role_choose: string;
+  users_person_section: string;
+  users_role_required: string;
   users_email: string;
   users_email_placeholder: string;
   users_password: string;

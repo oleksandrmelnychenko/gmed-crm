@@ -293,4 +293,17 @@ describe("admin users page model", () => {
       "Email already exists",
     );
   });
+
+  it("words the server's refusal of a user without a role (QA 2026-11-12 D-6)", () => {
+    const withRoleText = { ...guardMessages, users_role_required: "Выберите роль" };
+    expect(
+      describeAdminUserError(
+        { code: "role_required", status: 422, message: "Choose a role for the new user" },
+        withRoleText,
+      ),
+    ).toBe("Выберите роль");
+    expect(
+      describeAdminUserError({ code: "role_required", status: 422, message: "Choose a role for the new user" }, guardMessages),
+    ).toBe("Choose a role for the new user");
+  });
 });

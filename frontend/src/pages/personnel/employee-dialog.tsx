@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
 import { Field, textareaClass } from "@/components/ui-shell";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -14,6 +15,7 @@ import {
   employeeFormOf,
   employeeRequestBody,
   employmentRangeValid,
+  linkableUserLabel,
   type EmployeeForm,
 } from "./model";
 import { FormSection, usePersonnelLabels } from "./personnel-ui";
@@ -66,7 +68,7 @@ export function EmployeeDialog({
       { value: "", label: t.personnel_no_user_link },
       ...users.map((user) => ({
         value: user.id,
-        label: `${user.name} · ${user.email}${tr[`role_${user.role}`] ? ` · ${tr[`role_${user.role}`]}` : ""}`,
+        label: linkableUserLabel(user, tr[`role_${user.role}`]),
       })),
     ];
     // The currently linked user is not "linkable" any more; keep it selectable.
@@ -190,12 +192,19 @@ export function EmployeeDialog({
                 ) : null}
               </FormSection>
               <FormSection icon={Link2} title={t.personnel_user_link} hint={t.personnel_user_link_hint}>
-                <SelectField
+                {/* Hundreds of accounts: a picker with a search box (QA 2026-11-12 D-9). */}
+                <NativeComboboxSelect
                   value={form.user_id}
                   aria-label={t.personnel_user_link}
-                  onValueChange={(value) => update("user_id", value)}
-                  options={userOptions}
-                />
+                  onChange={(event) => update("user_id", event.target.value ?? "")}
+                  className="h-9 w-full rounded-lg bg-field"
+                >
+                  {userOptions.map((option) => (
+                    <option key={option.value || "none"} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
               </FormSection>
               <FormSection icon={NotebookText} title={t.personnel_notes}>
                 <textarea

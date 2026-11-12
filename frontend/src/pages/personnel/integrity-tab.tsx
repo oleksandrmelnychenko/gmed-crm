@@ -10,10 +10,17 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { formatUiText, useLang } from "@/lib/i18n";
+import { formatCount, type PluralWords } from "@/lib/i18n/plural";
 import { cn } from "@/lib/utils";
 
 import { personnelApi, type PersonnelAnchor, type PersonnelIntegrity, type PersonnelIntegrityRun } from "./api";
 import { RowIconAction, usePersonnelLabels } from "./personnel-ui";
+
+const FILE_WORDS: PluralWords = { ru: ["дело", "дела", "дел"], de: ["Akte", "Akten"] };
+const DOCUMENT_WORDS: PluralWords = {
+  ru: ["документ", "документа", "документов"],
+  de: ["Dokument", "Dokumente"],
+};
 
 /**
  * Proof of integrity: the weekly (or manual) re-check of every file against
@@ -22,7 +29,7 @@ import { RowIconAction, usePersonnelLabels } from "./personnel-ui";
  */
 export function IntegrityTab({ canManage }: { canManage: boolean }) {
   const { errorMessage } = usePersonnelLabels();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const [data, setData] = useState<PersonnelIntegrity | null>(null);
   const [loading, setLoading] = useState(true);
@@ -120,8 +127,8 @@ export function IntegrityTab({ canManage }: { canManage: boolean }) {
         width: 200,
         render: (run) => (
           <span className="text-xs tabular-nums">
-            {run.employees_checked} {t.personnel_integrity_employees} · {run.documents_checked}{" "}
-            {t.personnel_integrity_documents}
+            {formatCount(lang, run.employees_checked, FILE_WORDS)} ·{" "}
+            {formatCount(lang, run.documents_checked, DOCUMENT_WORDS)}
           </span>
         ),
       },
@@ -141,7 +148,7 @@ export function IntegrityTab({ canManage }: { canManage: boolean }) {
           ),
       },
     ],
-    [t, tr],
+    [lang, t, tr],
   );
 
   const anchorColumns = useMemo<ColumnDef<PersonnelAnchor>[]>(

@@ -20,6 +20,15 @@ export const securityReviewUiDe = {
     "Ihr Passwort wurde von der Administration zurückgesetzt. Legen Sie ein neues Passwort fest, um fortzufahren.",
   account_password_required_body_expired:
     "Ihr Passwort ist abgelaufen. Legen Sie ein neues Passwort fest, um fortzufahren.",
+  // The same for a patient: no "administration", no "work" (QA 2026-11-12).
+  account_password_required_body_initial_portal:
+    "Dies ist Ihre erste Anmeldung. Geben Sie das Passwort ein, das Sie von GMED erhalten haben, und legen Sie ein eigenes fest.",
+  account_password_required_body_reset_portal:
+    "GMED hat Ihnen ein neues Einmalpasswort gegeben. Geben Sie es ein und legen Sie ein eigenes Passwort fest.",
+  account_password_required_body_expired_portal:
+    "Ihr Passwort ist abgelaufen. Legen Sie ein neues Passwort fest, um fortzufahren.",
+  // The first field when the user holds a one-time password, not an own one.
+  account_password_current_temporary: "Erhaltenes Einmalpasswort",
 
   // Activity log: who acted
   activity_payer_link_actor: "Anfrage über den Zahler-Link",
@@ -250,6 +259,13 @@ export const securityReviewUiRu = {
     "Администратор сбросил ваш пароль. Задайте новый пароль, чтобы продолжить работу.",
   account_password_required_body_expired:
     "Срок действия вашего пароля истёк. Задайте новый пароль, чтобы продолжить работу.",
+  account_password_required_body_initial_portal:
+    "Это ваш первый вход. Введите пароль, полученный от GMED, и задайте собственный.",
+  account_password_required_body_reset_portal:
+    "GMED выдал вам новый одноразовый пароль. Введите его и задайте собственный пароль.",
+  account_password_required_body_expired_portal:
+    "Срок действия вашего пароля истёк. Задайте новый пароль, чтобы продолжить.",
+  account_password_current_temporary: "Полученный одноразовый пароль",
 
   activity_payer_link_actor: "Запрос по ссылке плательщика",
   activity_system_actor: "Система",

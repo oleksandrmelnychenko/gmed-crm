@@ -158,6 +158,10 @@ struct CreateUserRequest {
     /// Omitted: the server generates a one-time password, returns it once and
     /// forces a change at the first login.
     password: Option<String>,
+    /// Required, without a default: a forgotten choice must not grant a
+    /// role. A missing field reads as empty and is refused with
+    /// `422 role_required` (QA 2026-11-12 D-6).
+    #[serde(default)]
     role: String,
 }
 
@@ -722,6 +726,13 @@ async fn create_user(
     Json(body): Json<CreateUserRequest>,
 ) -> impl IntoResponse {
     auth.require_capability(Capability::UsersManage)?;
+    if body.role.trim().is_empty() {
+        return Err(err_code(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "role_required",
+            "Choose a role for the new user",
+        ));
+    }
     ensure_can_assign_role(&auth, &body.role)?;
     reject_patient_role(&body.role)?;
 

@@ -165,6 +165,13 @@ pub fn name_token(input: &str) -> String {
         .collect()
 }
 
+#[derive(Clone, Copy)]
+enum NamePart {
+    Category,
+    Last,
+    First,
+}
+
 fn normalized_extension(extension: &str) -> Option<&'static str> {
     match extension
         .trim()
@@ -186,9 +193,11 @@ fn normalized_extension(extension: &str) -> Option<&'static str> {
 ///
 /// `suffix` tells versions and duplicates apart (`V2`, `2`, `V2_2`); only
 /// ASCII letters and digits are kept, other characters separate parts. When the result
-/// is longer than [`MAX_ARCHIVE_FILE_NAME_LEN`], the first name is shortened
-/// first, then the category; the period, the suffix and the last name are
-/// kept as long as possible (the last name is cut only as a last resort).
+/// is longer than [`MAX_ARCHIVE_FILE_NAME_LEN`], a long last name gives way
+/// first (down to 16 characters), then the first name (down to 8) and the
+/// category (down to 12), then the last name again (down to 8); only after
+/// that are the first name, the category and the last name cut further. The
+/// period and the suffix are never shortened.
 pub fn archive_file_name(
     category_label: &str,
     period: ArchivePeriod,
@@ -231,21 +240,36 @@ pub fn archive_file_name(
     };
 
     let mut name = assemble(&category, &last, &first);
-    // ASCII only from here on, so byte length is character length.
-    while name.len() > MAX_ARCHIVE_FILE_NAME_LEN {
-        if first.len() > 1 {
-            let overflow = name.len() - MAX_ARCHIVE_FILE_NAME_LEN;
-            first.truncate(first.len().saturating_sub(overflow).max(1));
-        } else if category.len() > 4 {
-            let overflow = name.len() - MAX_ARCHIVE_FILE_NAME_LEN;
-            category.truncate(category.len().saturating_sub(overflow).max(4));
-        } else if last.len() > 1 {
-            let overflow = name.len() - MAX_ARCHIVE_FILE_NAME_LEN;
-            last.truncate(last.len().saturating_sub(overflow).max(1));
-        } else {
-            return Err(ArchiveNameError::TooLong);
+    // ASCII only from here on, so byte length is character length. Each
+    // step shortens one part down to its floor for that step; the category
+    // and the first name stay readable for the tax adviser as long as a
+    // long last name can give way.
+    const STEPS: [(NamePart, usize); 7] = [
+        (NamePart::Last, 16),
+        (NamePart::First, 8),
+        (NamePart::Category, 12),
+        (NamePart::Last, 8),
+        (NamePart::First, 1),
+        (NamePart::Category, 4),
+        (NamePart::Last, 1),
+    ];
+    for (part, floor) in STEPS {
+        if name.len() <= MAX_ARCHIVE_FILE_NAME_LEN {
+            break;
         }
-        name = assemble(&category, &last, &first);
+        let target = match part {
+            NamePart::Category => &mut category,
+            NamePart::Last => &mut last,
+            NamePart::First => &mut first,
+        };
+        if target.len() > floor {
+            let overflow = name.len() - MAX_ARCHIVE_FILE_NAME_LEN;
+            target.truncate(target.len().saturating_sub(overflow).max(floor));
+            name = assemble(&category, &last, &first);
+        }
+    }
+    if name.len() > MAX_ARCHIVE_FILE_NAME_LEN {
+        return Err(ArchiveNameError::TooLong);
     }
     debug_assert!(is_valid_archive_file_name(&name));
     Ok(name)
@@ -327,10 +351,10 @@ mod tests {
             None,
         )
         .unwrap();
-        // 66 characters in full, so the first name loses two.
+        // 66 characters in full, so the last name loses two.
         assert_eq!(
             name,
-            "Arbeitsunfaehigkeit_20260309_MuellerLuedenscheidt_JoergStrau.jpg"
+            "Arbeitsunfaehigkeit_20260309_MuellerLuedenschei_JoergStrauss.jpg"
         );
         assert!(is_valid_archive_file_name(&name));
     }
@@ -345,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn long_names_shorten_first_name_then_category_and_keep_period() {
+    fn long_names_shorten_last_then_first_then_category_and_keep_period() {
         let name = archive_file_name(
             "Sozialversicherungsmeldung",
             month(2026, 11),
@@ -355,19 +379,38 @@ mod tests {
             Some("V2"),
         )
         .unwrap();
-        assert_eq!(name.len(), MAX_ARCHIVE_FILE_NAME_LEN);
+        assert_eq!(
+            name,
+            "Sozialversicherungsmeld_2026_11_SchwarzenbergHoh_Maximili_V2.pdf"
+        );
         assert!(is_valid_archive_file_name(&name));
-        assert!(name.contains("_2026_11_SchwarzenbergHohenlohe_"));
-        assert!(name.ends_with("_V2.pdf"));
     }
 
     #[test]
-    fn last_name_is_cut_only_as_last_resort() {
+    fn very_long_last_name_keeps_category_and_first_name() {
         let last = "A".repeat(80);
         let name = archive_file_name("Urlaub", month(2026, 1), &last, "Eva", "pdf", None).unwrap();
         assert_eq!(name.len(), MAX_ARCHIVE_FILE_NAME_LEN);
-        assert!(name.starts_with("Urla_2026_01_AAAA"));
+        assert!(name.starts_with("Urlaub_2026_01_AAAA"));
+        assert!(name.ends_with("A_Eva.pdf"));
         assert!(is_valid_archive_file_name(&name));
+
+        // QA 2026-11-12: a 61-character surname used to cut the category
+        // to "Arbe" and the first name to "S".
+        let last = "X".repeat(61);
+        let name = archive_file_name(
+            "Arbeitsvertrag",
+            ArchivePeriod::Date(NaiveDate::from_ymd_opt(2025, 1, 10).unwrap()),
+            &last,
+            "Svetlana",
+            "pdf",
+            Some("V2"),
+        )
+        .unwrap();
+        assert_eq!(
+            name,
+            format!("Arbeitsvertrag_20250110_{}_Svetlana_V2.pdf", "X".repeat(24))
+        );
     }
 
     #[test]

@@ -506,3 +506,15 @@ export function resolvePersonnelTab(
   const match = allowed.find((tab) => tab === requested);
   return match ?? allowed[0] ?? "employees";
 }
+
+/**
+ * The "GMED account" picker's line for a staff account: name, e-mail and the
+ * role name. An account without a name shows its e-mail first instead of a
+ * line that starts with " · " (QA 2026-11-12 D-9).
+ */
+export function linkableUserLabel(
+  user: { name: string; email: string; role: string },
+  roleName: string | undefined,
+): string {
+  return [user.name.trim(), user.email.trim(), roleName?.trim()].filter((part) => Boolean(part)).join(" · ");
+}

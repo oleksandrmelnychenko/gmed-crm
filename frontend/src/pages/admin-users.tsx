@@ -298,7 +298,8 @@ const INITIAL_CREATE_FIELDS = {
   newPassword: "",
   newPasswordConfirm: "",
   newPasswordVisible: false,
-  newRole: "patient_manager",
+  // No role is preselected: a forgotten choice must not grant patient data (QA 2026-11-12 D-6).
+  newRole: "",
   createdUser: null,
 } satisfies Partial<AdminUsersState>;
 
@@ -746,6 +747,10 @@ function useAdminUsersPageContent() {
       setCreateError(t.login_error_email_invalid);
       return;
     }
+    if (!newRole) {
+      setCreateError(t.users_role_required);
+      return;
+    }
     const newEmailNoMail = knownNoMailEmailError(newEmail, lang);
     if (newEmailNoMail) {
       setCreateError(newEmailNoMail);
@@ -822,7 +827,7 @@ function useAdminUsersPageContent() {
       newEmail.trim().length > 0 ||
       newPassword.length > 0 ||
       newPasswordConfirm.length > 0 ||
-      newRole !== "patient_manager");
+      newRole !== "");
 
   const editDirty =
     editProfileDirty ||
@@ -1153,7 +1158,6 @@ function useAdminUsersPageContent() {
                 icon={UserRoundPlus}
                 onSubmit={onSubmitCreate}
                 title={t.users_create_title}
-                description={t.users_subtitle}
                 footer={(
                   <SheetFormFooter
                     cancelLabel={t.users_cancel}
@@ -1166,7 +1170,7 @@ function useAdminUsersPageContent() {
                 )}
               >
                 {createError ? <Banner tone="error">{createError}</Banner> : null}
-                <AdminFormSection icon={UserRoundPlus} title={t.users_create_title}>
+                <AdminFormSection icon={UserRoundPlus} title={t.users_person_section}>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-1.5">
                       <Label className={fieldLabelClass}>{t.users_name}</Label>
@@ -1183,9 +1187,12 @@ function useAdminUsersPageContent() {
                     <NativeComboboxSelect
                       value={newRole}
                       aria-label={t.users_role}
+                      hidePlaceholderOption
+                      aria-invalid={createError === t.users_role_required || undefined}
                       onChange={(event) => setNewRole(event.target.value ?? "")}
                       className="h-9 w-full rounded-lg bg-field"
                     >
+                      <option value="">{t.users_role_choose}</option>
                       {assignableRoles.map((key) => (
                         <option key={key} value={key}>{roleLabel(key)}</option>
                       ))}
