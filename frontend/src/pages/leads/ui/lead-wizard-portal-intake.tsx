@@ -241,14 +241,20 @@ export function Step1FillModeSwitch({
 }
 
 /** Progress of the patient in the portal, shown in step 1. */
-export function Step1PortalSummary({ intake, mode, tx }: { intake: LeadPortalIntake | null; mode: Step1FillMode; tx: Tx }) {
+export function Step1PortalSummary({ intake, mode, minor = false, tx }: { intake: LeadPortalIntake | null; mode: Step1FillMode; minor?: boolean; tx: Tx }) {
   if (!intake) {
     return mode === "patient" ? (
       <p className="text-xs text-muted-foreground">
-        {tx(
-          "Обязательны только имя, фамилия и e-mail. Остальное пациент заполнит в портале; заполнить самому можно в любой момент.",
-          "Pflicht sind nur Vorname, Nachname und E-Mail. Den Rest füllt der Patient im Portal aus; selbst ausfüllen geht jederzeit.",
-        )}
+        {minor
+          // A minor's own e-mail is optional (QA 2026-11-13, D-14): the parents fill in the form.
+          ? tx(
+            "Обязательны только имя и фамилия ребёнка и контакт родителя. Остальное родители заполнят в портале; заполнить самому можно в любой момент.",
+            "Pflicht sind nur Vor- und Nachname des Kindes und ein Kontakt eines Elternteils. Den Rest füllen die Eltern im Portal aus; selbst ausfüllen geht jederzeit.",
+          )
+          : tx(
+            "Обязательны только имя, фамилия и e-mail. Остальное пациент заполнит в портале; заполнить самому можно в любой момент.",
+            "Pflicht sind nur Vorname, Nachname und E-Mail. Den Rest füllt der Patient im Portal aus; selbst ausfüllen geht jederzeit.",
+          )}
       </p>
     ) : null;
   }

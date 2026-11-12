@@ -866,6 +866,58 @@ async fn an_adult_names_the_person_who_acts_for_him() {
         false,
         "{intake}"
     );
+    // Staff filling in the client's form change them as in the wizard, and
+    // the save is staff's, with the name (QA 2026-11-13: stored without one).
+    sqlx::query("UPDATE lead_representatives SET id_data_entered_at = NULL, id_data_entered_by = NULL WHERE lead_id = $1 AND contact_id = $2")
+        .bind(lead_id)
+        .bind(agent)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &agent_path,
+        &app.staff("patient_manager"),
+        Some(json!({ "id_document_number": "X7654321" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (number, entered_by, entered_at): (
+        Option<String>,
+        Option<Uuid>,
+        Option<chrono::DateTime<chrono::Utc>>,
+    ) = sqlx::query_as(
+        "SELECT id_document_number, id_data_entered_by, id_data_entered_at FROM lead_representatives WHERE lead_id = $1 AND contact_id = $2",
+    )
+    .bind(lead_id)
+    .bind(agent)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(number.as_deref(), Some("X7654321"));
+    assert_eq!(entered_by, Some(app.patient_manager_id));
+    assert!(entered_at.is_some());
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &agent_path,
+        &app.staff("patient_manager"),
+        Some(json!({ "id_document_number": "X7654322" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "staff keep editing: {body}");
+    // The client still cannot change staff's entry.
+    let (status, error) = json_request(
+        router,
+        "POST",
+        &agent_path,
+        &patient,
+        Some(json!({ "id_document_number": "X1234567" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+    assert_eq!(error["code"], "staff_only", "{error}");
     // The rest of the walk runs without document data, as before.
     sqlx::query(
         "UPDATE lead_representatives SET id_document_type = NULL, id_document_number = NULL, \

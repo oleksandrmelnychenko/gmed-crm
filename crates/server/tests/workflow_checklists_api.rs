@@ -929,3 +929,60 @@ async fn items_of_passed_stages_created_on_first_view_are_not_required_without_t
     );
     assert_eq!(checklist["not_required_count"], 2);
 }
+
+/// QA 2026-11-13, D-09: an order checklist item is internal work. The
+/// patient's or a parent's portal account is assigned to the patient but
+/// owns no item; billing owns billing items without an assignment.
+#[tokio::test]
+async fn checklist_items_are_owned_by_staff_and_billing_only() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("workflow-owner");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let patient_id = create_patient(&app, &pm_bearer, &tag).await;
+    let order_id = create_order(&app, &pm_bearer, patient_id).await;
+    let checklist_path = format!("/api/v1/orders/{order_id}/workflow-checklist");
+
+    let parent_id = seed_user(&pool, &format!("{tag}-parent"), "patient").await;
+    sqlx::query(
+        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+           VALUES ($1, $2, $3)"#,
+    )
+    .bind(patient_id)
+    .bind(parent_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &checklist_path,
+        &pm_bearer,
+        Some(json!({ "item_text": "Parent must not own this", "owner_user_id": parent_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &checklist_path,
+        &pm_bearer,
+        Some(json!({ "item_text": "Prepare the final invoice", "owner_user_id": billing_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let owner: (Option<Uuid>, String) = sqlx::query_as(
+        "SELECT owner_user_id, owner_role FROM workflow_checklist_items WHERE order_id = $1 AND item_text = 'Prepare the final invoice'",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(owner, (Some(billing_id), "billing".to_string()));
+}

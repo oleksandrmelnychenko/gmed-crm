@@ -513,6 +513,12 @@ export function createWorkflowChecklistItem(orderId: string, payload: JsonPayloa
   return postJson<void>(`/orders/${orderId}/workflow-checklist`, payload);
 }
 
+/** The active billing staff: they own billing items of a checklist without an assignment to the patient (QA 2026-11-13, D-09). */
+export async function fetchBillingWorkflowOwners(): Promise<{ id: string; name: string; role: string }[]> {
+  const staff = await apiFetch<{ id: string; name: string; role: string }[]>("/appointments/meta/staff");
+  return staff.filter((item) => item.role === "billing");
+}
+
 export function completeWorkflowChecklistItem(orderId: string, itemId: string) {
   return post(`/orders/${orderId}/workflow-checklist/${itemId}/complete`);
 }

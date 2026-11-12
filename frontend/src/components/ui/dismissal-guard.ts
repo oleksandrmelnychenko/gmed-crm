@@ -91,12 +91,37 @@ const escapeEventsWhileListOpen = new WeakSet<Event>()
 // The topbar's panels are no overlay of the dialog: they say so with
 // `data-overlay-escape-panel`.
 let lastAuxiliaryEscapeAt = Number.NEGATIVE_INFINITY
+// When a multi-select list last closed on a pick (`noteMultiSelectPick`).
+let lastMultiSelectPickAt = Number.NEGATIVE_INFINITY
+const MULTI_SELECT_PICK_ESCAPE_MS = 1500
+
+/**
+ * A multi-select list (citizenships, languages, specialisations) closes on
+ * each pick, but people press Escape right after it to leave the list they
+ * had just open — and the dialog behind closed with it (QA 2026-11-13, F-C2:
+ * Escape after picking a citizenship closed the lead wizard). The list says
+ * when it closed on a pick.
+ */
+export function noteMultiSelectPick(now = Date.now()) {
+  lastMultiSelectPickAt = now
+}
+
+/** Whether an Escape at `now` still belongs to the multi-select list that closed on a pick at `pickedAt`. */
+export function escapeFollowsMultiSelectPick(now: number, pickedAt = lastMultiSelectPickAt) {
+  return now >= pickedAt && now - pickedAt < MULTI_SELECT_PICK_ESCAPE_MS
+}
+
 if (typeof document !== "undefined") {
   document.addEventListener(
     "keydown",
     (event) => {
       if (event.key !== "Escape") return
-      if (document.querySelector(OPEN_AUXILIARY_OVERLAY_SELECTOR) !== null) {
+      if (escapeFollowsMultiSelectPick(Date.now())) {
+        // One Escape only: the next one is the dialog's again.
+        lastMultiSelectPickAt = Number.NEGATIVE_INFINITY
+        escapeEventsWhileListOpen.add(event)
+        lastAuxiliaryEscapeAt = Date.now()
+      } else if (document.querySelector(OPEN_AUXILIARY_OVERLAY_SELECTOR) !== null) {
         escapeEventsWhileListOpen.add(event)
         lastAuxiliaryEscapeAt = Date.now()
       } else if (document.querySelector(`${EXPANDED_CONTROL_SELECTOR}, [data-overlay-escape-panel]`) !== null) {
@@ -142,7 +167,11 @@ export function isAuxiliaryOverlayEscape(reason: string, event: Event | undefine
     // goes to the input inside the dialog (DEV check 2026-10-11: Escape closed
     // the whole lead wizard instead of the specialization list).
     isElementInside(event.target, EXPANDED_CONTROL_SELECTOR) ||
-    isElementInside(activeElement, EXPANDED_CONTROL_SELECTOR)
+    isElementInside(activeElement, EXPANDED_CONTROL_SELECTOR) ||
+    // A list still open anywhere when the dialog hears the key: the focus may
+    // have stayed on the dialog while the list floats in its portal.
+    (typeof document !== "undefined" &&
+      document.querySelector(OPEN_AUXILIARY_OVERLAY_SELECTOR) !== null)
   )
 }
 

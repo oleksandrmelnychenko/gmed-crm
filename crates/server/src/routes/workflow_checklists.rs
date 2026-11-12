@@ -1816,14 +1816,22 @@ async fn resolve_requested_assignee(
         return Ok(fallback_user_id);
     };
 
+    // A checklist item is internal work (QA 2026-11-13, D-09): staff only,
+    // never the patient's or a parent's portal account, although those are
+    // assigned to the patient too. Billing works on every patient without an
+    // assignment and owns the billing items.
     let row = sqlx::query(
-        r#"SELECT pa.user_id
-           FROM patient_assignments pa
-           JOIN users u ON u.id = pa.user_id
-           WHERE pa.patient_id = $1
-             AND pa.user_id = $2
-             AND pa.revoked_at IS NULL
-             AND u.is_active = true"#,
+        r#"SELECT u.id
+           FROM users u
+           WHERE u.id = $2
+             AND u.is_active = true
+             AND u.role::text <> 'patient'
+             AND (u.role::text = 'billing'
+                  OR EXISTS (
+                      SELECT 1 FROM patient_assignments pa
+                      WHERE pa.patient_id = $1
+                        AND pa.user_id = u.id
+                        AND pa.revoked_at IS NULL))"#,
     )
     .bind(patient_id)
     .bind(requested_user_id)
@@ -1842,7 +1850,7 @@ async fn resolve_requested_assignee(
     } else {
         Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "Workflow assignee must be actively linked to the patient",
+            "Workflow assignee must be a member of staff actively linked to the patient, or billing",
         ))
     }
 }

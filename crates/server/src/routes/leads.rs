@@ -9078,9 +9078,14 @@ fn matching_relation(
             .iter()
             .filter(|relation| !taken.contains(&relation.id))
     };
+    // A minor's repeat request takes the parents over from the patient's
+    // relations with the relation's own id as the entry id
+    // (`prefill_minor_repeat_representation`): that relation is the person
+    // (QA 2026-11-13 D-01: the parents were added a second time).
     if let Some(contact_id) = contact_id
-        && let Some(relation) =
-            free().find(|relation| relation.source_contact_id == Some(contact_id))
+        && let Some(relation) = free().find(|relation| {
+            relation.id == contact_id || relation.source_contact_id == Some(contact_id)
+        })
     {
         return Some(relation.id);
     }
@@ -10276,7 +10281,11 @@ async fn convert_lead(
                            address_city = CASE WHEN COALESCE($8, $9, $10, $11) IS NOT NULL THEN $10 ELSE address_city END,
                            address_country = CASE WHEN COALESCE($8, $9, $10, $11) IS NOT NULL THEN $11 ELSE address_country END,
                            is_emergency_contact = is_emergency_contact OR $12,
-                           source_contact_id = COALESCE(source_contact_id, $13),
+                           -- A repeat request's entry is the relation itself: the relation
+                           -- then remembers it, so the paying parent the request names is
+                           -- found among the contracting parents (documents).
+                           source_contact_id = CASE WHEN id = $13 THEN id
+                               ELSE COALESCE(source_contact_id, $13) END,
                            -- A repeat conversion completes a date the relation lacks.
                            birth_date = COALESCE(birth_date, $15),
                            -- The lead's current citizenships; none keeps the stored ones.
@@ -15691,6 +15700,20 @@ mod repeat_conversion_relation_tests {
                 Some(contact),
                 None,
                 "Anna Neu",
+                "mother"
+            ),
+            Some(created.id)
+        );
+        // A repeat request's entry carries the relation's own id
+        // (QA 2026-11-13 D-01): the relation another request created is
+        // the same person, whatever its own source entry.
+        assert_eq!(
+            matching_relation(
+                &[older.clone(), created.clone()],
+                &[],
+                Some(created.id),
+                None,
+                "Anna Alt",
                 "mother"
             ),
             Some(created.id)

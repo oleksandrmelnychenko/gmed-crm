@@ -1212,8 +1212,8 @@ function useStaffServicesPageContent() {
   const orderFieldLabel = lang === "de" ? "Auftrag" : "Заказ";
   const orderFieldHint =
     lang === "de"
-      ? "Eine bestätigte Buchung erfüllt die Anforderung „Nichtmedizinische Leistungen“ dieses Auftrags."
-      : "Подтверждённое бронирование закрывает требование «Немедицинские услуги» этого заказа.";
+      ? "Eine bestätigte Buchung erfüllt die Anforderung „Nichtmedizinische Leistungen“ dieses Auftrags. Die Buchung beim Partner bestätigen der Concierge oder der CEO."
+      : "Подтверждённое бронирование закрывает требование «Немедицинские услуги» этого заказа. Бронирование у партнёра подтверждает консьерж или CEO.";
   const noOrderLabel = lang === "de" ? "Ohne Auftrag" : "Без заказа";
 
   const {

@@ -1262,8 +1262,10 @@ function usePatientDetailPageContent() {
   const workspaceTabs = patientWorkspaceNavigation(user, lang, t);
   const activeWorkflowAssignees = useMemo(
     () =>
+      // Checklist items are staff's: the patient's and parents' portal
+      // accounts own none (QA 2026-11-13, D-09; the server refuses them).
       assignments.filter(
-        (item) => !item.revoked_at && item.user_active
+        (item) => !item.revoked_at && item.user_active && item.user_role !== "patient"
       ),
     [assignments]
   );

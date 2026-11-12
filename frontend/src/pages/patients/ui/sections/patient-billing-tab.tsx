@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Ban, BriefcaseMedical, CheckCircle2, ConciergeBell, Eye, FilePlus2, LoaderCircle, ReceiptText, RefreshCw, Undo2, Wallet } from "lucide-react";
 
 import { SectionHeading } from "@/components/ui/section-heading";
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { toast } from "@/components/ui/toast";
 import { Banner, Field, StatusBadge, textareaClass } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { formatAppDate } from "@/lib/app-time-zone";
@@ -154,6 +155,11 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedInvoice | null>(null);
+  // The form is long: the result is shown where the user looks (QA 2026-11-13, D-13: no visible result).
+  const createdRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (created) createdRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [created]);
 
   const copy = de ? {
     title: "Patientenabrechnung",
@@ -366,6 +372,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
         }),
       });
       setCreated(invoice);
+      toast.success(de ? `Rechnungsentwurf ${invoice.invoice_number} erstellt` : `Черновик счёта ${invoice.invoice_number} создан`, 6000);
       setRequestId(crypto.randomUUID());
       setSelectedExpenses([]);
       setSelectedConcierge([]);
@@ -564,7 +571,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
         {proposedOrderId && proposedOrderId === orderId && order ? <p className="text-xs text-muted-foreground" data-testid="patient-billing-proposed-order">{copy.proposedOrder(order.order_number)}</p> : null}
         {billingWarnings.transitForSelectedExpenses.map(item => <div key={item.order.id} data-testid="patient-billing-transit-warning"><Banner tone="warning">{copy.transitWarning(item.order.order_number, item.names.join(", "))}</Banner></div>)}
         {billingWarnings.rebilledForTransitLines ? <div data-testid="patient-billing-rebilled-warning"><Banner tone="warning">{copy.rebilledWarning(billingWarnings.rebilledForTransitLines.lines.join(", "), billingWarnings.rebilledForTransitLines.expenses.map(expense => expense.latest_patient_invoice_number || expense.external_invoice_number).join(", "))}</Banner></div> : null}
-        {created ? <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"><div className="flex flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2"><CheckCircle2 className="size-4" />{copy.success}</span><StaffLink className="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground" to={`/invoices?invoice=${created.id}`}>{copy.open}</StaffLink></div></div> : null}
+        {created ? <div ref={createdRef} data-testid="patient-billing-created" role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"><div className="flex flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2"><CheckCircle2 className="size-4" />{created.invoice_number ? `${created.invoice_number}: ` : ""}{copy.success}</span><StaffLink className="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground" to={`/invoices?invoice=${created.id}`}>{copy.open}</StaffLink></div></div> : null}
 
         <section className="overflow-hidden rounded-xl border border-border/70">
           <div className="border-b border-border/60 px-4 py-3"><AdminSectionTitle icon={BriefcaseMedical}>{copy.services}</AdminSectionTitle></div>

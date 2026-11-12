@@ -5676,6 +5676,37 @@ async fn update_concierge_service(
     {
         return failed(error);
     }
+    // A moved service moves its booked task (an event of the calendar) too
+    // (QA 2026-11-13, D-11: the task kept the old date). Without a new end
+    // the task keeps its length.
+    let previous_starts_at = existing
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("starts_at")
+        .unwrap_or_default();
+    let previous_ends_at = existing
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("ends_at")
+        .unwrap_or_default();
+    if let (Some(linked_task_id), Some(next_starts_at)) = (task_state.linked_task_id, starts_at)
+        && (previous_starts_at != starts_at || previous_ends_at != ends_at)
+        && let Err(error) = sqlx::query(
+            r#"UPDATE tasks
+               SET starts_at = $2,
+                   ends_at = CASE
+                       WHEN $3::timestamptz IS NOT NULL THEN $3
+                       WHEN starts_at IS NOT NULL AND ends_at IS NOT NULL
+                           THEN $2 + (ends_at - starts_at)
+                       ELSE ends_at
+                   END,
+                   updated_at = now()
+               WHERE id = $1 AND task_kind = 'event'"#,
+        )
+        .bind(linked_task_id)
+        .bind(next_starts_at)
+        .bind(ends_at)
+        .execute(&mut *tx)
+        .await
+    {
+        return failed(error);
+    }
     if let Err(error) = tx.commit().await {
         return failed(error);
     }

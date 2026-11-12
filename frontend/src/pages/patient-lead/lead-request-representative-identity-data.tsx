@@ -15,6 +15,7 @@ import {
 } from "./lead-request-api";
 import { LeadRequestIdentityRecognition } from "./lead-request-identity-recognition";
 import { CabinetHint, LabeledField, errorBody, useAutosave, type RequestQueue } from "./lead-request-parts";
+import { cabinetStaffText, useCabinetStaffMode } from "./lead-request-staff-mode";
 import { identificationFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 // The data of a representative's identity document, typed next to the copy
@@ -99,6 +100,8 @@ export function RepresentativeIdentityData({
   const refusedRef = useRef<Refused>({});
   const [refused, setRefused] = useState<Refused>({});
   const byStaff = person.id_data_by_staff === true;
+  // Staff filling in the form for the client keep editing what staff entered (QA 2026-11-13 D-08).
+  const staffMode = useCabinetStaffMode();
 
   // Saved elsewhere meanwhile (the other parent, GMED): untouched fields follow.
   const incomingKey = JSON.stringify(representativeIdDraft(person));
@@ -159,7 +162,8 @@ export function RepresentativeIdentityData({
     const invalid = Boolean(errorFor(field));
     return {
       id: idOf(field),
-      disabled: byStaff,
+      // Staff entries are read-only for the client; staff in the client's form keep editing them.
+      disabled: byStaff && !staffMode,
       "aria-invalid": invalid || undefined,
       "aria-describedby": invalid ? `${idOf(field)}-error` : undefined,
     };
@@ -206,7 +210,9 @@ export function RepresentativeIdentityData({
   return (
     <div className="space-y-3" data-testid={`lead-request-${slot}-identity-data`}>
       {byStaff ? (
-        <CabinetHint>{text.representativeIdDataStaff}</CabinetHint>
+        <CabinetHint testId={`lead-request-${slot}-identity-data-by-staff`}>
+          {staffMode ? cabinetStaffText(lang).idDataByStaff : text.representativeIdDataStaff}
+        </CabinetHint>
       ) : (
         <>
           <p className="text-sm leading-6 text-muted-foreground">{text.representativeIdDataIntro}</p>
@@ -244,7 +250,7 @@ export function RepresentativeIdentityData({
             value={draft.id_issuing_country || null}
             lang={lang}
             className={selectClass}
-            disabled={byStaff}
+            disabled={byStaff && !staffMode}
             aria-label={identificationFieldLabel(text, "id_issuing_country")}
             onChange={(code) => set("id_issuing_country", code ?? "")}
           />

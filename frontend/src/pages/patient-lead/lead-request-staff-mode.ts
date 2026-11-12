@@ -34,6 +34,7 @@ const TEXT = {
     recordedBy: (how: string) => `Записал сотрудник · ${how}`,
     withdraw: "Клиент отозвал согласие",
     cancel: "Отмена",
+    idDataByStaff: "Данные документа внёс сотрудник по скану; клиент их не изменяет. Ваши изменения здесь тоже сохраняются как внесённые сотрудником — сверьте их со сканом.",
   },
   uk: {
     banner: "Ви заповнюєте анкету за клієнта. Усе, що ви вносите, позначено «вніс співробітник». Згоди клієнта, його вибір у формі згоди та довірених осіб записуйте з тим, як він їх дав; надіслати анкету за клієнта можна на останньому кроці, вказавши, як він підтвердив дані.",
@@ -53,6 +54,7 @@ const TEXT = {
     recordedBy: (how: string) => `Записав співробітник · ${how}`,
     withdraw: "Клієнт відкликав згоду",
     cancel: "Скасувати",
+    idDataByStaff: "Дані документа вніс співробітник зі скану; клієнт їх не змінює. Ваші зміни тут теж зберігаються як внесені співробітником — звірте їх зі сканом.",
   },
   de: {
     banner: "Sie füllen das Formular für den Kunden aus. Ihre Angaben sind als «von Mitarbeitenden eingetragen» markiert. Einwilligungen des Kunden, seine Auswahl in der Einwilligungserklärung und Vertrauenspersonen tragen Sie mit dem Weg ein, auf dem er sie gab; das Formular senden Sie für den Kunden im letzten Schritt ab, mit dem Weg, auf dem er die Angaben bestätigt hat.",
@@ -72,6 +74,7 @@ const TEXT = {
     recordedBy: (how: string) => `Von Mitarbeitenden eingetragen · ${how}`,
     withdraw: "Kunde hat widerrufen",
     cancel: "Abbrechen",
+    idDataByStaff: "Die Ausweisdaten haben Mitarbeitende anhand der Kopie eingetragen; der Kunde ändert sie nicht. Ihre Änderungen hier gelten ebenfalls als von Mitarbeitenden eingetragen – gleichen Sie sie mit der Kopie ab.",
   },
   en: {
     banner: "You are filling in the form for the client. Your entries are marked “entered by staff”. Record the client's consents, their consent form options and trusted persons with how they were given; send the form for the client on the last step, saying how they confirmed the details.",
@@ -91,6 +94,7 @@ const TEXT = {
     recordedBy: (how: string) => `Recorded by staff · ${how}`,
     withdraw: "The client withdrew",
     cancel: "Cancel",
+    idDataByStaff: "Staff entered the document details from the copy; the client cannot change them. Your changes here are saved as entered by staff too — check them against the copy.",
   },
 } as const;
 

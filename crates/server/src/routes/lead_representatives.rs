@@ -208,6 +208,8 @@ pub(crate) struct Extras {
     /// Staff saved the document's data in the wizard: from then on the
     /// cabinet no longer changes them.
     pub id_data_entered_at: Option<DateTime<Utc>>,
+    /// The name of the member of staff who saved them (QA 2026-11-13, D-15).
+    pub id_data_entered_by_name: Option<String>,
     /// The cabinet typed the document's data (owner 2026-11-10).
     pub id_data_client_at: Option<DateTime<Utc>>,
     /// The e-mail address a cabinet login wrote for the contact (lower
@@ -251,6 +253,7 @@ impl Extras {
                 .try_get::<bool, _>("id_document_unreadable")
                 .unwrap_or(false),
             id_data_entered_at: row.try_get("id_data_entered_at").ok().flatten(),
+            id_data_entered_by_name: text("id_data_entered_by_name"),
             id_data_client_at: row.try_get("id_data_client_at").ok().flatten(),
             cabinet_email: text("cabinet_email").map(|email| email.to_lowercase()),
             country_questions: row
@@ -749,19 +752,23 @@ pub(crate) async fn load_on(
     else {
         return Ok(None);
     };
-    let mut rows: HashMap<Uuid, Extras> =
-        sqlx::query("SELECT * FROM lead_representatives WHERE lead_id = $1")
-            .bind(lead_id)
-            .fetch_all(&mut *conn)
-            .await?
-            .iter()
-            .filter_map(|row| {
-                Some((
-                    row.try_get::<Uuid, _>("contact_id").ok()?,
-                    Extras::from_row(row),
-                ))
-            })
-            .collect();
+    let mut rows: HashMap<Uuid, Extras> = sqlx::query(
+        r#"SELECT r.*, u.name AS id_data_entered_by_name
+               FROM lead_representatives r
+               LEFT JOIN users u ON u.id = r.id_data_entered_by
+               WHERE r.lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_all(&mut *conn)
+    .await?
+    .iter()
+    .filter_map(|row| {
+        Some((
+            row.try_get::<Uuid, _>("contact_id").ok()?,
+            Extras::from_row(row),
+        ))
+    })
+    .collect();
     let logins: Vec<(Uuid, Uuid)> = sqlx::query_as(
         r#"SELECT trusted_contact_id, user_id
            FROM lead_portal_access
@@ -852,6 +859,7 @@ pub(crate) async fn load_on(
                 effective.country_questions = stored.country_questions.clone();
                 // Who typed the data of the identity document is the row's.
                 effective.id_data_entered_at = stored.id_data_entered_at;
+                effective.id_data_entered_by_name = stored.id_data_entered_by_name.clone();
                 effective.id_data_client_at = stored.id_data_client_at;
                 effective.cabinet_email = stored.cabinet_email.clone();
             } else {
@@ -1725,6 +1733,11 @@ pub(crate) fn staff_payload(loaded: &Loaded) -> Value {
             value.insert(
                 "id_data_entered_at".into(),
                 json!(person.extras.id_data_entered_at),
+            );
+            // Who saved them, as the wizard names the patient's (QA 2026-11-13, D-15).
+            value.insert(
+                "id_data_entered_by_name".into(),
+                json!(person.extras.id_data_entered_by_name),
             );
             // Typed in the cabinet and not yet saved by staff: to compare
             // with the scan.
@@ -3464,12 +3477,14 @@ pub(crate) async fn upsert_my_representative(
     }
     let mut fields = changed_person_fields(&current, &next);
     // The data of the identity document staff saved in the wizard stay
-    // staff's: they compared them with the scan.
+    // staff's: they compared them with the scan. Staff in the client's form
+    // change them as in the wizard; their save is staff's entry (below).
     let id_data_changed = fields
         .iter()
         .copied()
         .find(|field| crate::risk::cabinet::is_id_data_key(field));
     if let Some(field) = id_data_changed
+        && kind != AccessKind::Staff
         && known.is_some_and(|person| person.extras.id_data_entered_at.is_some())
     {
         return crate::risk::cabinet::staff_only(field);
@@ -3581,7 +3596,16 @@ pub(crate) async fn upsert_my_representative(
                        id_issuing_country = $6,
                        id_issued_on = $7,
                        id_valid_until = $8,
-                       id_data_client_at = CASE WHEN $9 THEN now() ELSE id_data_client_at END
+                       id_data_client_at = CASE WHEN $9 THEN now() ELSE id_data_client_at END,
+                       -- Typed by staff in the client's form: staff's entry, as in
+                       -- the wizard (QA 2026-11-13: it was stored without a name),
+                       -- and read-only in the cabinet from then on.
+                       id_data_entered_by = CASE WHEN $9 THEN id_data_entered_by ELSE $10 END,
+                       id_data_entered_at = CASE WHEN $9 THEN id_data_entered_at ELSE GREATEST(
+                           clock_timestamp(),
+                           (SELECT max(u.created_at) FROM lead_portal_uploads u
+                            WHERE u.lead_id = $1 AND u.kind = 'representative_identity'
+                              AND u.representative_id = $2 AND u.withdrawn_at IS NULL)) END
                    WHERE lead_id = $1 AND contact_id = $2"#,
             )
             .bind(lead_id)
@@ -3593,6 +3617,7 @@ pub(crate) async fn upsert_my_representative(
             .bind(next.id_issued_on)
             .bind(next.id_valid_until)
             .bind(kind != AccessKind::Staff)
+            .bind(auth.user_id)
             .execute(&mut *tx)
             .await?;
         }

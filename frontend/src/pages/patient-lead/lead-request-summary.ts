@@ -8,7 +8,7 @@ import { actsAsGuardian } from "./lead-request-access";
 import { consentFormText } from "./lead-request-consent-form-text";
 import { citizenshipFieldLabel } from "@/components/ui/citizenship-multi-select";
 import { disclosureDefaultsToNo, formatBirthDate, personCitizenships, personScope, storedTrustedPersons } from "./lead-trusted-persons-model";
-import { REPRESENTATIVE_COUNTRY_FIELDS } from "./lead-request-representative-questions-model";
+import { REPRESENTATIVE_COUNTRY_FIELDS, type RepresentativeCountryField } from "./lead-request-representative-questions-model";
 import { trustedPersonsText } from "./lead-trusted-persons-text";
 import { asksAccount, asksPaymentRoute, type BillingField } from "./lead-request-billing-model";
 import {
@@ -57,6 +57,13 @@ import {
   representativeUploadLabel,
   type LeadRequestText,
 } from "./lead-request-text";
+
+/** A representative's PEP and sanctions answers, as the cabinet asks them. */
+const REPRESENTATIVE_PEP_FIELDS = [
+  "pep_self", "pep_related", "sanctions_links",
+  "pep_office", "pep_country", "pep_period", "pep_relationship", "pep_wealth_origin",
+  "sanctions_link_name", "sanctions_link_kind", "sanctions_link_since_extent",
+] as const satisfies readonly RepresentativeCountryField[];
 
 /** One statement in the summary; a row without a label is an entry of a list (a file). */
 export type SummaryRow = { label: string; value: string };
@@ -297,6 +304,16 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
             ),
             [representativeUploadLabel(text, slot, "identity"), fileNames(person.identity_documents)],
             ...idDocumentRows(person),
+            // The person's PEP and sanctions answers are part of the request (QA 2026-11-13, D-16).
+            ...REPRESENTATIVE_PEP_FIELDS.map((field): [string, string | null | undefined] => {
+              const value = person.country_questions?.[field];
+              return [
+                followUpFieldLabel(text, field),
+                typeof value === "boolean" ? yesNo(value)
+                  : field === "sanctions_link_kind" ? option(text.sanctionsLinkKindOptions, value)
+                    : field === "pep_country" ? country(value) : value,
+              ];
+            }),
             // A proof is listed where the form asks for one.
             [
               proof ? text.representativeAuthority[proof.proof] : "",

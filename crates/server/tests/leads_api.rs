@@ -9536,6 +9536,82 @@ async fn a_minor_patients_repeat_intake_starts_with_the_parents_on_record() {
     assert_eq!(repeat_custody, custody);
 }
 
+/// QA 2026-11-13 D-01: a minor's repeat request names the parents by the ids
+/// of their relations (as the repeat intake prefills them). Converting it
+/// keeps the two relations instead of adding both parents again, and the
+/// default-payer mark stays where it was while the payer is the same.
+#[tokio::test]
+async fn converting_a_minors_repeat_request_keeps_the_parents_relations() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let (anna, ben) = (Uuid::new_v4(), Uuid::new_v4());
+    let lead_email = format!("mia-{}@example.com", Uuid::new_v4().simple());
+    let lead_id = seed_minor_lead_with_parents(&app, &lead_email, anna, ben, None).await;
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    declare_mother_as_payer_and_sign(&app, lead_id, artifacts.order_id).await;
+    let patient_id = convert_ready_lead(&app, lead_id).await;
+    let before = parent_relations(pool, patient_id).await;
+    assert_eq!(before.len(), 2, "{before:?}");
+    let (anna_relation, ben_relation) = (before[0].0, before[1].0);
+    assert!(before[0].8, "the paying mother is the default payer");
+
+    // The repeat request: its entries carry the relations' own ids.
+    let repeat = seed_minor_lead_with_parents(
+        &app,
+        &lead_email,
+        anna_relation,
+        ben_relation,
+        Some(patient_id),
+    )
+    .await;
+    let artifacts = seed_complete_lead_onboarding(&app, repeat).await;
+    declare_mother_as_payer_and_sign(&app, repeat, artifacts.order_id).await;
+    assert_eq!(convert_ready_lead(&app, repeat).await, patient_id);
+
+    let after = parent_relations(pool, patient_id).await;
+    assert_eq!(after.len(), 2, "no parent is added twice: {after:?}");
+    assert_eq!((after[0].0, after[1].0), (anna_relation, ben_relation));
+    assert!(after[0].8, "the mark stays with the same paying mother");
+    assert!(!after[1].8);
+    let sources: Vec<(Uuid, Option<Uuid>)> = sqlx::query_as(
+        "SELECT id, source_contact_id FROM patient_relations WHERE patient_id=$1 ORDER BY related_name",
+    )
+    .bind(patient_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        sources,
+        vec![
+            (anna_relation, Some(anna_relation)),
+            (ben_relation, Some(ben_relation))
+        ],
+        "the relation remembers the entry of the request converted last"
+    );
+    let contracting: Vec<Uuid> =
+        sqlx::query_scalar("SELECT contracting_relation_ids FROM patients WHERE id=$1")
+            .bind(patient_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(
+        !contracting.is_empty()
+            && contracting
+                .iter()
+                .all(|relation| [anna_relation, ben_relation].contains(relation)),
+        "{contracting:?}"
+    );
+    let payer_audits: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM audit_log
+           WHERE action = 'set_default_payer_on_conversion' AND entity_id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(payer_audits, 1, "the payer did not change");
+}
+
 /// Owner decision 2026-10-19: the parent(s) with custody are the minor's
 /// contracting party. Conversion stores the custody and their relations on
 /// the patient, so a parent without custody is no Auftraggeber; trusted

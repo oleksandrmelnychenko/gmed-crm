@@ -551,6 +551,28 @@ pub(crate) async fn load_identification_status(
         }
         _ => None,
     };
+    // A minor's repeat request before «who pays» is answered: the parent the
+    // patient record names as default payer stays the payer (QA 2026-11-13,
+    // D-07: the non-paying mother was asked for a payment from her own
+    // account). The request's parents carry their relations' ids.
+    let kept_payer = match (representation.minor, payer_since) {
+        (true, None) => {
+            let relation: Option<Uuid> = sqlx::query_scalar(
+                r#"SELECT r.id FROM leads l
+                   JOIN patient_relations r ON r.patient_id = l.repeat_patient_id
+                   WHERE l.id = $1 AND r.is_default_payer
+                   LIMIT 1"#,
+            )
+            .bind(lead_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+            relation
+                .and_then(|id| representation.find(id))
+                .filter(|person| person.slot.is_some())
+                .map(|person| person.id)
+        }
+        _ => None,
+    };
 
     let requests = sqlx::query(
         r#"WITH lead_documents AS (
@@ -731,12 +753,17 @@ pub(crate) async fn load_identification_status(
             own_account_payment: payment_of(SUBJECT_PAYER, Some(since)),
         }
     });
+    let payer = payer.or_else(|| {
+        kept_payer
+            .and_then(|id| representatives.iter().find(|person| person.id == id))
+            .map(|same| same.person.clone())
+    });
     Ok(IdentificationStatus {
         minor: true,
         // The parents sign and pay for the child: nothing counts for it.
         contract_partner: PersonIdentification::default(),
         payer,
-        payer_same_person_as: payer_is,
+        payer_same_person_as: payer_is.or(kept_payer),
         representatives,
         acting_persons: Vec::new(),
     })

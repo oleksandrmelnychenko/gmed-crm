@@ -5,7 +5,7 @@ import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
 import { CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-react"
 
 import { readOnlyDisables, useReadOnly, type ReadOnlyExemptProps } from "@/components/read-only-scope"
-import { useOverlayDirtyField } from "@/components/ui/dismissal-guard"
+import { noteMultiSelectPick, useOverlayDirtyField } from "@/components/ui/dismissal-guard"
 import { useLang } from "@/lib/i18n"
 import { useComboboxText } from "@/components/ui/combobox-text"
 import { cn } from "@/lib/utils"
@@ -214,6 +214,7 @@ function ComboboxSelect({
   ...ariaProps
 }: ComboboxSelectProps) {
   const actionsRef = React.useRef<ComboboxPrimitive.Root.Actions | null>(null)
+  const isMultiSelect = selectedValues !== EMPTY_SELECTED_VALUES
   const { t } = useLang()
   const pageText = useComboboxText()
   const readOnly = useReadOnly()
@@ -309,6 +310,11 @@ function ComboboxSelect({
       autoHighlight={true}
       modal={false}
       actionsRef={actionsRef}
+      // A multi-select closes on each pick; the Escape that follows belongs to
+      // it, not to the dialog behind (QA 2026-11-13, F-C2).
+      onOpenChange={(nextOpen, eventDetails) => {
+        if (!nextOpen && isMultiSelect && eventDetails.reason === "item-press") noteMultiSelectPick()
+      }}
     >
       <ComboboxPrimitive.Trigger
         id={id}

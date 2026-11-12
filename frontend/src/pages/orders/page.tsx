@@ -235,6 +235,7 @@ import {
   createOrder,
   createOrderLeistung,
   createWorkflowChecklistItem,
+  fetchBillingWorkflowOwners,
   fetchOrderDebtQueue,
   fetchOrderDirectory,
   fetchOrderEconomics,
@@ -1746,6 +1747,30 @@ function useOrdersPageContent() {
       ),
     [workflowAssignments],
   );
+  // A checklist item is internal work (QA 2026-11-13, D-09): the patient's and
+  // the parents' portal accounts own none; billing owns the billing items.
+  const [billingWorkflowOwners, setBillingWorkflowOwners] = useState<
+    { id: string; name: string; role: string }[] | null
+  >(null);
+  useEffect(() => {
+    if (!workflowCreateOpen || billingWorkflowOwners !== null) return;
+    let active = true;
+    fetchBillingWorkflowOwners()
+      .then((owners) => { if (active) setBillingWorkflowOwners(owners); })
+      .catch(() => { if (active) setBillingWorkflowOwners([]); });
+    return () => { active = false; };
+  }, [billingWorkflowOwners, workflowCreateOpen]);
+  const workflowOwnerOptions = useMemo(() => {
+    const staff = activeWorkflowAssignments
+      .filter((item) => item.user_role !== "patient")
+      .map((item) => ({ user_id: item.user_id, user_name: item.user_name, user_role: item.user_role }));
+    for (const owner of billingWorkflowOwners ?? []) {
+      if (!staff.some((item) => item.user_id === owner.id)) {
+        staff.push({ user_id: owner.id, user_name: owner.name, user_role: owner.role });
+      }
+    }
+    return staff;
+  }, [activeWorkflowAssignments, billingWorkflowOwners]);
   const debtOwnerOptions = useMemo(() => {
     // Debt collection is owned by staff; the patient's portal account is
     // part of the assignments but never an owner.
@@ -8763,7 +8788,7 @@ function useOrdersPageContent() {
                       <option value="">
                         {l("orders_aktueller_benutzer")}
                       </option>
-                      {activeWorkflowAssignments.map((item) => (
+                      {workflowOwnerOptions.map((item) => (
                         <option key={item.user_id} value={item.user_id}>
                           {item.user_name} · {roleLabel(item.user_role)}
                         </option>

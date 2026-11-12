@@ -2921,7 +2921,10 @@ function readinessReasonText(reason: string, tx: Tx, minor: boolean, readiness: 
   const detail = representativeMissingText(missing, tx);
   if (!detail) return label;
   const where = representativeDocumentFieldsMissing(missing)
-    ? tx("Вносится в карточке этого лица в блоке «Документ, удостоверяющий личность».", "Wird in der Karte dieser Person im Block „Ausweisdokument“ erfasst.")
+    ? tx(
+      "Вносится на шаге «Документы» в блоке «Документы представителей», в карточке этого лица.",
+      "Wird im Schritt „Unterlagen“ im Block „Ausweise der Vertreter“ in der Karte dieser Person erfasst.",
+    )
     : tx("Вносится в карточке контакта в разделе «Данные клиента».", "Wird in der Kontaktkarte unter „Personendaten“ erfasst.");
   return `${label}. ${detail} ${where}`;
 }
@@ -2974,6 +2977,8 @@ export type CommercialSaveFeedback = {
   message: string;
   /** The message follows the lead's live readiness instead of the save moment. */
   followsReadiness?: boolean;
+  /** «Отмена» on the signature-reset question: gone once the estimate is signed anew or the step changes (QA F-C3). */
+  signatureKept?: boolean;
 };
 
 /**
@@ -3352,7 +3357,9 @@ function validateMasterDraft(
         "Gültige Telefonnummer eingeben: mindestens 6 Ziffern, nur Ziffern, +, Leerzeichen, ( ) - / .",
       );
     }
-  } else if (repeatIntake && !email && !phone) {
+  } else if (repeatIntake && !email && !phone && !minorEmailOptional(draft)) {
+    // A minor is reached through the parents, in a repeat request as at the
+    // first intake (QA 2026-11-13, D-03).
     const contactRequired = tx(
       "Укажите электронную почту или телефон",
       "E-Mail oder Telefonnummer angeben",
@@ -5677,6 +5684,21 @@ export function LeadWizard({
     serverQuoteAccepted,
     serverPrepaymentReady,
   );
+  // «Изменение не сохранено: подпись клиента сохранена» speaks of the moment of
+  // the «Отмена»: another step, or another estimate accepted, ends it (QA F-C3).
+  // The same estimate accepted again after the «Отмена» (its positions came back) is no new one.
+  const acceptedQuoteKey = acceptedQuote ? `${acceptedQuote.id}:${acceptedQuote.current_version_number ?? ""}` : null;
+  const lastAcceptedQuoteKeyRef = useRef(acceptedQuoteKey);
+  useEffect(() => {
+    if (!acceptedQuoteKey) return;
+    const previous = lastAcceptedQuoteKeyRef.current;
+    lastAcceptedQuoteKeyRef.current = acceptedQuoteKey;
+    if (previous === acceptedQuoteKey) return;
+    setCommercialSaveFeedback((current) => (current?.signatureKept ? null : current));
+  }, [acceptedQuoteKey]);
+  useEffect(() => {
+    setCommercialSaveFeedback((current) => (current?.signatureKept ? null : current));
+  }, [step]);
   const quoteStateLabel = !quote
     ? tx("Смета ещё не рассчитана", "Kostenvoranschlag noch nicht berechnet")
     : !quoteIsCurrent
@@ -7963,7 +7985,7 @@ ${serviceCommentLines.join("\n")}`
     } catch (nextError) {
       // Keeping the client's signature is a choice, not a failure (QA C3-01).
       setCommercialSaveFeedback(nextError instanceof SignedTermsChangeCancelled
-        ? { tone: "warning", message: nextError.message }
+        ? { tone: "warning", message: nextError.message, signatureKept: true }
         : { tone: "error", message: errorText(nextError, tx) });
       setValidationContext(null);
       setError("");
@@ -8206,7 +8228,7 @@ ${serviceCommentLines.join("\n")}`
       // failure to show; the positions went back already (QA F-C3).
       if (nextError instanceof SignedTermsChangeCancelled) {
         setCommercialQuoteError("");
-        setCommercialSaveFeedback({ tone: "warning", message: nextError.message });
+        setCommercialSaveFeedback({ tone: "warning", message: nextError.message, signatureKept: true });
         return;
       }
       // 409 `estimate_document_outdated`: the KV PDF is older than the order.
@@ -9688,7 +9710,7 @@ ${serviceCommentLines.join("\n")}`
               {step1Portal.patientUpdatedAt ? (
                 <PatientUpdatedBanner at={step1Portal.patientUpdatedAt} onClose={step1Portal.dismissPatientUpdate} tx={tx} />
               ) : null}
-              {isRepeatIntake ? null : <Step1PortalSummary intake={step1Portal.intake} mode={step1Portal.mode} tx={tx} />}
+              {isRepeatIntake ? null : <Step1PortalSummary intake={step1Portal.intake} mode={step1Portal.mode} minor={draft ? minorEmailOptional(draft) : false} tx={tx} />}
               {masterOpenIssues.length > 0 && validationContext?.kind !== "master" && !masterValidationAttempted ? (
                 // The fields the stepper counts as open, named here (A-4); "Показать
                 // поля" marks each of them and leads to the first.
@@ -9931,7 +9953,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label="E-Mail"
-                  required={isRepeatIntake ? !draft.phone.trim() : !minorEmailOptional(draft)}
+                  required={isRepeatIntake ? !draft.phone.trim() && !minorEmailOptional(draft) : !minorEmailOptional(draft)}
                   error={visibleMasterError("email")}
                   errorId={`${MASTER_FIELD_IDS.email}-error`}
                   htmlFor={MASTER_FIELD_IDS.email}
@@ -9942,11 +9964,11 @@ ${serviceCommentLines.join("\n")}`
                     autoComplete="email"
                     spellCheck={false}
                     type="email"
-                    aria-required={isRepeatIntake ? !draft.phone.trim() : !minorEmailOptional(draft)}
+                    aria-required={isRepeatIntake ? !draft.phone.trim() && !minorEmailOptional(draft) : !minorEmailOptional(draft)}
                     aria-invalid={Boolean(visibleMasterError("email"))}
                     aria-describedby={[
                       visibleMasterError("email") ? `${MASTER_FIELD_IDS.email}-error` : "",
-                      !isRepeatIntake && minorEmailOptional(draft) ? `${MASTER_FIELD_IDS.email}-minor-hint` : "",
+                      minorEmailOptional(draft) ? `${MASTER_FIELD_IDS.email}-minor-hint` : "",
                     ].filter(Boolean).join(" ") || undefined}
                     className={inputClass}
                     value={draft.email}
@@ -9954,7 +9976,7 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("email", event.target.value)}
                   />
                   {visibleMasterError("email") ? null : <EmailDomainWarning email={draft.email} lang={lang} />}
-                  {!isRepeatIntake && minorEmailOptional(draft) ? (
+                  {minorEmailOptional(draft) ? (
                     // Read as the field's description, not as part of its name.
                     <span
                       id={`${MASTER_FIELD_IDS.email}-minor-hint`}
@@ -9972,7 +9994,7 @@ ${serviceCommentLines.join("\n")}`
                 <Field
                   label={tx("Телефон", "Telefon")}
                   note={clientVisibleNote}
-                  required={isRepeatIntake && !draft.email.trim()}
+                  required={isRepeatIntake && !draft.email.trim() && !minorEmailOptional(draft)}
                   error={visibleMasterError("phone")}
                   errorId={`${MASTER_FIELD_IDS.phone}-error`}
                   htmlFor={MASTER_FIELD_IDS.phone}
@@ -9982,7 +10004,7 @@ ${serviceCommentLines.join("\n")}`
                     name="phone"
                     autoComplete="tel"
                     type="tel"
-                    aria-required={isRepeatIntake && !draft.email.trim()}
+                    aria-required={isRepeatIntake && !draft.email.trim() && !minorEmailOptional(draft)}
                     aria-invalid={Boolean(visibleMasterError("phone"))}
                     aria-describedby={visibleMasterError("phone") ? `${MASTER_FIELD_IDS.phone}-error` : undefined}
                     className={inputClass}

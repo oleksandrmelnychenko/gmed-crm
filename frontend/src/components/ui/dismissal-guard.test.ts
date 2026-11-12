@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   confirmDirtyDismiss,
+  escapeFollowsMultiSelectPick,
   isAuxiliaryOverlayEscape,
   isCancelDismissControl,
   isInternalOverlayInteractionEvent,
@@ -181,6 +182,13 @@ describe("dismissal guard", () => {
 
     expect(isAuxiliaryOverlayEscape("escape-key", openList)).toBe(true)
     expect(isAuxiliaryOverlayEscape("escape-key", closedList)).toBe(false)
+  })
+
+  it("gives the Escape right after a multi-select pick to that list, not to the dialog (QA F-C2)", () => {
+    expect(escapeFollowsMultiSelectPick(10_000, 9_500)).toBe(true)
+    expect(escapeFollowsMultiSelectPick(11_600, 10_000)).toBe(false)
+    expect(escapeFollowsMultiSelectPick(10_000, Number.NEGATIVE_INFINITY)).toBe(false)
+    expect(escapeFollowsMultiSelectPick(9_000, 10_000)).toBe(false)
   })
 
   it("uses controlled dirty as the source of truth when provided", () => {
