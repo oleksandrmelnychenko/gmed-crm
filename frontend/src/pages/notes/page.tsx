@@ -83,7 +83,8 @@ export const NOTES_COPY = {
     noNotes: "Noch keine internen Notizen",
     selectNote: "Notiz auswählen oder eine neue Notiz anlegen",
     updated: "Aktualisiert",
-    by: "von",
+    by: "Erstellt von",
+    editedBy: "zuletzt geändert von",
     archive: "Archivieren",
     deleteFile: "Datei entfernen",
     confirmArchive: "Diese Notiz archivieren?",
@@ -131,7 +132,8 @@ export const NOTES_COPY = {
     noNotes: "Внутренних заметок пока нет",
     selectNote: "Выберите заметку или создайте новую",
     updated: "Обновлено",
-    by: "автор",
+    by: "Автор:",
+    editedBy: "изменил(а):",
     archive: "Архивировать",
     deleteFile: "Удалить файл",
     confirmArchive: "Архивировать эту заметку?",
@@ -612,7 +614,8 @@ export function InternalNotesPage() {
                       no tooltip can be hovered (QA C-15). */}
                   <h2 className="text-base font-semibold text-foreground [overflow-wrap:anywhere]" title={activeNote?.title ?? labels.untitled}>{activeNote?.title ?? labels.untitled}</h2>
                   <p className="mt-1 text-xs text-muted-foreground">{`${labels.updated} ${activeNote ? formatDate(activeNote.updated_at) : ""}`}</p>
-                  {activeNote ? <p className="mt-1 text-xs text-muted-foreground">{labels.by} {activeNote.updated_by_name}</p> : null}
+                  {/* The author is who created the note; a later editor is named apart (QA 2026-11-12 B-07). */}
+                  {activeNote ? <p className="mt-1 text-xs text-muted-foreground">{labels.by} {activeNote.created_by_name}{activeNote.updated_by_name && activeNote.updated_by_name !== activeNote.created_by_name ? ` · ${labels.editedBy} ${activeNote.updated_by_name}` : ""}</p> : null}
                 </div>
                 {readOnly ? null : (
                   <div className="flex gap-2">

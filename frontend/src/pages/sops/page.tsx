@@ -4,6 +4,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useState,
   type FormEvent,
   type ReactNode,
   type SetStateAction,
@@ -19,7 +20,6 @@ import {
   LoaderCircle,
   Plus,
   RefreshCw,
-  Scan,
   Target,
   type LucideIcon,
 } from "lucide-react";
@@ -36,6 +36,7 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { useSearchParams } from "react-router-dom";
 import {
   Banner as ShellBanner,
   PageHeader,
@@ -348,8 +349,6 @@ function useSopsPageContent() {
       noSelectionDescription: t.sops_no_selection_description,
       targetingModelTitle: t.sops_targeting_model_title,
       targetingModelDescription: t.sops_targeting_model_description,
-      scopeTitle: t.sops_scope_title,
-      scopeDescription: t.sops_scope_description,
       formCreateTitle: t.sops_form_create_title,
       formEditTitle: t.sops_form_edit_title,
       formTitle: t.sops_form_title,
@@ -541,6 +540,16 @@ function useSopsPageContent() {
     );
   }, [eligibleUsers, form.targetRoles, form.targetUserIds]);
 
+  // A long staff list gets a search; ticked people stay visible (QA 2026-11-12 B-14).
+  const [directUserQuery, setDirectUserQuery] = useState("");
+  const directUserRows = useMemo(() => {
+    const base = filteredUsers.length > 0 ? filteredUsers : eligibleUsers;
+    const needle = directUserQuery.trim().toLocaleLowerCase();
+    if (!needle) return base;
+    return base.filter((item) =>
+      form.targetUserIds.includes(item.id) || item.name.toLocaleLowerCase().includes(needle));
+  }, [directUserQuery, eligibleUsers, filteredUsers, form.targetUserIds]);
+
   const visibleItems = useMemo(() => {
     const term = librarySearch.trim().toLowerCase();
     if (!term) return items;
@@ -572,6 +581,20 @@ function useSopsPageContent() {
     () => items.find((item) => item.id === selectedItemId) ?? null,
     [items, selectedItemId],
   );
+
+  // A SOP notification opens its SOP (`/sops?sop=<id>`, QA 2026-11-12 B-04);
+  // the parameter is consumed so the next click on the same notice opens it again.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const linkedSopId = searchParams.get("sop");
+  useEffect(() => {
+    if (!linkedSopId) return;
+    setSelectedItemId(linkedSopId);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete("sop");
+      return next;
+    }, { replace: true });
+  }, [linkedSopId, setSearchParams, setSelectedItemId]);
 
   const queueColumns = useMemo<ColumnDef<SopItem>[]>(
     () => [
@@ -922,7 +945,7 @@ function useSopsPageContent() {
           </AdminTableCard>
         ) : null}
 
-        <section className="grid min-w-0 grid-cols-1 gap-3 2xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)]">
+        <section className={cn("grid min-w-0 grid-cols-1 gap-3", allowedTargetRoles.length > 0 && "2xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)]")}>
           <AdminTableCard
             icon={Library} title={text.libraryTitle}
             description={text.libraryDescription}
@@ -1011,33 +1034,24 @@ function useSopsPageContent() {
             />
           </AdminTableCard>
 
+          {/* The roles an author may address; readers who write no SOP see
+              nothing here (QA 2026-11-12 B-10: no "Не указано", no developer text). */}
+          {allowedTargetRoles.length > 0 ? (
           <div className="min-w-0 space-y-3">
             <AdminTableCard
               icon={Target} title={text.targetingModelTitle}
               description={text.targetingModelDescription}
             >
               <div className="flex flex-wrap gap-2 p-3.5">
-                {allowedTargetRoles.length > 0 ? (
-                  allowedTargetRoles.map((role) => (
-                    <Badge key={role} variant="outline" className="rounded-full">
-                      {roleLabel(role)}
-                    </Badge>
-                  ))
-                ) : (
-                  <span className="text-sm text-muted-foreground">{text.statusNotSet}</span>
-                )}
-              </div>
-            </AdminTableCard>
-
-            <AdminTableCard
-              icon={Scan} title={text.scopeTitle}
-              description={text.scopeDescription}
-            >
-              <div className="p-3.5 text-sm text-muted-foreground">
-                {text.scopeDescription}
+                {allowedTargetRoles.map((role) => (
+                  <Badge key={role} variant="outline" className="rounded-full">
+                    {roleLabel(role)}
+                  </Badge>
+                ))}
               </div>
             </AdminTableCard>
           </div>
+          ) : null}
         </section>
 
         <GwgTrainingSection />
@@ -1122,7 +1136,8 @@ function useSopsPageContent() {
                     <SummaryLine label={text.columns.ack} value={ackLabel(selectedItem.my_ack_status)} />
                     <SummaryLine label={text.pendingAck} value={selectedItem.pending_ack_count} />
                     <SummaryLine label={text.acknowledged} value={selectedItem.acknowledged_count} />
-                    <SummaryLine label={text.columns.approval} value={approvalRoleLabel(selectedItem.approval_required_role)} />
+                    {/* After approval the route is done: name who approved it and when (QA 2026-11-12 B-13). */}
+                    <SummaryLine label={text.columns.approval} value={selectedItem.approved_by_name ? [selectedItem.approved_by_name, selectedItem.approved_at ? formatDate(selectedItem.approved_at, t) : ""].filter(Boolean).join(", ") : approvalRoleLabel(selectedItem.approval_required_role)} />
                     <SummaryLine label={text.myStatus} value={ackLabel(selectedItem.my_ack_status)} />
                   </div>
                 </DetailSection>
@@ -1343,13 +1358,23 @@ function useSopsPageContent() {
                     </Field>
 
                     <Field label={text.formDirectUsers} groupId="sop-form-direct-users">
+                      {eligibleUsers.length > 8 ? (
+                        <Input
+                          type="search"
+                          className="mb-2 h-9 rounded-lg bg-field"
+                          value={directUserQuery}
+                          placeholder={t.common_search}
+                          aria-label={`${text.formDirectUsers}: ${t.common_search}`}
+                          onChange={(event) => setDirectUserQuery(event.target.value)}
+                        />
+                      ) : null}
                       <div
                         className={cn(
                           "max-h-72 space-y-2 overflow-y-auto rounded-xl p-3",
                           tokens.surface.mutedCard,
                         )}
                       >
-                        {(filteredUsers.length > 0 ? filteredUsers : eligibleUsers).map((item) => (
+                        {directUserRows.map((item) => (
                           <label
                             key={item.id}
                             className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground"
@@ -1432,6 +1457,21 @@ function useSopsPageContent() {
                       label={text.columns.updated}
                       value={formatDate(reviewItem.updated_at, t)}
                     />
+                  </div>
+                </AdminTableCard>
+              ) : null}
+              {/* The reviewer reads what is approved (QA 2026-11-12 B-13). */}
+              {reviewItem ? (
+                <AdminTableCard icon={BookOpen} title={text.detailBody}>
+                  <div className="space-y-3 p-3.5">
+                    {reviewItem.summary ? (
+                      <p className="rounded-xl border border-border/50 bg-muted/20 p-3 text-sm leading-6 text-muted-foreground">
+                        {reviewItem.summary}
+                      </p>
+                    ) : null}
+                    <pre data-testid="sop-review-body" className="max-h-[360px] overflow-auto whitespace-pre-wrap break-words rounded-xl border border-border/50 bg-background/60 p-3 text-sm leading-6 text-foreground">
+                      {reviewItem.body_markdown}
+                    </pre>
                   </div>
                 </AdminTableCard>
               ) : null}

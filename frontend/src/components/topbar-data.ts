@@ -890,6 +890,9 @@ export function notificationHrefForRole(item: Notification, role: string) {
   }
   if (item.entity_type === "privacy_request") return "/admin/compliance";
   if (item.entity_type === "feedback") return "/feedback";
+  // Review requests, review results and acknowledgement requests of a SOP
+  // open that SOP in the library (QA 2026-11-12 B-04).
+  if (item.entity_type === "sop") return `/sops?sop=${item.entity_id}`;
   if (item.entity_type === "case") return "/patients";
   return null;
 }

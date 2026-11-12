@@ -94,7 +94,7 @@ const VARIANT_COLORS: Record<string, string> = {
 const ANNOUNCEMENT_VARIANT_LABEL_KEYS = {
   info: "ann_info",
   warning: "ann_warning",
-  error: "common_error",
+  error: "ann_error",
   success: "ann_success",
 } as const satisfies Partial<Record<string, TranslationKey>>;
 
@@ -243,7 +243,7 @@ function AdminAnnouncementCreateSheet({
                     onChange={(event) => onVariantChange(event.target.value ?? "info")} id="announcement-variant" className="!h-9 w-full rounded-lg bg-field">
                       <option value="info">{t.ann_info}</option>
                       <option value="warning">{t.ann_warning}</option>
-                      <option value="error">{t.common_error}</option>
+                      <option value="error">{t.ann_error}</option>
                       <option value="success">{t.ann_success}</option>
                     </NativeComboboxSelect>
                 </Field>

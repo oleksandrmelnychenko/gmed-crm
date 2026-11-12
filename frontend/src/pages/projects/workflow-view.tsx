@@ -56,10 +56,10 @@ const workflowCopy = {
     project: "Проект",
     selectProject: "Выберите проект",
     searchProject: "Поиск проекта",
-    noProjects: "Сначала создайте проект, чтобы собрать его workflow.",
+    noProjects: "Сначала создайте проект, чтобы собрать его схему задач.",
     noProjectsTitle: "Проектов пока нет",
     createProject: "Создать проект",
-    workflow: "Workflow проекта",
+    workflow: "Схема проекта",
     workflowHint: "Задачи, зависимости, блокеры и прогресс в одной схеме.",
     tasks: "Задачи",
     completed: "Выполнено",
@@ -80,7 +80,7 @@ const workflowCopy = {
     dependencyResolved: "Зависимость выполнена",
     dependencyBlocking: "Ожидает предыдущую задачу",
     details: "Детали задачи",
-    selectTask: "Выберите плитку на канвасе, чтобы увидеть связи задачи.",
+    selectTask: "Выберите карточку на схеме, чтобы увидеть связи задачи.",
     dependsOn: "Зависит от",
     unlocks: "Открывает следующие",
     noDependencies: "Нет предыдущих зависимостей",
@@ -90,7 +90,7 @@ const workflowCopy = {
     prerequisite: "Сначала должна быть выполнена",
     selectTaskPlaceholder: "Выберите задачу",
     selectPrerequisite: "Выберите предыдущую задачу",
-    dependencyHelp: "После сохранения связь появится на канвасе. Циклические связи запрещены.",
+    dependencyHelp: "После сохранения связь появится на схеме. Циклические связи запрещены.",
     saveDependency: "Связать задачи",
     removeDependency: "Удалить связь",
     removeTitle: "Удалить зависимость?",
@@ -100,9 +100,9 @@ const workflowCopy = {
     openTask: "Открыть задачу",
     createTask: "Создать задачу",
     emptyTitle: "В проекте пока нет задач",
-    emptyHint: "Создайте первую задачу — она станет стартовой плиткой workflow.",
+    emptyHint: "Создайте первую задачу — она станет стартовой карточкой схемы.",
     allLinked: "Для этой задачи уже указаны все допустимые зависимости.",
-    loadFailed: "Не удалось загрузить зависимости workflow.",
+    loadFailed: "Не удалось загрузить зависимости задач.",
     saveFailed: "Не удалось сохранить зависимость.",
     removeFailed: "Не удалось удалить зависимость.",
     cycleError: "Эта связь создаст цикл. Выберите другую предыдущую задачу.",
@@ -121,10 +121,10 @@ const workflowCopy = {
     overdueTasks: "Просроченные",
     shown: "Показано",
     noFilteredTasks: "По этим условиям задач нет",
-    noFilteredTasksHint: "Измените поиск или фильтр, чтобы вернуть задачи на канвас.",
+    noFilteredTasksHint: "Измените поиск или фильтр, чтобы вернуть задачи на схему.",
     clearFilters: "Сбросить фильтры",
-    zoomIn: "Увеличить канвас",
-    zoomOut: "Уменьшить канвас",
+    zoomIn: "Увеличить схему",
+    zoomOut: "Уменьшить схему",
     resetZoom: "Сбросить масштаб",
     retry: "Повторить загрузку",
   },
@@ -219,7 +219,8 @@ type ProjectWorkflowViewProps = {
   dependencyError: string;
   canManage: boolean;
   onSelectProject: (projectId: string) => void;
-  onCreateProject: () => void;
+  /** Left out for a role that may not create projects (CEO assistant). */
+  onCreateProject?: () => void;
   onCreateTask: () => void;
   onOpenTask: (taskId: string) => void;
   onAddDependency: (taskId: string, dependsOnTaskId: string) => Promise<void>;
@@ -369,7 +370,7 @@ function WorkflowCanvas({
             <div className="flex items-center gap-2 text-xs font-semibold text-orange-700"><span className="size-2 rounded-full bg-[var(--dot,var(--color-orange-500))]" />{labels.start}</div>
             <p className="mt-3 line-clamp-2 text-sm font-semibold text-foreground">{project.name}</p>
             <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{project.description || labels.startHint}</p>
-            <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground"><FolderKanban className="size-3.5" />{graph.nodes.length} {labels.tasks.toLocaleLowerCase()}</div>
+            <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground"><FolderKanban className="size-3.5" />{labels.tasks}: {graph.nodes.length}</div>
           </div>
 
           {graph.stages.map((stage, index) => {
@@ -668,7 +669,7 @@ export function ProjectWorkflowView({
           <GitBranch className="size-10 text-orange-500" />
           <h2 className="mt-3 font-semibold">{projects.length ? labels.selectProject : labels.noProjectsTitle}</h2>
           <p className="mt-1 max-w-md text-sm text-muted-foreground">{projects.length ? labels.workflowHint : labels.noProjects}</p>
-          {!projects.length ? <Button className="mt-4" onClick={onCreateProject}><Plus />{labels.createProject}</Button> : null}
+          {!projects.length && onCreateProject ? <Button className="mt-4" onClick={onCreateProject}><Plus />{labels.createProject}</Button> : null}
         </div>
       ) : loading ? (
         <div className="flex min-h-80 items-center justify-center rounded-2xl border bg-card text-sm text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" />{labels.workflow}</div>

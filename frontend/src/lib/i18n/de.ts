@@ -1093,6 +1093,7 @@ export const de = {
   stub_not_implemented: "Diese Seite ist noch nicht implementiert.",
 
   ann_success: "Erfolg",
+  ann_error: "Fehler",
 
   staff_link_no_access: "Kein Zugriff für Ihre Rolle",
 

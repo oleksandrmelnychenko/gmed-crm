@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 import { TASK_REALTIME_EVENTS, useTaskRealtimeRefresh } from "@/pages/concierge/use-task-realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import type { PatientSummary } from "@/pages/patients/model/list-model";
-import { assignableConciergeTaskUsers, conciergeTaskErrorMessage, type ConciergeAssignee, type ConciergeTask } from "@/pages/concierge/model";
+import { assignableConciergeTaskUsers, conciergeTaskErrorMessage, staffDisplayName, type ConciergeAssignee, type ConciergeTask } from "@/pages/concierge/model";
 import {
   ConciergeTaskEventDialog,
   type ConciergeTaskPatientOption,
@@ -27,7 +27,7 @@ import {
 } from "@/pages/concierge/task-event-dialog";
 
 import type { Project, ProjectFormValue, ProjectPriority, ProjectStatus, ProjectWorkflowDependency } from "./model";
-import { canManageProject } from "./model";
+import { canCreateProject, canManageProject, filterProjectMemberOptions, PROJECT_MEMBER_SEARCH_FROM } from "./model";
 import { ProjectWorkflowView } from "./workflow-view";
 
 const copy = {
@@ -35,7 +35,7 @@ const copy = {
     title: "Проекты",
     create: "Новый проект",
     overviewView: "Проекты",
-    workflowView: "Workflow",
+    workflowView: "Схема задач",
     empty: "Проектов пока нет",
     emptyHint: "Создайте проект, чтобы объединить команду, сроки и задачи в одном месте.",
     noMatches: "Проекты не найдены",
@@ -83,7 +83,10 @@ const copy = {
     noDeadline: "Без срока",
     period: "Период",
     createdBy: "Создал",
-    open: "Открыта",
+    open: "Открыто",
+    rangeError: "Срок не может быть раньше начала проекта.",
+    memberSearch: "Найти сотрудника",
+    noMemberMatches: "Сотрудники не найдены",
     in_progress: "В работе",
     review: "На проверке",
   },
@@ -140,6 +143,9 @@ const copy = {
     period: "Zeitraum",
     createdBy: "Erstellt von",
     open: "Offen",
+    rangeError: "Das Fälligkeitsdatum darf nicht vor dem Projektbeginn liegen.",
+    memberSearch: "Mitarbeitende suchen",
+    noMemberMatches: "Keine Mitarbeitenden gefunden",
     in_progress: "In Arbeit",
     review: "In Prüfung",
   },
@@ -472,12 +478,13 @@ export function ProjectsPage() {
 
   const filtersActive = Boolean(query.trim()) || status !== "all";
   const canEditSelected = Boolean(selected && user && canManageProject(selected, user));
+  const canCreate = canCreateProject(user?.role);
 
   return (
     <div className="space-y-3">
       <PageHeader title={labels.title} actions={<>
         {canEditSelected && activeView === "workflow" ? <Button variant="outline" disabled={detailLoading || deleting} onClick={() => { setDeleteError(""); setDeleteCandidate(selected); }}><Trash2 />{lang === "de" ? "Projekt löschen" : "Удалить проект"}</Button> : null}
-        <Button onClick={openCreate}><Plus />{labels.create}</Button>
+        {canCreate ? <Button onClick={openCreate}><Plus />{labels.create}</Button> : null}
       </>} />
       {error && activeView === "overview" ? <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div> : null}
       <div className="flex justify-center">
@@ -499,7 +506,7 @@ export function ProjectsPage() {
           dependencyError={dependencyError}
           canManage={canEditSelected}
           onSelectProject={selectWorkflowProject}
-          onCreateProject={openCreate}
+          onCreateProject={canCreate ? openCreate : undefined}
           onCreateTask={openCreateTask}
           onOpenTask={(taskId) => staffGo(`/task-manager?task=${taskId}`)}
           onAddDependency={addWorkflowDependency}
@@ -533,7 +540,7 @@ export function ProjectsPage() {
                 );
               })}
             </div>
-          ) : <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed bg-card p-4 text-center"><FolderKanban className="size-6 text-foreground" /><h2 className="mt-3 font-semibold">{filtersActive ? labels.noMatches : labels.empty}</h2><p className="mt-1 max-w-md text-sm text-muted-foreground">{filtersActive ? labels.noMatchesHint : labels.emptyHint}</p>{filtersActive ? <Button className="mt-4" variant="outline" onClick={() => { setQuery(""); setStatus("all"); }}>{labels.clearFilters}</Button> : <Button className="mt-4" onClick={openCreate}><Plus />{labels.create}</Button>}</div>}
+          ) : <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed bg-card p-4 text-center"><FolderKanban className="size-6 text-foreground" /><h2 className="mt-3 font-semibold">{filtersActive ? labels.noMatches : labels.empty}</h2><p className="mt-1 max-w-md text-sm text-muted-foreground">{filtersActive ? labels.noMatchesHint : labels.emptyHint}</p>{filtersActive ? <Button className="mt-4" variant="outline" onClick={() => { setQuery(""); setStatus("all"); }}>{labels.clearFilters}</Button> : canCreate ? <Button className="mt-4" onClick={openCreate}><Plus />{labels.create}</Button> : null}</div>}
         </section>
 
         <aside className="min-w-0 rounded-xl border bg-card p-3 xl:sticky xl:top-3 xl:max-h-[calc(100vh-7rem)] xl:overflow-y-auto">
@@ -613,16 +620,19 @@ function ProjectDialog({ open, editing, assignees, patients, lang, saving, error
   const [status, setStatus] = useState<ProjectStatus>("planned"); const [priority, setPriority] = useState<ProjectPriority>("normal");
   const [ownerId, setOwnerId] = useState(""); const [patientId, setPatientId] = useState("");
   const [startsOn, setStartsOn] = useState(""); const [dueOn, setDueOn] = useState(""); const [memberIds, setMemberIds] = useState<string[]>([]);
-  useEffect(() => { if (!open) return; setName(editing?.name ?? ""); setDescription(editing?.description ?? ""); setStatus(editing?.status ?? "planned"); setPriority(editing?.priority ?? "normal"); setOwnerId(editing?.owner_id ?? currentUserId); setPatientId(editing?.patient_id ?? ""); setStartsOn(editing?.starts_on ?? ""); setDueOn(editing?.due_on ?? ""); setMemberIds(editing?.members?.map((member) => member.id) ?? [editing?.owner_id ?? currentUserId].filter(Boolean)); }, [currentUserId, editing, open]);
-  async function submit(event: FormEvent) { event.preventDefault(); await onSave({ name: name.trim(), description: description.trim() || null, status, priority, owner_id: ownerId, patient_id: patientId || null, starts_on: startsOn || null, due_on: dueOn || null, member_ids: Array.from(new Set([...memberIds, ownerId])) }); }
+  const [rangeError, setRangeError] = useState(false); const [memberQuery, setMemberQuery] = useState("");
+  const visibleMembers = filterProjectMemberOptions(assignees, memberQuery, [...memberIds, ownerId]);
+  useEffect(() => { if (!open) return; setName(editing?.name ?? ""); setDescription(editing?.description ?? ""); setStatus(editing?.status ?? "planned"); setPriority(editing?.priority ?? "normal"); setOwnerId(editing?.owner_id ?? currentUserId); setPatientId(editing?.patient_id ?? ""); setStartsOn(editing?.starts_on ?? ""); setDueOn(editing?.due_on ?? ""); setMemberIds(editing?.members?.map((member) => member.id) ?? [editing?.owner_id ?? currentUserId].filter(Boolean)); setRangeError(false); setMemberQuery(""); }, [currentUserId, editing, open]);
+  async function submit(event: FormEvent) { event.preventDefault(); if (startsOn && dueOn && dueOn < startsOn) { setRangeError(true); return; } setRangeError(false); await onSave({ name: name.trim(), description: description.trim() || null, status, priority, owner_id: ownerId, patient_id: patientId || null, starts_on: startsOn || null, due_on: dueOn || null, member_ids: Array.from(new Set([...memberIds, ownerId])) }); }
   return <Dialog requireChanges={Boolean(editing)} open={open} onOpenChange={onOpenChange}><DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl"><DialogHeader><DialogTitle><SectionHeading icon={editing ? FolderPen : FolderPlus}>{editing ? labels.edit : labels.createTitle}</SectionHeading></DialogTitle></DialogHeader><form onSubmit={(event) => void submit(event)} className="space-y-3">
     {error ? <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div> : null}
     <label className="grid gap-1 font-mono text-xs font-medium [&>input]:font-sans [&>textarea]:font-sans [&>select]:font-sans [&>button]:font-sans">{labels.name}<Input required maxLength={255} value={name} placeholder={labels.namePlaceholder} onChange={(event) => setName(event.target.value)} /></label>
     <label className="grid gap-1 font-mono text-xs font-medium [&>input]:font-sans [&>textarea]:font-sans [&>select]:font-sans [&>button]:font-sans">{labels.description}<textarea className="min-h-24 rounded-md border bg-field px-3 py-2 text-sm text-foreground outline-none placeholder:text-[var(--control-placeholder,var(--muted-foreground))] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" maxLength={8000} value={description} placeholder={labels.descriptionPlaceholder} onChange={(event) => setDescription(event.target.value)} /></label>
-    <div className="grid gap-3 sm:grid-cols-2"><label className="grid gap-1 font-mono text-xs font-medium [&>input]:font-sans [&>textarea]:font-sans [&>select]:font-sans [&>button]:font-sans">{labels.owner}<NativeComboboxSelect value={ownerId} required onChange={(event) => setOwnerId(event.target.value)}>{assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}</NativeComboboxSelect></label><label className="grid gap-1 font-mono text-xs font-medium [&>input]:font-sans [&>textarea]:font-sans [&>select]:font-sans [&>button]:font-sans">{labels.patient}<NativeComboboxSelect value={patientId} onChange={(event) => setPatientId(event.target.value)}><option value="">{labels.noPatient}</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{[patient.first_name, patient.last_name].filter(Boolean).join(" ") || patient.patient_id}</option>)}</NativeComboboxSelect></label></div>
+    <div className="grid gap-3 sm:grid-cols-2"><label className="grid gap-1 font-mono text-xs font-medium [&>input]:font-sans [&>textarea]:font-sans [&>select]:font-sans [&>button]:font-sans">{labels.owner}<NativeComboboxSelect value={ownerId} required onChange={(event) => setOwnerId(event.target.value)}>{assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{staffDisplayName(assignee)}</option>)}</NativeComboboxSelect></label><label className="grid gap-1 font-mono text-xs font-medium [&>input]:font-sans [&>textarea]:font-sans [&>select]:font-sans [&>button]:font-sans">{labels.patient}<NativeComboboxSelect value={patientId} onChange={(event) => setPatientId(event.target.value)}><option value="">{labels.noPatient}</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{[patient.first_name, patient.last_name].filter(Boolean).join(" ") || patient.patient_id}</option>)}</NativeComboboxSelect></label></div>
     <div className="grid gap-3 sm:grid-cols-2"><label className="grid gap-1 font-mono text-xs font-medium [&>input]:font-sans [&>textarea]:font-sans [&>select]:font-sans [&>button]:font-sans">{labels.status}<select className="h-9 rounded-md border bg-field px-3 text-sm" value={status} onChange={(event) => setStatus(event.target.value as ProjectStatus)}>{statusOrder.map((value) => <option key={value} value={value}>{labels[value]}</option>)}</select></label><label className="grid gap-1 font-mono text-xs font-medium [&>input]:font-sans [&>textarea]:font-sans [&>select]:font-sans [&>button]:font-sans">{labels.priority}<select className="h-9 rounded-md border bg-field px-3 text-sm" value={priority} onChange={(event) => setPriority(event.target.value as ProjectPriority)}>{(["low", "normal", "high", "urgent"] as const).map((value) => <option key={value} value={value}>{labels[value]}</option>)}</select></label></div>
-    <div className="grid gap-3 sm:grid-cols-2"><label className="grid gap-1 font-mono text-xs font-medium [&>input]:font-sans [&>textarea]:font-sans [&>select]:font-sans [&>button]:font-sans">{labels.starts}<Input type="date" value={startsOn} onChange={(event) => setStartsOn(event.target.value)} /></label><label className="grid gap-1 font-mono text-xs font-medium [&>input]:font-sans [&>textarea]:font-sans [&>select]:font-sans [&>button]:font-sans">{labels.due}<Input type="date" min={startsOn || undefined} value={dueOn} onChange={(event) => setDueOn(event.target.value)} /></label></div>
-    <fieldset className="rounded-lg border p-3"><legend className="px-1 text-sm font-medium">{labels.members}</legend><div className="grid max-h-40 gap-2 overflow-y-auto sm:grid-cols-2">{assignees.map((assignee) => <label key={assignee.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/50"><input type="checkbox" className="size-4 accent-primary" checked={memberIds.includes(assignee.id) || ownerId === assignee.id} disabled={ownerId === assignee.id} onChange={(event) => setMemberIds((current) => event.target.checked ? [...current, assignee.id] : current.filter((id) => id !== assignee.id))} /><span className="truncate">{assignee.name}</span></label>)}</div></fieldset>
+    <div className="grid gap-3 sm:grid-cols-2"><label className="grid gap-1 font-mono text-xs font-medium [&>input]:font-sans [&>textarea]:font-sans [&>select]:font-sans [&>button]:font-sans">{labels.starts}<Input type="date" value={startsOn} onChange={(event) => { setStartsOn(event.target.value); setRangeError(false); }} /></label><label className="grid gap-1 font-mono text-xs font-medium [&>input]:font-sans [&>textarea]:font-sans [&>select]:font-sans [&>button]:font-sans">{labels.due}<Input type="date" value={dueOn} aria-invalid={rangeError || undefined} aria-describedby={rangeError ? "project-range-error" : undefined} onChange={(event) => { setDueOn(event.target.value); setRangeError(false); }} /></label></div>
+    {rangeError ? <p id="project-range-error" role="alert" className="text-sm text-destructive">{labels.rangeError}</p> : null}
+    <fieldset className="rounded-lg border p-3"><legend className="px-1 text-sm font-medium">{labels.members}</legend>{assignees.length > PROJECT_MEMBER_SEARCH_FROM ? <div className="relative mb-2"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input type="search" className="pl-8" value={memberQuery} placeholder={labels.memberSearch} aria-label={labels.memberSearch} onChange={(event) => setMemberQuery(event.target.value)} /></div> : null}<div className="grid max-h-40 gap-2 overflow-y-auto sm:grid-cols-2">{visibleMembers.length === 0 ? <p className="px-2 py-1.5 text-sm text-muted-foreground">{labels.noMemberMatches}</p> : null}{visibleMembers.map((assignee) => <label key={assignee.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/50"><input type="checkbox" className="size-4 accent-primary" checked={memberIds.includes(assignee.id) || ownerId === assignee.id} disabled={ownerId === assignee.id} onChange={(event) => setMemberIds((current) => event.target.checked ? [...current, assignee.id] : current.filter((id) => id !== assignee.id))} /><span className="truncate">{staffDisplayName(assignee)}</span></label>)}</div></fieldset>
     <DialogFooter className="sticky -bottom-4 z-10 border-t bg-background/95 pb-1 pt-4 backdrop-blur"><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{labels.cancel}</Button><Button type="submit" disabled={saving || !name.trim() || !ownerId}>{saving ? <LoaderCircle className="animate-spin" /> : null}{labels.save}</Button></DialogFooter>
   </form></DialogContent></Dialog>;
 }

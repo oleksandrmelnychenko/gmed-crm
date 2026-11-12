@@ -220,6 +220,14 @@ export type ConciergeAssignee = {
   is_active: boolean;
 };
 
+/**
+ * The name a staff member is shown under; an account without a name falls
+ * back to its e-mail so it can still be told apart (QA 2026-11-12 B-11).
+ */
+export function staffDisplayName(user: { name?: string | null; email?: string | null }) {
+  return user.name?.trim() || user.email?.trim() || "—";
+}
+
 /** Roles holding `tasks.use` (the registry mirror); the hierarchy below stays role-based. */
 export const TASK_MANAGER_ROLES = [
   "ceo",
@@ -260,6 +268,8 @@ function canManageConciergeTaskCreatorRole(
 export function filterConciergeTaskAssignees(users: ConciergeAssignee[]) {
   return users
     .filter((user) => user.is_active && participatesInTaskManager(user.role))
+    // A nameless account is listed under its e-mail, never as a blank row (QA 2026-11-12 B-11).
+    .map((user) => (user.name?.trim() ? user : { ...user, name: staffDisplayName(user) }))
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
@@ -418,6 +428,9 @@ const TASK_DELETE_ERROR = "Only an untouched open task can be deleted; cancel or
 const TASK_ACCESS_ERROR = "Only the task assignee, creator, or a higher role can access this task";
 const TASK_SERVICE_ERROR = "concierge_service_id must reference an assigned non-medical service";
 const TASK_SERVICE_CONVERTED_ERROR = "Concierge service request already converted to a task";
+/** The access refusal of comments, checklist and files (server since the project scope). */
+const TASK_PROJECT_ACCESS_ERROR = "Only the task assignee, creator, project member, or a higher role can access this task";
+const TASK_ATTACHMENT_PERMISSION_ERROR = "Only the task assignee, creator, or a higher role can change attachments";
 
 /**
  * A checklist task that is still open can be closed as "not required": the
@@ -524,7 +537,7 @@ export function conciergeTaskErrorMessage(
     return lang === "ru" ? "Окончание должно быть позже начала." : "Das Ende muss nach dem Beginn liegen.";
   }
 
-  if (message === TASK_ACCESS_ERROR || message === "Forbidden") {
+  if (message === TASK_ACCESS_ERROR || message === TASK_PROJECT_ACCESS_ERROR || message === "Forbidden") {
     return lang === "ru"
       ? "У вас нет доступа к этой задаче."
       : "Sie haben keinen Zugriff auf diese Aufgabe.";
@@ -546,6 +559,24 @@ export function conciergeTaskErrorMessage(
     return lang === "ru"
       ? "Изменять задачу может только её автор или сотрудник с более высокой ролью."
       : "Nur der Ersteller oder eine Person mit einer höheren Rolle darf diese Aufgabe ändern.";
+  }
+
+  if (message === TASK_ATTACHMENT_PERMISSION_ERROR) {
+    return lang === "ru"
+      ? "Файлы задачи может менять исполнитель, автор или сотрудник с более высокой ролью."
+      : "Die Dateien der Aufgabe dürfen der Zuständige, der Ersteller oder eine Person mit einer höheren Rolle ändern.";
+  }
+
+  // Any other refusal of the server is shown in the user's language, never
+  // as the server's English text (QA 2026-11-12, B-01).
+  const status =
+    error && typeof error === "object" && "status" in error
+      ? (error as { status?: unknown }).status
+      : undefined;
+  if (status === 403) {
+    return lang === "ru"
+      ? "У вас нет прав на это действие с задачей."
+      : "Sie haben keine Berechtigung für diese Aktion an der Aufgabe.";
   }
 
   return message || fallback;

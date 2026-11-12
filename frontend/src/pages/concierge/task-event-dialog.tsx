@@ -668,7 +668,8 @@ export function ConciergeTaskEventDialog({
       <DialogContent className={conciergeDialogContentClassName}>
         <ConciergeDialogHeader icon={CalendarPlus} title={item ? labels.editTitle : labels.createTitle} />
 
-        <form className="flex min-h-0 flex-col" onSubmit={(event) => void submit(event)}>
+        {/* The checks run in `submit` with a message; the browser's silent block of `min` showed only a red border (QA 2026-11-12 B-02). */}
+        <form noValidate className="flex min-h-0 flex-col" onSubmit={(event) => void submit(event)}>
           <ConciergeDialogBody>
             {error ? <p role="alert" className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p> : null}
             {scheduleError ? <p role="alert" className="mb-4 text-sm text-destructive">{scheduleError}</p> : null}

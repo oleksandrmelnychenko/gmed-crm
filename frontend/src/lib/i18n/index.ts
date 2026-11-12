@@ -934,6 +934,7 @@ export interface Translations
   stub_not_implemented: string;
 
   ann_success: string;
+  ann_error: string;
 
   staff_link_no_access: string;
 

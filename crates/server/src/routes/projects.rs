@@ -162,7 +162,7 @@ async fn create_project(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<ProjectRequest>,
 ) -> axum::response::Response {
-    if let Err(response) = require_project_staff(&auth) {
+    if let Err(response) = require_project_writer(&auth) {
         return response;
     }
     let mut fields = match validate_fields(&body, auth.user_id) {
@@ -321,7 +321,7 @@ async fn create_workflow_dependency(
     Path(project_id): Path<Uuid>,
     Json(body): Json<WorkflowDependencyRequest>,
 ) -> axum::response::Response {
-    if let Err(response) = require_project_staff(&auth) {
+    if let Err(response) = require_project_writer(&auth) {
         return response;
     }
     if !can_manage_project(&state, &auth, project_id).await {
@@ -433,7 +433,7 @@ async fn delete_workflow_dependency(
     Extension(auth): Extension<AuthUser>,
     Path((project_id, dependency_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(response) = require_project_staff(&auth) {
+    if let Err(response) = require_project_writer(&auth) {
         return response;
     }
     if !can_manage_project(&state, &auth, project_id).await {
@@ -502,7 +502,7 @@ async fn update_project(
     Path(project_id): Path<Uuid>,
     Json(body): Json<ProjectRequest>,
 ) -> axum::response::Response {
-    if let Err(response) = require_project_staff(&auth) {
+    if let Err(response) = require_project_writer(&auth) {
         return response;
     }
     let expected_updated_at = match body
@@ -615,7 +615,7 @@ async fn delete_project(
     Path(project_id): Path<Uuid>,
     Json(body): Json<DeleteProjectRequest>,
 ) -> axum::response::Response {
-    if let Err(response) = require_project_staff(&auth) {
+    if let Err(response) = require_project_writer(&auth) {
         return response;
     }
     if !can_manage_project(&state, &auth, project_id).await {
@@ -1040,6 +1040,27 @@ fn require_project_staff(auth: &AuthUser) -> Result<(), axum::response::Response
     }
 }
 
+/// Whether the role may create, change or delete projects and their
+/// workflow. The CEO assistant reads and changes nothing (owner decision
+/// 2026-09-20, RBAC matrix «CEO Assistant: тільки читання»).
+fn project_role_may_write(role: Role) -> bool {
+    role != Role::CeoAssistant
+}
+
+/// Operational staff that may write projects (see `project_role_may_write`).
+#[allow(clippy::result_large_err)]
+fn require_project_writer(auth: &AuthUser) -> Result<(), axum::response::Response> {
+    require_project_staff(auth)?;
+    if project_role_may_write(auth.role) {
+        Ok(())
+    } else {
+        Err(err(
+            StatusCode::FORBIDDEN,
+            "The CEO assistant has read-only access to projects",
+        ))
+    }
+}
+
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(serde_json::json!({ "error": message }))).into_response()
 }
@@ -1085,5 +1106,21 @@ mod tests {
         let mut body = request();
         body.status = Some("almost_done".to_owned());
         assert!(validate_fields(&body, Uuid::new_v4()).is_err());
+    }
+
+    #[test]
+    fn ceo_assistant_reads_projects_but_never_writes_them() {
+        assert!(!project_role_may_write(Role::CeoAssistant));
+        for role in [
+            Role::Ceo,
+            Role::PatientManager,
+            Role::TeamleadInterpreter,
+            Role::Interpreter,
+            Role::Concierge,
+            Role::Billing,
+            Role::Sales,
+        ] {
+            assert!(project_role_may_write(role), "{role:?}");
+        }
     }
 }

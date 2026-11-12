@@ -1088,6 +1088,7 @@ export const ru = {
   stub_not_implemented: "Эта страница ещё не реализована.",
 
   ann_success: "Успех",
+  ann_error: "Ошибка",
 
   staff_link_no_access: "Нет доступа для вашей роли",
 

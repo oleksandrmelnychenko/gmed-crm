@@ -754,9 +754,9 @@ export const adminSystemRu: AdminSystemTranslations = {
   sops_no_selection_title: "Запись не выбрана",
   sops_no_selection_description:
     "Выберите запись в таблице, чтобы открыть правую панель.",
-  sops_targeting_model_title: "Модель таргетинга",
+  sops_targeting_model_title: "Кому вы можете адресовать материалы",
   sops_targeting_model_description:
-    "Доступ определяется целевыми ролями и прямыми назначениями пользователей.",
+    "Материал видят выбранные целевые роли и сотрудники с прямым назначением.",
   sops_scope_title: "Охват",
   sops_scope_description:
     "Текущий срез покрывает библиотеку SOP, маршруты согласования и подтверждения ознакомления.",
@@ -1243,7 +1243,7 @@ export const adminSystemDe: AdminSystemTranslations = {
   sops_no_selection_title: "Kein Eintrag ausgewählt",
   sops_no_selection_description:
     "Wählen Sie einen Eintrag in der Tabelle aus, um die rechte Ansicht zu öffnen.",
-  sops_targeting_model_title: "Zielgruppenmodell",
+  sops_targeting_model_title: "Zielrollen Ihrer Materialien",
   sops_targeting_model_description:
     "Sichtbarkeit wird über Zielrollen und direkte Benutzerzuweisungen definiert.",
   sops_scope_title: "Umfang",

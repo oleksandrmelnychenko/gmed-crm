@@ -662,7 +662,7 @@ export function ConciergeTaskDetailDialog({
   }, [canSubmitTaskExpense, expenseLoading, expenseSubject, open, openExpenseOnLoad]);
 
   async function addComment() {
-    if (!taskId || !comment.trim() || busy) return;
+    if (!taskId || !canCollaborate || !comment.trim() || busy) return;
     const body = comment.trim();
     const requestId = commentRequestRef.current?.body === body
       ? commentRequestRef.current.requestId
@@ -695,7 +695,7 @@ export function ConciergeTaskDetailDialog({
   }
 
   async function addChecklistItem() {
-    if (!taskId || !checklistLabel.trim() || busy) return;
+    if (!taskId || !canCollaborate || !checklistLabel.trim() || busy) return;
     const label = checklistLabel.trim();
     const requestId = checklistRequestRef.current?.label === label
       ? checklistRequestRef.current.requestId
@@ -728,7 +728,7 @@ export function ConciergeTaskDetailDialog({
   }
 
   async function toggleChecklist(item: ConciergeTaskChecklistItem) {
-    if (!taskId || busy) return;
+    if (!taskId || !canCollaborate || busy) return;
     const completed = !item.is_completed;
     const payloadKey = `${item.id}:${completed}`;
     const requestId = toggleRequestRef.current?.payloadKey === payloadKey
@@ -1253,8 +1253,9 @@ export function ConciergeTaskDetailDialog({
                         size="icon-sm"
                         variant="ghost"
                         className="-ml-1.5 size-7 shrink-0 rounded-full"
-                        disabled={busy || Boolean(detail.item.archived_at)}
+                        disabled={busy || !canCollaborate || Boolean(detail.item.archived_at)}
                         aria-label={item.label}
+                        aria-pressed={item.is_completed}
                         onClick={() => void toggleChecklist(item)}
                       >
                         {item.is_completed ? <Check className="size-4 text-emerald-600" /> : <Circle className="size-4 text-muted-foreground" />}
@@ -1297,7 +1298,7 @@ export function ConciergeTaskDetailDialog({
                       )}
                     </div>
                   ))}
-                  {!detail.item.archived_at ? <div className="flex gap-1.5 p-2.5"><Input className="h-8" value={checklistLabel} maxLength={500} placeholder={labels.checklistPlaceholder} onChange={(event) => setChecklistLabel(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addChecklistItem(); } }} /><Button type="button" size="icon-sm" className="size-8" disabled={busy || !checklistLabel.trim()} aria-label={labels.addChecklist} onClick={() => void addChecklistItem()}><Plus /></Button></div> : null}
+                  {canCollaborate && !detail.item.archived_at ? <div className="flex gap-1.5 p-2.5"><Input className="h-8" value={checklistLabel} maxLength={500} placeholder={labels.checklistPlaceholder} onChange={(event) => setChecklistLabel(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addChecklistItem(); } }} /><Button type="button" size="icon-sm" className="size-8" disabled={busy || !checklistLabel.trim()} aria-label={labels.addChecklist} onClick={() => void addChecklistItem()}><Plus /></Button></div> : null}
                 </div>
               </TaskDetailSection>
 
@@ -1328,7 +1329,7 @@ export function ConciergeTaskDetailDialog({
                       ) : <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-snug">{item.body}</p>}
                     </article>
                   ))}
-                  {!detail.item.archived_at ? <div className="space-y-1.5 p-2.5"><textarea className="min-h-16 w-full rounded-md border border-input bg-field px-3 py-2 text-sm outline-none placeholder:font-normal focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" value={comment} maxLength={4000} placeholder={labels.commentPlaceholder} onChange={(event) => setComment(event.target.value)} /><div className="flex justify-end"><Button type="button" size="sm" className="h-8 px-3" disabled={busy || !comment.trim()} onClick={() => void addComment()}>{busy ? <LoaderCircle className="animate-spin" /> : <MessageSquareText />}{labels.addComment}</Button></div></div> : null}
+                  {canCollaborate && !detail.item.archived_at ? <div className="space-y-1.5 p-2.5"><textarea className="min-h-16 w-full rounded-md border border-input bg-field px-3 py-2 text-sm outline-none placeholder:font-normal focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" value={comment} maxLength={4000} placeholder={labels.commentPlaceholder} onChange={(event) => setComment(event.target.value)} /><div className="flex justify-end"><Button type="button" size="sm" className="h-8 px-3" disabled={busy || !comment.trim()} onClick={() => void addComment()}>{busy ? <LoaderCircle className="animate-spin" /> : <MessageSquareText />}{labels.addComment}</Button></div></div> : null}
                 </div>
               </TaskDetailSection>
             </div>

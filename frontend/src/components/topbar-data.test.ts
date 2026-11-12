@@ -295,6 +295,11 @@ describe("notificationHrefForRole", () => {
     expect(notificationHrefForRole(notification("privacy_request"), "patient")).toBe("/privacy");
   });
 
+  it("opens the SOP of a review or acknowledgement notice (QA 2026-11-12 B-04)", () => {
+    expect(notificationHrefForRole(notification("sop", "sop-1"), "concierge")).toBe("/sops?sop=sop-1");
+    expect(notificationHrefForRole(notification("sop", "sop-1"), "ceo")).toBe("/sops?sop=sop-1");
+  });
+
   it("opens an overdue company invoice in company finance", () => {
     expect(notificationHrefForRole(notification("external_invoice", "invoice-1"), "billing")).toBe(
       "/company-finance?provider_invoice=invoice-1",

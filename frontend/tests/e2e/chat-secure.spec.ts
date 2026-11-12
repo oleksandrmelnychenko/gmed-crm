@@ -226,7 +226,7 @@ async function installSecureChatApiMocks(
           ? ""
           : last.is_e2e
             ? "[Encrypted message]"
-            : last.message ?? (last.attachment_filename ? `[${last.attachment_filename}]` : ""),
+            : last.message ?? (last.attachment_filename ?? ""),
         last_at: last?.created_at ?? "2026-04-13T09:00:00Z",
         is_read: unreadIncoming === 0,
         last_read_at: lastIncomingReadAt ?? "2026-04-13T09:00:00Z",

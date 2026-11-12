@@ -483,7 +483,8 @@ function useChatPageContent() {
               return encryptedPreview;
             }
             const [hydrated] = await hydrateMessages(conversation.user_id, [latest]);
-            const preview = hydrated.message || (hydrated.attachment_filename ? `[${hydrated.attachment_filename}]` : "");
+            // A file-only message previews as its file name (no brackets the truncation would cut, QA B-10).
+            const preview = hydrated.message || hydrated.attachment_filename || "";
             conversationPreviewsRef.current.set(conversation.user_id, {
               source, text: preview, decrypted: !hydrated.decryption_failed,
             });

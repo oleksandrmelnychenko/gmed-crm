@@ -81,6 +81,14 @@ describe("filterConciergeTaskAssignees", () => {
     ]);
   });
 
+  it("lists a nameless account under its e-mail (QA 2026-11-12 B-11)", () => {
+    const rows = filterConciergeTaskAssignees([
+      { id: "1", name: "  ", email: "nameless@test", role: "patient_manager", is_active: true },
+      { id: "2", name: "Berta", email: "b@test", role: "concierge", is_active: true },
+    ]);
+    expect(rows.map((user) => user.name)).toEqual(["Berta", "nameless@test"]);
+  });
+
   it("localizes task permission errors returned by the API", () => {
     const error = new Error(
       "Only the task creator or a higher role can change this task",
@@ -130,6 +138,19 @@ describe("filterConciergeTaskAssignees", () => {
         "fallback",
       ),
     ).toBe("Этот запрос уже преобразован в задачу. Откройте созданную задачу в менеджере задач.");
+  });
+
+  it("never shows the server's English refusal of a task (QA 2026-11-12 B-01)", () => {
+    expect(
+      conciergeTaskErrorMessage(
+        new Error("Only the task assignee, creator, project member, or a higher role can access this task"),
+        "ru",
+        "fallback",
+      ),
+    ).toBe("У вас нет доступа к этой задаче.");
+    const unknownRefusal = Object.assign(new Error("Some new English refusal"), { status: 403 });
+    expect(conciergeTaskErrorMessage(unknownRefusal, "ru", "fallback")).toBe("У вас нет прав на это действие с задачей.");
+    expect(conciergeTaskErrorMessage(unknownRefusal, "de", "fallback")).toBe("Sie haben keine Berechtigung für diese Aktion an der Aufgabe.");
   });
 
   it("keeps concierge and interpreter assignment branches separate", () => {

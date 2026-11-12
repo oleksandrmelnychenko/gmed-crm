@@ -342,13 +342,14 @@ function TaskCard({
       <div className="mb-2 flex flex-wrap items-center justify-between gap-1.5">
         <button type="button" title={conciergeTaskCode(task)} onClick={() => onOpen(task)}><Badge variant="outline" className="rounded-full font-mono text-[10px] text-muted-foreground">{conciergeTaskCode(task)}</Badge></button>
       <div className="ml-auto flex shrink-0 items-center gap-1">
-        {archived ? (
+        {/* No write control the server would refuse (`can_manage`). */}
+        {!canModify ? null : archived ? (
           <Button type="button" size="sm" variant="ghost" className="rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.restore : labels.noPermission} onClick={() => onRestore(task)}><ArchiveRestore /><span className={cn(!compact && "sr-only")}>{labels.restore}</span></Button>
         ) : terminal ? (
           <Button type="button" size="sm" variant="ghost" className="rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.archive : labels.noPermission} onClick={() => onArchive(task)}><Archive /><span className={cn(!compact && "sr-only")}>{labels.archive}</span></Button>
         ) : null}
         <Button type="button" size="sm" variant="ghost" className="h-8 gap-1.5 rounded-md px-1.5 text-primary hover:text-primary" data-workflow-task-id={task.id} title={`${countLabel}: ${subCount?.total ?? 0}${subCount?.total ? ` · ${doneLabel}: ${subCount.done}/${subCount.active}` : ""}${subCount?.paused ? ` · ${labels.on_hold}: ${subCount.paused}` : ""}`} aria-label={`${workflowLabel} · ${countLabel}: ${subCount?.total ?? 0}${subCount?.total ? ` · ${doneLabel}: ${subCount.done}/${subCount.active}` : ""}`} onClick={() => onWorkflow(task)}><Workflow /><span data-testid={`task-sub-count-${task.id}`} className={cn("min-w-4 rounded-full px-1 font-mono text-[10px] leading-4", subCount?.active && subCount.done === subCount.active ? "bg-emerald-100 text-emerald-700" : "bg-primary/10")}>{subCount?.total ? `${subCount.done}/${subCount.active}` : 0}</span></Button>
-        {!archived ? <Button type="button" size="icon-sm" variant="ghost" className="rounded-md" disabled={!canModify || updating || deleting || archiving} title={canModify ? labels.edit : labels.noPermission} aria-label={labels.edit} onClick={() => onEdit(task)}><Pencil /></Button> : null}
+        {!archived && canModify ? <Button type="button" size="icon-sm" variant="ghost" className="rounded-md" disabled={updating || deleting || archiving} title={canModify ? labels.edit : labels.noPermission} aria-label={labels.edit} onClick={() => onEdit(task)}><Pencil /></Button> : null}
         {!archived && canDelete ? <Button type="button" size="icon-sm" variant="ghost" className="rounded-md text-destructive hover:text-destructive" disabled={updating || deleting || archiving} title={labels.delete} aria-label={labels.delete} onClick={() => onDelete(task)}><Trash2 /></Button> : null}
       </div>
       </div>
@@ -447,12 +448,14 @@ function TaskCard({
       {parentTask ? <button type="button" className="mt-2 flex w-full min-w-0 items-center gap-1.5 rounded-md py-1 text-left text-[10px] text-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-primary" title={`${parentLabel}: ${localizeTaskTitle(parentTask.title, lang)}`} onClick={() => onWorkflow(parentTask)}><Workflow className="size-3 shrink-0" /><span className="truncate">{parentLabel}: {localizeTaskTitle(parentTask.title, lang)}</span><ArrowUpRight className="ml-auto size-3 shrink-0" /></button> : null}
       </div>
       <div className={cn("space-y-1.5", compact && "col-span-2 sm:col-span-1")}>
-        {!archived && ["open", "in_progress", "on_hold"].includes(task.status) ? (
+        {!archived && canChangeStatus && ["open", "in_progress", "on_hold"].includes(task.status) ? (
           <Button type="button" size="sm" variant={task.status === "in_progress" ? "outline" : "default"} className="h-8 w-full text-xs" disabled={!canChangeStatus || updating || deleting || archiving || !availableStatuses.includes(task.status === "in_progress" ? "on_hold" : "in_progress")} onClick={() => onStatusChange(task, task.status === "in_progress" ? "on_hold" : "in_progress")}>
             {task.status === "in_progress" ? <Pause /> : <Play />}{task.status === "in_progress" ? labels.pause : task.status === "on_hold" ? labels.resume : labels.start}
           </Button>
         ) : null}
-        <SelectField
+        {!archived && !canChangeStatus ? (
+          <Badge variant="outline" data-testid={`task-status-readonly-${task.id}`} className="h-8 w-full justify-center rounded-md text-xs" title={labels.noStatusPermission}>{labels[task.status]}</Badge>
+        ) : <SelectField
           className="h-8 min-w-[130px] rounded-md bg-background text-xs"
           value={archived ? "archived" : task.status}
           disabled={archived || !canChangeStatus || updating || deleting || archiving}
@@ -469,7 +472,7 @@ function TaskCard({
               if (task.status === "completed" && canModify) onArchive(task);
             } else onStatusChange(task, status);
           }}
-        />
+        />}
         {!archived && canAddExpense ? (
           <Button
             type="button"

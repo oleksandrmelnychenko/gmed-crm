@@ -876,3 +876,59 @@ async fn portal_feedback_notifications_are_scoped_to_assigned_patient_roles() {
         "unrelated PM must not see feedback from unassigned patient"
     );
 }
+
+/// Screens QA 2026-11-12 B-06: the concierge and the interpreter team lead read
+/// only answers that rate them, so an answer without their score notifies
+/// neither of them; the patient manager is still told.
+#[tokio::test]
+async fn portal_feedback_without_their_score_does_not_notify_concierge_or_teamlead() {
+    let Some(ctx) = test_context().await else {
+        return;
+    };
+    let app = ctx.router();
+    let pool = ctx.pool();
+    let admin_id = ctx.admin_id();
+
+    let tag = unique_tag("feedback-notify-readers");
+    let patient_user_id = seed_user(pool, &tag, "patient").await;
+    let patient_manager_id = seed_user(pool, &format!("{tag}-pm"), "patient_manager").await;
+    let teamlead_id = seed_user(pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
+    let concierge_id = seed_user(pool, &format!("{tag}-concierge"), "concierge").await;
+    let patient_id = seed_patient(pool, admin_id, &tag).await;
+
+    seed_patient_assignment(pool, patient_id, patient_user_id, admin_id).await;
+    seed_patient_assignment(pool, patient_id, patient_manager_id, admin_id).await;
+    seed_patient_assignment(pool, patient_id, teamlead_id, admin_id).await;
+    seed_patient_assignment(pool, patient_id, concierge_id, admin_id).await;
+
+    let patient_auth = auth_header_for(patient_user_id, "patient");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/feedback",
+        &patient_auth,
+        Some(json!({ "overall_score": 2, "nps_score": 3 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    for (user_id, expected_count) in [
+        (patient_manager_id, 1_i64),
+        (teamlead_id, 0_i64),
+        (concierge_id, 0_i64),
+    ] {
+        let count: i64 = sqlx::query_scalar(
+            r#"SELECT count(*)
+               FROM user_notifications
+               WHERE user_id = $1
+                 AND kind = 'feedback'
+                 AND entity_id = $2"#,
+        )
+        .bind(user_id)
+        .bind(patient_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert_eq!(count, expected_count, "feedback notice for {user_id}");
+    }
+}

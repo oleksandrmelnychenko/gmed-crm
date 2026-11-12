@@ -141,9 +141,9 @@ test("filters keep blockers and let the details panel reveal a hidden prerequisi
   await expect(search).toHaveValue("");
   await expect(page.locator("aside h3")).toHaveText("Prepare documents");
   await page.screenshot({ path: test.info().outputPath("workflow-desktop.png"), fullPage: true });
-  await page.getByRole("button", { name: "Уменьшить канвас", exact: true }).click();
+  await page.getByRole("button", { name: "Уменьшить схему", exact: true }).click();
   await expect(page.getByRole("button", { name: "Сбросить масштаб", exact: true })).toContainText("75%");
-  await expect(page.getByRole("button", { name: "Уменьшить канвас", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Уменьшить схему", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Сбросить масштаб", exact: true }).click();
   await expect(page.getByRole("button", { name: "Сбросить масштаб", exact: true })).toContainText("100%");
   await page.getByRole("combobox", { name: "Все задачи", exact: true }).click();

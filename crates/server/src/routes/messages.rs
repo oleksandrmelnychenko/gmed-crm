@@ -1169,10 +1169,11 @@ async fn list_conversations(
                             .unwrap_or_default(),
                     }
                 };
+                // A file-only message previews as its file name; brackets
+                // were cut off by the list's truncation (QA 2026-11-12 B-10).
                 let last_msg = if last_message.is_empty() {
                     r.try_get::<Option<String>, _>("attachment_filename")
                         .unwrap_or_default()
-                        .map(|filename| format!("[{filename}]"))
                         .unwrap_or_default()
                 } else {
                     last_message

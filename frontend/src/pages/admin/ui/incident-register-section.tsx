@@ -28,6 +28,11 @@ function dateTime(value: string | null) {
   return value ? formatAppDateTime(value) || value : "—";
 }
 
+/** Catalog values are lower case for inline use; chips and options start upper case. */
+function sentence(text: string) {
+  return text ? text.charAt(0).toLocaleUpperCase() + text.slice(1) : text;
+}
+
 /**
  * The server refusals of the register in the UI language (screens QA
  * 2026-11-12, E F14: closing without a reason showed English text).
@@ -211,7 +216,7 @@ export function IncidentRegisterSection({
           >
             {CATEGORIES.map((value) => (
               <option key={value} value={value}>
-                {l(`incidents_category_${value}`)}
+                {sentence(l(`incidents_category_${value}`))}
               </option>
             ))}
           </select>
@@ -225,7 +230,7 @@ export function IncidentRegisterSection({
           >
             {SEVERITIES.map((value) => (
               <option key={value} value={value}>
-                {l(`incidents_severity_${value}`)}
+                {sentence(l(`incidents_severity_${value}`))}
               </option>
             ))}
           </select>
@@ -267,8 +272,8 @@ export function IncidentRegisterSection({
                 >
                   <span className="font-mono text-xs text-muted-foreground">{incident.reference}</span>
                   <span className="text-sm font-medium">{incident.title}</span>
-                  <StatusChip tone={incident.status === "resolved" || incident.status === "closed" ? "success" : "warning"}>{l(`incidents_status_${incident.status}`)}</StatusChip>
-                  <StatusChip tone={incident.severity === "critical" || incident.severity === "high" ? "error" : "neutral"}>{l(`incidents_severity_${incident.severity}`)}</StatusChip>
+                  <StatusChip tone={incident.status === "resolved" || incident.status === "closed" ? "success" : "warning"}>{sentence(l(`incidents_status_${incident.status}`))}</StatusChip>
+                  <StatusChip tone={incident.severity === "critical" || incident.severity === "high" ? "error" : "neutral"}>{sentence(l(`incidents_severity_${incident.severity}`))}</StatusChip>
                   {incident.authority_notified_late ? (
                     <StatusChip tone="error">{l("incidents_notified_late")}</StatusChip>
                   ) : null}
@@ -303,7 +308,7 @@ export function IncidentRegisterSection({
                     {!canManage ? (
                       // Read-only: the recorded decision, no form (QA B3-11).
                       <p className="text-xs text-muted-foreground" data-testid="incident-read-only-decision">
-                        {l("incidents_field_risk")}: {l(`incidents_risk_${incident.risk_assessment}`)}
+                        {l("incidents_field_risk")}: {sentence(l(`incidents_risk_${incident.risk_assessment}`))}
                         {incident.authority_reference
                           ? ` · ${l("incidents_field_authority_reference")}: ${incident.authority_reference}`
                           : ""}
@@ -326,7 +331,7 @@ export function IncidentRegisterSection({
                         >
                           {STATUSES.map((value) => (
                             <option key={value} value={value}>
-                              {l(`incidents_status_${value}`)}
+                              {sentence(l(`incidents_status_${value}`))}
                             </option>
                           ))}
                         </select>
@@ -340,7 +345,7 @@ export function IncidentRegisterSection({
                         >
                           {RISKS.map((value) => (
                             <option key={value} value={value}>
-                              {l(`incidents_risk_${value}`)}
+                              {sentence(l(`incidents_risk_${value}`))}
                             </option>
                           ))}
                         </select>

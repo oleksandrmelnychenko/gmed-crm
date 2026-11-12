@@ -121,6 +121,12 @@ struct PromoterSummary {
     last_submitted_at: Option<DateTime<Utc>>,
 }
 
+/// A patient counts as a promoter by the NPS definition: an average
+/// recommendation score of 9 or 10 (QA 2026-11-12 B-05; 7–8 are passives).
+fn is_promoter_average(sum: i64, count: i64) -> bool {
+    count > 0 && sum >= 9 * count
+}
+
 #[derive(Clone)]
 struct StaffRankingSummary {
     user_id: Uuid,
@@ -507,7 +513,10 @@ async fn get_feedback_summary(
         (((promoters - detractors) as f64 / total_feedback as f64) * 100.0).round() as i64
     };
 
-    let mut top_promoters = promoter_map.into_values().collect::<Vec<_>>();
+    let mut top_promoters = promoter_map
+        .into_values()
+        .filter(|item| is_promoter_average(item.sum, item.count))
+        .collect::<Vec<_>>();
     top_promoters.sort_by(|left, right| {
         let left_avg = left.sum as f64 / left.count as f64;
         let right_avg = right.sum as f64 / right.count as f64;
@@ -869,6 +878,11 @@ async fn create_feedback_record(
         let patient_label = load_patient_label(state, patient_id)
             .await
             .unwrap_or_else(|| "Patient".to_string());
+        // Only people who can open the answer are told about it (see
+        // `role_can_see_feedback_row`): the interpreter team lead reads answers
+        // with an interpreter score, the concierge those with a concierge score
+        // (RBAC matrix «Feedback по перекладачах» / «Feedback по сервісу»);
+        // QA 2026-11-12 B-06.
         if let Ok(notification_rows) = sqlx::query(
             r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
                SELECT DISTINCT u.id, 'feedback', $2, $3, 'patient', $1, $4
@@ -880,7 +894,9 @@ async fn create_feedback_record(
                WHERE u.is_active = true
                  AND (
                     u.role = 'ceo'
-                    OR (pa.user_id IS NOT NULL AND u.role IN ('patient_manager', 'teamlead_interpreter', 'concierge'))
+                    OR (pa.user_id IS NOT NULL AND u.role = 'patient_manager')
+                    OR (pa.user_id IS NOT NULL AND u.role = 'teamlead_interpreter' AND $5)
+                    OR (pa.user_id IS NOT NULL AND u.role = 'concierge' AND $6)
                  )
                RETURNING id, user_id"#,
         )
@@ -888,6 +904,8 @@ async fn create_feedback_record(
         .bind(format!("New patient feedback: {patient_label}"))
         .bind("A patient submitted a satisfaction survey in the portal.")
         .bind(json!({ "patient_label": patient_label }))
+        .bind(interpreter_score.is_some())
+        .bind(body.concierge_score.is_some())
         .fetch_all(&state.db)
         .await
         {
@@ -1730,8 +1748,17 @@ fn coded_err(status: StatusCode, code: &str, message: &str) -> axum::response::R
 
 #[cfg(test)]
 mod tests {
-    use super::appointment_took_place;
+    use super::{appointment_took_place, is_promoter_average};
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+
+    #[test]
+    fn only_an_average_of_nine_or_ten_is_a_promoter() {
+        assert!(is_promoter_average(9, 1));
+        assert!(is_promoter_average(19, 2));
+        assert!(!is_promoter_average(12, 2)); // NPS 9 and 3 → 6,0 (QA B-05)
+        assert!(!is_promoter_average(17, 2)); // 8,5 is a passive
+        assert!(!is_promoter_average(0, 0));
+    }
 
     fn at(value: &str) -> NaiveDateTime {
         NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M").unwrap()
