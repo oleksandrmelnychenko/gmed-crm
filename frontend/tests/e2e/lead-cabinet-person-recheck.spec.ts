@@ -122,7 +122,7 @@ async function setup(page: Page, firstPersonalReply?: Promise<void>, scenario?: 
     }
     return route.fulfill({ json: [] });
   });
-  await page.goto("/my/request");
+  await page.goto("/");
   if (scenario === "extra") await expect(page.getByTestId("lead-request-follow-up-A")).toBeVisible();
   else await expect(page.locator("#lead-request-first_name")).toHaveValue("Anna");
   return { calls, request };

@@ -115,7 +115,7 @@ async function setup(page: Page, scenario: Scenario, failMiddle = false, multipl
     if (path.startsWith(`${base}/`)) return route.fulfill({ json: request });
     return route.fulfill({ json: [] });
   });
-  await page.goto("/my/request");
+  await page.goto("/");
   await page.locator(`[data-step="${scenario.step}"]`).click();
   return { first, last, calls, request, secondRequest };
 }
