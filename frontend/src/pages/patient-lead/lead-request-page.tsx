@@ -774,6 +774,8 @@ function LeadRequestView({
     const root = stepRef.current ?? document;
     return nextHoldKeys(current, id, cabinetMissing(current)).filter((key) => findCabinetTarget({ field: key }, root) !== null);
   };
+  // The step the address named when the page last looked at it, or last wrote itself.
+  const seenAddressStep = useRef(addressStep);
   const go = useCallback((next: StepId, validateCurrent = false, target?: CabinetTarget) => {
     if (validateCurrent) setNextPressed(true);
     // A link into the step on screen needs no saving and no step change: it only shows the field.
@@ -839,6 +841,7 @@ function LeadRequestView({
           // Every step is an entry of the browser history: Back opens the step before, it does
           // not leave the cabinet (QA 2026-11-10, finding 6).
         }, { replace: next === step });
+        seenAddressStep.current = next;
       }
       if (next === "send") setSendOpened(true);
       if (target?.anchor || target?.field) {
@@ -864,12 +867,23 @@ function LeadRequestView({
 
   // Browser Back / Forward: the step on screen follows the address, saved first like any step
   // change. The entry before the first step change names no step: the request's own first step.
-  const seenAddressStep = useRef(addressStep);
+  // The address is read from the browser itself: a step tab and a quick Back may reach the screen
+  // as one render that never shows the step in between (release CI 2026-11-12). Back then names
+  // the address the page had first, and only the browser's popstate tells that it moved.
+  const [popCount, setPopCount] = useState(0);
   useEffect(() => {
-    if (!syncAddress || startStep || seenAddressStep.current === addressStep) return;
-    seenAddressStep.current = addressStep;
+    if (!syncAddress) return;
+    const moved = () => setPopCount((count) => count + 1);
+    window.addEventListener("popstate", moved);
+    return () => window.removeEventListener("popstate", moved);
+  }, [syncAddress]);
+  useEffect(() => {
+    if (!syncAddress || startStep) return;
+    const addressNow = new URLSearchParams(window.location.search).get("step");
+    if (seenAddressStep.current === addressNow) return;
+    seenAddressStep.current = addressNow;
     const current = latestRequest.current;
-    const target = addressStep ? visibleSteps(current).find((id) => id === addressStep) : initialStep(current);
+    const target = addressNow ? visibleSteps(current).find((id) => id === addressNow) : initialStep(current);
     if (!target || target === chosenStepRef.current) return;
     void switchAfterSave(current.lead_id, () => {
       // Forward is "Next" by another button: it does not pass a step with an empty required
@@ -903,7 +917,7 @@ function LeadRequestView({
         return next;
       }, { replace: true });
     });
-  }, [addressStep, setSearchParams, showMissingOf, startStep, switchAfterSave, syncAddress]);
+  }, [addressStep, popCount, setSearchParams, showMissingOf, startStep, switchAfterSave, syncAddress]);
 
   const nav: StepNav = {
     index: position + 1,
