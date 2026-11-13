@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { apiFetch } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { appointmentSelectControlClassName } from "@/pages/appointments/appearance/surface-appearance";
@@ -183,10 +184,12 @@ export function AppointmentEntryRow({
 type PlanningDoctorPickerProps = {
   lang: string;
   onAdd: (doctor: PlanningDoctor) => void;
+  /** In the planning grid's narrow doctor column: fields stacked, one per line. */
+  stacked?: boolean;
 };
 
 /** «Добавить врача»: a medical provider and, if it has them, one of its doctors. */
-export function PlanningDoctorPicker({ lang, onAdd }: PlanningDoctorPickerProps) {
+export function PlanningDoctorPicker({ lang, onAdd, stacked = false }: PlanningDoctorPickerProps) {
   const de = lang === "de";
   const tx = (ru: string, german: string) => (de ? german : ru);
   const [open, setOpen] = useState(false);
@@ -255,9 +258,19 @@ export function PlanningDoctorPicker({ lang, onAdd }: PlanningDoctorPickerProps)
   return (
     <div
       data-testid="order-planning-doctor-picker"
-      className="space-y-2 rounded-lg border border-border/70 bg-muted/20 p-3"
+      className={cn(
+        "space-y-2 rounded-lg border border-border/70 bg-muted/20",
+        stacked ? "p-2" : "p-3",
+      )}
     >
-      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
+      <div
+        className={cn(
+          "grid gap-2",
+          stacked
+            ? "grid-cols-2 [&>*:nth-child(-n+2)]:col-span-2"
+            : "sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]",
+        )}
+      >
         <NativeComboboxSelect
           aria-label={providerLabel}
           value={providerId}

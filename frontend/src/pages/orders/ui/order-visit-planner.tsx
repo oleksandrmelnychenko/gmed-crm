@@ -437,7 +437,7 @@ export function OrderVisitPlanner({
               </p>
             ) : null}
           </div>
-          <PlanningDoctorPicker lang={lang} onAdd={onAddDoctor} />
+          <PlanningDoctorPicker lang={lang} onAdd={onAddDoctor} stacked />
         </div>
 
         <div className="min-w-0 space-y-2">
