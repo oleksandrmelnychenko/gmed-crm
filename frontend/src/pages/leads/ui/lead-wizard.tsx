@@ -8868,6 +8868,8 @@ ${serviceCommentLines.join("\n")}`
     {patientReview.error ? <Banner tone="error"><p>{tx("Не удалось проверить документы пациента", "Patientendokumente konnten nicht geprüft werden")}: {patientReview.error}</p><Button type="button" variant="default" size="sm" onClick={() => void patientReview.refresh().catch(() => undefined)}>{tx("Повторить", "Erneut versuchen")}</Button></Banner> : null}
     {patientReview.loading ? <p role="status" className="text-xs text-muted-foreground">{tx("Проверка документов пациента…", "Patientendokumente werden geprüft…")}</p> : null}
     {patientReview.readiness ? <OrderPatientDocumentReview readiness={patientReview.readiness} documents={[...patientReview.documents, ...documents]} dateTo={draft?.programDateTo || null} lang={lang} busy={isBusy || patientReview.loading} requestRows={requestReviewRows}
+      // The new document verified in this request counts at once (QA final-B F-B7).
+      renewedPassportExpiry={readinessChecks.get("identity_document_verified") ? step1Portal.intake?.identification?.id_valid_until ?? null : null}
       onRefresh={() => void Promise.all([patientReview.refresh(), refreshLeadState()]).catch(showWizardError)}
       onOpenDocuments={() => { setStep("documents"); window.requestAnimationFrame(() => document.getElementById(CONFIDENTIALITY_RELEASE_ID)?.focus()); }}
       onSaveExpiry={async expiry => { setBusy("passport-expiry"); setError(""); try { return await patientReview.saveExpiry(expiry); } catch (cause) { showWizardError(cause); return false; } finally { setBusy(null); } }} /> : null}
@@ -10189,6 +10191,16 @@ ${serviceCommentLines.join("\n")}`
                         beforeSave={step1Portal.intake?.minor ? undefined : () => save(step, false)}
                         onSaved={step1Portal.applyRepresentation}
                       />
+                    ) : !leadId && isRepeatIntake ? (
+                      // A repeat request takes the custody over from the
+                      // patient file when it is created (owner decision
+                      // 2026-11-13 #4, QA final-B F-B3): no empty choice here.
+                      <div className="max-w-md space-y-1.5" data-testid="lead-repeat-custody">
+                        <span data-wizard-field-label className="block font-mono text-xs font-medium text-muted-foreground">{tx("Кто представляет ребёнка", "Wer vertritt das Kind")}</span>
+                        <p className="text-sm text-muted-foreground">
+                          {tx("Как в прежнем обращении: берётся из карточки пациента", "Wie in der früheren Anfrage: aus der Patientenakte übernommen")}
+                        </p>
+                      </div>
                     ) : !leadId ? (
                       // Before the lead exists: sent with its creation, so a
                       // child under guardianship can name the guardian at once.

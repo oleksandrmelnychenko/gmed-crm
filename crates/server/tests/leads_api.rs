@@ -9810,6 +9810,170 @@ async fn a_minors_repeat_request_takes_over_the_parents_valid_identity_documents
     }
 }
 
+/// QA final-B F-B1 / F-B3 (2026-11-13, owner decision 4): the copies the
+/// parents uploaded themselves in the cabinet of the converted first request
+/// — never accepted one by one, data typed by the parents — are taken over
+/// like staff uploads, and the custody of that request comes along when the
+/// patient file has none.
+#[tokio::test]
+async fn a_minors_repeat_request_takes_over_the_parents_cabinet_copies_and_the_custody() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let pm = app.auth_header("patient_manager");
+    let (anna, ben) = (Uuid::new_v4(), Uuid::new_v4());
+    let lead_email = format!("mia-{}@example.com", Uuid::new_v4().simple());
+    let lead_id = seed_minor_lead_with_parents(&app, &lead_email, anna, ben, None).await;
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    declare_mother_as_payer_and_sign(&app, lead_id, artifacts.order_id).await;
+    let patient_id = convert_ready_lead(&app, lead_id).await;
+    // As the parents left them in the cabinet: uploads not accepted one by
+    // one, ID data typed by the parents (no staff entry), no signature.
+    sqlx::query(
+        "UPDATE lead_portal_uploads SET reviewed_at = NULL, reviewed_by = NULL
+         WHERE lead_id = $1 AND kind = 'representative_identity'",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE documents SET signed_at = NULL WHERE id IN (
+             SELECT document_id FROM lead_portal_uploads
+             WHERE lead_id = $1 AND kind = 'representative_identity')",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE lead_representatives SET id_data_entered_at = NULL, id_data_entered_by = NULL
+         WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    // The patient file holds no custody; the first request said «both parents».
+    sqlx::query("UPDATE patients SET custody = NULL WHERE id = $1")
+        .bind(patient_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO lead_gwg_declarations (lead_id, custody, custody_set_by_staff)
+         VALUES ($1, 'joint', true)
+         ON CONFLICT (lead_id) DO UPDATE SET custody = 'joint'",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let relations = parent_relations(pool, patient_id).await;
+    assert_eq!(relations.len(), 2, "{relations:?}");
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Mia",
+            "last_name": "Muster",
+            "repeat_patient_id": patient_id,
+            "creation_key": Uuid::new_v4(),
+        })),
+    )
+    .await;
+    assert!(status.is_success(), "{created}");
+    let repeat = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+
+    let custody: Option<String> =
+        sqlx::query_scalar("SELECT custody FROM lead_gwg_declarations WHERE lead_id = $1")
+            .bind(repeat)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(custody.as_deref(), Some("joint"));
+
+    // QA final-A F3: who pays and the payment route come along; the paying
+    // mother is named by her relation. The invoice recipient too, when the
+    // first request recorded one.
+    let earlier: (String, Option<String>) = sqlx::query_as(
+        "SELECT payer_kind, payment_method FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(earlier.0, "representative");
+    let copied: (
+        String,
+        Option<Uuid>,
+        Option<String>,
+        Option<chrono::DateTime<chrono::Utc>>,
+    ) = sqlx::query_as(
+        "SELECT payer_kind, payer_representative_id, payment_method, cost_estimate_consent_at
+             FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(repeat)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(copied.0, "representative");
+    assert_eq!(copied.1, Some(relations[0].0), "the mother's relation pays");
+    assert_eq!(copied.2, earlier.1);
+    assert_eq!(copied.3, None, "a consent is asked again");
+    let recipients: (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM lead_invoice_recipients WHERE lead_id = $1),
+                (SELECT count(*) FROM lead_invoice_recipients WHERE lead_id = $2)",
+    )
+    .bind(lead_id)
+    .bind(repeat)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(recipients.0, recipients.1);
+
+    let (status, intake) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{repeat}/portal-intake"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    assert_eq!(intake["representation"]["custody"], "joint", "{intake}");
+    assert_eq!(intake["representation"]["custody_stated"], true, "{intake}");
+    for relation in relations.iter().map(|row| row.0) {
+        let person = intake["representation"]["representatives"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|person| person["id"] == relation.to_string())
+            .cloned()
+            .unwrap_or_else(|| panic!("{relation} is a representative: {intake}"));
+        let copies = person["identity_documents"].as_array().unwrap();
+        assert_eq!(copies.len(), 1, "{person}");
+        assert_eq!(copies[0]["from_earlier_request"], true, "{person}");
+    }
+    // Nothing of the parents' copies is asked again.
+    let (status, lead) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{repeat}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{lead}");
+    let missing = lead["readiness"]["contract_details_missing"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        !missing
+            .iter()
+            .filter_map(Value::as_str)
+            .any(|key| key.ends_with("_id_upload")),
+        "{missing:?}"
+    );
+}
+
 /// Owner decision 2026-10-19: the parent(s) with custody are the minor's
 /// contracting party. Conversion stores the custody and their relations on
 /// the patient, so a parent without custody is no Auftraggeber; without a

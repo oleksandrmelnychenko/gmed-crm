@@ -566,6 +566,14 @@ describe("USt-IdNr. / Steuernummer of the invoice recipient (section 7, staff fi
 });
 
 describe("payer AML and signing order", () => {
+  it("never says «Не заполнено» next to the prefilled declaration of a repeat request (QA final-A F3)", () => {
+    expect(payerStatusBadge(status({ complete: false, missing: ["payer_kind_missing"] }), tx, true)).toEqual({
+      tone: "info",
+      label: "Из прошлого обращения — подтвердите",
+    });
+    expect(payerStatusBadge(status({ complete: true, missing: [] }), tx, true)).toEqual({ tone: "success", label: "Заполнено" });
+  });
+
   it("says the section waits for the Kostenübernahmeerklärung when nothing else is missing", () => {
     const de = (_ru: string, text: string) => text;
     expect(payerStatusBadge(status({ complete: true, missing: [] }), tx)).toEqual({ tone: "success", label: "Заполнено" });

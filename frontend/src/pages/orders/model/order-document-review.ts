@@ -1,4 +1,4 @@
-import { appDateKey } from "@/lib/app-time-zone";
+import { appDateKey, appDateKeyOf } from "@/lib/app-time-zone";
 import type { ContractItem } from "@/pages/contracts/model/types";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import type { PatientOrderRecheck } from "./types";
@@ -154,6 +154,20 @@ export function defaultOrderContractId(contracts: Pick<ContractItem, "id" | "sta
   const usable = contracts.filter(contract => contractUsability(contract) === "usable");
   const moment = (contract: (typeof usable)[number]) => contract.signed_at ?? contract.created_at;
   return [...usable].sort((a, b) => moment(b).localeCompare(moment(a)) || b.created_at.localeCompare(a.created_at))[0]?.id ?? null;
+}
+
+/**
+ * The later of the card's passport validity and the one of a renewed
+ * document verified in the open request (dates as YYYY-MM-DD, or an instant
+ * read on its Berlin day): a new passport replaces an expired one at once in
+ * the review, not only after the conversion (QA final-B F-B7).
+ */
+export function laterPassportExpiry(card: string | null | undefined, renewed: string | null | undefined): string | null {
+  const cardKey = appDateKeyOf(card) || null;
+  const renewedKey = appDateKeyOf(renewed) || null;
+  if (!renewedKey) return card ?? null;
+  if (!cardKey) return renewedKey;
+  return renewedKey > cardKey ? renewedKey : card ?? null;
 }
 
 export const PASSPORT_REVIEW_LABELS: Record<PassportReviewStatus, [string, string]> = {

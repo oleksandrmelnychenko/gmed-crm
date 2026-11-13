@@ -1241,8 +1241,13 @@ export function payerReasonLabel(code: string, tx: Tx, payerType?: PayerType | n
 export function payerStatusBadge(
   status: Pick<PayerDeclarationStatus, "complete" | "missing" | "payer_package"> | null | undefined,
   tx: Tx,
+  /** The form shows the declaration of the earlier request, not yet confirmed. */
+  prefilled = false,
 ): { tone: "success" | "info" | "warning"; label: string; hint?: string } {
   if (status?.complete) return { tone: "success", label: tx("Заполнено", "Vollständig") };
+  // A repeat request's form already filled from the earlier declaration is not
+  // «Не заполнено» (QA final-A F3): it waits for staff to confirm it.
+  if (prefilled) return { tone: "info", label: tx("Из прошлого обращения — подтвердите", "Aus der früheren Anfrage – bitte bestätigen") };
   const packageOut = status?.payer_package?.status === "sending" || status?.payer_package?.status === "pending";
   if (
     packageOut

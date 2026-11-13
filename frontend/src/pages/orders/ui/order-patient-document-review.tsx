@@ -12,7 +12,7 @@ import type { ContractItem } from "@/pages/contracts/model/types";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import type { PatientOrderRecheck } from "../model/types";
 import { formatIntakeDate, INTAKE_CHECK_LABELS, isContractUsable } from "../model/order-intake";
-import { contractUsability, CONTRACT_USABILITY_LABELS, DOCUMENT_CHECK_STATUS_LABELS, documentCheckEvidence, documentCheckStatus, isDocumentCheckReady, passportReviewStatus, PASSPORT_REVIEW_LABELS } from "../model/order-document-review";
+import { contractUsability, CONTRACT_USABILITY_LABELS, DOCUMENT_CHECK_STATUS_LABELS, documentCheckEvidence, documentCheckStatus, isDocumentCheckReady, laterPassportExpiry, passportReviewStatus, PASSPORT_REVIEW_LABELS } from "../model/order-document-review";
 import { OrderWizardSection } from "./order-wizard-tables";
 
 const tableClass = "rounded-none border-0 bg-transparent shadow-none sm:max-h-[400px]";
@@ -42,8 +42,14 @@ export function OrderExistingContractsTable({ contracts, selectedId, lang, busy,
 /** A check of the current request itself (consents, documents) rather than of the patient card. */
 export type RequestReviewRow = { key: string; label: string; ready: boolean; status: string; detail: string; action?: { label: string; onClick: () => void } };
 type ReviewRow = RequestReviewRow;
-export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang, busy, requestRows = [], compact = false, onRefresh, onOpenDocuments, onSaveExpiry }: {
+export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang, busy, requestRows = [], compact = false, renewedPassportExpiry = null, onRefresh, onOpenDocuments, onSaveExpiry }: {
   readiness: PatientOrderRecheck; documents: DocumentItem[]; dateTo: string | null; lang: Lang; busy: boolean; requestRows?: RequestReviewRow[];
+  /**
+   * The validity of the new identity document staff verified in the open
+   * request (YYYY-MM-DD); the card takes it over only at the conversion, so
+   * the row shows the later date (QA final-B F-B7).
+   */
+  renewedPassportExpiry?: string | null;
   /** For a narrow sheet: the details go under the status instead of into their own column. */
   compact?: boolean;
   onRefresh: () => void; onOpenDocuments: () => void; onSaveExpiry: (expiry: string) => Promise<boolean | undefined>;
@@ -52,7 +58,8 @@ export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang,
   const tx = (ru: string, de: string) => language ? de : ru;
   const [editing, setEditing] = useState(false);
   const [expiry, setExpiry] = useState("");
-  const passportStatus = passportReviewStatus(readiness.passport_expiry, dateTo);
+  const passportExpiry = laterPassportExpiry(readiness.passport_expiry, renewedPassportExpiry);
+  const passportStatus = passportReviewStatus(passportExpiry, dateTo);
   // Status and details of the document rows come from the same source: the
   // card's flags where they are set, the documents in hand where they lag.
   const evidence = documentCheckEvidence(readiness, documents);
@@ -67,7 +74,7 @@ export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang,
         ? `${tx("Просрочено счетов", "Überfällige Rechnungen")}: ${readiness.overdue_invoice_count}${outstanding ? ` · ${tx("Остаток", "Offen")}: ${formatMoneyLabel(outstanding)}` : ""}`
         : "—" },
     { key: "passport", label: tx("Паспорт", "Reisepass"), ready: passportStatus === "valid", status: PASSPORT_REVIEW_LABELS[passportStatus][language],
-      detail: readiness.passport_expiry ? `${tx("Действует до", "Gültig bis")}: ${formatIntakeDate(readiness.passport_expiry)}` : tx("Дата окончания действия отсутствует", "Ablaufdatum fehlt") },
+      detail: passportExpiry ? `${tx("Действует до", "Gültig bis")}: ${formatIntakeDate(passportExpiry)}` : tx("Дата окончания действия отсутствует", "Ablaufdatum fehlt") },
     ...(["compliance_ready", "confidentiality_release_ready", "identity_ready", "document_pack_ready"] as const).map(key => {
       const status = documentCheckStatus(key, readiness, evidence);
       return {

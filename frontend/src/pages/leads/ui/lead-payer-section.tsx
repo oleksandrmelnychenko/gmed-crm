@@ -564,7 +564,7 @@ export function LeadPayerDeclarationSection({
   // Format hints only: the values are saved as typed (owner decision 2026-10-22).
   const vatIdWarning = vatIdFormatWarning(form.invoiceVatId, tx);
   const taxNumberWarning = taxNumberFormatWarning(form.invoiceTaxNumber, tx);
-  const statusBadge = payerStatusBadge(data?.status, tx);
+  const statusBadge = payerStatusBadge(data?.status, tx, prefillActive);
   const informedAt = data?.declaration?.payer_informed_at ?? null;
   // Owner decision 2026-11-13: the payer accepted the notice in its own link.
   const informedViaLink = data?.declaration?.payer_informed_via === "link";

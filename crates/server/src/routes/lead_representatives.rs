@@ -992,8 +992,13 @@ pub(crate) async fn load_on(
                    WHERE rel.id = $3 AND rel.patient_id = $2
                      AND d.status = 'active' AND d.file_deleted_at IS NULL
                      AND NOT er.id_document_unreadable
-                     -- Staff took the copy over on the earlier request.
+                     -- Staff took the copy over on the earlier request, or
+                     -- that request was converted with it: the conversion
+                     -- needs the parents' copies, so a copy the parent
+                     -- uploaded in the cabinet counts as checked then (QA
+                     -- final-B F-B1 2026-11-13).
                      AND (u.reviewed_at IS NOT NULL OR d.signed_at IS NOT NULL
+                          OR e.converted_patient_id IS NOT NULL
                           OR (er.id_data_entered_at IS NOT NULL
                               AND u.created_at <= er.id_data_entered_at))
                      -- The copy of the same document, still valid.

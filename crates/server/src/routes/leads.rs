@@ -4439,8 +4439,22 @@ async fn prefill_minor_repeat_representation(
     patient_id: Uuid,
     actor: Uuid,
 ) -> Result<(), sqlx::Error> {
+    // The custody of the patient file, else the one the latest earlier
+    // request stated (owner decision 2026-11-13 #4: everything is taken
+    // over; QA final-B F-B3).
     let Some((birth_date, custody)) = sqlx::query_as::<_, (Option<NaiveDate>, Option<String>)>(
-        "SELECT birth_date, custody FROM patients WHERE id = $1",
+        r#"SELECT p.birth_date,
+                  COALESCE(p.custody, (
+                      SELECT g.custody
+                      FROM lead_gwg_declarations g
+                      JOIN leads e ON e.id = g.lead_id
+                      WHERE (e.converted_patient_id = p.id OR e.repeat_patient_id = p.id)
+                        AND e.qualification_status <> 'deleted'
+                        AND g.custody IS NOT NULL
+                      ORDER BY e.created_at DESC, e.id
+                      LIMIT 1
+                  )) AS custody
+           FROM patients p WHERE p.id = $1"#,
     )
     .bind(patient_id)
     .fetch_optional(&mut **tx)
@@ -4753,6 +4767,134 @@ async fn prefill_repeat_identity_document(
     .await
 }
 
+/// A repeat request takes the billing answers of the patient's latest
+/// converted request (owner decision 2026-11-13 #4: everything comes from the
+/// first request; QA final-A F3): the invoice recipient (step 3) and, when
+/// the patient side pays — the patient or a contracting parent — who pays
+/// with the payment route and the own-account and funds answers. The
+/// consents, the «payer informed» mark and a third party's identity are not
+/// copied: a third-party payer stays the wizard's prefill that staff check
+/// and confirm. A paying parent is named by the relation the repeat request
+/// lists him under; without one the declaration is left to staff.
+async fn prefill_repeat_billing(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    patient_id: Uuid,
+    actor: Uuid,
+) -> Result<(), sqlx::Error> {
+    // The request whose declaration the conversion fixed for the patient.
+    let Some(source_lead): Option<Uuid> = sqlx::query_scalar(
+        r#"SELECT d.lead_id
+           FROM lead_payer_declarations d
+           JOIN leads e ON e.id = d.lead_id
+           WHERE d.patient_id = $2 AND d.lead_id <> $1
+             AND e.converted_patient_id = $2
+             AND e.qualification_status <> 'deleted'
+           ORDER BY e.created_at DESC, d.updated_at DESC, d.lead_id
+           LIMIT 1"#,
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    else {
+        return Ok(());
+    };
+    // A trusted contact of the earlier request is a relation of the patient
+    // now (`source_contact_id`); the repeat request lists the relation's id.
+    let recipient_copied = sqlx::query(
+        r#"INSERT INTO lead_invoice_recipients (
+               lead_id, recipient, recipient_is_payer, recipient_type, first_name, last_name,
+               organisation_name, legal_form, contact_name, street, zip, city, country, email,
+               phone, relationship_kind, relationship, payment_reason, updated_by,
+               representative_contact_id, legacy_name, from_section_seven)
+           SELECT $1, r.recipient, r.recipient_is_payer, r.recipient_type, r.first_name, r.last_name,
+                  r.organisation_name, r.legal_form, r.contact_name, r.street, r.zip, r.city,
+                  r.country, r.email, r.phone, r.relationship_kind, r.relationship,
+                  r.payment_reason, $4,
+                  (SELECT rel.id FROM patient_relations rel
+                   WHERE rel.patient_id = $3
+                     AND r.representative_contact_id IN (rel.id, rel.source_contact_id)
+                   ORDER BY rel.created_at, rel.id LIMIT 1),
+                  r.legacy_name, r.from_section_seven
+           FROM lead_invoice_recipients r
+           WHERE r.lead_id = $2
+             -- A parent named as recipient must be found again.
+             AND (r.representative_contact_id IS NULL OR EXISTS (
+                     SELECT 1 FROM patient_relations rel
+                     WHERE rel.patient_id = $3
+                       AND r.representative_contact_id IN (rel.id, rel.source_contact_id)))
+           ON CONFLICT (lead_id) DO NOTHING"#,
+    )
+    .bind(lead_id)
+    .bind(source_lead)
+    .bind(patient_id)
+    .bind(actor)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected()
+        > 0;
+    let declaration_copied = sqlx::query(
+        r#"INSERT INTO lead_payer_declarations (
+               lead_id, payer_kind, payer_representative_id, payer_type,
+               acts_on_own_account, own_account_answered, beneficial_owner_name,
+               beneficial_owner_note, source_of_funds, source_of_funds_description,
+               self_funds_description, self_funds_source, self_funds_entered_by,
+               payment_method, payment_method_details, account_country, account_holder,
+               bank_name, via_third_party, via_third_party_details, via_third_party_kind,
+               payment_route_entered_by, created_by, updated_by)
+           SELECT $1, d.payer_kind,
+                  CASE WHEN d.payer_kind = 'representative' THEN
+                      (SELECT rel.id FROM patient_relations rel
+                       WHERE rel.patient_id = $3
+                         AND d.payer_representative_id IN (rel.id, rel.source_contact_id)
+                       ORDER BY rel.created_at, rel.id LIMIT 1)
+                  END,
+                  d.payer_type,
+                  d.acts_on_own_account, d.own_account_answered, d.beneficial_owner_name,
+                  d.beneficial_owner_note, d.source_of_funds, d.source_of_funds_description,
+                  d.self_funds_description, d.self_funds_source, d.self_funds_entered_by,
+                  d.payment_method, d.payment_method_details, d.account_country,
+                  d.account_holder, d.bank_name, d.via_third_party, d.via_third_party_details,
+                  d.via_third_party_kind, d.payment_route_entered_by, $4, $4
+           FROM lead_payer_declarations d
+           WHERE d.lead_id = $2
+             AND (d.payer_kind = 'self'
+                  OR (d.payer_kind = 'representative' AND EXISTS (
+                      SELECT 1 FROM patient_relations rel
+                      WHERE rel.patient_id = $3
+                        AND d.payer_representative_id IN (rel.id, rel.source_contact_id))))
+           ON CONFLICT (lead_id) DO NOTHING"#,
+    )
+    .bind(lead_id)
+    .bind(source_lead)
+    .bind(patient_id)
+    .bind(actor)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected()
+        > 0;
+    if !recipient_copied && !declaration_copied {
+        return Ok(());
+    }
+    audit::write_in_transaction(
+        tx,
+        &audit::domain_event(
+            "prefill_repeat_intake_billing",
+            Some(actor),
+            "lead",
+            Some(lead_id),
+            json!({
+                "patient_id": patient_id,
+                "source_lead_id": source_lead,
+                "invoice_recipient": recipient_copied,
+                "payer_declaration": declaration_copied,
+            }),
+        ),
+    )
+    .await
+}
+
 /// The citizenships a repeat request's representative row takes from the
 /// patient relation: valid ISO codes, upper-cased, each once, in order (the
 /// row's check refuses anything else).
@@ -4867,6 +5009,15 @@ async fn create_repeat_intake(
         .await
         .map_err(|error| {
             tracing::error!(%error, lead_id = %id, patient_id = %patient, "prefill the identity document of a repeat intake");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create repeat intake",
+            )
+        })?;
+    prefill_repeat_billing(&mut tx, id, patient, auth.user_id)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, lead_id = %id, patient_id = %patient, "prefill the billing of a repeat intake");
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to create repeat intake",

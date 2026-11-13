@@ -1,9 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   contractUsability, defaultOrderContractId, documentCheckEvidence, documentCheckStatus, type DocumentCheckReadiness,
-  identityDocumentOnFile, isDocumentCheckReady, passportReviewStatus, stillMissingRequiredDocuments,
+  identityDocumentOnFile, isDocumentCheckReady, laterPassportExpiry, passportReviewStatus, stillMissingRequiredDocuments,
 } from "./order-document-review";
 import { isContractUsable } from "./order-intake";
+
+describe("laterPassportExpiry (QA final-B F-B7)", () => {
+  it("lets a new passport verified in the request replace the expired one of the card", () => {
+    expect(laterPassportExpiry("2026-11-10", "2036-11-10")).toBe("2036-11-10");
+    expect(laterPassportExpiry("2030-01-01", "2028-01-01")).toBe("2030-01-01");
+    expect(laterPassportExpiry(null, "2036-11-10")).toBe("2036-11-10");
+    expect(laterPassportExpiry("2026-11-10", null)).toBe("2026-11-10");
+    expect(laterPassportExpiry(null, null)).toBeNull();
+  });
+});
 
 const reviewDocument = (patch: Record<string, unknown>) => ({
   art: "other", compliance_kind: null, generated_template_id: null, signed_at: null, status: "active", file_deleted_at: null,
