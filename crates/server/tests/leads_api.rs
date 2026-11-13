@@ -7292,6 +7292,16 @@ async fn repeat_intake_takes_the_identity_document_from_the_patient_card() {
         ))
     );
 
+    // An expired document is not taken over: the request asks for the new
+    // one (owner decision 2026-11-13).
+    let expired = seed_repeat_patient(&app, true).await;
+    sqlx::query("UPDATE patients SET passport_number = 'L01X00T47', passport_expiry = DATE '2020-04-30' WHERE id = $1")
+        .bind(expired)
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(repeat(expired).await, None);
+
     // Nothing known: no row is made up.
     let unknown = seed_repeat_patient(&app, true).await;
     assert_eq!(repeat(unknown).await, None);
@@ -9612,10 +9622,170 @@ async fn converting_a_minors_repeat_request_keeps_the_parents_relations() {
     assert_eq!(payer_audits, 1, "the payer did not change");
 }
 
+/// Owner decision 2026-11-13 (QA D-06): a minor's repeat request takes over
+/// the parents' identity documents of the earlier request — the data and the
+/// checked copy, referenced and never uploaded again — while the document is
+/// valid. A document that has expired since is asked again, and only that one.
+#[tokio::test]
+async fn a_minors_repeat_request_takes_over_the_parents_valid_identity_documents() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let pm = app.auth_header("patient_manager");
+    let (anna, ben) = (Uuid::new_v4(), Uuid::new_v4());
+    let lead_email = format!("mia-{}@example.com", Uuid::new_v4().simple());
+    let lead_id = seed_minor_lead_with_parents(&app, &lead_email, anna, ben, None).await;
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    declare_mother_as_payer_and_sign(&app, lead_id, artifacts.order_id).await;
+    let patient_id = convert_ready_lead(&app, lead_id).await;
+    // Staff checked both parents' copies on the first request; the father's
+    // document has expired since.
+    sqlx::query(
+        "UPDATE lead_portal_uploads SET reviewed_at = now(), reviewed_by = $2
+         WHERE lead_id = $1 AND kind = 'representative_identity'",
+    )
+    .bind(lead_id)
+    .bind(app.patient_manager_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE lead_representatives SET id_valid_until = DATE '2020-01-31'
+         WHERE lead_id = $1 AND contact_id = $2",
+    )
+    .bind(lead_id)
+    .bind(ben)
+    .execute(pool)
+    .await
+    .unwrap();
+    let relations = parent_relations(pool, patient_id).await;
+    assert_eq!(relations.len(), 2, "{relations:?}");
+    let (anna_relation, ben_relation) = (relations[0].0, relations[1].0);
+    let anna_document: Uuid = sqlx::query_scalar(
+        "SELECT document_id FROM lead_portal_uploads
+         WHERE lead_id = $1 AND representative_id = $2 AND kind = 'representative_identity'",
+    )
+    .bind(lead_id)
+    .bind(anna)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Mia",
+            "last_name": "Muster",
+            "repeat_patient_id": patient_id,
+            "creation_key": Uuid::new_v4(),
+        })),
+    )
+    .await;
+    assert!(status.is_success(), "{created}");
+    let repeat = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+
+    // The data: the mother's valid document comes along, the father's
+    // expired one does not.
+    let documents: Vec<(Uuid, Option<String>, Option<chrono::NaiveDate>)> = sqlx::query_as(
+        "SELECT contact_id, id_document_number, id_valid_until FROM lead_representatives
+         WHERE lead_id = $1 ORDER BY contact_id = $2 DESC",
+    )
+    .bind(repeat)
+    .bind(anna_relation)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        documents,
+        vec![
+            (
+                anna_relation,
+                Some(format!("SYNTHETIC-{anna}")),
+                chrono::NaiveDate::from_ymd_opt(2099, 1, 1)
+            ),
+            (ben_relation, None, None),
+        ]
+    );
+    // No file was copied or registered again for the repeat request.
+    let registered: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM lead_portal_uploads WHERE lead_id = $1")
+            .bind(repeat)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(registered, 0);
+
+    // The wizard shows the mother's checked copy as taken over.
+    let (status, intake) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{repeat}/portal-intake"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    let person = |id: Uuid| {
+        intake["representation"]["representatives"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|person| person["id"] == id.to_string())
+            .cloned()
+            .unwrap_or_else(|| panic!("{id} is a representative: {intake}"))
+    };
+    let (mother, father) = (person(anna_relation), person(ben_relation));
+    let copies = mother["identity_documents"].as_array().unwrap();
+    assert_eq!(copies.len(), 1, "{mother}");
+    assert_eq!(copies[0]["id"], anna_document.to_string());
+    assert_eq!(copies[0]["from_earlier_request"], true);
+    assert_eq!(copies[0]["reviewed"], true);
+    assert_eq!(father["identity_documents"], json!([]), "{father}");
+
+    // Only the father's document is asked again.
+    let (status, lead) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{repeat}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{lead}");
+    let missing: Vec<String> = lead["readiness"]["contract_details_missing"]
+        .as_array()
+        .map(|keys| {
+            keys.iter()
+                .filter_map(|key| key.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let (mother_slot, father_slot) = (
+        mother["slot"].as_str().unwrap().to_string(),
+        father["slot"].as_str().unwrap().to_string(),
+    );
+    assert!(
+        !missing
+            .iter()
+            .any(|key| key.starts_with(&format!("{mother_slot}_id_"))),
+        "the mother's valid document is not asked again: {missing:?}"
+    );
+    for field in [
+        "id_document_type",
+        "id_document_number",
+        "id_issuing_authority",
+        "id_issuing_country",
+        "id_valid_until",
+        "id_upload",
+    ] {
+        assert!(
+            missing.contains(&format!("{father_slot}_{field}")),
+            "the father's expired document is asked again ({field}): {missing:?}"
+        );
+    }
+}
+
 /// Owner decision 2026-10-19: the parent(s) with custody are the minor's
 /// contracting party. Conversion stores the custody and their relations on
-/// the patient, so a parent without custody is no Auftraggeber; trusted
-/// contacts are no emergency contacts by themselves; the paying parent is
+/// the patient, so a parent without custody is no Auftraggeber; without a
+/// marked emergency contact the first contracting parent becomes it, on the
+/// relation and on the card (owner decision 2026-11-13); the paying parent is
 /// the default payer also when linked to a patient record of her own. The
 /// father, who never had a login on the child's request, is linked to the
 /// child when his own request is converted (same e-mail, his patronymic on
@@ -9675,11 +9845,14 @@ async fn converting_a_minor_stores_the_custodial_parents_as_contracting_party() 
         default_payer,
         "the paying parent with a patient record is the default payer"
     );
-    assert!(!emergency);
+    assert!(
+        emergency,
+        "the first contracting parent is the emergency contact"
+    );
     let (ben_relation, name, _, default_payer, emergency) = relations[1].clone();
     assert_eq!(name, "Ben Muster");
     assert!(!default_payer);
-    assert!(!emergency);
+    assert!(!emergency, "the parent without custody is not");
     let audits: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM audit_log WHERE action='set_default_payer_on_conversion' AND entity_id=$1",
     )
@@ -9688,6 +9861,24 @@ async fn converting_a_minor_stores_the_custodial_parents_as_contracting_party() 
     .await
     .unwrap();
     assert_eq!(audits, 1);
+    // The card names her too (QA 2026-11-13, D-04: «Не указано»), audited.
+    let (emergency_name, emergency_relation): (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT emergency_contact_name, emergency_contact_relation FROM patients WHERE id=$1",
+    )
+    .bind(child)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(emergency_name.as_deref(), Some("Anna Muster"));
+    assert_eq!(emergency_relation.as_deref(), Some("mother"));
+    let emergency_audit: Value = sqlx::query_scalar(
+        "SELECT context FROM audit_log WHERE action='set_emergency_contact_on_conversion' AND entity_id=$1",
+    )
+    .bind(child)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(emergency_audit["relation_id"], anna_relation.to_string());
 
     let (custody, contracting): (Option<String>, Vec<Uuid>) =
         sqlx::query_as("SELECT custody, contracting_relation_ids FROM patients WHERE id=$1")

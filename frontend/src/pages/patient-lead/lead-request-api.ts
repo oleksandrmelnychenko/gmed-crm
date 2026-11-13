@@ -416,6 +416,8 @@ export type LeadRequestDocument = {
   can_delete: boolean;
   /** Added to the sent request («Dokumente nachreichen», owner 2026-10-26). */
   added_after_submit?: boolean;
+  /** A repeat request: the checked copy of the same valid document from an earlier request (owner 2026-11-13). */
+  from_earlier_request?: boolean;
 };
 
 /**

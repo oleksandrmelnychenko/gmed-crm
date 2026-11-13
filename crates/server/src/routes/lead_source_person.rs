@@ -973,8 +973,16 @@ pub(crate) async fn apply_in_tx(
                    id_issuing_country = COALESCE(lead_gwg_declarations.id_issuing_country, EXCLUDED.id_issuing_country),
                    id_issued_on = COALESCE(lead_gwg_declarations.id_issued_on, EXCLUDED.id_issued_on),
                    id_valid_until = COALESCE(lead_gwg_declarations.id_valid_until, EXCLUDED.id_valid_until),
-                   id_data_entered_by = COALESCE(lead_gwg_declarations.id_data_entered_by, EXCLUDED.id_data_entered_by),
-                   id_data_entered_at = COALESCE(lead_gwg_declarations.id_data_entered_at, EXCLUDED.id_data_entered_at),
+                   -- Who took the data over and when follow the last change
+                   -- (owner decision 2026-11-13), not the first entry.
+                   id_data_entered_by = CASE WHEN (lead_gwg_declarations.id_document_number IS NULL AND EXCLUDED.id_document_number IS NOT NULL)
+                                               OR (lead_gwg_declarations.id_valid_until IS NULL AND EXCLUDED.id_valid_until IS NOT NULL)
+                                             THEN COALESCE(EXCLUDED.id_data_entered_by, lead_gwg_declarations.id_data_entered_by)
+                                             ELSE lead_gwg_declarations.id_data_entered_by END,
+                   id_data_entered_at = CASE WHEN (lead_gwg_declarations.id_document_number IS NULL AND EXCLUDED.id_document_number IS NOT NULL)
+                                               OR (lead_gwg_declarations.id_valid_until IS NULL AND EXCLUDED.id_valid_until IS NOT NULL)
+                                             THEN COALESCE(EXCLUDED.id_data_entered_at, lead_gwg_declarations.id_data_entered_at)
+                                             ELSE lead_gwg_declarations.id_data_entered_at END,
                    updated_by = EXCLUDED.updated_by
                RETURNING birth_place IS NOT DISTINCT FROM $2 AND $2 IS NOT NULL AS birth_place,
                          birth_country IS NOT DISTINCT FROM $3 AND $3 IS NOT NULL AS birth_country,

@@ -134,6 +134,8 @@ export type LeadRequestText = {
   documentsOptional: string;
   removeDocument: string;
   documentTakenOver: string;
+  /** A copy taken over from an earlier request (owner 2026-11-13). */
+  documentFromEarlierRequest: string;
   /** An identity copy GMED could not use: block I asks a new one (QA 2026-10-25, G F-G4). Never "abgelehnt" (reads as the request refused). */
   documentRefused: string;
   /** Per reason of the server (`follow_up.refused_identity_documents[].reason`); about the document only. */
@@ -1266,6 +1268,7 @@ const de: LeadRequestText = {
   documentsOptional: "Sie können die Anfrage auch ohne Unterlagen senden.",
   removeDocument: "Entfernen",
   documentTakenOver: "Von uns übernommen",
+  documentFromEarlierRequest: "Aus Ihrer früheren Anfrage",
   documentRefused: "Nicht verwendbar",
   documentRefusedReasons: {
     unreadable: "GMED konnte dieses Dokument nicht lesen. Bitte laden Sie einen neuen, gut lesbaren Scan hoch – er ersetzt dieses Dokument.",
@@ -1949,6 +1952,7 @@ const ru: LeadRequestText = {
   documentsOptional: "Заявку можно отправить и без документов.",
   removeDocument: "Удалить",
   documentTakenOver: "Принято в работу",
+  documentFromEarlierRequest: "Из вашей прежней заявки",
   documentRefused: "Не подходит",
   documentRefusedReasons: {
     unreadable: "GMED не удалось прочитать этот документ. Пожалуйста, загрузите новый, хорошо читаемый скан — он заменит этот документ.",
@@ -2626,6 +2630,7 @@ const uk: LeadRequestText = {
   documentsOptional: "Заявку можна надіслати і без документів.",
   removeDocument: "Видалити",
   documentTakenOver: "Прийнято в роботу",
+  documentFromEarlierRequest: "З вашої попередньої заявки",
   documentRefused: "Не підходить",
   documentRefusedReasons: {
     unreadable: "GMED не вдалося прочитати цей документ. Будь ласка, завантажте новий, добре читабельний скан — він замінить цей документ.",
@@ -3303,6 +3308,7 @@ const en: LeadRequestText = {
   documentsOptional: "You can also send the request without documents.",
   removeDocument: "Remove",
   documentTakenOver: "Taken over by us",
+  documentFromEarlierRequest: "From your earlier request",
   documentRefused: "Not usable",
   documentRefusedReasons: {
     unreadable: "GMED could not read this document. Please upload a new, clearly legible scan – it replaces this document.",

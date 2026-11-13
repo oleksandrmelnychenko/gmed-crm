@@ -631,6 +631,11 @@ pub(crate) struct Upload {
     /// stands in the patient record (DEV 2026-10-27): referenced, not copied;
     /// it counts as the parent's checked copy and nobody removes it here.
     pub from_patient_record: bool,
+    /// The parent's checked copy of the same, still valid identity document
+    /// on an earlier request of the same patient (owner decision 2026-11-13:
+    /// a repeat request takes it over): referenced, not copied or uploaded
+    /// again; it counts as the parent's checked copy and nobody removes it here.
+    pub from_earlier_request: bool,
 }
 
 /// Everything of a lead's representation, as [`load`] reads it.
@@ -732,7 +737,7 @@ pub(crate) async fn load_on(
     on: NaiveDate,
 ) -> Result<Option<Loaded>, sqlx::Error> {
     let Some(lead) = sqlx::query(
-        r#"SELECT l.date_of_birth, l.trusted_contacts,
+        r#"SELECT l.date_of_birth, l.trusted_contacts, l.repeat_patient_id,
                   g.has_representative, g.under_guardianship, g.custody,
                   COALESCE(g.custody_set_by_staff, false) AS custody_set_by_staff,
                   (l.converted_patient_id IS NOT NULL
@@ -829,6 +834,7 @@ pub(crate) async fn load_on(
                 || row.try_get::<bool, _>("shared").unwrap_or(true)
                 || row.try_get::<bool, _>("in_review").unwrap_or(true),
             from_patient_record: false,
+            from_earlier_request: false,
         })
     })
     .collect();
@@ -942,6 +948,94 @@ pub(crate) async fn load_on(
                 reviewed: true,
                 locked: true,
                 from_patient_record: true,
+                from_earlier_request: false,
+            });
+        }
+    }
+    // A repeat request of the same patient takes over what the earlier
+    // request recorded (owner decision 2026-11-13): a parent's checked copy
+    // of the identity document whose data the repeat request carries
+    // ([`crate::routes::leads`] prefills them) counts here as long as that
+    // document is valid. The copy is referenced, never uploaded again; an
+    // expired document or another number asks for a new copy.
+    let repeat_patient_id = lead
+        .try_get::<Option<Uuid>, _>("repeat_patient_id")
+        .ok()
+        .flatten();
+    if let Some(repeat_patient_id) = repeat_patient_id {
+        for person in &representatives {
+            if uploads.iter().any(|upload| {
+                upload.representative_id == person.id && upload.kind == UPLOAD_IDENTITY
+            }) {
+                continue;
+            }
+            let Some(number) = person.extras.id_document_number.as_deref() else {
+                continue;
+            };
+            if person.extras.id_valid_until.is_some_and(|date| date < on) {
+                continue;
+            }
+            let earlier = sqlx::query(
+                r#"SELECT d.id, d.original_filename, d.auto_name, d.file_size, d.mime_type,
+                          u.created_at, u.access_kind
+                   FROM patient_relations rel
+                   JOIN leads e ON e.id <> $1
+                        AND (e.converted_patient_id = $2 OR e.repeat_patient_id = $2)
+                        AND e.qualification_status <> 'deleted'
+                   JOIN lead_representatives er ON er.lead_id = e.id
+                        AND er.contact_id IN (rel.id, rel.source_contact_id)
+                   JOIN lead_portal_uploads u ON u.lead_id = e.id
+                        AND u.representative_id = er.contact_id
+                        AND u.kind = 'representative_identity'
+                        AND u.withdrawn_at IS NULL
+                   JOIN documents d ON d.id = u.document_id
+                   WHERE rel.id = $3 AND rel.patient_id = $2
+                     AND d.status = 'active' AND d.file_deleted_at IS NULL
+                     AND NOT er.id_document_unreadable
+                     -- Staff took the copy over on the earlier request.
+                     AND (u.reviewed_at IS NOT NULL OR d.signed_at IS NOT NULL
+                          OR (er.id_data_entered_at IS NOT NULL
+                              AND u.created_at <= er.id_data_entered_at))
+                     -- The copy of the same document, still valid.
+                     AND upper(regexp_replace(er.id_document_number, '\s', '', 'g'))
+                         = upper(regexp_replace($4, '\s', '', 'g'))
+                     AND (er.id_valid_until IS NULL OR er.id_valid_until >= $5)
+                   ORDER BY u.created_at DESC, d.id
+                   LIMIT 1"#,
+            )
+            .bind(lead_id)
+            .bind(repeat_patient_id)
+            .bind(person.id)
+            .bind(number)
+            .bind(on)
+            .fetch_optional(&mut *conn)
+            .await?;
+            let Some(row) = earlier else {
+                continue;
+            };
+            let Ok(document_id) = row.try_get::<Uuid, _>("id") else {
+                continue;
+            };
+            uploads.push(Upload {
+                document_id,
+                representative_id: person.id,
+                kind: UPLOAD_IDENTITY.to_string(),
+                file_name: row
+                    .try_get::<Option<String>, _>("original_filename")
+                    .ok()
+                    .flatten()
+                    .or_else(|| row.try_get::<Option<String>, _>("auto_name").ok().flatten()),
+                size_bytes: row.try_get::<Option<i64>, _>("file_size").ok().flatten(),
+                mime_type: row.try_get::<Option<String>, _>("mime_type").ok().flatten(),
+                uploaded_at: row.try_get::<DateTime<Utc>, _>("created_at").ok(),
+                uploaded_by: None,
+                by_staff: row
+                    .try_get::<String, _>("access_kind")
+                    .is_ok_and(|kind| kind == ACCESS_STAFF),
+                reviewed: true,
+                locked: true,
+                from_patient_record: false,
+                from_earlier_request: true,
             });
         }
     }
@@ -1628,6 +1722,10 @@ pub(crate) fn portal_payload(loaded: &Loaded, user_id: Uuid) -> Value {
                 if upload.from_patient_record {
                     value["from_patient_record"] = json!(true);
                 }
+                // The copy taken over from an earlier request (owner 2026-11-13).
+                if upload.from_earlier_request {
+                    value["from_earlier_request"] = json!(true);
+                }
                 value
             })
             .collect()
@@ -1718,6 +1816,10 @@ pub(crate) fn staff_payload(loaded: &Loaded) -> Value {
                 // Only a parent's patient-record passport says where it comes from.
                 if upload.from_patient_record {
                     value["from_patient_record"] = json!(true);
+                }
+                // The copy taken over from an earlier request (owner 2026-11-13).
+                if upload.from_earlier_request {
+                    value["from_earlier_request"] = json!(true);
                 }
                 value
             })
@@ -1851,7 +1953,8 @@ pub(crate) fn updated_at(loaded: &Loaded, field_updates: &Value) -> Option<DateT
     loaded
         .uploads
         .iter()
-        .filter(|upload| !upload.by_staff)
+        // A copy of an earlier request is no change of this one.
+        .filter(|upload| !upload.by_staff && !upload.from_earlier_request)
         .filter_map(|upload| upload.uploaded_at)
         .chain(marked)
         .max()
@@ -5604,6 +5707,7 @@ mod tests {
             reviewed: false,
             locked: false,
             from_patient_record: false,
+            from_earlier_request: false,
         }
     }
 

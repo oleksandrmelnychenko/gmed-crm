@@ -109,6 +109,8 @@ export type LeadIdentityDocument = {
   uploaded_by_staff?: boolean;
   /** A parent who is a patient: the identity document of the patient record, referenced (DEV 2026-10-27). */
   from_patient_record?: boolean;
+  /** A repeat request: the parent's checked copy of the same valid document on an earlier request, referenced (owner 2026-11-13). */
+  from_earlier_request?: boolean;
 };
 
 /** Who represents a minor; a request without an answer counts as `joint`. */
@@ -593,6 +595,7 @@ function normalizeIdentityDocuments(value: unknown): LeadIdentityDocument[] {
         reviewed: raw.reviewed === true,
         ...(raw.uploaded_by_staff === true ? { uploaded_by_staff: true } : {}),
         ...(raw.from_patient_record === true ? { from_patient_record: true } : {}),
+        ...(raw.from_earlier_request === true ? { from_earlier_request: true } : {}),
       },
     ];
   });

@@ -1015,6 +1015,7 @@ export function UploadedFileList({
                 <PortalDateChip timestamp={document.uploaded_at} />
                 {document.added_after_submit ? <StatusChip tone="warning">{text.addedAfterSend}</StatusChip> : null}
                 {document.reviewed ? <StatusChip tone="success"><Check aria-hidden="true" />{text.documentTakenOver}</StatusChip> : null}
+                {document.from_earlier_request ? <StatusChip tone="neutral">{text.documentFromEarlierRequest}</StatusChip> : null}
               </span>
             </span>
             {document.can_delete ? (

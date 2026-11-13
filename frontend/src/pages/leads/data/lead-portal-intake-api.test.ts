@@ -19,6 +19,19 @@ describe("staff cabinet parity payload", () => {
     expect(intake?.enhanced_details?.relationship_proof_documents?.[0].file_name).toBe("relationship.pdf");
   });
 
+  it("keeps where a referenced identity copy comes from", () => {
+    const intake = normalizeLeadPortalIntake({ lead_id: "test-only", identity_documents: [
+      { id: "earlier", file_name: "parent.pdf", uploaded_at: "2026-11-12T07:00:00Z", reviewed: true, from_earlier_request: true },
+      { id: "record", file_name: "record.pdf", uploaded_at: null, reviewed: true, from_patient_record: true },
+      { id: "own", file_name: "own.pdf", uploaded_at: null, reviewed: false, from_earlier_request: "yes" },
+    ] });
+    expect(intake?.identity_documents.map((item) => [item.id, item.from_earlier_request ?? false, item.from_patient_record ?? false])).toEqual([
+      ["earlier", true, false],
+      ["record", false, true],
+      ["own", false, false],
+    ]);
+  });
+
   it("keeps old backend absence and unknown values distinct from a negative answer", () => {
     const intake = normalizeLeadPortalIntake({ lead_id: "test-only", billing: { via_third_party_kind: "unknown" }, enhanced_details: {} });
     expect(intake?.consent_form).toBeNull();

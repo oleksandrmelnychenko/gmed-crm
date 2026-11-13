@@ -9174,15 +9174,25 @@ ${serviceCommentLines.join("\n")}`
     const files = documents.filter((item) => byId.has(item.id) && !item.file_deleted_at);
     // A parent who is a patient: the passport of the patient record counts here;
     // it is not one of this lead's documents, so it is named, not managed (DEV 2026-10-27).
-    const fromRecord = uploads.filter((item) => item.from_patient_record && !files.some((file) => file.id === item.id));
+    // A repeat request: the parent's checked copy of the same valid document on the
+    // earlier request counts the same way (owner 2026-11-13).
+    const fromRecord = uploads.filter((item) => (item.from_patient_record || item.from_earlier_request) && !files.some((file) => file.id === item.id));
     if (files.length === 0 && fromRecord.length === 0) return null;
     return (
       <>
       {fromRecord.map((item) => (
-        <div key={item.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-card px-3 py-2 text-sm" data-testid="representative-file-from-patient-record">
+        <div
+          key={item.id}
+          className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-card px-3 py-2 text-sm"
+          data-testid={item.from_earlier_request ? "representative-file-from-earlier-request" : "representative-file-from-patient-record"}
+        >
           <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
           <span className="min-w-0 break-all">{item.file_name || tx("Документ", "Dokument")}</span>
-          <StatusChip tone="success">{tx("Из карточки пациента", "Aus der Patientenakte")}</StatusChip>
+          <StatusChip tone="success">
+            {item.from_earlier_request
+              ? tx("Из прежней заявки", "Aus der früheren Anfrage")
+              : tx("Из карточки пациента", "Aus der Patientenakte")}
+          </StatusChip>
         </div>
       ))}
       {files.length > 0 ? <WizardDocumentRows

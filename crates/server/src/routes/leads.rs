@@ -2542,7 +2542,8 @@ fn emergency_contact_of(contacts: &Value) -> (Option<String>, Option<String>, Op
 /// columns (the old one-contact model named the emergency contact there) —
 /// but never while a parent or guardian is among the contacts, since a
 /// minor's parents are not the emergency contact by themselves (owner
-/// decision 2026-10-19).
+/// decision 2026-10-19). A minor without one gets the first contracting
+/// parent once the relations are written (owner decision 2026-11-13).
 fn emergency_contact_for_patient(
     contacts: &Value,
     legacy: (Option<String>, Option<String>, Option<String>),
@@ -4158,7 +4159,7 @@ async fn apply_repeat_patient_readiness(
     input: &mut LeadConversionReadinessInput,
 ) -> Result<(), axum::response::Response> {
     let row = sqlx::query(
-        r#"SELECT p.id AS patient_id, p.legal_status,
+        r#"SELECT p.id AS patient_id, p.legal_status, p.passport_expiry,
                   fc.patient_id AS contract_patient_id, fc.lead_id AS contract_lead_id,
                   fc.status AS contract_status, fc.signed_at,
                   o.package_coverage_status
@@ -4189,7 +4190,14 @@ async fn apply_repeat_patient_readiness(
     })?;
     let Some(row) = row else { return Ok(()) };
     let legal: Value = row.try_get("legal_status").unwrap_or_else(|_| json!({}));
-    input.identity_document_verified |= legal["identity_verified"] == true;
+    // The patient's checked identity document counts again while it is
+    // valid; an expired one is identified anew (owner decision 2026-11-13).
+    let document_expired = row
+        .try_get::<Option<NaiveDate>, _>("passport_expiry")
+        .ok()
+        .flatten()
+        .is_some_and(|valid_until| valid_until < crate::app_time::today());
+    input.identity_document_verified |= legal["identity_verified"] == true && !document_expired;
     input.dsgvo_document_signed |= legal["dsgvo_signed"] == true;
     input.confidentiality_release_signed |= legal["confidentiality_release_signed"] == true;
     // A lead's compliance is "signed" once its DSGVO consent is signed. For a
@@ -4420,8 +4428,10 @@ async fn list_previous_requests(
 /// name parts and address of the relation as their row. Without this the
 /// request of a minor has no legal representatives, and its contracts, cost
 /// estimates and the patient's own signatures are refused until staff enter
-/// both parents again. Identity documents are not copied: they are checked
-/// for every request. A linked parent's data come from their patient record
+/// both parents again. A parent's identity document data of the earlier
+/// request come along while the document is valid, and its checked copy
+/// counts by reference (owner decision 2026-11-13); an expired document is
+/// asked again. A linked parent's data come from their patient record
 /// ([`crate::services::lead_guardian_identity`]). Nothing for an adult.
 async fn prefill_minor_repeat_representation(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -4465,6 +4475,7 @@ async fn prefill_minor_repeat_representation(
     .fetch_all(&mut **tx)
     .await?;
     let mut contacts = Vec::new();
+    let mut identity_documents_reused = 0usize;
     for relation in &relations {
         let Some(name) = relation.try_get::<Option<String>, _>("name")? else {
             continue;
@@ -4514,12 +4525,54 @@ async fn prefill_minor_repeat_representation(
             let citizenships = repeat_representative_citizenships(
                 relation.try_get::<Vec<String>, _>("citizenships")?,
             );
-            sqlx::query(
+            // The parent's birth place and identity document as the latest
+            // earlier request of this patient recorded them (owner decision
+            // 2026-11-13: a repeat request takes over everything but what
+            // expired). An expired document is left out and asked again; who
+            // entered the data and when stays as recorded there. The checked
+            // copy of the document is referenced by the representation
+            // ([`super::lead_representatives::load`]), never copied.
+            let reused: Option<bool> = sqlx::query_scalar(
                 r#"INSERT INTO lead_representatives (
                        lead_id, contact_id, role, contact_origin, first_name, last_name,
-                       street, zip, city, country, updated_by, citizenships)
-                   VALUES ($1, $2, 'legal_representative', 'staff', $3, $4, $5, $6, $7, $8, $9, $10)
-                   ON CONFLICT (lead_id, contact_id) DO NOTHING"#,
+                       street, zip, city, country, updated_by, citizenships,
+                       birth_place, birth_country, id_document_type, id_document_number,
+                       id_issuing_authority, id_issuing_country, id_issued_on, id_valid_until,
+                       id_data_entered_by, id_data_entered_at, id_data_client_at)
+                   SELECT $1, $2, 'legal_representative', 'staff', $3, $4, $5, $6, $7, $8, $9, $10,
+                          earlier.birth_place, earlier.birth_country,
+                          CASE WHEN earlier.valid THEN earlier.id_document_type END,
+                          CASE WHEN earlier.valid THEN earlier.id_document_number END,
+                          CASE WHEN earlier.valid THEN earlier.id_issuing_authority END,
+                          CASE WHEN earlier.valid THEN earlier.id_issuing_country END,
+                          CASE WHEN earlier.valid THEN earlier.id_issued_on END,
+                          CASE WHEN earlier.valid THEN earlier.id_valid_until END,
+                          CASE WHEN earlier.valid THEN earlier.id_data_entered_by END,
+                          CASE WHEN earlier.valid THEN earlier.id_data_entered_at END,
+                          CASE WHEN earlier.valid THEN earlier.id_data_client_at END
+                   FROM (SELECT 1) AS one
+                   LEFT JOIN LATERAL (
+                       SELECT er.birth_place, er.birth_country, er.id_document_type,
+                              er.id_document_number, er.id_issuing_authority,
+                              er.id_issuing_country, er.id_issued_on, er.id_valid_until,
+                              er.id_data_entered_by, er.id_data_entered_at, er.id_data_client_at,
+                              (er.id_document_number IS NOT NULL OR er.id_valid_until IS NOT NULL)
+                              AND (er.id_valid_until IS NULL OR er.id_valid_until >= $12) AS valid
+                       FROM patient_relations rel
+                       JOIN lead_representatives er
+                            ON er.contact_id IN (rel.id, rel.source_contact_id)
+                       JOIN leads e ON e.id = er.lead_id
+                       WHERE rel.id = $2 AND rel.patient_id = $11 AND e.id <> $1
+                         AND (e.converted_patient_id = $11 OR e.repeat_patient_id = $11)
+                         AND e.qualification_status <> 'deleted'
+                         AND (er.id_document_number IS NOT NULL OR er.id_valid_until IS NOT NULL
+                              OR er.birth_place IS NOT NULL)
+                       ORDER BY er.id_data_entered_at DESC NULLS LAST, er.updated_at DESC,
+                                e.created_at DESC
+                       LIMIT 1
+                   ) AS earlier ON true
+                   ON CONFLICT (lead_id, contact_id) DO NOTHING
+                   RETURNING id_document_number IS NOT NULL OR id_valid_until IS NOT NULL"#,
             )
             .bind(lead_id)
             .bind(contact_id)
@@ -4531,8 +4584,13 @@ async fn prefill_minor_repeat_representation(
             .bind(country)
             .bind(actor)
             .bind(&citizenships)
-            .execute(&mut **tx)
+            .bind(patient_id)
+            .bind(crate::app_time::today())
+            .fetch_optional(&mut **tx)
             .await?;
+            if reused == Some(true) {
+                identity_documents_reused += 1;
+            }
         }
     }
     if !contacts.is_empty() {
@@ -4586,6 +4644,7 @@ async fn prefill_minor_repeat_representation(
             json!({
                 "patient_id": patient_id,
                 "contacts": contacts.len(),
+                "identity_documents_reused": identity_documents_reused,
                 "custody": custody,
             }),
         ),
@@ -4598,8 +4657,10 @@ async fn prefill_minor_repeat_representation(
 /// the passport number and validity of the patient card, completed with the
 /// type, authority, country and issue date the patient's earlier request
 /// recorded for that same document. Another number on the card means another
-/// document: only the card's data then. The data are checked for the request
-/// as usual (an expired document is named as such); the scan is not copied.
+/// document: only the card's data then. An expired document is not taken
+/// over: the request asks for the new one (owner decision 2026-11-13). The
+/// scan is not copied; the patient record's copy counts while the card's
+/// document is valid ([`super::lead_portal_intake`]).
 async fn prefill_repeat_identity_document(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     lead_id: Uuid,
@@ -4648,7 +4709,9 @@ async fn prefill_repeat_identity_document(
            SELECT $1, document_type, document_number, authority, issuing_country, issued_on,
                   valid_until, $3, clock_timestamp(), $3
            FROM prefill
-           WHERE document_number IS NOT NULL OR valid_until IS NOT NULL
+           WHERE (document_number IS NOT NULL OR valid_until IS NOT NULL)
+             -- An expired document is asked again (owner decision 2026-11-13).
+             AND (valid_until IS NULL OR valid_until >= $4)
            ON CONFLICT (lead_id) DO UPDATE SET
                id_document_type = COALESCE(lead_gwg_declarations.id_document_type, EXCLUDED.id_document_type),
                id_document_number = COALESCE(lead_gwg_declarations.id_document_number, EXCLUDED.id_document_number),
@@ -4656,13 +4719,22 @@ async fn prefill_repeat_identity_document(
                id_issuing_country = COALESCE(lead_gwg_declarations.id_issuing_country, EXCLUDED.id_issuing_country),
                id_issued_on = COALESCE(lead_gwg_declarations.id_issued_on, EXCLUDED.id_issued_on),
                id_valid_until = COALESCE(lead_gwg_declarations.id_valid_until, EXCLUDED.id_valid_until),
-               id_data_entered_by = COALESCE(lead_gwg_declarations.id_data_entered_by, EXCLUDED.id_data_entered_by),
-               id_data_entered_at = COALESCE(lead_gwg_declarations.id_data_entered_at, EXCLUDED.id_data_entered_at)
+               -- Who took the data over and when follow the last change
+               -- (owner decision 2026-11-13), not the first entry.
+               id_data_entered_by = CASE WHEN (lead_gwg_declarations.id_document_number IS NULL AND EXCLUDED.id_document_number IS NOT NULL)
+                                           OR (lead_gwg_declarations.id_valid_until IS NULL AND EXCLUDED.id_valid_until IS NOT NULL)
+                                         THEN EXCLUDED.id_data_entered_by
+                                         ELSE lead_gwg_declarations.id_data_entered_by END,
+               id_data_entered_at = CASE WHEN (lead_gwg_declarations.id_document_number IS NULL AND EXCLUDED.id_document_number IS NOT NULL)
+                                           OR (lead_gwg_declarations.id_valid_until IS NULL AND EXCLUDED.id_valid_until IS NOT NULL)
+                                         THEN EXCLUDED.id_data_entered_at
+                                         ELSE lead_gwg_declarations.id_data_entered_at END
            RETURNING (SELECT source FROM prefill)"#,
     )
     .bind(lead_id)
     .bind(patient_id)
     .bind(actor)
+    .bind(crate::app_time::today())
     .fetch_optional(&mut **tx)
     .await?;
     let Some(source) = source else {
@@ -10410,6 +10482,8 @@ async fn convert_lead(
                     .map(|(_, relation)| *relation)
             })
             .collect::<Vec<_>>();
+        // The first contracting parent: the emergency contact below.
+        let first_parent: Option<Uuid> = relation_ids.first().copied();
         let stored = sqlx::query_scalar::<_, Uuid>(
             r#"UPDATE patients
                SET custody = $2,
@@ -10451,6 +10525,59 @@ async fn convert_lead(
             Ok(None) => {}
             Err(error) => {
                 tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "store contracting party on conversion");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+        // A minor's emergency contact (owner decision 2026-11-13): without
+        // one marked on the request or on the card, the first contracting
+        // parent becomes it — on the relation and on the card. A contact
+        // marked before stays; a repeat conversion changes nothing then.
+        let marked = sqlx::query_scalar::<_, Uuid>(
+            r#"WITH chosen AS (
+                   UPDATE patient_relations r SET is_emergency_contact = true
+                   WHERE r.patient_id = $1
+                     AND r.id = COALESCE($2, (SELECT p.contracting_relation_ids[1]
+                                              FROM patients p WHERE p.id = $1))
+                     AND NOT EXISTS (SELECT 1 FROM patient_relations o
+                                     WHERE o.patient_id = $1 AND o.is_emergency_contact)
+                     AND NOT EXISTS (SELECT 1 FROM patients p
+                                     WHERE p.id = $1
+                                       AND NULLIF(btrim(p.emergency_contact_name), '') IS NOT NULL)
+                   RETURNING r.id, r.related_name, r.phone, r.relation_type
+               )
+               UPDATE patients p
+               SET emergency_contact_name = chosen.related_name,
+                   emergency_contact_phone = chosen.phone,
+                   emergency_contact_relation = chosen.relation_type
+               FROM chosen
+               WHERE p.id = $1
+               RETURNING chosen.id"#,
+        )
+        .bind(patient_id)
+        .bind(first_parent)
+        .fetch_optional(&mut *tx)
+        .await;
+        match marked {
+            Ok(Some(relation_id)) => {
+                if let Err(error) = audit::write_in_transaction(
+                    &mut tx,
+                    &audit::domain_event(
+                        "set_emergency_contact_on_conversion",
+                        Some(auth.user_id),
+                        "patient",
+                        Some(patient_id),
+                        json!({ "lead_id": lead_id, "relation_id": relation_id }),
+                    ),
+                )
+                .await
+                {
+                    tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "audit emergency contact on conversion");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "store emergency contact on conversion");
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         }

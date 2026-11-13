@@ -2955,6 +2955,9 @@ async fn replace_refused_identity_copies(
 }
 
 /// Whether the lead has an identity document uploaded through the cabinet.
+/// The copy of the patient record (a repeat request takes it over, owner
+/// decision 2026-11-13) counts while the card's document is valid: an
+/// expired document needs a new copy.
 async fn identity_document_uploaded<'e, E>(executor: E, lead_id: Uuid) -> Result<bool, sqlx::Error>
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
@@ -2970,9 +2973,14 @@ where
                WHERE (d.lead_id = l.id OR d.patient_id = l.prospect_patient_id)
                  AND d.status = 'active' AND d.file_deleted_at IS NULL
                  AND d.compliance_kind = 'identity'
+                 AND (d.lead_id IS NOT DISTINCT FROM l.id
+                      OR NOT EXISTS (SELECT 1 FROM patients p
+                                     WHERE p.id = l.prospect_patient_id
+                                       AND p.passport_expiry < $2))
            )"#,
     )
     .bind(lead_id)
+    .bind(crate::app_time::today())
     .fetch_one(executor)
     .await
 }
@@ -5228,6 +5236,28 @@ async fn update_my_identification(
         && let Err(error) = store_identification(&mut tx, lead_id, &next, auth.user_id).await
     {
         return internal(error, "store identification");
+    }
+    // The identity document's data typed by staff in the client's form are
+    // staff's entry, dated by the last save (owner decision 2026-11-13: the
+    // label «Внесено сотрудником» kept the time of the first entry).
+    if kind == AccessKind::Staff
+        && changed.iter().any(|field| field.starts_with("id_"))
+        && let Err(error) = sqlx::query(
+            r#"UPDATE lead_gwg_declarations SET
+                   id_data_entered_by = $2,
+                   id_data_entered_at = GREATEST(
+                       clock_timestamp(),
+                       (SELECT max(u.created_at) FROM lead_portal_uploads u
+                        WHERE u.lead_id = $1 AND u.kind = 'identity'
+                          AND u.withdrawn_at IS NULL))
+               WHERE lead_id = $1"#,
+        )
+        .bind(lead_id)
+        .bind(auth.user_id)
+        .execute(&mut *tx)
+        .await
+    {
+        return internal(error, "store identity data author");
     }
     let now = match portal_update_time(&mut tx).await {
         Ok(now) => now,
