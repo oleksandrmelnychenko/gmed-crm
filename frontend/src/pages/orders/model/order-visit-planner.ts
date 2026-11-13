@@ -171,6 +171,63 @@ export function batchPayload(drafts: readonly DraftVisit[], dryRun: boolean) {
   };
 }
 
+/** A saved grid draft line (`GET /orders/{id}/visit-drafts`). */
+export type SavedVisitDraft = {
+  id: string;
+  provider_id: string;
+  provider_name: string;
+  doctor_id: string | null;
+  doctor_name: string | null;
+  title: string;
+  date: string;
+  time_start: string;
+  time_end: string;
+  interpreter_needed: boolean;
+  interpreter_id: string | null;
+};
+
+/** The saved draft back on the grid; a line whose times cannot be read is left out. */
+export function draftsFromSaved(saved: readonly SavedVisitDraft[]): DraftVisit[] {
+  return saved.flatMap((item) => {
+    const start = timeToMinutes(item.time_start);
+    const end = timeToMinutes(item.time_end);
+    if (start === null || end === null || end <= start) return [];
+    return [
+      {
+        key: `saved-${item.id}`,
+        doctor: {
+          providerId: item.provider_id,
+          providerName: item.provider_name,
+          doctorId: item.doctor_id,
+          doctorName: item.doctor_name,
+        },
+        date: item.date,
+        start,
+        duration: end - start,
+        title: item.title,
+        interpreterNeeded: item.interpreter_needed,
+        interpreterId: item.interpreter_id ?? "",
+      },
+    ];
+  });
+}
+
+/** The body of `POST /orders/{id}/visit-drafts`: the grid as it stands. */
+export function draftSavePayload(drafts: readonly DraftVisit[]) {
+  return {
+    items: batchPayload(drafts, false).items.map((item) => ({
+      provider_id: item.provider_id,
+      doctor_id: item.doctor_id,
+      title: item.title,
+      date: item.date,
+      time_start: item.time_start,
+      time_end: item.time_end,
+      interpreter_needed: item.interpreter_needed,
+      interpreter_id: item.interpreter_id,
+    })),
+  };
+}
+
 const SCOPE_TEXT = {
   ru: { patient: "пациент", doctor: "врач", interpreter: "переводчик" },
   de: { patient: "Patient", doctor: "Arzt", interpreter: "Dolmetscher" },

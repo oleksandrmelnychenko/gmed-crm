@@ -40,6 +40,11 @@ type OrderPlannedAppointmentsProps = {
   canReleasePlan?: boolean;
   /** The viewer may add appointments under the doctors (plan stage 3). */
   canPlan?: boolean;
+  /**
+   * A lead's order (no patient yet): the planner lays the doctors out on the
+   * grid as a draft that becomes visits once the order has its patient.
+   */
+  canDraft?: boolean;
   patientId?: string | null;
   /** An appointment was added: the other planning blocks reload. */
   onChanged?: () => void;
@@ -114,6 +119,7 @@ export function OrderPlannedAppointments({
   appointmentsHref,
   canReleasePlan = false,
   canPlan = false,
+  canDraft = false,
   patientId = null,
   onChanged,
 }: OrderPlannedAppointmentsProps) {
@@ -122,7 +128,9 @@ export function OrderPlannedAppointments({
   const planning = canPlan && Boolean(patientId);
   // Planners start with the doctors: visits are added under them.
   // Planners start on the grid (stage 6): doctors laid out on days and hours.
-  const [groupBy, setGroupBy] = useState<GroupBy>(planning ? "grid" : "day");
+  const drafting = canDraft && !planning;
+  const gridAllowed = planning || drafting;
+  const [groupBy, setGroupBy] = useState<GroupBy>(gridAllowed ? "grid" : "day");
   const [loaded, setLoaded] = useState<{
     orderId: string;
     items: OrderPipelineAppointment[];
@@ -177,7 +185,7 @@ export function OrderPlannedAppointments({
   const careTeam = loaded?.orderId === orderId ? loaded.careTeam : null;
   const extraDoctors = addedDoctors.orderId === orderId ? addedDoctors.doctors : [];
   const unreleased = appointments ? unreleasedPlanCount(appointments) : 0;
-  const gridShown = planning && groupBy === "grid";
+  const gridShown = gridAllowed && groupBy === "grid";
   // The grid's doctors: the care team, the doctors already booked, the added ones.
   const gridDoctors = useMemo(() => {
     if (!gridShown || !appointments) return [];
@@ -265,7 +273,7 @@ export function OrderPlannedAppointments({
           <div className="inline-flex rounded-lg border border-border/70 bg-muted/30 p-0.5" role="group">
             {(
               [
-                ...(planning ? ([["grid", tx("Сетка", "Raster"), LayoutGrid]] as const) : []),
+                ...(gridAllowed ? ([["grid", tx("Сетка", "Raster"), LayoutGrid]] as const) : []),
                 ["day", tx("По дням", "Nach Tagen"), CalendarDays],
                 ["doctor", tx("По врачам", "Nach Ärzten"), Stethoscope],
               ] as const
@@ -304,6 +312,7 @@ export function OrderPlannedAppointments({
             onAddDoctor={addDoctor}
             firstDay={gridFirstDay}
             onCreated={() => handleCreated("")}
+            mode={drafting ? "draft" : "create"}
           />
         ) : null}
         {appointments && !gridShown && groups.length === 0 ? (

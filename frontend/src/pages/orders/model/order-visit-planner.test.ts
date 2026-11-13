@@ -124,3 +124,23 @@ describe("batchFailureText", () => {
     );
   });
 });
+
+describe("grid drafts of a lead's order", () => {
+  it("restores saved lines and drops unreadable ones", async () => {
+    const { draftsFromSaved, draftSavePayload } = await import("./order-visit-planner");
+    const restored = draftsFromSaved([
+      { id: "s1", provider_id: "p1", provider_name: "Charité", doctor_id: "d1", doctor_name: "Dr. Müller",
+        title: "Echo", date: "2026-11-20", time_start: "09:00", time_end: "10:30", interpreter_needed: true, interpreter_id: null },
+      { id: "s2", provider_id: "p1", provider_name: "Charité", doctor_id: null, doctor_name: null,
+        title: "Broken", date: "2026-11-20", time_start: "11:00", time_end: "10:00", interpreter_needed: false, interpreter_id: null },
+    ]);
+    expect(restored).toHaveLength(1);
+    expect(restored[0]).toMatchObject({ start: 540, duration: 90, interpreterNeeded: true, interpreterId: "" });
+    expect(draftSavePayload(restored)).toEqual({
+      items: [{
+        provider_id: "p1", doctor_id: "d1", title: "Echo", date: "2026-11-20", time_start: "09:00", time_end: "10:30",
+        interpreter_needed: true, interpreter_id: null,
+      }],
+    });
+  });
+});

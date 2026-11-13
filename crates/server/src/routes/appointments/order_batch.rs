@@ -548,6 +548,15 @@ pub(super) async fn create_order_appointments(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    // The order's grid draft (saved while it was a lead's order) is now visits.
+    if let Err(e) = sqlx::query("DELETE FROM order_visit_drafts WHERE order_id = $1")
+        .bind(order_id)
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(error = %e, %order_id, "batch visits: clear grid draft");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, %order_id, "batch visits: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
@@ -618,12 +627,28 @@ pub(super) async fn list_order_busy_time(
         (Ok(doctors), Ok(interpreters)) => (doctors, interpreters),
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid id list"),
     };
+    // A lead's order has no patient yet: its draft grid still sees the
+    // doctors' and interpreters' taken time.
     let patient_id = match load_order_patient(&state, order_id).await {
-        Ok(value) => value,
+        Ok(value) => Some(value),
+        Err(resp) if resp.status() == StatusCode::CONFLICT => None,
         Err(resp) => return resp,
     };
-    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
-        return resp;
+    match patient_id {
+        Some(patient_id) => {
+            if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+                return resp;
+            }
+        }
+        None => {
+            match crate::routes::orders::can_access_order_preparation(&state, &auth, order_id, None)
+                .await
+            {
+                Ok(true) => {}
+                Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+                Err(resp) => return resp,
+            }
+        }
     }
 
     let rows = match sqlx::query(
@@ -658,7 +683,8 @@ pub(super) async fn list_order_busy_time(
     let items: Vec<serde_json::Value> = rows
         .iter()
         .map(|row| {
-            let own = row.try_get::<Uuid, _>("patient_id").ok() == Some(patient_id);
+            let own =
+                patient_id.is_some() && row.try_get::<Uuid, _>("patient_id").ok() == patient_id;
             let doctor_id: Option<Uuid> = row.try_get("doctor_id").unwrap_or_default();
             let interpreter_id: Option<Uuid> = row.try_get("interpreter_id").unwrap_or_default();
             let declined = row

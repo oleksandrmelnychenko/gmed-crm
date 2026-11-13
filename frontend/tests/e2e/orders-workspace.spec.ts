@@ -653,6 +653,62 @@ test("the planning grid shows the server's refusal per visit and creates nothing
   expect(saves).toBe(0);
 });
 
+test("a lead's order keeps the grid as a draft until the patient exists (plan stage 6)", async ({page}) => {
+  await page.clock.setFixedTime(new Date("2026-11-13T09:00:00+01:00"));
+  const {order} = await prepare(page);
+  Object.assign(order, {patient_id: null, patient_pid: null, patient_name: "Inga Mustermann", source_lead_id: "lead-1"});
+  const saves: Array<{items: Array<Record<string, unknown>>}> = [];
+  let batchCalls = 0;
+  await page.route(`**/api/v1/orders/${orderId}/pipeline`, route => route.fulfill({json: {
+    order_id: orderId, phase: "intake", status: "active", stages: [], medical: {visible: false, required: false},
+    care_team: [
+      {provider_id: "klinik", provider_name: "Klinik Nord", provider_type: "medical", doctor_id: "weber", doctor_name: "Dr. Weber",
+       doctor_title: null, doctor_specialty: null, services: 1, appointments: 0},
+    ],
+    appointments: [],
+  }}));
+  await page.route(`**/api/v1/orders/${orderId}/visit-drafts`, route => {
+    if (route.request().method() === "POST") {
+      saves.push(route.request().postDataJSON());
+      return route.fulfill({json: {saved: saves.at(-1)!.items.length}});
+    }
+    return route.fulfill({json: {items: [
+      {id: "s1", provider_id: "labor", provider_name: "Labor Süd", doctor_id: null, doctor_name: null, title: "Blutbild",
+       date: "2026-11-17", time_start: "08:00", time_end: "08:30", interpreter_needed: false, interpreter_id: null},
+    ]}});
+  });
+  await page.route(`**/api/v1/orders/${orderId}/appointments/busy**`, route => route.fulfill({json: {items: []}}));
+  await page.route(`**/api/v1/orders/${orderId}/appointments/batch`, route => {
+    batchCalls += 1;
+    return route.fulfill({status: 409, json: {error: "Conflict", code: "order_without_patient"}});
+  });
+
+  await page.goto(`/orders/${orderId}?section=planning`);
+  const planner = page.getByTestId("order-visit-planner");
+  await expect(planner).toHaveAttribute("data-mode", "draft");
+  await expect(planner).toContainText("Заказ лида: пациента ещё нет");
+  // The saved draft is back on the grid, its provider in the doctor list.
+  await expect(planner.getByTestId("order-visit-planner-draft")).toHaveCount(1);
+  await expect(planner.getByRole("option", {name: /Labor Süd/})).toBeVisible();
+  await expect(planner.getByTestId("order-visit-planner-create")).toBeHidden();
+  const save = planner.getByTestId("order-visit-planner-save-draft");
+  await expect(save).toBeDisabled();
+
+  await planner.getByRole("option", {name: /Dr. Weber/}).click();
+  await planner.locator('[data-testid="order-visit-planner-day"][data-date="2026-11-17"] [data-slot-time="10:00"]').click();
+  await expect(save).toHaveText("Сохранить черновик (2)");
+  await save.click();
+  await expect(planner).toContainText("Черновик сохранён: 2");
+  expect(saves).toHaveLength(1);
+  expect(saves[0].items).toEqual([
+    expect.objectContaining({provider_id: "labor", doctor_id: null, title: "Blutbild", time_start: "08:00", time_end: "08:30"}),
+    expect.objectContaining({provider_id: "klinik", doctor_id: "weber", date: "2026-11-17", time_start: "10:00", time_end: "11:00"}),
+  ]);
+  await expect(save).toBeDisabled();
+  // A lead's grid never tries to create visits.
+  expect(batchCalls).toBe(0);
+});
+
 test("after the visits papers, interpreter hours and clinic invoices sit at their visit (plan stage 7)", async ({page}) => {
   await page.clock.setFixedTime(new Date("2026-11-13T09:00:00+01:00"));
   await prepare(page);

@@ -649,3 +649,146 @@ async fn pipeline_names_the_interpreter_hours_of_each_visit() {
     assert_eq!(row["report_status"], "pending");
     assert_eq!(row["interpreter_needed"], true);
 }
+
+// Grid drafts of a lead's order (owner 2026-11-13): saved while the order has
+// no patient, turned into visits by the batch once it has one.
+
+async fn seed_lead_order(fx: &Fixture) -> (Uuid, Uuid) {
+    let lead: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, created_by)
+           VALUES ('Synthetic', $1, $2, $3) RETURNING id"#,
+    )
+    .bind(format!("Lead {}", fx.tag))
+    .bind(format!("{}@example.com", fx.tag))
+    .bind(fx.pm_id)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    let order: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, source_lead_id, needs_description, created_by)
+           VALUES ($1, $2, 'Synthetic lead order', $3) RETURNING id"#,
+    )
+    .bind(format!("A-LEAD-{}", fx.tag))
+    .bind(lead)
+    .bind(fx.pm_id)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    (lead, order)
+}
+
+#[tokio::test]
+async fn a_lead_order_keeps_a_grid_draft_that_the_batch_turns_into_visits() {
+    let Some(fx) = fixture().await else {
+        return;
+    };
+    let (_lead, lead_order) = seed_lead_order(&fx).await;
+    let drafts_path = format!("/api/v1/orders/{lead_order}/visit-drafts");
+    let mut first = visit(&fx, fx.doctor_a, day(20), "09:00", "10:00");
+    first["interpreter_needed"] = json!(true);
+    let second = visit(&fx, fx.doctor_b, day(20), "11:00", "11:45");
+
+    // No patient yet: the batch is refused, the draft is saved.
+    let (status, body) = json_request(
+        &fx.app,
+        "POST",
+        &format!("/api/v1/orders/{lead_order}/appointments/batch"),
+        &fx.pm,
+        Some(json!({ "dry_run": true, "items": [first.clone()] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "order_without_patient");
+    let (status, body) = json_request(
+        &fx.app,
+        "POST",
+        &drafts_path,
+        &fx.pm,
+        Some(json!({ "items": [first, second] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(&fx.app, "GET", &drafts_path, &fx.pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["time_start"], "09:00");
+    assert_eq!(items[0]["interpreter_needed"], true);
+    assert_eq!(items[1]["doctor_id"], json!(fx.doctor_b));
+
+    // The busy time of the lead's grid shows the doctors' bookings only.
+    seed_foreign_booking(&fx, fx.doctor_a, day(20), "13:00", "14:00").await;
+    let (status, body) = json_request(
+        &fx.app,
+        "GET",
+        &format!(
+            "/api/v1/orders/{lead_order}/appointments/busy?from={}&to={}&doctor_ids={}",
+            day(20),
+            day(20),
+            fx.doctor_a
+        ),
+        &fx.pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["items"].as_array().unwrap().len(), 1, "{body}");
+    assert_eq!(body["items"][0]["scopes"], json!(["doctor"]));
+
+    // A doctor of another provider is refused; an interpreter may not plan.
+    let other_provider = seed_provider(&fx.pool, &format!("{}-p3", fx.tag)).await;
+    let mut wrong = visit(&fx, fx.doctor_a, day(21), "09:00", "10:00");
+    wrong["provider_id"] = json!(other_provider);
+    let (status, _) = json_request(
+        &fx.app,
+        "POST",
+        &drafts_path,
+        &fx.pm,
+        Some(json!({ "items": [wrong] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let interpreter = seed_user(&fx.pool, &fx.tag, "interpreter").await;
+    let (status, _) = json_request(
+        &fx.app,
+        "GET",
+        &drafts_path,
+        &bearer(interpreter, "interpreter"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (_, body) = json_request(&fx.app, "GET", &drafts_path, &fx.pm, None).await;
+    assert_eq!(
+        body["items"].as_array().unwrap().len(),
+        2,
+        "a refused save keeps the draft"
+    );
+
+    // The order gets its patient; creating the visits removes the draft.
+    sqlx::query("UPDATE orders SET patient_id = $2 WHERE id = $1")
+        .bind(lead_order)
+        .bind(fx.patient_id)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(
+        &fx.app,
+        "POST",
+        &format!("/api/v1/orders/{lead_order}/appointments/batch"),
+        &fx.pm,
+        Some(json!({ "items": [visit(&fx, fx.doctor_b, day(20), "11:00", "11:45")] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (_, body) = json_request(&fx.app, "GET", &drafts_path, &fx.pm, None).await;
+    assert_eq!(body["items"], json!([]));
+    let saved_audit: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_log WHERE action = 'save_order_visit_drafts' AND entity_id = $1",
+    )
+    .bind(lead_order)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(saved_audit, 1);
+}

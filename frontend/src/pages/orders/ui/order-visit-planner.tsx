@@ -26,6 +26,8 @@ import {
   batchPayload,
   doctorKeyOf,
   draftConflicts,
+  draftSavePayload,
+  draftsFromSaved,
   gridDays,
   gridSlots,
   minutesToTime,
@@ -35,6 +37,7 @@ import {
   type BatchFailure,
   type BusySlot,
   type DraftVisit,
+  type SavedVisitDraft,
 } from "../model/order-visit-planner";
 import { PlanningDoctorPicker } from "./order-appointment-entry";
 
@@ -62,6 +65,11 @@ type OrderVisitPlannerProps = {
   firstDay?: string;
   /** Visits were created: the plan reloads. */
   onCreated: (count: number) => void;
+  /**
+   * "draft" for a lead's order: no patient yet, so the grid is saved as a
+   * draft that becomes visits once the order has its patient.
+   */
+  mode?: "create" | "draft";
 };
 
 type DragPayload = { kind: "doctor"; key: string } | { kind: "draft"; key: string };
@@ -85,7 +93,9 @@ export function OrderVisitPlanner({
   onAddDoctor,
   firstDay,
   onCreated,
+  mode = "create",
 }: OrderVisitPlannerProps) {
+  const draftMode = mode === "draft";
   const de = lang === "de";
   const tx = (ru: string, german: string) => (de ? german : ru);
   const [startDay, setStartDay] = useState(() => firstDay ?? appDateKey());
@@ -102,8 +112,41 @@ export function OrderVisitPlanner({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /** The grid as last saved as a draft; differs from the grid while unsaved. */
+  const [savedDraft, setSavedDraft] = useState(() => JSON.stringify(draftSavePayload([])));
   const nextKey = useRef(1);
   const savingRef = useRef(false);
+  const onAddDoctorRef = useRef(onAddDoctor);
+  onAddDoctorRef.current = onAddDoctor;
+  const knownDoctorKeys = useRef(new Set<string>());
+  knownDoctorKeys.current = new Set(doctors.map(doctorKeyOf));
+
+  // The order's saved draft (laid out while it was a lead's order).
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ items: SavedVisitDraft[] }>(`/orders/${orderId}/visit-drafts`)
+      .then((result) => {
+        if (cancelled || !Array.isArray(result?.items) || result.items.length === 0) return;
+        const restored = draftsFromSaved(result.items);
+        setDrafts(restored);
+        setSavedDraft(JSON.stringify(draftSavePayload(restored)));
+        const added = new Set<string>();
+        for (const draft of restored) {
+          const key = doctorKeyOf(draft.doctor);
+          if (!knownDoctorKeys.current.has(key) && !added.has(key)) {
+            added.add(key);
+            onAddDoctorRef.current(draft.doctor);
+          }
+        }
+        if (restored[0]) setStartDay(restored.map((draft) => draft.date).sort()[0]);
+      })
+      .catch(() => {
+        // No draft, or the viewer may not read it: the grid starts empty.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [orderId]);
   const dragRef = useRef<DragPayload | null>(null);
 
   const days = useMemo(() => gridDays(startDay), [startDay]);
@@ -161,7 +204,8 @@ export function OrderVisitPlanner({
 
   // The server's dry run: the same checks as the save, nothing written.
   useEffect(() => {
-    if (drafts.length === 0) {
+    // A lead's order cannot hold visits yet: nothing to dry-run.
+    if (drafts.length === 0 || draftMode) {
       setServerFailures([]);
       return;
     }
@@ -189,7 +233,7 @@ export function OrderVisitPlanner({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [drafts, orderId]);
+  }, [drafts, draftMode, orderId]);
 
   const localConflicts = useMemo(() => draftConflicts(drafts, busy), [drafts, busy]);
   const failureByKey = useMemo(() => {
@@ -201,6 +245,29 @@ export function OrderVisitPlanner({
     return map;
   }, [drafts, serverFailures]);
   const missingTitle = drafts.some((draft) => !draft.title.trim());
+  const draftDirty = JSON.stringify(draftSavePayload(drafts)) !== savedDraft;
+  const saveDraft = () => {
+    if (!draftDirty || missingTitle || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setError(null);
+    const payload = draftSavePayload(drafts);
+    apiFetch(`/orders/${orderId}/visit-drafts`, { method: "POST", body: JSON.stringify(payload) })
+      .then(() => {
+        setSavedDraft(JSON.stringify(payload));
+        setNotice(
+          tx(
+            `Черновик сохранён: ${drafts.length}. Приёмы создадутся из него, когда у заказа появится пациент.`,
+            `Entwurf gespeichert: ${drafts.length}. Die Termine werden daraus angelegt, sobald der Auftrag einen Patienten hat.`,
+          ),
+        );
+      })
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)))
+      .finally(() => {
+        savingRef.current = false;
+        setSaving(false);
+      });
+  };
   const blocked =
     drafts.length === 0 ||
     localConflicts.size > 0 ||
@@ -312,7 +379,15 @@ export function OrderVisitPlanner({
     DOCTOR_TONES[(doctorIndex.get(doctorKeyOf(doctor)) ?? 0) % DOCTOR_TONES.length];
 
   return (
-    <div data-testid="order-visit-planner" className="space-y-3">
+    <div data-testid="order-visit-planner" data-mode={mode} className="space-y-3">
+      {draftMode ? (
+        <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200">
+          {tx(
+            "Заказ лида: пациента ещё нет, поэтому сохраняем черновик. Когда лид станет пациентом, блоки будут ждать здесь — останется нажать «Создать все приёмы».",
+            "Auftrag eines Leads: noch kein Patient, daher wird ein Entwurf gespeichert. Sobald der Lead Patient ist, stehen die Blöcke hier bereit – dann «Alle Termine anlegen».",
+          )}
+        </p>
+      ) : null}
       {/* The side panel moves under the grid until the screen has room for five days. */}
       <div className="grid gap-3 lg:grid-cols-[12rem_minmax(0,1fr)] 2xl:grid-cols-[13rem_minmax(0,1fr)_15rem]">
         <div className="space-y-2">
@@ -647,10 +722,23 @@ export function OrderVisitPlanner({
               {tx("Очистить", "Leeren")}
             </Button>
           ) : null}
+          {draftMode ? (
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 gap-1.5"
+              data-testid="order-visit-planner-save-draft"
+              disabled={!draftDirty || missingTitle || saving}
+              onClick={saveDraft}
+            >
+              {saving ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+              {tx(`Сохранить черновик (${drafts.length})`, `Entwurf speichern (${drafts.length})`)}
+            </Button>
+          ) : null}
           <Button
             type="button"
             size="sm"
-            className="h-8 gap-1.5"
+            className={draftMode ? "hidden" : "h-8 gap-1.5"}
             data-testid="order-visit-planner-create"
             disabled={blocked}
             onClick={createAll}

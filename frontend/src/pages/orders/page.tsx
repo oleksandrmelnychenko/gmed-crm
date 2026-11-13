@@ -3598,6 +3598,15 @@ function useOrdersPageContent() {
   const canReleaseOrderPlan = Boolean(
     detailNewAppointmentHref && (user?.role === "ceo" || user?.role === "patient_manager"),
   );
+  // A lead's order has no patient yet: CEO and PM lay the visits out on
+  // the grid as a draft (owner 2026-11-13).
+  const canDraftOrderPlan = Boolean(
+    orderDetail &&
+      !detailPatientId &&
+      detailLeadId &&
+      !orderStepsLocked &&
+      (user?.role === "ceo" || user?.role === "patient_manager"),
+  );
   // The same condition as inside OrderInterpretersByDay.
   const interpretersByDayShown = Boolean(
     detailPatientId && hasCapability(user, "appointments.assign_interpreter"),
@@ -5595,6 +5604,7 @@ function useOrdersPageContent() {
                         appointmentsHref={detailAppointmentsHref}
                         canReleasePlan={canReleaseOrderPlan}
                         canPlan={Boolean(detailNewAppointmentHref)}
+                        canDraft={canDraftOrderPlan}
                         patientId={detailPatientId}
                         onChanged={() => setReloadNonce((current) => current + 1)}
                       />
