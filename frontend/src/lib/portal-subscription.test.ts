@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  canRequestPortalService,
   hasPortalSubscription,
-  isBasicPortalRoute,
-  isPausedPortalRoute,
+  isPortalRouteLocked,
   isPortalSubscriptionPaused,
+  isTariffPortalRoute,
 } from "./portal-subscription";
 import { listPatientPortalNavItems } from "./staff-route-access";
 
@@ -27,20 +28,36 @@ describe("paused subscription (owner decision 2026-11-10)", () => {
     expect(isPortalSubscriptionPaused({ role: "ceo" }, null)).toBe(false);
   });
 
-  it("keeps agreed visits, the subscriptions page, the chat and notifications open", () => {
-    const open = listPatientPortalNavItems()
-      .filter((item) => isBasicPortalRoute(item.to) || isPausedPortalRoute(item.to)).map((item) => item.to);
-    for (const path of ["/appointments", "/services", "/subscriptions", "/chat", "/notifications", "/documents", "/invoices"]) {
-      expect(open, path).toContain(path);
+  it("keeps every page and the chat open, but no new concierge request", () => {
+    for (const item of listPatientPortalNavItems()) {
+      expect(isPortalRouteLocked(paused, "p", item.to), item.to).toBe(false);
     }
-    for (const path of ["/", "/recommendations", "/feedback", "/services-extra"]) {
-      expect(isBasicPortalRoute(path) || isPausedPortalRoute(path), path).toBe(false);
+    expect(canRequestPortalService(paused, "p")).toBe(false);
+  });
+});
+
+describe("tariff is optional (owner decision 9, 2026-11-13)", () => {
+  it("locks only the team chat without a tariff", () => {
+    const locked = listPatientPortalNavItems({ leadRequests: true })
+      .filter((item) => isPortalRouteLocked(user, "mother", item.to)).map((item) => item.to);
+    expect(locked).toEqual(["/chat"]);
+    for (const path of ["/", "/appointments", "/services", "/notifications", "/subscriptions", "/documents", "/invoices"]) {
+      expect(isPortalRouteLocked(user, "mother", path), path).toBe(false);
     }
+    expect(isTariffPortalRoute("/chat/x")).toBe(true);
+    expect(isTariffPortalRoute("/chatter")).toBe(false);
+    expect(canRequestPortalService(user, "mother")).toBe(false);
+  });
+
+  it("opens the chat and new requests with the tariff of the selected person", () => {
+    expect(isPortalRouteLocked(user, "child", "/chat")).toBe(false);
+    expect(canRequestPortalService(user, "child")).toBe(true);
+    expect(isPortalRouteLocked({ role: "ceo" }, null, "/chat")).toBe(false);
   });
 });
 
 describe("patient subscription access", () => {
-  it("locks a converted patient without a subscription, including missing metadata", () => {
+  it("knows no subscription for a converted patient without one, including missing metadata", () => {
     expect(hasPortalSubscription(user, "mother")).toBe(false);
     expect(hasPortalSubscription({ role: "patient", patients: [{ id: "old", name: "Old", patient_number: "P3" }] }, "old")).toBe(false);
     expect(hasPortalSubscription({ role: "patient", portal_mode: "lead", patients: user.patients }, "child")).toBe(false);
@@ -52,13 +69,5 @@ describe("patient subscription access", () => {
     expect(hasPortalSubscription(user, "revoked")).toBe(false);
     expect(hasPortalSubscription({ ...user, patients: [user.patients[1]] }, null)).toBe(true);
     expect(hasPortalSubscription({ role: "ceo" }, null)).toBe(true);
-  });
-  it("leaves exactly the basic records, account and existing request available in the navigation", () => {
-    const allowed = listPatientPortalNavItems({ leadRequests: true })
-      .filter((item) => isBasicPortalRoute(item.to)).map((item) => item.id);
-    expect(allowed).toEqual(["lead_request", "documents", "invoices", "privacy", "account", "legal"]);
-    expect(isBasicPortalRoute("/documents/a")).toBe(true);
-    expect(isBasicPortalRoute("/documents-extra")).toBe(false);
-    expect(isBasicPortalRoute("/")).toBe(false);
   });
 });

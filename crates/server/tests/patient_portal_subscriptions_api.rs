@@ -472,13 +472,21 @@ async fn portal_subscriptions_are_self_scoped_visible_and_client_safe() {
 
     let other_bearer = auth_header_for(other_patient_user_id, "patient");
     let (status, other_body) = get_json(&app, "/api/v1/me/subscriptions", &other_bearer).await;
+    // The subscriptions page needs no tariff (owner decision 9, 2026-11-13);
+    // the other patient sees nothing of the first patient's subscriptions.
     assert_eq!(
         status,
-        StatusCode::FORBIDDEN,
+        StatusCode::OK,
         "other patient response: {other_body:?}"
     );
-    // This assignment has no order: it cannot unlock the subscriptions module.
-    assert_eq!(other_body["error"], "subscription_required");
+    for item in items {
+        assert!(
+            !other_body
+                .to_string()
+                .contains(item["id"].as_str().unwrap_or("-")),
+            "{other_body}"
+        );
+    }
     assert!(!items.iter().any(|item| item["id"] == other_id.to_string()));
 
     let manager_bearer = auth_header_for(manager_id, "patient_manager");

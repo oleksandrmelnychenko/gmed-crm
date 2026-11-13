@@ -128,8 +128,10 @@ async fn subscription(pool: &PgPool, patient: Uuid, actor: Uuid) -> (Uuid, Uuid)
     (assigned, order)
 }
 
+/// The team chat is the module that needs an active tariff (owner decision
+/// 9, 2026-11-13); `/me` reports the tariff of the selected person.
 async fn assert_access(app: &axum::Router, token: &str, patient_id: Uuid, allowed: bool) {
-    let (status, body) = request(app, token, "/me/recommendations", Some(patient_id)).await;
+    let (status, body) = request(app, token, "/messages/conversations", Some(patient_id)).await;
     assert_eq!(
         status,
         if allowed {
@@ -153,8 +155,26 @@ async fn assert_access(app: &axum::Router, token: &str, patient_id: Uuid, allowe
     assert_eq!(linked["has_active_subscription"], allowed);
 }
 
+async fn post_appointment_request(
+    app: &axum::Router,
+    token: &str,
+    patient: Uuid,
+) -> (StatusCode, Value) {
+    post(
+        app,
+        token,
+        "/me/appointment-requests",
+        patient,
+        json!({
+            "appointment_type": "medical",
+            "reason": "Synthetic request"
+        }),
+    )
+    .await
+}
+
 #[tokio::test]
-async fn portal_service_access_requires_a_current_released_subscription_in_an_order() {
+async fn the_chat_needs_a_current_released_subscription_in_an_order() {
     let Some(ctx) = support::suite_context(SECRET).await else {
         return;
     };
@@ -178,27 +198,6 @@ async fn portal_service_access_requires_a_current_released_subscription_in_an_or
     assign(pool, patient_id, user_id, ctx.admin_id, "manual").await;
     let token = bearer(user_id, "patient");
     assert_access(&ctx.app, &token, patient_id, false).await;
-    for path in [
-        "/me/profile",
-        "/me/privacy-requests",
-        "/me/documents",
-        "/me/invoices",
-        "/me/account-statement",
-    ] {
-        let (status, body) = request(&ctx.app, &token, path, Some(patient_id)).await;
-        assert_eq!(status, StatusCode::OK, "{path}: {body}");
-    }
-    for path in [
-        "/me/appointments",
-        "/me/subscriptions",
-        "/messages/conversations",
-        "/notifications",
-        "/patients",
-    ] {
-        let (status, body) = request(&ctx.app, &token, path, Some(patient_id)).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
-        assert_eq!(body["error"], "subscription_required");
-    }
     let (assigned, order) = subscription(pool, patient_id, ctx.admin_id).await;
     assert_access(&ctx.app, &token, patient_id, true).await;
     for status in ["draft", "paused", "completed", "cancelled"] {
@@ -208,7 +207,9 @@ async fn portal_service_access_requires_a_current_released_subscription_in_an_or
             .execute(pool)
             .await
             .unwrap();
-        assert_access(&ctx.app, &token, patient_id, false).await;
+        let (code, me) = request(&ctx.app, &token, "/me", Some(patient_id)).await;
+        assert_eq!(code, StatusCode::OK, "{me}");
+        assert_eq!(me["patients"][0]["has_active_subscription"], false, "{me}");
     }
     sqlx::query(
         "UPDATE patient_service_packages SET status='active',portal_visible=false WHERE id=$1",
@@ -263,6 +264,110 @@ async fn portal_service_access_requires_a_current_released_subscription_in_an_or
     );
 }
 
+/// Owner decision 9 (2026-11-13): the order tariff is optional. Without one
+/// the portal shows everything of the patient's own orders — visits,
+/// documents, invoices, notifications, recommendations, the subscriptions
+/// page and the concierge services already booked; only a new concierge
+/// request and the team chat need a tariff. Staff routes stay refused by
+/// their own role checks.
+#[tokio::test]
+async fn without_a_tariff_the_portal_shows_the_own_orders_and_locks_only_new_concierge_requests_and_the_chat()
+ {
+    let Some(ctx) = support::suite_context(SECRET).await else {
+        return;
+    };
+    let pool = &ctx.pool;
+    let patient_id = patient(pool, ctx.admin_id).await;
+    let user_id = user(pool).await;
+    assign(pool, patient_id, user_id, ctx.admin_id, "manual").await;
+    let token = bearer(user_id, "patient");
+    // A service staff booked for the patient (no tariff anywhere).
+    let booked: Uuid = sqlx::query_scalar(
+        "INSERT INTO concierge_services(patient_id, service_kind, title, starts_at, status, created_by)
+         VALUES($1, 'transfer', 'Synthetic booked transfer', '2099-04-22T09:00:00Z', 'booked', $2)
+         RETURNING id",
+    )
+    .bind(patient_id)
+    .bind(ctx.admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    for path in [
+        "/me/profile",
+        "/me/privacy-requests",
+        "/me/documents",
+        "/me/invoices",
+        "/me/account-statement",
+        "/me/appointments",
+        "/me/appointment-requests",
+        "/me/followup-milestones",
+        "/me/subscriptions",
+        "/me/recommendations",
+        "/me/next-actions",
+        "/notifications",
+        "/notifications/unread-count",
+    ] {
+        let (status, body) = request(&ctx.app, &token, path, Some(patient_id)).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
+    }
+    let (status, body) =
+        request(&ctx.app, &token, "/me/concierge-services", Some(patient_id)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body.as_array()
+            .expect("service list")
+            .iter()
+            .any(|service| service["id"] == booked.to_string()),
+        "the booked service is listed: {body}"
+    );
+
+    // Locked: the team chat and a new concierge request.
+    for path in ["/messages/conversations", "/messages/unread-total"] {
+        let (status, body) = request(&ctx.app, &token, path, Some(patient_id)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
+        assert_eq!(body["error"], "subscription_required");
+    }
+    let (status, body) = post(
+        &ctx.app,
+        &token,
+        "/me/concierge-services",
+        patient_id,
+        concierge_request("Synthetic request without a tariff"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"], "subscription_required");
+
+    // An appointment request is no tariff module.
+    let (status, body) = post_appointment_request(&ctx.app, &token, patient_id).await;
+    assert_ne!(body["error"], "subscription_required", "{status}: {body}");
+
+    // Staff routes keep their own refusal.
+    let (status, body) = request(&ctx.app, &token, "/patients", Some(patient_id)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // With the tariff the chat and a new request open.
+    subscription(pool, patient_id, ctx.admin_id).await;
+    let (status, body) = request(
+        &ctx.app,
+        &token,
+        "/messages/conversations",
+        Some(patient_id),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = post(
+        &ctx.app,
+        &token,
+        "/me/concierge-services",
+        patient_id,
+        concierge_request("Synthetic request with a tariff"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+}
+
 #[tokio::test]
 async fn a_family_login_cannot_share_a_subscription_between_patient_contexts() {
     let Some(ctx) = support::suite_context(SECRET).await else {
@@ -277,7 +382,7 @@ async fn a_family_login_cannot_share_a_subscription_between_patient_contexts() {
     subscription(&ctx.pool, child, ctx.admin_id).await;
     assert_access(&ctx.app, &token, parent, false).await;
     assert_access(&ctx.app, &token, child, true).await;
-    let (status, body) = request(&ctx.app, &token, "/me/recommendations", None).await;
+    let (status, body) = request(&ctx.app, &token, "/messages/conversations", None).await;
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
@@ -337,6 +442,7 @@ async fn a_paused_subscription_keeps_agreed_visits_and_the_chat_open() {
         "/me/appointments",
         "/me/appointment-requests",
         "/me/subscriptions",
+        "/me/recommendations",
         "/messages/conversations",
         "/messages/allowed-peers",
         "/messages/unread-total",
@@ -345,9 +451,6 @@ async fn a_paused_subscription_keeps_agreed_visits_and_the_chat_open() {
         let (status, body) = request(&ctx.app, &token, path, Some(patient_id)).await;
         assert_eq!(status, StatusCode::OK, "{path}: {body}");
     }
-    let (status, body) = request(&ctx.app, &token, "/me/recommendations", Some(patient_id)).await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
-    assert_eq!(body["error"], "subscription_required");
 
     // Owner decision 2026-11-12: the own concierge requests stay readable
     // and an open one can be cancelled; a new one is refused.
@@ -392,47 +495,28 @@ async fn a_paused_subscription_keeps_agreed_visits_and_the_chat_open() {
     .unwrap();
     assert_eq!(open_requests, 1);
 
-    // A new appointment request is a new action: refused.
-    let response = ctx
-        .app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/me/appointment-requests")
-                .header("Authorization", &token)
-                .header("X-Patient-Id", patient_id.to_string())
-                .header("Content-Type", "application/json")
-                .body(Body::from(
-                    serde_json::to_vec(&json!({
-                        "appointment_type": "medical",
-                        "reason": "Synthetic request"
-                    }))
-                    .unwrap(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
-        .await
-        .unwrap();
-    let body: Value = serde_json::from_slice(&body).unwrap_or(json!(null));
+    // A new appointment request is a new action: refused during the pause.
+    let (status, body) = post_appointment_request(&ctx.app, &token, patient_id).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
     assert_eq!(body["error"], "subscription_required");
 
-    // Without the pause (cancelled) the same read routes close again.
+    // Without any tariff (cancelled) the own records stay open (owner
+    // decision 9, 2026-11-13), the chat closes.
     sqlx::query("UPDATE patient_service_packages SET status='cancelled' WHERE id=$1")
         .bind(assigned)
         .execute(pool)
         .await
         .unwrap();
-    for path in [
-        "/me/appointments",
-        "/me/concierge-services",
-        "/messages/conversations",
-    ] {
+    for path in ["/me/appointments", "/me/concierge-services"] {
         let (status, body) = request(&ctx.app, &token, path, Some(patient_id)).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
     }
+    let (status, body) = request(
+        &ctx.app,
+        &token,
+        "/messages/conversations",
+        Some(patient_id),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
 }

@@ -26,16 +26,25 @@ export function isPortalSubscriptionPaused(user: PortalUser | null, patientId: s
 }
 
 /**
- * What stays open during a pause besides the basic routes (the server allows the same).
- * `/services` shows the own requests read-only and lets the patient cancel an
- * open one; no new request (owner decision 2026-11-12).
+ * The only portal page that needs the order tariff (owner decision 9,
+ * 2026-11-13): the team chat. Without a tariff the portal shows everything
+ * of the own orders — visits, services already booked, notifications,
+ * documents, invoices; a new concierge request is closed inside the services
+ * page. A pause keeps the chat open (owner decision 2026-11-10). The server
+ * allows the same.
  */
-export function isPausedPortalRoute(pathname: string): boolean {
-  return ["/appointments", "/services", "/subscriptions", "/chat", "/notifications"]
-    .some((root) => pathname === root || pathname.startsWith(`${root}/`));
+export function isTariffPortalRoute(pathname: string): boolean {
+  return ["/chat"].some((root) => pathname === root || pathname.startsWith(`${root}/`));
 }
 
-export function isBasicPortalRoute(pathname: string): boolean {
-  return ["/account", "/privacy", "/documents", "/invoices", "/legal", "/security", "/request", "/trusted-persons"]
-    .some((root) => pathname === root || pathname.startsWith(`${root}/`));
+/** The chat (the tariff page) is closed for the selected person. */
+export function isPortalRouteLocked(user: PortalUser | null, patientId: string | null, pathname: string): boolean {
+  if (user?.role !== "patient" || user.portal_mode === "lead") return false;
+  if (!isTariffPortalRoute(pathname)) return false;
+  return !hasPortalSubscription(user, patientId) && !isPortalSubscriptionPaused(user, patientId);
+}
+
+/** A new concierge request needs an active tariff (not a paused one). */
+export function canRequestPortalService(user: PortalUser | null, patientId: string | null): boolean {
+  return hasPortalSubscription(user, patientId);
 }

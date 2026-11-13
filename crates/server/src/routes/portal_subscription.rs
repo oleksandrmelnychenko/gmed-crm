@@ -1,5 +1,8 @@
-//! Patient status enables sign-in; an active package in the patient's order
-//! enables the service modules. Basic records and account rights stay open.
+//! Patient status enables sign-in. The order tariff (GMED One / Reserve /
+//! Behandlung) is optional (owner decision 9, 2026-11-13): without one the
+//! portal shows everything of the patient's own orders — visits, documents,
+//! invoices, notifications, the concierge services already booked — and only
+//! a new concierge request and the team chat need an active tariff.
 use axum::{
     Json,
     extract::{Request, State},
@@ -41,6 +44,10 @@ pub(crate) async fn has_active_subscription(
     subscription_matches(state, patient_id, ACTIVE_SUBSCRIPTION_SQL).await
 }
 
+async fn has_paused_subscription(state: &AppState, patient_id: Uuid) -> Result<bool, Response> {
+    subscription_matches(state, patient_id, PAUSED_SUBSCRIPTION_SQL).await
+}
+
 async fn subscription_matches(
     state: &AppState,
     patient_id: Uuid,
@@ -65,40 +72,28 @@ async fn subscription_matches(
     })
 }
 
-pub(crate) async fn require_subscription(
-    state: &AppState,
-    auth: &AuthUser,
-) -> Result<(), Response> {
-    require_subscription_state(state, auth, false).await
+/// The patient record of a portal login; a login without one gets the
+/// subscription refusal, as before.
+async fn portal_patient_id(state: &AppState, auth: &AuthUser) -> Result<Uuid, Response> {
+    match super::me::resolve_self_patient_id(state, auth).await {
+        Ok(id) => Ok(id),
+        Err(response) if response.status() == StatusCode::NOT_FOUND => Err(subscription_required()),
+        Err(response) => Err(response),
+    }
 }
 
-/// As [`require_subscription`], but a paused subscription is enough: for the
-/// read routes of what is already agreed and for the chat.
+/// The team chat: an active tariff, or a paused one (the chat with the
+/// manager stays open during a pause, owner decision 2026-11-10).
 pub(crate) async fn require_subscription_or_pause(
     state: &AppState,
     auth: &AuthUser,
 ) -> Result<(), Response> {
-    require_subscription_state(state, auth, true).await
-}
-
-async fn require_subscription_state(
-    state: &AppState,
-    auth: &AuthUser,
-    paused_is_enough: bool,
-) -> Result<(), Response> {
     if auth.role != Role::Patient {
         return Ok(());
     }
-    let patient_id = match super::me::resolve_self_patient_id(state, auth).await {
-        Ok(id) => id,
-        Err(response) if response.status() == StatusCode::NOT_FOUND => {
-            return Err(subscription_required());
-        }
-        Err(response) => return Err(response),
-    };
+    let patient_id = portal_patient_id(state, auth).await?;
     if has_active_subscription(state, patient_id).await?
-        || (paused_is_enough
-            && subscription_matches(state, patient_id, PAUSED_SUBSCRIPTION_SQL).await?)
+        || has_paused_subscription(state, patient_id).await?
     {
         Ok(())
     } else {
@@ -153,34 +148,26 @@ fn basic_path(path: &str) -> bool {
         .any(|root| within(path, root))
 }
 
-/// What a patient with a paused subscription still reaches besides the basic
-/// paths: the visits already booked and the own requests (read only), the
-/// own concierge service requests (read, and cancelling an open one: owner
-/// decision 2026-11-12), the subscriptions page, the chat with the team and
-/// the notifications. Creating a request or a service, withdrawing an
-/// appointment request and recommendations stay closed.
-fn paused_path(method: &Method, path: &str) -> bool {
+/// What needs a tariff (owner decision 9, 2026-11-13): a new concierge
+/// request and the team chat. Cancelling an own open request, the booked
+/// services, visits, notifications and the rest of the own orders do not.
+fn tariff_path(method: &Method, path: &str) -> bool {
     let path = path.strip_prefix("/api/v1").unwrap_or(path);
-    let read = method == Method::GET || method == Method::HEAD;
-    (read
-        && [
-            "/me/appointments",
-            "/me/appointment-requests",
-            "/me/concierge-services",
-            "/me/followup-milestones",
-            "/me/subscriptions",
-        ]
-        .contains(&path))
-        || (method == Method::POST && concierge_service_cancel_path(path))
-        || within(path, "/messages")
-        || within(path, "/notifications")
+    (method == Method::POST && path == "/me/concierge-services") || chat_path(path)
 }
 
-/// `/me/concierge-services/{service_id}/cancel`, with exactly one id segment.
-fn concierge_service_cancel_path(path: &str) -> bool {
-    path.strip_prefix("/me/concierge-services/")
-        .and_then(|tail| tail.strip_suffix("/cancel"))
-        .is_some_and(|id| !id.is_empty() && !id.contains('/'))
+fn chat_path(path: &str) -> bool {
+    let path = path.strip_prefix("/api/v1").unwrap_or(path);
+    within(path, "/messages")
+}
+
+/// What a subscription staff paused closes besides a new concierge request
+/// (owner decision 2026-11-10, new actions closed): a new appointment
+/// request and withdrawing one. Without any tariff they stay open — only the
+/// staff pause closes them.
+fn pause_closed_path(method: &Method, path: &str) -> bool {
+    let path = path.strip_prefix("/api/v1").unwrap_or(path);
+    method == Method::POST && within(path, "/me/appointment-requests")
 }
 
 pub async fn middleware(State(state): State<AppState>, req: Request, next: Next) -> Response {
@@ -188,13 +175,31 @@ pub async fn middleware(State(state): State<AppState>, req: Request, next: Next)
         && auth.role == Role::Patient
         && !basic_path(req.uri().path())
     {
-        let checked = if paused_path(req.method(), req.uri().path()) {
-            require_subscription_or_pause(&state, auth).await
-        } else {
-            require_subscription(&state, auth).await
+        let path = req.uri().path();
+        let patient_id = match portal_patient_id(&state, auth).await {
+            Ok(id) => id,
+            Err(response) => return response,
         };
-        if let Err(response) = checked {
-            return response;
+        let needs_tariff = tariff_path(req.method(), path);
+        if needs_tariff || pause_closed_path(req.method(), path) {
+            let active = match has_active_subscription(&state, patient_id).await {
+                Ok(value) => value,
+                Err(response) => return response,
+            };
+            if !active {
+                let paused = match has_paused_subscription(&state, patient_id).await {
+                    Ok(value) => value,
+                    Err(response) => return response,
+                };
+                let allowed = if needs_tariff {
+                    paused && chat_path(path)
+                } else {
+                    !paused
+                };
+                if !allowed {
+                    return subscription_required();
+                }
+            }
         }
     }
     next.run(req).await
@@ -236,39 +241,46 @@ mod tests {
     }
 
     #[test]
-    fn a_pause_keeps_agreed_visits_and_the_chat_but_no_new_requests() {
-        for path in [
-            "/me/appointments",
-            "/api/v1/me/appointment-requests",
-            "/me/followup-milestones",
-            "/me/subscriptions",
-            "/messages/conversations",
-            "/notifications/unread-count",
-        ] {
-            assert!(paused_path(&Method::GET, path), "{path}");
-        }
-        // Writing to the chat and marking a notice read stay possible.
-        assert!(paused_path(&Method::POST, "/messages/a/upload"));
-        assert!(paused_path(&Method::POST, "/notifications/a/read"));
-        // The own concierge requests stay readable and an open one can be
-        // cancelled (owner decision 2026-11-12); a new one stays refused.
-        assert!(paused_path(&Method::GET, "/me/concierge-services"));
-        assert!(paused_path(
-            &Method::POST,
-            "/api/v1/me/concierge-services/a/cancel"
-        ));
+    fn only_a_new_concierge_request_and_the_chat_need_a_tariff() {
         for (method, path) in [
-            (Method::POST, "/me/appointment-requests"),
-            (Method::POST, "/me/appointment-requests/a/withdraw"),
-            (Method::GET, "/me/recommendations"),
             (Method::POST, "/me/concierge-services"),
-            (Method::POST, "/me/concierge-services//cancel"),
-            (Method::POST, "/me/concierge-services/a/b/cancel"),
-            (Method::GET, "/me/concierge-services/a/cancel"),
+            (Method::POST, "/api/v1/me/concierge-services"),
+            (Method::GET, "/messages/conversations"),
+            (Method::POST, "/messages/a/upload"),
+            (Method::GET, "/api/v1/messages/unread-total"),
+        ] {
+            assert!(tariff_path(&method, path), "{method} {path}");
+        }
+        for (method, path) in [
+            (Method::GET, "/me/concierge-services"),
+            (Method::POST, "/me/concierge-services/a/cancel"),
+            (Method::GET, "/me/appointments"),
+            (Method::GET, "/me/appointment-requests"),
+            (Method::POST, "/me/appointment-requests"),
+            (Method::GET, "/me/followup-milestones"),
+            (Method::GET, "/me/subscriptions"),
+            (Method::GET, "/me/recommendations"),
             (Method::GET, "/me/next-actions"),
+            (Method::GET, "/notifications"),
+            (Method::POST, "/notifications/a/read"),
             (Method::GET, "/messagesX"),
         ] {
-            assert!(!paused_path(&method, path), "{method} {path}");
+            assert!(!tariff_path(&method, path), "{method} {path}");
         }
+    }
+
+    #[test]
+    fn a_pause_closes_new_appointment_requests_only() {
+        assert!(pause_closed_path(&Method::POST, "/me/appointment-requests"));
+        assert!(pause_closed_path(
+            &Method::POST,
+            "/api/v1/me/appointment-requests/a/withdraw"
+        ));
+        assert!(!pause_closed_path(&Method::GET, "/me/appointment-requests"));
+        assert!(!pause_closed_path(&Method::GET, "/me/appointments"));
+        assert!(!pause_closed_path(
+            &Method::POST,
+            "/me/appointment-requestsX"
+        ));
     }
 }

@@ -58,6 +58,8 @@ export const portalQaUiDe = {
   "portal_paused_appointments_note": "Ihr Abonnement ist pausiert: Bereits vereinbarte Termine sehen Sie hier weiterhin, neue Anfragen und Änderungen sind bis zur Fortsetzung nicht möglich. Bei Fragen schreiben Sie Ihrem Manager im Chat.",
   "portal_paused_services_note": "Ihr Abonnement ist pausiert: Ihre Serviceanfragen sehen Sie hier weiterhin, und eine offene Anfrage können Sie stornieren. Neue Anfragen sind bis zur Fortsetzung nicht möglich. Bei Fragen schreiben Sie Ihrem Manager im Chat.",
   "portal_paused_subscriptions_note": "Ihr Abonnement ist pausiert. Neue Termin- und Serviceanfragen sind bis zur Fortsetzung geschlossen; vereinbarte Termine, Dokumente, Rechnungen und der Chat mit Ihrem Manager bleiben verfügbar.",
+  // No order tariff (owner decision 9, 2026-11-13)
+  "portal_services_tariff_note": "Die für Sie gebuchten Services sehen Sie hier. Neue Serviceanfragen und der Chat mit dem Team sind mit einem Tarif in Ihrem Auftrag möglich (GMED One, Reserve oder Behandlung). Bitte wenden Sie sich an GMED.",
   // Account
   "account_profile_error_name_required": "Bitte geben Sie Ihren Namen an.",
 } as const satisfies Record<string, string>;
@@ -106,5 +108,6 @@ export const portalQaUiRu = {
   "portal_paused_appointments_note": "Ваша подписка приостановлена: уже согласованные визиты по-прежнему видны здесь, новые запросы и изменения недоступны до возобновления. С вопросами напишите менеджеру в чате.",
   "portal_paused_services_note": "Ваша подписка приостановлена: ваши запросы на сервисы по-прежнему видны здесь, открытый запрос можно отменить. Новые запросы недоступны до возобновления. С вопросами напишите менеджеру в чате.",
   "portal_paused_subscriptions_note": "Ваша подписка приостановлена. Новые запросы на визиты и сервисы закрыты до возобновления; согласованные визиты, документы, счета и чат с менеджером остаются доступными.",
+  "portal_services_tariff_note": "Здесь видны сервисы, заказанные для вас. Новые запросы на сервисы и чат с командой доступны с тарифом в вашем заказе (GMED One, Reserve или Behandlung). Обратитесь в GMED.",
   "account_profile_error_name_required": "Укажите имя.",
 } as const satisfies Record<keyof typeof portalQaUiDe, string>;

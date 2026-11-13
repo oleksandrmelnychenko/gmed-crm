@@ -20,9 +20,7 @@ import { TwoFactorReminder } from "@/components/two-factor-reminder";
 import { clearApiCache } from "@/lib/api";
 import { selectPortalPatient, usePortalPatientId } from "@/lib/portal-patient-context";
 import {
-  hasPortalSubscription,
-  isBasicPortalRoute,
-  isPausedPortalRoute,
+  isPortalRouteLocked,
   isPortalSubscriptionPaused,
 } from "@/lib/portal-subscription";
 import { PortalSubscriptionLock } from "@/components/portal-subscription-lock";
@@ -89,11 +87,11 @@ function AuthenticatedAppShellContent() {
   // The 404 page needs no patient picked and no subscription.
   const unknownPath = !isKnownAppPath(location.pathname);
   const needsPatient = !accountPage && !unknownPath && patients.length > 1 && !patients.some((patient) => patient.id === patientId);
-  // A pause keeps the agreed visits, the subscriptions page and the chat open.
+  // The tariff is optional (owner decision 9, 2026-11-13): only the team
+  // chat needs it; a pause keeps the chat open.
   const subscriptionPaused = isPortalSubscriptionPaused(user ?? null, patientId);
   const subscriptionLocked = user?.role === "patient" && !isLeadPortalUser(user) && !unknownPath
-    && !hasPortalSubscription(user, patientId) && !isBasicPortalRoute(location.pathname)
-    && !(subscriptionPaused && isPausedPortalRoute(location.pathname));
+    && isPortalRouteLocked(user, patientId, location.pathname);
 
   if (
     user &&

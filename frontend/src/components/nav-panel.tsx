@@ -25,8 +25,7 @@ import { LeadPortalPlanDialog } from "@/components/lead-portal-plan-dialog";
 import { PortalSubscriptionLock } from "@/components/portal-subscription-lock";
 import {
   hasPortalSubscription,
-  isBasicPortalRoute,
-  isPausedPortalRoute,
+  isPortalRouteLocked,
   isPortalSubscriptionPaused,
 } from "@/lib/portal-subscription";
 import { isPortalLegalRepresentative, usePortalPatientId } from "@/lib/portal-patient-context";
@@ -133,7 +132,7 @@ export function NavPanel() {
           ...listLeadPortalNavItems().filter((item) => item.id === "account" || item.id === "legal").map(toPatientNavItem),
         ].map(withShellLabel)
       : listPatientPortalNavItems({ leadRequests: Boolean(user?.lead_portal?.requests) })
-        .map((item) => ({ ...toPatientNavItem(item), locked: !needsPatientSelection && !subscribed && !isBasicPortalRoute(item.to) && !(subscriptionPaused && isPausedPortalRoute(item.to)) }))
+        .map((item) => ({ ...toPatientNavItem(item), locked: !needsPatientSelection && isPortalRouteLocked(user ?? null, patientId, item.to) }))
     : [];
   const staffNavBySection =
     user && user.role !== "patient"

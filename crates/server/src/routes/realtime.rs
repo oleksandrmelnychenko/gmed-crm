@@ -338,25 +338,9 @@ async fn can_receive_event(
             .any(|(lead_id, _)| *lead_id == event.entity_id));
     }
 
-    // Live updates and replay follow the same service entitlement as HTTP.
-    // A package for another family member cannot unlock this patient's data.
-    if auth.role == Role::Patient
-        && !matches!(
-            event.entity_type.as_str(),
-            "document" | "invoice" | "privacy_request" | "user" | "session" | "security"
-        )
-    {
-        let patient_id = match event.patient_id {
-            Some(id) => id,
-            None => match super::me::resolve_linked_patient_id(state, auth).await? {
-                Some(id) => id,
-                None => return Ok(false),
-            },
-        };
-        if !super::portal_subscription::has_active_subscription(state, patient_id).await? {
-            return Ok(false);
-        }
-    }
+    // Live updates of the own orders need no tariff, like the HTTP reads
+    // (owner decision 9, 2026-11-13): the portal allow-list below decides,
+    // and it checks the event's patient against the login's own patients.
 
     // A portal login hears only what the portal itself shows: an allow-list,
     // so a staff event of the login's own patient (the staff copy of an order

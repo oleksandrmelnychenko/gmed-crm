@@ -10,7 +10,7 @@ import {
   type FormEvent,
   type SetStateAction,
 } from "react";
-import { Building2, ConciergeBell, LoaderCircle, Plus, RefreshCw, Send } from "lucide-react";
+import { Building2, ConciergeBell, LoaderCircle, LockKeyhole, Plus, RefreshCw, Send } from "lucide-react";
 
 import { Dialog } from "@/components/ui/dialog";
 import { AdminDialogScaffold } from "@/components/admin-dialog-scaffold";
@@ -36,7 +36,8 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { usePortalPatientId } from "@/lib/portal-patient-context";
-import { isPortalSubscriptionPaused } from "@/lib/portal-subscription";
+import { canRequestPortalService, isPortalSubscriptionPaused } from "@/lib/portal-subscription";
+import { PortalSubscriptionLock } from "@/components/portal-subscription-lock";
 import { appDateKey, berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { uiText, useLang, type Lang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
@@ -375,7 +376,13 @@ export function PatientServicesPage() {
   const { user } = useAuth();
   // Paused subscription (owner decision 2026-11-12): the own requests stay
   // readable and an open one can be cancelled; no new request.
-  const subscriptionPaused = isPortalSubscriptionPaused(user ?? null, usePortalPatientId(user?.id));
+  const portalPatientId = usePortalPatientId(user?.id);
+  const subscriptionPaused = isPortalSubscriptionPaused(user ?? null, portalPatientId);
+  // Without an order tariff (owner decision 9, 2026-11-13) the own and the
+  // booked services stay visible; only a new request is locked (padlock).
+  const tariffMissing = !subscriptionPaused && !canRequestPortalService(user ?? null, portalPatientId);
+  const newRequestsClosed = subscriptionPaused || tariffMissing;
+  const [tariffLockOpen, setTariffLockOpen] = useState(false);
   const [pageState, dispatchPageState] = useReducer(
     patientServicesReducer,
     undefined,
@@ -428,7 +435,7 @@ export function PatientServicesPage() {
         // (and the server refuses the catalogue then).
         const [rows, taxonomy] = await Promise.all([
           fetchPortalServices(),
-          subscriptionPaused ? Promise.resolve(null) : fetchProviderTaxonomy("non_medical"),
+          newRequestsClosed ? Promise.resolve(null) : fetchProviderTaxonomy("non_medical"),
         ]);
         if (cancelled) return;
         startTransition(() => {
@@ -454,7 +461,7 @@ export function PatientServicesPage() {
     return () => {
       cancelled = true;
     };
-  }, [version, subscriptionPaused, t.services_failed_load]);
+  }, [version, newRequestsClosed, t.services_failed_load]);
 
   // «Открытые запросы»: the patient's own requests nobody has booked yet;
   // a service the team planned or booked is not a request (QA D-8).
@@ -559,7 +566,11 @@ export function PatientServicesPage() {
   return (
     <div className="w-full min-w-0 max-w-none space-y-3">
       <PageHeader
-        pageAction={subscriptionPaused ? undefined : <Button onClick={() => setRequestOpen(true)}><Plus className="size-4" />{t.services_request_title}</Button>}
+        pageAction={subscriptionPaused ? undefined : tariffMissing ? (
+          <Button variant="outline" data-testid="portal-services-request-locked" onClick={() => setTariffLockOpen(true)}>
+            <LockKeyhole className="size-4" aria-hidden="true" />{t.services_request_title}
+          </Button>
+        ) : <Button onClick={() => setRequestOpen(true)}><Plus className="size-4" />{t.services_request_title}</Button>}
         title={t.services_title}
         description={t.services_description}
         actions={
@@ -581,6 +592,14 @@ export function PatientServicesPage() {
         <Banner tone="warning" withIcon>
           <span data-testid="portal-services-paused">{uiText("portal_paused_services_note", lang)}</span>
         </Banner>
+      ) : null}
+      {tariffMissing ? (
+        <Banner tone="warning" withIcon>
+          <span data-testid="portal-services-tariff-note">{uiText("portal_services_tariff_note", lang)}</span>
+        </Banner>
+      ) : null}
+      {tariffLockOpen ? (
+        <PortalSubscriptionLock label={t.services_request_title} onClose={() => setTariffLockOpen(false)} />
       ) : null}
 
       <PortalSummary items={[
@@ -683,7 +702,7 @@ export function PatientServicesPage() {
           </Section>
         </section>
 
-        <Dialog open={requestOpen && !subscriptionPaused} onOpenChange={(open) => {
+        <Dialog open={requestOpen && !newRequestsClosed} onOpenChange={(open) => {
           if (requestBusy) return;
           setRequestOpen(open);
           if (!open) dispatchPageState({ form: blankServiceRequestForm(), requestError: "" });
