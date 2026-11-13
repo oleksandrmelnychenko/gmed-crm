@@ -543,6 +543,115 @@ async fn audit_analytics_hides_patient_record_ids_from_the_it_admin() {
     assert_eq!(event["entity_id"], patient_record.to_string(), "{event}");
 }
 
+/// QA final-C S2-C7 (2026-11-13): the activity log names no patient, lead
+/// or document id to the IT admin (it resolves patient ids in the DSGVO
+/// lookup) and its search does not find a row by such an id; technical rows
+/// keep their id, the CEO sees every id.
+#[tokio::test]
+async fn activity_log_hides_business_record_ids_from_the_it_admin() {
+    let Some(app) = test_context().await else {
+        return;
+    };
+    let pool = app.suite.pool.clone();
+    let ceo_id = seed_user(&pool, "activity-record-ids", "ceo").await;
+    let portal_id = seed_user(&pool, "activity-record-ids", "patient").await;
+    let staff_target = seed_user(&pool, "activity-record-ids", "billing").await;
+    let patient_record = Uuid::new_v4();
+    let lead_record = Uuid::new_v4();
+    let document_record = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO audit_log (user_id, action, entity_type, entity_id, context, created_at)
+           VALUES
+                ($1, 'dsgvo_data_export', 'patient', $3, '{}'::jsonb, now() - interval '1 minute'),
+                ($2, 'download_portal_invoice_pdf', 'patient', $3, '{}'::jsonb, now() - interval '2 minute'),
+                ($1, 'update_lead', 'lead', $4, '{}'::jsonb, now() - interval '3 minute'),
+                ($1, 'download_document', 'document', $5, '{}'::jsonb, now() - interval '4 minute'),
+                ($1, 'reset_password', 'user', $6, '{}'::jsonb, now() - interval '5 minute')"#,
+    )
+    .bind(ceo_id)
+    .bind(portal_id)
+    .bind(patient_record)
+    .bind(lead_record)
+    .bind(document_record)
+    .bind(staff_target)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let it_admin = auth_header_for("it_admin", app.it_admin_id);
+    let mut items: Vec<Value> = Vec::new();
+    for actor in [ceo_id, portal_id] {
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/admin/activity?view=all&user_id={actor}&limit=100"),
+            &it_admin,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let text = body.to_string();
+        for hidden in [patient_record, lead_record, document_record] {
+            assert!(!text.contains(&hidden.to_string()), "{hidden}: {body}");
+        }
+        items.extend(body["items"].as_array().expect("items").iter().cloned());
+    }
+    let body = json!(items);
+    for action in [
+        "dsgvo_data_export",
+        "download_portal_invoice_pdf",
+        "update_lead",
+        "download_document",
+    ] {
+        let row = items
+            .iter()
+            .find(|item| item["action"] == action)
+            .unwrap_or_else(|| panic!("{action} missing: {body}"));
+        assert_eq!(row["entity_id"], Value::Null, "{row}");
+    }
+    let staff_row = items
+        .iter()
+        .find(|item| item["action"] == "reset_password" && item["entity_type"] == "user")
+        .expect("staff account row");
+    assert_eq!(
+        staff_row["entity_id"],
+        staff_target.to_string(),
+        "{staff_row}"
+    );
+
+    // The search is no oracle for a hidden id.
+    let (status, found) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/activity?view=all&search={patient_record}"),
+        &it_admin,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["total"], 0, "{found}");
+
+    // The CEO sees and finds the record ids.
+    let (status, found) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/activity?view=all&search={patient_record}"),
+        &auth_header_for("ceo", ceo_id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["total"], 2, "{found}");
+    assert!(
+        found["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["entity_id"] == patient_record.to_string()),
+        "{found}"
+    );
+}
+
 /// QA E-14: "Datenänderungen 24 h" counted only rows with an HTTP write
 /// method, so domain events (`update_lead`, `create_invoice`, ...) never
 /// counted. Reads, downloads, sign-ins and technical rows still do not.

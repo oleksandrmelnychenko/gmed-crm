@@ -453,6 +453,29 @@ pub(crate) fn visible_activity_context(
     }
 }
 
+/// The record id a reader gets: unchanged with full access, otherwise only
+/// for technical entity types and never for a portal account. A business
+/// record (patient, lead, document, invoice, conversation) is named by no id:
+/// the IT admin resolves patient ids in the DSGVO lookup, so the id would tie
+/// anonymised portal activity to a named patient (QA final-C S2-C7
+/// 2026-11-13, like /admin/audit-analytics).
+pub(crate) fn visible_activity_entity_id(
+    full_access: bool,
+    entity_type: Option<&str>,
+    target_is_portal_account: bool,
+    entity_id: Option<Uuid>,
+) -> Option<Uuid> {
+    if full_access {
+        return entity_id;
+    }
+    let technical = entity_type.is_some_and(|value| TECHNICAL_AUDIT_ENTITY_TYPES.contains(&value));
+    if technical && !target_is_portal_account {
+        entity_id
+    } else {
+        None
+    }
+}
+
 fn normalize_activity_view(value: Option<String>) -> Result<String, &'static str> {
     let view = value.unwrap_or_else(|| "activity".to_string());
     match view.as_str() {
@@ -678,7 +701,10 @@ async fn list_activity(
                  OR al.entity_type ILIKE '%' || $6 || '%'
                  OR al.action = ANY(COALESCE($10::TEXT[], '{}'::TEXT[]))
                  OR al.entity_type = ANY(COALESCE($11::TEXT[], '{}'::TEXT[]))
-                 OR COALESCE(al.entity_id::TEXT, '') ILIKE '%' || $6 || '%'
+                 OR (
+                     ($8::bool OR (al.entity_type = ANY($9) AND COALESCE(target.role, '') <> 'patient'))
+                     AND COALESCE(al.entity_id::TEXT, '') ILIKE '%' || $6 || '%'
+                 )
                  OR (
                      ($8::bool OR COALESCE(target.role, '') <> 'patient')
                      AND (target.name ILIKE '%' || $6 || '%' OR target.email ILIKE '%' || $6 || '%')
@@ -761,7 +787,10 @@ async fn list_activity(
                  OR al.entity_type ILIKE '%' || $6 || '%'
                  OR al.action = ANY(COALESCE($12::TEXT[], '{}'::TEXT[]))
                  OR al.entity_type = ANY(COALESCE($13::TEXT[], '{}'::TEXT[]))
-                 OR COALESCE(al.entity_id::TEXT, '') ILIKE '%' || $6 || '%'
+                 OR (
+                     ($10::bool OR (al.entity_type = ANY($11) AND COALESCE(target.role, '') <> 'patient'))
+                     AND COALESCE(al.entity_id::TEXT, '') ILIKE '%' || $6 || '%'
+                 )
                  OR (
                      ($10::bool OR COALESCE(target.role, '') <> 'patient')
                      AND (target.name ILIKE '%' || $6 || '%' OR target.email ILIKE '%' || $6 || '%')
@@ -902,7 +931,12 @@ async fn list_activity(
                         "actor_role": actor_role,
                         "action": r.try_get::<String, _>("action").unwrap_or_default(),
                         "entity_type": entity_type,
-                        "entity_id": r.try_get::<Option<Uuid>, _>("entity_id").unwrap_or_default(),
+                        "entity_id": visible_activity_entity_id(
+                            full_access,
+                            entity_type.as_deref(),
+                            target_is_portal,
+                            r.try_get::<Option<Uuid>, _>("entity_id").unwrap_or_default(),
+                        ),
                         "entity_name": target_name,
                         "entity_email": target_email,
                         "context": context,
