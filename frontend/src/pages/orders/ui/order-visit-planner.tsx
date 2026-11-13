@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { Check, ChevronLeft, ChevronRight, LoaderCircle, Trash2, TriangleAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -111,6 +111,10 @@ export function OrderVisitPlanner({
   const [startDay, setStartDay] = useState(() => firstDay ?? appDateKey());
   const [drafts, setDrafts] = useState<DraftVisit[]>([]);
   const [popover, setPopover] = useState<Popover>(null);
+  // An opened popover scrolls fully into the grid's view (a late-hour slot sits low).
+  const revealPopover = useCallback((element: HTMLDivElement | null) => {
+    element?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, []);
   const [busy, setBusy] = useState<BusySlot[]>([]);
   const [busyNonce, setBusyNonce] = useState(0);
   const [interpreters, setInterpreters] = useState<InterpreterOption[]>([]);
@@ -402,7 +406,7 @@ export function OrderVisitPlanner({
     );
     if (popover.kind === "slot") {
       return (
-        <div data-testid="order-visit-planner-choose" className={shell} style={{ top }}>
+        <div data-testid="order-visit-planner-choose" ref={revealPopover} className={shell} style={{ top }}>
           <div className="font-semibold">
             {tx("Какой врач?", "Welcher Arzt?")}{" "}
             <span className="font-normal text-muted-foreground tabular-nums">
@@ -451,7 +455,7 @@ export function OrderVisitPlanner({
     }
     if (!activeDraft) return null;
     return (
-      <div data-testid="order-visit-planner-editor" className={shell} style={{ top }}>
+      <div data-testid="order-visit-planner-editor" ref={revealPopover} className={shell} style={{ top }}>
         <div>
           <div className="font-semibold">{doctorName(activeDraft.doctor)}</div>
           <div className="text-xs text-muted-foreground tabular-nums">
