@@ -64,6 +64,10 @@ export interface AdminSystemTranslations {
   cf_error_options_required: string;
   cf_error_options_invalid: string;
   cf_error_not_found: string;
+  cf_medical: string;
+  cf_medical_hint: string;
+  cf_medical_locked_hint: string;
+  cf_error_medical_unset_forbidden: string;
   notif_edit: string;
   notif_test_dry_run: string;
   notif_delete_confirm: string;
@@ -546,6 +550,11 @@ export const adminSystemRu: AdminSystemTranslations = {
   cf_error_options_required: "Для списка укажите от 1 до 100 вариантов через запятую.",
   cf_error_options_invalid: "Каждый вариант списка — текст до 200 символов.",
   cf_error_not_found: "Поле не найдено — возможно, его уже удалили. Обновите страницу.",
+  cf_medical: "Медицинское поле",
+  cf_medical_hint:
+    "Значение видят только сотрудники с доступом к медицинским данным (CEO, ассистент CEO, менеджер пациента), меняют — CEO и менеджер пациента. Продажи, консьерж, бухгалтерия и переводчики его не видят.",
+  cf_medical_locked_hint: "Снять отметку может только CEO.",
+  cf_error_medical_unset_forbidden: "Снять отметку «Медицинское поле» может только CEO.",
   notif_edit: "Изменить канал",
   notif_test_dry_run:
     "Проверка без отправки: канал «{name}» сохранён, но GMED пока не отправляет через такие каналы. Ничего не отправлено, подключение к серверу не проверялось.",
@@ -1054,6 +1063,11 @@ export const adminSystemDe: AdminSystemTranslations = {
   cf_error_options_required: "Für eine Auswahl 1 bis 100 Werte durch Kommas getrennt angeben.",
   cf_error_options_invalid: "Jeder Auswahlwert ist ein Text mit höchstens 200 Zeichen.",
   cf_error_not_found: "Feld nicht gefunden – vielleicht wurde es schon gelöscht. Bitte die Seite neu laden.",
+  cf_medical: "Medizinisches Feld",
+  cf_medical_hint:
+    "Den Wert sehen nur Mitarbeitende mit Zugriff auf medizinische Daten (CEO, CEO-Assistenz, Patientenmanager), ändern dürfen ihn CEO und Patientenmanager. Vertrieb, Concierge, Buchhaltung und Dolmetscher sehen ihn nicht.",
+  cf_medical_locked_hint: "Die Markierung kann nur der CEO entfernen.",
+  cf_error_medical_unset_forbidden: "Die Markierung „Medizinisches Feld“ kann nur der CEO entfernen.",
   notif_edit: "Kanal bearbeiten",
   notif_test_dry_run:
     "Prüfung ohne Versand: Der Kanal „{name}“ ist gespeichert, aber GMED versendet noch nicht über solche Kanäle. Es wurde nichts gesendet und keine Verbindung zum Server geprüft.",

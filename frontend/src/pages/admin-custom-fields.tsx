@@ -32,6 +32,8 @@ import {
   TabLoader,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
 import { formatEnumLabelFromKeys, formatUiText, useLang, type TranslationKey } from "@/lib/i18n";
 import { codedAdminErrorText } from "@/pages/admin-pages.helpers";
 import { useRealtimeSubscription } from "@/lib/realtime";
@@ -60,6 +62,8 @@ interface CustomField {
   is_required: boolean;
   sort_order: number;
   is_active: boolean;
+  /** «Медицинское поле»: values only for roles that read medical data. */
+  is_medical?: boolean;
 }
 
 const ENTITY_TYPES = ["lead", "patient", "order", "provider"] as const;
@@ -123,6 +127,7 @@ type AdminCustomFieldsState = {
   fSort: string;
   fOptions: string;
   fRequired: boolean;
+  fMedical: boolean;
   createError: string | null;
 };
 
@@ -231,6 +236,9 @@ type AdminCustomFieldCreateSheetProps = {
   fSort: string;
   fType: string;
   fRequired: boolean;
+  fMedical: boolean;
+  /** A medical field may be made ordinary only with medical edit rights. */
+  medicalLocked: boolean;
   editing: boolean;
   showCreate: boolean;
   dirty: boolean;
@@ -243,6 +251,7 @@ type AdminCustomFieldCreateSheetProps = {
   onOpenChange: (open: boolean) => void;
   onOptionsChange: (value: string) => void;
   onRequiredChange: (value: boolean) => void;
+  onMedicalChange: (value: boolean) => void;
   onSortChange: (value: string) => void;
   onTypeChange: (value: string) => void;
 };
@@ -259,6 +268,8 @@ function AdminCustomFieldCreateSheet({
   fSort,
   fType,
   fRequired,
+  fMedical,
+  medicalLocked,
   editing,
   showCreate,
   dirty,
@@ -271,6 +282,7 @@ function AdminCustomFieldCreateSheet({
   onOpenChange,
   onOptionsChange,
   onRequiredChange,
+  onMedicalChange,
   onSortChange,
   onTypeChange,
 }: AdminCustomFieldCreateSheetProps) {
@@ -381,6 +393,23 @@ function AdminCustomFieldCreateSheet({
                 {t.cf_required}
                 <span className="text-[11.5px] text-muted-foreground">· {t.cf_required_hint}</span>
               </label>
+              <label className="flex items-start gap-2 text-[13px] text-foreground">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-4 accent-primary"
+                  checked={fMedical}
+                  disabled={medicalLocked}
+                  data-testid="custom-field-medical"
+                  onChange={(event) => onMedicalChange(event.target.checked)}
+                />
+                <span>
+                  {t.cf_medical}
+                  <span className="block text-[11.5px] text-muted-foreground">
+                    {t.cf_medical_hint}
+                    {medicalLocked ? ` ${t.cf_medical_locked_hint}` : ""}
+                  </span>
+                </span>
+              </label>
             </section>
           </AdminSheetScaffold>
         </form>
@@ -463,6 +492,10 @@ function AdminCustomFieldsTable({
 
 export function AdminCustomFieldsPage() {
   const { t } = useLang();
+  const { user: currentUser } = useAuth();
+  // Mirrors the server: only medical edit rights (the CEO) make a medical
+  // field ordinary again (security review 2026-11-13, final-D S3-1).
+  const canUnsetMedical = hasCapability(currentUser, "patients.medical.edit");
 
   const [customFieldsState, dispatchCustomFieldsState] = useReducer(
     adminCustomFieldsReducer,
@@ -482,6 +515,7 @@ export function AdminCustomFieldsPage() {
       fSort: "0",
       fOptions: "",
       fRequired: false,
+      fMedical: false,
       createError: null,
     }),
   );
@@ -496,6 +530,7 @@ export function AdminCustomFieldsPage() {
     fLabel,
     fOptions,
     fRequired,
+    fMedical,
     fSort,
     fType,
     loading,
@@ -537,6 +572,8 @@ export function AdminCustomFieldsPage() {
     setCustomFieldsField("editingId", nextValue);
   const setFRequired = (nextValue: SetStateAction<boolean>) =>
     setCustomFieldsField("fRequired", nextValue);
+  const setFMedical = (nextValue: SetStateAction<boolean>) =>
+    setCustomFieldsField("fMedical", nextValue);
   const setCreateError = (nextValue: SetStateAction<string | null>) =>
     setCustomFieldsField("createError", nextValue);
 
@@ -574,6 +611,7 @@ export function AdminCustomFieldsPage() {
       custom_field_options_required: t.cf_error_options_required,
       custom_field_options_invalid: t.cf_error_options_invalid,
       custom_field_not_found: t.cf_error_not_found,
+      custom_field_medical_unset_forbidden: t.cf_error_medical_unset_forbidden,
     }),
     [t],
   );
@@ -600,6 +638,7 @@ export function AdminCustomFieldsPage() {
       field_type: fType,
       options: options.length > 0 ? options : null,
       is_required: fRequired,
+      is_medical: fMedical,
       sort_order: parseInt(fSort, 10) || 0,
     };
     try {
@@ -626,6 +665,7 @@ export function AdminCustomFieldsPage() {
       fLabel: field.field_label,
       fOptions: customFieldOptionsText(field.options),
       fRequired: field.is_required,
+      fMedical: field.is_medical === true,
       fSort: String(field.sort_order ?? 0),
       fType: field.field_type,
       showCreate: true,
@@ -637,6 +677,7 @@ export function AdminCustomFieldsPage() {
     setCreateError(null);
     setEditingId("");
     setFRequired(false);
+    setFMedical(false);
     setFEntity("lead");
     setFType("text");
     setFSort("0");
@@ -650,9 +691,11 @@ export function AdminCustomFieldsPage() {
     ? fLabel !== editedField.field_label ||
       fType !== editedField.field_type ||
       fRequired !== editedField.is_required ||
+      fMedical !== (editedField.is_medical === true) ||
       fSort !== String(editedField.sort_order ?? 0) ||
       fOptions !== customFieldOptionsText(editedField.options)
     : fRequired ||
+    fMedical ||
     fEntity !== "lead" ||
     fType !== "text" ||
     fSort !== "0" ||
@@ -751,6 +794,14 @@ export function AdminCustomFieldsPage() {
       render: (field) => (field.is_required ? t.common_yes : ""),
     },
     {
+      id: "medical",
+      label: t.cf_medical,
+      accessor: (field) => field.is_medical === true,
+      sortable: true,
+      width: 150,
+      render: (field) => (field.is_medical ? t.common_yes : ""),
+    },
+    {
       id: "actions",
       label: t.users_actions,
       accessor: (field) => field.id,
@@ -788,6 +839,7 @@ export function AdminCustomFieldsPage() {
     t.cf_field_label,
     t.cf_field_type,
     t.cf_required,
+    t.cf_medical,
     t.common_delete,
     t.common_yes,
     t.users_actions,
@@ -815,6 +867,9 @@ export function AdminCustomFieldsPage() {
         fOptions={fOptions} fSort={fSort} fType={fType} showCreate={showCreate}
         fRequired={fRequired} editing={Boolean(editingId)}
         onRequiredChange={setFRequired}
+        fMedical={fMedical}
+        medicalLocked={Boolean(editedField?.is_medical) && !canUnsetMedical}
+        onMedicalChange={setFMedical}
         dirty={createDirty}
         t={t as unknown as Record<string, string>}
         onClose={closeCreateSheet} onCreate={onCreate}

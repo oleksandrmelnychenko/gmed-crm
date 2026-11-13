@@ -12,6 +12,7 @@ use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
+use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -42,23 +43,61 @@ async fn list_fields(
         return e;
     }
 
-    match sqlx::query!(
-        r#"SELECT id, entity_type, field_key, field_label, field_type, options, is_required, sort_order, is_active
+    type DefinitionRow = (
+        Uuid,
+        String,
+        String,
+        String,
+        String,
+        Option<serde_json::Value>,
+        bool,
+        i32,
+        bool,
+        bool,
+    );
+    match sqlx::query_as::<_, DefinitionRow>(
+        r#"SELECT id, entity_type, field_key, field_label, field_type, options, is_required,
+                  sort_order, is_active, is_medical
            FROM custom_fields
            WHERE ($1::TEXT IS NULL OR entity_type = $1)
            ORDER BY entity_type, sort_order, field_label"#,
-        q.entity_type
-    ).fetch_all(&state.db).await {
+    )
+    .bind(q.entity_type)
+    .fetch_all(&state.db)
+    .await
+    {
         Ok(rows) => {
-            let data: Vec<serde_json::Value> = rows.into_iter().map(|r| serde_json::json!({
-                "id": r.id, "entity_type": r.entity_type, "field_key": r.field_key,
-                "field_label": r.field_label, "field_type": r.field_type,
-                "options": r.options, "is_required": r.is_required,
-                "sort_order": r.sort_order, "is_active": r.is_active,
-            })).collect();
+            let data: Vec<serde_json::Value> = rows
+                .into_iter()
+                .map(
+                    |(
+                        id,
+                        entity_type,
+                        field_key,
+                        field_label,
+                        field_type,
+                        options,
+                        is_required,
+                        sort_order,
+                        is_active,
+                        is_medical,
+                    )| {
+                        serde_json::json!({
+                            "id": id, "entity_type": entity_type, "field_key": field_key,
+                            "field_label": field_label, "field_type": field_type,
+                            "options": options, "is_required": is_required,
+                            "sort_order": sort_order, "is_active": is_active,
+                            "is_medical": is_medical,
+                        })
+                    },
+                )
+                .collect();
             Json(data).into_response()
         }
-        Err(e) => { tracing::error!(error = %e, "list custom fields"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
+        Err(e) => {
+            tracing::error!(error = %e, "list custom fields");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
     }
 }
 
@@ -71,6 +110,9 @@ struct UpsertField {
     options: Option<serde_json::Value>,
     is_required: Option<bool>,
     sort_order: Option<i32>,
+    /// «Медицинское поле»: the values are medical data (security review
+    /// 2026-11-13, final-D S3-1). Absent on an update keeps the stored flag.
+    is_medical: Option<bool>,
 }
 
 const ENTITY_TYPES: &[&str] = &["lead", "patient", "order", "provider"];
@@ -205,8 +247,8 @@ async fn create_field(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     let inserted = sqlx::query_scalar::<_, Uuid>(
-        "INSERT INTO custom_fields (entity_type, field_key, field_label, field_type, options, is_required, sort_order, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+        "INSERT INTO custom_fields (entity_type, field_key, field_label, field_type, options, is_required, sort_order, created_by, is_medical)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
     )
     .bind(&entity_type)
     .bind(&field_key)
@@ -216,6 +258,7 @@ async fn create_field(
     .bind(body.is_required.unwrap_or(false))
     .bind(body.sort_order.unwrap_or(0))
     .bind(auth.user_id)
+    .bind(body.is_medical.unwrap_or(false))
     .fetch_one(&mut *tx)
     .await;
     let id = match inserted {
@@ -247,6 +290,7 @@ async fn create_field(
         serde_json::json!({
             "entity_type": entity_type,
             "field_key": field_key,
+            "is_medical": body.is_medical.unwrap_or(false),
         }),
     ));
     crate::realtime::publish_admin_event(
@@ -278,9 +322,36 @@ async fn update_field(
         Err((status, code, message)) => return coded_err(status, code, message),
     };
 
+    // Making a field medical narrows who reads it; making a medical field
+    // ordinary again opens its values to every reader of the card, so only a
+    // role with medical edit rights (the CEO among the field admins) may.
+    if body.is_medical == Some(false) && !auth.can(Capability::PatientsMedicalEdit) {
+        match sqlx::query_scalar::<_, bool>(
+            "SELECT is_medical FROM custom_fields WHERE id = $1 AND is_active = true",
+        )
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(Some(true)) => {
+                return coded_err(
+                    StatusCode::FORBIDDEN,
+                    "custom_field_medical_unset_forbidden",
+                    "Only a role with medical edit rights may make a medical field ordinary",
+                );
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::error!(error = %e, "read custom field medical flag");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    }
+
     match sqlx::query(
         "UPDATE custom_fields
-            SET field_label = $2, field_type = $3, options = $4, is_required = $5, sort_order = $6
+            SET field_label = $2, field_type = $3, options = $4, is_required = $5, sort_order = $6,
+                is_medical = COALESCE($7, is_medical)
           WHERE id = $1 AND is_active = true",
     )
     .bind(id)
@@ -289,6 +360,7 @@ async fn update_field(
     .bind(&options)
     .bind(body.is_required.unwrap_or(false))
     .bind(body.sort_order.unwrap_or(0))
+    .bind(body.is_medical)
     .execute(&state.db)
     .await
     {
@@ -298,7 +370,7 @@ async fn update_field(
                 Some(auth.user_id),
                 "custom_field",
                 Some(id),
-                serde_json::json!({ "field_type": field_type }),
+                serde_json::json!({ "field_type": field_type, "is_medical": body.is_medical }),
             ));
             crate::realtime::publish_admin_event(
                 &state,
@@ -386,6 +458,7 @@ async fn get_values(
         Ok(scope) => scope,
         Err(e) => return e,
     };
+    let medical_visible = custom_field_medical_access(auth.role).0;
     let can_edit = match scope.entity_type {
         "patient" => {
             auth.can(Capability::PatientsEdit)
@@ -406,11 +479,12 @@ async fn get_values(
         Option<serde_json::Value>,
         bool,
         i32,
+        bool,
         Option<String>,
     );
     match sqlx::query_as::<_, FieldRow>(
         r#"SELECT cf.id, cf.field_key, cf.field_label, cf.field_type, cf.options,
-                  cf.is_required, cf.sort_order, cfv.value
+                  cf.is_required, cf.sort_order, cf.is_medical, cfv.value
            FROM custom_fields cf
            LEFT JOIN custom_field_values cfv
                   ON cfv.field_id = cf.id AND cfv.entity_id = $1
@@ -423,15 +497,29 @@ async fn get_values(
     .await
     {
         Ok(rows) => {
+            // A medical field is left out for a reader without medical
+            // access (final-D S3-1), the rule of the lead's
+            // `medical_fields_hidden` and the patient's clinical record.
             let fields: Vec<serde_json::Value> = rows
                 .into_iter()
+                .filter(|row| medical_visible || !row.7)
                 .map(
-                    |(id, key, label, field_type, options, is_required, sort_order, value)| {
+                    |(
+                        id,
+                        key,
+                        label,
+                        field_type,
+                        options,
+                        is_required,
+                        sort_order,
+                        is_medical,
+                        value,
+                    )| {
                         serde_json::json!({
                             "field_id": id, "field_key": key, "field_label": label,
                             "field_type": field_type, "options": options,
                             "is_required": is_required, "sort_order": sort_order,
-                            "value": value,
+                            "is_medical": is_medical, "value": value,
                         })
                     },
                 )
@@ -439,6 +527,7 @@ async fn get_values(
             Json(serde_json::json!({
                 "entity_type": scope.entity_type,
                 "can_edit": can_edit,
+                "medical_fields_hidden": !medical_visible,
                 "fields": fields,
             }))
             .into_response()
@@ -555,9 +644,9 @@ async fn set_values(
             "A field is named twice",
         );
     }
-    type Definition = (Uuid, String, String, Option<serde_json::Value>);
+    type Definition = (Uuid, String, String, Option<serde_json::Value>, bool);
     let definitions = match sqlx::query_as::<_, Definition>(
-        "SELECT id, field_key, field_type, options FROM custom_fields
+        "SELECT id, field_key, field_type, options, is_medical FROM custom_fields
          WHERE id = ANY($1) AND entity_type = $2 AND is_active = true",
     )
     .bind(&field_ids)
@@ -579,10 +668,22 @@ async fn set_values(
         }
     };
 
+    // A medical field is written only with medical edit rights (final-D S3-1);
+    // a reader without medical access does not even see it.
+    let medical_writable = custom_field_medical_access(auth.role).1;
+    if !medical_writable && definitions.iter().any(|definition| definition.4) {
+        return coded_err(
+            StatusCode::FORBIDDEN,
+            "custom_field_medical_forbidden",
+            "Medical custom fields need medical edit rights",
+        );
+    }
+
     let mut checked: Vec<(Uuid, &str, Option<String>)> = Vec::with_capacity(body.values.len());
     for fv in &body.values {
-        let Some((_, field_key, field_type, options)) =
-            definitions.iter().find(|(id, _, _, _)| *id == fv.field_id)
+        let Some((_, field_key, field_type, options, _)) = definitions
+            .iter()
+            .find(|definition| definition.0 == fv.field_id)
         else {
             return value_refusal("custom_field_not_found", fv.field_id);
         };
@@ -719,6 +820,18 @@ async fn authorize_values_access(
     }
 }
 
+/// (read, write) of the values of a medical custom field for a role. Read: the
+/// medical access of the card — `patients.medical.view` as the lead's
+/// `medical_fields_hidden`, without the interpreters, who never get the
+/// clinical record (owner decision 2026-09-28). Write: in addition
+/// `patients.medical.edit`. Sales, Concierge, Billing and the interpreters
+/// neither read nor write them; CEO and PM do both; the CEO Assistant reads.
+fn custom_field_medical_access(role: Role) -> (bool, bool) {
+    let read = role.can(Capability::PatientsMedicalView)
+        && !matches!(role, Role::Interpreter | Role::TeamleadInterpreter);
+    (read, read && role.can(Capability::PatientsMedicalEdit))
+}
+
 /// The (patient, lead) capabilities a read or a write of values needs: the
 /// capabilities of reading or editing the card itself.
 fn values_capabilities(write: bool) -> (Capability, Capability) {
@@ -744,7 +857,8 @@ fn coded_err(status: StatusCode, code: &str, message: &str) -> axum::response::R
 #[cfg(test)]
 mod tests {
     use super::{
-        UpsertField, normalized_value, valid_field_key, validated_definition, values_capabilities,
+        UpsertField, custom_field_medical_access, normalized_value, valid_field_key,
+        validated_definition, values_capabilities,
     };
     use gmed_domain::access::capabilities::Capability;
     use gmed_domain::role::Role;
@@ -759,6 +873,7 @@ mod tests {
             options,
             is_required: Some(true),
             sort_order: Some(1),
+            is_medical: None,
         }
     }
 
@@ -904,5 +1019,33 @@ mod tests {
         assert_eq!(writes(Role::CeoAssistant), (false, false));
         assert_eq!(writes(Role::Sales), (false, true));
         assert_eq!(writes(Role::PatientManager), (true, true));
+    }
+
+    #[test]
+    fn medical_fields_follow_the_medical_access() {
+        assert_eq!(custom_field_medical_access(Role::Ceo), (true, true));
+        assert_eq!(
+            custom_field_medical_access(Role::PatientManager),
+            (true, true)
+        );
+        assert_eq!(
+            custom_field_medical_access(Role::CeoAssistant),
+            (true, false)
+        );
+        for role in [
+            Role::Sales,
+            Role::Concierge,
+            Role::Billing,
+            Role::Interpreter,
+            Role::TeamleadInterpreter,
+            Role::ItAdmin,
+            Role::Patient,
+        ] {
+            assert_eq!(
+                custom_field_medical_access(role),
+                (false, false),
+                "{role:?}"
+            );
+        }
     }
 }

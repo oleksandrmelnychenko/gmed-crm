@@ -16,12 +16,16 @@ export interface CustomFieldWithValue {
   options: unknown;
   is_required: boolean;
   sort_order: number;
+  /** «Медицинское поле»: sent only to roles that read medical data. */
+  is_medical?: boolean;
   value: string | null;
 }
 
 export interface CustomFieldValues {
   entity_type: "lead" | "patient" | string;
   can_edit: boolean;
+  /** The caller reads no medical data: the server left the medical fields out. */
+  medical_fields_hidden?: boolean;
   fields: CustomFieldWithValue[];
 }
 
@@ -110,6 +114,11 @@ export function customFieldErrorText(code: string | undefined, tx: Tx): string {
       return tx(
         "Поле больше не существует. Обновите страницу.",
         "Das Feld existiert nicht mehr. Bitte die Seite neu laden.",
+      );
+    case "custom_field_medical_forbidden":
+      return tx(
+        "Медицинские поля меняют только сотрудники с доступом к медицинским данным.",
+        "Medizinische Felder ändern nur Mitarbeitende mit Zugriff auf medizinische Daten.",
       );
     case "lead_converted":
       return tx(

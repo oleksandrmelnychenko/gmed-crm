@@ -230,12 +230,27 @@ export function CustomFieldsSection({ entityId, locked = false, className, rende
 }
 
 function RequiredMark({ field, tx }: { field: CustomFieldWithValue; tx: (ru: string, de: string) => string }) {
-  if (!field.is_required) return null;
-  const label = tx("Обязательное", "Pflichtfeld");
+  const required = field.is_required ? tx("Обязательное", "Pflichtfeld") : null;
+  // Medical fields reach only roles that read medical data (the server leaves
+  // them out for everyone else); the mark reminds who may see the value.
+  const medical = field.is_medical ? tx("Медицинское поле", "Medizinisches Feld") : null;
   return (
-    <span className="ml-0.5 text-rose-600" title={label} aria-label={label}>
-      *
-    </span>
+    <>
+      {required ? (
+        <span className="ml-0.5 text-rose-600" title={required} aria-label={required}>
+          *
+        </span>
+      ) : null}
+      {medical ? (
+        <span
+          className="ml-1 rounded bg-sky-500/15 px-1 text-[10px] font-medium text-sky-700 dark:text-sky-400"
+          title={medical}
+          data-testid="custom-field-medical-mark"
+        >
+          {tx("мед.", "med.")}
+        </span>
+      ) : null}
+    </>
   );
 }
 

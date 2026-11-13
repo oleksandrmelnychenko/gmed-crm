@@ -48,6 +48,7 @@ describe("custom fields on the lead and patient card", () => {
     expect(customFieldErrorText("custom_field_value_date_invalid", ru)).toContain("ДД.ММ.ГГГГ");
     expect(customFieldErrorText("custom_field_value_number_invalid", de)).toContain("Zahl");
     expect(customFieldErrorText("lead_converted", de)).toContain("Patient");
+    expect(customFieldErrorText("custom_field_medical_forbidden", de)).toContain("medizinische Daten");
     expect(customFieldErrorText(undefined, ru)).toBe("Не удалось сохранить поля.");
   });
 });
