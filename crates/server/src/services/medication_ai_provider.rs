@@ -1214,14 +1214,10 @@ fn valid_text(value: &str) -> bool {
     }
     let lower = normalized_safety_text(trimmed);
     let compact = lower.split_whitespace().collect::<String>();
-    if contains_dose_amount(&lower)
+    !(contains_dose_amount(&lower)
         || contains_dosing_schedule(&lower)
         || contains_forbidden_clinical_content(&lower)
-        || contains_forbidden_clinical_content(&compact)
-    {
-        return false;
-    }
-    true
+        || contains_forbidden_clinical_content(&compact))
 }
 
 fn normalized_safety_text(value: &str) -> String {
