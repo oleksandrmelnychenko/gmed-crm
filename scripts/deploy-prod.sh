@@ -37,6 +37,7 @@ LOG_FILE="${LOG_FILE:-/var/log/gmed-deploy.log}"
 TMP_ENV=""
 IMPORT_BOOTSTRAP_DIRECTORY=false
 UPGRADE_ONLY=false
+DATA_CHECKS=false
 
 if [[ "$#" -gt 1 ]]; then
   echo "ERROR: deploy-prod.sh accepts at most one argument." >&2
@@ -46,6 +47,8 @@ if [[ "${1:-}" == "--import-bootstrap-directory" ]]; then
   IMPORT_BOOTSTRAP_DIRECTORY=true
 elif [[ "${1:-}" == "--upgrade-only" ]]; then
   UPGRADE_ONLY=true
+elif [[ "${1:-}" == "--data-checks" ]]; then
+  DATA_CHECKS=true
 elif [[ "$#" -eq 1 ]]; then
   echo "ERROR: unsupported deploy-prod.sh argument: $1" >&2
   exit 1
@@ -98,6 +101,34 @@ finish() {
 trap finish EXIT
 
 echo "deploy-prod started branch=$GIT_BRANCH repo=$REPO_DIR"
+
+# --data-checks: READ-ONLY data-consistency checks, nothing else (owner
+# 2026-11-13). No pull into the working tree, no secrets decrypted, no
+# container touched: the SQL file is read from origin/$GIT_BRANCH, the
+# database credentials from the release.env of the last deploy, and the
+# session is forced read-only on the server side, so even a wrong statement
+# cannot write. Each check prints check_id | count | at most 20 record ids.
+if [[ "$DATA_CHECKS" == "true" ]]; then
+  if [[ ! -f "$RELEASE_ENV" ]]; then
+    echo "ERROR: $RELEASE_ENV missing: run a normal deploy first." >&2
+    exit 1
+  fi
+  git -C "$REPO_DIR" fetch --quiet origin "$GIT_BRANCH"
+  checks_sql="$(git -C "$REPO_DIR" show "origin/$GIT_BRANCH:scripts/prod-data-checks.sql")"
+  echo "data checks from origin/$GIT_BRANCH $(git -C "$REPO_DIR" rev-parse --short=12 "origin/$GIT_BRANCH")"
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$RELEASE_ENV"
+    set +a
+    printf '%s\n' "$checks_sql" \
+      | PGPASSWORD="$POSTGRES_PASSWORD" docker exec -i -e PGPASSWORD \
+          -e PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=120s" gmed-postgres \
+          psql -X -P pager=off -v ON_ERROR_STOP=0 -U "$POSTGRES_USER" -d "${POSTGRES_DB:-gmed}"
+  )
+  echo "data checks done"
+  exit 0
+fi
 
 for path in "$REPO_DIR/.git" "$AGE_KEY_FILE" "$REPO_DIR/$IMAGE_PINS_PATH"; do
   if [[ ! -e "$path" ]]; then
