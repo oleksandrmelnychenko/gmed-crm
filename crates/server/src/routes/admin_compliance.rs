@@ -6301,7 +6301,8 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 #[cfg(test)]
 mod tests {
     use super::{
-        PORTAL_EXPORT_CLOSED_TYPES, identity_terms_pattern, narrow_export_for_patient,
+        OTHER_PERSON_EXPORT_TYPES, PORTAL_EXPORT_CLOSED_TYPES, export_documents_selection_sql,
+        identity_terms_pattern, narrow_export_for_patient, portal_export_documents_sql,
         scrub_statement,
     };
     use serde_json::json;

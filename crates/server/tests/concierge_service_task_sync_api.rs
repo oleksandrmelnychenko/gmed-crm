@@ -845,6 +845,17 @@ async fn a_transfer_task_shows_the_pickup_place() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let service_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+    // The service's task is created with the first status change (as in
+    // `the_service_follows_its_task_and_stays_in_the_workspace`): the
+    // assignee starts the ride.
+    let (status, body) = update_service(
+        &ctx.app,
+        &concierge,
+        service_id,
+        json!({ "status": "in_service" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     let (task_id, _, _) = task_of(&ctx.pool, service_id).await;
     // The partner booking copied the partner's office into the address.
     sqlx::query(

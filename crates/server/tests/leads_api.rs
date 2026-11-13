@@ -10800,6 +10800,10 @@ async fn the_cabinet_reads_a_parents_identity_copy_taken_over_by_a_repeat_reques
     .unwrap();
     let anna_document = representative_identity_copy(pool, lead_id, anna).await;
     let ben_document = representative_identity_copy(pool, lead_id, ben).await;
+    // The conversion fixture's copies are metadata only; the recognition
+    // reads the stored file, so both get one (a 404 then means «not listed»).
+    store_synthetic_file(pool, anna_document).await;
+    store_synthetic_file(pool, ben_document).await;
 
     let (status, created) = json_request(
         &app,
@@ -10870,6 +10874,23 @@ async fn representative_identity_copy(pool: &PgPool, lead_id: Uuid, person: Uuid
     .fetch_one(pool)
     .await
     .unwrap()
+}
+
+/// Gives a metadata-only document row a stored synthetic file.
+async fn store_synthetic_file(pool: &PgPool, document_id: Uuid) {
+    let storage_key = format!("{document_id}_synthetic-parent.pdf");
+    std::fs::create_dir_all("uploads/documents").unwrap();
+    std::fs::write(
+        std::path::Path::new("uploads/documents").join(&storage_key),
+        b"%PDF-1.4 synthetic",
+    )
+    .unwrap();
+    sqlx::query("UPDATE documents SET storage_key = $2, file_size = 18 WHERE id = $1")
+        .bind(document_id)
+        .bind(&storage_key)
+        .execute(pool)
+        .await
+        .unwrap();
 }
 
 async fn audit_count_of(pool: &PgPool, action: &str, entity_id: Uuid) -> i64 {
