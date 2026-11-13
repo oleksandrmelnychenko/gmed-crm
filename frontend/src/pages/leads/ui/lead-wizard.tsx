@@ -2799,7 +2799,10 @@ function wizardSignatureErrorText(error: unknown, tx: Tx): string | null {
   return frameworkContractSignErrorText(error, tx)
     ?? payerGateErrorText(error, tx)
     ?? riskGateErrorText(error, tx)
-    ?? outdatedDocumentSignErrorText(error, tx);
+    ?? outdatedDocumentSignErrorText(error, tx)
+    // The paying organisation's sheet is confirmed only with the scan (QA 2026-11-13 F-x7):
+    // the paper dialog names its missing data as the one-click confirmation did.
+    ?? gwgSheetErrorText(error, tx);
 }
 
 function errorText(error: unknown, tx: Tx): string {
@@ -9252,6 +9255,12 @@ ${serviceCommentLines.join("\n")}`
     if (error instanceof ApiRequestError && error.body?.error === "payer_gate_blocked") {
       const reasons = Array.isArray(error.body.reasons) ? error.body.reasons : [];
       if (reasons.length === 1 && reasons[0] === "client_order_signature_missing") return null;
+      return {
+        label: goToPayerLabel,
+        onClick: () => openValidationIssue({ key: "payer-declaration", step: "documents", message: "", fieldId: PAYER_SECTION_ID }),
+      };
+    }
+    if (isGwgPayerSheetIncomplete(error)) {
       return {
         label: goToPayerLabel,
         onClick: () => openValidationIssue({ key: "payer-declaration", step: "documents", message: "", fieldId: PAYER_SECTION_ID }),
