@@ -267,7 +267,7 @@ export function PlanningDoctorPicker({ lang, onAdd, stacked = false }: PlanningD
         className={cn(
           "grid gap-2",
           stacked
-            ? "grid-cols-2 [&>*:nth-child(-n+2)]:col-span-2"
+            ? "grid-cols-1"
             : "sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]",
         )}
       >
