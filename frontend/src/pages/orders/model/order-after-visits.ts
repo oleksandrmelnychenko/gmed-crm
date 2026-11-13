@@ -56,13 +56,20 @@ export function visitsToCollect(
     );
 }
 
-export function interpreterState(appointment: OrderPipelineAppointment): InterpreterState {
+/**
+ * The interpreter side of a visit. A visit without its own mark follows the
+ * order's planning («Переводчик требуется»), as on the server.
+ */
+export function interpreterState(
+  appointment: OrderPipelineAppointment,
+  orderRequiresInterpreter = false,
+): InterpreterState {
   if (appointment.report_status && appointment.report_hours != null) {
     return { kind: appointment.report_status, hours: appointment.report_hours };
   }
   if (appointment.interpreter_id) return { kind: "waiting" };
-  if (appointment.interpreter_needed) return { kind: "unassigned" };
-  return { kind: "not_needed" };
+  const needed = appointment.interpreter_needed ?? orderRequiresInterpreter;
+  return needed ? { kind: "unassigned" } : { kind: "not_needed" };
 }
 
 /** The doctor's next visit in the order: same doctor, or the same provider when no doctor is named. */

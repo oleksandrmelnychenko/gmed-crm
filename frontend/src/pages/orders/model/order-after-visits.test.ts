@@ -68,6 +68,9 @@ describe("order after visits", () => {
     expect(interpreterState(visit("b", "2026-11-13", { interpreter_id: "i" }))).toEqual({ kind: "waiting" });
     expect(interpreterState(visit("c", "2026-11-13", { interpreter_needed: true }))).toEqual({ kind: "unassigned" });
     expect(interpreterState(visit("d", "2026-11-13"))).toEqual({ kind: "not_needed" });
+    // No mark of its own: the order's «Переводчик требуется» decides; an explicit «no» wins.
+    expect(interpreterState(visit("e", "2026-11-13"), true)).toEqual({ kind: "unassigned" });
+    expect(interpreterState(visit("f", "2026-11-13", { interpreter_needed: false }), true)).toEqual({ kind: "not_needed" });
     expect(hoursLabel(2.5, "ru")).toBe("2,5 ч");
     expect(hoursLabel(1, "de")).toBe("1 Std.");
   });

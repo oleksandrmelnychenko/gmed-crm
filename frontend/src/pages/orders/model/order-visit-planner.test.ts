@@ -104,7 +104,7 @@ describe("batchPayload", () => {
           interpreter_id: null,
           location: "Charité",
         }),
-        expect.objectContaining({ doctor_id: null, interpreter_needed: false, interpreter_id: null }),
+        expect.objectContaining({ doctor_id: null, interpreter_needed: null, interpreter_id: null }),
         expect.objectContaining({ interpreter_needed: true, interpreter_id: "i2" }),
       ],
     });

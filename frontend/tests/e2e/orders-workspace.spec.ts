@@ -616,7 +616,7 @@ test("planning lays doctors out on the grid and creates every visit at once (pla
   expect(saved).toHaveLength(1);
   expect(saved[0].items).toEqual([
     expect.objectContaining({provider_id: "klinik", doctor_id: "klein", date: "2026-11-17", time_start: "11:00", time_end: "12:00",
-      interpreter_needed: false, interpreter_id: null, title: "Dr. Klein", location: "Klinik Nord"}),
+      interpreter_needed: null, interpreter_id: null, title: "Dr. Klein", location: "Klinik Nord"}),
     expect.objectContaining({doctor_id: "weber", date: "2026-11-16", time_start: "10:00", time_end: "11:30",
       title: "Echo und Gespräch", interpreter_needed: true, interpreter_id: "olga"}),
   ]);

@@ -36,6 +36,8 @@ type OrderAfterVisitsProps = {
   reloadNonce: number;
   /** Planners upload papers and sort invoices; others read. */
   canEdit: boolean;
+  /** The order's «Переводчик требуется»: a visit without its own mark follows it. */
+  orderRequiresInterpreter?: boolean;
 };
 
 type Loaded = {
@@ -60,7 +62,14 @@ function fileBaseName(name: string) {
  * linking them is optional, one invoice may cover several visits) and what
  * comes next. A row «Без приёма» holds what came into the order unsorted.
  */
-export function OrderAfterVisits({ orderId, patientId, lang, reloadNonce, canEdit }: OrderAfterVisitsProps) {
+export function OrderAfterVisits({
+  orderId,
+  patientId,
+  lang,
+  reloadNonce,
+  canEdit,
+  orderRequiresInterpreter = false,
+}: OrderAfterVisitsProps) {
   const de = lang === "de";
   const tx = (ru: string, german: string) => (de ? german : ru);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -225,7 +234,7 @@ export function OrderAfterVisits({ orderId, patientId, lang, reloadNonce, canEdi
             {visits.map((visit) => {
               const papers = documentsOf(current.documents, visit.id);
               const invoices = invoicesOf(current.invoices, visit.id);
-              const interpreter = interpreterState(visit);
+              const interpreter = interpreterState(visit, orderRequiresInterpreter);
               const missing = missingAfterVisit(papers, interpreter);
               const next = nextVisitAfter(visit, current.appointments);
               const addable = current.invoices.filter(

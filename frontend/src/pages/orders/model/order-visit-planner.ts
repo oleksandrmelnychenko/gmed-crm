@@ -163,7 +163,9 @@ export function batchPayload(drafts: readonly DraftVisit[], dryRun: boolean) {
       date: draft.date,
       time_start: minutesToTime(draft.start),
       time_end: minutesToTime(draft.start + draft.duration),
-      interpreter_needed: draft.interpreterNeeded,
+      // An unticked box leaves the visit to the order's planning (null), as
+      // the appointment form does; only a tick is the visit's own answer.
+      interpreter_needed: draft.interpreterNeeded ? true : null,
       interpreter_id: draft.interpreterNeeded && draft.interpreterId ? draft.interpreterId : null,
       // The appointment form fills the place from the provider the same way.
       location: draft.doctor.providerName,
@@ -222,7 +224,7 @@ export function draftSavePayload(drafts: readonly DraftVisit[]) {
       date: item.date,
       time_start: item.time_start,
       time_end: item.time_end,
-      interpreter_needed: item.interpreter_needed,
+      interpreter_needed: item.interpreter_needed === true,
       interpreter_id: item.interpreter_id,
     })),
   };

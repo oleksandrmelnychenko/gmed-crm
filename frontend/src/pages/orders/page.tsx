@@ -5676,6 +5676,9 @@ function useOrdersPageContent() {
                           lang={lang}
                           reloadNonce={reloadNonce}
                           canEdit={canReleaseOrderPlan}
+                          orderRequiresInterpreter={
+                            orderDetail.planning_preparation.interpreter_required
+                          }
                         />
                       ) : null}
 
