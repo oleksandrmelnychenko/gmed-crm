@@ -251,6 +251,7 @@ import {
   updateOrderPhase,
   updateOrderStatus,
   fetchOrderOpenTaskTitles,
+  fetchOrderOpenConciergeServices,
   updateOrderPlanningPreparation,
   updateOrderProcessGates,
   updateOrderLeistungPlannedCost,
@@ -1252,6 +1253,7 @@ function useOrdersPageContent() {
   const [cancelOrderOpen, setCancelOrderOpen] = useState(false);
   const [completeOrderAsk, setCompleteOrderAsk] = useState(false);
   const [completeOrderOpenTasks, setCompleteOrderOpenTasks] = useState<string[]>([]);
+  const [completeOrderOpenServices, setCompleteOrderOpenServices] = useState<string[]>([]);
   const [cancelLeistungTarget, setCancelLeistungTarget] =
     useState<CancelLeistungTarget | null>(null);
   const [agencyServices, setAgencyServices] = useState<AgencyServiceItem[]>([]);
@@ -2889,6 +2891,12 @@ function useOrdersPageContent() {
       void fetchOrderOpenTaskTitles(orderId)
         .then((titles) => setCompleteOrderOpenTasks(titles.map((title) => localizeTaskTitle(title, lang))))
         .catch(() => setCompleteOrderOpenTasks([]));
+      // Open concierge bookings of the order are named too; completing
+      // closes none of them (QA final-A F4, no auto-close).
+      setCompleteOrderOpenServices([]);
+      void fetchOrderOpenConciergeServices(orderId)
+        .then(setCompleteOrderOpenServices)
+        .catch(() => setCompleteOrderOpenServices([]));
       return;
     }
 
@@ -9795,6 +9803,13 @@ function useOrdersPageContent() {
                 {lang === "de"
                   ? `Diese Aufgaben bleiben offen und müssen von ihren Verantwortlichen erledigt werden: ${completeOrderOpenTasks.join(", ")}.`
                   : `Эти задачи останутся открытыми, их закрывают ответственные: ${completeOrderOpenTasks.join(", ")}.`}
+              </span>
+            ) : null}
+            {completeOrderOpenServices.length > 0 ? (
+              <span className="mt-2 block" data-testid="order-complete-open-services">
+                {lang === "de"
+                  ? `Diese Concierge-Buchungen sind noch offen und bleiben bestehen: ${completeOrderOpenServices.join(", ")}.`
+                  : `Эти консьерж-бронирования ещё открыты и останутся без изменений: ${completeOrderOpenServices.join(", ")}.`}
               </span>
             ) : null}
           </>

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { apiFetch } from "@/lib/api";
 
 import {
+  fetchOrderOpenConciergeServices,
   fetchOrderWorkspace,
   normalizeOrderAmendment,
   orderGroupCandidates,
@@ -42,6 +43,24 @@ describe("fetchOrderWorkspace", () => {
     expect(workspace.workflow).toBeNull();
     expect(workspace.assignments).toEqual([]);
     expect(workspace.detail.id).toBe("order-1");
+  });
+});
+
+describe("fetchOrderOpenConciergeServices (QA final-A F4)", () => {
+  beforeEach(() => {
+    apiFetchMock.mockReset();
+  });
+
+  it("names the open bookings of the order with their Berlin date", async () => {
+    apiFetchMock.mockResolvedValue([
+      { title: "Abendessen Restaurant", status: "confirmed", starts_at: "2026-12-02T18:30:00Z" },
+      { title: "Transfer Flughafen", status: "completed", starts_at: "2026-11-13T06:00:00Z" },
+      { title: "Theater", status: "cancelled", starts_at: null },
+      { title: "Hotel", status: "planned", starts_at: null },
+    ]);
+    const open = await fetchOrderOpenConciergeServices("order 1");
+    expect(apiFetchMock).toHaveBeenCalledWith("/concierge-services?order_id=order%201");
+    expect(open).toEqual(["Abendessen Restaurant (02.12.2026)", "Hotel"]);
   });
 });
 

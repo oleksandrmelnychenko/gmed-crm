@@ -816,3 +816,73 @@ async fn a_transfer_keeps_its_own_fields_validated_by_kind() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["error"], "concierge_service_details_invalid");
 }
+
+/// QA final-A F1 (2026-11-13): the task of a transfer names its pickup place
+/// under «Место или адрес», not the partner office the booking copied into
+/// the address; a place staff typed into the task stays.
+#[tokio::test]
+async fn a_transfer_task_shows_the_pickup_place() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let fx = fixture(&ctx.pool, ctx.admin_id, &tag).await;
+    let pm = auth_header_for(fx.pm_id, "patient_manager");
+    let concierge = auth_header_for(fx.concierge_id, "concierge");
+    let (status, body) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/concierge-services",
+        &pm,
+        Some(json!({
+            "patient_id": fx.patient_id,
+            "assigned_concierge_id": fx.concierge_id,
+            "service_kind": "transfer",
+            "title": "Airport pickup",
+            "details": { "pickup_place": "Flughafen München, Terminal 2" },
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let service_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+    let (task_id, _, _) = task_of(&ctx.pool, service_id).await;
+    // The partner booking copied the partner's office into the address.
+    sqlx::query(
+        "UPDATE concierge_services SET service_address = 'Friedrichstr. 100, Berlin' WHERE id = $1",
+    )
+    .bind(service_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE tasks SET location = 'Friedrichstr. 100, Berlin', service_address = 'Friedrichstr. 100, Berlin' WHERE id = $1")
+        .bind(task_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+
+    let location = |list: &Value| {
+        list.as_array()
+            .expect("task list")
+            .iter()
+            .find(|row| row["id"] == task_id.to_string())
+            .map(|row| row["location"].clone())
+            .unwrap_or_else(|| panic!("task {task_id} listed: {list}"))
+    };
+    let path = format!(
+        "/api/v1/concierge-operational-items?patient_id={}&archive=all",
+        fx.patient_id
+    );
+    let (status, list) = json_request(&ctx.app, "GET", &path, &concierge, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(location(&list), json!("Flughafen München, Terminal 2"));
+
+    // A place staff typed into the task stays.
+    sqlx::query("UPDATE tasks SET location = 'Hotel Bayerischer Hof, Lobby' WHERE id = $1")
+        .bind(task_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (status, list) = json_request(&ctx.app, "GET", &path, &concierge, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(location(&list), json!("Hotel Bayerischer Hof, Lobby"));
+}

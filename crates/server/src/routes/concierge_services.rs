@@ -108,6 +108,10 @@ struct ListConciergeServicesQuery {
     status: Option<String>,
     billing_status: Option<String>,
     mine_only: Option<bool>,
+    /// The services of one order, linked directly or through their visit
+    /// (the order's completion confirmation names the open ones, QA final-A
+    /// F4 2026-11-13).
+    order_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -1172,6 +1176,7 @@ async fn list_concierge_services(
                     WHERE st.id = cs.taxonomy_node_id
                 )
              )
+             AND ($10::uuid IS NULL OR COALESCE(cs.order_id, a.order_id) = $10)
            ORDER BY COALESCE(cs.starts_at, cs.created_at) DESC, cs.created_at DESC
            LIMIT 200"#
     );
@@ -1185,6 +1190,7 @@ async fn list_concierge_services(
         .bind(query.status)
         .bind(query.billing_status)
         .bind(query.taxonomy_node_id)
+        .bind(query.order_id)
         .fetch_all(&state.db)
         .await
     {

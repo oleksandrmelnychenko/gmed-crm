@@ -288,7 +288,18 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
           (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL) AS child_count,
           (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL AND child.status = 'completed') AS child_completed_count,
           (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL AND child.status NOT IN ('completed', 'cancelled')) AS child_open_count,
-          t.location, t.priority, t.status, t.reminder_at, t.reminder_sent_at,
+          -- A ride shows its pickup place, not the partner office the booking
+          -- copied into the address (QA final-A F1 2026-11-13); a place staff
+          -- typed into the task stays.
+          CASE
+              WHEN cs.service_kind IN ('transfer', 'chauffeur')
+               AND NULLIF(BTRIM(cs.details->>'pickup_place'), '') IS NOT NULL
+               AND (NULLIF(BTRIM(t.location), '') IS NULL
+                    OR t.location IS NOT DISTINCT FROM cs.service_address)
+              THEN BTRIM(cs.details->>'pickup_place')
+              ELSE t.location
+          END AS location,
+          t.priority, t.status, t.reminder_at, t.reminder_sent_at,
           t.completed_at, t.archived_at, t.archived_by, archiver.name AS archived_by_name,
           t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
           t.project_id, project.name AS project_name,
@@ -430,7 +441,18 @@ async fn list_items(
                   (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL) AS child_count,
                   (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL AND child.status = 'completed') AS child_completed_count,
                   (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL AND child.status NOT IN ('completed', 'cancelled')) AS child_open_count,
-                  t.location, t.priority, t.status, t.reminder_at, t.reminder_sent_at,
+                  -- A ride shows its pickup place, not the partner office the booking
+                  -- copied into the address (QA final-A F1 2026-11-13); a place staff
+                  -- typed into the task stays.
+                  CASE
+                      WHEN cs.service_kind IN ('transfer', 'chauffeur')
+                       AND NULLIF(BTRIM(cs.details->>'pickup_place'), '') IS NOT NULL
+                       AND (NULLIF(BTRIM(t.location), '') IS NULL
+                            OR t.location IS NOT DISTINCT FROM cs.service_address)
+                      THEN BTRIM(cs.details->>'pickup_place')
+                      ELSE t.location
+                  END AS location,
+                  t.priority, t.status, t.reminder_at, t.reminder_sent_at,
                   t.completed_at, t.archived_at, t.archived_by, archiver.name AS archived_by_name,
                   t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
                   t.project_id, project.name AS project_name,

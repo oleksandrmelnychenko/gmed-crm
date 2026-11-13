@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api";
+import { formatAppDate } from "@/lib/app-time-zone";
 import type { BillingReversalPreview, IssuedCreditNote } from "@/lib/billing-reversal";
 import { fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
@@ -288,6 +289,27 @@ export async function fetchOrderOpenTaskTitles(orderId: string): Promise<string[
   return rows
     .filter((row) => !CLOSED_TASK_STATUSES.has(row.status ?? ""))
     .map((row) => row.title?.trim() ?? "")
+    .filter(Boolean);
+}
+
+const CLOSED_SERVICE_STATUSES = new Set(["completed", "cancelled"]);
+
+/**
+ * The order's concierge bookings that are still open (planned, booked,
+ * confirmed, in service), as «title (DD.MM.YYYY)»: completing the order
+ * closes none of them, so the confirmation names them (QA final-A F4).
+ */
+export async function fetchOrderOpenConciergeServices(orderId: string): Promise<string[]> {
+  const rows = await apiFetch<{ title?: string | null; status?: string | null; starts_at?: string | null }[]>(
+    `/concierge-services?order_id=${encodeURIComponent(orderId)}`,
+  );
+  return rows
+    .filter((row) => !CLOSED_SERVICE_STATUSES.has(row.status ?? ""))
+    .map((row) => {
+      const title = row.title?.trim() ?? "";
+      const date = row.starts_at ? formatAppDate(row.starts_at) : "";
+      return title && date ? `${title} (${date})` : title;
+    })
     .filter(Boolean);
 }
 
