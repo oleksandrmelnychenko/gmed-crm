@@ -29,7 +29,7 @@ import {
   isPausedPortalRoute,
   isPortalSubscriptionPaused,
 } from "@/lib/portal-subscription";
-import { usePortalPatientId } from "@/lib/portal-patient-context";
+import { isPortalLegalRepresentative, usePortalPatientId } from "@/lib/portal-patient-context";
 import { useLocalStorage } from "@/components/data-table/use-local-storage";
 
 interface NavItem {
@@ -106,7 +106,12 @@ export function NavPanel() {
     && !user?.patients?.some((patient) => patient.id === patientId);
   const [lockedModule, setLockedModule] = useState<{ id: string; label: string } | null>(null);
   // A parent's login in the lead cabinet is no patient: the cabinet names it.
-  const portalAccountLabel = usePortalAccountLabel(isPatientPortal ? user?.id : null);
+  const cabinetAccountLabel = usePortalAccountLabel(isPatientPortal ? user?.id : null);
+  // A parent in the patient portal of a minor is the legal representative,
+  // not the patient (owner decision 2026-11-13).
+  const portalAccountLabel = isPatientPortal && !isLeadPortal && isPortalLegalRepresentative(user, patientId)
+    ? tr.portal_role_legal_representative ?? null
+    : cabinetAccountLabel;
   // A parent whose access to every request ended sees the cabinet's notice alone, without the
   // locked entries of the patient portal (QA 2026-10-24, B-2/D-4).
   const leadPortalClosed = useLeadPortalClosed(isLeadPortal ? user?.id : null);

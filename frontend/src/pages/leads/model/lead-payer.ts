@@ -132,6 +132,12 @@ export type PayerDeclaration = {
   phone: string | null;
   payer_informed_at: string | null;
   payer_informed_by: string | null;
+  /**
+   * `link` when the payer accepted the privacy notice in its own payer link
+   * (owner decision 2026-11-13; no staff member then); absent on an older
+   * server, null when a person recorded it.
+   */
+  payer_informed_via?: "link" | null;
   /** Absent on an older server; a third party without a type is a person. */
   payer_type?: PayerType | null;
   /** Name of the company, organisation or insurer. */

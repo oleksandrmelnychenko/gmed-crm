@@ -203,6 +203,7 @@ export const ru = {
   role_sales: "Отдел продаж",
   role_it_admin: "IT-администратор",
   role_patient: "Пациент",
+  portal_role_legal_representative: "Законный представитель",
 
   cabinet_eyebrow_default: "Рабочее место",
   cabinet_subtitle_default: "Для вашей роли пока не настроен кабинет. Доступны только общие разделы.",

@@ -532,6 +532,11 @@ describe("label helpers", () => {
     expect(payerInformedLabel(declaration, de)).toBe("ja, 05.10.2026");
     expect(payerInformedLabel({ ...declaration, payer_informed_at: null }, ru)).toBe("нет");
     expect(payerInformedLabel({ ...declaration, payer_informed_at: null }, de)).toBe("nein");
+    // Owner decision 2026-11-13: the payer accepted the notice in its own link.
+    expect(payerInformedLabel({ ...declaration, payer_informed_via: "link" }, ru))
+      .toBe("да, 05.10.2026 · принято плательщиком по ссылке");
+    expect(payerInformedLabel({ ...declaration, payer_informed_via: "link" }, de))
+      .toBe("ja, 05.10.2026 · vom Zahler im Link bestätigt");
   });
 
   it("names the contracting party", () => {

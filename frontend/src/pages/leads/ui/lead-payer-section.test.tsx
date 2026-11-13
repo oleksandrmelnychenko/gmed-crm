@@ -753,6 +753,14 @@ describe("LeadPayerDeclarationSection: the third party's phone", () => {
     last_name: "Zahler",
   };
 
+  it("names the payer's own link as the source of the information (owner decision 2026-11-13)", () => {
+    const informed = { ...thirdParty, payer_informed_at: "2026-11-12T22:37:00Z", payer_informed_by: null };
+    const viaLink = renderSection({ ...informed, payer_informed_via: "link" });
+    expect(viaLink).toContain('data-testid="lead-payer-informed-via-link"');
+    expect(viaLink).toContain("Принято плательщиком по ссылке");
+    expect(renderSection({ ...informed, payer_informed_via: null })).not.toContain('data-testid="lead-payer-informed-via-link"');
+  });
+
   it("marks a phone with fewer than six digits and keeps a valid one quiet", () => {
     expect(renderSection({ ...thirdParty, phone: "12-34" })).toContain('data-testid="lead-payer-phone-error"');
     expect(renderSection({ ...thirdParty, phone: "12-34" })).toContain("Телефон указан неверно, изменения не сохраняются");

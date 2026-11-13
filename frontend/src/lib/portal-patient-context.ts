@@ -45,6 +45,24 @@ function subscribe(listener: () => void) {
   return () => { listeners.delete(listener); };
 }
 
+/**
+ * Whether the login acts for the selected patient as a legal representative
+ * (a parent linked to a minor through the guardian access): the portal names
+ * the login «Законный представитель» / «Gesetzliche Vertretung», not
+ * «Пациент» (owner decision 2026-11-13).
+ */
+export function isPortalLegalRepresentative(
+  user: { role: string; patients?: PortalPatient[] } | null | undefined,
+  patientId: string | null | undefined,
+): boolean {
+  if (!user || user.role !== "patient") return false;
+  const patients = user.patients ?? [];
+  const selected = patientId ? patients.find((patient) => patient.id === patientId) : undefined;
+  if (selected) return selected.access_kind === "guardian";
+  // Nobody picked yet: only a login that acts for others alone.
+  return patients.length > 0 && patients.every((patient) => patient.access_kind === "guardian");
+}
+
 export function usePortalPatientId(userId: string | null | undefined) {
   return useSyncExternalStore(subscribe, () => getPortalPatientId(userId), () => null);
 }

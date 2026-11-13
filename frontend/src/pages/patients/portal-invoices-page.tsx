@@ -58,6 +58,7 @@ import {
   openPortalInvoicePdf,
   portalInvoiceIsThirdParty,
   portalInvoiceNeedsPaymentProof,
+  portalInvoicePaidByRepresentative,
   portalThirdPartyPayerLabel,
   portalOwnOpenBalances,
   portalStatementAvailableCredit,
@@ -407,6 +408,9 @@ function usePatientInvoicesPageContent() {
       (portalInvoiceIsThirdParty(detail) ||
         invoices.some((item) => item.id === detail.id && portalInvoiceIsThirdParty(item))),
   );
+  // Owner decision 2026-11-13: the other parent pays it — no amount due here.
+  const detailListItem = detail ? invoices.find((item) => item.id === detail.id) ?? null : null;
+  const detailPaidByRepresentative = Boolean(detailListItem && portalInvoicePaidByRepresentative(detailListItem));
 
   async function handlePaymentProofUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -477,13 +481,29 @@ function usePatientInvoicesPageContent() {
       ? `${payer} – nicht in Ihrem offenen Saldo`
       : `${payer} – не входит в ваш открытый баланс`;
   };
-  // A third party's invoice asks no payment proof of the patient (QA F-x6).
+  // A third party's invoice asks no payment proof of the patient (QA F-x6),
+  // nor the other parent's of a parent who does not pay it (2026-11-13).
   const paymentProofText = (invoice: PortalInvoiceItem) =>
     invoice.last_payment_proof_at
       ? <PortalDateChip title={t.portal_invoices_uploaded} timestamp={invoice.last_payment_proof_at} />
-      : portalInvoiceIsThirdParty(invoice)
-        ? lang === "de" ? "Nicht nötig – der Zahler zahlt" : "Не нужно – оплачивает плательщик"
-        : t.portal_invoices_not_uploaded;
+      : portalInvoicePaidByRepresentative(invoice)
+        ? representativeProofText(invoice.third_party_payer_name)
+        : portalInvoiceIsThirdParty(invoice)
+          ? lang === "de" ? "Nicht nötig – der Zahler zahlt" : "Не нужно – оплачивает плательщик"
+          : t.portal_invoices_not_uploaded;
+  const representativeProofText = (payer: string | null | undefined) => {
+    const name = payer?.trim();
+    return lang === "de"
+      ? `Nicht nötig – ${name || "die andere gesetzliche Vertretung"} zahlt`
+      : `Не нужно – оплачивает ${name || "другой законный представитель"}`;
+  };
+  // What the open-amount cell says: the other parent's invoice shows none.
+  const openAmountText = (invoice: PortalInvoiceItem) =>
+    portalInvoicePaidByRepresentative(invoice)
+      ? "—"
+      : invoiceAmountsVisible(invoice)
+        ? formatPortalCurrency(Number(invoice.balance_due ?? 0), invoice.currency)
+        : t.portal_invoices_hidden;
   const overpaymentText = (amount: number) =>
     lang === "de"
       ? `Überzahlung ${formatPortalCurrency(amount, accountStatement?.currency)} als Guthaben`
@@ -731,21 +751,29 @@ function usePatientInvoicesPageContent() {
               );
             })}
           </div>
-          {statementSplit.thirdParty.length > 0 ? (
-            <div className="mt-4 space-y-2" data-testid="portal-statement-third-party">
+          {[false, true].map((representative) => {
+            const payerGroups = statementSplit.thirdParty.filter((group) => group.representative === representative);
+            if (payerGroups.length === 0) return null;
+            return (
+            <div key={representative ? "representative" : "third-party"} className="mt-4 space-y-2" data-testid={representative ? "portal-statement-representative" : "portal-statement-third-party"}>
               <div className={tokens.text.eyebrow}>
-                {lang === "de" ? "Rechnungen, die Dritte zahlen (nicht in Ihrem Saldo)" : "Счета, которые оплачивает третье лицо (не входят в ваш баланс)"}
+                {representative
+                  ? lang === "de" ? "Rechnungen, die die andere gesetzliche Vertretung zahlt (nicht in Ihrem Saldo)" : "Счета, которые оплачивает другой законный представитель (не входят в ваш баланс)"
+                  : lang === "de" ? "Rechnungen, die Dritte zahlen (nicht in Ihrem Saldo)" : "Счета, которые оплачивает третье лицо (не входят в ваш баланс)"}
               </div>
-              {statementSplit.thirdParty.map((group) => (
-                <ListItem key={`third-party:${group.payer}`} className="space-y-2">
+              {payerGroups.map((group) => (
+                <ListItem key={`third-party:${representative ? "representative" : "payer"}:${group.payer}`} className="space-y-2">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="text-sm font-semibold text-foreground">
                       {portalThirdPartyPayerLabel(group.payer, group.due <= 0.004, lang)}
                     </div>
-                    <div className="text-right text-xs text-muted-foreground">
-                      {lang === "de" ? "Offen beim Zahler" : "Открыто у плательщика"}{" "}
-                      <span className="font-mono font-semibold tabular-nums text-foreground">{formatPortalCurrency(group.due, accountStatement.currency)}</span>
-                    </div>
+                    {/* The other parent's open amount is that parent's (owner decision 2026-11-13). */}
+                    {representative ? null : (
+                      <div className="text-right text-xs text-muted-foreground">
+                        {lang === "de" ? "Offen beim Zahler" : "Открыто у плательщика"}{" "}
+                        <span className="font-mono font-semibold tabular-nums text-foreground">{formatPortalCurrency(group.due, accountStatement.currency)}</span>
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-1">
                     {group.items.map((item) => {
@@ -762,7 +790,7 @@ function usePatientInvoicesPageContent() {
                             {item.amounts_visible && item.amount_gross != null
                               ? formatPortalCurrency(item.amount_gross, accountStatement.currency)
                               : t.portal_invoices_hidden}
-                            {!isCreditAdjustment && item.amounts_visible
+                            {!isCreditAdjustment && item.amounts_visible && !representative
                               ? ` · ${lang === "de" ? "offen" : "открыто"} ${formatPortalCurrency(portalStatementOpenAmount(item).amount, accountStatement.currency)}`
                               : ""}
                           </span>
@@ -773,7 +801,8 @@ function usePatientInvoicesPageContent() {
                 </ListItem>
               ))}
             </div>
-          ) : null}
+            );
+          })}
         </Section>
       ) : null}
 
@@ -803,7 +832,6 @@ function usePatientInvoicesPageContent() {
               <tbody className="divide-y divide-border/60">
                 {invoices.map((invoice) => {
                   const amountsVisible = invoiceAmountsVisible(invoice);
-                  const balanceDue = Number(invoice.balance_due ?? 0);
                   const openInvoice = () => dispatchInvoicesState({ selectedInvoiceId: invoice.id });
                   return (
                     <tr
@@ -837,7 +865,7 @@ function usePatientInvoicesPageContent() {
                         {amountsVisible ? formatPortalCurrency(portalInvoiceNetTotal(invoice), invoice.currency) : t.portal_invoices_hidden}
                         {amountsVisible ? portalInvoiceCreditLine(invoice, lang, formatPortalCurrency) ? <div className="mt-0.5 text-xs font-sans text-muted-foreground">{portalInvoiceCreditLine(invoice, lang, formatPortalCurrency)}</div> : null : null}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right font-mono font-semibold tabular-nums text-foreground">{amountsVisible ? formatPortalCurrency(balanceDue, invoice.currency) : t.portal_invoices_hidden}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right font-mono font-semibold tabular-nums text-foreground">{openAmountText(invoice)}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{paymentProofText(invoice)}</td>
                     </tr>
                   );
@@ -848,7 +876,6 @@ function usePatientInvoicesPageContent() {
           <div className="grid gap-3 md:hidden">
             {invoices.map((invoice) => {
               const amountsVisible = invoiceAmountsVisible(invoice);
-              const balanceDue = Number(invoice.balance_due ?? 0);
 
               return (
                 <ListItem
@@ -888,7 +915,7 @@ function usePatientInvoicesPageContent() {
                     <InfoRow
                       className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
                       label={t.portal_invoices_open}
-                      value={amountsVisible ? formatPortalCurrency(balanceDue, invoice.currency) : t.portal_invoices_hidden}
+                      value={openAmountText(invoice)}
                     />
                     <InfoRow
                       className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
@@ -1014,11 +1041,16 @@ function usePatientInvoicesPageContent() {
                     {invoiceAmountsVisible(detail) && Number(detail.paid_amount ?? 0) > 0 ? (
                       <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={lang === "de" ? "Bezahlt" : "Оплачено"} value={`−${formatPortalCurrency(Math.max(0, Number(detail.paid_amount ?? 0) - Math.max(0, Number(detail.credit_balance ?? 0))), detail.currency)}`} />
                     ) : null}
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_open_balance} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.balance_due, detail.currency) : t.portal_invoices_hidden} />
+                    {/* The other parent's invoice: who pays it, no amount due (owner decision 2026-11-13). */}
+                    {detailPaidByRepresentative ? (
+                      <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={lang === "de" ? "Zahler" : "Плательщик"} value={portalThirdPartyPayerLabel(detailListItem?.third_party_payer_name, detail.status === "paid", lang)} />
+                    ) : (
+                      <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_open_balance} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.balance_due, detail.currency) : t.portal_invoices_hidden} />
+                    )}
                     {invoiceAmountsVisible(detail) && Number(detail.credit_balance ?? 0) > 0 ? (
                       <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={lang === "de" ? "Überzahlung als Guthaben (noch nicht verrechnet)" : "Переплата на балансе (ещё не зачтена)"} value={formatPortalCurrency(detail.credit_balance, detail.currency)} />
                     ) : null}
-                    {invoiceAmountsVisible(detail) && Number(detail.advance_credit_available ?? 0) > 0 ? (
+                    {invoiceAmountsVisible(detail) && !detailPaidByRepresentative && Number(detail.advance_credit_available ?? 0) > 0 ? (
                       <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.finance_invoice_amount_to_pay} value={formatPortalCurrency(detail.amount_to_pay, detail.currency)} />
                     ) : null}
                   </div>
@@ -1261,7 +1293,11 @@ function usePatientInvoicesPageContent() {
                         <SectionHeading icon={FileCheck}>{t.portal_invoices_payment_proof}</SectionHeading>
                       </h2>
                       <p className={cn("mt-1", tokens.text.muted)}>
-                        {detailIsThirdParty
+                        {detailPaidByRepresentative
+                          ? lang === "de"
+                            ? `Diese Rechnung zahlt ${detailListItem?.third_party_payer_name?.trim() || "die andere gesetzliche Vertretung"}; von Ihnen ist kein Zahlungsnachweis nötig.`
+                            : `Этот счёт оплачивает ${detailListItem?.third_party_payer_name?.trim() || "другой законный представитель"}; подтверждение оплаты от вас не нужно.`
+                          : detailIsThirdParty
                           ? lang === "de"
                             ? "Diese Rechnung zahlt der Zahler; von Ihnen ist kein Zahlungsnachweis nötig."
                             : "Этот счёт оплачивает плательщик; подтверждение оплаты от вас не нужно."

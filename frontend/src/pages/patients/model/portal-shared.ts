@@ -159,6 +159,12 @@ export type PortalInvoiceItem = {
   third_party_payer?: boolean;
   /** Name of that third party, as on the invoice. */
   third_party_payer_name?: string | null;
+  /**
+   * A minor's invoice to the other legal representative (the contracting
+   * parent), seen by a parent who does not pay it (owner decision
+   * 2026-11-13): also `third_party_payer`, shown without an amount due.
+   */
+  payer_is_representative?: boolean;
 };
 
 export type PortalInvoicePaymentTransaction = {
@@ -237,6 +243,8 @@ export type PortalAccountStatementItem = {
   kind: "invoice" | "prepayment" | "credit_note" | "credit_note_reversal";
   /** Who pays the invoice: `third_party` for a Kostenübernehmer (kept out of the patient's totals). */
   paid_by?: "patient" | "third_party";
+  /** With `third_party`: the other legal representative pays it (owner decision 2026-11-13). */
+  paid_by_representative?: boolean;
   /** Recipient of the invoice as printed. */
   recipient_name?: string | null;
   /** For a credit note row: the invoice it corrects. */
@@ -346,6 +354,17 @@ export function portalInvoiceIsThirdParty(invoice: Pick<PortalInvoiceItem, "thir
 }
 
 /**
+ * Owner decision 2026-11-13: a parent who does not pay sees the contracting
+ * parent's invoice as «оплачивает <имя>» / «zahlt <Name>», with no amount due
+ * and no payment proof; only the paying parent sees the open amount.
+ */
+export function portalInvoicePaidByRepresentative(
+  invoice: Pick<PortalInvoiceItem, "third_party_payer" | "payer_is_representative">,
+): boolean {
+  return portalInvoiceIsThirdParty(invoice) && invoice.payer_is_representative === true;
+}
+
+/**
  * Whether the portal asks the patient for a payment proof of this invoice:
  * open, without a proof yet, and the patient's own invoice. A third party's
  * invoice is never the patient's to prove (owner 2026-11-12 #7, QA F-x6).
@@ -396,30 +415,42 @@ export function portalOwnOpenBalances(
  * The statement rows of the patient's own invoices, and those a third party
  * pays (with their credit notes), grouped by that payer.
  */
+export type PortalStatementPayerGroup = {
+  payer: string;
+  items: PortalAccountStatementItem[];
+  due: number;
+  /** The other legal representative pays these (owner decision 2026-11-13): no amount due is shown. */
+  representative: boolean;
+};
+
 export function portalStatementSplit(items: readonly PortalAccountStatementItem[]): {
   own: PortalAccountStatementItem[];
-  thirdParty: { payer: string; items: PortalAccountStatementItem[]; due: number }[];
+  thirdParty: PortalStatementPayerGroup[];
 } {
   const thirdPartyInvoices = new Map<string, string>();
+  const representativeInvoices = new Set<string>();
   for (const item of items) {
     if (item.paid_by === "third_party") thirdPartyInvoices.set(item.id, item.recipient_name?.trim() ?? "");
+    if (item.paid_by === "third_party" && item.paid_by_representative === true) representativeInvoices.add(item.id);
   }
   const own: PortalAccountStatementItem[] = [];
-  const groups = new Map<string, { payer: string; items: PortalAccountStatementItem[]; due: number }>();
+  const groups = new Map<string, PortalStatementPayerGroup>();
   for (const item of items) {
-    const payer = item.paid_by === "third_party"
-      ? thirdPartyInvoices.get(item.id)
-      : item.invoice_id ? thirdPartyInvoices.get(item.invoice_id) : undefined;
-    if (payer === undefined) {
+    const invoiceId = item.paid_by === "third_party" ? item.id : item.invoice_id ?? undefined;
+    const payer = invoiceId ? thirdPartyInvoices.get(invoiceId) : undefined;
+    if (payer === undefined || !invoiceId) {
       own.push(item);
       continue;
     }
-    const group = groups.get(payer) ?? { payer, items: [], due: 0 };
+    const representative = representativeInvoices.has(invoiceId);
+    // A representative and a Kostenübernehmer of the same name stay apart.
+    const key = `${representative ? "representative" : "payer"}:${payer}`;
+    const group = groups.get(key) ?? { payer, items: [], due: 0, representative };
     group.items.push(item);
     if (item.paid_by === "third_party" && item.amounts_visible) {
       group.due = roundedAmount(group.due + Math.max(0, Number(portalStatementOpenAmount(item).amount) || 0));
     }
-    groups.set(payer, group);
+    groups.set(key, group);
   }
   return { own, thirdParty: [...groups.values()] };
 }

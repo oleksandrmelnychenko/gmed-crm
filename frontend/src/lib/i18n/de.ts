@@ -204,6 +204,7 @@ export const de = {
   role_sales: "Vertrieb",
   role_it_admin: "IT-Admin",
   role_patient: "Patient",
+  portal_role_legal_representative: "Gesetzliche Vertretung",
 
   cabinet_eyebrow_default: "Arbeitsplatz",
   cabinet_subtitle_default:

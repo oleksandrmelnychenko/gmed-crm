@@ -1758,6 +1758,7 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
     for key in [
         "payer_informed_at",
         "payer_informed_by",
+        "payer_informed_via",
         "contact_consent_at",
         "own_account_answered",
         "patient_id",

@@ -73,6 +73,11 @@ export type PatientPayerDeclaration = {
   /** When the payer was informed about the processing of their data (Art. 14 DSGVO). */
   payer_informed_at: string | null;
   /**
+   * `link` when the payer accepted the privacy notice in its own payer link
+   * (owner decision 2026-11-13); absent or null when a person recorded it.
+   */
+  payer_informed_via?: "link" | null;
+  /**
    * Section 7 of the form, where the invoice goes as the lead chose it:
    * `self`, `payer` or `other`; null while unanswered; absent (undefined) on
    * a server that does not send section 7 — the card shows no line then.
@@ -239,6 +244,7 @@ function normalizeDeclaration(value: unknown): PatientPayerDeclaration | null {
     phone: named ? text(record.phone) : null,
     contact_consent_at: thirdParty ? text(record.contact_consent_at) : null,
     payer_informed_at: thirdParty ? text(record.payer_informed_at) : null,
+    payer_informed_via: thirdParty && record.payer_informed_via === "link" ? "link" : null,
     // Section 7 applies to a self-payer as well; a server without it sends no key.
     ...(Object.hasOwn(record, "invoice_to") ? { invoice_to: isInvoiceTo(record.invoice_to) ? record.invoice_to : null } : {}),
     invoice_name: text(record.invoice_name),
@@ -455,7 +461,12 @@ export function contactConsentLabel(declaration: PatientPayerDeclaration, tx: Tx
 /** Whether the payer was informed about the processing of their data (Art. 14 DSGVO). */
 export function payerInformedLabel(declaration: PatientPayerDeclaration, tx: Tx): string {
   const day = declaration.payer_informed_at ? formatAppDate(declaration.payer_informed_at) : "";
-  return day ? `${tx("да", "ja")}, ${day}` : tx("нет", "nein");
+  if (!day) return tx("нет", "nein");
+  // The payer accepted the privacy notice in its own link (owner decision 2026-11-13).
+  if (declaration.payer_informed_via === "link") {
+    return `${tx("да", "ja")}, ${day} · ${tx("принято плательщиком по ссылке", "vom Zahler im Link bestätigt")}`;
+  }
+  return `${tx("да", "ja")}, ${day}`;
 }
 
 /**

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   portalInvoiceIsThirdParty,
   portalInvoiceNeedsPaymentProof,
+  portalInvoicePaidByRepresentative,
   portalOwnOpenBalances,
   portalThirdPartyPayerLabel,
   portalStatementAvailableCredit,
@@ -55,6 +56,25 @@ describe("third-party invoices in the patient's portal balance", () => {
     expect(split.thirdParty[0].items.map((item) => item.id)).toEqual(["inv-20", "cn-1"]);
     expect(split.thirdParty[0].due).toBe(663.05);
     expect(portalStatementSplit([row({ id: "a" })]).thirdParty).toEqual([]);
+  });
+
+  // Owner decision 2026-11-13: the other parent pays the contracting parent's invoice.
+  it("keeps the other parent's invoice apart from a Kostenübernehmer's, without an amount due", () => {
+    const jonas = { ...lukas, third_party_payer_name: "Jonas Vater", payer_is_representative: true };
+    expect(portalInvoicePaidByRepresentative(jonas)).toBe(true);
+    expect(portalInvoicePaidByRepresentative(lukas)).toBe(false);
+    expect(portalInvoicePaidByRepresentative({ ...jonas, third_party_payer: false })).toBe(false);
+    expect(portalInvoiceNeedsPaymentProof({ ...jonas, last_payment_proof_at: null })).toBe(false);
+    expect(portalOwnOpenBalances([own, jonas]).get("EUR")).toBe(633.05);
+    const split = portalStatementSplit([
+      row({ id: "inv-1", paid_by: "third_party", paid_by_representative: true, recipient_name: "Jonas Vater", invoice_balance_due: "400" }),
+      row({ id: "inv-2", paid_by: "third_party", recipient_name: "Jonas Vater", invoice_balance_due: "50" }),
+    ]);
+    expect(split.own).toEqual([]);
+    expect(split.thirdParty.map((group) => [group.payer, group.representative, group.items.map((item) => item.id)])).toEqual([
+      ["Jonas Vater", true, ["inv-1"]],
+      ["Jonas Vater", false, ["inv-2"]],
+    ]);
   });
 });
 

@@ -872,11 +872,15 @@ async fn load_patient_settlement_ledger(
     })
 }
 
+/// `viewer` is the signed-in portal login (None for staff): a parent signed
+/// in for a minor sees the other parent's invoice as paid by that parent
+/// (owner decision 2026-11-13).
 async fn load_patient_account_statement(
     state: &AppState,
     patient_id: Uuid,
     query: &PatientFinancialQuery,
     portal_scope: bool,
+    viewer: Option<Uuid>,
 ) -> Result<Value, sqlx::Error> {
     let from = parse_query_date(query.from.as_deref(), "from").map_err(sqlx::Error::Protocol)?;
     let to = parse_query_date(query.to.as_deref(), "to").map_err(sqlx::Error::Protocol)?;
@@ -1022,7 +1026,10 @@ async fn load_patient_account_statement(
                                  OR invoice.payer_patient_relation_id IS NOT NULL
                                  OR NULLIF(btrim(invoice.payer_contact_name), '') IS NOT NULL
                             THEN invoice.payer_role ELSE orders.payer_role END)
-                      IS NOT DISTINCT FROM 'cost_bearer' AS third_party_payer
+                      IS NOT DISTINCT FROM 'cost_bearer' AS third_party_payer,
+                  -- A minor's invoice to the other parent, for a parent's
+                  -- login: that parent pays it (owner decision 2026-11-13).
+                  {OTHER_REPRESENTATIVE} AS other_representative_payer
            FROM invoices invoice
            LEFT JOIN orders ON orders.id = invoice.order_id
            CROSS JOIN LATERAL (SELECT {INVOICE_RECIPIENT_VALUE} AS value) rcpt
@@ -1062,6 +1069,10 @@ async fn load_patient_account_statement(
              )
              AND invoice.currency = $7
            ORDER BY invoice.issued_at DESC, invoice.created_at DESC"#,
+    )
+    .replace(
+        "{OTHER_REPRESENTATIVE}",
+        &crate::routes::invoices::payer::other_representative_payer_sql("invoice", "$9"),
     ))
     .bind(patient_id)
     .bind(from)
@@ -1071,6 +1082,7 @@ async fn load_patient_account_statement(
     .bind(portal_scope)
     .bind(&currency)
     .bind(&recipient_filter)
+    .bind(viewer.filter(|_| portal_scope))
     .fetch_all(&state.db)
     .await?;
 
@@ -1100,7 +1112,14 @@ async fn load_patient_account_statement(
 
     for row in invoice_rows {
         let is_third_party = row.try_get::<bool, _>("third_party_payer").unwrap_or(false);
-        let separate_third_party = portal_scope && is_third_party;
+        // The other parent's invoice is kept apart like a third party's in
+        // the parent's portal, without being a Kostenübernehmer's.
+        let other_representative = portal_scope
+            && !is_third_party
+            && row
+                .try_get::<bool, _>("other_representative_payer")
+                .unwrap_or(false);
+        let separate_third_party = portal_scope && (is_third_party || other_representative);
         let invoice_type = row.try_get::<String, _>("invoice_type").unwrap_or_default();
         let mut status = row.try_get::<String, _>("status").unwrap_or_default();
         let total_gross = row
@@ -1224,6 +1243,7 @@ async fn load_patient_account_statement(
             "status": status,
             "payment_state": payment_state,
             "paid_by": if separate_third_party { "third_party" } else { "patient" },
+            "paid_by_representative": other_representative,
             "recipient_name": row.try_get::<Option<String>, _>("recipient_name").unwrap_or_default(),
             "recipient_identity": row.try_get::<Option<String>, _>("recipient_identity").unwrap_or_default(),
             "amounts_visible": amounts_visible,
@@ -1738,7 +1758,7 @@ async fn get_patient_account_statement(
         return err(StatusCode::UNPROCESSABLE_ENTITY, &message);
     }
 
-    match load_patient_account_statement(&state, patient_id, &query, false).await {
+    match load_patient_account_statement(&state, patient_id, &query, false, None).await {
         Ok(statement) => Json(statement).into_response(),
         Err(e) => {
             tracing::error!(error = %e, patient_id = %patient_id, "load patient account statement");
@@ -1774,7 +1794,15 @@ async fn get_my_account_statement(
         currency: query.currency,
         payer: None,
     };
-    match load_patient_account_statement(&state, patient_id, &portal_query, true).await {
+    match load_patient_account_statement(
+        &state,
+        patient_id,
+        &portal_query,
+        true,
+        Some(auth.user_id),
+    )
+    .await
+    {
         Ok(statement) => Json(statement).into_response(),
         Err(e) => {
             tracing::error!(error = %e, patient_id = %patient_id, "load portal account statement");

@@ -6379,7 +6379,7 @@ async fn list_my_invoices(
         Err(resp) => return resp,
     };
 
-    match sqlx::query(
+    match sqlx::query(&format!(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
                   i.status, i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
                   i.paid_amount, i.credited_amount, i.prepayment_applied_amount, i.paid_at, i.notes,
@@ -6387,6 +6387,9 @@ async fn list_my_invoices(
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient,
                   o.order_number, i.currency, q.quote_number,
+                  -- A minor's invoice to the other parent (the contracting
+                  -- one): that parent pays it (owner decision 2026-11-13).
+                  {other_representative} AS other_representative_payer,
                   EXISTS (
                     SELECT 1 FROM invoice_storno_documents storno WHERE storno.invoice_id = i.id
                   ) AS has_storno_document,
@@ -6438,7 +6441,8 @@ async fn list_my_invoices(
              AND ($3::text IS NULL
                   OR invoice_display_status(i.status, i.total_gross, i.credited_amount) = $3)
            ORDER BY i.issued_at DESC, i.created_at DESC"#,
-    )
+        other_representative = payer::other_representative_payer_sql("i", "$1"),
+    ))
     .bind(auth.user_id)
     .bind(patient_id)
     .bind(query.status)
@@ -6495,8 +6499,17 @@ async fn list_my_invoices(
                         "last_payment_proof_at": row.try_get::<Option<DateTime<Utc>>, _>("last_payment_proof_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                         "portal_visibility": row_invoice_portal_visibility(&row),
                     });
-                    let third_party = row.try_get::<bool, _>("third_party_payer").unwrap_or(false);
+                    let cost_bearer = row.try_get::<bool, _>("third_party_payer").unwrap_or(false);
+                    // The other parent's invoice is shown like a third
+                    // party's: not the viewer's debt, no payment proof
+                    // (owner decision 2026-11-13).
+                    let other_representative = !cost_bearer
+                        && row
+                            .try_get::<bool, _>("other_representative_payer")
+                            .unwrap_or(false);
+                    let third_party = cost_bearer || other_representative;
                     invoice["third_party_payer"] = serde_json::json!(third_party);
+                    invoice["payer_is_representative"] = serde_json::json!(other_representative);
                     invoice["third_party_payer_name"] = if third_party {
                         serde_json::json!(row.try_get::<Option<String>, _>("third_party_payer_name").unwrap_or_default())
                     } else {

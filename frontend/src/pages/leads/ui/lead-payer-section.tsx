@@ -566,6 +566,8 @@ export function LeadPayerDeclarationSection({
   const taxNumberWarning = taxNumberFormatWarning(form.invoiceTaxNumber, tx);
   const statusBadge = payerStatusBadge(data?.status, tx);
   const informedAt = data?.declaration?.payer_informed_at ?? null;
+  // Owner decision 2026-11-13: the payer accepted the notice in its own link.
+  const informedViaLink = data?.declaration?.payer_informed_via === "link";
   const contactConsentAt = data?.declaration?.contact_consent_at ?? null;
   const contactConsentWay = staffRecordedLabel({
     recorded_how: data?.declaration?.contact_consent_recorded_how,
@@ -1346,6 +1348,11 @@ export function LeadPayerDeclarationSection({
                     {tx("Плательщик проинформирован об обработке его данных", "Die zahlende Person wurde über die Verarbeitung ihrer Daten informiert")}
                     {informedAt && form.payerInformed ? (
                       <StatusChip tone="info" className="ml-2 align-middle"><CalendarDays aria-hidden="true" />{formatAppDateTime(informedAt)}</StatusChip>
+                    ) : null}
+                    {informedAt && form.payerInformed && informedViaLink ? (
+                      <StatusChip tone="success" className="ml-2 align-middle" data-testid="lead-payer-informed-via-link">
+                        {tx("Принято плательщиком по ссылке", "Vom Zahler im Link bestätigt")}
+                      </StatusChip>
                     ) : null}
                   </>
                 )}

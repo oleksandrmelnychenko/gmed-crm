@@ -4195,3 +4195,86 @@ async fn an_organisation_uploads_its_register_extract_on_the_link() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["code"], "register_extract_organisation_only", "{body}");
 }
+
+/// Owner decision 2026-11-13 (release QA F-x3): a link handed over without
+/// e-mail informs the payer once the payer accepts the privacy notice in it.
+/// The declaration records the time and the link as the source (no staff
+/// member), «payer_not_informed» leaves the gate, and a staff save — with or
+/// without the tick — keeps that record.
+#[tokio::test]
+async fn the_payers_notice_accepted_in_a_manual_link_counts_as_informed() {
+    let Some(app) = payer_app().await else { return };
+    let pool = app.pool();
+    let (lead_id, _) = lead_with_payer(&app, "informed-by-link").await;
+    let declaration_path = format!("/api/v1/leads/{lead_id}/payer-declaration");
+    let (status, prepared) = with_login(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/payer-link"),
+        &app.manager(),
+        Some(json!({ "delivery": "manual" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{prepared}");
+    let token = prepared["token"]
+        .as_str()
+        .expect("a prepared token")
+        .to_string();
+    let (_, before) = with_login(&app, "GET", &declaration_path, &app.manager(), None).await;
+    assert!(
+        before["declaration"]["payer_informed_at"].is_null(),
+        "{before}"
+    );
+    assert!(
+        before["status"]["missing"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("payer_not_informed")),
+        "{before}"
+    );
+
+    let session = open_session(&app, &token).await;
+    consent(&app, &token, &session).await;
+    let (_, after) = with_login(&app, "GET", &declaration_path, &app.manager(), None).await;
+    let informed_at = after["declaration"]["payer_informed_at"].clone();
+    assert!(informed_at.is_string(), "{after}");
+    assert!(
+        after["declaration"]["payer_informed_by"].is_null(),
+        "{after}"
+    );
+    assert_eq!(
+        after["declaration"]["payer_informed_via"], "link",
+        "{after}"
+    );
+    assert!(
+        !after["status"]["missing"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("payer_not_informed")),
+        "{after}"
+    );
+    let consents = audit_contexts(pool, "payer_questionnaire_consent", lead_id).await;
+    let (actor, context) = consents.last().expect("the consent is audited");
+    assert!(actor.is_none(), "{context}");
+    assert_eq!(context["payer_informed_recorded"], true, "{context}");
+
+    // The second acknowledgement keeps the first record.
+    consent(&app, &token, &session).await;
+    let (_, again) = with_login(&app, "GET", &declaration_path, &app.manager(), None).await;
+    assert_eq!(again["declaration"]["payer_informed_at"], informed_at);
+    let consents = audit_contexts(pool, "payer_questionnaire_consent", lead_id).await;
+    assert_eq!(consents.last().unwrap().1["payer_informed_recorded"], false);
+
+    // Staff save the same payer without the tick, then with it: the link's
+    // record stays, with its time and without an author.
+    let saved = staff_save(&app, lead_id, |form| {
+        form.insert("payer_informed".into(), json!(false));
+    })
+    .await;
+    assert_eq!(saved["payer_informed_at"], informed_at, "{saved}");
+    assert_eq!(saved["payer_informed_via"], "link", "{saved}");
+    let saved = staff_save(&app, lead_id, |_| {}).await;
+    assert_eq!(saved["payer_informed_at"], informed_at, "{saved}");
+    assert!(saved["payer_informed_by"].is_null(), "{saved}");
+    assert_eq!(saved["payer_informed_via"], "link", "{saved}");
+}

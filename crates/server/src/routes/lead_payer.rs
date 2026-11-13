@@ -101,6 +101,10 @@ use gmed_domain::role::Role;
 
 pub const PAYER_KIND_SELF: &str = "self";
 pub const PAYER_KIND_THIRD_PARTY: &str = "third_party";
+
+/// `lead_payer_declarations.payer_informed_via`: the payer accepted the
+/// privacy notice in its own link (owner decision 2026-11-13).
+pub(crate) const INFORMED_VIA_LINK: &str = "link";
 /// A minor's parent or legal representative pays (owner decision
 /// 2026-10-19): the representative who signs the contract is the
 /// contracting party (Auftraggeber, "im eigenen Namen zugunsten des
@@ -288,6 +292,11 @@ pub(crate) struct Declaration {
     /// the payer's data (Art. 14 DSGVO: the data come from the patient side).
     pub payer_informed_at: Option<DateTime<Utc>>,
     pub payer_informed_by: Option<Uuid>,
+    /// `link` when the payer accepted the privacy notice in its own link
+    /// (owner decision 2026-11-13; `payer_informed_by` is then empty). The
+    /// link's consent writes it; the declaration's upsert keeps it while
+    /// `payer_informed_at` stays and clears it otherwise.
+    pub payer_informed_via: Option<String>,
     /// When the lead agreed in the cabinet that GMED contacts the payer about
     /// the costs and tells the payer the lead's name. Only the lead gives or
     /// removes this consent.
@@ -361,7 +370,7 @@ const DECLARATION_COLUMNS: &str = "payer_kind, payer_representative_id, acts_on_
      source_of_funds_document_id, payer_type, organisation_name, first_name, last_name, \
      date_of_birth, place_of_birth, street, zip, city, country, citizenships, \
      relationship_kind, relationship, email, phone, messenger, payer_informed_at, \
-     payer_informed_by, contact_consent_at, invoice_vat_id, \
+     payer_informed_by, payer_informed_via, contact_consent_at, invoice_vat_id, \
      invoice_tax_number, payment_method, payment_method_details, account_country, \
      account_holder, bank_name, via_third_party, via_third_party_details, identity_adopted_at, \
      identity_adopted_key, identity_changed_at, payer_person_changed_at, \
@@ -493,6 +502,7 @@ impl Declaration {
             messenger: row.try_get("messenger").unwrap_or_default(),
             payer_informed_at: row.try_get("payer_informed_at").unwrap_or_default(),
             payer_informed_by: row.try_get("payer_informed_by").unwrap_or_default(),
+            payer_informed_via: row.try_get("payer_informed_via").unwrap_or_default(),
             contact_consent_at: row.try_get("contact_consent_at").unwrap_or_default(),
             cost_estimate_consent_at: row.try_get("cost_estimate_consent_at").unwrap_or_default(),
             // Section 7 is derived from `lead_invoice_recipients`
@@ -677,6 +687,7 @@ impl Declaration {
             "phone": self.phone,
             "contact_consent_at": self.contact_consent_at.map(|at| at.to_rfc3339()),
             "payer_informed_at": self.payer_informed_at.map(|at| at.to_rfc3339()),
+            "payer_informed_via": self.payer_informed_via,
             "invoice_to": self.invoice_to,
             "invoice_name": self.invoice_name,
             "invoice_street": self.invoice_street,
@@ -737,6 +748,7 @@ impl Declaration {
             "messenger": self.messenger,
             "payer_informed_at": self.payer_informed_at.map(|at| at.to_rfc3339()),
             "payer_informed_by": self.payer_informed_by,
+            "payer_informed_via": self.payer_informed_via,
             "contact_consent_at": self.contact_consent_at.map(|at| at.to_rfc3339()),
             // Read-only: only the lead gives it (phase 3b).
             "cost_estimate_consent_at": self.cost_estimate_consent_at.map(|at| at.to_rfc3339()),
@@ -1318,6 +1330,7 @@ impl Declaration {
         // stays for the same representative.
         self.payer_informed_at = same.and_then(|previous| previous.payer_informed_at);
         self.payer_informed_by = same.and_then(|previous| previous.payer_informed_by);
+        self.payer_informed_via = same.and_then(|previous| previous.payer_informed_via.clone());
         self.contact_consent_at = None;
         self.cost_estimate_consent_at = None;
         self.identity_adopted_at = None;
@@ -2914,6 +2927,7 @@ async fn save_payer_declaration(
             Ok(true) => {
                 declaration.payer_informed_at = previous.payer_informed_at;
                 declaration.payer_informed_by = previous.payer_informed_by;
+                declaration.payer_informed_via = previous.payer_informed_via.clone();
             }
             Ok(false) => {}
             Err(error) => return database_error(error, "load payer link e-mails"),
@@ -2945,20 +2959,34 @@ async fn save_payer_declaration(
         }
     }
     if body.payer_informed && declaration.is_third_party() {
-        // The first confirmation keeps its time and author.
+        // The first confirmation keeps its time and author — or that the
+        // payer acknowledged the notice in its own link, which has no author.
         let earlier = previous
             .as_ref()
             .filter(|previous| previous.same_payer(&declaration))
-            .and_then(|previous| previous.payer_informed_at.zip(previous.payer_informed_by));
-        let (at, by) = match earlier {
+            .filter(|previous| {
+                previous.payer_informed_by.is_some()
+                    || previous.payer_informed_via.as_deref() == Some(INFORMED_VIA_LINK)
+            })
+            .and_then(|previous| {
+                previous.payer_informed_at.map(|at| {
+                    (
+                        at,
+                        previous.payer_informed_by,
+                        previous.payer_informed_via.clone(),
+                    )
+                })
+            });
+        let (at, by, via) = match earlier {
             Some(earlier) => earlier,
             None => match crate::routes::lead_portal_intake::portal_update_time(&mut tx).await {
-                Ok(at) => (at, auth.user_id),
+                Ok(at) => (at, Some(auth.user_id), None),
                 Err(error) => return database_error(error, "read payer confirmation time"),
             },
         };
         declaration.payer_informed_at = Some(at);
-        declaration.payer_informed_by = Some(by);
+        declaration.payer_informed_by = by;
+        declaration.payer_informed_via = via;
     }
     let identity_changed = previous
         .as_ref()
@@ -3425,6 +3453,12 @@ async fn store_declaration(
                phone = EXCLUDED.phone,
                payer_informed_at = EXCLUDED.payer_informed_at,
                payer_informed_by = EXCLUDED.payer_informed_by,
+               -- Where the record came from goes with it (owner decision
+               -- 2026-11-13: the payer's own link).
+               payer_informed_via = CASE
+                   WHEN EXCLUDED.payer_informed_at
+                        IS NOT DISTINCT FROM lead_payer_declarations.payer_informed_at
+                   THEN lead_payer_declarations.payer_informed_via ELSE NULL END,
                invoice_vat_id = EXCLUDED.invoice_vat_id,
                invoice_tax_number = EXCLUDED.invoice_tax_number,
                payment_method = EXCLUDED.payment_method,
@@ -4129,6 +4163,7 @@ fn declaration_from_portal(
         declaration.place_of_birth = previous.place_of_birth.clone();
         declaration.payer_informed_at = previous.payer_informed_at;
         declaration.payer_informed_by = previous.payer_informed_by;
+        declaration.payer_informed_via = previous.payer_informed_via.clone();
     }
     if declaration.is_third_party() {
         let recorded = same_payer.and_then(|previous| previous.contact_consent_at);

@@ -44,7 +44,9 @@ import {
   invoiceStatusTone,
   nextActionTone,
   portalAppointmentPlaceLabel,
+  portalInvoiceIsThirdParty,
   portalServiceStatus,
+  portalThirdPartyPayerLabel,
   portalUpcomingServices,
   privacyStatusTone,
   recommendationStatusTone,
@@ -123,6 +125,9 @@ function invoiceAmountsVisible(invoice: PortalInvoiceItem) {
  * the card read "Open: not set" (global QA 2026-11-10).
  */
 function isOpenInvoice(invoice: PortalInvoiceItem) {
+  // A third party's invoice, and the other parent's for a parent who does not
+  // pay it, are not the viewer's to pay (owner decisions 2026-11-12, 2026-11-13).
+  if (portalInvoiceIsThirdParty(invoice)) return false;
   if (invoiceAmountsVisible(invoice)) return Number(invoice.balance_due ?? 0) > 0;
   return ["sent", "partially_paid", "overdue"].includes(invoice.display_status ?? invoice.status);
 }
@@ -740,12 +745,18 @@ function usePatientDashboardPageContent() {
                       {portalStatusLabel(item.status)}
                     </StatusBadge>
                   </div>
-                  <div className="mt-2"><StatusChip tone={isOpenInvoice(item) ? "warning" : "success"}>
-                    {t.portal_dashboard_open}:{" "}
-                    {invoiceAmountsVisible(item)
-                      ? formatPortalCurrency(item.balance_due, item.currency)
-                      : t.portal_invoices_hidden}
-                  </StatusChip></div>
+                  <div className="mt-2">{portalInvoiceIsThirdParty(item) ? (
+                    <StatusChip tone="neutral" data-testid="portal-dashboard-invoice-payer">
+                      {portalThirdPartyPayerLabel(item.third_party_payer_name, item.status === "paid", lang)}
+                    </StatusChip>
+                  ) : (
+                    <StatusChip tone={isOpenInvoice(item) ? "warning" : "success"}>
+                      {t.portal_dashboard_open}:{" "}
+                      {invoiceAmountsVisible(item)
+                        ? formatPortalCurrency(item.balance_due, item.currency)
+                        : t.portal_invoices_hidden}
+                    </StatusChip>
+                  )}</div>
                 </ListItem>
               ))
             )}

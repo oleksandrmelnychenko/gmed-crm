@@ -2960,8 +2960,8 @@ fn billing_error(error: PortalBillingError) -> Response {
 /// The acknowledgement of the privacy notice (D7): the first one keeps its
 /// time, text version, language and IP; the contact channels follow the
 /// latest answer. Nothing else is writable before it. `payer_informed` is
-/// what the paying parent's acknowledgement recorded on the declaration
-/// (`None` for the link, whose invitation records it).
+/// whether the acknowledgement recorded the payer as informed on the
+/// declaration (the link, the paying parent's cabinet, the paper form).
 #[allow(clippy::too_many_arguments)]
 async fn record_consent(
     conn: &mut PgConnection,
@@ -4121,25 +4121,77 @@ async fn give_consent(State(state): State<AppState>, headers: HeaderMap, body: B
     }
     let writer = link_writer(&state, &link, &headers);
     let ip = client_ip(&headers);
+    // The payer read the notice in its own link: the payer is informed
+    // (Art. 14 DSGVO; owner decision 2026-11-13), also when the link was
+    // handed over without the e-mailed invitation. Recorded once, with the
+    // time and the link as its source (no staff member), and only while the
+    // declaration still names the link's payer. The manual tick stays for
+    // paper and phone. In a savepoint with the consent: a refused consent
+    // records nothing (`refuse` commits the session renewal).
+    let mut savepoint = match sqlx::Connection::begin(&mut *tx).await {
+        Ok(savepoint) => savepoint,
+        Err(error) => return intake::internal(error, "begin payer consent"),
+    };
+    let informed = match record_informed_by_link(&mut savepoint, &context, &link).await {
+        Ok(informed) => informed,
+        Err(error) => return intake::internal(error, "record payer informed"),
+    };
     if let Err(response) = record_consent(
-        &mut tx,
+        &mut savepoint,
         &context,
         &writer,
         link.lead_id,
         &body,
         ip.as_deref(),
         Some(&link.language),
-        None,
+        Some(informed),
     )
     .await
     {
+        if let Err(error) = savepoint.rollback().await {
+            return intake::internal(error, "roll back payer consent");
+        }
         return refuse(tx, response).await;
+    }
+    if let Err(error) = savepoint.commit().await {
+        return intake::internal(error, "release payer consent");
     }
     if let Err(error) = tx.commit().await {
         return intake::internal(error, "commit payer consent");
     }
     publish(&state, None, link.lead_id, Some("payer")).await;
     questionnaire_response(&state, link.lead_id, Viewer::Payer, StatusCode::OK).await
+}
+
+/// Records the link's payer as informed (see [`give_consent`]): only a third
+/// party the declaration still names, and only the first time. A request
+/// that is already sent records nothing (the consent refuses it anyway).
+async fn record_informed_by_link(
+    conn: &mut PgConnection,
+    context: &LeadContext,
+    link: &Link,
+) -> Result<bool, sqlx::Error> {
+    if context.submitted_at().is_some() {
+        return Ok(false);
+    }
+    let names_link_payer = context.declaration.as_ref().is_some_and(|declaration| {
+        declaration.is_third_party()
+            && lead_payer::same_payer_key(&link.payer_key, &declaration.payer_key())
+    });
+    if !names_link_payer {
+        return Ok(false);
+    }
+    let done = sqlx::query(
+        r#"UPDATE lead_payer_declarations
+           SET payer_informed_at = now(), payer_informed_by = NULL,
+               payer_informed_via = $2, updated_at = now()
+           WHERE lead_id = $1 AND payer_informed_at IS NULL"#,
+    )
+    .bind(link.lead_id)
+    .bind(lead_payer::INFORMED_VIA_LINK)
+    .execute(&mut *conn)
+    .await?;
+    Ok(done.rows_affected() > 0)
 }
 
 /// `POST /public/payer-link/questionnaire`: autosave of the changed keys.
@@ -6031,8 +6083,10 @@ async fn staff_revoke(
 
 /// Whether this payer was informed through its own channel: a link with it
 /// was ever mailed successfully for the lead (the invitation carries the
-/// notice), or the paying parent acknowledged the payer's notice in the
-/// cabinet. The staff save keeps the record either way.
+/// notice), the payer acknowledged the notice in its own link (owner
+/// decision 2026-11-13: also a link handed over without e-mail), or the
+/// paying parent acknowledged the payer's notice in the cabinet. The staff
+/// save keeps the record either way.
 ///
 /// The stored keys hold the raw names; they match through
 /// [`lead_payer::same_payer_key`], so a cosmetic correction of the name by
@@ -6051,7 +6105,7 @@ pub(crate) async fn link_sent_for(
            WHERE k.lead_id = $1
            UNION ALL
            SELECT s.payer_key FROM lead_payer_statements s
-           WHERE s.lead_id = $1 AND s.source IN ('cabinet', 'staff')
+           WHERE s.lead_id = $1 AND s.source IN ('cabinet', 'staff', 'link')
              AND s.privacy_ack_at IS NOT NULL"#,
     )
     .bind(lead_id)

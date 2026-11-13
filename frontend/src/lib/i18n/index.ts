@@ -182,6 +182,8 @@ export interface Translations
   role_sales: string;
   role_it_admin: string;
   role_patient: string;
+  /** A parent signed in to the patient portal for a minor (owner decision 2026-11-13). */
+  portal_role_legal_representative: string;
 
   // Role cabinets (landing dashboards), see docs/role-cabinets-plan-2026-09-20_ua.md.
   cabinet_eyebrow_default: string;

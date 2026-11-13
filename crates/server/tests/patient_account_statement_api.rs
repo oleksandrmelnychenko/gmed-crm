@@ -844,3 +844,182 @@ async fn a_third_party_invoice_stays_out_of_the_patients_portal_balance() {
     assert_eq!(listed["third_party_payer"], true);
     assert_eq!(listed["third_party_payer_name"], "Lukas Beispiel");
 }
+
+/// A parent's login linked to the minor through the guardian access, with its
+/// own relation on the child's record (matched here by the login's e-mail).
+async fn seed_parent(
+    pool: &PgPool,
+    child: Uuid,
+    actor: Uuid,
+    tag: &str,
+    name: &str,
+) -> (Uuid, Uuid) {
+    let email = format!(
+        "{tag}-{}@example.com",
+        name.to_lowercase().replace(' ', ".")
+    );
+    let user_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO users (email, password_hash, name, role)
+           VALUES ($1, 'test-password-hash', $2, 'patient')
+           RETURNING id"#,
+    )
+    .bind(&email)
+    .bind(name)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by, source)
+           VALUES ($1, $2, $3, 'lead_guardian')"#,
+    )
+    .bind(child)
+    .bind(user_id)
+    .bind(actor)
+    .execute(pool)
+    .await
+    .unwrap();
+    let relation_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_relations (patient_id, related_name, relation_type, email)
+           VALUES ($1, $2, 'parent', $3)
+           RETURNING id"#,
+    )
+    .bind(child)
+    .bind(name)
+    .bind(email.to_uppercase())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    (user_id, relation_id)
+}
+
+/// Owner decision 2026-11-13: a minor's invoice to the contracting parent is
+/// that parent's to pay. The other parent sees it in the portal as paid by
+/// that parent — not in the own balance, no amount due asked, no payment
+/// proof (the portal reads `third_party_payer`), with
+/// `payer_is_representative` / `paid_by_representative` set. The contracting
+/// parent sees the open amount as before.
+#[tokio::test]
+async fn a_non_paying_parent_sees_the_contracting_parents_invoice_as_paid_by_that_parent() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = format!("parents-{}", Uuid::new_v4().simple());
+    let child = seed_patient(&pool, admin_id, &tag).await;
+    sqlx::query("UPDATE patients SET birth_date = CURRENT_DATE - 3650 WHERE id = $1")
+        .bind(child)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // The next actions are read with a subscription only.
+    support::seed_active_portal_subscription(&pool, child, admin_id).await;
+    let (jonas, jonas_relation) = seed_parent(&pool, child, admin_id, &tag, "Jonas Vater").await;
+    let (klara, _) = seed_parent(&pool, child, admin_id, &tag, "Klara Mutter").await;
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by)
+           VALUES ($1, $2, 'execution', 'active', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(child)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let invoice: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status,
+                due_date, total_net, total_vat, total_gross, paid_amount,
+                line_items, portal_visible, hide_amounts_from_patient, created_by,
+                payer_patient_relation_id, payer_role, recipient_snapshot, released_at
+           ) VALUES (
+                $1, $2, $3, 'final', 'sent', CURRENT_DATE + 14,
+                400, 0, 400, 0, '[]', true, false, $4,
+                $5, 'contracting_party',
+                '{"kind":"relation","is_payer":true,"name":"Jonas Vater"}'::jsonb, now()
+           ) RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(child)
+    .bind(format!("PARENT-{tag}"))
+    .bind(admin_id)
+    .bind(jonas_relation)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let listed_in = |invoices: &Value| {
+        invoices
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == invoice.to_string())
+            .cloned()
+            .expect("the parent's invoice is listed")
+    };
+    let statement_row = |statement: &Value| {
+        statement["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == invoice.to_string())
+            .cloned()
+            .expect("the parent's invoice is in the statement")
+    };
+
+    // The mother does not pay it.
+    let klara_bearer = auth_header_for(klara, "patient");
+    let (status, invoices) = request_json(&app, "/api/v1/me/invoices", &klara_bearer).await;
+    assert_eq!(status, StatusCode::OK, "{invoices:?}");
+    let listed = listed_in(&invoices);
+    assert_eq!(listed["third_party_payer"], true, "{listed}");
+    assert_eq!(listed["payer_is_representative"], true, "{listed}");
+    assert_eq!(listed["third_party_payer_name"], "Jonas Vater", "{listed}");
+    let (status, statement) =
+        request_json(&app, "/api/v1/me/account-statement", &klara_bearer).await;
+    assert_eq!(status, StatusCode::OK, "{statement:?}");
+    assert_eq!(statement["summary"]["invoice_due"], "0", "{statement}");
+    assert_eq!(statement["summary"]["amount_to_pay"], "0", "{statement}");
+    let row = statement_row(&statement);
+    assert_eq!(row["paid_by"], "third_party", "{row}");
+    assert_eq!(row["paid_by_representative"], true, "{row}");
+    let (status, actions) = request_json(&app, "/api/v1/me/next-actions", &klara_bearer).await;
+    assert_eq!(status, StatusCode::OK, "{actions:?}");
+    assert!(
+        !actions.to_string().contains(&invoice.to_string()),
+        "no payment asked of the mother: {actions}"
+    );
+
+    // The father, the contracting parent, sees the open amount.
+    let jonas_bearer = auth_header_for(jonas, "patient");
+    let (status, invoices) = request_json(&app, "/api/v1/me/invoices", &jonas_bearer).await;
+    assert_eq!(status, StatusCode::OK, "{invoices:?}");
+    let listed = listed_in(&invoices);
+    assert_eq!(listed["third_party_payer"], false, "{listed}");
+    assert_eq!(listed["payer_is_representative"], false, "{listed}");
+    assert_eq!(listed["balance_due"], "400", "{listed}");
+    let (status, statement) =
+        request_json(&app, "/api/v1/me/account-statement", &jonas_bearer).await;
+    assert_eq!(status, StatusCode::OK, "{statement:?}");
+    assert_eq!(statement["summary"]["invoice_due"], "400", "{statement}");
+    let row = statement_row(&statement);
+    assert_eq!(row["paid_by"], "patient", "{row}");
+    assert_eq!(row["paid_by_representative"], false, "{row}");
+    let (status, actions) = request_json(&app, "/api/v1/me/next-actions", &jonas_bearer).await;
+    assert_eq!(status, StatusCode::OK, "{actions:?}");
+    assert!(
+        actions.to_string().contains(&invoice.to_string()),
+        "the father is asked to pay: {actions}"
+    );
+
+    // Staff see the invoice in the totals as before.
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    assign(&pool, child, manager_id, admin_id).await;
+    let (status, staff) = request_json(
+        &app,
+        &format!("/api/v1/patients/{child}/account-statement"),
+        &auth_header_for(manager_id, "patient_manager"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{staff:?}");
+    assert_eq!(staff["summary"]["invoice_due"], "400", "{staff}");
+    assert_eq!(statement_row(&staff)["paid_by_representative"], false);
+}

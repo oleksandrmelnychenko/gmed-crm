@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { getPortalPatientId, reconcilePortalPatientSelection, selectPortalPatient } from "./portal-patient-context";
+import { getPortalPatientId, isPortalLegalRepresentative, reconcilePortalPatientSelection, selectPortalPatient } from "./portal-patient-context";
 
 const first = { id: "first", name: "Mia Muster", patient_number: "P-1" };
 const second = { id: "second", name: "Ben Muster", patient_number: "P-2" };
@@ -40,6 +40,21 @@ describe("family portal context", () => {
     expect(getPortalPatientId(user.id)).toBe(second.id);
     reconcilePortalPatientSelection({ ...user, patients: [] });
     expect(getPortalPatientId(user.id)).toBeNull();
+  });
+
+  // Owner decision 2026-11-13: a parent is named «Законный представитель», not «Пациент».
+  it("names a parent acting for the selected child as the legal representative", () => {
+    const family = { ...user, patients: [
+      { ...first, access_kind: "guardian" as const },
+      { ...second, access_kind: "self" as const },
+    ] };
+    expect(isPortalLegalRepresentative(family, first.id)).toBe(true);
+    expect(isPortalLegalRepresentative(family, second.id)).toBe(false);
+    expect(isPortalLegalRepresentative(family, null)).toBe(false);
+    const parentOnly = { ...user, patients: [{ ...first, access_kind: "guardian" as const }] };
+    expect(isPortalLegalRepresentative(parentOnly, null)).toBe(true);
+    expect(isPortalLegalRepresentative({ ...parentOnly, role: "billing" }, first.id)).toBe(false);
+    expect(isPortalLegalRepresentative(user, first.id)).toBe(false);
   });
 
   it("clears the context when the signed-in account changes", () => {

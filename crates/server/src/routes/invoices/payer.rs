@@ -57,6 +57,55 @@ use gmed_domain::access::capabilities::Capability;
 /// outside the invoice module (the patient card's payer summary).
 pub(crate) use document::{InvoiceRecipient, missing_address_parts};
 
+/// The portal's view of a minor's invoice (owner decision 2026-11-13): for a
+/// parent signed in through the guardian link (`patient_assignments.source =
+/// 'lead_guardian'`), an invoice addressed to a relation of the patient that
+/// is not this parent — the contracting parent — is paid by that person, not
+/// by the viewer. The viewer's own relations: the trusted contact the
+/// guardian access was granted for (copied to the relation at conversion as
+/// `source_contact_id`), the viewer's own patient record, or the login's
+/// e-mail. Only when one of them is found among the patient's relations, so a
+/// login that cannot be matched keeps seeing its invoices as its own.
+///
+/// `invoice` is the alias of the `invoices` row, `viewer` the SQL expression
+/// (a bind parameter) of the signed-in user's id; NULL is never the viewer.
+/// The SQL boolean is false for staff (no viewer).
+pub(crate) fn other_representative_payer_sql(invoice: &str, viewer: &str) -> String {
+    let own = format!(
+        r#"(own_relation.source_contact_id IN (
+                SELECT access.trusted_contact_id
+                FROM lead_portal_access access
+                JOIN leads access_lead ON access_lead.id = access.lead_id
+                WHERE access.user_id = {viewer}::uuid AND access.kind = 'guardian'
+                  AND access.trusted_contact_id IS NOT NULL
+                  AND access_lead.converted_patient_id = own_relation.patient_id)
+            OR own_relation.related_patient_id IN (
+                SELECT own_record.patient_id FROM patient_assignments own_record
+                WHERE own_record.user_id = {viewer}::uuid AND own_record.revoked_at IS NULL
+                  AND own_record.source = 'manual')
+            OR (NULLIF(btrim(own_relation.email), '') IS NOT NULL
+                AND lower(btrim(own_relation.email)) = (
+                    SELECT lower(btrim(viewer_user.email)) FROM users viewer_user
+                    WHERE viewer_user.id = {viewer}::uuid)))"#
+    );
+    format!(
+        r#"({viewer}::uuid IS NOT NULL
+            AND {invoice}.payer_patient_relation_id IS NOT NULL
+            AND EXISTS (
+                SELECT 1 FROM patient_assignments viewer_access
+                WHERE viewer_access.user_id = {viewer}::uuid
+                  AND viewer_access.patient_id = {invoice}.patient_id
+                  AND viewer_access.source = 'lead_guardian'
+                  AND viewer_access.revoked_at IS NULL)
+            AND EXISTS (
+                SELECT 1 FROM patient_relations own_relation
+                WHERE own_relation.patient_id = {invoice}.patient_id AND {own})
+            AND NOT EXISTS (
+                SELECT 1 FROM patient_relations own_relation
+                WHERE own_relation.id = {invoice}.payer_patient_relation_id AND {own}))"#
+    )
+}
+
 pub(crate) const PAYER_ROLE_CONTRACTING_PARTY: &str = "contracting_party";
 pub(crate) const PAYER_ROLE_COST_BEARER: &str = "cost_bearer";
 /// The contracting party itself at another address (the lead's "invoice to

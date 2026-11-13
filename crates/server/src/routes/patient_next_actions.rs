@@ -48,7 +48,7 @@ async fn list_my_next_actions(
         Ok(mut rows) => items.append(&mut rows),
         Err(resp) => return resp,
     }
-    match load_invoice_actions(&state, patient_id).await {
+    match load_invoice_actions(&state, patient_id, auth.user_id).await {
         Ok(mut rows) => items.append(&mut rows),
         Err(resp) => return resp,
     }
@@ -257,24 +257,39 @@ async fn load_document_actions(
         .collect())
 }
 
+/// Open invoices the signed-in login is asked to pay. A third party's
+/// (Kostenübernehmer) invoice and, for a parent's login, the other parent's
+/// are not the viewer's to pay (owner decisions 2026-11-12 #7, 2026-11-13).
 async fn load_invoice_actions(
     state: &AppState,
     patient_id: Uuid,
+    viewer: Uuid,
 ) -> Result<Vec<Value>, axum::response::Response> {
-    let rows = sqlx::query(
-        r#"SELECT id, invoice_number, status, due_date, total_gross, credited_amount, paid_amount,
-                  prepayment_applied_amount,
-                  portal_visible, hide_amounts_from_patient, pdf_visible_to_patient
-           FROM invoices
-           WHERE patient_id = $1
-             AND portal_visible = true
-             AND hide_amounts_from_patient = false
-             AND status IN ('sent', 'partially_paid', 'overdue')
-             AND (total_gross - credited_amount - paid_amount - prepayment_applied_amount) > 0
-           ORDER BY due_date ASC NULLS LAST, issued_at DESC
+    let rows = sqlx::query(&format!(
+        r#"SELECT i.id, i.invoice_number, i.status, i.due_date, i.total_gross,
+                  i.credited_amount, i.paid_amount, i.prepayment_applied_amount,
+                  i.portal_visible, i.hide_amounts_from_patient, i.pdf_visible_to_patient
+           FROM invoices i
+           LEFT JOIN orders o ON o.id = i.order_id
+           WHERE i.patient_id = $1
+             AND i.portal_visible = true
+             AND i.hide_amounts_from_patient = false
+             AND i.status IN ('sent', 'partially_paid', 'overdue')
+             AND (i.total_gross - i.credited_amount - i.paid_amount - i.prepayment_applied_amount) > 0
+             AND NOT (COALESCE((i.recipient_snapshot ->> 'is_payer')::boolean, false)
+                      AND (CASE WHEN i.payer_patient_id IS NOT NULL
+                                     OR i.payer_patient_relation_id IS NOT NULL
+                                     OR NULLIF(btrim(i.payer_contact_name), '') IS NOT NULL
+                                THEN i.payer_role ELSE o.payer_role END)
+                          IS NOT DISTINCT FROM 'cost_bearer')
+             AND NOT {other_representative}
+           ORDER BY i.due_date ASC NULLS LAST, i.issued_at DESC
            LIMIT 10"#,
-    )
+        other_representative =
+            crate::routes::invoices::payer::other_representative_payer_sql("i", "$2"),
+    ))
     .bind(patient_id)
+    .bind(viewer)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
