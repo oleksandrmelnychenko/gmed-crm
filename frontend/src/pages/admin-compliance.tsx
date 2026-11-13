@@ -80,6 +80,7 @@ import {
   PrivacyRequestSteps,
   type PrivacyRequestStepFacts,
 } from "@/pages/admin/ui/privacy-request-steps";
+import { privacyExecutionSummary } from "@/pages/admin-compliance-execution";
 import {
   canExportPatientData,
   canWritePrivacyRegister,
@@ -803,7 +804,7 @@ function useAdminCompliancePageContent() {
 
     try {
       const payload = await executeCompliancePrivacyRequest<unknown>(requestId);
-      setExportResult(JSON.stringify(payload, null, 2));
+      setExportResult(privacyExecutionSummary(payload, t.uiText));
 
       await Promise.all([
         loadPrivacyQueue(),
@@ -1125,10 +1126,6 @@ function useAdminCompliancePageContent() {
 
   const exportResultIsError =
     exportResult?.startsWith(`${t.admin_system_export_error_prefix}:`) ?? false;
-  const exportResultIsJson = Boolean(
-    exportResult &&
-      (exportResult.trim().startsWith("{") || exportResult.trim().startsWith("[")),
-  );
 
   return (
     <div className="space-y-3">
@@ -1306,10 +1303,6 @@ function useAdminCompliancePageContent() {
             {exportResult ? (
               exportResultIsError ? (
                 <Banner tone="error">{exportResult}</Banner>
-              ) : exportResultIsJson ? (
-                <pre className="max-h-72 overflow-auto rounded-lg border border-border/50 bg-card/60 p-3 text-xs text-muted-foreground">
-                  {exportResult}
-                </pre>
               ) : (
                 <SuccessBanner>{exportResult}</SuccessBanner>
               )

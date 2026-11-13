@@ -529,6 +529,73 @@ pub(crate) const PORTAL_EXPORT_CLOSED_TYPES: [&str; 12] = [
     "payer_funds_proof",
 ];
 
+/// Document types that hold another person's data than the patient's (QA
+/// 2026-11-13 F-B2, Art. 15 Abs. 4 DSGVO): the files of a representative and
+/// of a third-party payer ([`super::documents::OTHER_PERSON_DOCUMENT_ARTS`]),
+/// the payer's Selbstauskunft, the declaration on the third party's cost
+/// coverage and the payer's copy of the cost estimate. Compared with the
+/// document's type, template and compliance kind.
+pub(crate) const OTHER_PERSON_EXPORT_TYPES: [&str; 7] = [
+    "representative_identity",
+    "representative_authority",
+    "payer_identity",
+    "payer_funds_proof",
+    "payer_self_disclosure",
+    "patient_payer_statement",
+    "payer_cost_estimate",
+];
+
+/// A document of `documents d` that holds another person's data: one of
+/// [`OTHER_PERSON_EXPORT_TYPES`], a cabinet or payer-link upload of such a
+/// person, or a GwG sheet of the payer (person or organisation, with its
+/// beneficial owners) or of a representative. A later version (a signed
+/// scan, a replacement) counts like the document it replaces.
+fn other_person_document_sql() -> String {
+    let types = OTHER_PERSON_EXPORT_TYPES
+        .iter()
+        .map(|kind| format!("'{kind}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        r#"(EXISTS (
+               SELECT 1 FROM documents tp
+               WHERE tp.id IN (d.id,
+                               COALESCE(d.version_root_document_id, d.id),
+                               COALESCE(d.replaces_document_id, d.id))
+                 AND (lower(COALESCE(tp.art, '')) IN ({types})
+                      OR COALESCE(tp.generated_template_id, '') IN ({types})
+                      OR COALESCE(tp.compliance_kind, '') IN ({types})
+                      OR ((COALESCE(tp.generated_template_id, '') = 'gwg_identification'
+                           OR lower(COALESCE(tp.art, '')) = 'gwg_identification')
+                          AND (COALESCE(tp.generated_bindings -> 'gwg_identification' ->> 'subject', '') = 'payer'
+                               OR COALESCE(tp.generated_bindings -> 'gwg_identification' ->> 'subject', '') LIKE 'representative%'
+                               OR (COALESCE(tp.generated_bindings -> 'gwg_identification' ->> 'form', '') = 'legal_entity'
+                                   AND COALESCE(tp.generated_bindings -> 'gwg_identification' ->> 'subject', '') <> 'contract_partner'))))
+           )
+           OR EXISTS (
+               SELECT 1 FROM lead_portal_uploads tpu
+               WHERE tpu.document_id = d.id
+                 AND tpu.kind IN ({types})
+           ))"#
+    )
+}
+
+/// The one selection of the documents of an Art. 15 export, for the staff
+/// handler and the patient's own download alike (`documents d`, `$2` the
+/// portal login or NULL for the staff handler, `$3`
+/// [`PORTAL_EXPORT_CLOSED_TYPES`]). Neither export holds the content of
+/// another person's document ([`other_person_document_sql`]): the staff
+/// export names it as not included, the patient's download leaves it out.
+/// The patient's own download is narrowed further
+/// ([`portal_export_documents_sql`]).
+fn export_documents_selection_sql() -> String {
+    format!(
+        "($2::uuid IS NULL OR (NOT {} AND ({})))",
+        other_person_document_sql(),
+        portal_export_documents_sql()
+    )
+}
+
 /// The documents of the patient's own download (`documents d`, `$2` the login,
 /// `$3` [`PORTAL_EXPORT_CLOSED_TYPES`]): the versions released to this login
 /// and what it uploaded in the portal itself. A cabinet upload is not one of
@@ -792,6 +859,24 @@ fn narrow_export_for_patient(export: &Value) -> Value {
     Value::Object(narrowed)
 }
 
+/// What the staff export says about another person's document instead of its
+/// name, notes and file (QA 2026-11-13 F-B2): its id, type and date only.
+const OTHER_PERSON_DOCUMENT_NOTE: &str =
+    "Dokument einer anderen Person – nicht enthalten / документ третьего лица — не включён";
+
+fn other_person_document_entry(row: &sqlx::postgres::PgRow) -> Value {
+    json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+        "art": row.try_get::<String, _>("art").unwrap_or_default(),
+        "created_at": row
+            .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+            .map(|value| value.to_rfc3339())
+            .unwrap_or_default(),
+        "other_person": true,
+        "not_included": OTHER_PERSON_DOCUMENT_NOTE,
+    })
+}
+
 /// Adds the staff-only `internal_note` of a quote or an invoice to its export
 /// row for the staff handler of an access request; the patient's own download
 /// shows the row as the portal does instead.
@@ -963,12 +1048,14 @@ pub(crate) async fn build_patient_export_payload(
         sqlx::query(&format!(
             r#"SELECT d.id, d.order_id, d.appointment_id, d.auto_name, d.original_filename, d.art,
                   d.category, d.status, d.visibility, d.is_medical, d.mime_type, d.file_size,
-                  d.klinik, d.ursprung, d.notes, d.version_number, d.created_at, d.updated_at
+                  d.klinik, d.ursprung, d.notes, d.version_number, d.created_at, d.updated_at,
+                  {} AS other_person
            FROM documents d
            WHERE d.patient_id = $1
-             AND ($2::uuid IS NULL OR ({}))
+             AND {}
            ORDER BY d.created_at DESC"#,
-            portal_export_documents_sql()
+            other_person_document_sql(),
+            export_documents_selection_sql()
         ))
         .bind(patient_id)
         .bind(portal_login)
@@ -1373,7 +1460,9 @@ pub(crate) async fn build_patient_export_payload(
             "context": row.try_get::<Option<serde_json::Value>, _>("context").unwrap_or_default(),
             "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
         })).collect::<Vec<_>>(),
-        "documents": documents.into_iter().map(|row| serde_json::json!({
+        "documents": documents.into_iter().map(|row| if row.try_get::<bool, _>("other_person").unwrap_or(true) {
+            other_person_document_entry(&row)
+        } else { serde_json::json!({
             "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
             "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
             "appointment_id": row.try_get::<Option<Uuid>, _>("appointment_id").unwrap_or_default(),
@@ -1392,7 +1481,7 @@ pub(crate) async fn build_patient_export_payload(
             "version_number": row.try_get::<i32, _>("version_number").unwrap_or(1),
             "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
             "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-        })).collect::<Vec<_>>(),
+        })}).collect::<Vec<_>>(),
         "invoices": invoices.into_iter().map(|row| with_internal_note(serde_json::json!({
             "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
             "quote_id": row.try_get::<Option<Uuid>, _>("quote_id").unwrap_or_default(),
@@ -1586,6 +1675,8 @@ const EXPORT_FILES_BYTE_BUDGET: usize = 400 * 1024 * 1024;
 struct ExportedDocumentFiles {
     files: Vec<(String, Vec<u8>)>,
     skipped: Vec<String>,
+    /// Another person's documents, left out (Art. 15 Abs. 4 DSGVO).
+    other_person: Vec<String>,
 }
 
 /// Art. 15 Abs. 3 DSGVO asks for a copy of the data, not a list of file names.
@@ -1597,14 +1688,16 @@ async fn load_patient_export_files(
     portal_login: Option<Uuid>,
 ) -> Result<ExportedDocumentFiles, axum::response::Response> {
     let rows = sqlx::query(&format!(
-        r#"SELECT d.id, d.auto_name, d.original_filename, d.mime_type, d.storage_key
+        r#"SELECT d.id, d.auto_name, d.original_filename, d.mime_type, d.storage_key,
+                  d.art, d.created_at, {} AS other_person
            FROM documents d
            WHERE d.patient_id = $1
              AND d.storage_key IS NOT NULL
              AND d.file_deleted_at IS NULL
-             AND ($2::uuid IS NULL OR ({}))
+             AND {}
            ORDER BY d.created_at"#,
-        portal_export_documents_sql()
+        other_person_document_sql(),
+        export_documents_selection_sql()
     ))
     .bind(patient_id)
     .bind(portal_login)
@@ -1622,10 +1715,28 @@ async fn load_patient_export_files(
     let mut exported = ExportedDocumentFiles {
         files: Vec::new(),
         skipped: Vec::new(),
+        other_person: Vec::new(),
     };
     let mut used = 0usize;
     for (index, row) in rows.iter().enumerate() {
         let id = row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil());
+        // Another person's document: named by type and date, never by its
+        // file or its name, which often carries that person's name (F-B2).
+        if row.try_get::<bool, _>("other_person").unwrap_or(true) {
+            let created = row
+                .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+                .map(|value| {
+                    crate::app_time::date_of(value)
+                        .format("%d.%m.%Y")
+                        .to_string()
+                })
+                .unwrap_or_default();
+            exported.other_person.push(format!(
+                "{} ({created}, {id})",
+                row.try_get::<String, _>("art").unwrap_or_default()
+            ));
+            continue;
+        }
         let auto_name = row.try_get::<String, _>("auto_name").unwrap_or_default();
         let original = row
             .try_get::<Option<String>, _>("original_filename")
@@ -1732,6 +1843,15 @@ fn build_patient_export_zip(
         readme.push_str("\r\nNot included, hand over separately:\r\n");
         for label in &documents.skipped {
             readme.push_str(&format!("- {label}\r\n"));
+        }
+    }
+    // QA 2026-11-13 F-B2: another person's documents are named, not packed.
+    if !documents.other_person.is_empty() {
+        readme.push_str(
+            "\r\nDocuments of other persons (payer, representative), not included (Art. 15 Abs. 4 DSGVO):\r\n",
+        );
+        for label in &documents.other_person {
+            readme.push_str(&format!("- {label}: {OTHER_PERSON_DOCUMENT_NOTE}\r\n"));
         }
     }
     // QA 2026-10-31: the chat of a login that reaches other records too.
@@ -6233,7 +6353,23 @@ mod tests {
     fn no_third_partys_file_is_open_to_the_patients_download() {
         for art in crate::routes::documents::OTHER_PERSON_DOCUMENT_ARTS {
             assert!(PORTAL_EXPORT_CLOSED_TYPES.contains(&art), "{art}");
+            assert!(OTHER_PERSON_EXPORT_TYPES.contains(&art), "{art}");
         }
+        for kind in OTHER_PERSON_EXPORT_TYPES {
+            assert!(PORTAL_EXPORT_CLOSED_TYPES.contains(&kind), "{kind}");
+        }
+    }
+
+    #[test]
+    fn both_exports_share_the_other_person_selection() {
+        let selection = export_documents_selection_sql();
+        assert!(selection.starts_with("($2::uuid IS NULL OR (NOT (EXISTS"));
+        for kind in OTHER_PERSON_EXPORT_TYPES {
+            assert!(selection.contains(&format!("'{kind}'")), "{kind}");
+        }
+        assert!(selection.contains("->> 'subject', '') = 'payer'"));
+        assert!(selection.contains("->> 'form', '') = 'legal_entity'"));
+        assert!(selection.contains(&portal_export_documents_sql()));
     }
 
     #[test]

@@ -790,6 +790,154 @@ async fn the_patients_own_export_holds_what_the_login_sees_in_the_portal() {
     );
 }
 
+/// QA 2026-11-13 F-B2: the staff's Art. 15 export holds the patient's own data
+/// only, like the patient's own download: the payer's GwG sheet (person or
+/// organisation), the payer's Selbstauskunft, the declaration on the third
+/// party's cost coverage and a representative's ID scan are named as not
+/// included, without their name, notes or file.
+#[tokio::test]
+async fn the_staff_export_leaves_out_other_persons_documents() {
+    use std::io::Read;
+
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("staff-export-third-party");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let manager = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, manager, admin_id).await;
+    let manager_bearer = auth_header_for(manager, "patient_manager");
+
+    let mut filed = Vec::new();
+    for name in [
+        "own-passport",
+        "own-gwg-sheet",
+        "payer-gwg-sheet",
+        "organisation-gwg-sheet",
+        "payer-selbstauskunft",
+        "payer-statement",
+        "parent-passport",
+    ] {
+        let (status, body) = multipart_upload(
+            &app,
+            "/api/v1/documents/upload",
+            &manager_bearer,
+            &[
+                ("patient_id", patient_id.to_string()),
+                ("auto_name", format!("{name} THIRD-PARTY-NAME {tag}")),
+                ("art", "arztbrief".to_string()),
+                ("category", "administrative".to_string()),
+                ("status", "active".to_string()),
+                ("visibility", "released_internal".to_string()),
+                ("is_medical", "false".to_string()),
+                ("notes", "THIRD-PARTY-NOTE".to_string()),
+            ],
+            &format!("{name}.pdf"),
+            "application/pdf",
+            b"%PDF-1.4 synthetic",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        filed.push(Uuid::parse_str(body["id"].as_str().unwrap()).unwrap());
+    }
+    for (index, (art, template, bindings)) in [
+        ("passport", None, Value::Null),
+        (
+            "gwg_identification",
+            Some("gwg_identification"),
+            json!({"gwg_identification": {"subject": "contract_partner"}}),
+        ),
+        (
+            "gwg_identification",
+            Some("gwg_identification"),
+            json!({"gwg_identification": {"subject": "payer"}}),
+        ),
+        (
+            "gwg_identification",
+            Some("gwg_identification"),
+            json!({"gwg_identification": {"subject": "payer", "form": "legal_entity"}}),
+        ),
+        (
+            "payer_self_disclosure",
+            Some("payer_self_disclosure"),
+            Value::Null,
+        ),
+        (
+            "patient_payer_statement",
+            Some("patient_payer_statement"),
+            Value::Null,
+        ),
+        ("representative_identity", None, Value::Null),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        sqlx::query(
+            r#"UPDATE documents
+               SET art = $2, generated_template_id = $3,
+                   generated_bindings = CASE WHEN $4::jsonb = 'null'::jsonb THEN NULL ELSE $4::jsonb END
+               WHERE id = $1"#,
+        )
+        .bind(filed[index])
+        .bind(art)
+        .bind(template)
+        .bind(&bindings)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let path = format!("/api/v1/admin/compliance/patient/{patient_id}/export");
+    let (status, full) = json_request(&app, "GET", &path, &manager_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{full}");
+    let documents = full["documents"].as_array().unwrap();
+    assert_eq!(documents.len(), 7, "{full}");
+    for document in documents {
+        let id = Uuid::parse_str(document["id"].as_str().unwrap()).unwrap();
+        let own = id == filed[0] || id == filed[1];
+        assert_eq!(document["other_person"] == json!(true), !own, "{document}");
+        if !own {
+            assert!(document.get("auto_name").is_none(), "{document}");
+            assert!(document.get("notes").is_none(), "{document}");
+        }
+    }
+    let payload = full.to_string();
+    assert_eq!(payload.matches("THIRD-PARTY-NOTE").count(), 2, "{payload}");
+    assert_eq!(payload.matches("THIRD-PARTY-NAME").count(), 2, "{payload}");
+
+    let (status, bytes) =
+        bytes_request(&app, "GET", &format!("{path}?format=zip"), &manager_bearer).await;
+    assert_eq!(status, StatusCode::OK);
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut files: Vec<String> = archive
+        .file_names()
+        .map(|name| name.unwrap().to_string())
+        .filter(|name| name.starts_with("documents/"))
+        .map(|name| name.rsplit('-').next().unwrap().to_string())
+        .collect();
+    files.sort();
+    assert_eq!(files, ["passport.pdf", "sheet.pdf"], "{files:?}");
+    let mut readme = String::new();
+    archive
+        .by_name("README.txt")
+        .unwrap()
+        .read_to_string(&mut readme)
+        .unwrap();
+    assert!(
+        readme.contains("документ третьего лица — не включён"),
+        "{readme}"
+    );
+    for kind in [
+        "payer_self_disclosure",
+        "patient_payer_statement",
+        "representative_identity",
+    ] {
+        assert!(readme.contains(kind), "{kind}: {readme}");
+    }
+    assert!(!readme.contains("THIRD-PARTY-NAME"), "{readme}");
+    assert!(!readme.contains("selbstauskunft"), "{readme}");
+}
+
 /// QA 2026-10-31: the staff's note on an order event stays with the staff.
 #[tokio::test]
 async fn an_order_event_reaches_the_patient_without_the_staff_note() {

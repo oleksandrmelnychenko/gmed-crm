@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   conciergeLineAmounts,
   conciergeServiceState,
+  formatBillingQuantity,
   hasSalePrice,
   type BillingConciergeService,
 } from "./patient-billing-concierge";
@@ -46,5 +47,14 @@ describe("concierge services in the patient billing tab", () => {
     expect(conciergeLineAmounts(service(), "19")).toEqual({ net: 120, vat: 22.8, gross: 142.8 });
     expect(conciergeLineAmounts(service({ sale_price_net: "49.99" }), "19")).toEqual({ net: 49.99, vat: 9.5, gross: 59.49 });
     expect(conciergeLineAmounts(service(), null)).toEqual({ net: 120, vat: 0, gross: 120 });
+  });
+});
+
+describe("formatBillingQuantity (QA 2026-11-13 F-B6)", () => {
+  it("writes a quantity in German like the invoice PDF", () => {
+    expect(formatBillingQuantity(2.5)).toBe("2,5");
+    expect(formatBillingQuantity("2.5000")).toBe("2,5");
+    expect(formatBillingQuantity(3)).toBe("3");
+    expect(formatBillingQuantity("1.125")).toBe("1,125");
   });
 });

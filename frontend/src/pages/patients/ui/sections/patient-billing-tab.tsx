@@ -29,6 +29,7 @@ import { doubleBillingWarnings, proposedOrderForExpense } from "./patient-billin
 import {
   conciergeLineAmounts,
   conciergeServiceState,
+  formatBillingQuantity,
   hasSalePrice,
   type BillingConciergeService,
   type ConciergeServiceState,
@@ -516,7 +517,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
         const details = [
           service.service_date ? formatAppDate(service.service_date) : null,
           service.order_number ?? copy.noOrderShort,
-          `${Number(service.quantity)} × ${formatMoneyAmount(service.unit_price ?? "0", service.currency)}`,
+          `${formatBillingQuantity(service.quantity)} × ${formatMoneyAmount(service.unit_price ?? "0", service.currency)}`,
           conciergeVatRate !== null ? `${de ? "MwSt." : "НДС"} ${conciergeVatRate}%` : null,
         ].filter(Boolean).join(" · ");
         const body = <>
@@ -582,7 +583,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
               const checked = selectedLines.includes(index);
               return <div key={`${quote.id}-${index}`} className={cn(!checked && "bg-muted/15")}><label className="grid cursor-pointer grid-cols-[1.25rem_minmax(0,1fr)_auto] items-start gap-3 px-4 py-3">
                 <input className={checkboxClass} type="checkbox" checked={checked} disabled={saving || invoiceType === "final"} onChange={event => setSelectedLines(current => event.target.checked ? [...current, index] : current.filter(value => value !== index))} />
-                <span className="min-w-0"><span className="block text-sm font-medium">{line.description}</span><span className="mt-1 block text-xs text-muted-foreground">{available} × {formatMoneyAmount(line.unit_price, activeCurrency)} · {de ? "MwSt." : "НДС"} {line.vat_rate}%</span></span>
+                <span className="min-w-0"><span className="block text-sm font-medium">{line.description}</span><span className="mt-1 block text-xs text-muted-foreground">{formatBillingQuantity(available)} × {formatMoneyAmount(line.unit_price, activeCurrency)} · {de ? "MwSt." : "НДС"} {line.vat_rate}%</span></span>
                 <span className="whitespace-nowrap font-mono text-sm font-semibold tabular-nums">{formatMoneyAmount(String(available * Number(line.line_gross || 0) / Math.max(Number(line.quantity || 1), 1)), activeCurrency)}</span>
               </label>
                 {checked ? <label className="block space-y-1 px-4 pb-3 pl-[2.75rem] text-xs text-muted-foreground"><span>{copy.comment}</span><Input type="text" maxLength={INVOICE_LINE_COMMENT_MAX_LENGTH} disabled={saving} aria-label={`${copy.comment}: ${line.description}`} placeholder={copy.commentHint} value={lineComments[index] ?? ""} onChange={event => setLineComments(current => ({ ...current, [index]: event.target.value }))} /></label> : null}

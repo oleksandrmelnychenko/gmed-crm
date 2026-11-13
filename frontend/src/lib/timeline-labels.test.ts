@@ -139,6 +139,23 @@ describe("timeline labels", () => {
     );
   });
 
+  // QA 2026-11-13 F-B8: the lead's consents carried over at conversion.
+  it("names the lead's consents in the UI language", () => {
+    const ru = translateCatalog("ru").uiText;
+    const lr = (key: string) => ru[key] ?? key;
+    expect(localizeTimelineTitle("Consent: health_data_processing", lr)).toBe(
+      "Согласие: Обработка данных о здоровье (ст. 9 DSGVO)",
+    );
+    expect(localizeTimelineTitle("Consent: lead_inquiry_processing", lr)).toBe(
+      "Согласие: Обработка данных заявки",
+    );
+    const de = translateCatalog("de").uiText;
+    const ld = (key: string) => de[key] ?? key;
+    expect(localizeTimelineSource("lead_inquiry_processing", ld)).toBe(
+      "Verarbeitung der Anfragedaten",
+    );
+  });
+
   // QA 2026-10-12 B-26b: every code the patient timeline receives reads in
   // the UI language — statuses, the German clinical titles, relation types,
   // privacy request types, invoice types and the document visibility.

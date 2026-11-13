@@ -222,6 +222,23 @@ export const securityReviewUiDe = {
     "Den Datenexport (Art. 15) erstellen der CEO oder das Patientenmanagement. Leiten Sie die Anfrage dorthin weiter.",
   compliance_export_forbidden: "Für den Datenexport dieses Patienten fehlen Ihnen die Rechte.",
 
+  // Result of «Ausführen» of a DSGVO request (QA 2026-11-13 F-B4)
+  compliance_executed_access:
+    "Der Auskunftsantrag (Art. 15) ist als erledigt erfasst. Nächster Schritt: Laden Sie mit „Daten exportieren (Art. 15)“ die Kopie herunter, prüfen Sie sie und übergeben Sie sie der betroffenen Person. Im Portal kann sie ihre eigene Kopie mit „Meine Daten exportieren“ herunterladen.",
+  compliance_executed_portability:
+    "Der Antrag auf Datenübertragbarkeit (Art. 20) ist als erledigt erfasst. Nächster Schritt: Laden Sie mit „Daten exportieren (Art. 15)“ die Daten herunter und übergeben Sie sie der betroffenen Person oder dem genannten Empfänger.",
+  compliance_executed_rectification:
+    "Der Berichtigungsantrag (Art. 16) ist als erledigt erfasst. Prüfen Sie, dass die Daten in der Patientenkarte berichtigt sind, und teilen Sie es der betroffenen Person mit.",
+  compliance_executed_objection:
+    "Der Widerspruch (Art. 21) ist als bearbeitet erfasst. Teilen Sie der betroffenen Person das Ergebnis mit.",
+  compliance_executed_restriction:
+    "Die Verarbeitung der Daten ist eingeschränkt (Art. 18). Die Einschränkung heben Sie in diesem Bereich wieder auf.",
+  compliance_executed_third_party_revoke:
+    "Die Weitergabe an Dritte ist widerrufen: {consents} Einwilligung(en), {shares} Dokumentfreigabe(n).",
+  compliance_executed_erasure:
+    "Die Patientendaten sind anonymisiert (Art. 17): {files} Dokumentdatei(en) gelöscht, {accounts} Portalzugang/-zugänge gesperrt.",
+  compliance_executed_generic: "Der Antrag ist ausgeführt.",
+
   // DSGVO register refusals (review, steps, execution)
   compliance_error_not_approved: "Der Antrag muss vor der Ausführung genehmigt werden.",
   compliance_error_execute_role:
@@ -461,6 +478,22 @@ export const securityReviewUiRu = {
   compliance_export_ceo_pm_only:
     "Экспорт данных (ст. 15) формируют CEO или менеджер пациента. Передайте запрос им.",
   compliance_export_forbidden: "У вас нет прав на экспорт данных этого пациента.",
+
+  compliance_executed_access:
+    "Запрос на доступ (ст. 15) отмечен как исполненный. Дальше: скачайте копию кнопкой «Экспорт данных (ст. 15)», проверьте её и передайте пациенту. Свою копию пациент может скачать в портале кнопкой «Экспортировать мои данные».",
+  compliance_executed_portability:
+    "Запрос на перенос данных (ст. 20) отмечен как исполненный. Дальше: скачайте данные кнопкой «Экспорт данных (ст. 15)» и передайте их пациенту или названному им получателю.",
+  compliance_executed_rectification:
+    "Запрос на исправление (ст. 16) отмечен как исполненный. Проверьте, что данные в карточке пациента исправлены, и сообщите об этом пациенту.",
+  compliance_executed_objection:
+    "Возражение (ст. 21) отмечено как рассмотренное. Сообщите пациенту результат.",
+  compliance_executed_restriction:
+    "Обработка данных пациента ограничена (ст. 18). Снять ограничение можно в этом разделе.",
+  compliance_executed_third_party_revoke:
+    "Передача третьим лицам отозвана: согласий — {consents}, доступов к документам — {shares}.",
+  compliance_executed_erasure:
+    "Данные пациента анонимизированы (ст. 17): удалено файлов документов — {files}, закрыто доступов к порталу — {accounts}.",
+  compliance_executed_generic: "Запрос исполнен.",
 
   compliance_error_not_approved: "Запрос нужно сначала одобрить, затем исполнить.",
   compliance_error_execute_role:

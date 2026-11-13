@@ -82,7 +82,7 @@ import {
 import { LegalStatusPill } from "../shared/legal-status-pill";
 import { PatientFormSection, humanizeFunctionalLabel } from "../shared/patient-form-primitives";
 import { PatientPayerSummaryCard } from "./patient-payer-summary";
-import { relationCitizenshipsLabel } from "./patient-relations-tab";
+import { localizeRelationNotes, relationCitizenshipsLabel } from "./patient-relations-tab";
 
 const loadPatientLegalStatusSheet = () => import("../sheets/patient-legal-status-sheet");
 const loadPatientNotesSheet = () => import("../sheets/patient-notes-sheet");
@@ -401,7 +401,7 @@ function PatientEmergencyContactSummary({
         {relationCitizenshipsLabel(relation, lang) ? (
           <ProfileSummaryLine label={t.patients_nationality} value={relationCitizenshipsLabel(relation, lang)} />
         ) : null}
-        {relation.notes ? <ProfileSummaryLine label={t.patient_relation_notes} value={relation.notes} /> : null}
+        {relation.notes ? <ProfileSummaryLine label={t.patient_relation_notes} value={localizeRelationNotes(relation.notes, lang)} /> : null}
       </div>
     ));
   }

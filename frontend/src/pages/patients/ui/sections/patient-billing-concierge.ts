@@ -1,3 +1,4 @@
+import { cachedNumberFormat } from "@/lib/intl-cache";
 import { roundCents } from "@/lib/money";
 
 /**
@@ -65,4 +66,14 @@ export function conciergeLineAmounts(service: BillingConciergeService, vatRate: 
   const net = roundCents(amount(service.sale_price_net));
   const vat = roundCents(net * amount(vatRate) / 100);
   return { net, vat, gross: roundCents(net + vat) };
+}
+
+/**
+ * A quantity of the billing form as written in German, like the invoice PDF:
+ * «2,5 × 95,00 €», never «2.5» (QA 2026-11-13 F-B6). Up to four decimals.
+ */
+export function formatBillingQuantity(value: unknown): string {
+  const numeric = typeof value === "number" ? value : Number(String(value ?? "").trim());
+  if (!Number.isFinite(numeric)) return String(value ?? "");
+  return cachedNumberFormat("de-DE", { maximumFractionDigits: 4 }).format(numeric);
 }
