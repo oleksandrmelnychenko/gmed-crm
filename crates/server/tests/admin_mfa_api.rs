@@ -569,7 +569,27 @@ async fn sessions_list_ok_for_it_admin() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(body.is_array());
+    // One page with the total (final-D S3-4).
+    assert!(body["items"].is_array(), "{body}");
+    assert!(body["total"].as_i64().is_some(), "{body}");
+    assert_eq!(body["offset"], 0);
+    assert_eq!(body["limit"], 50);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/admin/sessions?offset=0&limit=1000",
+        &auth_header(&app, "it_admin").await,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["limit"], 200);
+    assert!(
+        body["items"]
+            .as_array()
+            .is_some_and(|items| items.len() <= 200)
+    );
 }
 
 #[tokio::test]

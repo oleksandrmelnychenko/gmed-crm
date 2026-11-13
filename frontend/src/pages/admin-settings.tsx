@@ -4,6 +4,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   useState,
   type SetStateAction,
 } from "react";
@@ -29,10 +30,7 @@ import { AdminGuideButton } from "@/components/admin-guide";
 import {
   SheetActionsFooter,
 } from "@/components/admin-page-patterns";
-import {
-  DataTablePager,
-  useDataTablePagination,
-} from "@/components/data-table/data-table-pager";
+import { DataTablePager } from "@/components/data-table/data-table-pager";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
@@ -73,9 +71,12 @@ import { useRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { canManageAdminAccount } from "@/pages/admin-users.helpers";
 import {
+  ADMIN_SESSIONS_PAGE_SIZE,
   approvePendingMfaLogin,
+  fetchAdminSessionsPage,
   fetchAdminSettingsWorkspace,
   rejectPendingMfaLogin,
+  type AdminSessionsPage,
   revokeAdminUserSessions,
   revokeAllAdminSessions,
   saveAdminSetting,
@@ -399,7 +400,10 @@ type AdminSettingsSheetState = {
 
 type AdminSettingsState = {
   settings: SettingRow[];
+  /** One page of the active sessions (the server pages them, final-D S3-4). */
   sessions: SessionRow[];
+  sessionsTotal: number;
+  sessionsPageIndex: number;
   pending: PendingLogin[];
   loading: boolean;
   error: string;
@@ -461,6 +465,8 @@ function useAdminSettingsPageContent() {
     (): AdminSettingsState => ({
       settings: [],
       sessions: [],
+      sessionsTotal: 0,
+      sessionsPageIndex: 0,
       pending: [],
       loading: true,
       error: "",
@@ -484,6 +490,8 @@ function useAdminSettingsPageContent() {
     pending,
     selectedGroupId,
     sessions,
+    sessionsPageIndex,
+    sessionsTotal,
     settings,
     sheetState,
   } = settingsState;
@@ -493,8 +501,14 @@ function useAdminSettingsPageContent() {
   ) => dispatchSettingsState(createAdminSettingsFieldPatch(field, nextValue));
   const setSettings = (nextValue: SetStateAction<SettingRow[]>) =>
     setSettingsField("settings", nextValue);
-  const setSessions = (nextValue: SetStateAction<SessionRow[]>) =>
-    setSettingsField("sessions", nextValue);
+  // The page the next reload asks for (load() is not rebuilt per page).
+  const sessionsPageRef = useRef(0);
+  const applySessionsPage = (page: AdminSessionsPage<SessionRow>, pageIndex: number) =>
+    dispatchSettingsState({
+      sessions: page.items,
+      sessionsTotal: page.total,
+      sessionsPageIndex: pageIndex,
+    });
   const setPending = (nextValue: SetStateAction<PendingLogin[]>) =>
     setSettingsField("pending", nextValue);
   const setLoading = (nextValue: SetStateAction<boolean>) =>
@@ -531,10 +545,20 @@ function useAdminSettingsPageContent() {
     setLoading(true);
     setError("");
     try {
-      const { settingsRows, sessionRows, pendingRows } =
-        await fetchAdminSettingsWorkspace<SettingRow, SessionRow, PendingLogin>();
+      const { settingsRows, sessionsPage, pendingRows } =
+        await fetchAdminSettingsWorkspace<SettingRow, SessionRow, PendingLogin>(
+          sessionsPageRef.current,
+        );
+      let page = sessionsPage;
+      let pageIndex = sessionsPageRef.current;
+      // Sessions ended meanwhile and the page is past the end: show the last one.
+      if (page.items.length === 0 && page.total > 0 && pageIndex > 0) {
+        pageIndex = Math.max(0, Math.ceil(page.total / ADMIN_SESSIONS_PAGE_SIZE) - 1);
+        page = await fetchAdminSessionsPage<SessionRow>(pageIndex);
+      }
+      sessionsPageRef.current = pageIndex;
       setSettings(settingsRows);
-      setSessions(sessionRows);
+      applySessionsPage(page, pageIndex);
       setPending(pendingRows);
       setEditValues(
         settingsRows.reduce<Record<string, string>>((acc, row) => {
@@ -750,7 +774,20 @@ function useAdminSettingsPageContent() {
     }
   }, [load, t.common_error, t.settings_updated]);
 
-  const sessionsPagination = useDataTablePagination(sessions, String(sessions.length));
+  const sessionsTotalPages = Math.max(1, Math.ceil(sessionsTotal / ADMIN_SESSIONS_PAGE_SIZE));
+  const changeSessionsPage = useCallback(async (pageIndex: number) => {
+    setFlash(null);
+    try {
+      const page = await fetchAdminSessionsPage<SessionRow>(pageIndex);
+      sessionsPageRef.current = pageIndex;
+      applySessionsPage(page, pageIndex);
+    } catch (pageError) {
+      setFlash({
+        tone: "error",
+        text: pageError instanceof Error ? pageError.message : t.common_error,
+      });
+    }
+  }, [t.common_error]);
 
   const pendingColumns = useMemo<ColumnDef<PendingLogin>[]>(() => [
     {
@@ -1033,7 +1070,7 @@ function useAdminSettingsPageContent() {
             <Tabs value={workspaceTab} onValueChange={(value) => setWorkspaceTab(String(value))}>
               <TabsList className="group-data-horizontal/tabs:h-auto max-w-full flex-wrap justify-start gap-0.5 rounded-lg border border-border bg-card p-0.5">
                 <TabsTrigger value="configuration" className="h-8 gap-2 rounded-lg px-3"><ScrollText className="size-3.5" />{t.common_configuration}</TabsTrigger>
-                <TabsTrigger value="sessions" className="h-8 gap-2 rounded-lg px-3"><KeyRound className="size-3.5" />{t.settings_active_sessions}<span className="font-mono text-xs">{sessions.length}</span></TabsTrigger>
+                <TabsTrigger value="sessions" className="h-8 gap-2 rounded-lg px-3"><KeyRound className="size-3.5" />{t.settings_active_sessions}<span className="font-mono text-xs">{sessionsTotal}</span></TabsTrigger>
                 <TabsTrigger value="pending" className="h-8 gap-2 rounded-lg px-3"><UserRoundCheck className="size-3.5" />{t.mfa_pending_logins}<span className="font-mono text-xs">{pending.length}</span></TabsTrigger>
               </TabsList>
               <TabsContent value="configuration" className="mt-0">
@@ -1089,7 +1126,7 @@ function useAdminSettingsPageContent() {
               </TabsContent>
               <TabsContent value="sessions" className="mt-0">
             <DataTableSurface
-              rows={sessionsPagination.pagedRows}
+              rows={sessions}
               columns={sessionColumns}
               defaultDensity="compact"
               defaultSort={[{ field: "last_activity_at", dir: "desc" }]}
@@ -1099,14 +1136,14 @@ function useAdminSettingsPageContent() {
               toolbarStart={
                 <>
                   <SectionHeading icon={Monitor}>{t.settings_active_sessions}</SectionHeading>
-                  <CountBadge>{sessions.length}</CountBadge>
+                  <CountBadge>{sessionsTotal}</CountBadge>
                   <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
                   <Button
                     type="button"
                     variant="destructive"
                     size="sm"
                     className="h-7 rounded-lg"
-                    disabled={sessions.length === 0 || actionBusyKey === "sessions:all"}
+                    disabled={sessionsTotal === 0 || actionBusyKey === "sessions:all"}
                     onClick={() => void logoutAll()}
                   >
                     {actionBusyKey === "sessions:all" ? (
@@ -1118,13 +1155,13 @@ function useAdminSettingsPageContent() {
               }
               toolbarAfter={
                 <DataTablePager
-                  pageIndex={sessionsPagination.pageIndex}
-                  pageSize={sessionsPagination.pageSize}
-                  totalPages={sessionsPagination.totalPages}
-                  totalRows={sessionsPagination.totalRows}
+                  pageIndex={sessionsPageIndex}
+                  pageSize={ADMIN_SESSIONS_PAGE_SIZE}
+                  totalPages={sessionsTotalPages}
+                  totalRows={sessionsTotal}
                   previousLabel={t.pagination_previous}
                   nextLabel={t.pagination_next}
-                  onPageChange={sessionsPagination.onPageChange}
+                  onPageChange={(pageIndex) => void changeSessionsPage(pageIndex)}
                 />
               }
             />

@@ -159,9 +159,33 @@ pub(crate) async fn count_active_sessions(
     .await
 }
 
+#[derive(Deserialize)]
+struct SessionsQuery {
+    offset: Option<i64>,
+    limit: Option<i64>,
+}
+
+/// Rows of one page of the active sessions list when the caller names none.
+const SESSIONS_PAGE_DEFAULT: i64 = 50;
+/// The largest page of the active sessions list.
+const SESSIONS_PAGE_MAX: i64 = 200;
+
+/// `(offset, limit)` of a sessions page: offset at least 0, limit 1..=200
+/// (50 when absent).
+fn sessions_page(query: &SessionsQuery) -> (i64, i64) {
+    (
+        query.offset.unwrap_or(0).max(0),
+        query
+            .limit
+            .unwrap_or(SESSIONS_PAGE_DEFAULT)
+            .clamp(1, SESSIONS_PAGE_MAX),
+    )
+}
+
 async fn list_all_sessions(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
+    axum::extract::Query(query): axum::extract::Query<SessionsQuery>,
 ) -> axum::response::Response {
     if let Err(e) = auth.require_capability(Capability::AdminSessions) {
         return e;
@@ -169,17 +193,29 @@ async fn list_all_sessions(
 
     // Sessions of patient and lead portal logins are patient data: only a role
     // that sees patients lists them (QA E-05).
-    // Every active session, not the first 200: the tab shows their number
-    // next to the counter of /admin/health (QA 2026-11-12 S3-4); the page
-    // pages the list itself.
+    let include_portal_accounts = super::users::can_see_portal_accounts(&auth);
+    // One page with the total (security review 2026-11-13, final-D S3-4: the
+    // whole list grew without bound with the portal logins). The total is
+    // the number of /admin/health (QA 2026-11-12 S3-4).
+    let (offset, limit) = sessions_page(&query);
+    let total = match count_active_sessions(&state.db, include_portal_accounts).await {
+        Ok(total) => total,
+        Err(e) => {
+            tracing::error!(error = %e, "count active sessions");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
     match sqlx::query(&format!(
         r#"SELECT tf.id AS family_id, tf.user_id, u.name AS user_name, u.email AS user_email, u.role,
                   tf.device_fingerprint, tf.ip_address, tf.user_agent,
                   tf.created_at, tf.last_activity_at
            {ACTIVE_SESSIONS_FROM_WHERE}
-           ORDER BY tf.last_activity_at DESC"#
+           ORDER BY tf.last_activity_at DESC, tf.id
+           LIMIT $2 OFFSET $3"#
     ))
-    .bind(super::users::can_see_portal_accounts(&auth))
+    .bind(include_portal_accounts)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(&state.db)
     .await
     {
@@ -201,7 +237,13 @@ async fn list_all_sessions(
                     })
                 })
                 .collect();
-            Json(sessions).into_response()
+            Json(serde_json::json!({
+                "items": sessions,
+                "total": total,
+                "offset": offset,
+                "limit": limit,
+            }))
+            .into_response()
         }
         Err(e) => {
             tracing::error!(error = %e, "list all sessions");
@@ -1134,10 +1176,22 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 #[cfg(test)]
 mod tests {
     use super::{
-        activity_action_filter, activity_category_actions, normalize_activity_view,
-        visible_activity_context,
+        SessionsQuery, activity_action_filter, activity_category_actions, normalize_activity_view,
+        sessions_page, visible_activity_context,
     };
     use serde_json::json;
+
+    /// final-D S3-4: the active sessions list is paged, never unbounded.
+    #[test]
+    fn sessions_pages_are_bounded() {
+        let page = |offset: Option<i64>, limit: Option<i64>| {
+            sessions_page(&SessionsQuery { offset, limit })
+        };
+        assert_eq!(page(None, None), (0, 50));
+        assert_eq!(page(Some(100), Some(25)), (100, 25));
+        assert_eq!(page(Some(-5), Some(0)), (0, 1));
+        assert_eq!(page(None, Some(i64::MAX)), (0, 200));
+    }
 
     #[test]
     fn activity_action_filter_keeps_every_given_code() {

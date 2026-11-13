@@ -57,23 +57,57 @@ export function setAdminUserActive(userId: string, isActive: boolean) {
   );
 }
 
+/** Rows of one page of the active sessions list (server pages it, final-D S3-4). */
+export const ADMIN_SESSIONS_PAGE_SIZE = 50;
+
+export type AdminSessionsPage<TSession> = {
+  items: TSession[];
+  total: number;
+  offset: number;
+  limit: number;
+};
+
+/** One page of the active sessions; an older server's bare list counts as one page. */
+export function normalizeAdminSessionsPage<TSession>(
+  page: AdminSessionsPage<TSession> | TSession[] | null | undefined,
+  offset: number,
+): AdminSessionsPage<TSession> {
+  if (Array.isArray(page)) {
+    return { items: page, total: page.length, offset: 0, limit: page.length };
+  }
+  const items = Array.isArray(page?.items) ? page.items : [];
+  return {
+    items,
+    total: typeof page?.total === "number" ? page.total : offset + items.length,
+    offset: typeof page?.offset === "number" ? page.offset : offset,
+    limit: typeof page?.limit === "number" ? page.limit : ADMIN_SESSIONS_PAGE_SIZE,
+  };
+}
+
+export async function fetchAdminSessionsPage<TSession>(pageIndex: number) {
+  const offset = Math.max(0, pageIndex) * ADMIN_SESSIONS_PAGE_SIZE;
+  const page = await apiFetch<AdminSessionsPage<TSession> | TSession[]>(
+    `/admin/sessions?offset=${offset}&limit=${ADMIN_SESSIONS_PAGE_SIZE}`,
+    { cacheTtlMs: ADMIN_FAST_CACHE_TTL_MS },
+  );
+  return normalizeAdminSessionsPage(page, offset);
+}
+
 export async function fetchAdminSettingsWorkspace<
   TSetting,
   TSession,
   TPendingLogin,
->() {
-  const [settingsRows, sessionRows, pendingRows] = await Promise.all([
+>(sessionsPageIndex = 0) {
+  const [settingsRows, sessionsPage, pendingRows] = await Promise.all([
     apiFetch<TSetting[]>("/admin/settings", {
       cacheTtlMs: ADMIN_LOOKUPS_CACHE_TTL_MS,
     }),
-    apiFetch<TSession[]>("/admin/sessions", {
-      cacheTtlMs: ADMIN_FAST_CACHE_TTL_MS,
-    }),
+    fetchAdminSessionsPage<TSession>(sessionsPageIndex),
     apiFetch<TPendingLogin[]>("/admin/mfa/pending", {
       cacheTtlMs: ADMIN_FAST_CACHE_TTL_MS,
     }),
   ]);
-  return { settingsRows, sessionRows, pendingRows };
+  return { settingsRows, sessionsPage, pendingRows };
 }
 
 export function saveAdminSetting(key: string, value: string) {

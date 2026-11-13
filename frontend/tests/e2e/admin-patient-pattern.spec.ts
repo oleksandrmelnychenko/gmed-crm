@@ -519,7 +519,9 @@ async function installAdminPatternMocks(page: Page) {
     if (path === "/admin/settings" && method === "GET") return json(route, settings);
     if (path.startsWith("/admin/settings/") && method === "POST") return json(route, { ok: true });
     if (path === "/admin/maintenance" && method === "POST") return json(route, { ok: true });
-    if (path === "/admin/sessions" && method === "GET") return json(route, sessions);
+    if (path === "/admin/sessions" && method === "GET") {
+      return json(route, { items: sessions, total: sessions.length, offset: 0, limit: 50 });
+    }
     if (path === "/admin/sessions/revoke-all" && method === "POST") return json(route, { ok: true });
     if (path.startsWith("/admin/sessions/user/") && path.endsWith("/revoke")) {
       return json(route, { ok: true });
