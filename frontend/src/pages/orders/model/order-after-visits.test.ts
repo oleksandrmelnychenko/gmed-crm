@@ -99,6 +99,8 @@ describe("order after visits", () => {
         paper("sorted", { appointment_id: "a" }),
         paper("contract", { is_medical: false }),
         paper("old", { status: "archived" }),
+        paper("plan-pdf", { document_direction: "outgoing", ursprung: "template:treatment_plan" }),
+        paper("generated", { ursprung: "template:treatment_plan" }),
       ]).map((item) => item.id),
     ).toEqual(["loose"]);
     const invoice = (id: string, appointment_ids: string[], status = "received"): VisitInvoice => ({

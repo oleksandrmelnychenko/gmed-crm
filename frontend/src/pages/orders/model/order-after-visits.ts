@@ -9,7 +9,16 @@ export type AfterVisitDocument = {
   is_medical: boolean;
   status: string;
   created_at: string;
+  /** "outgoing" for GMED's own papers (contracts, the plan PDF). */
+  document_direction?: string | null;
+  /** "template:<id>" for a document GMED generated. */
+  ursprung?: string | null;
 };
+
+/** A paper GMED made itself (plan PDF, contract), not one that came back from a visit. */
+function isGmedOwnPaper(document: AfterVisitDocument) {
+  return document.document_direction === "outgoing" || (document.ursprung ?? "").startsWith("template:");
+}
 
 /** A clinic invoice of the order with the visits it covers (`GET /orders/{id}/visit-invoices`). */
 export type VisitInvoice = {
@@ -94,10 +103,17 @@ export function missingAfterVisit(
   return missing;
 }
 
-/** Medical papers of the order not sorted under a visit yet (archived ones stay out). */
+/**
+ * Medical papers that came into the order and are not sorted under a visit
+ * yet; archived ones and GMED's own papers (the plan PDF) stay out.
+ */
 export function unsortedDocuments(documents: readonly AfterVisitDocument[]) {
   return documents.filter(
-    (document) => !document.appointment_id && document.is_medical && document.status !== "archived",
+    (document) =>
+      !document.appointment_id &&
+      document.is_medical &&
+      document.status !== "archived" &&
+      !isGmedOwnPaper(document),
   );
 }
 

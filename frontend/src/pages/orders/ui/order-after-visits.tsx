@@ -239,7 +239,7 @@ export function OrderAfterVisits({ orderId, patientId, lang, reloadNonce, canEdi
                       {plannedDayLabel(visit.date, lang)} {plannedTimeLabel(visit)}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {[visit.doctor_name, visit.provider_name, visit.title].filter(Boolean).join(" · ")}
+                      {[...new Set([visit.doctor_name, visit.provider_name, visit.title].filter(Boolean))].join(" · ")}
                     </div>
                   </td>
                   <td className="px-2 py-2">
