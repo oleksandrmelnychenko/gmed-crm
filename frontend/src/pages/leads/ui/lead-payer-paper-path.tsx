@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, CircleAlert, ClipboardPen, FileText, Info, LoaderCircle, Upload, Printer } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
@@ -106,7 +106,10 @@ export function LeadPayerPaperPath({
     void reload();
   }, [reload]);
 
-  const { selfDisclosure, identity, previous } = payerPaperDocuments(documents, identification.payer_since);
+  const { selfDisclosure, identity, previous } = useMemo(
+    () => payerPaperDocuments(documents, identification.payer_since),
+    [documents, identification.payer_since],
+  );
   const documentCount = identity.length + (selfDisclosure ? 1 : 0);
   const countCallback = useRef(onDocumentCountChange);
   countCallback.current = onDocumentCountChange;
@@ -536,6 +539,7 @@ export function LeadPayerPaperPath({
           errorText={errorText}
           onChanged={() => void changed(tx("Ответы плательщика сохранены", "Angaben des Zahlers gespeichert"))}
           onClose={() => setAnswersOpen(false)}
+          paperIdentityCopies={identity}
         />
       ) : null}
       {notice ? (

@@ -10764,6 +10764,123 @@ async fn backfill_stores_the_contracting_party_of_an_old_converted_minor_once() 
     assert_eq!((custody, stored), (None, Vec::new()));
 }
 
+/// Owner 2026-11-13 («OCR everywhere»): the cabinet has a parent's copy read
+/// also when a repeat request takes it over from the earlier request
+/// (referenced, not uploaded again). Only the copies the request references
+/// are reachable: the father's expired copy, which the repeat request does
+/// not take over, and any copy through another request stay 404.
+#[tokio::test]
+async fn the_cabinet_reads_a_parents_identity_copy_taken_over_by_a_repeat_request() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let pm = app.auth_header("patient_manager");
+    let (anna, ben) = (Uuid::new_v4(), Uuid::new_v4());
+    let lead_email = format!("ocr-{}@example.com", Uuid::new_v4().simple());
+    let lead_id = seed_minor_lead_with_parents(&app, &lead_email, anna, ben, None).await;
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    declare_mother_as_payer_and_sign(&app, lead_id, artifacts.order_id).await;
+    let patient_id = convert_ready_lead(&app, lead_id).await;
+    sqlx::query(
+        "UPDATE lead_portal_uploads SET reviewed_at = now(), reviewed_by = $2
+         WHERE lead_id = $1 AND kind = 'representative_identity'",
+    )
+    .bind(lead_id)
+    .bind(app.patient_manager_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE lead_representatives SET id_valid_until = DATE '2020-01-31'
+         WHERE lead_id = $1 AND contact_id = $2",
+    )
+    .bind(lead_id)
+    .bind(ben)
+    .execute(pool)
+    .await
+    .unwrap();
+    let anna_document = representative_identity_copy(pool, lead_id, anna).await;
+    let ben_document = representative_identity_copy(pool, lead_id, ben).await;
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Mia",
+            "last_name": "Muster",
+            "repeat_patient_id": patient_id,
+            "creation_key": Uuid::new_v4(),
+        })),
+    )
+    .await;
+    assert!(status.is_success(), "{created}");
+    let repeat = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+
+    // Staff filling in the client's form have the mother's taken-over copy
+    // read. The test file has no zone, and a host may lack the OCR tools.
+    let before = audit_count_of(pool, "identity_document_recognized", anna_document).await;
+    let (status, body) = cabinet_recognition(&app, &pm, repeat, anna_document).await;
+    let read_nothing = status == StatusCode::OK && body == json!({ "status": "not_found" });
+    let no_tools = matches!(
+        status,
+        StatusCode::SERVICE_UNAVAILABLE | StatusCode::BAD_GATEWAY
+    ) && matches!(
+        body["code"].as_str(),
+        Some("recognition_unavailable" | "recognition_failed")
+    );
+    assert!(read_nothing || no_tools, "{status} {body}");
+    assert_eq!(
+        audit_count_of(pool, "identity_document_recognized", anna_document).await,
+        before + i64::from(read_nothing)
+    );
+
+    // The father's expired copy is not taken over: not reachable.
+    let (status, body) = cabinet_recognition(&app, &pm, repeat, ben_document).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    // The converted earlier request is no cabinet request any more.
+    let (status, body) = cabinet_recognition(&app, &pm, lead_id, anna_document).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    // Another open request does not reach the copy.
+    let other_email = format!("ocr-other-{}@example.com", Uuid::new_v4().simple());
+    let other =
+        seed_minor_lead_with_parents(&app, &other_email, Uuid::new_v4(), Uuid::new_v4(), None)
+            .await;
+    let (status, body) = cabinet_recognition(&app, &pm, other, anna_document).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+}
+
+async fn cabinet_recognition(
+    app: &TestApp,
+    bearer: &str,
+    lead: Uuid,
+    document: Uuid,
+) -> (StatusCode, Value) {
+    let path = format!("/api/v1/me/lead-requests/{lead}/documents/{document}/identity-recognition");
+    json_request(app, "POST", &path, bearer, None).await
+}
+
+async fn representative_identity_copy(pool: &PgPool, lead_id: Uuid, person: Uuid) -> Uuid {
+    sqlx::query_scalar(
+        "SELECT document_id FROM lead_portal_uploads
+         WHERE lead_id = $1 AND representative_id = $2 AND kind = 'representative_identity'",
+    )
+    .bind(lead_id)
+    .bind(person)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn audit_count_of(pool: &PgPool, action: &str, entity_id: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action = $1 AND entity_id = $2")
+        .bind(action)
+        .bind(entity_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
 /// Sales sees why a lead failed as a code only: staff's own words (the
 /// failure note, a free-text reason) may name a diagnosis.
 #[tokio::test]

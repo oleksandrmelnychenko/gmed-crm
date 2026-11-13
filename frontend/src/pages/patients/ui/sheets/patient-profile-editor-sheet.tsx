@@ -47,8 +47,14 @@ import {
   inputClass as formInputClassName,
   textareaClass as formTextareaClassName,
 } from "@/components/ui-shell";
+import { apiFetch } from "@/lib/api";
 import { appDateKey } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
+import type { RecognizedDocumentField } from "@/pages/leads/model/identity-recognition";
+import { LeadIdentityRecognition, type RecognitionScan } from "@/pages/leads/ui/lead-identity-recognition";
+
+import type { DocumentItem } from "../../model/detail-tab-types";
+import { isPatientIdentityDocument } from "../../model/patient-identity-documents";
 
 import { updatePatient } from "../../data/patient-mutations";
 import {
@@ -308,12 +314,50 @@ type PatientProfileEditorFormSectionsProps = {
   complianceNote: ComplianceRevocationNote | null;
   /** Type of the stored identity document (`id_document_type`), for its labels. */
   idDocumentType?: string | null;
+  /** The patient's own identity scans, offered for «Распознать со скана». */
+  identityScans?: readonly RecognitionScan[];
 };
+
+/** The patient card keeps number and "valid until" of the document; type and country stay with the lead's data. */
+const PATIENT_CARD_RECOGNIZED_FIELDS: readonly RecognizedDocumentField[] = ["number", "validUntil"];
+
+/**
+ * The patient's own identity scans while the editor is open (owner
+ * 2026-11-13: recognition wherever ID data are typed). A role that may not
+ * list the documents gets none, and no reading is offered.
+ */
+export function usePatientIdentityScans(open: boolean, patientId: string | undefined): RecognitionScan[] {
+  const [scans, setScans] = useState<RecognitionScan[]>([]);
+  useEffect(() => {
+    if (!open || !patientId) {
+      setScans([]);
+      return;
+    }
+    let active = true;
+    apiFetch<DocumentItem[]>(`/patients/${encodeURIComponent(patientId)}/documents`)
+      .then((documents) => {
+        if (!active) return;
+        setScans(
+          (Array.isArray(documents) ? documents : [])
+            .filter(isPatientIdentityDocument)
+            .map((document) => ({ id: document.id, name: document.filename || document.auto_name || "" })),
+        );
+      })
+      .catch(() => {
+        if (active) setScans([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [open, patientId]);
+  return scans;
+}
 
 function PatientProfileEditorFormSections({
   dictionary,
   lang,
   idDocumentType,
+  identityScans = [],
   form,
   fieldErrors,
   trustedContacts,
@@ -713,6 +757,34 @@ function PatientProfileEditorFormSections({
                 </div>
               </FormSection>
               <FormSection icon={IdCard} title={identityLabels.title}>
+                {/* A proposal from the scan's machine readable zone: nothing is taken
+                    before «Подставить отмеченное», the editor's own save stores it. */}
+                <LeadIdentityRecognition
+                  scans={identityScans}
+                  draft={{
+                    type: idDocumentType ?? "",
+                    number: form.passportNumber,
+                    authority: "",
+                    country: "",
+                    issuedOn: "",
+                    validUntil: form.passportExpiry,
+                    unreadable: false,
+                  }}
+                  documentFields={PATIENT_CARD_RECOGNIZED_FIELDS}
+                  onApply={(patch) => {
+                    if (patch.number !== undefined) updateField("passportNumber", patch.number);
+                    if (patch.validUntil !== undefined) updateField("passportExpiry", patch.validUntil);
+                  }}
+                  holder={{
+                    lastName: form.lastName,
+                    firstName: form.firstName,
+                    birthDate: form.birthDate,
+                    citizenships: form.citizenships,
+                  }}
+                  tx={lang === "de" ? (_ru, de) => de : (ru) => ru}
+                  lang={lang}
+                  testId="patient-profile-id-recognition"
+                />
                 <div className="grid gap-2.5 md:grid-cols-2">
                   <FormField
                     label={identityLabels.number}
@@ -1146,6 +1218,7 @@ function PatientProfileEditorSheetContent({
   const fieldErrors = validationAttempted && form
     ? patientProfileFieldErrors(form, trustedContacts, dictionary, lang)
     : {};
+  const identityScans = usePatientIdentityScans(open, patientId);
 
   useEffect(() => {
     if (!open || !patientId) {
@@ -1404,6 +1477,7 @@ function PatientProfileEditorSheetContent({
           updateLegalStatusField={updateLegalStatusField}
           complianceNote={detail ? complianceRevocationNote(detail.legal_status) : null}
           idDocumentType={detail?.id_document_type}
+          identityScans={identityScans}
         />
         </fieldset>
       ) : null}

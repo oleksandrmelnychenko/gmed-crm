@@ -130,3 +130,69 @@ test("saving a minor's profile preserves the linked mother and her e-mail-only c
   });
   expect(savedRelation).not.toHaveProperty("related_patient_id");
 });
+
+// Owner 2026-11-13: recognition wherever ID data are typed — the patient card's
+// passport number and "valid until" too, as a proposal staff confirm.
+test("the profile editor reads the patient's passport scan as a proposal", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("gmed_lang", "ru");
+    localStorage.setItem("gmed_access_token", "profile-editor-test");
+  });
+  const recognitions: string[] = [];
+  let savedBody: Record<string, unknown> | undefined;
+  await page.route("**/api/v1/**", async route => {
+    const url = route.request().url();
+    if (url.endsWith("/patients/patient-profile-qa/documents")) {
+      return route.fulfill({ json: [
+        { id: "scan-passport", filename: "pass.pdf", art: "identity", category: "identity", created_at: "2026-11-01T08:00:00Z" },
+        { id: "scan-payer", filename: "payer.pdf", art: "payer_identity", category: "identity", created_at: "2026-11-01T08:00:00Z" },
+      ] });
+    }
+    const recognition = url.match(/\/documents\/([^/]+)\/identity-recognition$/);
+    if (recognition) {
+      recognitions.push(recognition[1]);
+      // Synthetic values (the ICAO specimen with a real country code).
+      return route.fulfill({ json: {
+        status: "verified",
+        format: "TD3",
+        checks: { document_number: true, birth_date: true, valid_until: true, composite: true },
+        names_truncated: false,
+        document: { id_document_type: "passport", id_document_number: "L898902C3", id_issuing_country: "UA", id_valid_until: "2031-04-15" },
+        holder: { last_name: "Beispiel", first_name: "Alex", date_of_birth: "1976-07-06", legal_sex: "male", citizenship: "UA" },
+      } });
+    }
+    if (url.endsWith("/patients/patient-profile-qa/update")) {
+      savedBody = route.request().postDataJSON();
+      return route.fulfill({ json: { id: "patient-profile-qa" } });
+    }
+    return route.fulfill({ json: [] });
+  });
+  await page.route("**/__patient-profile-editor-qa**", route => route.fulfill({
+    contentType: "text/html",
+    body: `<html><div id="root"></div><script type="module">
+      import RefreshRuntime from '/@react-refresh';
+      RefreshRuntime.injectIntoGlobalHook(window);
+      window.$RefreshReg$ = () => {};
+      window.$RefreshSig$ = () => (type) => type;
+      window.__vite_plugin_react_preamble_installed__ = true;
+      await import('/tests/e2e/fixtures/patient-profile-editor.tsx');
+    </script></html>`,
+  }));
+  await page.goto("/__patient-profile-editor-qa");
+  const sheet = page.getByRole("dialog", { name: "Редактировать профиль пациента", exact: true });
+  // One own scan and empty fields: the reading starts by itself; the payer's copy is never offered.
+  const proposal = sheet.getByTestId("patient-profile-id-recognition-proposal");
+  await expect(proposal).toBeVisible();
+  expect(recognitions).toEqual(["scan-passport"]);
+  // Only the fields the card has: no type, no country.
+  await expect(proposal).toContainText("L898902C3");
+  await expect(proposal).toContainText("15.04.2031");
+  await expect(proposal).not.toContainText("Страна выдачи");
+  // Nothing is taken before the confirmation.
+  await expect(sheet.locator('input[value="L898902C3"]')).toHaveCount(0);
+  await sheet.getByTestId("patient-profile-id-recognition-apply").click();
+  await expect(sheet.locator('input[value="L898902C3"]')).toHaveCount(1);
+  await sheet.getByRole("button", { name: "Сохранить пациента", exact: true }).click();
+  await expect(sheet).toBeHidden();
+  expect(savedBody).toMatchObject({ passport_number: "L898902C3", passport_expiry: "2031-04-15" });
+});

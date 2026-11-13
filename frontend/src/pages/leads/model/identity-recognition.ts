@@ -106,6 +106,17 @@ export function recognitionDocumentRows(
 }
 
 /**
+ * The rows of the fields a form has (the patient card keeps number and
+ * "valid until" only, owner 2026-11-13); every row without a limit.
+ */
+export function onlyFields<Field extends string>(
+  rows: RecognitionRow<Field>[],
+  fields: readonly Field[] | undefined,
+): RecognitionRow<Field>[] {
+  return fields ? rows.filter((row) => fields.includes(row.field)) : rows;
+}
+
+/**
  * The rows ticked when the proposal opens: empty fields whose value a check
  * digit confirms. A field that holds another value is left to staff.
  */

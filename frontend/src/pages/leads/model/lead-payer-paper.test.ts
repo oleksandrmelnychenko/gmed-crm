@@ -17,6 +17,7 @@ import {
   payerIdentityUploadForm,
   payerPaperDocuments,
   payerPaperPathDerived,
+  withPaperIdentityCopies,
 } from "./lead-payer-paper";
 
 const ru = (text: string) => text;
@@ -173,5 +174,32 @@ describe("payer paper path (re-check V-A7)", () => {
     });
     expect(payerIdentityAnswersPatch({ ...fields, registerExtract: true })).toEqual({});
     expect(payerIdentityAnswersPatch(EMPTY_PAYER_IDENTITY_FIELDS)).toEqual({});
+  });
+});
+
+// Owner 2026-11-13: recognition wherever ID data are typed — the paper answers too.
+describe("withPaperIdentityCopies", () => {
+  const linkCopy = { id: "link", file_name: "pass.jpg", size_bytes: 10, mime_type: "image/jpeg", uploaded_at: "2026-11-01T08:00:00Z", reviewed: false, can_delete: false };
+
+  it("lists the paper copies with the questionnaire's own, read-only, the extract as one", () => {
+    const merged = withPaperIdentityCopies(
+      { identity_documents: [linkCopy] },
+      [
+        document({ id: "link" }),
+        document({ id: "paper", original_filename: "ausweis.pdf", mime_type: "application/pdf", file_size: 20 }),
+        document({ id: "extract", notes: "Handelsregisterauszug, vorgelegt von Erika Zahler" }),
+      ],
+    );
+    expect(merged.identity_documents?.map((item) => [item.id, item.can_delete, item.register_extract ?? false])).toEqual([
+      ["link", false, false],
+      ["paper", false, false],
+      ["extract", false, true],
+    ]);
+    expect(merged.identity_documents?.[1]).toMatchObject({ file_name: "ausweis.pdf", mime_type: "application/pdf", size_bytes: 20, uploaded_at: "2026-10-25T08:00:00Z" });
+  });
+
+  it("keeps the questionnaire as it is without paper copies", () => {
+    const questionnaire = { identity_documents: null };
+    expect(withPaperIdentityCopies(questionnaire, [])).toBe(questionnaire);
   });
 });

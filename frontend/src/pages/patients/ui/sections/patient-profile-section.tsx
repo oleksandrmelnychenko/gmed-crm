@@ -44,7 +44,7 @@ import {
   leadIntakeTypeFromLead,
   useLeadLabels,
 } from "@/pages/leads/model/leads-model";
-import { isOtherPersonUploadArt } from "@/pages/leads/model/gwg-identification";
+import { isPatientIdentityDocument } from "../../model/patient-identity-documents";
 import { idDocumentTypeLabel } from "@/pages/leads/model/lead-gwg-statements";
 import { fetchSpecializations } from "@/pages/providers/data/provider-api";
 import {
@@ -126,24 +126,8 @@ function profileRecordString(record: Record<string, unknown>, key: string) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-/**
- * The patient's own identity document. An upload about another person — a
- * representative's or the payer's passport, a proof of authority or of the
- * source of funds — is filed with category `identity` too, and is never the
- * patient's.
- */
-export function isPatientIdentityDocument(document: DocumentItem) {
-  if (isOtherPersonUploadArt(document.art)) return false;
-  const markers = [document.art, document.category, document.compliance_kind]
-    .map((value) => value?.trim().toLowerCase())
-    .filter(Boolean);
-  return markers.some((value) => [
-    "identity",
-    "passport",
-    "passport_scan",
-    "personal_passport",
-  ].includes(value ?? ""));
-}
+// The predicate lives in the model (the profile editor reads the scans too).
+export { isPatientIdentityDocument };
 
 function useLivePatientRelations(patientId: string): LiveRelationsState {
   const [state, setState] = useState<LiveRelationsState>({

@@ -214,19 +214,21 @@ export function RepresentativeIdentityData({
           {staffMode ? cabinetStaffText(lang).idDataByStaff : text.representativeIdDataStaff}
         </CabinetHint>
       ) : (
-        <>
-          <p className="text-sm leading-6 text-muted-foreground">{text.representativeIdDataIntro}</p>
-          <LeadRequestIdentityRecognition
-            leadId={request.lead_id}
-            documents={person.identity_documents}
-            draft={draft}
-            onTake={set}
-            text={text}
-            lang={lang}
-            testId={`lead-request-${slot}-recognition`}
-          />
-        </>
+        <p className="text-sm leading-6 text-muted-foreground">{text.representativeIdDataIntro}</p>
       )}
+      {/* Whoever may edit the fields has the copy read (owner 2026-11-13: OCR wherever ID data
+          are typed) — staff in the client's form too, also after staff entered the data. */}
+      {!byStaff || staffMode ? (
+        <LeadRequestIdentityRecognition
+          leadId={request.lead_id}
+          documents={person.identity_documents}
+          draft={draft}
+          onTake={set}
+          text={text}
+          lang={lang}
+          testId={`lead-request-${slot}-recognition`}
+        />
+      ) : null}
       <div className="grid gap-3 sm:grid-cols-2">
         <LabeledField {...labeled("id_document_type")}>
           <NativeComboboxSelect

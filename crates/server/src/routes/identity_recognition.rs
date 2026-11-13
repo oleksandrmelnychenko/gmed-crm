@@ -9,7 +9,9 @@
 //!   `POST /me/lead-requests/{lead_id}/documents/{document_id}/identity-recognition`:
 //!   whoever fills the request (the lead, a parent, staff for the client)
 //!   has a copy of the identity document of the lead or of a representative
-//!   read, never another file.
+//!   read, never another file. A representative's copy the request takes
+//!   over without an upload of its own (from an earlier request of the same
+//!   patient, or a parent's patient record) counts as that representative's.
 //! * Nothing is stored and nothing is written to the log: staff see the
 //!   values, confirm or correct them, and the form's own save stores them.
 //! * The reading is recorded like a download (who had which scan read, and
@@ -30,6 +32,7 @@ use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::documents::{StaffDocumentCopy, load_staff_document_copy};
 use crate::routes::lead_portal_intake as intake;
+use crate::routes::lead_representatives;
 use crate::services::identity_recognition::{self, RecognitionError};
 use crate::services::mrz::MrzData;
 use crate::state::AppState;
@@ -205,6 +208,21 @@ async fn recognize_my_identity_document(
         Ok(found) => found,
         Err(error_value) => return intake::internal(error_value, "load identity upload"),
     };
+    // A representative's copy the request references instead of an upload
+    // of its own (owner 2026-11-13: «OCR everywhere»): the checked copy of a
+    // still valid document taken over from an earlier request of the same
+    // patient, or a parent's passport in the own patient record. The
+    // representation lists exactly these for the request, so nothing else
+    // is reachable this way.
+    let upload = match upload {
+        Some(row) => Some(row),
+        None => match referenced_representative_copy(&state, lead_id, document_id).await {
+            Ok(found) => found,
+            Err(error_value) => {
+                return intake::internal(error_value, "load referenced identity copy");
+            }
+        },
+    };
     let Some(storage_key) = upload.as_ref().and_then(|row| {
         row.try_get::<Option<String>, _>("storage_key")
             .ok()
@@ -253,6 +271,40 @@ async fn recognize_my_identity_document(
         return intake::internal(error_value, "record cabinet identity recognition");
     }
     Json(recognition_json(found.as_ref())).into_response()
+}
+
+/// The stored file of a representative's identity copy that the request's
+/// representation references without an upload of this request
+/// (`from_earlier_request`, `from_patient_record`); `None` for any other
+/// document.
+async fn referenced_representative_copy(
+    state: &AppState,
+    lead_id: Uuid,
+    document_id: Uuid,
+) -> Result<Option<sqlx::postgres::PgRow>, sqlx::Error> {
+    let mut conn = state.db.acquire().await?;
+    let Some(loaded) = lead_representatives::load(&mut conn, lead_id).await? else {
+        return Ok(None);
+    };
+    let referenced = loaded.uploads.iter().any(|upload| {
+        upload.document_id == document_id
+            && upload.kind == lead_representatives::UPLOAD_IDENTITY
+            && (upload.from_earlier_request || upload.from_patient_record)
+    });
+    if !referenced {
+        return Ok(None);
+    }
+    sqlx::query(
+        r#"SELECT d.storage_key, d.mime_type
+           FROM documents d
+           WHERE d.id = $1
+             AND d.status = 'active'
+             AND d.file_deleted_at IS NULL
+             AND NOT d.is_medical"#,
+    )
+    .bind(document_id)
+    .fetch_optional(&mut *conn)
+    .await
 }
 
 #[cfg(test)]

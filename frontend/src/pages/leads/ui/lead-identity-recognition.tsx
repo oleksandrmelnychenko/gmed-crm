@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { recognizeIdentityDocument } from "../data/identity-recognition-api";
 import {
   defaultRecognitionSelection,
+  onlyFields,
   recognitionDocumentPatch,
   recognitionDocumentRows,
   recognitionErrorText,
@@ -194,7 +195,14 @@ export function LeadIdentityRecognition({
   lang,
   disabled = false,
   testId,
+  documentFields,
 }: {
+  /**
+   * The document fields the form has (the patient card keeps number and
+   * "valid until" only); all four when not given. A value the form cannot
+   * take is not offered.
+   */
+  documentFields?: readonly RecognizedDocumentField[];
   /** The files of this person's identity document, in the order of the list above the form. */
   scans: readonly RecognitionScan[];
   draft: IdentityDocumentDraft;
@@ -222,6 +230,8 @@ export function LeadIdentityRecognition({
   holderRef.current = holder;
   const langRef = useRef(lang);
   langRef.current = lang;
+  const fieldsRef = useRef(documentFields);
+  fieldsRef.current = documentFields;
   const scanKey = scans.map((scan) => scan.id).join(",");
   const readable = useMemo(() => scans.filter((scan) => !looksLikeInternalForm(scan.name)), [scans]);
   const skipped = useMemo(() => scans.filter((scan) => looksLikeInternalForm(scan.name)), [scans]);
@@ -250,7 +260,7 @@ export function LeadIdentityRecognition({
         setState({ kind: "not_found", scanId });
         return;
       }
-      setDocumentSelection(new Set(defaultRecognitionSelection(recognitionDocumentRows(result, draftRef.current, txRef.current, langRef.current))));
+      setDocumentSelection(new Set(defaultRecognitionSelection(onlyFields(recognitionDocumentRows(result, draftRef.current, txRef.current, langRef.current), fieldsRef.current))));
       // The person's data are never ticked by themselves: they are entered elsewhere.
       setHolderSelection(new Set());
       setState({ kind: "result", scanId, result });
@@ -272,7 +282,7 @@ export function LeadIdentityRecognition({
   }, [scanKey, onlyScanId, disabled]);
 
   const result = state.kind === "result" ? state.result : null;
-  const documentRows = useMemo(() => (result ? recognitionDocumentRows(result, draft, tx, lang) : []), [result, draft, tx, lang]);
+  const documentRows = useMemo(() => (result ? onlyFields(recognitionDocumentRows(result, draft, tx, lang), documentFields) : []), [result, draft, tx, lang, documentFields]);
   const holderRows = useMemo(() => (result ? recognitionHolderRows(result, holder ?? {}, tx, lang) : []), [result, holder, tx, lang]);
 
   if (scans.length === 0) return null;
@@ -390,7 +400,7 @@ export function LeadIdentityRecognition({
         {state.kind === "running"
           ? `${tx("Читаем машиночитаемую зону файла", "Die maschinenlesbare Zone wird gelesen, Datei")} «${stateFile}»…`
           : state.kind === "applied"
-            ? `${tx("Подставлено из файла", "Übernommen aus der Datei")} «${stateFile}». ${tx("Проверьте поля и дополните «Кем выдан».", "Bitte prüfen und die Behörde ergänzen.")}`
+            ? `${tx("Подставлено из файла", "Übernommen aus der Datei")} «${stateFile}». ${documentFields ? tx("Проверьте поля.", "Bitte prüfen.") : tx("Проверьте поля и дополните «Кем выдан».", "Bitte prüfen und die Behörde ergänzen.")}`
             : state.kind === "idle" && readable.length > 0
               ? tx("Заполняет поля из машиночитаемой зоны; ничего не сохраняется без вашего подтверждения.", "Füllt die Felder aus der maschinenlesbaren Zone; nichts wird ohne Ihre Bestätigung gespeichert.")
               : null}

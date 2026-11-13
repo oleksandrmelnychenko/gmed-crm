@@ -1,5 +1,6 @@
 import { formatAppDate } from "@/lib/app-time-zone";
 import type { DocumentItem } from "@/pages/documents/model/types";
+import type { PayerDocument } from "@/pages/payer-link/payer-link-api";
 
 import type { Tx } from "./lead-payer";
 
@@ -279,4 +280,34 @@ export function payerIdentityAnswersPatch(fields: PayerIdentityFields): Record<s
   if (country) patch.id_issuing_country = country;
   if (fields.validUntil) patch.id_valid_until = fields.validUntil;
   return patch;
+}
+
+/**
+ * The staff questionnaire with the payer's ID copies filed on the paper path
+ * among its identity copies (owner 2026-11-13: recognition wherever ID data
+ * are typed). Staff transcribe the paper answers next to the copy the payer
+ * handed over, so «Распознать со скана» reads it there too; staff's route
+ * checks the same access as the download. A register extract stays one, a
+ * copy already listed is not listed twice, nothing can be removed here.
+ */
+export function withPaperIdentityCopies<Questionnaire extends { identity_documents: PayerDocument[] | null }>(
+  questionnaire: Questionnaire,
+  copies: readonly DocumentItem[],
+): Questionnaire {
+  const listed = questionnaire.identity_documents ?? [];
+  const known = new Set(listed.map((document) => document.id));
+  const added: PayerDocument[] = copies
+    .filter((document) => !known.has(document.id))
+    .map((document) => ({
+      id: document.id,
+      file_name: document.original_filename || document.auto_name || null,
+      size_bytes: document.file_size ?? null,
+      mime_type: document.mime_type ?? null,
+      uploaded_at: document.created_at ?? null,
+      reviewed: true,
+      can_delete: false,
+      register_extract: (document.notes ?? "").startsWith("Handelsregisterauszug"),
+    }));
+  if (added.length === 0) return questionnaire;
+  return { ...questionnaire, identity_documents: [...listed, ...added] };
 }

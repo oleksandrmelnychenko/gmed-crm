@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api";
 import { RepresentationSection } from "./lead-request-representation";
 import { OtherParentDocumentSection, OwnRepresentativeDocumentSection } from "./lead-request-step-forms";
+import { CabinetStaffModeContext } from "./lead-request-staff-mode";
 import { leadRequestText } from "./lead-request-text";
 
 const mother: LeadRequestRepresentative = {
@@ -120,6 +121,28 @@ describe("a minor's parent in the cabinet", () => {
     expect(html).toContain("Эти данные GMED внесла по копии документа");
     expect(html).not.toContain("lead-request-rep1-recognition-run");
     expect(html).toMatch(/id="lead-request-rep1_id_document_number"[^>]*disabled/);
+  });
+
+  // Owner 2026-11-13: OCR wherever ID data are typed — staff in the client's form keep editing
+  // staff's entry, so they have the copy read too, also one taken over from an earlier request.
+  it("reads the copy for staff in the client's form, also after staff entered the data", () => {
+    const earlier = { id: "doc-earlier", file_name: "pass.pdf", mime_type: "application/pdf", size_bytes: 1024, uploaded_at: "2026-10-01T08:00:00Z", uploaded_by_me: false, reviewed: true, can_delete: false, from_earlier_request: true };
+    const parents = [{ ...mother, id_document_number: "L898902C3", id_data_by_staff: true, identity_documents: [earlier] }, father];
+    const client = renderDocumentStep(parents);
+    expect(client).not.toContain("lead-request-rep1-recognition-run");
+    const staff = renderToStaticMarkup(
+      <CabinetStaffModeContext.Provider value>
+        <OwnRepresentativeDocumentSection
+          request={{ ...request(false), representation: { ...request(false).representation!, representatives: parents } }}
+          text={leadRequestText("ru")}
+          lang="ru"
+          enqueue={((task: () => Promise<unknown>) => task()) as never}
+          onChange={() => undefined}
+        />
+      </CabinetStaffModeContext.Provider>,
+    );
+    expect(staff).toContain("lead-request-rep1-recognition-run");
+    expect(staff).not.toMatch(/id="lead-request-rep1_id_document_number"[^>]*disabled=""/);
   });
 
   it("points to step 1 while the other parent is not named yet", () => {

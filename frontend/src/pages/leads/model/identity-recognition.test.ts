@@ -4,6 +4,7 @@ import {
   comparableName,
   defaultRecognitionSelection,
   normalizeIdentityRecognition,
+  onlyFields,
   recognitionDocumentPatch,
   recognitionDocumentRows,
   recognitionErrorText,
@@ -178,5 +179,16 @@ describe("recognitionErrorText (QA 2026-11-11, B-11)", () => {
     const text = recognitionErrorText("unsupported_file", tx);
     expect(text).not.toContain("нужен PDF");
     expect(text).toContain("Введите данные вручную");
+  });
+});
+
+// Owner 2026-11-13: the patient card reads the scan too; its form keeps number and "valid until" only.
+describe("onlyFields", () => {
+  it("offers only the fields the form has, and ticks only among them", () => {
+    const rows = recognitionDocumentRows(normalizeIdentityRecognition(answer())!, emptyDraft, tx, "ru");
+    const card = onlyFields(rows, ["number", "validUntil"] as const);
+    expect(card.map((row) => row.field)).toEqual(["number", "validUntil"]);
+    expect(recognitionDocumentPatch(card, new Set(defaultRecognitionSelection(card)))).toEqual({ number: "L898902C3", validUntil: "2031-04-15" });
+    expect(onlyFields(rows, undefined)).toBe(rows);
   });
 });

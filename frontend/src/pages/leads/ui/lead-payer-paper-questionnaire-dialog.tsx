@@ -4,6 +4,7 @@ import { ClipboardPen, LoaderCircle, RotateCcw } from "lucide-react";
 import { Banner } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import type { DocumentItem } from "@/pages/documents/model/types";
 import type { PayerQuestionnaire } from "@/pages/payer-link/payer-link-api";
 import { PayerLinkForm } from "@/pages/payer-link/payer-link-form";
 import { payerLinkText } from "@/pages/payer-link/payer-link-text";
@@ -16,6 +17,7 @@ import {
   type StaffPayerQuestionnaire,
 } from "../data/lead-payer-paper-questionnaire-api";
 import type { Tx } from "../model/lead-payer";
+import { withPaperIdentityCopies } from "../model/lead-payer-paper";
 
 /**
  * Staff transcribe the payer's signed paper Selbstauskunft into the payer's
@@ -24,6 +26,8 @@ import type { Tx } from "../model/lead-payer";
  * own send — risk blocks C/D, the GwG sheet, the payer's documents — and is
  * marked «внёс сотрудник».
  */
+const NO_COPIES: readonly DocumentItem[] = [];
+
 export function LeadPayerPaperQuestionnaireDialog({
   leadId,
   lang,
@@ -31,6 +35,7 @@ export function LeadPayerPaperQuestionnaireDialog({
   errorText,
   onChanged,
   onClose,
+  paperIdentityCopies = NO_COPIES,
 }: {
   leadId: string;
   lang: "de" | "ru";
@@ -39,10 +44,16 @@ export function LeadPayerPaperQuestionnaireDialog({
   /** The answers changed on the server: the wizard reads the payer afresh. */
   onChanged: () => void;
   onClose: () => void;
+  /** The payer's copies filed on the paper path: listed with the identity copies, read on request. */
+  paperIdentityCopies?: readonly DocumentItem[];
 }) {
   const client = useMemo(() => createStaffPayerClient(leadId), [leadId]);
   const text = useMemo(() => payerLinkText(lang), [lang]);
-  const [questionnaire, setQuestionnaire] = useState<StaffPayerQuestionnaire | null>(null);
+  const [loaded, setQuestionnaire] = useState<StaffPayerQuestionnaire | null>(null);
+  const questionnaire = useMemo(
+    () => (loaded ? withPaperIdentityCopies(loaded, paperIdentityCopies) : null),
+    [loaded, paperIdentityCopies],
+  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const changedRef = useRef(false);
