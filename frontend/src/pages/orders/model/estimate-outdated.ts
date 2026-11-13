@@ -1,4 +1,10 @@
-/** What changed since the accepted estimate was signed (server `load_estimate_outdated`). */
+/**
+ * What changed since the accepted estimate was signed (server
+ * `load_estimate_outdated`, the only place that decides it). Actuals that only
+ * lower the amount (approved interpreter hours below the plan, a cancelled
+ * service) leave the estimate current (owner 2026-11-13); more units, a new
+ * line or a changed price or VAT rate outdate it.
+ */
 export type EstimateOutdatedReason = "lines" | "vat" | "prepayment" | "contracting_party";
 
 export type EstimateOutdatedGate = {

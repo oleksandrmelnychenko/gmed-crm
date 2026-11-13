@@ -3729,6 +3729,128 @@ async fn approved_interpreter_report_consumes_the_planned_interpreter_line() {
     .await;
 }
 
+/// Owner 2026-11-13 (release QA D-02): approved interpreter hours below the
+/// plan only lower the amount, so the signed estimate stays current; hours
+/// above the plan raise it, and the estimate is outdated.
+#[tokio::test]
+async fn approved_interpreter_hours_outdate_the_signed_estimate_only_above_the_plan() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("interp-estimate-stale");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+    let interpreter_service_id = seed_agency_service_catalog_item(
+        &pool,
+        admin_id,
+        "interpreter_hours",
+        "Interpreter hours",
+        "2026-01-01",
+    )
+    .await;
+
+    // An order with 4 planned hours at 60 € and an accepted quote for them;
+    // the interpreter reports `hours`, the PM approves. Returns the order's
+    // outdated-estimate gate.
+    let outdated_after_report = |suffix: &'static str, date: &'static str, hours: f64| {
+        let app = app.clone();
+        let pool = pool.clone();
+        let bearer = bearer.clone();
+        let tag = tag.clone();
+        async move {
+            let order_id = seed_order(
+                &pool,
+                patient_id,
+                pm_id,
+                &format!("ORD-KV-{suffix}-{tag}"),
+                "execution",
+                "active",
+                "Interpreter support",
+            )
+            .await;
+            let planned = seed_planned_order_service(
+                &pool,
+                order_id,
+                patient_id,
+                Some(interpreter_service_id),
+                "Dolmetscher-/Betreuungsleistung",
+                "4",
+                1,
+            )
+            .await;
+            sqlx::query(
+                r#"INSERT INTO quotes (
+                        order_id, quote_number, total_net, total_vat, total_gross,
+                        status, line_items, created_by
+                   )
+                   SELECT $1, $2, 240, 45.60, 285.60, 'accepted',
+                          jsonb_agg(jsonb_build_object(
+                              'source_order_leistung_id', ol.id,
+                              'description', ol.description,
+                              'quantity', ol.quantity,
+                              'unit_price', ol.unit_price,
+                              'vat_rate', ol.vat_rate)),
+                          $3
+                   FROM order_leistungen ol
+                   WHERE ol.order_id = $1"#,
+            )
+            .bind(order_id)
+            .bind(format!("KV-{suffix}-{tag}"))
+            .bind(admin_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+            let gate = || {
+                let app = app.clone();
+                let bearer = bearer.clone();
+                async move {
+                    let (status, body) = json_request(
+                        &app,
+                        "GET",
+                        &format!("/api/v1/orders/{order_id}"),
+                        &bearer,
+                        None,
+                    )
+                    .await;
+                    assert_eq!(status, StatusCode::OK, "{body}");
+                    body["process_gates"]["estimate_outdated"].clone()
+                }
+            };
+            assert!(gate().await.is_null(), "the quote matches the plan");
+
+            let fixture = InterpreterReportFixture {
+                app: &app,
+                pool: &pool,
+                order_id,
+                patient_id,
+                provider_id,
+                doctor_id,
+                pm_id,
+                interpreter_id,
+            };
+            fixture.approved_report(date, hours).await;
+            let (status, quantity, _) = order_service_state(&pool, planned).await;
+            assert_eq!(status, "approved");
+            assert_eq!(quantity.parse::<f64>().unwrap(), hours);
+            gate().await
+        }
+    };
+
+    // 1,5 h instead of the planned 4 h: the estimate stays current.
+    let below = outdated_after_report("below", "2026-04-21", 1.5).await;
+    assert!(below.is_null(), "{below}");
+
+    // 5 h instead of 4 h: the client has not signed for the extra hour.
+    let above = outdated_after_report("above", "2026-04-22", 5.0).await;
+    assert_eq!(above["reasons"], json!(["lines"]), "{above}");
+}
+
 /// Staff with `orders.edit` can cancel a planned line (e.g. the rest of an
 /// interpreter block) and, since 2026-09-29, an approved line no released
 /// invoice bills; the reason is kept and audited.

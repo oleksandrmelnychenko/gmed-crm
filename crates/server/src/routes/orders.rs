@@ -1929,16 +1929,23 @@ pub(crate) const ESTIMATE_OUTDATED_REASON: &str =
 const ESTIMATE_OUTDATED_CODE: &str = "estimate_outdated";
 
 /// The stale-estimate rule on the order (owner 2026-10-25; QA 2026-11-11,
-/// F3): the order's current quote is accepted, but the money it states is no
-/// longer the order's, or the terms its newest estimate document states
+/// F3): the order's current quote is accepted, but the order now holds more
+/// money than it states, or the terms its newest estimate document states
 /// changed since it was made. Money means the lines' quantities, unit prices
 /// and VAT rates (so the sum and the VAT): a renamed service or a note leaves
-/// the estimate current (owner 2026-11-11). Every quoted line must still be
-/// a line of the order, and every open (not invoiced, not cancelled) line of
-/// the order must be quoted. A quoted line without a VAT rate counts as 0 %,
-/// as on the invoice (QA 2026-11-11, B-17: such a quote was reported as
-/// outdated with an equal sum). The terms are the prepayment and the
-/// contracting party (`prepayment_terms_changed_at`,
+/// the estimate current (owner 2026-11-11). The lines are compared per unit
+/// price and VAT rate: the order may hold fewer units of a quoted price and
+/// rate than the quote (approved interpreter hours below the plan, a
+/// delivered visit split off a planned block, a cancelled service), never
+/// more, and no price or rate the quote does not state (owner 2026-11-13:
+/// actuals that only lower the amount need no new signature; a new line, more
+/// units, a changed price or rate do). For a negative price (a discount)
+/// fewer units are more money. The order's lines are the open (not invoiced,
+/// not cancelled) ones and the invoiced ones the quote was made from. A
+/// quoted line without a VAT rate counts as 0 %, as on the invoice (QA
+/// 2026-11-11, B-17: such a quote was reported as outdated with an equal
+/// sum). The terms are the prepayment and the contracting party
+/// (`prepayment_terms_changed_at`,
 /// `contracting_party_changed_at`). `reasons` names what changed: `lines`
 /// (a line, a quantity or a price), `vat` (only a VAT rate), `prepayment`,
 /// `contracting_party`. `None` while the estimate is current.
@@ -1960,7 +1967,8 @@ async fn load_estimate_outdated(
                                  THEN (line.value ->> 'unit_price')::numeric END, 2) AS unit_price,
                       ROUND(CASE WHEN line.value ->> 'vat_rate' IS NULL THEN 0
                                  WHEN line.value ->> 'vat_rate' ~ '^-?[0-9]+(\.[0-9]+)?$'
-                                 THEN (line.value ->> 'vat_rate')::numeric END, 2) AS vat_rate
+                                 THEN (line.value ->> 'vat_rate')::numeric END, 2) AS vat_rate,
+                      line.value ->> 'source_order_leistung_id' AS source_id
                FROM current_quote q
                CROSS JOIN LATERAL jsonb_array_elements(
                    CASE WHEN jsonb_typeof(q.line_items) = 'array' THEN q.line_items
@@ -1968,10 +1976,30 @@ async fn load_estimate_outdated(
            ), order_lines AS (
                SELECT ROUND(s.quantity::numeric, 4) AS quantity,
                       ROUND(s.unit_price_snapshot::numeric, 2) AS unit_price,
-                      ROUND(s.vat_rate_snapshot::numeric, 2) AS vat_rate,
-                      s.status
+                      ROUND(s.vat_rate_snapshot::numeric, 2) AS vat_rate
                FROM order_leistungen s
-               WHERE s.order_id = $1 AND s.status <> 'cancelled'
+               WHERE s.order_id = $1
+                 AND s.status <> 'cancelled'
+                 AND (s.status <> 'invoiced'
+                      OR s.id::text IN (SELECT source_id FROM quoted
+                                        WHERE source_id IS NOT NULL))
+           ), all_lines AS (
+               SELECT unit_price, vat_rate, COALESCE(quantity, 0) AS order_quantity,
+                      0::numeric AS quoted_quantity
+               FROM order_lines
+               UNION ALL
+               SELECT unit_price, vat_rate, 0::numeric, COALESCE(quantity, 0)
+               FROM quoted
+           ), money_buckets AS (
+               SELECT unit_price, SUM(order_quantity) AS order_quantity,
+                      SUM(quoted_quantity) AS quoted_quantity
+               FROM all_lines
+               GROUP BY unit_price, vat_rate
+           ), price_buckets AS (
+               SELECT unit_price, SUM(order_quantity) AS order_quantity,
+                      SUM(quoted_quantity) AS quoted_quantity
+               FROM all_lines
+               GROUP BY unit_price
            ), estimate AS (
                SELECT COALESCE(
                           (SELECT original.created_at FROM documents original
@@ -1987,24 +2015,22 @@ async fn load_estimate_outdated(
                LIMIT 1
            ), checks AS (
                SELECT
-                   (EXISTS (
-                        SELECT quantity, unit_price, vat_rate FROM quoted
-                        EXCEPT ALL
-                        SELECT quantity, unit_price, vat_rate FROM order_lines)
-                    OR EXISTS (
-                        SELECT quantity, unit_price, vat_rate FROM order_lines
-                        WHERE status <> 'invoiced'
-                        EXCEPT ALL
-                        SELECT quantity, unit_price, vat_rate FROM quoted)) AS money_changed,
-                   (EXISTS (
-                        SELECT quantity, unit_price FROM quoted
-                        EXCEPT ALL
-                        SELECT quantity, unit_price FROM order_lines)
-                    OR EXISTS (
-                        SELECT quantity, unit_price FROM order_lines
-                        WHERE status <> 'invoiced'
-                        EXCEPT ALL
-                        SELECT quantity, unit_price FROM quoted)) AS lines_changed,
+                   EXISTS (
+                       SELECT 1 FROM money_buckets b
+                       WHERE CASE WHEN b.unit_price IS NULL
+                                      THEN b.order_quantity <> b.quoted_quantity
+                                  WHEN b.unit_price >= 0
+                                      THEN b.order_quantity > b.quoted_quantity
+                                  ELSE b.order_quantity < b.quoted_quantity END)
+                       AS money_changed,
+                   EXISTS (
+                       SELECT 1 FROM price_buckets b
+                       WHERE CASE WHEN b.unit_price IS NULL
+                                      THEN b.order_quantity <> b.quoted_quantity
+                                  WHEN b.unit_price >= 0
+                                      THEN b.order_quantity > b.quoted_quantity
+                                  ELSE b.order_quantity < b.quoted_quantity END)
+                       AS lines_changed,
                    EXISTS (
                        SELECT 1 FROM estimate e JOIN orders po ON po.id = $1
                        WHERE po.prepayment_terms_changed_at > e.generated_at)
