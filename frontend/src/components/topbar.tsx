@@ -272,7 +272,8 @@ export function Topbar() {
       return;
     }
     void fetchActiveAnnouncements()
-      .then(setAnnouncements)
+      // A partial or unexpected answer must never take the shell down.
+      .then((items) => setAnnouncements(Array.isArray(items) ? items : []))
       .catch(() => undefined);
   }, [notificationsLocked]);
   useEffect(() => {
@@ -944,8 +945,9 @@ function NotificationPanel({
   const loadWorkspace = useCallback(() => {
     fetchNotificationPanelWorkspace()
       .then((workspace) => {
-        setNotifs(workspace.notifications);
-        setAnnouncements(workspace.announcements);
+        // A partial or unexpected answer must never take the shell down.
+        setNotifs(Array.isArray(workspace.notifications) ? workspace.notifications : []);
+        setAnnouncements(Array.isArray(workspace.announcements) ? workspace.announcements : []);
       })
       .catch(() => {})
       .finally(() => setNotificationsLoaded(true));

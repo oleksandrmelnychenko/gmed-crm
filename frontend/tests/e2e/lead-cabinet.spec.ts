@@ -3141,12 +3141,14 @@ test.describe("Weiter holds a step the same way on every press", () => {
 test.describe("patient portal after conversion", () => {
   test("a patient without a subscription keeps basic records and can fill in a new request", async ({ page }) => {
     await setup(page, "patient", { leadRequests: 1 });
-    await page.goto("/");
+    // The dashboard is open without a tariff (owner 2026-11-13) and needs real data; the menu is the same on every page.
+    await page.goto("/request");
     const nav = page.getByRole("navigation").filter({ has: page.getByRole("link", { name: "Ihre Anfrage", exact: true }) });
     for (const name of ["Meine Dokumente", "Meine Rechnungen", "Datenschutz", "Konto"]) {
       await expect(nav.getByRole("link", { name, exact: true })).toBeVisible();
     }
-    await expect(nav.getByRole("button", { name: "Dashboard — Gesperrt", exact: true })).toBeVisible();
+    // Without a tariff only the chat is locked (owner 2026-11-13).
+    await expect(nav.getByRole("link", { name: "Dashboard", exact: true })).toBeVisible();
     await expect(nav.getByRole("button", { name: "Chat — Gesperrt", exact: true })).toBeVisible();
     await expect(nav.getByRole("link", { name: "Ihre Anfrage" })).toBeVisible();
     await nav.getByRole("link", { name: "Ihre Anfrage" }).click();
