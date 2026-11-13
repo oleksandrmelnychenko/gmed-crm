@@ -331,13 +331,23 @@ async fn get_order_pipeline(
                               OR appointment.doctor_id IS NULL
                               OR line.item ->> 'doctor_id' = appointment.doctor_id::text)
                    )) AS outside_signed_quote,
-                  appointment.interpreter_id,
+                  appointment.interpreter_id, appointment.interpreter_needed,
                   provider.name AS provider_name, doctor.name AS doctor_name,
-                  interpreter.name AS interpreter_name
+                  interpreter.name AS interpreter_name,
+                  report.hours::float8 AS report_hours, report.approval_status AS report_status
            FROM appointments appointment
            LEFT JOIN providers provider ON provider.id = appointment.provider_id
            LEFT JOIN provider_doctors doctor ON doctor.id = appointment.doctor_id
            LEFT JOIN users interpreter ON interpreter.id = appointment.interpreter_id
+           -- The interpreter's hours for «После приёмов» (plan stage 7): the
+           -- latest report, a rejected one only when nothing else is there.
+           LEFT JOIN LATERAL (
+               SELECT r.hours, r.approval_status
+               FROM interpreter_reports r
+               WHERE r.appointment_id = appointment.id
+               ORDER BY (r.approval_status = 'rejected'), r.created_at DESC
+               LIMIT 1
+           ) report ON true
            WHERE appointment.order_id = $1
            ORDER BY appointment.date, appointment.time_start NULLS LAST, appointment.id"#,
     )
@@ -536,6 +546,10 @@ async fn get_order_pipeline(
             "interpreter_id": row.try_get::<Option<Uuid>, _>("interpreter_id").unwrap_or(None),
             "interpreter_name": row.try_get::<Option<String>, _>("interpreter_name").unwrap_or(None),
             "interpreter_response": row.try_get::<Option<String>, _>("interpreter_response").unwrap_or(None),
+            // The visit's own mark; null leaves it to the order's planning.
+            "interpreter_needed": row.try_get::<Option<bool>, _>("interpreter_needed").unwrap_or(None),
+            "report_hours": row.try_get::<Option<f64>, _>("report_hours").unwrap_or(None),
+            "report_status": row.try_get::<Option<String>, _>("report_status").unwrap_or(None),
             // Null while the plan is not yet shown to the patient (owner decision 2026-11-02).
             "portal_released_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("portal_released_at").unwrap_or(None).map(|value| value.to_rfc3339()),
             // Completing it adds a new invoice line (owner decision 2026-11-02).

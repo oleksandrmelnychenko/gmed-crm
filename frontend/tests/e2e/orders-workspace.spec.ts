@@ -653,6 +653,78 @@ test("the planning grid shows the server's refusal per visit and creates nothing
   expect(saves).toBe(0);
 });
 
+test("after the visits papers, interpreter hours and clinic invoices sit at their visit (plan stage 7)", async ({page}) => {
+  await page.clock.setFixedTime(new Date("2026-11-13T09:00:00+01:00"));
+  await prepare(page);
+  const posts: Array<{path: string; body: string}> = [];
+  let linked = false;
+  const visit = (id: string, date: string, start: string, overrides: Record<string, unknown>) => ({
+    id, title: id, appointment_type: "medical", date, time_start: start, time_end: null, status: "confirmed", location: null,
+    provider_id: "klinik", provider_name: "Klinik Nord", doctor_id: "weber", doctor_name: "Dr. Weber",
+    interpreter_id: null, interpreter_name: null, interpreter_response: null, portal_released_at: null, ...overrides,
+  });
+  await page.route(`**/api/v1/orders/${orderId}/pipeline`, route => route.fulfill({json: {
+    order_id: orderId, phase: "intake", status: "active", stages: [], medical: {visible: false, required: false}, care_team: [],
+    appointments: [
+      visit("v1", "2026-11-12", "09:00", {interpreter_id: "olga", interpreter_name: "Olga Test", report_hours: 2.5, report_status: "approved"}),
+      visit("v2", "2026-11-12", "14:00", {doctor_id: "klein", doctor_name: "Dr. Klein", interpreter_id: "olga", interpreter_name: "Olga Test"}),
+      visit("v3", "2026-11-20", "10:00", {}),
+    ],
+  }}));
+  await page.route(/\/api\/v1\/documents\?order_id=/, route => route.fulfill({json: [
+    {id: "d1", appointment_id: "v1", auto_name: "Arztbrief Weber", original_filename: "a.pdf", is_medical: true, status: "active", created_at: "2026-11-12T12:00:00Z"},
+    {id: "d2", appointment_id: linked ? "v2" : null, auto_name: "Laborwerte", original_filename: "l.pdf", is_medical: true, status: "active", created_at: "2026-11-12T12:00:00Z"},
+    {id: "d3", appointment_id: null, auto_name: "Rahmenvertrag", original_filename: "c.pdf", is_medical: false, status: "active", created_at: "2026-11-01T12:00:00Z"},
+  ]}));
+  await page.route(`**/api/v1/orders/${orderId}/visit-invoices`, route => route.fulfill({json: {items: [
+    {id: "inv1", external_invoice_number: "RE-4471", invoice_date: "2026-11-12", amount_gross: "480.00", currency: "EUR",
+     status: "received", source_document_id: null, provider_name: "Klinik Nord", appointment_ids: ["v1"]},
+    {id: "inv2", external_invoice_number: "RE-0912", invoice_date: "2026-11-12", amount_gross: "120.00", currency: "EUR",
+     status: "received", source_document_id: null, provider_name: "Labor Süd", appointment_ids: []},
+  ]}}));
+  await page.route(/\/api\/v1\/(documents\/d2\/update|documents\/upload|orders\/[^/]+\/external-invoices\/inv2\/appointments)$/, route => {
+    const path = new URL(route.request().url()).pathname;
+    posts.push({path, body: route.request().postData() ?? ""});
+    if (path.endsWith("/documents/d2/update")) linked = true;
+    return route.fulfill({json: {ok: true}});
+  });
+
+  await page.goto(`/orders/${orderId}?section=planning`);
+  const block = page.getByTestId("order-after-visits");
+  const rows = block.getByTestId("order-after-visit-row");
+  // Only visits that already happened; v3 is next week.
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText("Arztbrief Weber");
+  await expect(rows.nth(0)).toContainText("2,5 ч · утверждено");
+  await expect(rows.nth(0)).toContainText("RE-4471");
+  await expect(rows.nth(0)).toContainText("Всё внесено");
+  await expect(rows.nth(1)).toContainText("ждём отчёт");
+  await expect(rows.nth(1)).toContainText("Не хватает: документы, отчёт переводчика");
+  const unsorted = block.getByTestId("order-after-visits-unsorted");
+  await expect(unsorted).toContainText("Laborwerte");
+  await expect(unsorted).toContainText("RE-0912");
+  await expect(unsorted).not.toContainText("Rahmenvertrag");
+
+  // A loose paper goes under Dr. Klein's visit.
+  await chooseComboboxOption(page, unsorted.getByRole("combobox", {name: /Laborwerte/}), "12.11.2026 14:00 Dr. Klein");
+  await expect.poll(() => posts.find(post => post.path.endsWith("/documents/d2/update"))?.body).toBe(JSON.stringify({appointment_id: "v2"}));
+  await expect(rows.nth(1)).toContainText("Laborwerte");
+
+  // The lab invoice is sorted under the same visit.
+  await chooseComboboxOption(page, rows.nth(1).getByRole("combobox", {name: "Привязать счёт"}), /RE-0912/);
+  await expect.poll(() => posts.find(post => post.path.endsWith("/inv2/appointments"))?.body)
+    .toBe(JSON.stringify({appointment_ids: ["v2"]}));
+
+  // A doctor's paper is uploaded straight onto the visit.
+  const chooser = page.waitForEvent("filechooser");
+  await rows.nth(1).getByRole("button", {name: "Загрузить"}).click();
+  await (await chooser).setFiles({name: "Befund Klein.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 synthetic")});
+  await expect.poll(() => posts.find(post => post.path.endsWith("/documents/upload"))?.body ?? "").toContain("Befund Klein");
+  const upload = posts.find(post => post.path.endsWith("/documents/upload"))!.body;
+  expect(upload).toMatch(/name="appointment_id"\s+v2/);
+  expect(upload).toMatch(new RegExp(`name="order_id"\\s+${orderId}`));
+});
+
 test("planning shows the hidden plan to the patient in one step (plan stage 4)", async ({page}) => {
   await prepare(page);
   let released = false;

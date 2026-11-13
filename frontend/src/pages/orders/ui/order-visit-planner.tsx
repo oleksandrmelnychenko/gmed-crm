@@ -313,7 +313,8 @@ export function OrderVisitPlanner({
 
   return (
     <div data-testid="order-visit-planner" className="space-y-3">
-      <div className="grid gap-3 lg:grid-cols-[13rem_minmax(0,1fr)_15rem]">
+      {/* The side panel moves under the grid until the screen has room for five days. */}
+      <div className="grid gap-3 lg:grid-cols-[12rem_minmax(0,1fr)] 2xl:grid-cols-[13rem_minmax(0,1fr)_15rem]">
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
             {tx(
@@ -392,8 +393,8 @@ export function OrderVisitPlanner({
           </div>
           <div className="max-h-[34rem] overflow-auto rounded-lg border border-border/70">
             <div
-              className="grid min-w-[40rem]"
-              style={{ gridTemplateColumns: `3rem repeat(${days.length}, minmax(7.5rem, 1fr))` }}
+              className="grid min-w-[36rem]"
+              style={{ gridTemplateColumns: `3rem repeat(${days.length}, minmax(6.5rem, 1fr))` }}
             >
               <div className="sticky top-0 z-20 border-b border-border/70 bg-card" />
               {days.map((day) => (
@@ -508,7 +509,10 @@ export function OrderVisitPlanner({
           </div>
         </div>
 
-        <div className="space-y-2 text-[13px]" data-testid="order-visit-planner-inspector">
+        <div
+          className="space-y-2 text-[13px] lg:col-span-2 2xl:col-span-1"
+          data-testid="order-visit-planner-inspector"
+        >
           {active ? (
             <>
               <div>

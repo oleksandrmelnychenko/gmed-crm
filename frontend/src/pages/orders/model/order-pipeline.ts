@@ -81,6 +81,11 @@ export type OrderPipelineAppointment = {
    * date, time and status; title is the fixed blocked-slot placeholder.
    */
   is_blocked?: boolean;
+  /** The visit's own «interpreter needed» mark; null leaves it to the order's planning. */
+  interpreter_needed?: boolean | null;
+  /** The interpreter's latest report (plan stage 7): hours and its review state. */
+  report_hours?: number | null;
+  report_status?: "pending" | "approved" | "rejected" | null;
 };
 
 /** Shows the blocked-slot placeholder titles of a pipeline in the UI language. */

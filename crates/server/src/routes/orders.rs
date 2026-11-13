@@ -24,12 +24,14 @@ pub(crate) mod client_terms;
 mod incoming_invoices;
 mod pipeline;
 mod unassigned_invoices;
+mod visit_invoices;
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .merge(incoming_invoices::router())
         .merge(unassigned_invoices::router())
         .merge(pipeline::router())
+        .merge(visit_invoices::router())
         .route("/me/followup-milestones", get(list_my_followup_milestones))
         .route("/orders", get(list_orders).post(create_order))
         .route("/orders/debt-management", get(list_debt_management_queue))

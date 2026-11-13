@@ -341,6 +341,7 @@ import { ScopedOrderDetail } from "./ui/scoped-order-detail";
 import { OrderInterpreterCallout } from "./ui/order-interpreter-callout";
 import { OrderInterpretersByDay } from "./ui/order-interpreters-by-day";
 import { OrderPlannedAppointments } from "./ui/order-planned-appointments";
+import { OrderAfterVisits } from "./ui/order-after-visits";
 import { OrderPlanAgreement } from "./ui/order-plan-agreement";
 import { ExternalInvoiceAllocationSheet } from "./ui/external-invoice-allocation-sheet";
 import {
@@ -5651,6 +5652,21 @@ function useOrdersPageContent() {
                         onEmptyChange={setInterpreterDaysEmpty}
                       />
                       </div>
+
+                      {/* «После приёмов» (plan stage 7): what was collected
+                          after each visit, sorted around the visit. */}
+                      {detailPatientId &&
+                      (user?.role === "ceo" ||
+                        user?.role === "patient_manager" ||
+                        user?.role === "ceo_assistant") ? (
+                        <OrderAfterVisits
+                          orderId={orderDetail.id}
+                          patientId={detailPatientId}
+                          lang={lang}
+                          reloadNonce={reloadNonce}
+                          canEdit={canReleaseOrderPlan}
+                        />
+                      ) : null}
 
                       {planningReadinessApplicable ? (
                         orderDetail.planning_preparation.blocking_reasons

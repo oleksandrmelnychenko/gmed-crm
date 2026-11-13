@@ -448,3 +448,204 @@ async fn invalid_items_are_listed_by_index() {
     );
     assert_eq!(order_visit_count(&fx).await, 0);
 }
+
+// «После приёмов» (planning stage 7): clinic invoices sorted under visits and
+// the interpreter's hours in the order pipeline.
+
+async fn seed_order_visit(fx: &Fixture, date: NaiveDate, start: &str, end: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO appointments (patient_id, order_id, provider_id, doctor_id, appointment_type,
+                title, date, time_start, time_end, status, created_by)
+           VALUES ($1, $2, $3, $4, 'medical', $5, $6, $7::time, $8::time, 'completed', $9)
+           RETURNING id"#,
+    )
+    .bind(fx.patient_id)
+    .bind(fx.order_id)
+    .bind(fx.provider_id)
+    .bind(fx.doctor_a)
+    .bind(format!("Visit {start}"))
+    .bind(date)
+    .bind(start)
+    .bind(end)
+    .bind(fx.pm_id)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap()
+}
+
+async fn seed_clinic_invoice(fx: &Fixture, order_id: Uuid, number: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO external_invoices (
+               order_id, patient_id, provider_id, external_invoice_number,
+               amount_net, amount_vat, amount_gross, currency, status, created_by
+           ) VALUES ($1, $2, $3, $4, 480, 0, 480, 'EUR', 'received', $5)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(fx.patient_id)
+    .bind(fx.provider_id)
+    .bind(number)
+    .bind(fx.pm_id)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap()
+}
+
+async fn visit_invoices(fx: &Fixture, bearer: &str) -> (StatusCode, Value) {
+    json_request(
+        &fx.app,
+        "GET",
+        &format!("/api/v1/orders/{}/visit-invoices", fx.order_id),
+        bearer,
+        None,
+    )
+    .await
+}
+
+async fn set_links(
+    fx: &Fixture,
+    bearer: &str,
+    invoice: Uuid,
+    visits: &[Uuid],
+) -> (StatusCode, Value) {
+    json_request(
+        &fx.app,
+        "POST",
+        &format!(
+            "/api/v1/orders/{}/external-invoices/{invoice}/appointments",
+            fx.order_id
+        ),
+        bearer,
+        Some(json!({ "appointment_ids": visits })),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn clinic_invoice_covers_several_visits_optionally_with_audit() {
+    let Some(fx) = fixture().await else {
+        return;
+    };
+    let first = seed_order_visit(&fx, day(-3), "09:00", "10:00").await;
+    let second = seed_order_visit(&fx, day(-3), "11:00", "12:00").await;
+    let invoice = seed_clinic_invoice(&fx, fx.order_id, &format!("RE-{}", fx.tag)).await;
+
+    // Without a link the invoice stays with the order.
+    let (status, body) = visit_invoices(&fx, &fx.pm).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["items"][0]["appointment_ids"], json!([]));
+
+    let (status, body) = set_links(&fx, &fx.pm, invoice, &[first, second, first]).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, body) = visit_invoices(&fx, &fx.pm).await;
+    let mut expected = vec![first.to_string(), second.to_string()];
+    expected.sort();
+    assert_eq!(body["items"][0]["appointment_ids"], json!(expected));
+
+    // Replacing the set removes one link; each change has its audit row.
+    let (status, _) = set_links(&fx, &fx.pm, invoice, &[second]).await;
+    assert_eq!(status, StatusCode::OK);
+    let audit: Vec<String> = sqlx::query_scalar(
+        r#"SELECT action FROM audit_log
+           WHERE entity_type = 'external_invoice' AND entity_id = $1
+           ORDER BY created_at, action"#,
+    )
+    .bind(invoice)
+    .fetch_all(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        audit
+            .iter()
+            .filter(|a| *a == "link_external_invoice_appointment")
+            .count(),
+        2
+    );
+    assert_eq!(
+        audit
+            .iter()
+            .filter(|a| *a == "unlink_external_invoice_appointment")
+            .count(),
+        1
+    );
+
+    // A visit of another order is refused and nothing changes.
+    let other_order =
+        seed_order(&fx.pool, &format!("{}-o2", fx.tag), fx.patient_id, fx.pm_id).await;
+    let foreign: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO appointments (patient_id, order_id, appointment_type, title, date, status, created_by)
+           VALUES ($1, $2, 'medical', 'Foreign', $3, 'completed', $4) RETURNING id"#,
+    )
+    .bind(fx.patient_id)
+    .bind(other_order)
+    .bind(day(-2))
+    .bind(fx.pm_id)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    let (status, _) = set_links(&fx, &fx.pm, invoice, &[second, foreign]).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (_, body) = visit_invoices(&fx, &fx.pm).await;
+    assert_eq!(
+        body["items"][0]["appointment_ids"],
+        json!([second.to_string()])
+    );
+
+    // An interpreter neither reads nor sorts the order's invoices.
+    let interpreter = seed_user(&fx.pool, &fx.tag, "interpreter").await;
+    let (status, _) = visit_invoices(&fx, &bearer(interpreter, "interpreter")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = set_links(&fx, &bearer(interpreter, "interpreter"), invoice, &[]).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Emptying the set leaves the invoice with the order alone.
+    let (status, _) = set_links(&fx, &fx.pm, invoice, &[]).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, body) = visit_invoices(&fx, &fx.pm).await;
+    assert_eq!(body["items"][0]["appointment_ids"], json!([]));
+}
+
+#[tokio::test]
+async fn pipeline_names_the_interpreter_hours_of_each_visit() {
+    let Some(fx) = fixture().await else {
+        return;
+    };
+    let visit = seed_order_visit(&fx, day(-1), "09:00", "10:00").await;
+    let interpreter = seed_user(&fx.pool, &fx.tag, "interpreter").await;
+    sqlx::query(
+        "UPDATE appointments SET interpreter_id = $2, interpreter_response = 'accepted', interpreter_needed = true WHERE id = $1",
+    )
+    .bind(visit)
+    .bind(interpreter)
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO interpreter_reports (appointment_id, interpreter_id, hours, report_text, approval_status)
+           VALUES ($1, $2, 2.5, 'Synthetic report', 'pending')"#,
+    )
+    .bind(visit)
+    .bind(interpreter)
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &fx.app,
+        "GET",
+        &format!("/api/v1/orders/{}/pipeline", fx.order_id),
+        &fx.pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let row = body["appointments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == json!(visit))
+        .unwrap_or_else(|| panic!("visit missing: {body}"));
+    assert_eq!(row["report_hours"], json!(2.5));
+    assert_eq!(row["report_status"], "pending");
+    assert_eq!(row["interpreter_needed"], true);
+}
