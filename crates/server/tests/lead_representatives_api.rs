@@ -972,7 +972,12 @@ async fn an_adult_names_the_person_who_acts_for_him() {
     assert!(updated_by_patient);
 
     // The audit events name the changed fields, never what was entered.
-    let events = audit_contexts(pool, "lead_portal_update_representative", lead_id).await;
+    // Staff saves through the client's form are audited too (access_kind "staff"); the client's own:
+    let events: Vec<Value> = audit_contexts(pool, "lead_portal_update_representative", lead_id)
+        .await
+        .into_iter()
+        .filter(|event| event["access_kind"] == "self")
+        .collect();
     assert_eq!(events.len(), 3, "{events:?}");
     // The data of the identity document typed in the cabinet (above).
     assert_eq!(
