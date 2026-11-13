@@ -70,6 +70,8 @@ type OrderVisitPlannerProps = {
    * draft that becomes visits once the order has its patient.
    */
   mode?: "create" | "draft";
+  /** The request's specialization codes: «Добавить врача» starts on them. */
+  preferredSpecialtyCodes?: readonly string[];
 };
 
 type DragPayload = { kind: "doctor"; key: string } | { kind: "draft"; key: string };
@@ -94,6 +96,7 @@ export function OrderVisitPlanner({
   firstDay,
   onCreated,
   mode = "create",
+  preferredSpecialtyCodes = [],
 }: OrderVisitPlannerProps) {
   const draftMode = mode === "draft";
   const de = lang === "de";
@@ -437,7 +440,12 @@ export function OrderVisitPlanner({
               </p>
             ) : null}
           </div>
-          <PlanningDoctorPicker lang={lang} onAdd={onAddDoctor} stacked />
+          <PlanningDoctorPicker
+            lang={lang}
+            onAdd={onAddDoctor}
+            stacked
+            preferredSpecialtyCodes={preferredSpecialtyCodes}
+          />
         </div>
 
         <div className="min-w-0 space-y-2">

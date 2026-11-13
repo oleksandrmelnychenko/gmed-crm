@@ -707,6 +707,30 @@ test("a lead's order keeps the grid as a draft until the patient exists (plan st
   await expect(save).toBeDisabled();
   // A lead's grid never tries to create visits.
   expect(batchCalls).toBe(0);
+
+  // «Добавить врача» starts on the lead's requested specialization and lists its clinics.
+  await page.route("**/api/v1/leads/lead-1", route => route.fulfill({json: {id: "lead-1", requested_specialties: ["cardiology"]}}));
+  await page.route("**/api/v1/providers/specializations**", route => route.fulfill({json: [
+    {id: "s-neuro", code: "neurology", name_en: "Neurology", name_de: "Neurologie", name_ru: "Неврология", is_active: true, sort_order: 1},
+    {id: "s-card", code: "cardiology", name_en: "Cardiology", name_de: "Kardiologie", name_ru: "Кардиология", is_active: true, sort_order: 2},
+  ]}));
+  const bySpecialization: string[] = [];
+  await page.route("**/api/v1/providers/by-specializations**", route => {
+    bySpecialization.push(new URL(route.request().url()).searchParams.get("specialization_ids") ?? "");
+    return route.fulfill({json: [
+      {id: "herz", name: "Herzzentrum", provider_type: "medical", address_city: "Berlin", is_active: true, specialization_ids: ["s-card"]},
+      {id: "hotel", name: "Hotel Mitte", provider_type: "non_medical", address_city: "Berlin", is_active: true, specialization_ids: ["s-card"]},
+    ]});
+  });
+  await page.reload();
+  await planner.getByRole("button", {name: "Добавить врача"}).click();
+  const picker = planner.getByTestId("order-planning-doctor-picker");
+  await expect(picker.getByRole("combobox", {name: "Специализация"})).toContainText("Кардиология · в запросе");
+  await expect.poll(() => bySpecialization).toContain("s-card");
+  await picker.getByRole("combobox", {name: "Клиника / провайдер"}).click();
+  await expect(page.getByRole("option", {name: /Herzzentrum/})).toBeVisible();
+  await expect(page.getByRole("option", {name: /Hotel Mitte/})).toHaveCount(0);
+  await page.keyboard.press("Escape");
 });
 
 test("after the visits papers, interpreter hours and clinic invoices sit at their visit (plan stage 7)", async ({page}) => {

@@ -10,6 +10,9 @@ import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { appointmentSelectControlClassName } from "@/pages/appointments/appearance/surface-appearance";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
+import { fetchSpecializations } from "@/pages/providers/data/provider-api";
+import type { SpecializationItem } from "@/pages/providers/model/types";
+import { fetchProvidersBySpecializations } from "@/pages/specializations/data/specialization-work-types-api";
 import {
   buildCreateAppointmentPayload,
   validateCreateAppointmentForm,
@@ -186,14 +189,53 @@ type PlanningDoctorPickerProps = {
   onAdd: (doctor: PlanningDoctor) => void;
   /** In the planning grid's narrow doctor column: fields stacked, one per line. */
   stacked?: boolean;
+  /**
+   * Specialization codes the request asked for (a lead's «Специализации»):
+   * the picker starts on the first of them and lists them first.
+   */
+  preferredSpecialtyCodes?: readonly string[];
 };
 
+type PickerProvider = Pick<ProviderSummary, "id" | "name" | "address_city">;
+
+/** Specializations with the requested ones first, the rest by the directory's order. */
+export function orderSpecializations(
+  items: readonly SpecializationItem[],
+  preferredCodes: readonly string[],
+): SpecializationItem[] {
+  const rank = (item: SpecializationItem) => {
+    // The lead wizard stores the code, or the English name when a code is missing.
+    const index = preferredCodes.findIndex((code) => code === item.code || code === item.name_en);
+    return index < 0 ? preferredCodes.length : index;
+  };
+  return items
+    .filter((item) => item.is_active)
+    .slice()
+    .sort((a, b) => rank(a) - rank(b) || a.sort_order - b.sort_order);
+}
+
+export function specializationName(item: SpecializationItem, lang: string) {
+  return (lang === "de" ? item.name_de : item.name_ru) || item.name_de || item.name_en || item.code;
+}
+
 /** «Добавить врача»: a medical provider and, if it has them, one of its doctors. */
-export function PlanningDoctorPicker({ lang, onAdd, stacked = false }: PlanningDoctorPickerProps) {
+export function PlanningDoctorPicker({
+  lang,
+  onAdd,
+  stacked = false,
+  preferredSpecialtyCodes = [],
+}: PlanningDoctorPickerProps) {
   const de = lang === "de";
   const tx = (ru: string, german: string) => (de ? german : ru);
   const [open, setOpen] = useState(false);
   const [providers, setProviders] = useState<ProviderSummary[] | null>(null);
+  const [specializations, setSpecializations] = useState<SpecializationItem[] | null>(null);
+  const [specializationId, setSpecializationId] = useState("");
+  const [specializationProviders, setSpecializationProviders] = useState<{
+    specializationId: string;
+    items: PickerProvider[];
+  } | null>(null);
+  const preferredKey = preferredSpecialtyCodes.join(",");
   const [providerId, setProviderId] = useState("");
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
   const [doctorId, setDoctorId] = useState("");
@@ -215,6 +257,50 @@ export function PlanningDoctorPicker({ lang, onAdd, stacked = false }: PlanningD
       cancelled = true;
     };
   }, [open, providers]);
+
+  useEffect(() => {
+    if (!open || specializations) return;
+    let cancelled = false;
+    fetchSpecializations()
+      .then((items) => {
+        if (cancelled) return;
+        const preferred = preferredKey ? preferredKey.split(",") : [];
+        const ordered = orderSpecializations(items, preferred);
+        setSpecializations(ordered);
+        const first = ordered.find(
+          (item) => preferred.includes(item.code) || preferred.includes(item.name_en),
+        );
+        if (first) setSpecializationId(first.id);
+      })
+      .catch(() => {
+        if (!cancelled) setSpecializations([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, specializations, preferredKey]);
+
+  useEffect(() => {
+    setProviderId("");
+    if (!specializationId) return;
+    let cancelled = false;
+    fetchProvidersBySpecializations([specializationId])
+      .then((items) => {
+        if (cancelled) return;
+        setSpecializationProviders({
+          specializationId,
+          items: items
+            .filter((item) => item.provider_type !== "non_medical" && item.is_active)
+            .map((item) => ({ id: item.id, name: item.name, address_city: item.address_city })),
+        });
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [specializationId]);
 
   useEffect(() => {
     setDoctorId("");
@@ -250,7 +336,14 @@ export function PlanningDoctorPicker({ lang, onAdd, stacked = false }: PlanningD
     );
   }
 
-  const provider = providers?.find((item) => item.id === providerId) ?? null;
+  // A chosen specialization narrows the clinics to the ones that offer it.
+  const shownProviders: PickerProvider[] | null = specializationId
+    ? specializationProviders?.specializationId === specializationId
+      ? specializationProviders.items
+      : null
+    : providers;
+  const provider = shownProviders?.find((item) => item.id === providerId) ?? null;
+  const specializationLabel = tx("Специализация", "Fachrichtung");
   const doctor = doctors.find((item) => item.id === doctorId) ?? null;
   const providerLabel = tx("Клиника / провайдер", "Klinik / Anbieter");
   const doctorFieldLabel = tx("Врач", "Arzt");
@@ -268,18 +361,38 @@ export function PlanningDoctorPicker({ lang, onAdd, stacked = false }: PlanningD
           "grid gap-2",
           stacked
             ? "grid-cols-1"
-            : "sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]",
+            : "sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto]",
         )}
       >
+        <NativeComboboxSelect
+          aria-label={specializationLabel}
+          value={specializationId}
+          onChange={(event) => setSpecializationId(event.target.value)}
+          missingValueLabel={specializations ? undefined : tx("Загрузка…", "Wird geladen…")}
+          className={appointmentSelectControlClassName}
+        >
+          <option value="">{tx("Все специализации", "Alle Fachrichtungen")}</option>
+          {(specializations ?? []).map((item) => (
+            <option key={item.id} value={item.id}>
+              {preferredSpecialtyCodes.some((code) => code === item.code || code === item.name_en)
+                ? `${specializationName(item, lang)} · ${tx("в запросе", "angefragt")}`
+                : specializationName(item, lang)}
+            </option>
+          ))}
+        </NativeComboboxSelect>
         <NativeComboboxSelect
           aria-label={providerLabel}
           value={providerId}
           onChange={(event) => setProviderId(event.target.value)}
-          missingValueLabel={providers ? undefined : tx("Загрузка…", "Wird geladen…")}
+          missingValueLabel={shownProviders ? undefined : tx("Загрузка…", "Wird geladen…")}
           className={appointmentSelectControlClassName}
         >
-          <option value="">{providerLabel}</option>
-          {(providers ?? []).map((item) => (
+          <option value="">
+            {shownProviders && shownProviders.length === 0
+              ? tx("Нет клиник с этой специализацией", "Keine Klinik mit dieser Fachrichtung")
+              : providerLabel}
+          </option>
+          {(shownProviders ?? []).map((item) => (
             <option key={item.id} value={item.id}>
               {item.address_city ? `${item.name} · ${item.address_city}` : item.name}
             </option>

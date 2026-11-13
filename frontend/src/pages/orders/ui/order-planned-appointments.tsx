@@ -45,6 +45,8 @@ type OrderPlannedAppointmentsProps = {
    * grid as a draft that becomes visits once the order has its patient.
    */
   canDraft?: boolean;
+  /** The order's lead: its requested specializations lead the doctor picker. */
+  leadId?: string | null;
   patientId?: string | null;
   /** An appointment was added: the other planning blocks reload. */
   onChanged?: () => void;
@@ -120,6 +122,7 @@ export function OrderPlannedAppointments({
   canReleasePlan = false,
   canPlan = false,
   canDraft = false,
+  leadId = null,
   patientId = null,
   onChanged,
 }: OrderPlannedAppointmentsProps) {
@@ -186,6 +189,30 @@ export function OrderPlannedAppointments({
   const extraDoctors = addedDoctors.orderId === orderId ? addedDoctors.doctors : [];
   const unreleased = appointments ? unreleasedPlanCount(appointments) : 0;
   const gridShown = gridAllowed && groupBy === "grid";
+  const [requestedSpecialties, setRequestedSpecialties] = useState<{
+    leadId: string;
+    codes: string[];
+  } | null>(null);
+  useEffect(() => {
+    if (!leadId || !(planning || drafting)) return;
+    let cancelled = false;
+    apiFetch<{ requested_specialties?: unknown }>(`/leads/${leadId}`)
+      .then((lead) => {
+        if (cancelled) return;
+        const codes = Array.isArray(lead?.requested_specialties)
+          ? lead.requested_specialties.filter((code): code is string => typeof code === "string")
+          : [];
+        setRequestedSpecialties({ leadId, codes });
+      })
+      .catch(() => {
+        // The picker then starts on every specialization.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [leadId, planning, drafting]);
+  const preferredSpecialtyCodes =
+    requestedSpecialties && requestedSpecialties.leadId === leadId ? requestedSpecialties.codes : [];
   // The grid's doctors: the care team, the doctors already booked, the added ones.
   const gridDoctors = useMemo(() => {
     if (!gridShown || !appointments) return [];
@@ -313,6 +340,7 @@ export function OrderPlannedAppointments({
             firstDay={gridFirstDay}
             onCreated={() => handleCreated("")}
             mode={drafting ? "draft" : "create"}
+            preferredSpecialtyCodes={preferredSpecialtyCodes}
           />
         ) : null}
         {appointments && !gridShown && groups.length === 0 ? (
@@ -396,7 +424,11 @@ export function OrderPlannedAppointments({
           </section>
         ))}
         {entriesShown ? (
-          <PlanningDoctorPicker lang={lang} onAdd={addDoctor} />
+          <PlanningDoctorPicker
+            lang={lang}
+            onAdd={addDoctor}
+            preferredSpecialtyCodes={preferredSpecialtyCodes}
+          />
         ) : null}
       </div>
     </div>
