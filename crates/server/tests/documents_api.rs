@@ -3163,6 +3163,17 @@ async fn paged_document_list_reports_older_documents() {
     seeded.sort();
     assert_eq!(ids, seeded);
 
+    // final-D S3-3: an offset past the cap is refused instead of reading the
+    // whole table; the cap itself is still served.
+    let (status, at_cap) = page(10_000).await;
+    assert_eq!(status, StatusCode::OK, "{at_cap}");
+    assert_eq!(at_cap["has_more"], false, "{at_cap}");
+    for offset in [10_001_usize, 1_000_000, i64::MAX as usize] {
+        let (status, refused) = page(offset).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+        assert_eq!(refused["error"], "document_list_offset_too_large");
+    }
+
     // Without `paged` the plain list as before.
     let (status, plain) = json_request(
         &app,

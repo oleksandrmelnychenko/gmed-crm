@@ -2939,6 +2939,11 @@ struct DocumentListQuery {
 const DOCUMENT_LIST_BATCH: i64 = 300;
 /// The largest page a paged document list returns.
 const DOCUMENT_LIST_MAX_PAGE: i64 = 1000;
+/// The largest `offset` of a paged document list (final-D S3-3): the paged
+/// list counts visible documents by reading batches from the newest, so the
+/// offset bounds how far one request reads. 10 000 documents are far more
+/// than anyone pages through with «load more»; filters narrow the rest.
+const DOCUMENT_LIST_MAX_OFFSET: i64 = 10_000;
 
 fn normalized_query_value(value: Option<&str>) -> Option<String> {
     value
@@ -32332,11 +32337,21 @@ async fn list_documents(
         };
 
     let paged = query.paged.unwrap_or(false);
-    let page_offset = if paged {
-        query.offset.unwrap_or(0).max(0) as usize
-    } else {
-        0
-    };
+    // A huge offset made the paged list read the whole table in batches
+    // (security review 2026-11-13, final-D S3-3): refused past the cap.
+    let requested_offset = query.offset.unwrap_or(0).max(0);
+    if paged && requested_offset > DOCUMENT_LIST_MAX_OFFSET {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "document_list_offset_too_large",
+                "message": "offset is larger than the document list allows",
+                "max_offset": DOCUMENT_LIST_MAX_OFFSET,
+            })),
+        )
+            .into_response();
+    }
+    let page_offset = if paged { requested_offset as usize } else { 0 };
     let page_limit = if paged {
         query
             .limit
@@ -32592,7 +32607,9 @@ async fn list_documents(
     if !paged {
         return Json(visible).into_response();
     }
-    let has_more = visible.len() > page_offset + page_limit;
+    // «Load more» stops where the next page would pass the offset cap.
+    let has_more = visible.len() > page_offset + page_limit
+        && page_offset + page_limit <= DOCUMENT_LIST_MAX_OFFSET as usize;
     let items: Vec<_> = visible
         .into_iter()
         .skip(page_offset)
