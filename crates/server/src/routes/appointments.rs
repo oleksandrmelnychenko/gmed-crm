@@ -25,6 +25,7 @@ use gmed_domain::access::resource_access::{
 use gmed_domain::role::Role;
 use sqlx::Row;
 
+mod order_batch;
 mod order_interpreters;
 
 const APPOINTMENT_SCHEDULE_CONSTRAINTS: &[&str] = &[
@@ -139,6 +140,14 @@ pub fn router() -> Router<AppState> {
         .route(
             "/orders/{id}/appointments/assign-interpreter",
             post(order_interpreters::assign_order_interpreter),
+        )
+        .route(
+            "/orders/{id}/appointments/batch",
+            post(order_batch::create_order_appointments),
+        )
+        .route(
+            "/orders/{id}/appointments/busy",
+            get(order_batch::list_order_busy_time),
         )
         .route(
             "/appointments/{id}/interpreter-response",

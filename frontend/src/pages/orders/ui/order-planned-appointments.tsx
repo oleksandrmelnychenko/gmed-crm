@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Stethoscope, CalendarDays, Clock3, Info, LoaderCircle } from "lucide-react";
+import { Stethoscope, CalendarDays, Clock3, Info, LayoutGrid, LoaderCircle } from "lucide-react";
 
 import { SectionHeading } from "@/components/ui/section-heading";
 import { buttonVariants } from "@/components/ui/button";
@@ -26,6 +26,8 @@ import {
   type OrderPipelineCareTeamMember,
 } from "../model/order-pipeline";
 import { AppointmentEntryRow, PlanningDoctorPicker } from "./order-appointment-entry";
+import { OrderVisitPlanner } from "./order-visit-planner";
+import { appDateKey } from "@/lib/app-time-zone";
 
 type OrderPlannedAppointmentsProps = {
   orderId: string;
@@ -42,7 +44,7 @@ type OrderPlannedAppointmentsProps = {
   onChanged?: () => void;
 };
 
-type GroupBy = "day" | "doctor";
+type GroupBy = "grid" | "day" | "doctor";
 
 type PlanReleaseButtonProps = {
   count: number;
@@ -118,7 +120,8 @@ export function OrderPlannedAppointments({
   const tx = (ru: string, german: string) => (de ? german : ru);
   const planning = canPlan && Boolean(patientId);
   // Planners start with the doctors: visits are added under them.
-  const [groupBy, setGroupBy] = useState<GroupBy>(planning ? "doctor" : "day");
+  // Planners start on the grid (stage 6): doctors laid out on days and hours.
+  const [groupBy, setGroupBy] = useState<GroupBy>(planning ? "grid" : "day");
   const [loaded, setLoaded] = useState<{
     orderId: string;
     items: OrderPipelineAppointment[];
@@ -173,8 +176,42 @@ export function OrderPlannedAppointments({
   const careTeam = loaded?.orderId === orderId ? loaded.careTeam : null;
   const extraDoctors = addedDoctors.orderId === orderId ? addedDoctors.doctors : [];
   const unreleased = appointments ? unreleasedPlanCount(appointments) : 0;
+  const gridShown = planning && groupBy === "grid";
+  // The grid's doctors: the care team, the doctors already booked, the added ones.
+  const gridDoctors = useMemo(() => {
+    if (!gridShown || !appointments) return [];
+    return groupAppointmentsByDoctor(appointments, [
+      ...planningDoctorsFromCareTeam(careTeam ?? []),
+      ...extraDoctors,
+    ]).flatMap((group) =>
+      group.providerId
+        ? [
+            {
+              providerId: group.providerId,
+              providerName: group.providerName ?? "",
+              doctorId: group.doctorId,
+              doctorName: group.doctorName,
+            },
+          ]
+        : [],
+    );
+  }, [appointments, careTeam, extraDoctors, gridShown]);
+  const gridFirstDay = useMemo(() => {
+    const today = appDateKey();
+    const next = (appointments ?? [])
+      .filter((appointment) => appointment.status !== "cancelled" && appointment.date >= today)
+      .map((appointment) => appointment.date)
+      .sort()[0];
+    return next ?? today;
+  }, [appointments]);
+  const addDoctor = (doctor: PlanningDoctor) =>
+    setAddedDoctors((current) => ({
+      orderId,
+      doctors: [...(current.orderId === orderId ? current.doctors : []), doctor],
+    }));
+
   const groups = useMemo(() => {
-    if (!appointments) return [];
+    if (!appointments || groupBy === "grid") return [];
     if (groupBy === "day") return groupAppointmentsByDay(appointments);
     return groupAppointmentsByDoctor(
       appointments,
@@ -227,6 +264,7 @@ export function OrderPlannedAppointments({
           <div className="inline-flex rounded-lg border border-border/70 bg-muted/30 p-0.5" role="group">
             {(
               [
+                ...(planning ? ([["grid", tx("Сетка", "Raster"), LayoutGrid]] as const) : []),
                 ["day", tx("По дням", "Nach Tagen"), CalendarDays],
                 ["doctor", tx("По врачам", "Nach Ärzten"), Stethoscope],
               ] as const
@@ -256,7 +294,18 @@ export function OrderPlannedAppointments({
           </div>
         ) : null}
         {entryNotice ? <Banner tone="warning">{entryNotice}</Banner> : null}
-        {appointments && groups.length === 0 ? (
+        {gridShown && appointments ? (
+          <OrderVisitPlanner
+            key={orderId}
+            orderId={orderId}
+            lang={lang}
+            doctors={gridDoctors}
+            onAddDoctor={addDoctor}
+            firstDay={gridFirstDay}
+            onCreated={() => handleCreated("")}
+          />
+        ) : null}
+        {appointments && !gridShown && groups.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             {tx("В плане ещё нет приёмов.", "Im Plan sind noch keine Termine.")}
           </p>
@@ -337,15 +386,7 @@ export function OrderPlannedAppointments({
           </section>
         ))}
         {entriesShown ? (
-          <PlanningDoctorPicker
-            lang={lang}
-            onAdd={(doctor) =>
-              setAddedDoctors((current) => ({
-                orderId,
-                doctors: [...(current.orderId === orderId ? current.doctors : []), doctor],
-              }))
-            }
-          />
+          <PlanningDoctorPicker lang={lang} onAdd={addDoctor} />
         ) : null}
       </div>
     </div>

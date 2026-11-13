@@ -113,7 +113,7 @@ fn refused(
 
 /// One notification per interpreter for the whole batch: the earliest
 /// appointment, with the number of appointments and the last day.
-fn one_notice_per_interpreter_for_batch(
+pub(super) fn one_notice_per_interpreter_for_batch(
     targets: Vec<(BookingNoticeTarget, chrono::NaiveDate)>,
 ) -> Vec<BookingNoticeTarget> {
     let mut grouped: Vec<(BookingNoticeTarget, usize, chrono::NaiveDate)> = Vec::new();

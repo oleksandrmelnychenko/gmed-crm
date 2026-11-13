@@ -487,6 +487,8 @@ test("planning adds visits right under the doctors and a new doctor (plan stage 
 
   await page.goto(`/orders/${orderId}?section=planning`);
   const plan = page.getByTestId("order-planned-appointments");
+  // A planner starts on the grid (plan stage 6); the rows stay under «По врачам».
+  await plan.getByRole("button", {name: "По врачам"}).click();
   await expect(plan.getByRole("heading", {level: 3})).toHaveText([/Dr. Weber/, /Dr. Klein/]);
   await expect(plan.getByTestId("order-appointment-entry")).toHaveCount(2);
 
@@ -531,6 +533,126 @@ test("planning adds visits right under the doctors and a new doctor (plan stage 
   await expect(plan.getByTestId("order-appointment-entry")).toHaveCount(3);
 });
 
+test("planning lays doctors out on the grid and creates every visit at once (plan stage 6)", async ({page}) => {
+  await page.clock.setFixedTime(new Date("2026-11-13T09:00:00+01:00"));
+  await prepare(page);
+  const batches: Array<{dry_run: boolean; items: Array<Record<string, unknown>>}> = [];
+  let busyQuery = "";
+  await page.route(`**/api/v1/orders/${orderId}/pipeline`, route => route.fulfill({json: {
+    order_id: orderId, phase: "intake", status: "active", stages: [], medical: {visible: false, required: false},
+    care_team: [
+      {provider_id: "klinik", provider_name: "Klinik Nord", provider_type: "medical", doctor_id: "weber", doctor_name: "Dr. Weber",
+       doctor_title: null, doctor_specialty: null, services: 1, appointments: 1},
+      {provider_id: "klinik", provider_name: "Klinik Nord", provider_type: "medical", doctor_id: "klein", doctor_name: "Dr. Klein",
+       doctor_title: null, doctor_specialty: null, services: 1, appointments: 0},
+    ],
+    appointments: [
+      {id: "visit-1", title: "Kardiologie", appointment_type: "medical", date: "2026-11-16", time_start: "08:30", time_end: "09:30",
+       status: "planned", location: "Klinik Nord", provider_id: "klinik", provider_name: "Klinik Nord", doctor_id: "weber",
+       doctor_name: "Dr. Weber", interpreter_name: null, interpreter_response: null, portal_released_at: null},
+    ],
+  }}));
+  await page.route(`**/api/v1/orders/${orderId}/appointments/busy**`, route => {
+    busyQuery = new URL(route.request().url()).search;
+    return route.fulfill({json: {items: [
+      {id: "visit-1", date: "2026-11-16", time_start: "08:30", time_end: "09:30", scopes: ["patient"], doctor_id: null,
+       interpreter_id: null, title: "Kardiologie", same_order: true},
+      {id: null, date: "2026-11-17", time_start: "10:00", time_end: "11:00", scopes: ["doctor"], doctor_id: "klein",
+       interpreter_id: null, title: null, same_order: false},
+    ]}});
+  });
+  await page.route(`**/api/v1/orders/${orderId}/appointments/batch`, route => {
+    const body = route.request().postDataJSON();
+    batches.push(body);
+    if (body.dry_run) return route.fulfill({json: {ok: true, failures: []}});
+    return route.fulfill({status: 201, json: {created: body.items.map((_: unknown, index: number) => ({index, id: `new-${index}`}))}});
+  });
+  await page.route("**/api/v1/appointments/meta/interpreters", route => route.fulfill({json: [
+    {id: "olga", name: "Olga Test", role: "interpreter", assignable: true},
+    {id: "blocked", name: "Blocked Person", role: "interpreter", assignable: false},
+  ]}));
+
+  await page.goto(`/orders/${orderId}?section=planning`);
+  const planner = page.getByTestId("order-visit-planner");
+  await expect(planner).toBeVisible();
+  // The grid opens on the order's next planned day and shows taken time without other patients' names.
+  await expect(planner).toContainText("Пн, 16.11.2026");
+  await expect(planner.getByTestId("order-visit-planner-busy")).toHaveCount(2);
+  await expect(planner.getByTestId("order-visit-planner-busy").first()).toContainText("Kardiologie");
+  await expect(planner.getByTestId("order-visit-planner-busy").nth(1)).toContainText("Занято: врач");
+  expect(busyQuery).toContain("from=2026-11-16");
+  expect(busyQuery).toContain("to=2026-11-20");
+  const slot = (date: string, time: string) =>
+    planner.locator(`[data-testid="order-visit-planner-day"][data-date="${date}"] [data-slot-time="${time}"]`);
+  const create = planner.getByTestId("order-visit-planner-create");
+
+  // Dr. Klein is busy at 10:00 on Tuesday: the conflict shows before saving.
+  await planner.getByRole("option", {name: /Dr. Klein/}).click();
+  await slot("2026-11-17", "10:00").click();
+  await expect(planner.getByTestId("order-visit-planner-conflicts")).toContainText("Вт, 17.11.2026 10:00 Dr. Klein: накладка (врач)");
+  await expect(create).toBeDisabled();
+  await planner.getByRole("button", {name: "Убрать из плана"}).click();
+  await slot("2026-11-17", "11:00").click();
+
+  // Dr. Weber on Monday at 10:00 for 90 minutes with an interpreter.
+  await planner.getByRole("option", {name: /Dr. Weber/}).click();
+  await slot("2026-11-16", "10:00").click();
+  const inspector = planner.getByTestId("order-visit-planner-inspector");
+  await inspector.getByRole("button", {name: "90 мин"}).click();
+  await inspector.getByRole("textbox", {name: "Название приёма"}).fill("Echo und Gespräch");
+  await inspector.getByRole("checkbox", {name: "Нужен переводчик"}).check();
+  await inspector.getByRole("combobox", {name: "Переводчик"}).click();
+  await expect(page.getByRole("option", {name: "Blocked Person"})).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await chooseComboboxOption(page, inspector.getByRole("combobox", {name: "Переводчик"}), "Olga Test");
+  await expect(planner.getByTestId("order-visit-planner-draft")).toHaveCount(2);
+  await expect(planner.getByTestId("order-visit-planner-conflicts")).toContainText("Накладок нет");
+  await expect.poll(() => batches.filter(batch => batch.dry_run).length).toBeGreaterThan(0);
+
+  await expect(create).toHaveText("Создать все приёмы (2)");
+  await create.click();
+  await expect(planner.getByTestId("order-visit-planner-notice")).toContainText("Создано приёмов: 2");
+  const saved = batches.filter(batch => !batch.dry_run);
+  expect(saved).toHaveLength(1);
+  expect(saved[0].items).toEqual([
+    expect.objectContaining({provider_id: "klinik", doctor_id: "klein", date: "2026-11-17", time_start: "11:00", time_end: "12:00",
+      interpreter_needed: false, interpreter_id: null, title: "Dr. Klein", location: "Klinik Nord"}),
+    expect.objectContaining({doctor_id: "weber", date: "2026-11-16", time_start: "10:00", time_end: "11:30",
+      title: "Echo und Gespräch", interpreter_needed: true, interpreter_id: "olga"}),
+  ]);
+  await expect(planner.getByTestId("order-visit-planner-draft")).toHaveCount(0);
+});
+
+test("the planning grid shows the server's refusal per visit and creates nothing (plan stage 6)", async ({page}) => {
+  await page.clock.setFixedTime(new Date("2026-11-13T09:00:00+01:00"));
+  await prepare(page, "de");
+  let saves = 0;
+  await page.route(`**/api/v1/orders/${orderId}/pipeline`, route => route.fulfill({json: {
+    order_id: orderId, phase: "intake", status: "active", stages: [], medical: {visible: false, required: false},
+    care_team: [
+      {provider_id: "klinik", provider_name: "Klinik Nord", provider_type: "medical", doctor_id: "weber", doctor_name: "Dr. Weber",
+       doctor_title: null, doctor_specialty: null, services: 1, appointments: 0},
+    ],
+    appointments: [],
+  }}));
+  await page.route(`**/api/v1/orders/${orderId}/appointments/busy**`, route => route.fulfill({json: {items: []}}));
+  await page.route(`**/api/v1/orders/${orderId}/appointments/batch`, route => {
+    const body = route.request().postDataJSON();
+    if (!body.dry_run) saves += 1;
+    // Another planner booked the interpreter meanwhile.
+    return route.fulfill({json: {ok: false, failures: [
+      {index: 0, code: "conflict", message: "Appointment conflict", conflicts: {interpreter_conflict_count: 1}},
+    ]}});
+  });
+  await page.goto(`/orders/${orderId}?section=planning`);
+  const planner = page.getByTestId("order-visit-planner");
+  await expect(planner).toContainText("Fr, 13.11.2026");
+  await planner.locator('[data-testid="order-visit-planner-day"][data-date="2026-11-13"] [data-slot-time="14:00"]').click();
+  await expect(planner.getByTestId("order-visit-planner-conflicts")).toContainText("Zeit bereits belegt (Dolmetscher)");
+  await expect(planner.getByTestId("order-visit-planner-create")).toBeDisabled();
+  expect(saves).toBe(0);
+});
+
 test("planning shows the hidden plan to the patient in one step (plan stage 4)", async ({page}) => {
   await prepare(page);
   let released = false;
@@ -554,6 +676,7 @@ test("planning shows the hidden plan to the patient in one step (plan stage 4)",
   });
   await page.goto(`/orders/${orderId}?section=planning`);
   const plan = page.getByTestId("order-planned-appointments");
+  await plan.getByRole("button", {name: "По дням"}).click();
   await expect(plan.getByTestId("order-planned-appointment-hidden")).toHaveCount(2);
   // A short confirmation first: cancelling sends nothing.
   await plan.getByRole("button", {name: "Показать план пациенту (2)"}).click();
@@ -590,6 +713,7 @@ test("planning warns about a doctor outside the quote and records the agreement 
   await page.goto(`/orders/${orderId}?section=planning`);
 
   const plan = page.getByTestId("order-planned-appointments");
+  await plan.getByRole("button", {name: "По дням"}).click();
   await expect(plan.getByTestId("order-planned-appointment-outside-quote")).toHaveCount(1);
   await expect(plan.locator("li", {hasText: "Ausserhalb KV"})).toContainText("Врача нет в подписанном КВ");
 
