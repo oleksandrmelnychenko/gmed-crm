@@ -586,26 +586,39 @@ test("planning lays doctors out on the grid and creates every visit at once (pla
     planner.locator(`[data-testid="order-visit-planner-day"][data-date="${date}"] [data-slot-time="${time}"]`);
   const create = planner.getByTestId("order-visit-planner-create");
 
-  // Dr. Klein is busy at 10:00 on Tuesday: the conflict shows before saving.
-  await planner.getByRole("option", {name: /Dr. Klein/}).click();
-  await slot("2026-11-17", "10:00").click();
-  await expect(planner.getByTestId("order-visit-planner-conflicts")).toContainText("Вт, 17.11.2026 10:00 Dr. Klein: накладка (врач)");
-  await expect(create).toBeDisabled();
-  await planner.getByRole("button", {name: "Убрать из плана"}).click();
-  await slot("2026-11-17", "11:00").click();
+  const choose = planner.getByTestId("order-visit-planner-choose");
+  const editor = planner.getByTestId("order-visit-planner-editor");
+  const pick = (name: string) => choose.getByTestId("order-visit-planner-doctor").filter({hasText: name}).click();
+  await expect(planner.getByTestId("order-visit-planner-range")).toHaveText("16.11 – 20.11.2026");
+  await expect(planner.getByTestId("order-visit-planner-steps").locator('[aria-current="step"]')).toContainText("Кликните время");
 
-  // Dr. Weber on Monday at 10:00 for 90 minutes with an interpreter.
-  await planner.getByRole("option", {name: /Dr. Weber/}).click();
+  // Click a time, then the doctor: Dr. Klein is busy at 10:00 on Tuesday, the conflict shows before saving.
+  await slot("2026-11-17", "10:00").click();
+  await expect(planner.getByTestId("order-visit-planner-steps").locator('[aria-current="step"]')).toContainText("Выберите врача");
+  await pick("Dr. Klein");
+  await expect(planner.getByTestId("order-visit-planner-plan-row")).toContainText("накладка: врач");
+  await expect(planner.getByTestId("order-visit-planner-conflicts")).toContainText("Накладки: 1");
+  await expect(create).toBeDisabled();
+  await editor.getByRole("button", {name: "Убрать"}).click();
+  await slot("2026-11-17", "11:00").click();
+  await pick("Dr. Klein");
+  await editor.getByRole("button", {name: "Готово"}).click();
+  await expect(editor).toHaveCount(0);
+
+  // Dr. Weber on Monday at 10:00 for 90 minutes with an interpreter, set right next to the block.
   await slot("2026-11-16", "10:00").click();
-  const inspector = planner.getByTestId("order-visit-planner-inspector");
-  await inspector.getByRole("button", {name: "90 мин"}).click();
-  await inspector.getByRole("textbox", {name: "Название приёма"}).fill("Echo und Gespräch");
-  await inspector.getByRole("checkbox", {name: "Нужен переводчик"}).check();
-  await inspector.getByRole("combobox", {name: "Переводчик"}).click();
+  await pick("Dr. Weber");
+  await editor.getByRole("button", {name: "90 мин"}).click();
+  await editor.getByRole("textbox", {name: "Название приёма"}).fill("Echo und Gespräch");
+  await editor.getByRole("checkbox", {name: "Нужен переводчик"}).check();
+  await editor.getByRole("combobox", {name: "Переводчик"}).click();
   await expect(page.getByRole("option", {name: "Blocked Person"})).toHaveCount(0);
   await page.keyboard.press("Escape");
-  await chooseComboboxOption(page, inspector.getByRole("combobox", {name: "Переводчик"}), "Olga Test");
+  await chooseComboboxOption(page, editor.getByRole("combobox", {name: "Переводчик"}), "Olga Test");
+  await editor.getByRole("button", {name: "Готово"}).click();
   await expect(planner.getByTestId("order-visit-planner-draft")).toHaveCount(2);
+  await expect(planner.getByTestId("order-visit-planner-plan-row")).toHaveCount(2);
+  await expect(planner.getByTestId("order-visit-planner-plan-row").first()).toContainText("Echo und Gespräch");
   await expect(planner.getByTestId("order-visit-planner-conflicts")).toContainText("Накладок нет");
   await expect.poll(() => batches.filter(batch => batch.dry_run).length).toBeGreaterThan(0);
 
@@ -648,7 +661,9 @@ test("the planning grid shows the server's refusal per visit and creates nothing
   const planner = page.getByTestId("order-visit-planner");
   await expect(planner).toContainText("Fr, 13.11.2026");
   await planner.locator('[data-testid="order-visit-planner-day"][data-date="2026-11-13"] [data-slot-time="14:00"]').click();
-  await expect(planner.getByTestId("order-visit-planner-conflicts")).toContainText("Zeit bereits belegt (Dolmetscher)");
+  await planner.getByTestId("order-visit-planner-choose").getByTestId("order-visit-planner-doctor").filter({hasText: "Dr. Weber"}).click();
+  await expect(planner.getByTestId("order-visit-planner-plan-row")).toContainText("Zeit bereits belegt (Dolmetscher)");
+  await expect(planner.getByTestId("order-visit-planner-conflicts")).toContainText("Überschneidungen: 1");
   await expect(planner.getByTestId("order-visit-planner-create")).toBeDisabled();
   expect(saves).toBe(0);
 });
@@ -687,15 +702,18 @@ test("a lead's order keeps the grid as a draft until the patient exists (plan st
   const planner = page.getByTestId("order-visit-planner");
   await expect(planner).toHaveAttribute("data-mode", "draft");
   await expect(planner).toContainText("Заказ лида: пациента ещё нет");
-  // The saved draft is back on the grid, its provider in the doctor list.
+  // The saved draft is back on the grid and in the plan list, its provider among the doctors.
   await expect(planner.getByTestId("order-visit-planner-draft")).toHaveCount(1);
-  await expect(planner.getByRole("option", {name: /Labor Süd/})).toBeVisible();
+  await expect(planner.getByTestId("order-visit-planner-plan-row")).toContainText("Blutbild");
   await expect(planner.getByTestId("order-visit-planner-create")).toBeHidden();
   const save = planner.getByTestId("order-visit-planner-save-draft");
   await expect(save).toBeDisabled();
 
-  await planner.getByRole("option", {name: /Dr. Weber/}).click();
   await planner.locator('[data-testid="order-visit-planner-day"][data-date="2026-11-17"] [data-slot-time="10:00"]').click();
+  const choose = planner.getByTestId("order-visit-planner-choose");
+  await expect(choose.getByTestId("order-visit-planner-doctor").filter({hasText: "Labor Süd"})).toBeVisible();
+  await choose.getByTestId("order-visit-planner-doctor").filter({hasText: "Dr. Weber"}).click();
+  await planner.getByTestId("order-visit-planner-editor").getByRole("button", {name: "Готово"}).click();
   await expect(save).toHaveText("Сохранить черновик (2)");
   await save.click();
   await expect(planner).toContainText("Черновик сохранён: 2");
@@ -723,7 +741,8 @@ test("a lead's order keeps the grid as a draft until the patient exists (plan st
     ]});
   });
   await page.reload();
-  await planner.getByRole("button", {name: "Добавить врача"}).click();
+  await planner.locator('[data-testid="order-visit-planner-day"][data-date="2026-11-18"] [data-slot-time="09:00"]').click();
+  await planner.getByTestId("order-visit-planner-choose").getByRole("button", {name: "Добавить врача"}).click();
   const picker = planner.getByTestId("order-planning-doctor-picker");
   await expect(picker.getByRole("combobox", {name: "Специализация"})).toContainText("Кардиология · в запросе");
   await expect.poll(() => bySpecialization).toContain("s-card");

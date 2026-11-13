@@ -67,6 +67,18 @@ export function gridDays(firstDay: string, count = GRID_DAY_COUNT): string[] {
   return Array.from({ length: count }, (_, index) => addDaysToDateKey(firstDay, index));
 }
 
+/** «13.11 – 17.11.2026»: the grid's days, short (DD.MM.YYYY at the end). */
+export function gridRangeLabel(days: readonly string[]): string {
+  const first = days[0];
+  const last = days[days.length - 1];
+  if (!first || !last) return "";
+  const short = (key: string) => `${key.slice(8, 10)}.${key.slice(5, 7)}`;
+  const full = (key: string) => `${short(key)}.${key.slice(0, 4)}`;
+  return first.slice(0, 4) === last.slice(0, 4)
+    ? `${short(first)} – ${full(last)}`
+    : `${full(first)} – ${full(last)}`;
+}
+
 export function gridSlots(): number[] {
   const slots: number[] = [];
   for (let minutes = GRID_START_MINUTES; minutes < GRID_END_MINUTES; minutes += GRID_STEP_MINUTES) {

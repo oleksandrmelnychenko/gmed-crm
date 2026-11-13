@@ -5,6 +5,7 @@ import {
   batchPayload,
   draftConflicts,
   gridDays,
+  gridRangeLabel,
   gridSlots,
   minutesToTime,
   newDraft,
@@ -44,6 +45,8 @@ describe("order visit planner grid", () => {
       "2026-12-03",
     ]);
     expect(timeToMinutes("09:30:00")).toBe(570);
+    expect(gridRangeLabel(gridDays("2026-11-13"))).toBe("13.11 – 17.11.2026");
+    expect(gridRangeLabel(gridDays("2026-12-30"))).toBe("30.12.2026 – 03.01.2027");
     expect(timeToMinutes(null)).toBeNull();
   });
 

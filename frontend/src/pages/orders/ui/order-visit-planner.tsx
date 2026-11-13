@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
-import { ChevronLeft, ChevronRight, LoaderCircle, Trash2 } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, LoaderCircle, Trash2, TriangleAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -29,6 +29,7 @@ import {
   draftSavePayload,
   draftsFromSaved,
   gridDays,
+  gridRangeLabel,
   gridSlots,
   minutesToTime,
   newDraft,
@@ -41,7 +42,9 @@ import {
 } from "../model/order-visit-planner";
 import { PlanningDoctorPicker } from "./order-appointment-entry";
 
-const ROW_PX = 26;
+const ROW_PX = 28;
+/** Room the popover needs below its slot before it opens higher up. */
+const POPOVER_HEIGHT_PX = 330;
 const INTERPRETER_META_TTL_MS = 120_000;
 const DRY_RUN_DELAY_MS = 500;
 
@@ -74,7 +77,10 @@ type OrderVisitPlannerProps = {
   preferredSpecialtyCodes?: readonly string[];
 };
 
-type DragPayload = { kind: "doctor"; key: string } | { kind: "draft"; key: string };
+type DragPayload = { kind: "draft"; key: string };
+
+/** What the popover next to the grid shows: «Какой врач?» for a slot, or a visit's settings. */
+type Popover = { kind: "slot"; date: string; start: number } | { kind: "draft"; key: string } | null;
 
 function failuresOf(error: unknown): BatchFailure[] | null {
   if (!(error instanceof ApiRequestError)) return null;
@@ -83,9 +89,10 @@ function failuresOf(error: unknown): BatchFailure[] | null {
 }
 
 /**
- * Planning grid (stage 6, owner request 2026-11-13): the order's doctors on
- * the left, days and hours on the right. A doctor clicked or dragged into a
- * slot becomes a draft visit; «Создать все приёмы» creates every draft in one
+ * Planning grid (stage 6, owner request 2026-11-13; reworked after the
+ * owner's «нема UX нормального»): click a time, pick the doctor in the
+ * popover next to it, adjust the visit right there; the plan is listed under
+ * the grid and «Создать все приёмы» creates every visit in one
  * all-or-nothing request after the server's dry run found no conflict.
  */
 export function OrderVisitPlanner({
@@ -103,10 +110,7 @@ export function OrderVisitPlanner({
   const tx = (ru: string, german: string) => (de ? german : ru);
   const [startDay, setStartDay] = useState(() => firstDay ?? appDateKey());
   const [drafts, setDrafts] = useState<DraftVisit[]>([]);
-  const [selectedDoctorKey, setSelectedDoctorKey] = useState<string | null>(
-    doctors[0] ? doctorKeyOf(doctors[0]) : null,
-  );
-  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [popover, setPopover] = useState<Popover>(null);
   const [busy, setBusy] = useState<BusySlot[]>([]);
   const [busyNonce, setBusyNonce] = useState(0);
   const [interpreters, setInterpreters] = useState<InterpreterOption[]>([]);
@@ -158,8 +162,6 @@ export function OrderVisitPlanner({
     () => new Map(doctors.map((doctor, index) => [doctorKeyOf(doctor), index])),
     [doctors],
   );
-  const selectedDoctor =
-    doctors.find((doctor) => doctorKeyOf(doctor) === selectedDoctorKey) ?? doctors[0] ?? null;
   const doctorIds = useMemo(
     () => [...new Set(doctors.map((doctor) => doctor.doctorId).filter(Boolean))].sort().join(","),
     [doctors],
@@ -283,7 +285,7 @@ export function OrderVisitPlanner({
     if (!doctor || saving) return;
     const key = `draft-${nextKey.current++}`;
     setDrafts((current) => [...current, newDraft(key, doctor, date, start)]);
-    setActiveKey(key);
+    setPopover({ kind: "draft", key });
     setNotice(null);
   };
   const moveDraft = (key: string, date: string, start: number) => {
@@ -294,28 +296,31 @@ export function OrderVisitPlanner({
           : draft,
       ),
     );
-    setActiveKey(key);
+    setPopover(null);
   };
   const updateDraft = (key: string, patch: Partial<DraftVisit>) => {
     setDrafts((current) => current.map((draft) => (draft.key === key ? { ...draft, ...patch } : draft)));
   };
   const removeDraft = (key: string) => {
     setDrafts((current) => current.filter((draft) => draft.key !== key));
-    setActiveKey(null);
+    setPopover(null);
   };
+
+  useEffect(() => {
+    if (!popover) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPopover(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [popover]);
 
   const onDrop = (event: DragEvent<HTMLElement>, date: string, start: number) => {
     event.preventDefault();
     const payload = dragRef.current;
     dragRef.current = null;
     if (!payload) return;
-    if (payload.kind === "draft") {
-      moveDraft(payload.key, date, start);
-      return;
-    }
-    const doctor = doctors.find((item) => doctorKeyOf(item) === payload.key) ?? null;
-    if (doctor) setSelectedDoctorKey(payload.key);
-    placeDraft(doctor, date, start);
+    moveDraft(payload.key, date, start);
   };
 
   const createAll = () => {
@@ -330,7 +335,7 @@ export function OrderVisitPlanner({
     )
       .then(() => {
         setDrafts([]);
-        setActiveKey(null);
+        setPopover(null);
         setServerFailures([]);
         setNotice(
           tx(
@@ -352,34 +357,177 @@ export function OrderVisitPlanner({
       });
   };
 
-  const active = drafts.find((draft) => draft.key === activeKey) ?? null;
-  const interpreterOptions = assignableInterpreterOptions(interpreters, active?.interpreterId);
-  const conflictLines = drafts.flatMap((draft) => {
-    const label = `${plannedDayLabel(draft.date, lang)} ${minutesToTime(draft.start)} ${
-      draft.doctor.doctorName ?? draft.doctor.providerName
-    }`;
-    const lines: Array<{ key: string; text: string; title?: string }> = [];
+  const conflictText = (draft: DraftVisit): { text: string; title?: string } | null => {
     const local = localConflicts.get(draft.key);
-    if (local) {
-      lines.push({
-        key: `${draft.key}-local`,
-        text: `${label}: ${tx("накладка", "Überschneidung")} (${scopesLabel(local, lang)})`,
-      });
-    }
+    if (local) return { text: `${tx("накладка", "Überschneidung")}: ${scopesLabel(local, lang)}` };
     const failure = failureByKey.get(draft.key);
-    if (failure && !local) {
-      lines.push({
-        key: `${draft.key}-server`,
-        text: `${label}: ${batchFailureText(failure, lang)}`,
-        title: failure.message,
-      });
-    }
-    return lines;
-  });
+    if (failure) return { text: batchFailureText(failure, lang), title: failure.message };
+    return null;
+  };
+  const conflictCount = drafts.filter((draft) => conflictText(draft)).length;
+  const sortedDrafts = [...drafts].sort((a, b) =>
+    `${a.date} ${minutesToTime(a.start)}`.localeCompare(`${b.date} ${minutesToTime(b.start)}`),
+  );
+  const doctorName = (doctor: PlanningDoctor) => doctor.doctorName ?? doctor.providerName;
 
   const totalHeight = slots.length * ROW_PX;
   const toneOf = (doctor: PlanningDoctor) =>
     DOCTOR_TONES[(doctorIndex.get(doctorKeyOf(doctor)) ?? 0) % DOCTOR_TONES.length];
+  const swatchOf = (doctor: PlanningDoctor) =>
+    DOCTOR_SWATCHES[(doctorIndex.get(doctorKeyOf(doctor)) ?? 0) % DOCTOR_SWATCHES.length];
+  const topOf = (minutes: number) => ((minutes - GRID_START_MINUTES) / GRID_STEP_MINUTES) * ROW_PX;
+
+  const step = drafts.length > 0 ? 3 : popover?.kind === "slot" ? 2 : 1;
+  const steps = [
+    tx("Кликните время в сетке", "Uhrzeit im Raster anklicken"),
+    tx("Выберите врача", "Arzt wählen"),
+    draftMode
+      ? tx("Сохраните черновик", "Entwurf speichern")
+      : tx("Создайте все приёмы", "Alle Termine anlegen"),
+  ];
+
+  const activeDraft =
+    popover?.kind === "draft" ? drafts.find((draft) => draft.key === popover.key) ?? null : null;
+  const popoverDate = popover?.kind === "slot" ? popover.date : activeDraft?.date ?? null;
+  const popoverStart = popover?.kind === "slot" ? popover.start : activeDraft?.start ?? null;
+  const interpreterOptions = assignableInterpreterOptions(interpreters, activeDraft?.interpreterId);
+
+  const renderPopover = (day: string, dayIndex: number) => {
+    if (!popover || popoverDate !== day || popoverStart === null) return null;
+    const top = Math.max(0, Math.min(topOf(popoverStart), totalHeight - POPOVER_HEIGHT_PX));
+    const side = dayIndex < Math.ceil(days.length / 2) ? "left-full ml-1.5" : "right-full mr-1.5";
+    const shell = cn(
+      "absolute z-30 w-72 space-y-2 rounded-xl border border-border bg-card p-3 text-[13px] shadow-xl",
+      side,
+    );
+    if (popover.kind === "slot") {
+      return (
+        <div data-testid="order-visit-planner-choose" className={shell} style={{ top }}>
+          <div className="font-semibold">
+            {tx("Какой врач?", "Welcher Arzt?")}{" "}
+            <span className="font-normal text-muted-foreground tabular-nums">
+              {plannedDayLabel(day, lang)}, {minutesToTime(popover.start)}
+            </span>
+          </div>
+          {doctors.length > 0 ? (
+            <div className="space-y-1">
+              {doctors.map((doctor) => (
+                <button
+                  key={doctorKeyOf(doctor)}
+                  type="button"
+                  data-testid="order-visit-planner-doctor"
+                  onClick={() => placeDraft(doctor, popover.date, popover.start)}
+                  className="flex w-full items-center gap-2 rounded-lg border border-border/70 px-2 py-1.5 text-left hover:border-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/30"
+                >
+                  <span aria-hidden="true" className={cn("h-6 w-1.5 shrink-0 rounded", swatchOf(doctor))} />
+                  <span className="min-w-0">
+                    <span className="block truncate font-semibold">{doctorName(doctor)}</span>
+                    {doctor.doctorName ? (
+                      <span className="block truncate text-xs text-muted-foreground">{doctor.providerName}</span>
+                    ) : null}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              {tx("В заказе ещё нет врачей — добавьте:", "Noch keine Ärzte im Auftrag – hinzufügen:")}
+            </p>
+          )}
+          <PlanningDoctorPicker
+            lang={lang}
+            stacked
+            preferredSpecialtyCodes={preferredSpecialtyCodes}
+            onAdd={(doctor) => {
+              onAddDoctor(doctor);
+              placeDraft(doctor, popover.date, popover.start);
+            }}
+          />
+          <Button type="button" variant="outline" size="sm" className="h-7 w-full" onClick={() => setPopover(null)}>
+            {tx("Отмена", "Abbrechen")}
+          </Button>
+        </div>
+      );
+    }
+    if (!activeDraft) return null;
+    return (
+      <div data-testid="order-visit-planner-editor" className={shell} style={{ top }}>
+        <div>
+          <div className="font-semibold">{doctorName(activeDraft.doctor)}</div>
+          <div className="text-xs text-muted-foreground tabular-nums">
+            {plannedDayLabel(activeDraft.date, lang)}, {minutesToTime(activeDraft.start)}–
+            {minutesToTime(activeDraft.start + activeDraft.duration)}
+          </div>
+        </div>
+        <Input
+          value={activeDraft.title}
+          aria-label={tx("Название приёма", "Bezeichnung des Termins")}
+          placeholder={tx("Название приёма", "Bezeichnung des Termins")}
+          onChange={(event) => updateDraft(activeDraft.key, { title: event.target.value })}
+          className="h-8 text-[13px]"
+        />
+        <div className="flex flex-wrap gap-1" role="group" aria-label={tx("Длительность", "Dauer")}>
+          {VISIT_DURATIONS.map((minutes) => (
+            <Button
+              key={minutes}
+              type="button"
+              size="sm"
+              variant={activeDraft.duration === minutes ? "default" : "outline"}
+              aria-pressed={activeDraft.duration === minutes}
+              disabled={activeDraft.start + minutes > GRID_END_MINUTES}
+              className="h-7 px-2 text-xs"
+              onClick={() => updateDraft(activeDraft.key, { duration: minutes })}
+            >
+              {minutes} {tx("мин", "Min.")}
+            </Button>
+          ))}
+        </div>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={activeDraft.interpreterNeeded}
+            onChange={(event) =>
+              updateDraft(activeDraft.key, {
+                interpreterNeeded: event.target.checked,
+                interpreterId: event.target.checked ? activeDraft.interpreterId : "",
+              })
+            }
+          />
+          {tx("Нужен переводчик", "Dolmetscher benötigt")}
+        </label>
+        {activeDraft.interpreterNeeded ? (
+          <NativeComboboxSelect
+            aria-label={tx("Переводчик", "Dolmetscher")}
+            value={activeDraft.interpreterId}
+            onChange={(event) => updateDraft(activeDraft.key, { interpreterId: event.target.value })}
+            className={appointmentSelectControlClassName}
+          >
+            <option value="">{tx("Назначить позже", "Später zuweisen")}</option>
+            {interpreterOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.name}
+              </option>
+            ))}
+          </NativeComboboxSelect>
+        ) : null}
+        <div className="flex items-center justify-between gap-2 pt-1">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1"
+            onClick={() => removeDraft(activeDraft.key)}
+          >
+            <Trash2 className="size-3.5" />
+            {tx("Убрать", "Entfernen")}
+          </Button>
+          <Button type="button" size="sm" className="h-7" onClick={() => setPopover(null)}>
+            {tx("Готово", "Fertig")}
+          </Button>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div data-testid="order-visit-planner" data-mode={mode} className="space-y-3">
@@ -391,302 +539,230 @@ export function OrderVisitPlanner({
           )}
         </p>
       ) : null}
-      {/* The side panel moves under the grid until the screen has room for five days. */}
-      <div className="grid gap-3 lg:grid-cols-[12rem_minmax(0,1fr)] 2xl:grid-cols-[13rem_minmax(0,1fr)_15rem]">
-        <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">
-            {tx(
-              "Выберите врача и кликните время в сетке (или перетащите врача).",
-              "Arzt wählen und Uhrzeit im Raster anklicken (oder Arzt hineinziehen).",
-            )}
-          </p>
-          <div className="space-y-1.5" role="listbox" aria-label={tx("Врачи заказа", "Ärzte des Auftrags")}>
-            {doctors.map((doctor, index) => {
-              const key = doctorKeyOf(doctor);
-              const selected = selectedDoctor ? doctorKeyOf(selectedDoctor) === key : false;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  role="option"
-                  aria-selected={selected}
-                  draggable
-                  data-testid="order-visit-planner-doctor"
-                  onDragStart={() => {
-                    dragRef.current = { kind: "doctor", key };
-                  }}
-                  onClick={() => setSelectedDoctorKey(key)}
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <ol className="flex flex-wrap gap-1.5" data-testid="order-visit-planner-steps">
+          {steps.map((label, index) => {
+            const number = index + 1;
+            const done = number < step;
+            const current = number === step;
+            return (
+              <li
+                key={label}
+                aria-current={current ? "step" : undefined}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
+                  current ? "border-orange-500 text-foreground" : "border-border/70 text-muted-foreground",
+                )}
+              >
+                <span
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-lg border border-border/70 bg-card px-2 py-1.5 text-left text-[13px]",
-                    selected && "ring-2 ring-orange-500",
+                    "grid size-5 place-items-center rounded-full text-[11px] font-semibold",
+                    done ? "bg-emerald-600 text-white" : current ? "bg-orange-500 text-white" : "bg-muted",
                   )}
                 >
-                  <span
-                    aria-hidden="true"
-                    className={cn("h-7 w-1.5 shrink-0 rounded", DOCTOR_SWATCHES[index % DOCTOR_SWATCHES.length])}
-                  />
-                  <span className="min-w-0">
-                    <span className="block truncate font-semibold">{doctor.doctorName ?? doctor.providerName}</span>
-                    {doctor.doctorName ? (
-                      <span className="block truncate text-xs text-muted-foreground">{doctor.providerName}</span>
-                    ) : null}
+                  {done ? <Check className="size-3" /> : number}
+                </span>
+                {label}
+              </li>
+            );
+          })}
+        </ol>
+        <div className="flex items-center gap-1.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8"
+            aria-label={tx("Предыдущие дни", "Vorherige Tage")}
+            onClick={() => setStartDay((day) => addDaysToDateKey(day, -GRID_DAY_COUNT))}
+          >
+            <ChevronLeft className="size-4" />
+          </Button>
+          <span className="min-w-[8.5rem] text-center text-xs font-medium tabular-nums" data-testid="order-visit-planner-range">
+            {gridRangeLabel(days)}
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8"
+            aria-label={tx("Следующие дни", "Nächste Tage")}
+            onClick={() => setStartDay((day) => addDaysToDateKey(day, GRID_DAY_COUNT))}
+          >
+            <ChevronRight className="size-4" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="max-h-[36rem] overflow-auto rounded-lg border border-border/70">
+        <div
+          className="grid min-w-[40rem]"
+          style={{ gridTemplateColumns: `3rem repeat(${days.length}, minmax(7rem, 1fr))` }}
+        >
+          <div className="sticky top-0 z-20 border-b border-border/70 bg-card" />
+          {days.map((day) => (
+            <div
+              key={day}
+              className="sticky top-0 z-20 border-b border-l border-border/70 bg-card px-1 py-1.5 text-center text-xs font-semibold"
+            >
+              {plannedDayLabel(day, lang)}
+            </div>
+          ))}
+          <div className="relative" style={{ height: totalHeight }}>
+            {slots.map((minutes, index) =>
+              minutes % 60 === 0 ? (
+                <div
+                  key={minutes}
+                  className="absolute right-1 text-[11px] text-muted-foreground tabular-nums"
+                  style={{ top: index * ROW_PX - 1 }}
+                >
+                  {minutesToTime(minutes)}
+                </div>
+              ) : null,
+            )}
+          </div>
+          {days.map((day, dayIndex) => (
+            <div
+              key={day}
+              data-testid="order-visit-planner-day"
+              data-date={day}
+              className={cn("relative border-l border-border/70", popoverDate === day && "z-10")}
+              style={{ height: totalHeight }}
+            >
+              {slots.map((minutes) => (
+                <button
+                  key={minutes}
+                  type="button"
+                  data-slot-time={minutesToTime(minutes)}
+                  aria-label={`${plannedDayLabel(day, lang)} ${minutesToTime(minutes)} — ${tx("добавить приём", "Termin hinzufügen")}`}
+                  onClick={() => {
+                    if (!saving) setPopover({ kind: "slot", date: day, start: minutes });
+                  }}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => onDrop(event, day, minutes)}
+                  className={cn(
+                    "group block w-full border-b border-border/40 text-left hover:bg-orange-50 focus-visible:bg-orange-50 focus-visible:outline-none dark:hover:bg-orange-950/30",
+                    minutes % 60 === 30 && "border-dashed",
+                    popover?.kind === "slot" &&
+                      popover.date === day &&
+                      popover.start === minutes &&
+                      "bg-orange-100 dark:bg-orange-950/50",
+                  )}
+                  style={{ height: ROW_PX }}
+                >
+                  <span className="hidden pl-1.5 text-[11px] font-semibold text-orange-600 group-hover:inline group-focus-visible:inline">
+                    + {tx("приём", "Termin")}
                   </span>
                 </button>
-              );
-            })}
-            {doctors.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                {tx("В заказе ещё нет врачей.", "Im Auftrag sind noch keine Ärzte.")}
-              </p>
-            ) : null}
-          </div>
-          <PlanningDoctorPicker
-            lang={lang}
-            onAdd={onAddDoctor}
-            stacked
-            preferredSpecialtyCodes={preferredSpecialtyCodes}
-          />
-        </div>
-
-        <div className="min-w-0 space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8"
-              aria-label={tx("Предыдущие дни", "Vorherige Tage")}
-              onClick={() => setStartDay((day) => addDaysToDateKey(day, -GRID_DAY_COUNT))}
-            >
-              <ChevronLeft className="size-4" />
-            </Button>
-            <span className="text-xs text-muted-foreground tabular-nums">
-              {plannedDayLabel(days[0], lang)} – {plannedDayLabel(days[days.length - 1], lang)}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8"
-              aria-label={tx("Следующие дни", "Nächste Tage")}
-              onClick={() => setStartDay((day) => addDaysToDateKey(day, GRID_DAY_COUNT))}
-            >
-              <ChevronRight className="size-4" />
-            </Button>
-          </div>
-          <div className="max-h-[34rem] overflow-auto rounded-lg border border-border/70">
-            <div
-              className="grid min-w-[36rem]"
-              style={{ gridTemplateColumns: `3rem repeat(${days.length}, minmax(6.5rem, 1fr))` }}
-            >
-              <div className="sticky top-0 z-20 border-b border-border/70 bg-card" />
-              {days.map((day) => (
-                <div
-                  key={day}
-                  className="sticky top-0 z-20 border-b border-l border-border/70 bg-card px-1 py-1.5 text-center text-xs font-semibold"
-                >
-                  {plannedDayLabel(day, lang)}
-                </div>
               ))}
-              <div className="relative" style={{ height: totalHeight }}>
-                {slots.map((minutes, index) =>
-                  minutes % 60 === 0 ? (
+              {busy
+                .filter((slot) => slot.date === day)
+                .map((slot, index) => {
+                  const start = Math.max(timeToMinutes(slot.time_start) ?? GRID_START_MINUTES, GRID_START_MINUTES);
+                  const end = Math.min(timeToMinutes(slot.time_end) ?? GRID_END_MINUTES, GRID_END_MINUTES);
+                  if (end <= start) return null;
+                  const own = slot.scopes.includes("patient");
+                  const text = own
+                    ? slot.title ?? tx("Приём пациента", "Termin des Patienten")
+                    : `${tx("Занято", "Belegt")}: ${scopesLabel(slot.scopes, lang)}`;
+                  return (
                     <div
-                      key={minutes}
-                      className="absolute right-1 text-[11px] text-muted-foreground tabular-nums"
-                      style={{ top: index * ROW_PX - 1 }}
+                      key={`busy-${index}`}
+                      data-testid="order-visit-planner-busy"
+                      title={`${slot.time_start ?? ""}–${slot.time_end ?? ""} ${text}`}
+                      className="pointer-events-none absolute inset-x-0.5 z-0 overflow-hidden rounded border border-border bg-[repeating-linear-gradient(135deg,var(--color-muted)_0_6px,transparent_6px_10px)] px-1 text-[11px] leading-4 text-muted-foreground"
+                      style={{ top: topOf(start) + 1, height: ((end - start) / GRID_STEP_MINUTES) * ROW_PX - 2 }}
                     >
-                      {minutesToTime(minutes)}
+                      {`${slot.time_start ?? ""} ${text}`}
                     </div>
-                  ) : null,
-                )}
-              </div>
-              {days.map((day) => (
-                <div
-                  key={day}
-                  data-testid="order-visit-planner-day"
-                  data-date={day}
-                  className="relative border-l border-border/70"
-                  style={{ height: totalHeight }}
-                >
-                  {slots.map((minutes) => (
-                    <button
-                      key={minutes}
-                      type="button"
-                      data-slot-time={minutesToTime(minutes)}
-                      aria-label={`${plannedDayLabel(day, lang)} ${minutesToTime(minutes)}`}
-                      onClick={() => placeDraft(selectedDoctor, day, minutes)}
-                      onDragOver={(event) => event.preventDefault()}
-                      onDrop={(event) => onDrop(event, day, minutes)}
-                      className={cn(
-                        "block w-full border-b border-border/40 hover:bg-orange-50 focus-visible:bg-orange-50 focus-visible:outline-none dark:hover:bg-orange-950/30",
-                        minutes % 60 === 30 && "border-dashed",
-                      )}
-                      style={{ height: ROW_PX }}
-                    />
-                  ))}
-                  {busy
-                    .filter((slot) => slot.date === day)
-                    .map((slot, index) => {
-                      const start = Math.max(timeToMinutes(slot.time_start) ?? GRID_START_MINUTES, GRID_START_MINUTES);
-                      const end = Math.min(timeToMinutes(slot.time_end) ?? GRID_END_MINUTES, GRID_END_MINUTES);
-                      if (end <= start) return null;
-                      const own = slot.scopes.includes("patient");
-                      const text = own
-                        ? slot.title ?? tx("Приём пациента", "Termin des Patienten")
-                        : `${tx("Занято", "Belegt")}: ${scopesLabel(slot.scopes, lang)}`;
-                      return (
-                        <div
-                          key={`busy-${index}`}
-                          data-testid="order-visit-planner-busy"
-                          title={`${slot.time_start ?? ""}–${slot.time_end ?? ""} ${text}`}
-                          className="pointer-events-none absolute inset-x-0.5 z-0 overflow-hidden rounded border border-border bg-[repeating-linear-gradient(135deg,var(--color-muted)_0_6px,transparent_6px_10px)] px-1 text-[11px] leading-4 text-muted-foreground"
-                          style={{
-                            top: ((start - GRID_START_MINUTES) / GRID_STEP_MINUTES) * ROW_PX + 1,
-                            height: ((end - start) / GRID_STEP_MINUTES) * ROW_PX - 2,
-                          }}
-                        >
-                          {`${slot.time_start ?? ""} ${text}`}
-                        </div>
-                      );
-                    })}
-                  {drafts
-                    .filter((draft) => draft.date === day)
-                    .map((draft) => {
-                      const conflicted = localConflicts.has(draft.key) || failureByKey.has(draft.key);
-                      return (
-                        <button
-                          key={draft.key}
-                          type="button"
-                          draggable
-                          data-testid="order-visit-planner-draft"
-                          onDragStart={() => {
-                            dragRef.current = { kind: "draft", key: draft.key };
-                          }}
-                          onClick={() => setActiveKey(draft.key)}
-                          className={cn(
-                            "absolute inset-x-0.5 z-10 overflow-hidden rounded border border-dashed px-1 text-left text-[11px] leading-4 text-foreground",
-                            toneOf(draft.doctor),
-                            conflicted && "ring-2 ring-rose-500",
-                            activeKey === draft.key && "ring-2 ring-orange-500",
-                          )}
-                          style={{
-                            top: ((draft.start - GRID_START_MINUTES) / GRID_STEP_MINUTES) * ROW_PX + 1,
-                            height: (draft.duration / GRID_STEP_MINUTES) * ROW_PX - 2,
-                          }}
-                        >
-                          <span className="font-semibold tabular-nums">
-                            {minutesToTime(draft.start)}–{minutesToTime(draft.start + draft.duration)}
-                          </span>{" "}
-                          {draft.doctor.doctorName ?? draft.doctor.providerName}
-                          {draft.title && draft.title !== (draft.doctor.doctorName ?? draft.doctor.providerName)
-                            ? ` · ${draft.title}`
-                            : ""}
-                          {draft.interpreterNeeded ? ` · ${tx("переводчик", "Dolmetscher")}` : ""}
-                        </button>
-                      );
-                    })}
-                </div>
-              ))}
+                  );
+                })}
+              {drafts
+                .filter((draft) => draft.date === day)
+                .map((draft) => (
+                  <button
+                    key={draft.key}
+                    type="button"
+                    draggable
+                    data-testid="order-visit-planner-draft"
+                    onDragStart={() => {
+                      dragRef.current = { kind: "draft", key: draft.key };
+                    }}
+                    onClick={() => setPopover({ kind: "draft", key: draft.key })}
+                    className={cn(
+                      "absolute inset-x-0.5 z-[5] overflow-hidden rounded border px-1 text-left text-[11px] leading-4 text-foreground",
+                      toneOf(draft.doctor),
+                      conflictText(draft) && "ring-2 ring-rose-500",
+                      popover?.kind === "draft" && popover.key === draft.key && "ring-2 ring-orange-500",
+                    )}
+                    style={{ top: topOf(draft.start) + 1, height: (draft.duration / GRID_STEP_MINUTES) * ROW_PX - 2 }}
+                  >
+                    <span className="font-semibold tabular-nums">{minutesToTime(draft.start)}</span>{" "}
+                    {doctorName(draft.doctor)}
+                    {draft.title && draft.title !== doctorName(draft.doctor) ? ` · ${draft.title}` : ""}
+                    {draft.interpreterNeeded ? ` · ${tx("переводчик", "Dolmetscher")}` : ""}
+                  </button>
+                ))}
+              {renderPopover(day, dayIndex)}
             </div>
-          </div>
+          ))}
         </div>
+      </div>
 
-        <div
-          className="space-y-2 text-[13px] lg:col-span-2 2xl:col-span-1"
-          data-testid="order-visit-planner-inspector"
-        >
-          {active ? (
-            <>
-              <div>
-                <div className="font-semibold">{active.doctor.doctorName ?? active.doctor.providerName}</div>
-                <div className="text-xs text-muted-foreground tabular-nums">
-                  {plannedDayLabel(active.date, lang)}, {minutesToTime(active.start)}–
-                  {minutesToTime(active.start + active.duration)}
-                </div>
-              </div>
-              <label className="block space-y-1 text-xs text-muted-foreground">
-                <span>{tx("Название приёма", "Bezeichnung des Termins")}</span>
-                <Input
-                  value={active.title}
-                  aria-label={tx("Название приёма", "Bezeichnung des Termins")}
-                  onChange={(event) => updateDraft(active.key, { title: event.target.value })}
-                  className="h-8 text-[13px]"
-                />
-              </label>
-              <div className="space-y-1 text-xs text-muted-foreground">
-                <span>{tx("Длительность", "Dauer")}</span>
-                <div className="flex flex-wrap gap-1" role="group" aria-label={tx("Длительность", "Dauer")}>
-                  {VISIT_DURATIONS.map((minutes) => (
-                    <Button
-                      key={minutes}
-                      type="button"
-                      size="sm"
-                      variant={active.duration === minutes ? "default" : "outline"}
-                      aria-pressed={active.duration === minutes}
-                      disabled={active.start + minutes > GRID_END_MINUTES}
-                      className="h-7 px-2 text-xs"
-                      onClick={() => updateDraft(active.key, { duration: minutes })}
-                    >
-                      {minutes} {tx("мин", "Min.")}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={active.interpreterNeeded}
-                  onChange={(event) =>
-                    updateDraft(active.key, {
-                      interpreterNeeded: event.target.checked,
-                      interpreterId: event.target.checked ? active.interpreterId : "",
-                    })
-                  }
-                />
-                {tx("Нужен переводчик", "Dolmetscher benötigt")}
-              </label>
-              {active.interpreterNeeded ? (
-                <NativeComboboxSelect
-                  aria-label={tx("Переводчик", "Dolmetscher")}
-                  value={active.interpreterId}
-                  onChange={(event) => updateDraft(active.key, { interpreterId: event.target.value })}
-                  className={appointmentSelectControlClassName}
-                >
-                  <option value="">{tx("Назначить позже", "Später zuweisen")}</option>
-                  {interpreterOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.name}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              ) : null}
-              <p className="text-xs text-muted-foreground">
-                {tx(
-                  "Переводчик получит одно уведомление на все приёмы сразу.",
-                  "Der Dolmetscher erhält eine Benachrichtigung für alle Termine.",
-                )}
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 gap-1.5"
-                onClick={() => removeDraft(active.key)}
-              >
-                <Trash2 className="size-3.5" />
-                {tx("Убрать из плана", "Aus dem Plan entfernen")}
-              </Button>
-            </>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              {tx(
-                "Кликните блок в сетке: длительность, название и переводчик.",
-                "Block im Raster anklicken: Dauer, Bezeichnung und Dolmetscher.",
-              )}
-            </p>
-          )}
-        </div>
+      <div data-testid="order-visit-planner-plan" className="overflow-hidden rounded-lg border border-border/70">
+        {sortedDrafts.length === 0 ? (
+          <p className="px-3 py-2.5 text-xs text-muted-foreground">
+            {tx(
+              "План пуст. Кликните свободное время в сетке, чтобы поставить первый приём.",
+              "Der Plan ist leer. Klicken Sie auf eine freie Uhrzeit im Raster, um den ersten Termin zu setzen.",
+            )}
+          </p>
+        ) : (
+          <table className="w-full text-[13px]">
+            <thead className="bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-3 py-1.5 font-semibold">{tx("День", "Tag")}</th>
+                <th className="px-3 py-1.5 font-semibold">{tx("Время", "Zeit")}</th>
+                <th className="px-3 py-1.5 font-semibold">{tx("Врач", "Arzt")}</th>
+                <th className="px-3 py-1.5 font-semibold">{tx("Название", "Bezeichnung")}</th>
+                <th className="px-3 py-1.5 font-semibold">{tx("Переводчик", "Dolmetscher")}</th>
+                <th className="px-3 py-1.5 font-semibold" />
+              </tr>
+            </thead>
+            <tbody>
+              {sortedDrafts.map((draft) => {
+                const problem = conflictText(draft);
+                return (
+                  <tr
+                    key={draft.key}
+                    data-testid="order-visit-planner-plan-row"
+                    onClick={() => setPopover({ kind: "draft", key: draft.key })}
+                    className="cursor-pointer border-t border-border/60 hover:bg-muted/30"
+                  >
+                    <td className="px-3 py-1.5">{plannedDayLabel(draft.date, lang)}</td>
+                    <td className="px-3 py-1.5 tabular-nums">
+                      {minutesToTime(draft.start)}–{minutesToTime(draft.start + draft.duration)}
+                    </td>
+                    <td className="px-3 py-1.5">{doctorName(draft.doctor)}</td>
+                    <td className="px-3 py-1.5">{draft.title || "—"}</td>
+                    <td className="px-3 py-1.5">{draft.interpreterNeeded ? tx("нужен", "benötigt") : "—"}</td>
+                    <td className="px-3 py-1.5 text-xs" title={problem?.title}>
+                      {problem ? (
+                        <span className="inline-flex items-center gap-1 text-rose-700 dark:text-rose-400">
+                          <TriangleAlert className="size-3.5" />
+                          {problem.text}
+                        </span>
+                      ) : (
+                        <Check className="size-4 text-emerald-600" aria-label={tx("без накладок", "keine Überschneidung")} />
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {error ? <Banner tone="error">{error}</Banner> : null}
@@ -700,18 +776,20 @@ export function OrderVisitPlanner({
         </p>
       ) : null}
 
-      <div className="flex flex-wrap items-start justify-between gap-3 border-t border-border/60 pt-3">
-        <div className="min-w-0 flex-1 space-y-1 text-xs" data-testid="order-visit-planner-conflicts" aria-live="polite">
-          {conflictLines.map((line) => (
-            <p key={line.key} title={line.title} className="text-rose-700 dark:text-rose-400">
-              {line.text}
-            </p>
-          ))}
-          {drafts.length > 0 && conflictLines.length === 0 && !checking ? (
-            <p className="text-emerald-700 dark:text-emerald-400">{tx("Накладок нет", "Keine Überschneidungen")}</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0 flex-1 text-xs" data-testid="order-visit-planner-conflicts" aria-live="polite">
+          {conflictCount > 0 ? (
+            <span className="text-rose-700 dark:text-rose-400">
+              {tx(
+                `Накладки: ${conflictCount}. Перетащите блок или измените время.`,
+                `Überschneidungen: ${conflictCount}. Block verschieben oder Zeit ändern.`,
+              )}
+            </span>
+          ) : drafts.length > 0 && !checking ? (
+            <span className="text-emerald-700 dark:text-emerald-400">{tx("Накладок нет", "Keine Überschneidungen")}</span>
           ) : null}
           {missingTitle ? (
-            <p className="text-rose-700">{tx("У приёма нет названия", "Ein Termin hat keine Bezeichnung")}</p>
+            <span className="ml-2 text-rose-700">{tx("У приёма нет названия", "Ein Termin hat keine Bezeichnung")}</span>
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -720,11 +798,11 @@ export function OrderVisitPlanner({
               type="button"
               variant="outline"
               size="sm"
-              className="h-8"
+              className="h-9"
               disabled={saving}
               onClick={() => {
                 setDrafts([]);
-                setActiveKey(null);
+                setPopover(null);
               }}
             >
               {tx("Очистить", "Leeren")}
@@ -733,8 +811,7 @@ export function OrderVisitPlanner({
           {draftMode ? (
             <Button
               type="button"
-              size="sm"
-              className="h-8 gap-1.5"
+              className="h-9 gap-1.5"
               data-testid="order-visit-planner-save-draft"
               disabled={!draftDirty || missingTitle || saving}
               onClick={saveDraft}
@@ -742,18 +819,18 @@ export function OrderVisitPlanner({
               {saving ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
               {tx(`Сохранить черновик (${drafts.length})`, `Entwurf speichern (${drafts.length})`)}
             </Button>
-          ) : null}
-          <Button
-            type="button"
-            size="sm"
-            className={draftMode ? "hidden" : "h-8 gap-1.5"}
-            data-testid="order-visit-planner-create"
-            disabled={blocked}
-            onClick={createAll}
-          >
-            {saving || checking ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-            {tx(`Создать все приёмы (${drafts.length})`, `Alle Termine anlegen (${drafts.length})`)}
-          </Button>
+          ) : (
+            <Button
+              type="button"
+              className="h-9 gap-1.5"
+              data-testid="order-visit-planner-create"
+              disabled={blocked}
+              onClick={createAll}
+            >
+              {saving || checking ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+              {tx(`Создать все приёмы (${drafts.length})`, `Alle Termine anlegen (${drafts.length})`)}
+            </Button>
+          )}
         </div>
       </div>
     </div>
